@@ -139,7 +139,7 @@ describe("check-required-user-relation", () => {
     write("src/lib/a.ts", inTenant("tx.tenantMember.count({ where: { user: { is: { email: { not: null } } } } })"));
     const { code, out } = run();
     expect(code).toBe(1);
-    expect(out).toContain("TenantMember.user<filter>");
+    expect(out).toContain("TenantMember.where.user<filter>");
   });
 
   it("follows logical branches and relation filters down to a required User relation", () => {
@@ -149,7 +149,7 @@ describe("check-required-user-relation", () => {
     );
     const { code, out } = run();
     expect(code).toBe(1);
-    expect(out).toContain("TeamMember.OR.team.is.owner<filter>");
+    expect(out).toContain("TeamMember.where.OR.team.is.owner<filter>");
   });
 
   it("follows a nested projection down to a required User relation", () => {
@@ -221,3 +221,136 @@ describe("check-required-user-relation", () => {
     expect(out).toContain("scanned zero source files");
   });
 });
+
+describe("check-required-user-relation — context by scope, not by spelling (round 5 S3/T2)", () => {
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+
+  it("does not trust an import aliased to the bypass opener's name", () => {
+    write(
+      "src/lib/a.ts",
+      'import { withTenantRls as withBypassRls } from "@/lib/tenant-rls";\n' +
+        `export const f = () => withBypassRls(prisma, async (tx) => ${READ});\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("trusts the bypass opener imported under another name", () => {
+    write(
+      "src/lib/a.ts",
+      'import { withBypassRls as runBypassed } from "@/lib/tenant-rls";\n' +
+        `export const f = () => runBypassed(prisma, async (tx) => ${READ}, PURPOSE);\n`,
+    );
+    expect(run().code).toBe(0);
+  });
+
+  it("does not trust a parameter that shadows a local bypass wrapper", () => {
+    write(
+      "src/lib/a.ts",
+      "const run = (fn) => withBypassRls(prisma, fn, PURPOSE);\n" +
+        `export async function b(run) {\n  return run(async (tx) => ${READ});\n}\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("resolves a wrapper name to the declaration in its own function, not a sibling's", () => {
+    write(
+      "src/lib/a.ts",
+      "export function a() {\n  const run = (fn) => withBypassRls(prisma, fn, PURPOSE);\n  return run(async (tx) => tx.share.findMany());\n}\n" +
+        `export function b() {\n  const run = (fn) => withTenantRls(prisma, t, fn);\n  return run(async (tx) => ${READ});\n}\n`,
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("src/lib/a.ts:");
+  });
+
+  it("does not trust a wrapper that opens a bypass but runs the callback outside it", () => {
+    write(
+      "src/lib/a.ts",
+      "async function guarded(fn) {\n  await withBypassRls(prisma, async (tx) => tx.share.findMany(), PURPOSE);\n  return fn(prisma);\n}\n" +
+        `export const f = () => guarded(async (tx) => ${READ});\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+});
+
+describe("check-required-user-relation — where given by name, and nested (round 5 T3)", () => {
+  it("follows a shorthand where to the const it names", () => {
+    write(
+      "src/lib/a.ts",
+      "export function f() {\n  const where = { user: { is: { email: { not: null } } } };\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where }));\n}\n",
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TenantMember.where.user<filter>");
+  });
+
+  it("follows a named where to the const it names", () => {
+    write(
+      "src/lib/a.ts",
+      "export function f() {\n  const prismaWhere = { user: { is: { email: { not: null } } } };\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where: prismaWhere }));\n}\n",
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("reports a where it cannot read because something assigns into it", () => {
+    write(
+      "src/lib/a.ts",
+      "export function f(email) {\n  const where = { deactivatedAt: null };\n  if (email) where.user = { is: { email } };\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where }));\n}\n",
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("<unreadable-where>");
+  });
+
+  it("passes a named where that filters only on scalar columns", () => {
+    write(
+      "src/lib/a.ts",
+      "export function f(userId) {\n  const where = { userId, deactivatedAt: null };\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where }));\n}\n",
+    );
+    expect(run().code).toBe(0);
+  });
+
+  it("scans the where of a nested relation in a projection", () => {
+    write(
+      "src/lib/a.ts",
+      inTenant('tx.team.findMany({ include: { members: { where: { user: { is: { email: "x" } } } } } })'),
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("Team.members.where.user<filter>");
+  });
+
+  it("scans both branches of a conditional where, and passes when both filter on scalars", () => {
+    write("src/lib/a.ts", inTenant('tx.teamMember.findMany({ where: userId ? { userId } : { userId: "" } })'));
+    expect(run().code).toBe(0);
+    write("src/lib/a.ts", inTenant('tx.teamMember.findMany({ where: userId ? { userId } : { user: { is: { email: "x" } } } })'));
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TeamMember.where.user<filter>");
+  });
+
+  it("accepts a dynamic-where exception whose count matches", () => {
+    write(
+      "src/lib/a.ts",
+      "export function f(email) {\n  const where = { deactivatedAt: null };\n  if (email) where.userId = email;\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where }));\n}\n",
+    );
+    manifest({ "src/lib/a.ts": { disposition: "dynamic-where", reason: "sets deactivatedAt and userId only", calls: 1 } });
+    expect(run().code).toBe(0);
+  });
+
+  it("scans the where inside _count", () => {
+    write(
+      "src/lib/a.ts",
+      inTenant('tx.team.findMany({ select: { _count: { select: { members: { where: { user: { is: { email: "x" } } } } } } } })'),
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("Team._count.members.where.user<filter>");
+  });
+});
+

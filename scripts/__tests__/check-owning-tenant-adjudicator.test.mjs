@@ -414,3 +414,51 @@ describe("check-owning-tenant-adjudicator", () => {
     }
   });
 });
+
+describe("check-owning-tenant-adjudicator — context by scope, not by spelling (round 5 S3/T2)", () => {
+  const TENANT_SCOPED_FILE = { "src/lib/thing.ts": { disposition: "tenant-scoped" } };
+
+  it("does not treat an import aliased to a tenant opener's name as tenant-scoped", () => {
+    write(
+      "src/lib/thing.ts",
+      'import { withBypassRls as withUserTenantRls } from "@/lib/tenant-rls";\n' + inTenantScope(RAW_READ),
+    );
+    manifest(TENANT_SCOPED_FILE);
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("OUTSIDE any tenant-scoped context");
+  });
+
+  it("does not trust a parameter that shadows a local tenant wrapper", () => {
+    write(
+      "src/lib/thing.ts",
+      "const scoped = (fn) => withUserTenantRls(userId, fn);\n" +
+        `export async function f(scoped) {\n  await scoped(async (tx) => {\n${RAW_READ}});\n}\n`,
+    );
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a wrapper that runs the callback outside its tenant opener", () => {
+    write(
+      "src/lib/thing.ts",
+      "async function guarded(fn) {\n  await withUserTenantRls(userId, async () => {});\n  return fn(prisma);\n}\n" +
+        `export const f = () => guarded(async (tx) => {\n${RAW_READ}});\n`,
+    );
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+
+  it("passes a read inside a local wrapper that hands the callback to a tenant opener", () => {
+    write(
+      "src/lib/thing.ts",
+      "const scoped = (fn) => withUserTenantRls(userId, fn);\n" +
+        `export const f = () => scoped(async (tx) => {\n${RAW_READ}});\n`,
+    );
+    manifest(TENANT_SCOPED_FILE);
+    const { code, out } = run();
+    expect(code).toBe(0);
+    expect(out).toContain("no unconstrained read");
+  });
+});
+

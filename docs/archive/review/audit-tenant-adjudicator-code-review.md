@@ -1187,3 +1187,44 @@ RT1 (T4). All other rows checked with no issue or not applicable.
   removed and the list back in the tenant context, the group cell and the
   departed-member list cell failed.
 
+#### S3 / T2 Major — both tenant gates resolve context by scope, not by spelling
+
+- Action: the scope-aware name resolution `check-bypass-rls` had already earned
+  (`scopeOf`, `bindingIndex`, innermost visible binding) moved unchanged into
+  `scripts/checks/lib/scope-bindings.mjs`; that gate imports it, and its 101
+  self-test cells and real-tree run are unchanged. A new
+  `scripts/checks/lib/rls-context.mjs` answers, for both tenant gates, which RLS
+  context encloses a call: the NEAREST enclosing call that opens one around the
+  argument the call is in. A local name resolves to its innermost visible
+  declaration; only when none is visible does an import answer, by its original
+  name. A local wrapper opens a context only if it passes that argument's parameter
+  into an opener; a parameter, a `let`, or a wrapper that also runs the callback
+  outside its opener is UNKNOWN, which neither gate reads as the context it needs.
+  `check-required-user-relation` exempts only BYPASS; `check-owning-tenant-adjudicator`
+  accepts only TENANT.
+- Red proof: the new self-test cells — sibling-scope same-named wrappers, a
+  shadowing parameter, a callback run outside the opener, an aliased import in
+  both directions — all fail against the previous commit's gates (sixteen cells
+  across the two files, including the two whose paths were renamed), while the
+  allow cells pass on both.
+
+#### T3 Major — the required-User gate reads a `where` given by name, by conditional, and nested
+
+- Action: a `where` given as a name or shorthand is followed to the `const` object
+  literal bound at the call, provided nothing in the file assigns into, deletes
+  from, or `Object.assign`s onto it; both branches of a conditional are scanned;
+  the `where` of a nested relation inside a projection and inside `_count.select`
+  is scanned. What it still cannot read is reported as `<unreadable-where>` when
+  the model declares a required User relation. Paths now name the `where`
+  (`TenantMember.where.user<filter>`). The header's coverage and limits were
+  rewritten to match, and the round-4 statement above that "counts … are covered
+  with reads" is corrected by this entry: before it, a count's `where` was covered
+  only when written inline.
+- Measured on the real tree: the widened gate reported seven calls. Conditional
+  branches resolved four (team-password favorites ×2, WebAuthn options, blob
+  cleanup) with no exception. Three `where`s are assembled at run time and received
+  a new, explicitly weaker disposition, `dynamic-where`, whose reason names every
+  key the builder can set: `share-links/mine` and `share-links` GET (scalar columns
+  and a non-User relation), and the WebAuthn verifier, whose `buildWhere` return
+  type admits only scalar columns.
+

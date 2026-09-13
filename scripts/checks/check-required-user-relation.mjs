@@ -31,10 +31,32 @@
  *     keeps on that tenant (src/lib/tenant/tenant-realignment.ts).
  *   - "actor": the relation is the requesting user's own row.
  *   - "caller-bypass": every caller runs the call inside a bypass it opened.
+ *   - "dynamic-where": the `where` is assembled at run time and this gate cannot
+ *     read it (`<unreadable-where>`). The reason must name every key the assembly
+ *     can set — or the type that bounds them — so a reviewer can see none is a
+ *     required User relation. Weaker than the others: a later edit to the builder
+ *     does not change the count. Prefer a literal the gate can read.
+ *
+ * Where it looks. A call's `select`/`include`, followed through nested relations;
+ * its `where`, through `AND`/`OR`/`NOT` and `is`/`isNot`/`some`/`every`/`none`; the
+ * `where` of a nested relation inside a projection, and inside `_count.select`. A
+ * `where` given as a name or a shorthand (`{ where }`) is followed to the `const`
+ * object literal it is bound to at the call, provided nothing in the file assigns
+ * into it; otherwise it is reported as `<unreadable-where>` when the model — or,
+ * for a nested filter, the related model — declares a required User relation.
+ * (Round 5, T3: `tenantMember.count({ where: prismaWhere })` was an S2 member this
+ * gate did not report.)
+ *
+ * Context comes from `lib/rls-context.mjs`: the nearest enclosing call that opens
+ * one around the argument the call is in, with names resolved by scope and imports
+ * by their original name. A parameter or a wrapper that also runs the callback
+ * outside its opener is UNKNOWN, which is not a bypass (round 5, S3/T2).
  *
  * Known not to be covered, stated so the next editor does not assume otherwise:
  *   - A `where` spread (`...ACTIVE_ENTRY_WHERE`) is not followed: the constant
  *     usually lives in another file. A projection spread fails closed instead.
+ *   - An unreadable `where` on a model with NO required User relation of its own
+ *     is not reported, even if a relation filter inside it could reach one.
  *   - A computed projection key is skipped.
  *   - Raw SQL, and a client obtained from a call (`const db = wrap(tx)`) whose
  *     handle the tree cannot resolve to a model.
@@ -46,6 +68,8 @@ import { SyntaxKind } from "ts-morph";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
+import { bindingIndex, resolveLocalObjectLiteral, unwrapExpression, visibleBinding } from "./lib/scope-bindings.mjs";
+import { RLS_CONTEXT, rlsContextOf } from "./lib/rls-context.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const ROOT = process.env.REQUIRED_USER_RELATION_CHECK_ROOT ?? REPO_ROOT;
@@ -61,10 +85,8 @@ const RETURNING = new Set([
 /** Calls whose `where` decides which rows are touched or counted. */
 const FILTERING = new Set([...RETURNING, "count", "aggregate", "groupBy", "updateMany", "deleteMany"]);
 
-const DISPOSITIONS = new Set(["active-membership", "actor", "caller-bypass"]);
+const DISPOSITIONS = new Set(["active-membership", "actor", "caller-bypass", "dynamic-where"]);
 
-const BYPASS = "withBypassRls";
-const TENANT_SCOPED = new Set(["withTenantRls", "withUserTenantRls", "withTeamTenantRls"]);
 const LOGICAL = new Set(["AND", "OR", "NOT"]);
 const RELATION_FILTERS = new Set(["is", "isNot", "some", "every", "none"]);
 
@@ -122,11 +144,100 @@ const { models: MODELS, handles: HANDLES } = loadSchema();
 const MANIFEST = loadManifest();
 
 const isRequiredUser = (field) => field.type === "User" && !field.list && !field.optional;
+const hasRequiredUser = (model) => [...(MODELS.get(model)?.values() ?? [])].some(isRequiredUser);
 const asObject = (node) => (node && node.getKind() === SyntaxKind.ObjectLiteralExpression ? node : null);
 const initializerOf = (prop) => prop?.getInitializer?.() ?? null;
 
+const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
+
+/** Does anything in the file assign into, delete from, or Object.assign onto this binding? */
+function assignedInto(name, declaration, ctx) {
+  const sf = declaration.getSourceFile();
+  const rootOf = (expr) => {
+    let node = unwrapExpression(expr);
+    while (
+      node &&
+      (node.getKind() === SyntaxKind.PropertyAccessExpression || node.getKind() === SyntaxKind.ElementAccessExpression)
+    ) {
+      node = unwrapExpression(node.getExpression());
+    }
+    return node;
+  };
+  const refersHere = (node) =>
+    node?.getKind() === SyntaxKind.Identifier &&
+    node.getText() === name &&
+    sameNode(visibleBinding(name, node, ctx.bindingsFor), declaration);
+  for (const bin of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+    const op = bin.getOperatorToken().getKind();
+    if (op < SyntaxKind.FirstAssignment || op > SyntaxKind.LastAssignment) continue;
+    const left = unwrapExpression(bin.getLeft());
+    if (left?.getKind() === SyntaxKind.Identifier) continue; // a const cannot be rebound
+    if (refersHere(rootOf(left))) return true;
+  }
+  for (const del of sf.getDescendantsOfKind(SyntaxKind.DeleteExpression)) {
+    if (refersHere(rootOf(del.getExpression()))) return true;
+  }
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (call.getExpression().getText() !== "Object.assign") continue;
+    if (refersHere(unwrapExpression(call.getArguments()[0]))) return true;
+  }
+  return false;
+}
+
+/**
+ * The object literals a `where` (or a filter inside one) can be: the literal
+ * itself, the `const` a bare name is bound to at the call provided nothing assigns
+ * into it, or both branches of a conditional. Null when this file cannot say.
+ */
+function filterLiterals(node, ctx) {
+  const value = unwrapExpression(node);
+  if (!value) return null;
+  if (value.getKind() === SyntaxKind.ObjectLiteralExpression) return [value];
+  if (value.getKind() === SyntaxKind.ConditionalExpression) {
+    const whenTrue = filterLiterals(value.getWhenTrue(), ctx);
+    const whenFalse = filterLiterals(value.getWhenFalse(), ctx);
+    return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
+  }
+  if (value.getKind() !== SyntaxKind.Identifier) return null;
+  const literal = resolveLocalObjectLiteral(value.getText(), ctx.at, ctx.bindingsFor);
+  if (!literal) return null;
+  return assignedInto(value.getText(), literal.getParent(), ctx) ? null : [literal];
+}
+
+/** The value node of a named property, including a shorthand `{ where }`. */
+function propertyValue(objectLiteral, name) {
+  const prop = objectLiteral.getProperty(name);
+  if (!prop) return null;
+  if (prop.getKind() === SyntaxKind.ShorthandPropertyAssignment) return prop.getNameNode();
+  return initializerOf(prop);
+}
+
+/** Scan the `where` held by `node` (a projection argument or a call's args), or report it unreadable. */
+function scanWhereOf(node, model, trail, hits, ctx) {
+  const value = propertyValue(node, "where");
+  if (!value) return;
+  const wheres = filterLiterals(value, ctx);
+  if (wheres) for (const where of wheres) scanWhere(where, model, [...trail, "where"], hits, ctx);
+  else if (hasRequiredUser(model)) hits.push([...trail, "where<unreadable-where>"].join("."));
+}
+
+/** `_count: { select: { relation: { where } } }` filters its counts through relations. */
+function scanCount(value, model, trail, hits, ctx) {
+  const count = asObject(unwrapExpression(value));
+  if (!count) return;
+  const select = asObject(initializerOf(count.getProperty("select")));
+  if (!select) return;
+  for (const prop of select.getProperties()) {
+    if (prop.getKind() !== SyntaxKind.PropertyAssignment) continue;
+    const field = MODELS.get(model)?.get(prop.getName());
+    if (!field || !MODELS.has(field.type)) continue;
+    const nested = asObject(initializerOf(prop));
+    if (nested) scanWhereOf(nested, field.type, [...trail, prop.getName()], hits, ctx);
+  }
+}
+
 /** Every path through a projection of `model` that reaches a required User relation. */
-function scanProjection(projection, model, trail, hits) {
+function scanProjection(projection, model, trail, hits, ctx) {
   for (const prop of projection.getProperties()) {
     if (prop.getKind() !== SyntaxKind.PropertyAssignment) {
       hits.push([...trail, "<spread>"].join("."));
@@ -134,7 +245,10 @@ function scanProjection(projection, model, trail, hits) {
     }
     if (prop.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) continue;
     const key = prop.getName();
-    if (key === "_count") continue;
+    if (key === "_count") {
+      scanCount(initializerOf(prop), model, [...trail, "_count"], hits, ctx);
+      continue;
+    }
     const field = MODELS.get(model)?.get(key);
     const here = [...trail, key];
     if (!field) {
@@ -148,6 +262,7 @@ function scanProjection(projection, model, trail, hits) {
     }
     const nested = asObject(initializerOf(prop));
     if (!nested) continue;
+    scanWhereOf(nested, field.type, here, hits, ctx);
     for (const root of ["select", "include"]) {
       const sub = initializerOf(nested.getProperty(root));
       if (!sub) continue;
@@ -155,23 +270,30 @@ function scanProjection(projection, model, trail, hits) {
         hits.push([...here, `${root}:<unreadable>`].join("."));
         continue;
       }
-      scanProjection(asObject(sub), field.type, here, hits);
+      scanProjection(asObject(sub), field.type, here, hits, ctx);
     }
   }
 }
 
 /** Every path through a `where` of `model` that filters through a required User relation. */
-function scanWhere(where, model, trail, hits) {
+function scanWhere(where, model, trail, hits, ctx) {
   for (const prop of where.getProperties()) {
+    if (prop.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
+      // `{ user }` names a filter held by a variable; treat it like `user: user`.
+      const field = MODELS.get(model)?.get(prop.getName());
+      if (field && isRequiredUser(field)) hits.push(`${[...trail, prop.getName()].join(".")}<filter>`);
+      continue;
+    }
     if (prop.getKind() !== SyntaxKind.PropertyAssignment) continue;
     if (prop.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) continue;
     const key = prop.getName();
-    const value = initializerOf(prop);
+    const value = unwrapExpression(initializerOf(prop));
     if (LOGICAL.has(key)) {
       const branches = value?.getKind() === SyntaxKind.ArrayLiteralExpression ? value.getElements() : [value];
       for (const branch of branches) {
-        const obj = asObject(branch);
-        if (obj) scanWhere(obj, model, [...trail, key], hits);
+        const objs = filterLiterals(branch, ctx);
+        if (objs) for (const obj of objs) scanWhere(obj, model, [...trail, key], hits, ctx);
+        else if (branch && hasRequiredUser(model)) hits.push([...trail, `${key}<unreadable-where>`].join("."));
       }
       continue;
     }
@@ -182,58 +304,28 @@ function scanWhere(where, model, trail, hits) {
       hits.push(`${here.join(".")}<filter>`);
       continue;
     }
-    const nested = asObject(value);
-    if (!nested) continue;
-    const wrapped = nested.getProperties().some(
-      (p) => p.getKind() === SyntaxKind.PropertyAssignment && RELATION_FILTERS.has(p.getName()),
-    );
-    if (!wrapped) {
-      scanWhere(nested, field.type, here, hits);
+    const nestedFilters = filterLiterals(value, ctx);
+    if (!nestedFilters) {
+      if (value && hasRequiredUser(field.type)) hits.push(`${here.join(".")}<unreadable-where>`);
       continue;
     }
-    for (const op of RELATION_FILTERS) {
-      const sub = asObject(initializerOf(nested.getProperty(op)));
-      if (sub) scanWhere(sub, field.type, [...here, op], hits);
+    for (const nested of nestedFilters) {
+      const wrapped = nested.getProperties().some(
+        (p) => p.getKind() === SyntaxKind.PropertyAssignment && RELATION_FILTERS.has(p.getName()),
+      );
+      if (!wrapped) {
+        scanWhere(nested, field.type, here, hits, ctx);
+        continue;
+      }
+      for (const op of RELATION_FILTERS) {
+        const opValue = propertyValue(nested, op);
+        if (!opValue) continue;
+        const subs = filterLiterals(opValue, ctx);
+        if (subs) for (const sub of subs) scanWhere(sub, field.type, [...here, op], hits, ctx);
+        else if (hasRequiredUser(field.type)) hits.push(`${[...here, op].join(".")}<unreadable-where>`);
+      }
     }
   }
-}
-
-/**
- * Every opener name reachable from `name`'s declaration in this file, following
- * local identifier callees transitively. An unresolvable name contributes nothing.
- */
-function openersReachableFrom(name, sf, seen) {
-  if (seen.has(name)) return new Set();
-  seen.add(name);
-  if (name === BYPASS || TENANT_SCOPED.has(name)) return new Set([name]);
-  const decl =
-    sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration).find((d) => d.getName() === name) ??
-    sf.getFunction(name);
-  if (!decl) return new Set();
-  const out = new Set();
-  for (const call of decl.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const callee = call.getExpression();
-    if (callee.getKind() !== SyntaxKind.Identifier) continue;
-    for (const o of openersReachableFrom(callee.getText(), sf, seen)) out.add(o);
-  }
-  return out;
-}
-
-/**
- * Inside a bypass: the nearest enclosing call that resolves to an opener at all
- * resolves to the bypass and to no tenant opener. A wrapper reaching both is not
- * trusted — which one it opens around this call is not decidable here.
- */
-function isInsideBypass(call, sf) {
-  for (let n = call.getParent(); n; n = n.getParent()) {
-    if (n.getKind() !== SyntaxKind.CallExpression) continue;
-    const callee = n.getExpression();
-    if (callee.getKind() !== SyntaxKind.Identifier) continue;
-    const reached = openersReachableFrom(callee.getText(), sf, new Set());
-    if (reached.size === 0) continue;
-    return reached.has(BYPASS) && ![...TENANT_SCOPED].some((o) => reached.has(o));
-  }
-  return false;
 }
 
 function walk(dir, out = []) {
@@ -258,6 +350,8 @@ let scanned = 0;
 
 for (const { rel, sf } of sourceFilesFrom(createAstProject(), files, ROOT)) {
   scanned += 1;
+  let bindings;
+  const bindingsFor = () => (bindings ??= bindingIndex(sf));
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
@@ -270,18 +364,18 @@ for (const { rel, sf } of sourceFilesFrom(createAstProject(), files, ROOT)) {
     const args = asObject(call.getArguments()[0]);
     if (!args) continue;
 
+    const ctx = { at: call, bindingsFor };
     const hits = [];
     if (RETURNING.has(method)) {
       for (const root of ["select", "include"]) {
         const node = initializerOf(args.getProperty(root));
         if (!node) continue;
         if (!asObject(node)) hits.push(`${model}.${root}:<unreadable>`);
-        else scanProjection(asObject(node), model, [model], hits);
+        else scanProjection(asObject(node), model, [model], hits, ctx);
       }
     }
-    const where = asObject(initializerOf(args.getProperty("where")));
-    if (where) scanWhere(where, model, [model], hits);
-    if (hits.length === 0 || isInsideBypass(call, sf)) continue;
+    scanWhereOf(args, model, [model], hits, ctx);
+    if (hits.length === 0 || rlsContextOf(call, sf, bindingsFor) === RLS_CONTEXT.BYPASS) continue;
 
     if (!found.has(rel)) found.set(rel, []);
     found.get(rel).push({ line: call.getStartLineNumber(), method, paths: hits });

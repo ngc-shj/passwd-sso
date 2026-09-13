@@ -83,6 +83,13 @@
  */
 import { SyntaxKind } from "ts-morph";
 import { createAstProject } from "./lib/ast-project.mjs";
+import {
+  FN_KINDS,
+  bindingIndex,
+  resolveLocalFunction,
+  resolveLocalObjectLiteral,
+  unwrapExpression,
+} from "./lib/scope-bindings.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, extname } from "node:path";
 
@@ -318,8 +325,6 @@ const TX_CLIENT_HELPERS = new Set(["withBypassRls", "withTenantRls"]);
 // this comment would rot the same way twice over.
 const HELPER_MENTION_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/;
 
-const FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
-
 // F3 anti-drift: the ONLY sanctioned with*Rls callbacks that declare `tx` and
 // never use it are the two thin wrappers in tenant-context.ts that delegate to
 // a caller-supplied `fn(tenantId)` public contract (SC1 deferral — threading tx
@@ -397,136 +402,6 @@ function helperCallsIn(sf) {
   return calls;
 }
 
-// Node kinds that open a scope, for deciding whether a declaration is visible
-// from a call site.
-const SCOPE_KINDS = new Set([
-  SyntaxKind.SourceFile,
-  SyntaxKind.Block,
-  SyntaxKind.FunctionDeclaration,
-  SyntaxKind.FunctionExpression,
-  SyntaxKind.ArrowFunction,
-  SyntaxKind.MethodDeclaration,
-  SyntaxKind.Constructor,
-  SyntaxKind.GetAccessor,
-  SyntaxKind.SetAccessor,
-  SyntaxKind.ModuleDeclaration,
-]);
-
-/** The nearest ancestor of `node` that introduces a scope. */
-function scopeOf(node) {
-  for (let p = node.getParent(); p; p = p.getParent()) {
-    if (SCOPE_KINDS.has(p.getKind())) return p;
-  }
-  return null;
-}
-
-/**
- * Every declaration in the file that binds a name, indexed by that name.
- * Built once per source file: `callbackOf` consults it per argument, and
- * rebuilding it per lookup would walk the whole tree ~950 times per run.
- *
- * All binding kinds are indexed, not only the function-valued ones. Counting
- * only functions is what let an unrelated `const job = async (tx) => …` in a
- * sibling function satisfy a `job` that actually refers to the enclosing
- * function's own parameter — the gate then scanned a body the call never runs
- * and reported OK, in place of the "could not be resolved" report.
- */
-function bindingIndex(sf) {
-  const index = new Map();
-  const add = (name, decl) => {
-    const bucket = index.get(name);
-    if (bucket) bucket.push(decl);
-    else index.set(name, [decl]);
-  };
-  const kinds = [
-    SyntaxKind.VariableDeclaration,
-    SyntaxKind.FunctionDeclaration,
-    SyntaxKind.Parameter,
-  ];
-  for (const kind of kinds) {
-    for (const decl of sf.getDescendantsOfKind(kind)) {
-      // A destructuring declaration binds each element's name, not the pattern.
-      // `getName()` returns the pattern text ("{ job }"), which no identifier can
-      // equal — so indexing by it would leave `job` looking unbound, and an
-      // unrelated `job` elsewhere would then resolve as the unique candidate.
-      // That is the same getName()-on-a-pattern mistake this file already fixed
-      // in clientBindingsIn and declaresUnusedTx.
-      const nameNode = decl.getNameNode?.();
-      if (nameNode && nameNode.getKind() !== SyntaxKind.Identifier) {
-        for (const el of nameNode.getDescendantsOfKind(SyntaxKind.BindingElement)) {
-          add(el.getName(), decl);
-        }
-        continue;
-      }
-      const name = decl.getName?.();
-      if (name) add(name, decl);
-    }
-  }
-  return index;
-}
-
-/**
- * The callback the helper will invoke. Its position differs per helper
- * (`withBypassRls(prisma, fn, purpose)` vs `withTenantRls(prisma, tenantId, fn)`),
- * so it is found by kind rather than by index.
- *
- * A callback passed by name resolves only when exactly one declaration of that
- * name is visible from the call — visible meaning its own scope encloses the
- * call site, which is what makes the answer about the name at THIS call rather
- * than about the file's vocabulary. Ambiguity, invisibility, or a binding that
- * is not a function all return null, and the caller reports the site: this gate
- * has been wrong four times by guessing, so it no longer guesses.
- */
-function resolveLocalFunction(name, at, bindingsFor, seen = new Set()) {
-  const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
-    const scope = scopeOf(decl);
-    return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
-  });
-  if (visible.length === 0) return null;
-
-  // JavaScript picks the INNERMOST binding, so the gate does too: the visible
-  // declaration whose scope is smallest. Requiring exactly one meant a local
-  // `query` shadowing a module-level `query` resolved to neither, and the call
-  // was skipped in silence.
-  let decl = visible[0];
-  let best = scopeOf(decl).getEnd() - scopeOf(decl).getStart();
-  for (const candidate of visible.slice(1)) {
-    const scope = scopeOf(candidate);
-    const span = scope.getEnd() - scope.getStart();
-    if (span < best) {
-      best = span;
-      decl = candidate;
-    }
-  }
-
-  const id = `${decl.getStart()}:${decl.getEnd()}`;
-  if (seen.has(id)) return null;
-  seen.add(id);
-
-  // A declaration without a body (an ambient or overload signature) says the
-  // implementation is elsewhere, so this file cannot answer.
-  if (decl.getKind() === SyntaxKind.FunctionDeclaration) {
-    return decl.getBody() ? decl : null;
-  }
-
-  // Only a `const` initializer answers "which function runs here". A
-  // parameter's initializer is its DEFAULT — one of the values a caller may
-  // supply, not the one supplied at any call that passes an argument. A
-  // `let`/`var` binding can hold a different function by the time it runs.
-  if (decl.getKind() !== SyntaxKind.VariableDeclaration) return null;
-  if (decl.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
-  const init = unwrapExpression(decl.getInitializer());
-  if (init && FN_KINDS.has(init.getKind())) return init;
-  // `const aliasedQuery = query` names a function without being one. Follow it
-  // from the ALIAS's own position, not the call's — that is where the name it
-  // mentions is resolved — and stop on a declaration already visited, which
-  // ends a cycle without a depth limit a longer chain could step over.
-  if (init?.getKind() === SyntaxKind.Identifier) {
-    return resolveLocalFunction(init.getText(), init, bindingsFor, seen);
-  }
-  return null;
-}
-
 /**
  * The function a call actually invokes, when this file can say: an inline
  * function expression (an IIFE), or a name resolved through the visible
@@ -578,41 +453,6 @@ function calleeFunctionOf(call, bindingsFor) {
     }
   }
   return null;
-}
-
-/** The object literal a local `const` name is bound to, if any. */
-function resolveLocalObjectLiteral(name, at, bindingsFor) {
-  // Pick the binding FIRST, then ask what it holds. Filtering candidates to
-  // object literals before choosing dropped an inner `const helpers = actual`
-  // from candidacy — its initializer is an identifier — so the OUTER object
-  // won, which is the "analysed a different binding" defect one filter-order
-  // away from the one D29 fixed. There is no fallback to an outer declaration:
-  // a binding this file cannot prove holds an object literal returns null, and
-  // null is the D28 class (a propagation whose mapping is unproven), not a
-  // licence to analyse something else.
-  const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
-    const scope = scopeOf(decl);
-    return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
-  });
-  if (visible.length === 0) return null;
-
-  let best = visible[0];
-  let span = scopeOf(best).getEnd() - scopeOf(best).getStart();
-  for (const candidate of visible.slice(1)) {
-    const scope = scopeOf(candidate);
-    const width = scope.getEnd() - scope.getStart();
-    if (width < span) {
-      span = width;
-      best = candidate;
-    }
-  }
-
-  if (best.getKind() !== SyntaxKind.VariableDeclaration) return null;
-  // `let`/`var` can hold a different object by the time the call runs, so only
-  // a `const` initializer answers what this name holds.
-  if (best.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
-  const init = unwrapExpression(best.getInitializer());
-  return init?.getKind() === SyntaxKind.ObjectLiteralExpression ? init : null;
 }
 
 function callbackOf(call, bindingsFor) {
@@ -712,19 +552,6 @@ function staticMemberName(node) {
  * receiver — because the last three defects here were all the two sides
  * reducing an expression differently.
  */
-/** An expression with its type-level wrappers removed. */
-function unwrapExpression(expr) {
-  switch (expr?.getKind()) {
-    case SyntaxKind.ParenthesizedExpression:
-    case SyntaxKind.AsExpression:
-    case SyntaxKind.NonNullExpression:
-    case SyntaxKind.SatisfiesExpression:
-      return unwrapExpression(expr.getExpression());
-    default:
-      return expr;
-  }
-}
-
 function clientKey(expr) {
   if (!expr) return null;
   switch (expr.getKind()) {

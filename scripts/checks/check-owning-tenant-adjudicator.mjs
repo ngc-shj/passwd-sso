@@ -95,6 +95,8 @@ import { SyntaxKind } from "ts-morph";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
+import { bindingIndex } from "./lib/scope-bindings.mjs";
+import { RLS_CONTEXT, rlsContextOf } from "./lib/rls-context.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const ROOT = process.env.OWNING_TENANT_CHECK_ROOT ?? REPO_ROOT;
@@ -111,8 +113,6 @@ const READ_METHODS = new Set([
   "findMany",
 ]);
 
-/** Openers that establish `app.tenant_id`, so RLS constrains the row. */
-const TENANT_SCOPED = new Set(["withTenantRls", "withUserTenantRls", "withTeamTenantRls"]);
 
 const MANIFEST_PATH = "scripts/checks/owning-tenant-adjudicator-manifest.json";
 const SCHEMA_PATH = "prisma/schema.prisma";
@@ -213,55 +213,14 @@ function walk(dir, out = []) {
 }
 
 /**
- * Does `name` resolve, in this file, to something that opens a tenant-scoped
- * context? One level deep, and fail-closed: an unresolvable name is not safe.
+ * The read is constrained when the nearest enclosing call that opens an RLS
+ * context around it opens a TENANT one. Resolved by scope, with imports read by
+ * their original name, through `lib/rls-context.mjs` — the file-wide name lookup
+ * this replaced trusted a sibling function's wrapper, a shadowing parameter, and a
+ * wrapper that ran the callback outside its opener (round 5, S3/T2).
  */
-function resolvesToTenantScoped(name, sf) {
-  if (TENANT_SCOPED.has(name)) return true;
-  const reached = openersReachableFrom(name, sf, new Set());
-  // Order matters: a wrapper whose own text names a tenant opener may still
-  // delegate to another wrapper that opens a bypass. Checking "names a tenant
-  // opener" first returns SAFE for exactly that shape — measured, on the
-  // one-level version this replaced.
-  if (reached.has("withBypassRls")) return false;
-  return [...TENANT_SCOPED].some((o) => reached.has(o));
-}
-
-/**
- * Every opener name reachable from `name`'s declaration in this file, following
- * local identifier callees transitively. `seen` is the cycle guard.
- *
- * Fail-closed: a name that resolves to no local declaration contributes nothing,
- * so a read wrapped only in unresolvable calls stays UNCONSTRAINED.
- */
-function openersReachableFrom(name, sf, seen) {
-  if (seen.has(name)) return new Set();
-  seen.add(name);
-  if (TENANT_SCOPED.has(name) || name === "withBypassRls") return new Set([name]);
-
-  const decl =
-    sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration).find((d) => d.getName() === name) ??
-    sf.getFunction(name);
-  if (!decl) return new Set();
-
-  const out = new Set();
-  for (const call of decl.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const callee = call.getExpression();
-    if (callee.getKind() !== SyntaxKind.Identifier) continue;
-    for (const o of openersReachableFrom(callee.getText(), sf, seen)) out.add(o);
-  }
-  return out;
-}
-
-/** The read is constrained when any enclosing call resolves to a tenant opener. */
-function isConstrained(call, sf) {
-  for (let n = call.getParent(); n; n = n.getParent()) {
-    if (n.getKind() !== SyntaxKind.CallExpression) continue;
-    const callee = n.getExpression();
-    if (callee.getKind() !== SyntaxKind.Identifier) continue;
-    if (resolvesToTenantScoped(callee.getText(), sf)) return true;
-  }
-  return false;
+function isConstrained(call, sf, bindingsFor) {
+  return rlsContextOf(call, sf, bindingsFor) === RLS_CONTEXT.TENANT;
 }
 
 const asObject = (node) =>
@@ -374,6 +333,8 @@ let scanned = 0;
 for (const { rel, sf } of sourceFilesFrom(project, files, ROOT)) {
   scanned += 1;
   let record = null;
+  let bindings;
+  const bindingsFor = () => (bindings ??= bindingIndex(sf));
 
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
@@ -395,7 +356,7 @@ for (const { rel, sf } of sourceFilesFrom(project, files, ROOT)) {
 
     record ??= { unconstrained: [], usesHelper: false, anyRead: false };
     record.anyRead = true;
-    if (!isConstrained(call, sf)) {
+    if (!isConstrained(call, sf, bindingsFor)) {
       record.unconstrained.push({ line: call.getStartLineNumber(), path: path.join(".") });
     }
   }

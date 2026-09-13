@@ -9,6 +9,16 @@
     "reason": "Both member reads require an active membership in the authenticated tenant as a relation filter (user.tenantMemberships.some). A team guest is excluded by design, and a user this context cannot see is excluded by that filter before any email is read.",
     "calls": 2
   },
+  "src/app/api/share-links/mine/route.ts": {
+    "disposition": "dynamic-where",
+    "reason": "`where` (typed Prisma.PasswordShareWhereInput) starts empty and is assembled per context and status. The keys it can set: teamPasswordEntry (a TeamPasswordEntry relation, { teamId }), createdById, passwordEntryId, shareType, teamPasswordEntryId, revokedAt, expiresAt. None is the required createdBy relation; the creator is hydrated after the context closes.",
+    "calls": 1
+  },
+  "src/app/api/share-links/route.ts": {
+    "disposition": "dynamic-where",
+    "reason": "GET's `where` starts as { createdById: session user } and conditionally adds passwordEntryId and teamPasswordEntryId. All three are scalar columns.",
+    "calls": 1
+  },
   "src/app/api/tenant/breakglass/route.ts": {
     "disposition": "active-membership",
     "reason": "The grant target must hold an ACTIVE membership here (deactivatedAt: null) before a grant is created.",
@@ -32,6 +42,11 @@
   "src/app/api/tenant/service-accounts/route.ts": {
     "disposition": "actor",
     "reason": "The create returns its creator, who is the requesting user (createdById: session.user.id) and visible in their own tenant context.",
+    "calls": 1
+  },
+  "src/lib/auth/webauthn/webauthn-server.ts": {
+    "disposition": "dynamic-where",
+    "reason": "verifyAssertionCore's credential lookup uses `where: buildWhere(responseCredentialId)`, whose return type is declared as `{ id, userId, credentialId } | { userId, credentialId }` \u2014 scalar columns only, enforced by the type rather than by this entry.",
     "calls": 1
   },
   "src/lib/emergency-access/vault-auto-promote.ts": {
