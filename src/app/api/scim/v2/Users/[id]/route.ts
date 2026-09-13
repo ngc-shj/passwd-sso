@@ -19,7 +19,8 @@ import { prisma } from "@/lib/prisma";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
   resolveUserId,
-  fetchScimUser,
+  loadScimUserSnapshot,
+  toScimUserResource,
   replaceScimUser,
   patchScimUser,
   deactivateScimUser,
@@ -29,6 +30,7 @@ import {
   ScimDeleteConflictError,
 } from "@/lib/services/scim-user-service";
 import { errorLogFields } from "@/lib/logger/error-fields";
+import { fetchUserContact } from "@/lib/audit/audit-user-lookup";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -38,20 +40,18 @@ async function handleGET(req: NextRequest, { params }: Params) {
   if (!auth.ok) return auth.response;
   const { tenantId } = auth.data;
 
-  return withTenantRls(prisma, tenantId, async (tx) => {
-    const { id } = await params;
+  const { id } = await params;
+  const snapshot = await withTenantRls(prisma, tenantId, async (tx) => {
     const userId = await resolveUserId(tenantId, id, tx);
-    if (!userId) {
-      return scimError(404, "User not found");
-    }
-
-    const resource = await fetchScimUser(tenantId, userId, getScimBaseUrl());
-    if (!resource) {
-      return scimError(404, "User not found");
-    }
-
-    return scimResponse(resource);
+    return userId ? loadScimUserSnapshot(tenantId, userId) : null;
   });
+  // Identity is read after the tenant context closes; see loadScimUserSnapshot.
+  const resource = snapshot ? await toScimUserResource(snapshot, getScimBaseUrl()) : null;
+  if (!resource) {
+    return scimError(404, "User not found");
+  }
+
+  return scimResponse(resource);
 }
 
 // PUT /api/scim/v2/Users/[id] — Full replace
@@ -90,7 +90,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
       resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
-        return replaceScimUser(tenantId, userId, { active, externalId, name }, getScimBaseUrl());
+        return replaceScimUser(tenantId, userId, { active, externalId, name });
       }),
     );
   } catch (e) {
@@ -109,7 +109,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     throw e;
   }
 
-  const { resource, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
 
   // Session invalidation on deactivation (fail-open)
   let invalidationCounts: InvalidateUserSessionsResult | undefined;
@@ -138,6 +138,8 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     },
   });
 
+  const resource = await toScimUserResource(snapshot, getScimBaseUrl());
+  if (!resource) return scimError(404, "User not found");
   return scimResponse(resource);
 }
 
@@ -191,7 +193,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
       resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
-        return patchScimUser(tenantId, userId, patchOps, getScimBaseUrl());
+        return patchScimUser(tenantId, userId, patchOps);
       }),
     );
   } catch (e) {
@@ -207,7 +209,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     throw e;
   }
 
-  const { resource, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
 
   // Session invalidation on deactivation (fail-open)
   let patchInvalidationCounts: InvalidateUserSessionsResult | undefined;
@@ -235,6 +237,8 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     },
   });
 
+  const resource = await toScimUserResource(snapshot, getScimBaseUrl());
+  if (!resource) return scimError(404, "User not found");
   return scimResponse(resource);
 }
 
@@ -270,7 +274,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     throw e;
   }
 
-  const { userId, userEmail, needsSessionInvalidation } = serviceResult;
+  const { userId, needsSessionInvalidation } = serviceResult;
 
   // Session invalidation after deletion (fail-open)
   let deleteInvalidationCounts: InvalidateUserSessionsResult | undefined;
@@ -284,6 +288,10 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     }
   }
 
+  // Read after the tenant context closes: the membership read inside it can no
+  // longer reach the email of a member whose users row names another tenant.
+  const contact = await fetchUserContact(userId, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
   await logAuditAsync({
     ...tenantAuditBase(req, auditUserId, tenantId),
     actorType: deleteActorType,
@@ -291,7 +299,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: {
-      email: userEmail,
+      email: contact?.email ?? null,
       ...(deleteInvalidationCounts ?? {}),
       ...(deleteSessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
     },

@@ -30,7 +30,13 @@ const {
   // sequences the POST cells depend on. Defaults: the email resolves to nobody,
   // and nobody is active anywhere else.
   mockGuardUser: { findUnique: vi.fn() },
-  mockGuardMember: { findMany: vi.fn() },
+  mockGuardMember: { findMany: vi.fn(), count: vi.fn() },
+}));
+
+// The bypass seam: the POST guard's reads and the GET list both run through it.
+const { mockWithBypassRls } = vi.hoisted(() => ({
+  mockWithBypassRls: vi.fn((_prisma: unknown, fn: (tx: unknown) => unknown) =>
+    fn({ user: mockGuardUser, tenantMember: mockGuardMember, scimExternalMapping: mockScimExternalMapping })),
 }));
 
 // withTenantRls now runs the POST body directly on its callback tx (the inner
@@ -58,14 +64,14 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
-  withBypassRls: (_prisma: unknown, fn: (tx: unknown) => unknown) =>
-    fn({ user: mockGuardUser, tenantMember: mockGuardMember }),
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
 import { GET, POST } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
@@ -102,14 +108,14 @@ describe("GET /api/scim/v2/Users", () => {
   });
 
   it("returns tenant users", async () => {
-    mockTenantMember.findMany.mockResolvedValue([
+    mockGuardMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "test@example.com", name: "Test" },
       },
     ]);
-    mockTenantMember.count.mockResolvedValue(1);
+    mockGuardMember.count.mockResolvedValue(1);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
 
     const res = await GET(makeReq());
@@ -122,14 +128,14 @@ describe("GET /api/scim/v2/Users", () => {
 
   it("filters by externalId", async () => {
     mockScimExternalMapping.findFirst.mockResolvedValue({ internalId: "user-1" });
-    mockTenantMember.findMany.mockResolvedValue([
+    mockGuardMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
         deactivatedAt: null,
         user: { id: "user-1", email: "ext@example.com", name: "Ext" },
       },
     ]);
-    mockTenantMember.count.mockResolvedValue(1);
+    mockGuardMember.count.mockResolvedValue(1);
     mockScimExternalMapping.findMany.mockResolvedValue([{ internalId: "user-1", externalId: "ext-1" }]);
 
     const res = await GET(makeReq({ searchParams: { filter: 'externalId eq "ext-1"' } }));
@@ -178,36 +184,57 @@ describe("GET /api/scim/v2/Users", () => {
     expect(await res.json()).toEqual(
       expect.objectContaining({ totalResults: 0, Resources: [] }),
     );
-    expect(mockTenantMember.findMany).not.toHaveBeenCalled();
+    expect(mockGuardMember.findMany).not.toHaveBeenCalled();
   });
 
   it("applies startIndex and count bounds", async () => {
-    mockTenantMember.findMany.mockResolvedValue([]);
-    mockTenantMember.count.mockResolvedValue(0);
+    mockGuardMember.findMany.mockResolvedValue([]);
+    mockGuardMember.count.mockResolvedValue(0);
     mockScimExternalMapping.findMany.mockResolvedValue([]);
 
     const res = await GET(makeReq({ searchParams: { startIndex: "0", count: "999" } }));
     expect(res.status).toBe(200);
-    expect(mockTenantMember.findMany).toHaveBeenCalledWith(
+    expect(mockGuardMember.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ skip: 0, take: 200 }),
     );
   });
 
   it("includes externalId mappings in resources", async () => {
-    mockTenantMember.findMany.mockResolvedValue([
+    mockGuardMember.findMany.mockResolvedValue([
       {
         userId: "user-1",
         deactivatedAt: new Date("2025-01-01T00:00:00.000Z"),
         user: { id: "user-1", email: "mapped@example.com", name: "Mapped" },
       },
     ]);
-    mockTenantMember.count.mockResolvedValue(1);
+    mockGuardMember.count.mockResolvedValue(1);
     mockScimExternalMapping.findMany.mockResolvedValue([{ internalId: "user-1", externalId: "ext-1" }]);
 
     const res = await GET(makeReq());
     const body = await res.json();
     expect(body.Resources[0]).toEqual(
       expect.objectContaining({ externalId: "ext-1", active: false }),
+    );
+  });
+
+  it("lists under a bypass with every condition ANDed under the token's tenant", async () => {
+    mockGuardMember.findMany.mockResolvedValue([]);
+    mockGuardMember.count.mockResolvedValue(0);
+    mockScimExternalMapping.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeReq({ searchParams: { filter: 'userName eq "u@example.com"' } }));
+    expect(res.status).toBe(200);
+    const { where } = mockGuardMember.findMany.mock.calls[0][0];
+    expect(where.AND[0]).toEqual({ tenantId: "tenant-1" });
+    expect(where.AND).toContainEqual({
+      user: { is: { email: { equals: "u@example.com", mode: "insensitive" } } },
+    });
+    expect(mockGuardMember.count).toHaveBeenCalledWith({ where });
+    expect(mockWithTenantRls).not.toHaveBeenCalled();
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
     );
   });
 });

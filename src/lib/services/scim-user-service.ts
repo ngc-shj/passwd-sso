@@ -1,7 +1,9 @@
 /**
  * SCIM User service — Prisma queries and data transformation for SCIM User operations.
  *
- * All functions must be called within a `withTenantRls()` context.
+ * All functions must be called within a `withTenantRls()` context — except
+ * `toScimUserResource`, which reads identity through a bypass and must run after
+ * that context closes.
  */
 
 import { Prisma } from "@prisma/client";
@@ -11,6 +13,8 @@ import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import type { UserPatchResult } from "@/lib/scim/patch-parser";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 
 // ── Input types ───────────────────────────────────────────────
 
@@ -22,8 +26,15 @@ export interface ScimUserReplaceInput {
 
 // ── Result types ──────────────────────────────────────────────
 
+/** The membership half of a SCIM User resource; identity is joined by `toScimUserResource`. */
+export interface ScimUserSnapshot {
+  userId: string;
+  deactivatedAt: Date | null;
+  externalId: string | undefined;
+}
+
 export interface ScimUserReplaceResult {
-  resource: ScimUserResource;
+  snapshot: ScimUserSnapshot;
   userId: string;
   auditAction: AuditAction;
   /** When true, the route handler must call invalidateUserSessions(userId, { tenantId }). */
@@ -31,7 +42,7 @@ export interface ScimUserReplaceResult {
 }
 
 export interface ScimUserPatchResult {
-  resource: ScimUserResource;
+  snapshot: ScimUserSnapshot;
   userId: string;
   auditAction: AuditAction;
   /** When true, the route handler must call invalidateUserSessions(userId, { tenantId }). */
@@ -40,7 +51,6 @@ export interface ScimUserPatchResult {
 
 export interface DeactivateResult {
   userId: string;
-  userEmail: string | null;
   /** Always true — the route handler must call invalidateUserSessions(userId, { tenantId }). */
   needsSessionInvalidation: true;
 }
@@ -107,20 +117,22 @@ export async function resolveUserId(
 }
 
 /**
- * Fetch a SCIM User resource by internal userId.
+ * The membership half of a SCIM User resource, read in the tenant context.
  *
- * Returns `null` when the member row or its user email is missing.
+ * Returns `null` when the member row is missing. Identity is not read here: a
+ * member whose users row names another tenant — a departed member the
+ * realignment moved — has a row RLS hides in this context, and the REQUIRED
+ * relation this used to include came back null (measured: Prisma does not throw).
  */
-export async function fetchScimUser(
+export async function loadScimUserSnapshot(
   tenantId: string,
   userId: string,
-  baseUrl: string,
-): Promise<ScimUserResource | null> {
+): Promise<ScimUserSnapshot | null> {
   const member = await prisma.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
-    include: { user: { select: { id: true, email: true, name: true } } },
+    select: { userId: true, deactivatedAt: true },
   });
-  if (!member || !member.user?.email) return null;
+  if (!member) return null;
 
   const extMapping = await prisma.scimExternalMapping.findFirst({
     where: {
@@ -131,12 +143,32 @@ export async function fetchScimUser(
     select: { externalId: true },
   });
 
-  const input: ScimUserInput = {
+  return {
     userId: member.userId,
-    email: member.user.email,
-    name: member.user.name,
     deactivatedAt: member.deactivatedAt,
     externalId: extMapping?.externalId,
+  };
+}
+
+/**
+ * A SCIM User resource from a membership snapshot, or `null` when the user has no
+ * email. Must run after the tenant context closes: identity is read through a
+ * bypass, which refuses to open inside one.
+ */
+export async function toScimUserResource(
+  snapshot: ScimUserSnapshot,
+  baseUrl: string,
+): Promise<ScimUserResource | null> {
+  const users = await fetchUserDisplayMap([snapshot.userId], BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  const user = users.get(snapshot.userId);
+  if (!user?.email) return null;
+
+  const input: ScimUserInput = {
+    userId: snapshot.userId,
+    email: user.email,
+    name: user.name,
+    deactivatedAt: snapshot.deactivatedAt,
+    externalId: snapshot.externalId,
   };
 
   return userToScimUser(input, baseUrl);
@@ -146,7 +178,7 @@ export async function fetchScimUser(
  * Full-replace a SCIM User (PUT semantics).
  *
  * Updates member active state, manages `ScimExternalMapping`, and returns the
- * updated resource with an audit action indicator.
+ * updated membership snapshot with an audit action indicator.
  *
  * Throws:
  * - `ScimUserNotFoundError` — member not found
@@ -157,7 +189,6 @@ export async function replaceScimUser(
   tenantId: string,
   userId: string,
   data: ScimUserReplaceInput,
-  baseUrl: string,
 ): Promise<ScimUserReplaceResult> {
   const { active, externalId } = data;
 
@@ -218,9 +249,10 @@ export async function replaceScimUser(
     throw e;
   }
 
-  const resource = await fetchScimUser(tenantId, userId, baseUrl);
+  const snapshot = await loadScimUserSnapshot(tenantId, userId);
+  if (!snapshot) throw new ScimUserNotFoundError();
   return {
-    resource: resource!,
+    snapshot,
     userId,
     auditAction,
     needsSessionInvalidation: auditAction === AUDIT_ACTION.SCIM_USER_DEACTIVATE,
@@ -240,7 +272,6 @@ export async function patchScimUser(
   tenantId: string,
   userId: string,
   operations: UserPatchResult,
-  baseUrl: string,
 ): Promise<ScimUserPatchResult> {
   const member = await prisma.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
@@ -277,9 +308,10 @@ export async function patchScimUser(
     data: updateData,
   });
 
-  const resource = await fetchScimUser(tenantId, userId, baseUrl);
+  const snapshot = await loadScimUserSnapshot(tenantId, userId);
+  if (!snapshot) throw new ScimUserNotFoundError();
   return {
-    resource: resource!,
+    snapshot,
     userId,
     auditAction,
     needsSessionInvalidation: auditAction === AUDIT_ACTION.SCIM_USER_DEACTIVATE,
@@ -302,7 +334,7 @@ export async function deactivateScimUser(
 ): Promise<DeactivateResult> {
   const member = await prisma.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
-    select: { id: true, role: true, user: { select: { email: true } } },
+    select: { id: true, role: true },
   });
   if (!member) throw new ScimUserNotFoundError();
   if (member.role === TENANT_ROLE.OWNER) throw new ScimOwnerProtectedError();
@@ -327,7 +359,6 @@ export async function deactivateScimUser(
 
   return {
     userId,
-    userEmail: member.user?.email ?? null,
     needsSessionInvalidation: true,
   };
 }

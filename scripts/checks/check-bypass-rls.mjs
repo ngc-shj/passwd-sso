@@ -162,7 +162,12 @@ const ALLOWED_USAGE = new Map([
   // see users outside this tenant (the whole point — the old in-context version
   // could not, so it never fired). Read-only; the tenant compared against is the
   // authenticated SCIM token's.
-  ["src/app/api/scim/v2/Users/route.ts", ["user"]],
+  // The user LIST reads under a bypass too: its filter runs through the users
+  // relation, which a tenant context narrows to users whose owning column names
+  // this tenant, silently dropping departed members from the page and the count.
+  // Every query carries the token's tenantId, ANDed so no filter can widen it.
+  // Read-only.
+  ["src/app/api/scim/v2/Users/route.ts", ["user", "tenantMember", "scimExternalMapping"]],
   // C3: also reads the session row to resolve the bound credential.
   ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential", "session"]],
   ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],

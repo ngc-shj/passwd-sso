@@ -37,13 +37,24 @@ async function handleGET(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { tenantId } = auth.data;
 
-  return withTenantRls(prisma, tenantId, async (tx) => {
+  // Read under a bypass pinned to the token's tenant in every query, not in the
+  // tenant context. The list's meaning is a filter through the users relation —
+  // `userName` is the email, and a user without one is not listed — and a tenant
+  // context evaluates that relation under users RLS: a member whose users row
+  // names another tenant, such as a departed member the realignment moved, was
+  // dropped from `Resources` and from `totalResults` alike (measured: a relation
+  // filter excludes the row; Prisma does not throw). Read-only.
+  return withBypassRls(prisma, async (tx) => {
     const url = req.nextUrl;
     const startIndex = Math.max(1, parseInt(url.searchParams.get("startIndex") ?? "1", 10) || 1);
     const count = Math.min(SCIM_PAGE_COUNT_MAX, Math.max(SCIM_PAGE_COUNT_MIN, parseInt(url.searchParams.get("count") ?? String(SCIM_PAGE_COUNT_DEFAULT), 10) || SCIM_PAGE_COUNT_DEFAULT));
     const filterParam = url.searchParams.get("filter");
 
-    let prismaWhere: Prisma.TenantMemberWhereInput = { tenantId, user: { is: { email: { not: null } } } };
+    // Every condition is ANDed under the token's tenant, so no filter can widen it.
+    const conditions: Prisma.TenantMemberWhereInput[] = [
+      { tenantId },
+      { user: { is: { email: { not: null } } } },
+    ];
 
     if (filterParam) {
       try {
@@ -66,11 +77,10 @@ async function handleGET(req: NextRequest) {
           if (!mapping) {
             return scimListResponse([], 0, startIndex);
           }
-          prismaWhere.userId = mapping.internalId;
+          conditions.push({ userId: mapping.internalId });
         }
 
-        const where = filterToPrismaWhere(ast);
-        prismaWhere = { ...prismaWhere, ...where };
+        conditions.push(filterToPrismaWhere(ast));
       } catch (e) {
         if (e instanceof FilterParseError) {
           return scimError(400, e.message);
@@ -79,6 +89,7 @@ async function handleGET(req: NextRequest) {
       }
     }
 
+    const prismaWhere: Prisma.TenantMemberWhereInput = { AND: conditions };
     const [members, totalResults] = await Promise.all([
       tx.tenantMember.findMany({
         where: prismaWhere,
@@ -117,7 +128,7 @@ async function handleGET(req: NextRequest) {
     });
 
     return scimListResponse(resources, totalResults, startIndex);
-  });
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
 // POST /api/scim/v2/Users — Create tenant user

@@ -850,6 +850,44 @@ is corrected here and in the comments.
   the `[id]` GET cell; removing it from the route's two queries failed the list and
   create cells.
 
+##### Resolution — SCIM users
+
+- Action: `fetchScimUser` is split. `loadScimUserSnapshot` reads the membership
+  half in the tenant context, with no user relation; `toScimUserResource` joins
+  identity through `fetchUserDisplayMap` after the context closes, and GET, PUT and
+  PATCH build their resource there. `replaceScimUser` and `patchScimUser` return
+  the snapshot. DELETE reads the email it records through `fetchUserContact` after
+  the context, and `deactivateScimUser` no longer selects the user.
+- The list is the exception. Its meaning is a filter through the users relation —
+  `userName` is the email, and a user without one is not listed — so hydrating
+  afterwards would change `totalResults` and paging. It reads under a bypass
+  (`CROSS_TENANT_LOOKUP`) instead, every condition ANDed under the token's tenant so
+  no filter can widen it, and the route's allowlist entry now names `tenantMember`
+  and `scimExternalMapping` beside `user`, with that reason.
+- Two PUT cells had passed because the old code answered an empty resource read with
+  `scimResponse(null)` and a 200: they mocked no third read. They mock it now, and a
+  snapshot missing after a successful write is a 404.
+- Red proof, two worktree copies: dropping the tenant pin from the list, re-adding
+  the relation to the snapshot read and dropping DELETE's contact read failed the
+  four cells written for them; re-adding the relation to the deactivate read and
+  swapping the bypass purpose failed the deactivate cell, the DELETE cell and the
+  two purpose cells.
+
+##### Found while resolving — directory sync cannot reach its cross-tenant arms
+
+Measured on the real database (app role, tenant A context) for a user owned by
+tenant B with an active membership there:
+
+- the create path's prefetch, `tx.user.findMany` by email, returns `[]`;
+- the `tx.user.create` that follows fails with P2002 on `users_email_key`;
+- the name sync, `tx.user.update` on that user, fails with P2025.
+
+Each throws inside the apply transaction, so the run rolls back and reports ERROR.
+The round-3 refusal arms for exactly this user — create the membership deactivated,
+count and audit the refusal — were reachable only in unit cells whose mocked
+`tx.user.findMany` returned a row the database never would. The load phase fails
+before either, dereferencing `member.user.name`.
+
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 
 - Action: an admin-authorized reset is refused while the target still owns

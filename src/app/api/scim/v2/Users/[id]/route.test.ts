@@ -37,6 +37,16 @@ const {
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+// Identity is read after the tenant context, through the same bypass seam as the guard.
+const { mockGuardUser, mockWithBypassRls } = vi.hoisted(() => {
+  const mockGuardUser = { findMany: vi.fn(), findUnique: vi.fn() };
+  return {
+    mockGuardUser,
+    mockWithBypassRls: vi.fn((_prisma: unknown, fn: (tx: unknown) => unknown) =>
+      fn({ tenantMember: mockGuardMember, scimExternalMapping: mockGuardMapping, user: mockGuardUser })),
+  };
+});
+
 vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -54,10 +64,7 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls, withBypassRls: (
-  _prisma: unknown,
-  fn: (tx: unknown) => unknown,
-) => fn({ tenantMember: mockGuardMember, scimExternalMapping: mockGuardMapping }) }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls, withBypassRls: mockWithBypassRls }));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
@@ -69,6 +76,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { GET, PUT, PATCH, DELETE } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
@@ -106,6 +114,8 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMapping.findFirst.mockResolvedValue(null);
+    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
+    mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
   });
 
   it("returns tenant user resource", async () => {
@@ -114,7 +124,6 @@ describe("GET /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: null,
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
@@ -125,6 +134,26 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     expect(body.active).toBe(true);
   });
 
+  it("builds the resource from identity read after the tenant context, not through the relation", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: null });
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "moved@example.com", name: "Moved", image: null }]);
+
+    const res = await GET(makeReq(), makeParams("user-1"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).userName).toBe("moved@example.com");
+    const snapshotRead = mockTenantMember.findUnique.mock.calls[1][0];
+    expect(snapshotRead).not.toHaveProperty("include");
+    expect(snapshotRead.select).toEqual({ userId: true, deactivatedAt: true });
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+  });
+
   it("returns 404 when user cannot be resolved", async () => {
     mockTenantMember.findUnique.mockResolvedValue(null);
 
@@ -133,12 +162,12 @@ describe("GET /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 404 when resolved user has no email resource", async () => {
+    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: null, name: "User", image: null }]);
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: null,
-        user: { id: "user-1", email: null, name: "User" },
       });
 
     const res = await GET(makeReq(), makeParams("user-1"));
@@ -176,6 +205,8 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMapping.findFirst.mockResolvedValue(null);
+    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
+    mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
   });
 
   it("deactivates tenant member", async () => {
@@ -185,7 +216,6 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: new Date(),
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
 
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
@@ -250,7 +280,8 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     // refuses every reactivation.
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() })
+      .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: null });
     mockGuardMember.findMany.mockResolvedValue([{ tenantId: "tenant-1" }]);
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     // Wired here, not inherited: `vi.clearAllMocks()` clears calls, not
@@ -290,7 +321,8 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     // would block the very operation that repairs the condition.
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
+      .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: new Date() });
     mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     // Wired here, not inherited: `vi.clearAllMocks()` clears calls, not
@@ -393,7 +425,6 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: null,
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
 
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
@@ -453,7 +484,6 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: null,
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
 
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
@@ -584,7 +614,6 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: new Date(),
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
@@ -620,7 +649,6 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: null,
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
@@ -666,7 +694,6 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: new Date(),
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
@@ -729,6 +756,8 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMapping.findFirst.mockResolvedValue(null);
+    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
+    mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
   });
 
   it("returns 400 for unsupported patch operation", async () => {
@@ -772,7 +801,6 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: new Date(),
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockTenantMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
@@ -862,7 +890,6 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: new Date("2024-01-01T00:00:00.000Z"),
-        user: { id: "user-1", email: "u@example.com", name: "Renamed" },
       });
     mockTenantMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
@@ -888,7 +915,6 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: null,
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockTenantMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
@@ -941,7 +967,6 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: new Date(),
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockTenantMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
@@ -967,7 +992,6 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: null,
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockTenantMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
@@ -993,7 +1017,6 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({
         userId: "user-1",
         deactivatedAt: new Date(),
-        user: { id: "user-1", email: "u@example.com", name: "User" },
       });
     mockTenantMember.update.mockResolvedValue({});
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
@@ -1041,12 +1064,14 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMapping.findFirst.mockResolvedValue(null);
+    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
+    mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
   });
 
   it("removes tenant member and related records", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", user: { email: "u@example.com" } });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
     mockTransaction.mockResolvedValue([]);
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
@@ -1057,7 +1082,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   it("returns 403 when deleting OWNER via DELETE", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "OWNER", user: { email: "owner@example.com" } });
+      .mockResolvedValueOnce({ id: "tm1", role: "OWNER" });
 
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
     expect(res!.status).toBe(403);
@@ -1067,7 +1092,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   it("returns 409 when related resources block deletion", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", user: { email: "u@example.com" } });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
     mockTransaction.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("fk", {
         code: "P2003",
@@ -1096,7 +1121,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   it("triggers invalidateUserSessions on SCIM DELETE", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", user: { email: "u@example.com" } });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
     mockTransaction.mockResolvedValue([]);
 
     await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
@@ -1107,7 +1132,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   it("returns 204 even if session invalidation fails on DELETE", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", user: { email: "u@example.com" } });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
     mockTransaction.mockResolvedValue([]);
     mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
 
@@ -1127,7 +1152,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   it("includes invalidation counts in audit metadata on DELETE success", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
-      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", user: { email: "u@example.com" } });
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
     mockTransaction.mockResolvedValue([]);
     mockInvalidateUserSessions.mockResolvedValue({ sessions: 2, extensionTokens: 1, apiKeys: 0 });
 
@@ -1137,6 +1162,21 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
       expect.objectContaining({
         metadata: expect.objectContaining({ sessions: 2, extensionTokens: 1, apiKeys: 0 }),
       }),
+    );
+  });
+
+  it("records the email read after the tenant context, not through the membership's relation", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
+    mockTransaction.mockResolvedValue([]);
+    mockGuardUser.findUnique.mockResolvedValue({ email: "moved@example.com", name: "Moved", locale: null });
+
+    await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+
+    expect(mockTenantMember.findUnique.mock.calls[1][0].select).toEqual({ id: true, role: true });
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ email: "moved@example.com" }) }),
     );
   });
 });
