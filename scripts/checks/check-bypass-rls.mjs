@@ -92,6 +92,12 @@ import { join, extname } from "node:path";
 const ALLOWED_USAGE = new Map([
   ["src/lib/tenant-rls.ts", ["*"]], // definition
   ["src/lib/tenant-context.ts", ["tenantMember", "team"]],
+  // The standalone realignment for producers that activate a membership inside a
+  // TENANT context (SCIM, directory sync): that context cannot write a users row
+  // the owning column files under another tenant. Re-reads the membership it
+  // follows — only while still ACTIVE in the tenant named — then moves the column
+  // through `realignOwningTenantColumn` and records both sides.
+  ["src/lib/tenant/tenant-realignment.ts", ["tenantMember"]],
   ["src/lib/auth/session/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit/audit.ts", ["team", "user", "auditLog"]],

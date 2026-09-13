@@ -706,6 +706,31 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(result.ok).toBe(true);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledTimes(1);
+    // The column already agrees: the realignment is one read and no write.
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("row 5: realigns a column that still names another tenant, and records it", async () => {
+    // "Already a member" is answered from the ACTIVE membership, so a user SCIM
+    // or directory sync reactivated here while their column named another tenant
+    // reaches this arm with the divergence row 4 exists to repair. Before this
+    // arm moved it, their own requests kept failing to see their own row.
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_CLAIMED }]);
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result.ok).toBe(true);
+    expect(mockPrisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { tenantId: TENANT_CLAIMED },
+    });
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT_CLAIMED,
+      expect.objectContaining({ action: "USER_TENANT_REALIGNED", targetId: "member-joined" }),
+    );
   });
 
   // Regression (acceptance criterion): a second claim registered against the

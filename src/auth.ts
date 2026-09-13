@@ -1,10 +1,8 @@
 import NextAuth from "next-auth";
 import type { Account } from "next-auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
-import { logAuditAsync, logAuditInTx } from "@/lib/audit/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import type { Prisma } from "@prisma/client";
+import { logAuditAsync } from "@/lib/audit/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant/tenant-claim";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
@@ -23,13 +21,12 @@ import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-c
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import {
-  countStrandedRows,
-  realignOwningTenantColumn,
   resolveOwningTenantIdFromClient,
   resolveUserTenantId,
   resolveUserTenantIdFromClient,
 } from "@/lib/tenant-context";
 import { getLogger } from "@/lib/logger";
+import { realignToMembershipInTx } from "@/lib/tenant/tenant-realignment";
 import {
   emitAuthLoginFailure,
   type AuthLoginFailureReason,
@@ -342,67 +339,6 @@ export async function ensureTenantMembershipForSignIn(
   }
 }
 
-/**
- * Record a realignment, on the transaction that performed it.
- *
- * `logAuditInTx`, NOT `logAuditAsync`. An earlier version carried the fact out
- * of the transaction and emitted at the callback, justified by "emitting inside
- * would run logAuditAsync -> resolveTenantId -> withBypassRls NESTED inside the
- * enclosing bypass". That reason is FALSE for this call shape: `resolveTenantId`
- * returns on its first line when `params.tenantId` is set, and it is set here.
- * What actually refuses `logAuditAsync` in an RLS context is
- * `refuseIfInsideRlsContext`, whose own docstring names `logAuditInTx` as the
- * in-context path — so the false reason was closing off the option that makes
- * the record atomic with the tenancy move it reports. The design decision
- * (`docs/archive/review/audit-tenant-adjudicator-design.md`) stakes option 3
- * entirely on that record existing; a crash between commit and a post-hoc
- * enqueue would have lost it.
- *
- * TWO rows, one per tenant. The joining tenant's operators hold the member and
- * can act; the RELEASING tenant keeps the data and, until this, was told nothing
- * at all while its own member list broke. Their row carries no id of the tenant
- * the user went to — that tenant's identity is not theirs to learn, the same
- * line the directory-sync refusal draws.
- */
-async function emitRealignment(
-  tx: TxOrPrisma,
-  r: {
-    userId: string;
-    memberId: string;
-    previousTenantId: string;
-    tenantId: string;
-    leftBehind: Record<string, number>;
-  },
-): Promise<void> {
-  const base = {
-    userId: r.userId,
-    actorType: ACTOR_TYPE.SYSTEM,
-    scope: AUDIT_SCOPE.TENANT,
-    // The MEMBERSHIP row, not the user id. Every other emitter of this
-    // targetType keys on `tenant_members.id`, and an operator joining
-    // `audit_logs.target_id` against it resolved nothing for exactly the event
-    // that is their only handle on the stranded rows.
-    targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
-  } as const;
-  await logAuditInTx(tx as Prisma.TransactionClient, r.tenantId, {
-    ...base,
-    action: AUDIT_ACTION.USER_TENANT_REALIGNED,
-    tenantId: r.tenantId,
-    targetId: r.memberId,
-    metadata: { previousTenantId: r.previousTenantId, leftBehind: r.leftBehind },
-  });
-  await logAuditInTx(tx as Prisma.TransactionClient, r.previousTenantId, {
-    ...base,
-    action: AUDIT_ACTION.USER_TENANT_REALIGNED,
-    tenantId: r.previousTenantId,
-    // No membership row of ours exists in the releasing tenant to point at —
-    // the user id is what that tenant can still resolve against its own
-    // deactivated membership.
-    targetId: r.userId,
-    metadata: { leftBehind: r.leftBehind },
-  });
-}
-
 async function claimedTenantMembership(
   userId: string,
   tenantClaim: string,
@@ -473,32 +409,26 @@ async function claimedTenantMembership(
       //
       // The column follows the membership. The DATA does not, and that is the
       // decision rather than an oversight: see `realignOwningTenantColumn`. The
-      // counts below are what stop it being a silent one — a member arriving
+      // counts it records are what stop it being a silent one — a member arriving
       // with rows stranded in a tenant they no longer belong to is a condition
       // an operator can act on, and nobody can act on a state nothing reports.
-      const previousTenantId = await realignOwningTenantColumn(tx, userId, target.id);
-      if (previousTenantId) {
-        // Only on the divergent path, which is rare; the ordinary join reaches
-        // none of these.
-        const leftBehind = await countStrandedRows(tx, userId, previousTenantId);
-        await emitRealignment(tx, {
-          userId,
-          memberId: joined.id,
-          previousTenantId,
-          tenantId: target.id,
-          leftBehind,
-        });
-      }
+      await realignToMembershipInTx(tx, { userId, memberId: joined.id, tenantId: target.id });
       return { ok: true };
     }
 
     if (lookup.kind === "tenant" && existingTenantId === lookup.id) {
       // Row 5: already a member of the claimed tenant.
-      await tx.tenantMember.upsert({
+      const member = await tx.tenantMember.upsert({
         where: { tenantId_userId: { tenantId: lookup.id, userId } },
         create: { tenantId: lookup.id, userId, role: TENANT_ROLE.MEMBER },
         update: {},
+        select: { id: true },
       });
+      // "Already a member" is answered from the active membership first, so the
+      // column can still name another tenant here — a user SCIM or directory sync
+      // reactivated before those producers moved it. Row 4's move, for the same
+      // reason; a no-op read when the column already agrees.
+      await realignToMembershipInTx(tx, { userId, memberId: member.id, tenantId: lookup.id });
       return { ok: true };
     }
 

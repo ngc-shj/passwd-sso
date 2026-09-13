@@ -888,6 +888,28 @@ count and audit the refusal — were reachable only in unit cells whose mocked
 `tx.user.findMany` returned a row the database never would. The load phase fails
 before either, dereferencing `member.user.name`.
 
+#### U2 — the producers that activate a membership without moving the column
+
+- Action, part 1 — one mechanism. The realignment and its two-tenant record move
+  out of `src/auth.ts` into `src/lib/tenant/tenant-realignment.ts`:
+  `realignToMembershipInTx` for a caller already inside a bypass, and
+  `realignAfterActivation` for a producer that activated inside a TENANT context,
+  which cannot write a users row filed under another tenant. The second opens its
+  own bypass after that context commits — so the move is not atomic with the
+  activation, which is accepted — and follows the membership only while it is
+  still active in the tenant named, so a deactivation landing in between is not
+  undone.
+- Action, part 2 — sign-in row 5. "Already a member of the claimed tenant" is
+  answered from the active membership, so a user reactivated by SCIM or directory
+  sync while their column named another tenant reached that arm with the divergence
+  row 4 repairs, and nothing moved it. Row 5 now realigns after its upsert; when the
+  column already agrees it is one read and no write.
+- Red proof: dropping the row 5 call, the active-only predicate and the releasing
+  tenant's row failed the row 5 cell, the module's two cells, and the two auth
+  cells that assert both rows (row 4 and the end-to-end sign-in).
+- Still open at this point: SCIM provisioning and reactivation, and directory sync —
+  each needs its producer-side fix before it can call `realignAfterActivation`.
+
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 
 - Action: an admin-authorized reset is refused while the target still owns
