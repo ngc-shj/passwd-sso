@@ -20,9 +20,6 @@
   "src/app/api/passwords/[id]/attachments/[attachmentId]/migrate/route.ts": {
     "disposition": "tenant-scoped"
   },
-  "src/app/api/scim/v2/Users/route.ts": {
-    "disposition": "tenant-scoped"
-  },
   "src/app/api/sends/file/route.ts": {
     "disposition": "tenant-scoped"
   },

@@ -949,7 +949,10 @@ before either, dereferencing `member.user.name`.
   realigns an existing user it provisioned ACTIVE, and PUT and PATCH realign on
   `SCIM_USER_REACTIVATE`, each after the tenant context commits; a failure is
   logged, not answered as a failed request whose membership already committed. The
-  created resource is read back through `toScimUserResource`.
+  created resource is read back through `toScimUserResource`. With the in-context
+  `user.findUnique` gone, the route no longer reads a user's tenant identity at all,
+  so its `check-owning-tenant-adjudicator` manifest entry was removed — the gate's
+  staleness check, run in pre-pr, is what reported it.
 - Red proof, two worktree copies: dropping the three realignment calls failed the
   two POST cells, the PUT and PATCH reactivation cells, and the failure-logging
   cell; always creating the user and realigning on every transition failed the six

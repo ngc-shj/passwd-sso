@@ -62,7 +62,7 @@ async function h() {
 // The sanctioned shape: tenant-context.ts is in F3_UNUSED_TX_ALLOWLIST,
 // so its unused-tx delegating wrapper (fn(tenantId) public contract) is allowed.
 // A sibling real (tx) => tx.x callback confirms the file still passes the model
-// allowlist (tenantMember, team).
+// allowlist (tenantMember, team, user).
 const TENANT_CONTEXT_ALLOWED = `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function withTenantContext(tenantId) {
@@ -79,6 +79,11 @@ export async function withTeamContext(tenantId, fn) {
 export async function resolveTeamTenantId(teamId) {
   return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) =>
     tx.team.findUnique({ where: { id: teamId } }));
+}
+// Mirrors existingUserIdsByEmail, for the same reason.
+export async function existingUserIdsByEmail(emails) {
+  return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) =>
+    tx.user.findMany({ where: { email: { in: emails } }, select: { id: true } }));
 }`;
 
 // A brand-new (non-allowlisted) file that suppresses an unused tx — trips BOTH
