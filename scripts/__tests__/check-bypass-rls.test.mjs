@@ -18,9 +18,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CHECKER = fileURLToPath(new URL("../checks/check-bypass-rls.mjs", import.meta.url));
@@ -405,17 +405,19 @@ export async function drain() {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
-  it("passes a healthy file that mentions the helper only in prose", () => {
-    // A file whose bypass call was removed but whose explanatory comment and
-    // allowlist entry remain — an ordinary cleanup. Round 3 reported it as
-    // unparseable, naming a file that parsed perfectly. Prior verdict: exit 1.
-    const { code, stdout, stderr } = run("src/lib/audit/audit-outbox.ts", `
+  it("reports a file that mentions the helper only in prose as a stale entry, not as unparseable", () => {
+    // A file whose bypass call was removed while its explanatory comment and
+    // allowlist entry remain. Round 3 reported it as unparseable, naming a file
+    // that parsed perfectly. It is a stale allowlist entry, and that is what it
+    // must be reported as.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 // This used to call withBypassRls(prisma, cb, BYPASS_PURPOSE.AUDIT) before the refactor.
 export const purpose = BYPASS_PURPOSE.AUDIT;`);
-    expect(code).toBe(0);
-    expect(stdout).toContain("check-bypass-rls: OK");
+    expect(code).toBe(1);
     expect(stderr).not.toContain("could not be parsed");
+    expect(stderr).toContain("makes no withBypassRls call");
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts");
   });
 
   it("passes a compliant call in a file whose string quotes an eslint-disable", () => {
@@ -1697,5 +1699,45 @@ export async function GET() {
 }`);
     expect(code).toBe(0);
     expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("fails an entry whose file makes no withBypassRls call at all", () => {
+    // The widest member of the over-breadth class, which the per-model check skips
+    // under a comment that called it "Check 1's business" — Check 1 fires only in
+    // the other direction. The real tree held two: the MCP token route and the 410
+    // DCR-cleanup stub, neither of which bypasses anything now.
+    const { code, stderr } = run("src/app/api/tenant/policy/route.ts", `
+export async function GET() {
+  return new Response(null, { status: 410 });
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("makes no withBypassRls call");
+    expect(stderr).toContain("src/app/api/tenant/policy/route.ts");
+  });
+
+  it("does not judge a file that bypasses through raw SQL", () => {
+    // A real bypass this gate cannot see; `check-raw-sql-usage` governs it.
+    // Flagging the entry would delete the only record here that the file bypasses.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+export async function drain(tx) {
+  await tx.$executeRaw\`SELECT set_config('app.bypass_rls', 'on', true)\`;
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("names only files that exist, in the real repo's allowlist", () => {
+    // Absence is not judged by the gate — it runs on one-file fixture trees, where
+    // every other allowlisted file is absent by construction — so it is asserted
+    // here against the real tree. A deleted file's entry must not outlive it.
+    const repoRoot = join(dirname(CHECKER), "..", "..");
+    const source = readFileSync(CHECKER, "utf8");
+    const start = source.indexOf("const ALLOWED_USAGE = new Map([");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = source.slice(start, source.indexOf("]);", start));
+    const files = [...block.matchAll(/\[\s*"([^"]+)",\s*\[/g)].map((m) => m[1]);
+    // "Parsed nothing" must not read as "nothing missing".
+    expect(files.length).toBeGreaterThan(50);
+    expect(files.filter((f) => !existsSync(join(repoRoot, f)))).toEqual([]);
   });
 });

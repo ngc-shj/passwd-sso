@@ -83,7 +83,7 @@
  */
 import { SyntaxKind } from "ts-morph";
 import { createAstProject } from "./lib/ast-project.mjs";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, extname } from "node:path";
 
 // Per-file allowlist: file path → allowed Prisma model names.
@@ -107,10 +107,6 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/extension/key/reset/route.ts", ["extensionToken"]],
   ["src/lib/auth/access/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
-  // C8: passkey-enforcement gate pre-read on the cookieless MCP refresh path.
-  // Resolves userId/tenantId from the refresh-token row (RLS would filter it to
-  // null for a DPoP-bearer request) before re-deriving passkey state + gating.
-  ["src/app/api/mcp/token/route.ts", ["mcpRefreshToken"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
   // A04-4: execute is the only phase that revokes shares system-wide; the
   // master key is global, so old-version shares across ALL tenants must be
@@ -243,7 +239,6 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
   ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],
   ["src/app/[locale]/mcp/authorize/page.tsx", ["mcpClient", "user"]],
-  ["src/app/api/maintenance/dcr-cleanup/route.ts", []],
   // JIT access requests: SA self-service path uses bypass for SA lookup; approve reads tenant policy
   ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
@@ -1124,6 +1119,8 @@ const modelViolations = [];
 const usedModels = new Map();
 const undecidableFiles = new Set();
 let handedOffSites = 0;
+/** Files that make at least one real `withBypassRls` call — the whole-entry check reads it. */
+const bypassCallFiles = new Set();
 const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
@@ -1171,6 +1168,7 @@ for (const file of sourceFiles) {
 
   const calls = helperCallsIn(sf);
   const bypassCalls = calls.filter(({ helper }) => helper === "withBypassRls");
+  if (bypassCalls.length > 0) bypassCallFiles.add(file);
   const allowedModels = ALLOWED_USAGE.get(file);
 
   // Check 1: a file that really calls withBypassRls must be on the allowlist.
@@ -1291,10 +1289,37 @@ const staleAllowances = [];
 for (const [file, models] of ALLOWED_USAGE) {
   if (models.includes("*") || undecidableFiles.has(file)) continue;
   const reached = usedModels.get(file);
-  if (!reached) continue; // no bypass call at all: Check 1's business, not this one
+  if (!reached) continue; // reached no model: a file with no bypass call is judged whole, below
   for (const model of models) {
     if (!reached.has(model)) staleAllowances.push({ file, model });
   }
+}
+
+/**
+ * The whole-entry form of the same question: an ALLOWED_USAGE entry whose file
+ * makes no `withBypassRls` call at all. The per-model check above skips such a
+ * file — it reached no model because it opened no bypass — and its comment used
+ * to call that "Check 1's business". It is not: Check 1 fires only in the other
+ * direction, a call with no entry, so this direction was checked by nothing.
+ *
+ * NOT judged here, each for a stated reason:
+ *   - `["*"]` entries, the helpers' own definition;
+ *   - a file this run could not parse, which is reported on its own above;
+ *   - a file that sets `app.bypass_rls` through raw SQL. That is a real bypass
+ *     this gate cannot see; `check-raw-sql-usage` requires such a file to be
+ *     allowlisted with a stated purpose, so the entry here documents a scope
+ *     nothing in this gate enforces, rather than one that has gone stale;
+ *   - a file absent from the tree being scanned. The self-test runs this gate on
+ *     one-file fixture trees, so absence is asserted by a real-repo cell there.
+ */
+const RAW_BYPASS_GUC_RE = /set_config\(\s*'app\.bypass_rls'\s*,\s*'on'/;
+const unparseableFileSet = new Set(unparseableFiles.map(({ file }) => file));
+const staleEntries = [];
+for (const [file, models] of ALLOWED_USAGE) {
+  if (models.includes("*") || bypassCallFiles.has(file) || unparseableFileSet.has(file)) continue;
+  if (!existsSync(file)) continue;
+  if (RAW_BYPASS_GUC_RE.test(readFileSync(file, "utf8"))) continue;
+  staleEntries.push(file);
 }
 
 let failed = false;
@@ -1345,6 +1370,15 @@ if (modelViolations.length > 0) {
   for (const { file, line, model } of modelViolations) {
     console.error(`  ${file}:${line}  prisma.${model}`);
   }
+}
+
+if (staleEntries.length > 0) {
+  failed = true;
+  if (modelViolations.length > 0) console.error("");
+  console.error("ALLOWED_USAGE has an entry for a file that makes no withBypassRls call.");
+  console.error("Remove it: the entry reads as a bypass this file performs, and it performs none.");
+  console.error("");
+  for (const file of staleEntries) console.error(`  ${file}`);
 }
 
 if (staleAllowances.length > 0) {
