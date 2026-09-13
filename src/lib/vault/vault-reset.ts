@@ -39,23 +39,122 @@ export interface VaultResetAtomicAudit {
 }
 
 /**
+ * A tenant-scoped reset refused because the user still owns vault rows under a
+ * different tenant. `outside` names the kinds and counts, never the tenant.
+ */
+export class VaultResetOutsideTenantError extends Error {
+  constructor(readonly outside: Readonly<Record<string, number>>) {
+    super("VAULT_RESET_DATA_OUTSIDE_TENANT");
+    this.name = "VaultResetOutsideTenantError";
+  }
+}
+
+/**
+ * Personal vault rows this user owns under any tenant other than `tenantId`,
+ * limited to the kinds a reset destroys. Zero-count kinds are dropped, so an
+ * empty object means "nothing outside".
+ *
+ * Why this exists: a realignment (`realignOwningTenantColumn`) moves the user's
+ * owning tenant and deliberately leaves their rows filed under the tenant that
+ * released them — reattachable later, which is what made that the chosen
+ * option. `executeVaultReset` deletes by user alone, so an admin reset
+ * authorized in the NEW tenant would destroy rows that tenant has no authority
+ * over, and which neither the admin nor the user can see under RLS.
+ *
+ * Team-side rows are excluded: `teamMemberKey`, and attachments or shares on a
+ * TEAM entry, legitimately live under a team's tenant when the user is a guest
+ * there, so counting them would refuse an ordinary reset.
+ */
+async function countVaultRowsOutsideTenant(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  tenantId: string,
+): Promise<Record<string, number>> {
+  const outside = { not: tenantId };
+  const [passwordEntry, tag, folder, vaultKey, attachment, passwordShare, emergencyAccessGrant] =
+    await Promise.all([
+      tx.passwordEntry.count({ where: { userId, tenantId: outside } }),
+      tx.tag.count({ where: { userId, tenantId: outside } }),
+      tx.folder.count({ where: { userId, tenantId: outside } }),
+      tx.vaultKey.count({ where: { userId, tenantId: outside } }),
+      tx.attachment.count({
+        where: { createdById: userId, teamPasswordEntryId: null, tenantId: outside },
+      }),
+      tx.passwordShare.count({
+        where: { createdById: userId, teamPasswordEntryId: null, tenantId: outside },
+      }),
+      tx.emergencyAccessGrant.count({ where: { ownerId: userId, tenantId: outside } }),
+    ]);
+  return Object.fromEntries(
+    Object.entries({
+      passwordEntry,
+      tag,
+      folder,
+      vaultKey,
+      attachment,
+      passwordShare,
+      emergencyAccessGrant,
+    }).filter(([, n]) => n > 0),
+  );
+}
+
+/**
+ * The same question outside any transaction, for a route that must refuse
+ * BEFORE it consumes something — the execute route's one-shot token, or an
+ * admin's daily initiate quota. Not the enforcement: the scoped reset re-asks
+ * inside its own transaction, after locking the user row.
+ */
+export async function findVaultRowsOutsideTenant(
+  userId: string,
+  tenantId: string,
+): Promise<Record<string, number>> {
+  return withBypassRls(
+    prisma,
+    (tx) => countVaultRowsOutsideTenant(tx, userId, tenantId),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+}
+
+/**
  * Execute a complete vault reset for the target user.
  *
- * Uses bypassRls to ensure all data is accessible regardless of tenant context
- * (admin-initiated resets may cross tenant boundaries within the same team).
+ * Unscoped, it deletes the user's vault rows under every tenant: the owner's own
+ * reset (`/api/vault/reset`), whose authority covers all of them. An
+ * ADMIN-authorized reset passes `scopeTenantId` and is refused with
+ * `VaultResetOutsideTenantError`, deleting nothing, while the user still owns
+ * personal vault rows under any other tenant. That check runs inside the
+ * deleting transaction after the user row is locked, so a realignment
+ * committing concurrently is serialized against it instead of landing between
+ * the check and the delete.
+ *
+ * The destructive body stays in THIS exported function, under this name:
+ * `route-class-patterns.json#deleteSignal` names it, and both the route
+ * classifier and `check-destructive-wrapper-derivation` find destructive routes
+ * through it. Moving the body behind a differently named wrapper declassified
+ * `/api/vault/admin-reset` — measured: `check-permanent-delete-stepup.sh`
+ * reported that route's exemption stale, and the derivation gate reported this
+ * name stale.
  *
  * @param targetUserId - The user whose vault will be wiped
- * @param __testHook   - TEST-ONLY: injected after bulkTransition inside the
- *                       transaction. Throwing from the hook asserts atomicity
- *                       (T16 / S4). Ignored in non-test environments even if
- *                       passed. Never use in production code.
+ * @param atomicAudit - Its own argument, not a field of `options`:
+ *   `check-critical-audit-atomic` credits a critical action only when its
+ *   `{ params: { action } }` descriptor is a direct call argument. Measured —
+ *   nesting it inside an options object made both reset actions read as
+ *   non-atomic.
+ * @param options.__testHook - TEST-ONLY: injected after bulkTransition inside
+ *   the transaction. Throwing from the hook asserts atomicity (T16 / S4).
+ *   Ignored in non-test environments even if passed. Never use in production.
  * @returns Counts of deleted entries and attachments (for audit metadata)
  */
 export async function executeVaultReset(
   targetUserId: string,
   atomicAudit?: VaultResetAtomicAudit,
-  __testHook?: (tx: Prisma.TransactionClient) => Promise<void>,
+  options: {
+    scopeTenantId?: string;
+    __testHook?: (tx: Prisma.TransactionClient) => Promise<void>;
+  } = {},
 ): Promise<VaultResetResult> {
+  const { scopeTenantId, __testHook } = options;
   // Count data being deleted for audit metadata
   const [deletedEntries, deletedAttachments] = await withBypassRls(
     prisma,
@@ -74,6 +173,13 @@ export async function executeVaultReset(
     // write holding the users FOR SHARE while waiting on an entry row here
     // (entries locked first, users updated last) would form a deadlock cycle.
     await tx.$queryRaw`SELECT id FROM users WHERE id = ${targetUserId}::uuid FOR UPDATE`;
+
+    if (scopeTenantId) {
+      const outside = await countVaultRowsOutsideTenant(tx, targetUserId, scopeTenantId);
+      if (Object.keys(outside).length > 0) {
+        throw new VaultResetOutsideTenantError(outside);
+      }
+    }
 
     // Attachments: rows are bytea in DB, but external blob backends store the
     // ciphertext out-of-band — capture refs before delete so they aren't

@@ -360,10 +360,11 @@ describe("centralize-state-transitions — integration", () => {
     });
 
     // Execute vault reset with a __testHook that throws after bulkTransition.
-    // (atomicAudit is now the 2nd param; the hook is the 3rd.)
     await expect(
-      executeVaultReset(ownerId, undefined, async () => {
-        throw new Error("T16 test hook: intentional rollback");
+      executeVaultReset(ownerId, undefined, {
+        __testHook: async () => {
+          throw new Error("T16 test hook: intentional rollback");
+        },
       }),
     ).rejects.toThrow("T16 test hook: intentional rollback");
 
@@ -398,8 +399,10 @@ describe("centralize-state-transitions — integration", () => {
             action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
           },
         },
-        async () => {
-          throw new Error("T#6 hook: rollback with atomic audit");
+        {
+          __testHook: async () => {
+            throw new Error("T#6 hook: rollback with atomic audit");
+          },
         },
       ),
     ).rejects.toThrow("T#6 hook");

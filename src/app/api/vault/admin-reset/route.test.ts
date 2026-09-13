@@ -4,13 +4,22 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
-  mockAuth, mockLogAudit, mockExecuteVaultReset,
+  mockAuth, mockLogAudit, mockExecuteVaultReset, mockFindVaultRowsOutsideTenant,
+  VaultResetOutsideTenantError,
   mockAdminVaultResetFindUnique, mockAdminVaultResetUpdateMany,
   mockRateLimitCheck, mockInvalidateUserSessions, mockCreateRateLimiter,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockLogAudit: vi.fn(),
   mockExecuteVaultReset: vi.fn(),
+  mockFindVaultRowsOutsideTenant: vi.fn(),
+  // The route's instanceof check resolves against THIS class through the module
+  // mock below, so a cell throwing it exercises the real catch arm.
+  VaultResetOutsideTenantError: class extends Error {
+    constructor(readonly outside: Record<string, number>) {
+      super("VAULT_RESET_DATA_OUTSIDE_TENANT");
+    }
+  },
   mockAdminVaultResetFindUnique: vi.fn(),
   mockAdminVaultResetUpdateMany: vi.fn(),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
@@ -38,6 +47,8 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/vault/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,
+  findVaultRowsOutsideTenant: mockFindVaultRowsOutsideTenant,
+  VaultResetOutsideTenantError,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: vi.fn((prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
@@ -93,6 +104,7 @@ describe("POST /api/vault/admin-reset", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockAdminVaultResetFindUnique.mockResolvedValue(RESET_RECORD);
     mockExecuteVaultReset.mockResolvedValue({ deletedEntries: 3, deletedAttachments: 1 });
+    mockFindVaultRowsOutsideTenant.mockResolvedValue({});
     mockAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockInvalidateUserSessions.mockResolvedValue({
@@ -225,6 +237,56 @@ describe("POST /api/vault/admin-reset", () => {
     expect(mockExecuteVaultReset).not.toHaveBeenCalled();
   });
 
+  it("refuses before spending the token when vault rows are held under another tenant", async () => {
+    // Left there by a realignment: reattachable, and invisible under RLS to both
+    // this user and the admins who authorized the reset. This tenant's authority
+    // does not reach them, and the unscoped reset deleted them anyway.
+    mockFindVaultRowsOutsideTenant.mockResolvedValue({ passwordEntry: 7 });
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("VAULT_RESET_DATA_OUTSIDE_TENANT");
+    expect(mockFindVaultRowsOutsideTenant).toHaveBeenCalledWith("user-1", RESET_RECORD.tenantId);
+    // The token survives, so the same reset can run once the data is resolved.
+    expect(mockAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+    expect(mockExecuteVaultReset).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the in-transaction check fires after the token was spent", async () => {
+    // The race the pre-check cannot see: a realignment of this user committing
+    // between the pre-check and the reset's own transaction. Nothing is deleted,
+    // so nothing else of a completed reset may happen either.
+    mockExecuteVaultReset.mockRejectedValue(
+      new VaultResetOutsideTenantError({ passwordEntry: 1 }),
+    );
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("VAULT_RESET_DATA_OUTSIDE_TENANT");
+    expect(mockAdminVaultResetUpdateMany).toHaveBeenCalled();
+    // Sessions are revoked only for a reset that happened.
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("rethrows a reset failure that is not a tenant-scope refusal", async () => {
+    // The catch arm must not turn every failure into a 409 — a database error
+    // mid-wipe is a 500, not "data held elsewhere".
+    mockExecuteVaultReset.mockRejectedValue(new Error("connection reset"));
+
+    await expect(
+      POST(createRequest("POST", URL, {
+        body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+      })),
+    ).rejects.toThrow("connection reset");
+  });
+
   it("marks token via updateMany BEFORE executing vault reset, and logs audit on success", async () => {
     const res = await POST(createRequest("POST", URL, {
       body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
@@ -245,6 +307,9 @@ describe("POST /api/vault/admin-reset", () => {
           metadata: expect.objectContaining({ phase: "committed" }),
         }),
       }),
+      // Scoped to the tenant that authorized the reset — the unscoped reset
+      // would destroy rows under any other tenant as well.
+      { scopeTenantId: RESET_RECORD.tenantId },
     );
 
     // Token marked as executed via atomic updateMany (TOCTOU prevention).

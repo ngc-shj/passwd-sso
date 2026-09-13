@@ -677,3 +677,84 @@ Of the 22 mutation red-proof claims made in round 3's fixes, the Testing expert 
 every one; 21 reproduced exactly and one over-delivered (3 reds where 1 was claimed).
 One claimed 34 measured 33 under a narrower mutation shape; all four target cells were
 red either way.
+
+### Resolution Status — round 4
+
+Closed so far, by commit:
+
+- **C1, C2, U3** — `review(4): make the realignment's record atomic, addressed, and complete`.
+- **S2 (read half), T3** — `review(4): stop the realignment breaking the releasing tenant's member list`.
+  The report half of S2 (a row for the releasing tenant) landed with C1.
+- **S1** — `review(4): refuse an admin vault reset that would destroy rows outside its tenant`.
+
+Open: U1, U2, T1, T2, T4, and the Minors (C3, S3, S4, T5–T8).
+
+#### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
+
+- Action: an admin-authorized reset is refused while the target still owns
+  personal vault rows under any tenant other than the one that authorized it.
+  One predicate (`countVaultRowsOutsideTenant` in `vault-reset.ts`), asked in three
+  positions: at initiate, before the rate limiters count the attempt (the target
+  limiter allows one a day); at execute, before the one-shot token is spent; and
+  authoritatively inside `executeVaultReset`'s deleting transaction, after the
+  user row is locked, so a concurrent realignment is serialized against it.
+  Refusal deletes nothing and returns `VAULT_RESET_DATA_OUTSIDE_TENANT` (409).
+- The expert's remedy — scope the delete to the authorizing tenant — was not
+  taken: it nulls the key material on the users row while leaving the ciphertext
+  under the other tenant, which is unrecoverable and undetectable. That is worse
+  than the defect.
+- Team-side rows are outside the predicate (`teamMemberKey`, and attachments or
+  shares on a team entry): a guest in another tenant's team holds those under
+  that team's tenant by design, and counting them would refuse an ordinary reset.
+  The docstring's claim that admin resets "may cross tenant boundaries within the
+  same team" was stale — the only `adminVaultReset.create` writes `teamId: null`.
+- The owner's own reset (`/api/vault/reset`) stays unscoped. Its authority is the
+  owner's over their own rows, it was reachable for a divergent user before this
+  branch (so not a widening), and refusing it would be a false deny on the
+  last-resort recovery path with no operator tooling to lift it.
+- Two regressions the fix introduced and gates caught, recorded because every
+  unit test stayed green through both:
+  1. Moving the destructive body into a non-exported helper behind a differently
+     named wrapper declassified `/api/vault/admin-reset`:
+     `check-permanent-delete-stepup` exited 1 (`STALE_EXEMPT`) and
+     `check-destructive-wrapper-derivation` reported `executeVaultReset` stale.
+     The body stays in `executeVaultReset`, under the name `deleteSignal` lists.
+  2. Nesting the atomic-audit descriptor inside an options object made both
+     `VAULT_RESET_EXECUTED` and `ADMIN_VAULT_RESET_EXECUTE` read as non-atomic:
+     `check-critical-audit-atomic` exited 1. The descriptor stays a direct
+     argument; only the scope and the test hook are options.
+- Red proof, one mutation per clause, each run in a detached worktree: in-tx check
+  removed; check always refuses; team-entry attachments counted; check asked
+  before the row lock; execute pre-check removed; catch arm removed; catch maps
+  every failure to 409; execute route stops passing the scope; owner's reset
+  becomes scoped; initiate pre-check removed; initiate pre-check moved after the
+  limiters; descriptor nested (audit gate exits 1); call renamed (step-up gate
+  exits 1). Each reddened the cell or gate that names it.
+
+### New findings raised while fixing S1
+
+**N1 — Major (question) — a personal vault reset deletes attachments and shares on
+TEAM entries.** `executeVaultReset` deletes `attachment` and `passwordShare` by
+`createdById` with no `teamPasswordEntryId` predicate, and
+`collectAttachmentRefsByCreator` selects `teamPasswordEntryId` and purges those
+blobs too. A team member resetting their own vault therefore removes attachments
+every other member of that team reads. Pre-existing, and not changed here because
+it alters what a vault reset destroys. Question that closes it: are a member's
+uploads to a team entry theirs to take with them, or the team's to keep?
+
+**N2 — Major — `check-destructive-wrapper-derivation` drops a destructive
+primitive whose enclosing function is not exported.** Its resolver walks from the
+primitive to the source-file root looking for an exported function and returns
+nothing when there is none, so `UNDECLARED_DESTRUCTIVE_WRAPPER` never fires.
+Measured during the S1 fix: an exported `executeTenantScopedVaultReset` wrapping a
+non-exported helper that held every `deleteMany` produced no UNDECLARED line; the
+only report was STALE, and only because `executeVaultReset` was already a listed
+name. A new wrapper over a private destructive helper would pass silently, and a
+route calling it would escape step-up classification.
+
+**N3 — Minor — `check-critical-audit-atomic` credits a descriptor without checking
+where it goes.** Case (2) scans the object-literal arguments of every call for
+`{ params: { action } }` and counts the action as atomic, with no check that the
+callee enqueues it via `logAuditInTx`. Its comment says the helper does; the gate
+does not verify that (R49). Question that closes it: should case (2) be limited to
+a declared set of helpers known to enqueue in-transaction?

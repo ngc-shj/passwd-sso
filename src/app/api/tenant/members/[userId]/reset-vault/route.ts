@@ -19,7 +19,9 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { forbidden, handleAuthError, notFound, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, forbidden, handleAuthError, notFound, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { findVaultRowsOutsideTenant } from "@/lib/vault/vault-reset";
 import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
 import { MS_PER_DAY, RESET_TOTAL_TTL_MS } from "@/lib/constants/time";
@@ -116,6 +118,17 @@ async function handlePOST(
   // @stepup id:reset-vault-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
+
+  // A reset this tenant cannot execute is refused here rather than created:
+  // the user's vault rows still filed under another tenant are outside this
+  // tenant's authority, and the execute route refuses on the same predicate.
+  // Checked BEFORE the rate limiters count the attempt — the target limiter
+  // allows one initiate a day, and a refusal that spent it would block the retry
+  // for a day after the data held elsewhere is resolved.
+  const outside = await findVaultRowsOutsideTenant(targetUserId, actor.tenantId);
+  if (Object.keys(outside).length > 0) {
+    return errorResponse(API_ERROR.VAULT_RESET_DATA_OUTSIDE_TENANT);
+  }
 
   // Rate limits (fail-closed: admin vault reset is a destructive privileged
   // action; a Redis outage must not relax the cap to a per-Pod in-memory limit).

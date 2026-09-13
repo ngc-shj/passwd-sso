@@ -26,6 +26,7 @@ const {
   mockNotificationBody,
   mockEncryptResetToken,
   mockRequireRecentSession,
+  mockFindVaultRowsOutsideTenant,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -79,6 +80,7 @@ const {
     mockNotificationBody: vi.fn(),
     mockEncryptResetToken: vi.fn(),
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+    mockFindVaultRowsOutsideTenant: vi.fn(),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -118,6 +120,9 @@ vi.mock("@/lib/email/templates/admin-vault-reset-pending", () => ({
   adminVaultResetPendingEmail: mockAdminVaultResetPendingEmail,
 }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: mockResolveUserLocale }));
+vi.mock("@/lib/vault/vault-reset", () => ({
+  findVaultRowsOutsideTenant: mockFindVaultRowsOutsideTenant,
+}));
 vi.mock("@/lib/vault/admin-reset-token-crypto", () => ({
   encryptResetToken: mockEncryptResetToken,
 }));
@@ -228,6 +233,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     mockAdminLimiterCheck.mockResolvedValue({ allowed: true });
     mockTargetLimiterCheck.mockResolvedValue({ allowed: true });
     mockResolveUserLocale.mockReturnValue("en");
+    mockFindVaultRowsOutsideTenant.mockResolvedValue({});
     mockEncryptResetToken.mockReturnValue("psoenc1:0:cipher");
     mockAdminVaultResetPendingEmail.mockReturnValue({
       subject: "Vault reset awaiting approval",
@@ -378,6 +384,26 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     expect(res.status).toBe(429);
     const json = await res.json();
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a reset this tenant could not execute, before the rate limiters count it", async () => {
+    // The user's vault rows still filed under another tenant are outside this
+    // tenant's authority, and the execute route refuses on the same predicate —
+    // so creating the reset would only strand an unexecutable token. Refused
+    // ahead of the limiters: the target limiter allows one initiate a day.
+    mockFindVaultRowsOutsideTenant.mockResolvedValue({ tag: 2 });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("VAULT_RESET_DATA_OUTSIDE_TENANT");
+    expect(mockFindVaultRowsOutsideTenant).toHaveBeenCalledWith(TARGET_USER_ID, TENANT_ID);
+    expect(mockAdminLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTargetLimiterCheck).not.toHaveBeenCalled();
     expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
   });
 

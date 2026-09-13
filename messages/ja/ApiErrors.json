@@ -88,6 +88,7 @@
   "vaultResetConfirmationMismatch": "確認テキストが一致しません。",
   "vaultResetTokenExpired": "保管庫リセットリンクの有効期限が切れています。",
   "vaultResetTokenUsed": "この保管庫リセットリンクは既に使用されています。",
+  "vaultResetDataOutsideTenant": "このアカウントの保管庫データが別の組織に残っているため、それが解決されるまで保管庫をリセットできません。",
   "vaultResetNotApproved": "リセットはまだ承認されていません。",
   "resetNotApprovable": "現在このリセットは承認できません。",
   "resetTargetEmailChanged": "リセット開始後に対象ユーザーのメールアドレスが変更されました。",

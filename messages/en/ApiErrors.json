@@ -88,6 +88,7 @@
   "vaultResetConfirmationMismatch": "Confirmation text does not match.",
   "vaultResetTokenExpired": "This vault reset link has expired.",
   "vaultResetTokenUsed": "This vault reset link has already been used.",
+  "vaultResetDataOutsideTenant": "Vault data for this account is still held under another organization, so the vault cannot be reset until that is resolved.",
   "vaultResetNotApproved": "Reset has not been approved yet.",
   "resetNotApprovable": "Reset cannot be approved at this time.",
   "resetTargetEmailChanged": "Target user's email has changed since the reset was initiated.",

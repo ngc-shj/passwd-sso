@@ -192,6 +192,9 @@ describe("POST /api/vault/reset", () => {
         }),
       }),
     );
+    // The owner's own reset is NOT limited to one tenant: their authority covers
+    // all of their vault rows. Only an admin-authorized reset passes a scope.
+    expect(mockExecuteVaultReset.mock.calls[0][2]?.scopeTenantId).toBeUndefined();
 
     // Async completion event carries invalidation counts (zero by default here).
     expect(mockLogAudit).toHaveBeenCalledWith(
