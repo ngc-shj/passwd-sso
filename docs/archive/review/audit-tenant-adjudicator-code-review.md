@@ -436,7 +436,7 @@ artifact a later round reads.
 tenantId: true } } } })` — the same stale copy through a relation — was invisible
 to it. The third time a gate here has been narrower than its own declaration.
 **Resolved**: projection keys resolve against `prisma/schema.prisma` with the
-receiver's model in hand, by declared TYPE (17 field names in this schema are
+receiver's model in hand, by declared TYPE (16 field names in this schema are
 `User`, and `createdBy` is one of them on some models and a `String` on another).
 Measured on landing — the same 16 files as the pass it replaced, manifest
 untouched, no relation-reached read in the tree today. Seven mutations.
@@ -686,8 +686,93 @@ Closed so far, by commit:
 - **S2 (read half), T3** — `review(4): stop the realignment breaking the releasing tenant's member list`.
   The report half of S2 (a row for the releasing tenant) landed with C1.
 - **S1** — `review(4): refuse an admin vault reset that would destroy rows outside its tenant`.
+- **T1, T2, T4, T6, T7, T8, C3, T5** — `review(4): pin the refusal chain end to end, and correct the stale figures`.
+- **U1** — `review(4): fail an allowlist entry whose file no longer bypasses at all`.
 
-Open: U1, U2, T1, T2, T4, and the Minors (C3, S3, S4, T5–T8).
+Open: U2 — now carrying the S2 class re-derived below (18 reachable sites) and its
+CI guard — plus S3 and S4.
+
+#### T1, T2, T4, T6, T7, T8 — the refusal chain, pinned end to end
+
+- T1: the unmapped-user-with-a-deactivated-membership arm has a refusal cell and a
+  paired allow cell (the guard clears it and it reactivates).
+- T2: the preview's `toCreate` clause has a cell, and the `pu.active` conjunct a
+  zero cell.
+- T4: the reviewer's remedy — make the guard's mocked row carry a foreign tenant id
+  so `not.toContain` can fail — is not implementable: `usersActiveInAnotherTenant`
+  maps rows to `{ ids, emails }`, so a tenant id in the fixture never reaches the
+  engine either. The vacuous assertion was replaced by EQUALITY on the emitted
+  metadata, which fails on any added key, a foreign tenant id included.
+- T6: the scheduled-run arm of the refusal emit's actor ternary has a cell.
+- T7: the card's conditional render has a cell with one refused row and one clean
+  row. The logs button is icon-only with no accessible name, so the cell finds it
+  by its icon; that button's missing label is a pre-existing accessibility gap,
+  not changed here.
+- T8: the run route's audit fixture carries a non-zero `usersRefused`.
+- Red proof, one mutation per clause, each asserted to have applied: the arm stops
+  counting; the refused arm reactivates anyway; the preview's `toCreate` clause
+  neutralised; the `pu.active` conjunct dropped; a foreign tenant id added to the
+  metadata; the metadata emptied; the actor always HUMAN; the run route drops the
+  field; the render predicate forced true, then false. Each reddened exactly the
+  cell that names it. (A first run of five of these reported no red at all — the
+  mutations had not applied. The rerun asserts an occurrence count before running.)
+
+#### C3, T5 — figures and a rationale
+
+The gate header now says 16 (42 declarations) and no longer freezes the read
+count; the self-test comment names what the `owner` cell actually discriminates
+(a pass that treats a User-typed field not spelled `user` as opaque) instead of a
+name-keyed pass that its generic relation descent still defeats.
+
+#### U1 Major — the over-breadth check skipped an entry whose file bypasses nothing
+
+- Action: `check-bypass-rls` now fails an ALLOWED_USAGE entry whose file makes no
+  `withBypassRls` call. Not judged, each stated in the gate: `["*"]` definitions;
+  files this run could not parse; files absent from the scanned tree (the
+  self-test's fixture trees), whose existence a real-repo self-test cell asserts
+  instead; and files that set `app.bypass_rls` through raw SQL, a real bypass this
+  gate cannot see and `check-raw-sql-usage` requires to be allowlisted with a
+  purpose.
+- CORRECTION to the finding's member set: of the three entries it named,
+  `workers/audit-anchor-publisher.ts` is not stale — it bypasses three times through
+  raw `set_config`. Measured over all 96 entries, five name a file with no
+  `withBypassRls` call: the `["*"]` definition, two raw-SQL bypasses
+  (`audit-outbox.ts`, `audit-anchor-publisher.ts`), and two genuinely dead entries
+  (`api/mcp/token/route.ts`, `api/maintenance/dcr-cleanup/route.ts`), which are
+  removed. The gate exited 1 naming exactly those two before they were.
+- One pre-existing self-test cell changed verdict: a file whose call was removed
+  while its entry remained was expected to pass. It parses, and it must still not
+  be reported unparseable — that assertion stays — but it is a stale entry, and the
+  cell now expects it reported as one.
+- Red proof: stale entries never reported (two cells red); raw-SQL exemption
+  removed (one); absent files judged (99 red — the skip is load-bearing on fixture
+  trees); a bogus entry added (the existence cell red).
+
+#### S2 re-derived — the class was 18, not 1
+
+S2 was fixed at `api/tenant/members` without deriving its member set. Derived from
+the schema — a read whose projection reaches a REQUIRED to-one `User` relation —
+there are 33 such reads (a positive control found 2 of 2). Under
+`users_tenant_isolation` a tenant context cannot see a user whose owning-tenant
+column names another tenant, and the required relation then fails the query.
+
+- Safe: 9 under a bypass; 1 reading the caller's own row; 5 restricted to active
+  memberships, which hold an aligned column once U2's producers are closed.
+- Reachable: 18. Every one references a user the realignment has moved out of the
+  tenant doing the reading — a departed member, creator, initiator or changer.
+  - Tenant context (11): the SCIM user list, `fetchScimUser`,
+    `deactivateScimUser`, the reset revoke notification, the directory-sync load
+    phase, the reset history's initiator, operator tokens, service accounts (list
+    and detail), and break-glass (list and logs).
+  - Team context (7): SCIM Groups (route twice, service once), team password
+    creators and updaters (twice), team password history, team invitations. These
+    were reachable before this branch too, through team guests from another primary
+    tenant — `buildTeamMemberDisplayItems` exists for exactly that and these reads
+    do not use it.
+- Correction to the round-3 statement that S2's class was introduced by the
+  realignment: it was not. Before it, a divergent user (column B, active membership
+  A) broke the same reads in tenant A; the realignment moves the breakage to the
+  tenant the user left.
 
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 

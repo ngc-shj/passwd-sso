@@ -243,8 +243,11 @@ describe("check-owning-tenant-adjudicator", () => {
   });
 
   it("sees a User relation that is not spelled `user`", () => {
-    // The relation set comes from the schema's TYPES. A pass keyed on the name
-    // `user` would clear this, and this schema declares 15 such names.
+    // `owner` is typed `User` in the fixture schema, so the walk has to descend
+    // into it. What this cell catches is a pass that treats a User-typed field not
+    // spelled `user` as opaque — keying only the User branch on the name is not
+    // enough to fail it, because the generic relation descent still reaches
+    // `tenantId`. (The fixture declares one such field; prisma/schema.prisma, 16.)
     write(
       "src/lib/owner-read.ts",
       inBypass(`const t = await tx.team.findUnique({ select: { owner: { select: { tenantId: true } } } });\n`),

@@ -99,6 +99,53 @@ describe("DirectorySyncCard", () => {
     });
   });
 
+  it("shows refused activations on a sync log row only when there were any", async () => {
+    // The operator-visible end of the usersRefused chain. No cell opened the logs
+    // sheet, so the conditional render was never evaluated and flipping its
+    // predicate left this file green.
+    const logRow = (id: string, usersRefused: number) => ({
+      id,
+      status: "SUCCESS",
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      dryRun: false,
+      usersCreated: 0,
+      usersUpdated: 1,
+      usersDeactivated: 0,
+      usersRefused,
+      groupsUpdated: 0,
+      errorMessage: null,
+    });
+    mockFetch.mockImplementation((url: string) => {
+      if (String(url).includes("logs")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({ items: [logRow("log-a", 2), logRow("log-b", 0)], hasMore: false }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([SAMPLE_CONFIG]) });
+    });
+
+    const { container } = render(<DirectorySyncCard />);
+    await waitFor(() => {
+      expect(screen.getByText("DeleteMe")).toBeInTheDocument();
+    });
+
+    // The logs button is icon-only with no accessible name, so it is found by its
+    // icon rather than by role.
+    const logsButton = container.querySelector("svg.lucide-scroll-text")?.closest("button");
+    if (!logsButton) throw new Error("logs button not rendered");
+    fireEvent.click(logsButton);
+
+    // Exactly one: the row with refusals shows the count, the row with none does not.
+    await waitFor(() => {
+      expect(screen.getAllByText(/^logUsersRefused/)).toHaveLength(1);
+    });
+    expect(screen.getByText("logUsersRefused: 2")).toBeInTheDocument();
+  });
+
   it("renders a config row with provider/status badges", async () => {
     setupConfigs([
       {

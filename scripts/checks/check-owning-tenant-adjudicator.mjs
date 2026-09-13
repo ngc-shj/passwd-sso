@@ -70,8 +70,8 @@
  * projection is walked with the receiver's MODEL in hand, resolving every key
  * against `prisma/schema.prisma`.
  *
- * Resolving by TYPE rather than by field name is what makes that walk sound: 17
- * field names in this schema are declared `User`, and `createdBy` is one of them
+ * Resolving by TYPE rather than by field name is what makes that walk sound: 16
+ * field names in this schema are declared `User` (42 declarations), and `createdBy` is one of them
  * on some models and a plain `String` on another. A name-keyed pass either misses
  * the relations it does not list or flags the scalar it cannot tell apart.
  *
@@ -386,9 +386,9 @@ for (const { rel, sf } of sourceFilesFrom(project, files, ROOT)) {
     const recv = callee.getExpression();
     if (recv.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
     const handle = recv.getName();
-    // An unresolvable handle is not a read this gate can clear. Every one of the
-    // 481 reads in the tree resolved when the walk landed, so this arm costs
-    // nothing today and refuses to guess if that stops being true.
+    // An unresolvable handle is not a read this gate can clear. Every read in the
+    // tree resolved when the walk landed, so this arm costs nothing today and
+    // refuses to guess if that stops being true.
     const model = HANDLES.get(handle);
     const path = model ? readsUserTenantIdentity(call, model) : [`${handle}`, "<unresolved-model>"];
     if (!path) continue;

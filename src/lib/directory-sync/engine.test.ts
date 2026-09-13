@@ -347,6 +347,54 @@ describe("runDirectorySync", () => {
       expect(mockLogAuditBulk).not.toHaveBeenCalled();
     });
 
+    it("predicts the refusal for a user the run will create", async () => {
+      // The toCreate clause of the preview's count. Every other dry-run fixture
+      // seeds a SCIM mapping, so all users landed in toUpdate and this clause could
+      // be replaced by 0 with the suite green.
+      setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-9", email: "carol@example.com", displayName: "Carol", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-9", user: { email: "carol@example.com" } },
+      ]);
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, dryRun: true });
+
+      expect(result.usersCreated).toBe(1);
+      expect(result.usersRefused).toBe(1);
+      // Still a preview: a cell that ran the apply phase instead cannot pass.
+      expect(applyTx.tenantMember.create).not.toHaveBeenCalled();
+    });
+
+    it("predicts no refusal for a user the IdP sent inactive", async () => {
+      // The `pu.active` conjunct: the guard fires on this user, but the run would
+      // create the membership deactivated anyway, so nothing is declined.
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx());
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-9", email: "carol@example.com", displayName: "Carol", status: "SUSPENDED" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-9", user: { email: "carol@example.com" } },
+      ]);
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, dryRun: true });
+
+      expect(result.usersCreated).toBe(1);
+      expect(result.usersRefused).toBe(0);
+    });
+
     it("predicts no refusal when the guard clears everyone", async () => {
       // The zero the cell above is measured against. Without it, a preview that
       // reported every reactivation as refused would satisfy it too.
@@ -886,10 +934,129 @@ describe("runDirectorySync", () => {
       ]);
 
       // The trail is readable by THIS tenant's admins, and which other
-      // organization holds the member is not theirs to learn. The guard's own
-      // row carries that tenant id; nothing may carry it through to here.
+      // organization holds the member is not theirs to learn. Pinned by EQUALITY
+      // rather than by the absence of a string: `usersActiveInAnotherTenant` never
+      // returns a tenant id, so a `not.toContain` over one could not fail. Any key
+      // added to this metadata — a foreign tenant id included — fails here.
       const [[emitted]] = mockLogAuditBulk.mock.calls;
-      expect(JSON.stringify(emitted)).not.toContain("tenant-other");
+      expect(emitted[0].metadata).toEqual({
+        configId: CONFIG_ID,
+        userId: "user-1",
+        email: "alice@example.com",
+      });
+      expect(emitted[0]).toMatchObject({ userId: USER_ID, actorType: "HUMAN" });
+    });
+
+    it("files a scheduled run's refusal under the system actor", async () => {
+      // The refusal emit's own actor ternary. Every other refusal cell passes a
+      // userId, so the scheduled arm was never taken.
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-1", internalId: "user-1" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({
+          id: "member-1",
+          userId: "user-1",
+          role: "MEMBER",
+          deactivatedAt: new Date("2025-01-01"),
+          email: "alice@example.com",
+          name: "Alice",
+        }),
+      ]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-1", user: { email: "alice@example.com" } },
+      ]);
+
+      await runDirectorySync({ ...BASE_OPTIONS, userId: undefined });
+
+      const [[emitted]] = mockLogAuditBulk.mock.calls;
+      expect(emitted[0]).toMatchObject({ userId: SYSTEM_ACTOR_ID, actorType: "SYSTEM" });
+    });
+
+    /** An unmapped provider user whose email matches a DEACTIVATED member here. */
+    function seedUnmappedDeactivatedMember(memberUpdate: ReturnType<typeof vi.fn>) {
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        user: {
+          findMany: vi.fn().mockResolvedValue([{ id: "user-7", email: "dora@example.com" }]),
+          create: vi.fn(),
+          update: vi.fn(),
+        },
+        tenantMember: {
+          findMany: vi.fn(),
+          create: vi.fn(),
+          update: memberUpdate,
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-7", email: "dora@example.com", displayName: "Dora", status: "ACTIVE" }),
+      ]);
+      // No mapping, so the provider user lands in toCreate.
+      mockScimMapping.findMany.mockResolvedValue([]);
+      // The top-level mock wins the merge for findMany, so one mock answers both
+      // the load phase ({ tenantId }) and the apply phase's pre-fetch
+      // ({ tenantId, userId: { in } }). It answers by query, as Prisma would.
+      mockTenantMember.findMany.mockImplementation(
+        async ({ where }: { where: { userId?: unknown } }) =>
+          where.userId
+            ? [{ id: "member-7", userId: "user-7", deactivatedAt: new Date("2025-01-01") }]
+            : [],
+      );
+    }
+
+    it("counts the refusal on an unmapped user who holds a deactivated membership here", async () => {
+      // The third refusal producer, and the one F15's narrative describes: no SCIM
+      // mapping, an existing user, a DEACTIVATED membership. Refused, the arm only
+      // stamps lastScimSyncedAt. Deleting its counter or its push left the suite green.
+      const memberUpdate = vi.fn().mockResolvedValue({});
+      seedUnmappedDeactivatedMember(memberUpdate);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-7", user: { email: "dora@example.com" } },
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      // The arm ran — without this the cell could pass on a user the diff never reached.
+      expect(result.usersCreated).toBe(1);
+      expect(result.usersRefused).toBe(1);
+      expect(memberUpdate).toHaveBeenCalledWith({
+        where: { id: "member-7" },
+        data: { lastScimSyncedAt: expect.any(Date) },
+      });
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([
+        expect.objectContaining({ targetId: "member-7" }),
+      ]);
+    });
+
+    it("reactivates that same unmapped member when the guard clears them", async () => {
+      // The allow side: a counter or an update that always refused would pass the
+      // cell above.
+      const memberUpdate = vi.fn().mockResolvedValue({});
+      seedUnmappedDeactivatedMember(memberUpdate);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.usersRefused).toBe(0);
+      expect(memberUpdate).toHaveBeenCalledWith({
+        where: { id: "member-7" },
+        data: { deactivatedAt: null, lastScimSyncedAt: expect.any(Date) },
+      });
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
     });
 
     it("reports no refusal when the guard clears the user", async () => {
