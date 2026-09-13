@@ -1461,3 +1461,71 @@ introduced (R6-S1), and a producer path that round 5's rule left open (R6-S2).
   itself fails.
 - Red proof: with `DATABASE_URL` pointed at the migration superuser, both files
   failed in `beforeAll` naming `passwd_user`, and all 13 cells were skipped.
+
+#### R6-S3 / F1 Major (convergent) — an opener opens its context only around its callback
+
+- Action (`scripts/checks/lib/rls-context.mjs`): each opener is recorded with the
+  context it opens and its callback's argument position, `OPENERS`, taken from the
+  signatures in `src/lib/tenant-rls.ts` and `src/lib/tenant-context.ts`. Any other
+  argument — the client, the tenant id, the purpose — answers null, and the walk
+  continues outward to the context that argument really runs in.
+- Three instances of the same defect, found while fixing it, were closed with it:
+  - The callback argument's own expression runs before the context opens. Only a
+    node inside a function written within that argument runs later, so
+    `withBypassRls(prisma, pick(await read), P)` is no longer a bypass.
+  - A spread at or before the callback position hides which argument lands there,
+    and is UNKNOWN. A spread at a local wrapper's call site asks every parameter it
+    could reach.
+  - A rest parameter collecting the argument is UNKNOWN. It used to answer null,
+    which let an outer opener answer for a callback the wrapper runs.
+- Stated limit, now in the module header: a function handed to a helper inside
+  the callback argument (`withBypassRls(prisma, pick(async (tx) => …), P)`) is
+  still read as running inside the bypass. Whether `pick` calls it before the
+  bypass opens is not something one file can show.
+- Red proof: every new cell fails against the gates as of 5b55f3129, or under a
+  mutation of its own branch. I re-ran this independently in a worktree copy:
+  letting an imported opener answer for every argument failed exactly the two
+  function-in-non-callback-argument cells, one per gate.
+
+#### F2 Minor — nested filter names resolve where they are written
+
+- Action: `filterLiterals` resolves each identifier at its own node, not at the
+  Prisma call, the way `scope-bindings.mjs` already follows aliases. `ctx.at` had
+  no other use and was removed. `assignedInto` already resolved per node.
+- Red proof: a module-level `const where = { OR: [userFilter] }` with a
+  same-named `userFilter` declared inside the calling function was passed by the
+  old gate and is flagged now. Resolving at the call site again fails that cell.
+
+#### T2 Major — each fail-open branch of the tenant gates has a deny cell
+
+- Action: deny cells for:
+  - a destructured and a rest callback parameter (both gates);
+  - mutually recursive wrappers, which also checks that the gate terminates;
+  - a callee bound to a parameter, under an outer opener (both gates);
+  - `delete` and `Object.assign` onto a followed `where`;
+  - a conditional with one unreadable branch;
+  - an unreadable filter inside `OR`, inside a relation filter's `is`, and as a
+    nested relation's value.
+- One allow cell pins `refersHere`'s scope check: a same-named, sibling-scope
+  binding that is `delete`d does not make an untouched `const` unreadable.
+- Red proof: each mutation named in the finding now fails its own cell and no
+  other, except the rest-parameter mutation, which also fails the rest-past-index
+  cell because both go through the same branch.
+
+#### T6 Minor — a manifest disposition excuses only its own kind of hit
+
+- Action: a `dynamic-where` entry excuses only paths through `<unreadable-where>`,
+  and no other disposition excuses such a path. A mismatch is reported with the
+  file, line, disposition and path. The shipped manifest passes unchanged: no
+  entry mixed hit kinds.
+- Red proof: I re-ran this independently. Letting every disposition excuse every
+  path failed exactly the two new cells, one for each direction.
+
+#### Round 6 verification
+
+- Gate slice: the three self-test files pass (198). All three gates exit 0 on
+  the real tree, each run unpiped.
+- Code slice: the unit suite passes (1033 files / 15622 tests), and `next build`
+  passes. Integration passes with the application client connected as
+  `passwd_app` and both workers stopped (113 files / 685 tests). `scripts/pre-pr.sh`
+  passes on the committed code slice.
