@@ -91,10 +91,11 @@ import { join, extname } from "node:path";
 // complex transactional code that touches many models by design).
 const ALLOWED_USAGE = new Map([
   ["src/lib/tenant-rls.ts", ["*"]], // definition
-  // `user`: `existingUserIdsByEmail`, directory sync's email lookup, which must
-  // see users filed under other tenants — inside the syncing tenant's context it
-  // found nobody and the create that followed collided on `users_email_key`.
-  // Read-only; returns ids only.
+  // `user`: `resolveExistingUsersForTenant`, the ownership read SCIM POST and
+  // directory sync consult before attaching an existing user. It must see users
+  // filed under other tenants — to REFUSE them — and it lives here, beside
+  // `resolveOwningTenantIdFromClient`, because it applies the same owning-tenant
+  // rule. Read-only; returns ids and a classification, no identity.
   ["src/lib/tenant-context.ts", ["tenantMember", "team", "user"]],
   // The standalone realignment for producers that activate a membership inside a
   // TENANT context (SCIM, directory sync): that context cannot write a users row
@@ -168,16 +169,13 @@ const ALLOWED_USAGE = new Map([
   // context this route mutates in. Read-only, and the tenant it compares against
   // is the authenticated SCIM token's, not caller-supplied.
   ["src/app/api/scim/v2/Users/[id]/route.ts", ["tenantMember", "scimExternalMapping"]],
-  // The same cross-tenant guard on the CREATE verb: an email lookup that must
-  // see users outside this tenant (the whole point — the old in-context version
-  // could not, so it never fired). Read-only; the tenant compared against is the
-  // authenticated SCIM token's.
-  // The user LIST reads under a bypass too: its filter runs through the users
+  // The user LIST reads under a bypass: its filter runs through the users
   // relation, which a tenant context narrows to users whose owning column names
   // this tenant, silently dropping departed members from the page and the count.
   // Every query carries the token's tenantId, ANDed so no filter can widen it.
-  // Read-only.
-  ["src/app/api/scim/v2/Users/route.ts", ["user", "tenantMember", "scimExternalMapping"]],
+  // Read-only. (The CREATE verb's ownership read moved into tenant-context.ts's
+  // `resolveExistingUsersForTenant`, so this file no longer reads `user`.)
+  ["src/app/api/scim/v2/Users/route.ts", ["tenantMember", "scimExternalMapping"]],
   // C3: also reads the session row to resolve the bound credential.
   ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential", "session"]],
   ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],

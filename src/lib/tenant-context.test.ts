@@ -42,7 +42,7 @@ import {
   realignOwningTenantColumn,
   wouldCreateSecondActiveMembership,
   usersActiveInAnotherTenant,
-  existingUserIdsByEmail,
+  resolveExistingUsersForTenant,
   resolveUserTenantId,
   resolveTeamTenantId,
   withUserTenantRls,
@@ -428,31 +428,102 @@ describe("withTeamTenantRls", () => {
   });
 });
 
-// ─── existingUserIdsByEmail ────────────────────────────────
+// ─── resolveExistingUsersForTenant ─────────────────────────
+//
+// The authority check SCIM POST and directory sync apply before attaching an
+// existing user. Ownership, by the same rule as resolveOwningTenantIdFromClient:
+// the oldest ACTIVE membership, else the column.
 
-describe("existingUserIdsByEmail", () => {
+describe("resolveExistingUsersForTenant", () => {
+  const user = (over: Record<string, unknown>) => ({
+    id: "u-1",
+    email: "erin@example.com",
+    tenantId: "this-tenant",
+    tenantMemberships: [],
+    ...over,
+  });
+
   it("opens no bypass for an empty list", async () => {
-    expect(await existingUserIdsByEmail([])).toEqual(new Map());
+    expect(await resolveExistingUsersForTenant("this-tenant", [])).toEqual(new Map());
     expect(mockWithBypassRls).not.toHaveBeenCalled();
   });
 
-  it("matches case-insensitively under a bypass and keys by lower-cased email", async () => {
-    mockUserFindMany.mockResolvedValue([
-      { id: "u-1", email: "Erin@Example.com" },
-      { id: "u-2", email: null },
-    ]);
+  it("reads under a bypass, case-insensitively, with this tenant's memberships of any state", async () => {
+    mockUserFindMany.mockResolvedValue([]);
 
-    const found = await existingUserIdsByEmail(["erin@example.com"]);
+    await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"]);
 
-    expect(found).toEqual(new Map([["erin@example.com", "u-1"]]));
-    expect(mockUserFindMany).toHaveBeenCalledWith({
-      where: { email: { in: ["erin@example.com"], mode: "insensitive" } },
-      select: { id: true, email: true },
-    });
+    expect(mockUserFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: { in: ["erin@example.com"], mode: "insensitive" } },
+        select: expect.objectContaining({
+          tenantMemberships: expect.objectContaining({
+            where: { OR: [{ deactivatedAt: null }, { tenantId: "this-tenant" }] },
+            orderBy: { createdAt: "asc" },
+          }),
+        }),
+      }),
+    );
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
       "cross_tenant_lookup",
     );
+  });
+
+  it("treats a user whose owning column names this tenant, active nowhere, as owned", async () => {
+    mockUserFindMany.mockResolvedValue([user({ email: "Erin@Example.com" })]);
+
+    expect(await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"])).toEqual(
+      new Map([["erin@example.com", { kind: "owned", userId: "u-1" }]]),
+    );
+  });
+
+  it("treats a user active in this tenant as owned even when the column is stale", async () => {
+    mockUserFindMany.mockResolvedValue([
+      user({ tenantId: "other-tenant", tenantMemberships: [{ tenantId: "this-tenant", deactivatedAt: null }] }),
+    ]);
+
+    expect((await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"])).get("erin@example.com"))
+      .toEqual({ kind: "owned", userId: "u-1" });
+  });
+
+  it("treats a user another tenant released as foreign, although they are active nowhere", async () => {
+    // The round-5 S1 case: "active nowhere else" is uniqueness, not authority.
+    mockUserFindMany.mockResolvedValue([user({ tenantId: "other-tenant" })]);
+
+    expect((await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"])).get("erin@example.com"))
+      .toEqual({ kind: "foreign", userId: "u-1", memberHere: false });
+  });
+
+  it("treats a user active in another tenant as foreign even when the column names this one", async () => {
+    mockUserFindMany.mockResolvedValue([
+      user({ tenantMemberships: [{ tenantId: "other-tenant", deactivatedAt: null }] }),
+    ]);
+
+    expect((await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"])).get("erin@example.com"))
+      .toEqual({ kind: "foreign", userId: "u-1", memberHere: false });
+  });
+
+  it("marks a foreign user who already holds a membership row here", async () => {
+    mockUserFindMany.mockResolvedValue([
+      user({
+        tenantId: "other-tenant",
+        tenantMemberships: [{ tenantId: "this-tenant", deactivatedAt: new Date("2025-01-01") }],
+      }),
+    ]);
+
+    expect((await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"])).get("erin@example.com"))
+      .toEqual({ kind: "foreign", userId: "u-1", memberHere: true });
+  });
+
+  it("refuses to choose between users whose emails differ only in case", async () => {
+    mockUserFindMany.mockResolvedValue([
+      user({ id: "u-1", email: "Erin@example.com" }),
+      user({ id: "u-2", email: "erin@EXAMPLE.com" }),
+    ]);
+
+    expect((await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"])).get("erin@example.com"))
+      .toEqual({ kind: "ambiguous" });
   });
 });

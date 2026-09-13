@@ -19,7 +19,7 @@ import { scimUserSchema } from "@/lib/scim/validations";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
+import { resolveExistingUsersForTenant, wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { realignAfterActivation } from "@/lib/tenant/tenant-realignment";
@@ -145,36 +145,39 @@ async function handlePOST(req: NextRequest) {
   if (!bodyResult.ok) return bodyResult.response;
   const { userName, name, externalId, active } = bodyResult.data;
 
-  // The cross-tenant guard, hoisted OUT of the tenant context because it could
-  // not work inside one. It was doubly vacuous: gated on `user.tenantId !==
-  // tenantId` — the denormalized column this whole class is about — and, even
-  // when entered, querying `tenantId: { not: tenantId }` under
-  // `withTenantRls`, which RLS has already restricted to `tenantId`. The set was
-  // structurally empty, so the 409 its own error mapping exists for could never
-  // be reached. Same placement as the PUT/PATCH arms in `[id]/route.ts`, for the
-  // same reason: the foreign membership row is what RLS hides inside a tenant
-  // context, and a nested bypass is refused by the nesting guard.
-  const existingUserId = await withBypassRls(
-    prisma,
-    async (tx) => {
-      const found = await tx.user.findUnique({
-        where: { email: userName },
-        select: { id: true },
-      });
-      return found?.id ?? null;
-    },
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
-  );
-  if (existingUserId && (await wouldCreateSecondActiveMembership(existingUserId, tenantId))) {
+  // The cross-tenant guards, hoisted OUT of the tenant context because they cannot
+  // work inside one: the users and memberships they must see are the rows RLS
+  // hides there, and a nested bypass is refused by the nesting guard.
+  //
+  // A SCIM token may attach an EXISTING user only if this tenant owns them. A user
+  // owned by another tenant — even one active nowhere, released by that tenant —
+  // is refused: attaching and then realigning them handed their tenancy to
+  // whichever tenant named their email first (round-5 S1). They join this tenant
+  // by signing in through its IdP; SCIM can manage them after that.
+  const emailKey = userName.toLowerCase();
+  const resolution = (await resolveExistingUsersForTenant(tenantId, [emailKey])).get(emailKey);
+  if (resolution?.kind === "ambiguous") {
+    return scimError(409, "More than one existing user matches this userName", "uniqueness");
+  }
+  if (resolution?.kind === "foreign") {
+    return resolution.memberHere
+      ? scimError(409, "User already exists in this tenant", "uniqueness")
+      : scimError(409, "User is managed by another organization", "uniqueness");
+  }
+  const existingUserId = resolution?.kind === "owned" ? resolution.userId : null;
+  // `active !== false`, as PUT: a membership provisioned inactive cannot become a
+  // second active one, so it is not this guard's to refuse (F4).
+  if (
+    existingUserId &&
+    active !== false &&
+    (await wouldCreateSecondActiveMembership(existingUserId, tenantId))
+  ) {
     return scimError(409, "User already belongs to another organization", "uniqueness");
   }
 
   try {
     const created = await withTenantRls(prisma, tenantId, async (tx) => {
-      // The user the guard resolved, not an in-context lookup: one filed under
-      // another tenant is invisible here, so that lookup found nobody and the
-      // create collided on the global email index — a 409 for a user this tenant
-      // was entitled to provision, active nowhere else.
+      // The user the guard resolved as this tenant's own, or a new one.
       const user = existingUserId
         ? { id: existingUserId }
         : await tx.user.create({
@@ -248,10 +251,10 @@ async function handlePOST(req: NextRequest) {
       metadata: { email: userName, externalId },
     });
 
-    // An ACTIVE membership for a user who already existed may leave their owning
-    // column naming another tenant. Moved after the commit, from outside this
-    // tenant's context; a failure is logged, not answered as a failed provision
-    // whose membership already committed.
+    // An ACTIVE membership for a user this tenant already owned by an old column
+    // copy may still leave the column behind. Moved after the commit, from outside
+    // this tenant's context; a failure is logged, not answered as a failed
+    // provision whose membership already committed.
     if (existingUserId && created.member.deactivatedAt === null) {
       try {
         await realignAfterActivation(existingUserId, tenantId);

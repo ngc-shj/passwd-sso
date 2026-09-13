@@ -12,7 +12,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { existingUserIdsByEmail, usersActiveInAnotherTenant } from "@/lib/tenant-context";
+import { resolveExistingUsersForTenant, usersActiveInAnotherTenant } from "@/lib/tenant-context";
 import { realignAfterActivation } from "@/lib/tenant/tenant-realignment";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
@@ -62,6 +62,18 @@ export interface SyncResult {
   abortedSafety?: boolean;
   logId?: string;
 }
+
+/** Why an activation or an attachment was declined, recorded on its audit row. */
+const REFUSAL_REASON = {
+  /** The user holds an active membership in another tenant. */
+  ACTIVE_IN_ANOTHER_TENANT: "active_in_another_tenant",
+  /** The user is owned by another tenant and has no membership here. */
+  OWNED_BY_ANOTHER_TENANT: "owned_by_another_tenant",
+  /** Several existing users share the provider's email under different casing. */
+  AMBIGUOUS_EMAIL: "ambiguous_email",
+} as const;
+
+type RefusalReason = (typeof REFUSAL_REASON)[keyof typeof REFUSAL_REASON];
 
 interface ProviderUser {
   externalId: string;
@@ -272,7 +284,12 @@ export async function runDirectorySync(
    * audit trail is readable by THIS tenant's admins, and which other
    * organization holds the member is not theirs to learn.
    */
-  const refusals: Array<{ memberId: string; userId: string; email: string | null }> = [];
+  const refusals: Array<{
+    memberId: string | null;
+    userId: string | null;
+    email: string | null;
+    reason: RefusalReason;
+  }> = [];
 
   try {
     // 2. Load config and decrypt credentials
@@ -463,26 +480,41 @@ export async function runDirectorySync(
       toCreate.map((pu) => pu.email.toLowerCase()),
     );
 
+    // How each toCreate user's email stands toward this tenant, resolved before any
+    // context opens and on a dry run too, so the preview declines what the run
+    // declines: see `resolveExistingUsersForTenant`. A directory sync does not
+    // authenticate the user, so it may attach an existing one only if this tenant
+    // owns them, or already holds a membership row for them (round-5 S1).
+    const existingUsers = await resolveExistingUsersForTenant(
+      tenantId,
+      toCreate.map((pu) => pu.email.toLowerCase()),
+    );
+    const declinedAttachment = (pu: ProviderUser): RefusalReason | null => {
+      const resolution = existingUsers.get(pu.email.toLowerCase());
+      if (resolution?.kind === "ambiguous") return REFUSAL_REASON.AMBIGUOUS_EMAIL;
+      if (resolution?.kind === "foreign" && !resolution.memberHere) {
+        return REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT;
+      }
+      return null;
+    };
+
     // 7. Apply changes (if not dryRun)
     if (!dryRun) {
-      // Resolved before the context opens, like `activeElsewhere`: see
-      // `existingUserIdsByEmail`.
-      const existingUserIdByEmail = await existingUserIdsByEmail(
-        toCreate.map((pu) => pu.email.toLowerCase()),
-      );
       // Members this run activated whose users row already existed. Their owning
       // column may name another tenant, so each is realigned after the commit.
       const activated: string[] = [];
       await withTenantRls(prisma, tenantId, async (tx) => {
-        // Create new users. Existing ones come from the lookup above.
-        const userByEmail = new Map<string, { id: string }>(
-          [...existingUserIdByEmail].map(([email, id]) => [email, { id }]),
-        );
+        const userByEmail = new Map<string, { id: string }>();
+        for (const [email, resolution] of existingUsers) {
+          if (resolution.kind !== "ambiguous") userByEmail.set(email, { id: resolution.userId });
+        }
 
-        // Create missing users individually (need IDs back)
+        // Create users no email matched at all. A user the lookup found is never
+        // created again: inside this context one owned elsewhere is invisible, and
+        // creating them collided on `users_email_key` and rolled back the run.
         for (const pu of toCreate) {
           const emailKey = pu.email.toLowerCase();
-          if (!userByEmail.has(emailKey)) {
+          if (!existingUsers.has(emailKey) && !userByEmail.has(emailKey)) {
             const newUser = await tx.user.create({
               data: { tenantId, email: pu.email, name: pu.displayName },
             });
@@ -490,8 +522,10 @@ export async function runDirectorySync(
           }
         }
 
-        // Batch pre-fetch: tenantMembers for all users in toCreate
-        const allUserIds = toCreate.map((pu) => userByEmail.get(pu.email.toLowerCase())!.id);
+        // Batch pre-fetch: tenantMembers for every resolvable toCreate user
+        const allUserIds = toCreate
+          .map((pu) => userByEmail.get(pu.email.toLowerCase())?.id)
+          .filter((id): id is string => id !== undefined);
         const existingTenantMembers = await tx.tenantMember.findMany({
           where: { tenantId, userId: { in: allUserIds } },
           select: { id: true, userId: true, deactivatedAt: true },
@@ -500,8 +534,27 @@ export async function runDirectorySync(
 
         // Process each user: create/reactivate tenantMember + upsert mapping
         for (const pu of toCreate) {
-          const user = userByEmail.get(pu.email.toLowerCase())!;
-          const existing = tmByUserId.get(user.id);
+          const resolution = existingUsers.get(pu.email.toLowerCase());
+          const user = userByEmail.get(pu.email.toLowerCase());
+          const existing = user ? tmByUserId.get(user.id) : undefined;
+
+          // Declined attachments write nothing — no membership and no mapping, so
+          // nothing is left for a later run to reactivate. Decided on the in-context
+          // membership read, so a row deleted since the lookup is not mistaken for
+          // the one that made a foreign user attachable.
+          if (!user || (resolution?.kind === "foreign" && !existing)) {
+            usersRefused++;
+            refusals.push({
+              memberId: null,
+              userId: resolution?.kind === "foreign" ? resolution.userId : null,
+              email: pu.email,
+              reason:
+                resolution?.kind === "ambiguous"
+                  ? REFUSAL_REASON.AMBIGUOUS_EMAIL
+                  : REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT,
+            });
+            continue;
+          }
 
           if (!existing) {
             // The same `activeElsewhere` answer the reactivation arm below uses.
@@ -527,8 +580,13 @@ export async function runDirectorySync(
             // A member the IdP itself sent as inactive is not a refusal.
             if (pu.active && activeInAnother) {
               usersRefused++;
-              refusals.push({ memberId: created.id, userId: user.id, email: pu.email });
-            } else if (pu.active && existingUserIdByEmail.has(pu.email.toLowerCase())) {
+              refusals.push({
+                memberId: created.id,
+                userId: user.id,
+                email: pu.email,
+                reason: REFUSAL_REASON.ACTIVE_IN_ANOTHER_TENANT,
+              });
+            } else if (pu.active && resolution) {
               activated.push(user.id);
             }
           } else if (existing.deactivatedAt && pu.active) {
@@ -540,7 +598,12 @@ export async function runDirectorySync(
                 data: { lastScimSyncedAt: new Date() },
               });
               usersRefused++;
-              refusals.push({ memberId: existing.id, userId: user.id, email: pu.email });
+              refusals.push({
+                memberId: existing.id,
+                userId: user.id,
+                email: pu.email,
+                reason: REFUSAL_REASON.ACTIVE_IN_ANOTHER_TENANT,
+              });
             } else {
               // Reactivate
               await tx.tenantMember.update({
@@ -612,7 +675,12 @@ export async function runDirectorySync(
           usersUpdated++;
           if (refused) {
             usersRefused++;
-            refusals.push({ memberId: member.id, userId: internalId, email: pu.email });
+            refusals.push({
+              memberId: member.id,
+              userId: internalId,
+              email: pu.email,
+              reason: REFUSAL_REASON.ACTIVE_IN_ANOTHER_TENANT,
+            });
           } else if (wouldReactivate) {
             activated.push(internalId);
           }
@@ -650,9 +718,11 @@ export async function runDirectorySync(
           userId: resolveAuditUserId(actorUserId, "system"),
           actorType: actorUserId ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.SYSTEM,
           tenantId,
-          targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
-          targetId: r.memberId,
-          metadata: { configId, userId: r.userId, email: r.email },
+          // A declined attachment has no membership to name; the sync config that
+          // declined it is the target instead.
+          targetType: r.memberId ? AUDIT_TARGET_TYPE.TENANT_MEMBER : AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
+          targetId: r.memberId ?? configId,
+          metadata: { configId, userId: r.userId, email: r.email, reason: r.reason },
         })),
       );
       // After the commit too — and because the apply ran in this tenant's context,
@@ -670,8 +740,10 @@ export async function runDirectorySync(
         }
       }
     } else {
-      // Dry run: count what would happen
-      usersCreated = toCreate.length;
+      // Dry run: count what would happen. A declined attachment writes nothing, so
+      // it is a refusal and not a creation — the same split the apply phase makes.
+      const declined = toCreate.filter((pu) => declinedAttachment(pu) !== null);
+      usersCreated = toCreate.length - declined.length;
       usersUpdated = toUpdate.length;
       usersDeactivated = toDeactivate.length;
       // Both apply-phase arms refuse on the same condition — the IdP asked for an
@@ -682,8 +754,13 @@ export async function runDirectorySync(
       // nothing to activate. That state is a second active membership already,
       // which `tenant_members_one_active_per_user` now makes unrepresentable.
       usersRefused =
-        toCreate.filter((pu) => pu.active && activeElsewhere.emails.has(pu.email.toLowerCase()))
-          .length +
+        declined.length +
+        toCreate.filter(
+          (pu) =>
+            declinedAttachment(pu) === null &&
+            pu.active &&
+            activeElsewhere.emails.has(pu.email.toLowerCase()),
+        ).length +
         toUpdate.filter(({ user: pu, internalId }) => {
           const member = memberByUserId.get(internalId);
           return (

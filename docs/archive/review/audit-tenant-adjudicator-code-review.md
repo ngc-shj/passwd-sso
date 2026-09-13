@@ -1058,3 +1058,132 @@ where it goes.** Case (2) scans the object-literal arguments of every call for
 callee enqueues it via `logAuditInTx`. Its comment says the helper does; the gate
 does not verify that (R49). Question that closes it: should case (2) be limited to
 a declared set of helpers known to enqueue in-transaction?
+
+## Round 5
+
+Date: 2026-09-13
+Review round: 5 (incremental, over the round-4 resolution commits `a557a6415..75c4acea5`)
+
+### Changes from Previous Round
+
+Round 4's findings were resolved in ten commits: the S2 class hydrated, restricted or
+read under a pinned bypass; U2 closed across every membership-activating producer; the
+directory-sync engine made able to reach users filed under another tenant; and a CI guard
+for the class. The three experts verified those resolutions and raised five Major and
+eight Minor findings, one of them (S1) a boundary widening this round's own fixes created.
+
+### Converged across experts (severity floored by convergence)
+
+- **S3 / T2 — Major — `check-required-user-relation` resolves wrapper names file-wide.**
+  Security red-proved sibling-scope shadowing (`const run` in two functions); Testing
+  red-proved a shadowing parameter and a wrapper that opens a bypass for another read and
+  then runs `fn` outside it. The name-based resolver is copied from
+  `check-owning-tenant-adjudicator`, which shares the defect.
+
+### Security findings
+
+- **S1 — Major (R43) — SCIM POST and directory sync can attach an active membership to,
+  and realign, an existing user filed under another tenant.** At `a557a6415` the in-context
+  lookup could not see such a user, so SCIM answered 409 and directory sync rolled back; no
+  non-sign-in producer could attach a foreign user. This round's fixes removed that accident
+  without adding the authority it stood in for: the only predicate left is
+  `wouldCreateSecondActiveMembership`, which enforces uniqueness, not authority. Option 3 in
+  the design note covers a user signing in through a new tenant's IdP — the user's own act —
+  and not provisioning. Attack: a tenant A SCIM token (or an A admin controlling its
+  directory's email attribute) names a user B released; the user resolves to A, their column
+  moves, B's IdP cannot reclaim them, their sign-in through B is refused, and A's policies and
+  admins act on them. Directory sync's refusal arm also let A plant a dormant membership on a
+  user still active in B and capture them when B suspends them.
+- **S2 — Minor — `USER_TENANT_REALIGNED` names the moved user as actor when SCIM or directory
+  sync caused the move**, so the releasing tenant cannot tell a sign-in elsewhere from another
+  tenant's provisioning.
+
+### Functionality findings
+
+- **F1 — Minor (R48) — directory sync's email lookup matches case-insensitively across every
+  tenant and keeps an arbitrary row among case variants**, while SCIM POST decides the same
+  question with an exact lookup.
+- **F2 — Minor — post-commit identity reads can fail the response to a committed SCIM write;**
+  DELETE's contact read throwing skips `SCIM_USER_DELETE`'s audit.
+- **F3 — Minor — the engine's name-sync visibility is read in the load context and used in the
+  apply transaction;** a user moved out in between makes `user.update` throw P2025 and roll
+  the run back.
+- **F4 — Minor — the SCIM POST guard refuses an `active: false` provision** for a user active
+  elsewhere, unlike PUT and directory sync.
+- **F5 — Minor, [Adjacent] (R43) — the bypass allowlist entry for tenant-context.ts gained
+  `user` at per-file granularity.**
+
+### Testing findings
+
+- **T1 — Major, [Adjacent] (R43) — the SCIM list's externalId mapping `findMany`, now under a
+  bypass, has no cell pinning its tenant;** removing `tenantId` from it stayed green.
+- **T3 — Major (R49) — the gate does not follow an identifier or shorthand `where`, nor a
+  `where` nested in an `include`/`select` relation or `_count`,** although its header and this
+  document claim counts are covered. On `a557a6415` the S2 member
+  `tenantMember.count({ where: prismaWhere })` was not reported. Six such calls exist today, all
+  filtering on scalar or foreign-key columns.
+- **T4 — Major (RT1) — three SCIM claims rest on mocked database behaviour:** the Groups
+  relation filter (`tenantMemberships.some`) excluding a hidden guest, the list under a bypass
+  including a departed member while excluding another tenant's, and the POST path for a user
+  filed elsewhere.
+- **T5 — Minor — the POST realign-failure cell does not assert the log.**
+- **T6 — Minor — the reset-vault history hydration has no bypass-purpose cell.**
+
+### Adjacent Findings
+
+F5 (Functionality → Security) and T1 (Testing → Security): routed to the S1/T1 fixes below.
+
+### Recurring Issue Check
+
+Each expert's full check is preserved in the round's working files; the findings above are the
+rows each marked as found: Functionality R5 (F3), R18 (F5), R34 (F4), R43 (F5), R48 (F1, F4),
+R51 (F3); Security R43 (S1), R46/R47/R49 (S3); Testing R1/R46/RT10 (T2), R43 (T1), R49 (T3),
+RT1 (T4). All other rows checked with no issue or not applicable.
+
+### Resolution Status — round 5
+
+#### S1 Major — a producer that does not authenticate the user attaches an existing user only if this tenant owns them (with F1, F4, F5 and T4)
+
+- Action: `resolveExistingUsersForTenant` (tenant-context.ts) classifies each email
+  that names an existing user as `owned` — the owning tenant, by the same
+  `owningTenantOf` rule `resolveOwningTenantIdFromClient` now calls, is this tenant —
+  `foreign` (with whether a membership row already exists here) or `ambiguous`
+  (more than one case variant). SCIM POST refuses a foreign user before any tenant
+  write: "User is managed by another organization", or the existing-member 409 when
+  a membership row is already here, which the IdP's GET/PATCH fallback handles.
+  Directory sync declines a foreign user with no membership here and an ambiguous
+  match: it writes no membership and no mapping, counts a refusal, and audits it
+  against the sync config with a `reason`; the dry-run preview declines the same
+  users. A foreign user who already holds a membership row here is reactivated as
+  before, which is also PUT's and PATCH's existing behaviour. Joining a new tenant
+  stays the user's own act, through that tenant's IdP (sign-in row 4). The round-3
+  refusal arm that created a DEACTIVATED membership — the plant Security described —
+  is gone with it.
+- What it rules out, stated as the cost: SCIM and directory sync can no longer
+  provision a user another tenant released until that user signs in through this
+  tenant's IdP.
+- F1: every case variant counts, and more than one is refused rather than guessed.
+- F4: SCIM POST's second-active-membership guard now applies only to an active
+  provision, as PUT's does.
+- F5: no narrowing. `tenant-context.ts` keeps `user` because the ownership read lives
+  beside the owning-tenant rule it applies; the entry's comment names the function
+  and why it must see other tenants' users — to refuse them. The SCIM Users route's
+  `user` permission was stale after the move and was removed (the gate's
+  over-breadth check reported it).
+- Directory sync's refusal audit display strings (en/ja) now name both reasons.
+- Unit red proof, worktree copy: SCIM POST treating a foreign user as owned failed
+  its three refusal cells; the engine never declining failed the four decline cells
+  (dry run and audit included); the ownership rule ignoring active memberships failed
+  four ownership cells.
+- T4 — `scim-cross-tenant-users.integration.test.ts` (real database, app role; only
+  token validation mocked): a SCIM group excludes a team guest filed under another
+  tenant and reports its own member; the list shows this tenant's departed member in
+  `Resources` and `totalResults` and no other tenant's member; POST refuses a user
+  another tenant released, attaches a user this tenant owns, and creates a new one.
+  The directory-sync integration cells were inverted to the same rule, with an
+  attach-own cell added.
+- Integration red proof: all ten cells green; against the previous commit the two
+  directory-sync decline cells and the POST refusal failed; with the Groups predicate
+  removed and the list back in the tenant context, the group cell and the
+  departed-member list cell failed.
+

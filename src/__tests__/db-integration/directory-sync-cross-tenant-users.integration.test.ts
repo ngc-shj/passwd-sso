@@ -57,6 +57,27 @@ describe("directory sync — users filed under another tenant (real DB)", () => 
     return row;
   }
 
+  async function membershipsIn(tenantId: string, userId: string) {
+    return asSuperuser((tx) =>
+      tx.$queryRawUnsafe<{ deactivated: boolean }[]>(
+        `SELECT deactivated_at IS NOT NULL AS deactivated FROM tenant_members
+          WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        tenantId,
+        userId,
+      ),
+    );
+  }
+
+  async function mappingsIn(tenantId: string): Promise<number> {
+    const [{ n }] = await asSuperuser((tx) =>
+      tx.$queryRawUnsafe<{ n: number }[]>(
+        `SELECT count(*)::int AS n FROM scim_external_mappings WHERE tenant_id = $1::uuid`,
+        tenantId,
+      ),
+    );
+    return n;
+  }
+
   beforeAll(async () => {
     ctx = await createTestContext();
   });
@@ -88,23 +109,16 @@ describe("directory sync — users filed under another tenant (real DB)", () => 
     await ctx.deleteTestData(owning);
   });
 
-  it("files a deactivated membership under a user active in another tenant, instead of colliding on their email", async () => {
+  it("declines a user active in another tenant without writing a membership, and without colliding on their email", async () => {
     const userId = await ctx.createUser(owning); // with an ACTIVE membership there
     const { email } = await userRow(userId);
     mockFetchOktaUsers.mockResolvedValue([oktaUser("ext-1", email, "Moved User", true)]);
 
     const result = await runDirectorySync({ configId, tenantId: syncing });
 
-    expect(result).toMatchObject({ success: true, usersCreated: 1, usersRefused: 1 });
-    const memberships = await asSuperuser((tx) =>
-      tx.$queryRawUnsafe<{ deactivated: boolean }[]>(
-        `SELECT deactivated_at IS NOT NULL AS deactivated FROM tenant_members
-          WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
-        syncing,
-        userId,
-      ),
-    );
-    expect(memberships).toEqual([{ deactivated: true }]);
+    expect(result).toMatchObject({ success: true, usersCreated: 0, usersRefused: 1 });
+    expect(await membershipsIn(syncing, userId)).toEqual([]);
+    expect(await mappingsIn(syncing)).toBe(0);
     const [{ n }] = await asSuperuser((tx) =>
       tx.$queryRawUnsafe<{ n: number }[]>(
         `SELECT count(*)::int AS n FROM users WHERE lower(email) = lower($1)`,
@@ -114,7 +128,9 @@ describe("directory sync — users filed under another tenant (real DB)", () => 
     expect(n).toBe(1);
   });
 
-  it("activates a user who is active nowhere and moves their owning column, recording it for both tenants", async () => {
+  it("declines a user another tenant released, leaving their owning column and memberships untouched", async () => {
+    // Round-5 S1. Active nowhere is not the same as unowned: attaching this user
+    // and realigning them handed a released user's tenancy to the syncing tenant.
     const userId = await ctx.createUser(owning);
     await asSuperuser((tx) =>
       tx.$executeRawUnsafe(
@@ -128,19 +144,38 @@ describe("directory sync — users filed under another tenant (real DB)", () => 
 
     const result = await runDirectorySync({ configId, tenantId: syncing });
 
-    expect(result).toMatchObject({ success: true, usersCreated: 1, usersRefused: 0 });
-    // Without the move the member's own requests could not see their own row,
-    // and this tenant could not read them either.
-    expect((await userRow(userId)).tenant_id).toBe(syncing);
-    const recorded = await asSuperuser((tx) =>
-      tx.$queryRawUnsafe<{ tenant_id: string }[]>(
-        `SELECT tenant_id FROM audit_outbox
+    expect(result).toMatchObject({ success: true, usersCreated: 0, usersRefused: 1 });
+    expect((await userRow(userId)).tenant_id).toBe(owning);
+    expect(await membershipsIn(syncing, userId)).toEqual([]);
+    const [{ n }] = await asSuperuser((tx) =>
+      tx.$queryRawUnsafe<{ n: number }[]>(
+        `SELECT count(*)::int AS n FROM audit_outbox
           WHERE payload->>'action' = 'USER_TENANT_REALIGNED' AND tenant_id IN ($1::uuid, $2::uuid)`,
         syncing,
         owning,
       ),
     );
-    expect(recorded.map((r) => r.tenant_id).sort()).toEqual([syncing, owning].sort());
+    expect(n).toBe(0);
+  });
+
+  it("attaches an existing user this tenant owns, active, without creating another", async () => {
+    // The allow side: an existing user filed under the syncing tenant, with no
+    // membership row yet, is this tenant's to activate.
+    const userId = await ctx.createUser(syncing);
+    await asSuperuser((tx) =>
+      tx.$executeRawUnsafe(`DELETE FROM tenant_members WHERE tenant_id = $1::uuid AND user_id = $2::uuid`, syncing, userId),
+    );
+    const { email } = await userRow(userId);
+    mockFetchOktaUsers.mockResolvedValue([oktaUser("ext-4", email, "Own User", true)]);
+
+    const result = await runDirectorySync({ configId, tenantId: syncing });
+
+    expect(result).toMatchObject({ success: true, usersCreated: 1, usersRefused: 0 });
+    expect(await membershipsIn(syncing, userId)).toEqual([{ deactivated: false }]);
+    const [{ n }] = await asSuperuser((tx) =>
+      tx.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM users WHERE lower(email) = lower($1)`, email),
+    );
+    expect(n).toBe(1);
   });
 
   it("syncs a mapped member whose users row it cannot see, leaving their name to the tenant that owns it", async () => {

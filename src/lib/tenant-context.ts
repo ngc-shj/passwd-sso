@@ -88,7 +88,16 @@ export async function resolveOwningTenantIdFromClient(
       },
     },
   });
-  return user?.tenantMemberships[0]?.tenantId ?? user?.tenantId ?? null;
+  return user ? owningTenantOf(user.tenantId, user.tenantMemberships) : null;
+}
+
+/**
+ * The owning-tenant rule itself, over a user's column and their ACTIVE
+ * memberships oldest first. One function so that `resolveOwningTenantIdFromClient`
+ * and the batch reader below cannot answer the same user differently.
+ */
+function owningTenantOf(column: string, activeMemberships: readonly { tenantId: string }[]): string {
+  return activeMemberships[0]?.tenantId ?? column;
 }
 
 /**
@@ -347,28 +356,74 @@ export async function usersActiveInAnotherTenant(
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
+/** How an existing user stands toward the tenant that wants to attach them. */
+export type ExistingUserResolution =
+  | { kind: "owned"; userId: string }
+  | { kind: "foreign"; userId: string; memberHere: boolean }
+  | { kind: "ambiguous" };
+
 /**
- * The ids of existing users with these emails, whichever tenant their owning
- * column names, keyed by lower-cased email.
+ * How each email that already names a user stands toward `tenantId`, keyed by
+ * lower-cased email. An email naming no user is absent.
  *
- * For directory sync's create path, which runs in the syncing tenant's context.
- * There a user filed under another tenant is invisible, so the in-context lookup
- * found nobody and the create that followed failed on `users_email_key`
- * (measured: P2002), rolling back the whole run — which is also why the refusal
- * arm for exactly that user was unreachable. Resolved before that context opens,
- * like `usersActiveInAnotherTenant`, for the same reason.
+ * For the producers that attach a membership WITHOUT the user authenticating:
+ * SCIM POST and directory sync's create path. Their authority over an existing
+ * user is ownership — the user's owning tenant, by the same rule as
+ * `resolveOwningTenantIdFromClient` — and not merely "active nowhere else": a
+ * user another tenant released is still not this tenant's to take, and attaching
+ * then realigning them moved their tenancy on this tenant's say-so (round-5 S1).
+ * Joining a new tenant is the user's own act, through that tenant's IdP (sign-in
+ * row 4). `memberHere` marks a foreign user who already holds a membership row
+ * in this tenant, which the producer may reactivate as before.
+ *
+ * Matched case-insensitively, and every case variant counts: `users_email_key` is
+ * case-sensitive and directory sync stores the provider's casing, so two rows can
+ * share one mailbox. More than one match is `ambiguous` — never a guess (F1).
  */
-export async function existingUserIdsByEmail(
+export async function resolveExistingUsersForTenant(
+  tenantId: string,
   emails: readonly string[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, ExistingUserResolution>> {
   if (emails.length === 0) return new Map();
   return withBypassRls(prisma, async (tx) => {
     const users = await tx.user.findMany({
       where: { email: { in: [...emails], mode: "insensitive" } },
-      select: { id: true, email: true },
+      select: {
+        id: true,
+        email: true,
+        tenantId: true,
+        tenantMemberships: {
+          where: { OR: [{ deactivatedAt: null }, { tenantId }] },
+          select: { tenantId: true, deactivatedAt: true },
+          orderBy: { createdAt: "asc" },
+        },
+      },
     });
-    return new Map(
-      users.flatMap((u) => (u.email ? [[u.email.toLowerCase(), u.id] as const] : [])),
-    );
+    const byEmail = new Map<string, typeof users>();
+    for (const user of users) {
+      if (!user.email) continue;
+      const key = user.email.toLowerCase();
+      byEmail.set(key, [...(byEmail.get(key) ?? []), user]);
+    }
+    const resolved = new Map<string, ExistingUserResolution>();
+    for (const [email, matches] of byEmail) {
+      if (matches.length > 1) {
+        resolved.set(email, { kind: "ambiguous" });
+        continue;
+      }
+      const [user] = matches;
+      const active = user.tenantMemberships.filter((m) => m.deactivatedAt === null);
+      resolved.set(
+        email,
+        owningTenantOf(user.tenantId, active) === tenantId
+          ? { kind: "owned", userId: user.id }
+          : {
+              kind: "foreign",
+              userId: user.id,
+              memberHere: user.tenantMemberships.some((m) => m.tenantId === tenantId),
+            },
+      );
+    }
+    return resolved;
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
