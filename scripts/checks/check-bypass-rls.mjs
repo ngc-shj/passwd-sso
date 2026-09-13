@@ -91,7 +91,11 @@ import { join, extname } from "node:path";
 // complex transactional code that touches many models by design).
 const ALLOWED_USAGE = new Map([
   ["src/lib/tenant-rls.ts", ["*"]], // definition
-  ["src/lib/tenant-context.ts", ["tenantMember", "team"]],
+  // `user`: `existingUserIdsByEmail`, directory sync's email lookup, which must
+  // see users filed under other tenants — inside the syncing tenant's context it
+  // found nobody and the create that followed collided on `users_email_key`.
+  // Read-only; returns ids only.
+  ["src/lib/tenant-context.ts", ["tenantMember", "team", "user"]],
   // The standalone realignment for producers that activate a membership inside a
   // TENANT context (SCIM, directory sync): that context cannot write a users row
   // the owning column files under another tenant. Re-reads the membership it

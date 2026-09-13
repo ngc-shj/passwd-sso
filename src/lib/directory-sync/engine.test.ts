@@ -19,6 +19,10 @@ const {
   mockGetGoogleAccessToken,
   mockFetchGoogleUsers,
   applyTxHolder,
+  mockLoadUser,
+  memberNames,
+  mockRealignAfterActivation,
+  mockLoggerError,
 } = vi.hoisted(() => {
   return {
     mockExecuteRaw: vi.fn(),
@@ -44,6 +48,13 @@ const {
     // on the withTenantRls callback's tx, so tests inject that tx here instead
     // of via prisma.$transaction.
     applyTxHolder: { current: null as Record<string, unknown> | null },
+    // The load phase's read of the users this tenant context can see. Answers by
+    // query from `memberNames`, which `makeMember` fills — a member built with
+    // `visible: false` is one whose users row RLS hides, so it is absent here.
+    mockLoadUser: { findMany: vi.fn() },
+    memberNames: new Map<string, string>(),
+    mockRealignAfterActivation: vi.fn(),
+    mockLoggerError: vi.fn(),
   };
 });
 
@@ -54,6 +65,7 @@ vi.mock("@/lib/prisma", () => ({
     scimExternalMapping: mockScimMapping,
     tenantMember: mockTenantMember,
     directorySyncLog: mockDirSyncLog,
+    user: mockLoadUser,
   },
 }));
 
@@ -64,6 +76,8 @@ vi.mock("@/lib/prisma", () => ({
 // load, mapping/member load, log create, AND the apply phase — resolves the
 // methods it calls on tx.
 const mockGuardFindMany = vi.fn().mockResolvedValue([]);
+// The email lookup `existingUserIdsByEmail` runs on the same bypass client.
+const mockGuardUserFindMany = vi.fn().mockResolvedValue([]);
 
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: vi.fn(async (prisma, _tenantId, fn) => {
@@ -95,7 +109,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   // state every pre-existing cell assumes; `mockGuardFindMany` is the seam for a
   // cell that wants the guard to fire.
   withBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) =>
-    fn({ tenantMember: { findMany: mockGuardFindMany } }),
+    fn({ tenantMember: { findMany: mockGuardFindMany }, user: { findMany: mockGuardUserFindMany } }),
   ),
 }));
 
@@ -124,6 +138,15 @@ vi.mock("./google-workspace", () => ({
 
 vi.mock("./okta", () => ({
   fetchOktaUsers: mockFetchOktaUsers,
+}));
+
+vi.mock("@/lib/tenant/tenant-realignment", () => ({
+  realignAfterActivation: mockRealignAfterActivation,
+}));
+
+vi.mock("@/lib/logger", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
 }));
 
 import { runDirectorySync } from "./engine";
@@ -182,18 +205,16 @@ function makeMember(overrides: Partial<{
   deactivatedAt: Date | null;
   name: string;
   email: string;
+  /** false: the users row is filed under another tenant, so this context cannot see it. */
+  visible: boolean;
 }> = {}) {
   const userId = overrides.userId ?? "user-1";
+  if (overrides.visible !== false) memberNames.set(userId, overrides.name ?? "Alice");
   return {
     id: overrides.id ?? "member-1",
     userId,
     role: overrides.role ?? "MEMBER",
     deactivatedAt: overrides.deactivatedAt ?? null,
-    user: {
-      id: userId,
-      email: overrides.email ?? "alice@example.com",
-      name: overrides.name ?? "Alice",
-    },
   };
 }
 
@@ -243,6 +264,12 @@ describe("runDirectorySync", () => {
     // `clearAllMocks` clears calls, not implementations, so a cell that makes the
     // cross-tenant guard fire would leak that state into every cell after it.
     mockGuardFindMany.mockResolvedValue([]);
+    mockGuardUserFindMany.mockResolvedValue([]);
+    memberNames.clear();
+    mockLoadUser.findMany.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) =>
+      where.id.in.filter((id) => memberNames.has(id)).map((id) => ({ id, name: memberNames.get(id) })),
+    );
+    mockRealignAfterActivation.mockResolvedValue(null);
     mockDirSyncLog.create.mockResolvedValue({ id: "log-1" });
     mockDirSyncConfig.update.mockResolvedValue({});
     mockDecryptCredentials.mockReturnValue(OKTA_CREDS_JSON);
@@ -475,6 +502,8 @@ describe("runDirectorySync", () => {
           data: expect.objectContaining({ tenantId: TENANT_ID }),
         }),
       );
+      // A user this run created is filed under this tenant already.
+      expect(mockRealignAfterActivation).not.toHaveBeenCalled();
     });
   });
 
@@ -747,10 +776,11 @@ describe("runDirectorySync", () => {
       setupAcquiredLock();
 
       let createArgs: unknown;
+      const userCreate = vi.fn();
       setApplyTx(makeApplyTx({
         user: {
-          findMany: vi.fn().mockResolvedValue([]),
-          create: vi.fn().mockResolvedValue({ id: "user-9", email: "carol@example.com" }),
+          findMany: vi.fn(),
+          create: userCreate,
           update: vi.fn(),
         },
         tenantMember: {
@@ -774,12 +804,19 @@ describe("runDirectorySync", () => {
         { userId: "user-9", user: { email: "carol@example.com" } },
       ]);
 
+      // The user exists — filed under the tenant they are active in. Resolved
+      // before the context opens: inside it they are invisible, and creating them
+      // again failed on users_email_key and rolled back the run.
+      mockGuardUserFindMany.mockResolvedValue([{ id: "user-9", email: "carol@example.com" }]);
+
       const result = await runDirectorySync(BASE_OPTIONS);
 
       expect(result.success).toBe(true);
+      expect(userCreate).not.toHaveBeenCalled();
       expect(createArgs).toMatchObject({
-        data: expect.objectContaining({ deactivatedAt: expect.any(Date) }),
+        data: expect.objectContaining({ userId: "user-9", deactivatedAt: expect.any(Date) }),
       });
+      expect(mockRealignAfterActivation).not.toHaveBeenCalled();
     });
 
     it("refuses to reactivate a user who is active in another tenant", async () => {
@@ -838,6 +875,8 @@ describe("runDirectorySync", () => {
         where: { id: "member-1" },
         data: { deactivatedAt: new Date("2025-01-01") },
       });
+      // A refused reactivation activated nothing, so there is nothing to realign.
+      expect(mockRealignAfterActivation).not.toHaveBeenCalled();
     });
 
     it("counts a refused reactivation apart from the writes it reports", async () => {
@@ -989,9 +1028,10 @@ describe("runDirectorySync", () => {
     /** An unmapped provider user whose email matches a DEACTIVATED member here. */
     function seedUnmappedDeactivatedMember(memberUpdate: ReturnType<typeof vi.fn>) {
       setupAcquiredLock();
+      mockGuardUserFindMany.mockResolvedValue([{ id: "user-7", email: "dora@example.com" }]);
       setApplyTx(makeApplyTx({
         user: {
-          findMany: vi.fn().mockResolvedValue([{ id: "user-7", email: "dora@example.com" }]),
+          findMany: vi.fn(),
           create: vi.fn(),
           update: vi.fn(),
         },
@@ -1057,6 +1097,7 @@ describe("runDirectorySync", () => {
         data: { deactivatedAt: null, lastScimSyncedAt: expect.any(Date) },
       });
       expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
+      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-7", TENANT_ID);
     });
 
     it("reports no refusal when the guard clears the user", async () => {
@@ -1124,6 +1165,8 @@ describe("runDirectorySync", () => {
         { userId: "user-9", user: { email: "carol@example.com" } },
       ]);
 
+      mockGuardUserFindMany.mockResolvedValue([{ id: "user-9", email: "carol@example.com" }]);
+
       const result = await runDirectorySync(BASE_OPTIONS);
 
       expect(result.usersRefused).toBe(1);
@@ -1133,6 +1176,7 @@ describe("runDirectorySync", () => {
           targetId: "member-9",
         }),
       ]);
+      expect((applyTxHolder.current as { user: { create: ReturnType<typeof vi.fn> } }).user.create).not.toHaveBeenCalled();
     });
 
     it("does not count an IdP-inactive user as a refusal", async () => {
@@ -1165,6 +1209,8 @@ describe("runDirectorySync", () => {
         { userId: "user-9", user: { email: "carol@example.com" } },
       ]);
 
+      mockGuardUserFindMany.mockResolvedValue([{ id: "user-9", email: "carol@example.com" }]);
+
       const result = await runDirectorySync(BASE_OPTIONS);
 
       // The create arm ran — without this the cell would pass on a user the diff
@@ -1172,6 +1218,7 @@ describe("runDirectorySync", () => {
       expect(result.usersCreated).toBe(1);
       expect(result.usersRefused).toBe(0);
       expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
+      expect((applyTxHolder.current as { user: { create: ReturnType<typeof vi.fn> } }).user.create).not.toHaveBeenCalled();
     });
 
     it("reactivates a deactivated user who reappears as active in the provider", async () => {
@@ -1223,6 +1270,123 @@ describe("runDirectorySync", () => {
         where: { id: "member-1" },
         data: expect.objectContaining({ deactivatedAt: null }),
       });
+      // After the commit: the apply ran in this tenant's context, which cannot
+      // write a users row filed under another tenant.
+      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", TENANT_ID);
+    });
+
+    it("files a new membership under a user who already exists in another tenant instead of creating a duplicate", async () => {
+      setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-5", email: "erin@example.com", displayName: "Erin", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardUserFindMany.mockResolvedValue([{ id: "user-5", email: "Erin@Example.com" }]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.success).toBe(true);
+      expect(applyTx.user.create).not.toHaveBeenCalled();
+      expect(applyTx.tenantMember.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: "user-5", deactivatedAt: null }),
+        }),
+      );
+      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-5", TENANT_ID);
+    });
+
+    it("does not fail a sync whose writes committed when the realignment fails", async () => {
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([{ externalId: "ext-1", internalId: "user-1" }]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({ id: "member-1", userId: "user-1", deactivatedAt: new Date("2025-01-01") }),
+      ]);
+      mockRealignAfterActivation.mockRejectedValue(new Error("bypass unavailable"));
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.success).toBe(true);
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        expect.objectContaining({ tenantId: TENANT_ID, userId: "user-1" }),
+        "directory-sync.realign-failed",
+      );
+    });
+  });
+
+  // ── Members whose users row this tenant cannot see ────────────
+
+  describe("a member whose users row this tenant cannot see", () => {
+    it("deactivates the member without renaming them, and reads no user relation", async () => {
+      setupAcquiredLock();
+      const applyTx = makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      });
+      setApplyTx(applyTx);
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-2", email: "moved@example.com", displayName: "Renamed", status: "SUSPENDED" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([{ externalId: "ext-2", internalId: "user-2" }]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({ id: "member-2", userId: "user-2", visible: false }),
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.success).toBe(true);
+      expect(applyTx.user.update).not.toHaveBeenCalled();
+      expect(applyTx.tenantMember.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "member-2" },
+          data: expect.objectContaining({ deactivatedAt: expect.any(Date) }),
+        }),
+      );
+      expect(mockTenantMember.findMany.mock.calls[0][0].select).not.toHaveProperty("user");
+    });
+
+    it("leaves a hidden member alone when only the name differs", async () => {
+      setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-2", email: "moved@example.com", displayName: "Renamed", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([{ externalId: "ext-2", internalId: "user-2" }]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({ id: "member-2", userId: "user-2", visible: false }),
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.success).toBe(true);
+      expect(result.usersUpdated).toBe(0);
+      expect(applyTx.user.update).not.toHaveBeenCalled();
     });
   });
 

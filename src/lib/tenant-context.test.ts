@@ -6,6 +6,7 @@ const {
   mockFindMany,
   mockFindUnique,
   mockUserFindUnique,
+  mockUserFindMany,
   mockUserUpdate,
   mockWithBypassRls,
   mockWithTenantRls,
@@ -14,6 +15,7 @@ const {
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
     mockUserFindUnique: vi.fn(),
+    mockUserFindMany: vi.fn(),
     mockUserUpdate: vi.fn(),
     mockWithBypassRls: vi.fn(),
     mockWithTenantRls: vi.fn(),
@@ -23,7 +25,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     tenantMember: { findMany: mockFindMany },
     team: { findUnique: mockFindUnique },
-    user: { findUnique: mockUserFindUnique, update: mockUserUpdate },
+    user: { findUnique: mockUserFindUnique, findMany: mockUserFindMany, update: mockUserUpdate },
   },
 }));
 
@@ -40,6 +42,7 @@ import {
   realignOwningTenantColumn,
   wouldCreateSecondActiveMembership,
   usersActiveInAnotherTenant,
+  existingUserIdsByEmail,
   resolveUserTenantId,
   resolveTeamTenantId,
   withUserTenantRls,
@@ -421,6 +424,35 @@ describe("withTeamTenantRls", () => {
       prisma,
       "tenant-xyz",
       expect.any(Function),
+    );
+  });
+});
+
+// ─── existingUserIdsByEmail ────────────────────────────────
+
+describe("existingUserIdsByEmail", () => {
+  it("opens no bypass for an empty list", async () => {
+    expect(await existingUserIdsByEmail([])).toEqual(new Map());
+    expect(mockWithBypassRls).not.toHaveBeenCalled();
+  });
+
+  it("matches case-insensitively under a bypass and keys by lower-cased email", async () => {
+    mockUserFindMany.mockResolvedValue([
+      { id: "u-1", email: "Erin@Example.com" },
+      { id: "u-2", email: null },
+    ]);
+
+    const found = await existingUserIdsByEmail(["erin@example.com"]);
+
+    expect(found).toEqual(new Map([["erin@example.com", "u-1"]]));
+    expect(mockUserFindMany).toHaveBeenCalledWith({
+      where: { email: { in: ["erin@example.com"], mode: "insensitive" } },
+      select: { id: true, email: true },
+    });
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      "cross_tenant_lookup",
     );
   });
 });

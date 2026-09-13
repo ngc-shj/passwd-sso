@@ -346,3 +346,29 @@ export async function usersActiveInAnotherTenant(
     };
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
+
+/**
+ * The ids of existing users with these emails, whichever tenant their owning
+ * column names, keyed by lower-cased email.
+ *
+ * For directory sync's create path, which runs in the syncing tenant's context.
+ * There a user filed under another tenant is invisible, so the in-context lookup
+ * found nobody and the create that followed failed on `users_email_key`
+ * (measured: P2002), rolling back the whole run — which is also why the refusal
+ * arm for exactly that user was unreachable. Resolved before that context opens,
+ * like `usersActiveInAnotherTenant`, for the same reason.
+ */
+export async function existingUserIdsByEmail(
+  emails: readonly string[],
+): Promise<Map<string, string>> {
+  if (emails.length === 0) return new Map();
+  return withBypassRls(prisma, async (tx) => {
+    const users = await tx.user.findMany({
+      where: { email: { in: [...emails], mode: "insensitive" } },
+      select: { id: true, email: true },
+    });
+    return new Map(
+      users.flatMap((u) => (u.email ? [[u.email.toLowerCase(), u.id] as const] : [])),
+    );
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}

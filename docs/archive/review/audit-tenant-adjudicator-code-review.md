@@ -910,6 +910,35 @@ before either, dereferencing `member.user.name`.
 - Still open at this point: SCIM provisioning and reactivation, and directory sync —
   each needs its producer-side fix before it can call `realignAfterActivation`.
 
+##### Resolution — directory sync (its S2 member, its U2 producer, and the finding above)
+
+- Action: the load phase reads members without the user relation and, in the same
+  context, reads only the users that context can see. The diff and the name sync
+  consider a name only for those, so a member filed under another tenant keeps the
+  name that tenant holds and still has their status applied. The create path
+  resolves existing users by email before the context opens
+  (`existingUserIdsByEmail`, a bypass read in tenant-context.ts, whose allowlist
+  entry now names `user`), so an existing user is given a membership rather than a
+  duplicate `user.create`. After the commit, every member the run activated whose
+  users row already existed goes through `realignAfterActivation`; a failure there
+  is logged and does not turn a committed run into an ERROR.
+- Integration cells (real database, app role): a user active in another tenant gets
+  a deactivated membership and one refusal, and no second users row; a user active
+  nowhere is activated, their column moves to the syncing tenant, and
+  `USER_TENANT_REALIGNED` is enqueued for both tenants; a mapped member filed under
+  another tenant is synced without their name being touched. Run against the
+  previous commit — the engine without this fix — all three fail, each on a run
+  that reported `success: false`.
+- Unit red proof, two worktree copies: restoring the relation in the load phase,
+  dropping the visibility conjunct from the diff, emptying the email lookup and
+  removing the catch around the realignment failed nine cells; renaming
+  unconditionally and dropping the reactivation's realignment failed three.
+- Found while writing those cells: `deleteTestData` did not remove
+  `scim_external_mappings`, whose tenant FK is RESTRICT, so any integration test
+  that lets directory sync or a SCIM route write a mapping leaked its tenant. Two
+  runs leaked four tenants onto the shared dev database; they were swept through
+  `trackTenant` and `cleanup`, and `deleteTestData` now removes the mappings.
+
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 
 - Action: an admin-authorized reset is refused while the target still owns

@@ -12,7 +12,10 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { usersActiveInAnotherTenant } from "@/lib/tenant-context";
+import { existingUserIdsByEmail, usersActiveInAnotherTenant } from "@/lib/tenant-context";
+import { realignAfterActivation } from "@/lib/tenant/tenant-realignment";
+import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import { logAuditAsync, logAuditBulkAsync } from "@/lib/audit/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
@@ -310,26 +313,30 @@ export async function runDirectorySync(
     const validUsers = providerUsers.filter((u) => u.email);
 
     // 4. Load existing mappings and members
-    const [existingMappings, existingMembers] = await withTenantRls(
+    const [existingMappings, existingMembers, visibleUsers] = await withTenantRls(
       prisma,
       tenantId,
-      (tx) =>
-        Promise.all([
+      async (tx) => {
+        const [mappings, members] = await Promise.all([
           tx.scimExternalMapping.findMany({
             where: { tenantId, resourceType: "User" },
             select: { externalId: true, internalId: true },
           }),
           tx.tenantMember.findMany({
             where: { tenantId },
-            select: {
-              id: true,
-              userId: true,
-              deactivatedAt: true,
-              role: true,
-              user: { select: { id: true, email: true, name: true } },
-            },
+            select: { id: true, userId: true, deactivatedAt: true, role: true },
           }),
-        ]),
+        ]);
+        // The users this context can see, and so can write. Not a relation on the
+        // member read: a member whose users row names another tenant came back
+        // with `user: null` (measured: Prisma does not throw), and reading its
+        // name in the diff below failed the whole run.
+        const users = await tx.user.findMany({
+          where: { id: { in: members.map((m) => m.userId) } },
+          select: { id: true, name: true },
+        });
+        return [mappings, members, users] as const;
+      },
     );
 
     const extIdToInternal = new Map(
@@ -338,6 +345,7 @@ export async function runDirectorySync(
     const memberByUserId = new Map(
       existingMembers.map((m) => [m.userId, m]),
     );
+    const visibleNameByUserId = new Map(visibleUsers.map((u) => [u.id, u.name]));
 
     // 5. Diff
     const toCreate: ProviderUser[] = [];
@@ -355,10 +363,13 @@ export async function runDirectorySync(
         if (member) {
           // Check if name changed or active status changed
           const currentActive = member.deactivatedAt === null;
-          if (
-            member.user.name !== pu.displayName ||
-            currentActive !== pu.active
-          ) {
+          // A name this tenant cannot see is not this tenant's to sync: the
+          // user's row is filed under another tenant, and RLS refuses the write
+          // (measured: P2025, which rolled back the whole run).
+          const nameChanged =
+            visibleNameByUserId.has(internalId) &&
+            visibleNameByUserId.get(internalId) !== pu.displayName;
+          if (nameChanged || currentActive !== pu.active) {
             toUpdate.push({ user: pu, internalId });
           }
         }
@@ -454,15 +465,19 @@ export async function runDirectorySync(
 
     // 7. Apply changes (if not dryRun)
     if (!dryRun) {
+      // Resolved before the context opens, like `activeElsewhere`: see
+      // `existingUserIdsByEmail`.
+      const existingUserIdByEmail = await existingUserIdsByEmail(
+        toCreate.map((pu) => pu.email.toLowerCase()),
+      );
+      // Members this run activated whose users row already existed. Their owning
+      // column may name another tenant, so each is realigned after the commit.
+      const activated: string[] = [];
       await withTenantRls(prisma, tenantId, async (tx) => {
-        // Create new users
-        // Batch pre-fetch: all users by email for toCreate
-        const createEmails = toCreate.map((pu) => pu.email.toLowerCase());
-        const existingUsers = await tx.user.findMany({
-          where: { email: { in: createEmails, mode: "insensitive" } },
-          select: { id: true, email: true },
-        });
-        const userByEmail = new Map(existingUsers.map((u) => [u.email!.toLowerCase(), u]));
+        // Create new users. Existing ones come from the lookup above.
+        const userByEmail = new Map<string, { id: string }>(
+          [...existingUserIdByEmail].map(([email, id]) => [email, { id }]),
+        );
 
         // Create missing users individually (need IDs back)
         for (const pu of toCreate) {
@@ -513,6 +528,8 @@ export async function runDirectorySync(
             if (pu.active && activeInAnother) {
               usersRefused++;
               refusals.push({ memberId: created.id, userId: user.id, email: pu.email });
+            } else if (pu.active && existingUserIdByEmail.has(pu.email.toLowerCase())) {
+              activated.push(user.id);
             }
           } else if (existing.deactivatedAt && pu.active) {
             if (activeElsewhere.emails.has(pu.email.toLowerCase())) {
@@ -530,6 +547,7 @@ export async function runDirectorySync(
                 where: { id: existing.id },
                 data: { deactivatedAt: null, lastScimSyncedAt: new Date() },
               });
+              activated.push(user.id);
             }
           }
 
@@ -561,10 +579,12 @@ export async function runDirectorySync(
           const member = memberByUserId.get(internalId);
           if (!member) continue;
 
-          await tx.user.update({
-            where: { id: internalId },
-            data: { name: pu.displayName },
-          });
+          if (visibleNameByUserId.has(internalId)) {
+            await tx.user.update({
+              where: { id: internalId },
+              data: { name: pu.displayName },
+            });
+          }
 
           // OWNER protection: skip deactivation for OWNER role
           if (member.role === TENANT_ROLE.OWNER && !pu.active) {
@@ -593,6 +613,8 @@ export async function runDirectorySync(
           if (refused) {
             usersRefused++;
             refusals.push({ memberId: member.id, userId: internalId, email: pu.email });
+          } else if (wouldReactivate) {
+            activated.push(internalId);
           }
         }
 
@@ -633,6 +655,20 @@ export async function runDirectorySync(
           metadata: { configId, userId: r.userId, email: r.email },
         })),
       );
+      // After the commit too — and because the apply ran in this tenant's context,
+      // which cannot write a users row filed under another tenant. Not atomic
+      // with the activation: a failure leaves that member's column diverged, and
+      // is logged rather than reported as a failed run whose writes committed.
+      for (const activatedUserId of activated) {
+        try {
+          await realignAfterActivation(activatedUserId, tenantId);
+        } catch (error) {
+          getLogger().error(
+            { tenantId, userId: activatedUserId, error: errorLogFields(error) },
+            "directory-sync.realign-failed",
+          );
+        }
+      }
     } else {
       // Dry run: count what would happen
       usersCreated = toCreate.length;

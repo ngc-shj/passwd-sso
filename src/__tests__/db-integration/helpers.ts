@@ -585,6 +585,13 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM password_entries WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // SCIM mappings FK to tenants with RESTRICT, and directory sync and the SCIM
+      // routes write them: without this the tenant delete below fails and the
+      // tenant leaks onto the shared database.
+      await tx.$executeRawUnsafe(
+        `DELETE FROM scim_external_mappings WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
       await tx.$executeRawUnsafe(
         `DELETE FROM tenant_members WHERE tenant_id = $1::uuid`,
         tenantId,
