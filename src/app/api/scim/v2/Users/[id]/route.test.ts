@@ -37,6 +37,8 @@ const {
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+const { mockRealignAfterActivation } = vi.hoisted(() => ({ mockRealignAfterActivation: vi.fn() }));
+
 // Identity is read after the tenant context, through the same bypass seam as the guard.
 const { mockGuardUser, mockWithBypassRls } = vi.hoisted(() => {
   const mockGuardUser = { findMany: vi.fn(), findUnique: vi.fn() };
@@ -67,6 +69,9 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls, withBypassRls: mockWithBypassRls }));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
+}));
+vi.mock("@/lib/tenant/tenant-realignment", () => ({
+  realignAfterActivation: mockRealignAfterActivation,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
@@ -116,6 +121,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     mockGuardMapping.findFirst.mockResolvedValue(null);
     mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
     mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
+    mockRealignAfterActivation.mockResolvedValue(null);
   });
 
   it("returns tenant user resource", async () => {
@@ -207,6 +213,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     mockGuardMapping.findFirst.mockResolvedValue(null);
     mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
     mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
+    mockRealignAfterActivation.mockResolvedValue(null);
   });
 
   it("deactivates tenant member", async () => {
@@ -246,6 +253,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(mockTenantMember.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "tm1" } }),
     );
+    expect(mockRealignAfterActivation).not.toHaveBeenCalled();
   });
 
   it("refuses PUT reactivation when the user is active in another tenant", async () => {
@@ -313,6 +321,44 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
     expect(res!.status).toBe(200);
     expect(mockTenantMember.update).toHaveBeenCalled();
+  });
+
+  it("answers 200 and logs when the realignment after a committed reactivation fails", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() })
+      .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: null });
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMapping.findFirst,
+          deleteMany: mockScimExternalMapping.deleteMany,
+          create: mockScimExternalMapping.create,
+        },
+      }),
+    );
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
+    mockRealignAfterActivation.mockRejectedValue(new Error("bypass unavailable"));
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "u@example.com",
+          active: true,
+        },
+      }) as never,
+      { params: Promise.resolve({ id: "user-1" }) },
+    );
+
+    expect(res!.status).toBe(200);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "tenant-1", userId: "user-1" }),
+      "scim.realign-failed",
+    );
   });
 
   it("does not refuse a DEACTIVATING PUT even with an active membership elsewhere", async () => {
@@ -521,6 +567,8 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       },
     });
     expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "SCIM_USER_REACTIVATE" }));
+    // After the commit: this tenant's context cannot write a users row filed elsewhere.
+    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", "tenant-1");
   });
 
   it("returns 400 for schema validation failures on PUT", async () => {
@@ -758,6 +806,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     mockGuardMapping.findFirst.mockResolvedValue(null);
     mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
     mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
+    mockRealignAfterActivation.mockResolvedValue(null);
   });
 
   it("returns 400 for unsupported patch operation", async () => {
@@ -906,6 +955,8 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     );
 
     expect(res!.status).toBe(200);
+    // No transition, so nothing to realign.
+    expect(mockRealignAfterActivation).not.toHaveBeenCalled();
   });
 
   it("reactivates member via PATCH", async () => {
@@ -932,6 +983,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
 
     expect(res!.status).toBe(200);
     expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "SCIM_USER_REACTIVATE" }));
+    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", "tenant-1");
   });
 
   it("returns 400 for schema validation failures on PATCH", async () => {
@@ -1066,6 +1118,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     mockGuardMapping.findFirst.mockResolvedValue(null);
     mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
     mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
+    mockRealignAfterActivation.mockResolvedValue(null);
   });
 
   it("removes tenant member and related records", async () => {

@@ -939,6 +939,25 @@ before either, dereferencing `member.user.name`.
   runs leaked four tenants onto the shared dev database; they were swept through
   `trackTenant` and `cleanup`, and `deleteTestData` now removes the mappings.
 
+##### Resolution — SCIM provisioning and reactivation
+
+- Action: SCIM POST gives the membership to the user its guard already resolved
+  under a bypass, instead of repeating the lookup inside the tenant context. That
+  lookup could not see a user filed under another tenant, so the create collided on
+  the global email index and the route answered 409 "A user with this email already
+  exists" for a user active nowhere, whom the guard above it had just cleared. POST
+  realigns an existing user it provisioned ACTIVE, and PUT and PATCH realign on
+  `SCIM_USER_REACTIVATE`, each after the tenant context commits; a failure is
+  logged, not answered as a failed request whose membership already committed. The
+  created resource is read back through `toScimUserResource`.
+- Red proof, two worktree copies: dropping the three realignment calls failed the
+  two POST cells, the PUT and PATCH reactivation cells, and the failure-logging
+  cell; always creating the user and realigning on every transition failed the six
+  existing-user POST cells and the two cells asserting no realignment on a
+  deactivation or a name-only PATCH.
+- U2 is closed with this: every producer that activates a membership — sign-in rows
+  4 and 5, SCIM POST/PUT/PATCH, directory sync — now moves the owning column.
+
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 
 - Action: an admin-authorized reset is refused while the target still owns

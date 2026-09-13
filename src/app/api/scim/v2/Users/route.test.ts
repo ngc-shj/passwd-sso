@@ -29,11 +29,13 @@ const {
   // its own client, so handing it the shared prisma mock would consume from the
   // sequences the POST cells depend on. Defaults: the email resolves to nobody,
   // and nobody is active anywhere else.
-  mockGuardUser: { findUnique: vi.fn() },
+  mockGuardUser: { findUnique: vi.fn(), findMany: vi.fn() },
   mockGuardMember: { findMany: vi.fn(), count: vi.fn() },
 }));
 
 // The bypass seam: the POST guard's reads and the GET list both run through it.
+const { mockRealignAfterActivation } = vi.hoisted(() => ({ mockRealignAfterActivation: vi.fn() }));
+
 const { mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn((_prisma: unknown, fn: (tx: unknown) => unknown) =>
     fn({ user: mockGuardUser, tenantMember: mockGuardMember, scimExternalMapping: mockScimExternalMapping })),
@@ -65,6 +67,9 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
   withBypassRls: mockWithBypassRls,
+}));
+vi.mock("@/lib/tenant/tenant-realignment", () => ({
+  realignAfterActivation: mockRealignAfterActivation,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
@@ -251,6 +256,11 @@ describe("POST /api/scim/v2/Users", () => {
     applyTxHolder.reject = null;
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
+    // The created resource is read back after the tenant context closes.
+    mockGuardUser.findMany.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) =>
+      where.id.in.map((id) => ({ id, email: `${id}@example.com`, name: null, image: null })),
+    );
+    mockRealignAfterActivation.mockResolvedValue(null);
   });
 
   it("refuses to provision a user who is already active in another tenant", async () => {
@@ -310,6 +320,59 @@ describe("POST /api/scim/v2/Users", () => {
     );
 
     expect(res.status).toBe(201);
+    expect((applyTxHolder.current as { user: { create: ReturnType<typeof vi.fn> } }).user.create).not.toHaveBeenCalled();
+    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-here", "tenant-1");
+  });
+
+  it("provisions a user filed under another tenant who is active nowhere, instead of answering 409", async () => {
+    // The in-context lookup could not see this user and the create that followed
+    // collided on the global email index. The guard already resolved them.
+    mockGuardUser.findUnique.mockResolvedValue({ id: "user-moved" });
+    const userCreate = vi.fn();
+    applyTxHolder.current = {
+      user: { findUnique: vi.fn().mockResolvedValue(null), create: userCreate },
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "tm-moved", deactivatedAt: null }),
+      },
+      scimExternalMapping: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn(), deleteMany: vi.fn() },
+    };
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "moved@example.com",
+        },
+      }) as never,
+    );
+
+    expect(res.status).toBe(201);
+    expect(userCreate).not.toHaveBeenCalled();
+    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-moved", "tenant-1");
+  });
+
+  it("answers 201 when the realignment after a committed provision fails", async () => {
+    mockGuardUser.findUnique.mockResolvedValue({ id: "user-moved" });
+    mockRealignAfterActivation.mockRejectedValue(new Error("bypass unavailable"));
+    applyTxHolder.current = {
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "tm-moved", deactivatedAt: null }),
+      },
+      scimExternalMapping: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn(), deleteMany: vi.fn() },
+    };
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "moved@example.com",
+        },
+      }) as never,
+    );
+
+    expect(res.status).toBe(201);
   });
 
   it("creates tenant member", async () => {
@@ -342,9 +405,12 @@ describe("POST /api/scim/v2/Users", () => {
 
     expect(res.status).toBe(201);
     expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "SCIM_USER_CREATE" }));
+    // A user this request created is filed under this tenant already.
+    expect(mockRealignAfterActivation).not.toHaveBeenCalled();
   });
 
   it("returns 409 when user already exists in tenant", async () => {
+    mockGuardUser.findUnique.mockResolvedValue({ id: "user-1" });
     applyTxHolder.current = {
       user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "dup@example.com" }) },
       tenantMember: { findUnique: vi.fn().mockResolvedValue({ id: "tm1" }) },
@@ -374,6 +440,7 @@ describe("POST /api/scim/v2/Users", () => {
   });
 
   it("returns 409 when externalId is already mapped to another user", async () => {
+    mockGuardUser.findUnique.mockResolvedValue({ id: "user-1" });
     applyTxHolder.current = {
       user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "dup@example.com", name: "Dup" }) },
       tenantMember: {
@@ -446,6 +513,7 @@ describe("POST /api/scim/v2/Users", () => {
   });
 
   it("creates a deactivated member when active is false", async () => {
+    mockGuardUser.findUnique.mockResolvedValue({ id: "user-1" });
     let createdMemberData: Record<string, unknown> | undefined;
     applyTxHolder.current = {
       user: {
@@ -477,9 +545,12 @@ describe("POST /api/scim/v2/Users", () => {
 
     expect(res.status).toBe(201);
     expect(createdMemberData?.deactivatedAt).toBeInstanceOf(Date);
+    // Nothing was activated, so nothing is realigned.
+    expect(mockRealignAfterActivation).not.toHaveBeenCalled();
   });
 
   it("reuses an existing externalId mapping for the same user", async () => {
+    mockGuardUser.findUnique.mockResolvedValue({ id: "user-1" });
     const deleteMany = vi.fn();
     const create = vi.fn();
     applyTxHolder.current = {

@@ -31,8 +31,23 @@ import {
 } from "@/lib/services/scim-user-service";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { fetchUserContact } from "@/lib/audit/audit-user-lookup";
+import { realignAfterActivation } from "@/lib/tenant/tenant-realignment";
 
 type Params = { params: Promise<{ id: string }> };
+
+/**
+ * Move a reactivated member's owning column after the tenant context commits: the
+ * member may have been filed under another tenant while deactivated here, and this
+ * tenant's context cannot write that users row. Logged on failure rather than
+ * answered as a failed request whose reactivation already committed.
+ */
+async function realignReactivatedMember(userId: string, tenantId: string): Promise<void> {
+  try {
+    await realignAfterActivation(userId, tenantId);
+  } catch (error) {
+    getLogger().error({ tenantId, userId, error: errorLogFields(error) }, "scim.realign-failed");
+  }
+}
 
 // GET /api/scim/v2/Users/[id]
 async function handleGET(req: NextRequest, { params }: Params) {
@@ -110,6 +125,9 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   }
 
   const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  if (auditAction === AUDIT_ACTION.SCIM_USER_REACTIVATE) {
+    await realignReactivatedMember(userId, tenantId);
+  }
 
   // Session invalidation on deactivation (fail-open)
   let invalidationCounts: InvalidateUserSessionsResult | undefined;
@@ -210,6 +228,9 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   }
 
   const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  if (auditAction === AUDIT_ACTION.SCIM_USER_REACTIVATE) {
+    await realignReactivatedMember(userId, tenantId);
+  }
 
   // Session invalidation on deactivation (fail-open)
   let patchInvalidationCounts: InvalidateUserSessionsResult | undefined;

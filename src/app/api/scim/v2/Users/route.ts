@@ -22,6 +22,10 @@ import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { realignAfterActivation } from "@/lib/tenant/tenant-realignment";
+import { toScimUserResource } from "@/lib/services/scim-user-service";
+import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import { scimParseBody } from "@/lib/scim/parse-body";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
@@ -167,16 +171,20 @@ async function handlePOST(req: NextRequest) {
 
   try {
     const created = await withTenantRls(prisma, tenantId, async (tx) => {
-      let user = await tx.user.findUnique({ where: { email: userName } });
-      if (!user) {
-        user = await tx.user.create({
-          data: {
-            tenantId,
-            email: userName,
-            name: name?.formatted ?? null,
-          },
-        });
-      }
+      // The user the guard resolved, not an in-context lookup: one filed under
+      // another tenant is invisible here, so that lookup found nobody and the
+      // create collided on the global email index — a 409 for a user this tenant
+      // was entitled to provision, active nowhere else.
+      const user = existingUserId
+        ? { id: existingUserId }
+        : await tx.user.create({
+            data: {
+              tenantId,
+              email: userName,
+              name: name?.formatted ?? null,
+            },
+            select: { id: true },
+          });
 
       const existingMember = await tx.tenantMember.findUnique({
         where: { tenantId_userId: { tenantId, userId: user.id } },
@@ -240,17 +248,23 @@ async function handlePOST(req: NextRequest) {
       metadata: { email: userName, externalId },
     });
 
-    const baseUrl = getScimBaseUrl();
-    const resource = userToScimUser(
-      {
-        userId: created.user.id,
-        email: userName,
-        name: created.user.name,
-        deactivatedAt: created.member.deactivatedAt,
-        externalId: created.externalId,
-      },
-      baseUrl,
+    // An ACTIVE membership for a user who already existed may leave their owning
+    // column naming another tenant. Moved after the commit, from outside this
+    // tenant's context; a failure is logged, not answered as a failed provision
+    // whose membership already committed.
+    if (existingUserId && created.member.deactivatedAt === null) {
+      try {
+        await realignAfterActivation(existingUserId, tenantId);
+      } catch (error) {
+        getLogger().error({ tenantId, userId: existingUserId, error: errorLogFields(error) }, "scim.realign-failed");
+      }
+    }
+
+    const resource = await toScimUserResource(
+      { userId: created.user.id, deactivatedAt: created.member.deactivatedAt, externalId: created.externalId },
+      getScimBaseUrl(),
     );
+    if (!resource) return scimError(404, "User not found");
 
     return scimResponse(resource, 201);
   } catch (e) {
