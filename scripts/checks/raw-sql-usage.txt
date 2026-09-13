@@ -76,6 +76,7 @@ src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob s
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry recheck on file download (TOCTOU close)
 src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry recheck on share view (TOCTOU close)
 src/auth.ts # SECURITY DEFINER call to migrate audit_logs rows during tenant merge
+src/lib/audit/audit-outbox-in-tx.ts # enqueueAuditInTx's GUC and tenant-existence probes on the caller's transaction, moved here so the offline operator CLI can enqueue without the app Prisma singleton
 src/lib/audit/audit-outbox.ts # bypass_rls GUC set/verify + tenant-existence check before enqueueing audit outbox rows
 src/lib/auth/policy/account-lockout.ts # row lock (FOR UPDATE) + lock_timeout for atomic failed-login counter update
 src/lib/auth/webauthn/webauthn-authorize.ts # CAS counter update on WebAuthn credential to prevent replay/clone
