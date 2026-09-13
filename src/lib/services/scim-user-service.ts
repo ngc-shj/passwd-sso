@@ -56,10 +56,11 @@ export interface DeactivateResult {
 }
 
 /**
- * The one 409 detail for an existing user a SCIM token may not provision: another
- * tenant's, a departed member another tenant now owns, or one of several users
- * whose emails differ only in case. Distinct details told a token holder which of
- * those any email was (round-6 R6-S4).
+ * The one 409 detail for an existing user a SCIM token may not provision or
+ * reactivate: another tenant's — active there or suspended — a departed member
+ * another tenant now owns, or one of several users whose emails differ only in
+ * case. Distinct details told a token holder which of those any email was
+ * (round-6 R6-S4, and for PUT/PATCH round-7 R7-S3).
  */
 export const SCIM_USER_NOT_PROVISIONABLE_DETAIL = "User cannot be provisioned by this organization";
 

@@ -379,6 +379,10 @@ describe("runDirectorySync", () => {
       mockGuardFindMany.mockResolvedValue([
         { userId: "user-1", user: { email: "alice@example.com" } },
       ]);
+      // As production has it: active in another tenant, so owned by it (R7-T2).
+      mockGuardUserFindMany.mockResolvedValue([
+        ownershipRow("user-1", "alice@example.com", OTHER_TENANT, [{ tenantId: OTHER_TENANT, deactivatedAt: null }]),
+      ]);
 
       const result = await runDirectorySync({ ...BASE_OPTIONS, dryRun: true });
 
@@ -859,6 +863,10 @@ describe("runDirectorySync", () => {
       mockGuardFindMany.mockResolvedValue([
         { userId: "user-1", user: { email: "alice@example.com" } },
       ]);
+      // As production has it: active in another tenant, so owned by it (R7-T2).
+      mockGuardUserFindMany.mockResolvedValue([
+        ownershipRow("user-1", "alice@example.com", OTHER_TENANT, [{ tenantId: OTHER_TENANT, deactivatedAt: null }]),
+      ]);
 
       const result = await runDirectorySync(BASE_OPTIONS);
 
@@ -910,6 +918,10 @@ describe("runDirectorySync", () => {
       mockGuardFindMany.mockResolvedValue([
         { userId: "user-1", user: { email: "alice@example.com" } },
       ]);
+      // As production has it: active in another tenant, so owned by it (R7-T2).
+      mockGuardUserFindMany.mockResolvedValue([
+        ownershipRow("user-1", "alice@example.com", OTHER_TENANT, [{ tenantId: OTHER_TENANT, deactivatedAt: null }]),
+      ]);
 
       const result = await runDirectorySync(BASE_OPTIONS);
 
@@ -956,6 +968,10 @@ describe("runDirectorySync", () => {
       ]);
       mockGuardFindMany.mockResolvedValue([
         { userId: "user-1", user: { email: "alice@example.com" } },
+      ]);
+      // As production has it: active in another tenant, so owned by it (R7-T2).
+      mockGuardUserFindMany.mockResolvedValue([
+        ownershipRow("user-1", "alice@example.com", OTHER_TENANT, [{ tenantId: OTHER_TENANT, deactivatedAt: null }]),
       ]);
 
       await runDirectorySync(BASE_OPTIONS);
@@ -1016,6 +1032,10 @@ describe("runDirectorySync", () => {
       mockGuardFindMany.mockResolvedValue([
         { userId: "user-1", user: { email: "alice@example.com" } },
       ]);
+      // As production has it: active in another tenant, so owned by it (R7-T2).
+      mockGuardUserFindMany.mockResolvedValue([
+        ownershipRow("user-1", "alice@example.com", OTHER_TENANT, [{ tenantId: OTHER_TENANT, deactivatedAt: null }]),
+      ]);
 
       await runDirectorySync({ ...BASE_OPTIONS, userId: undefined });
 
@@ -1073,6 +1093,14 @@ describe("runDirectorySync", () => {
       mockGuardFindMany.mockResolvedValue([
         { userId: "user-7", user: { email: "dora@example.com" } },
       ]);
+      // Active in another tenant, so owned by it too (R7-T2) — with the
+      // deactivated row here the seed gave them.
+      mockGuardUserFindMany.mockResolvedValue([
+        ownershipRow("user-7", "dora@example.com", OTHER_TENANT, [
+          { tenantId: OTHER_TENANT, deactivatedAt: null },
+          { tenantId: TENANT_ID, deactivatedAt: new Date("2025-01-01") },
+        ]),
+      ]);
 
       const result = await runDirectorySync(BASE_OPTIONS);
 
@@ -1084,7 +1112,8 @@ describe("runDirectorySync", () => {
         data: { lastScimSyncedAt: expect.any(Date) },
       });
       expect(mockLogAuditBulk).toHaveBeenCalledWith([
-        expect.objectContaining({ targetId: "member-7" }),
+        // Both reasons hold for this user; the more specific one is recorded.
+        expect.objectContaining({ targetId: "member-7", metadata: expect.objectContaining({ reason: "active_in_another_tenant" }) }),
       ]);
     });
 
@@ -1425,6 +1454,41 @@ describe("runDirectorySync", () => {
       const result = await runDirectorySync({ ...BASE_OPTIONS, dryRun: true });
 
       expect(result).toMatchObject({ usersCreated: 0, usersRefused: 1 });
+    });
+
+    it("declines case variants that include another tenant's user under the ownership reason, live and on a dry run", async () => {
+      // Round-7 R7-S2: "ambiguous_email" for such an email told this tenant that
+      // another tenant holds a case variant of it — the distinction SCIM POST no
+      // longer gives.
+      const seed = () => {
+        setupAcquiredLock();
+        mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+        mockFetchOktaUsers.mockResolvedValue([
+          makeOktaUser({ id: "ext-8", email: "dup@example.com", displayName: "Dup", status: "ACTIVE" }),
+        ]);
+        mockScimMapping.findMany.mockResolvedValue([]);
+        mockTenantMember.findMany.mockResolvedValue([]);
+        mockGuardUserFindMany.mockResolvedValue([
+          ownershipRow("user-a", "Dup@example.com", TENANT_ID),
+          ownershipRow("user-b", "dup@EXAMPLE.com", OTHER_TENANT),
+        ]);
+      };
+      seed();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result).toMatchObject({ success: true, usersCreated: 0, usersRefused: 1 });
+      expect(applyTx.tenantMember.create).not.toHaveBeenCalled();
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([
+        expect.objectContaining({
+          metadata: { configId: CONFIG_ID, userId: null, email: "dup@example.com", reason: "owned_by_another_tenant" },
+        }),
+      ]);
+
+      seed();
+      expect(await runDirectorySync({ ...BASE_OPTIONS, dryRun: true })).toMatchObject({ usersCreated: 0, usersRefused: 1 });
     });
 
     it("declines a user another tenant owns although they are active nowhere", async () => {

@@ -277,53 +277,13 @@ export async function withTeamTenantRls<T>(
 }
 
 /**
- * Would activating this user's membership in `tenantId` give them a SECOND
- * active membership?
- *
- * The create path already refuses this (`api/scim/v2/Users/route.ts`), but the
- * REACTIVATION arms did not, and they are reachable by a principal with no
- * authority in the other tenant: a holder of this tenant's SCIM token, or its
- * directory-sync config, flipping `deactivatedAt` back to null.
- *
- * Two active memberships is not a tolerable state. `resolveUserTenantIdFromClient`
- * THROWS on it, and the proxy's auth gate calls it on every request — so the
- * result is that one tenant's SCIM admin can invalidate every session of a user
- * who belongs to a different tenant.
- *
- * MUST be called OUTSIDE a tenant context: the foreign membership row is exactly
- * what RLS hides inside one, and opening a bypass inside one is refused by the
- * nesting guard.
- */
-export async function wouldCreateSecondActiveMembership(
-  userId: string,
-  tenantId: string,
-): Promise<boolean> {
-  return withBypassRls(prisma, async (tx) => {
-    // One read over the ACTIVE set, which answers both halves: if this tenant is
-    // already in it, nothing is being activated; if it is not and the set is
-    // non-empty, activating here makes a second.
-    //
-    // `findMany` rather than the `findUnique` + `findFirst` pair the predicate
-    // reads like, because the callers' own tenantMember.findUnique calls are
-    // sequenced in tests and an extra one shifts them — a query shape chosen so
-    // the guard cannot perturb the thing it guards.
-    const active = await tx.tenantMember.findMany({
-      where: { userId, deactivatedAt: null },
-      select: { tenantId: true },
-      take: 2,
-    });
-    return active.length > 0 && !active.some((m) => m.tenantId === tenantId);
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-}
-
-/**
  * Which of these users already hold an ACTIVE membership in some OTHER tenant.
  *
- * The batch form of `wouldCreateSecondActiveMembership`, for directory sync:
+ * For directory sync:
  * that path reactivates many memberships in one run, and the row it must not
  * step on is invisible inside the tenant context the sync runs in.
  *
- * MUST be called OUTSIDE a tenant context, for the same reason as its sibling.
+ * MUST be called OUTSIDE a tenant context, because another tenant's membership is exactly what RLS hides inside one.
  * Returns both keys because the sync knows some users by id (already-mapped) and
  * others only by email (about to be mapped).
  */
@@ -360,7 +320,7 @@ export async function usersActiveInAnotherTenant(
 export type ExistingUserResolution =
   | { kind: "owned"; userId: string }
   | { kind: "foreign"; userId: string; memberHere: boolean }
-  | { kind: "ambiguous" };
+  | { kind: "ambiguous"; ownedHere: boolean };
 
 /**
  * How each email that already names a user stands toward `tenantId`, keyed by
@@ -409,7 +369,14 @@ export async function resolveExistingUsersForTenant(
     const resolved = new Map<string, ExistingUserResolution>();
     for (const [email, matches] of byEmail) {
       if (matches.length > 1) {
-        resolved.set(email, { kind: "ambiguous" });
+        // `ownedHere` only when EVERY match is this tenant's: the ambiguity is
+        // then this tenant's own data to resolve. With another tenant's user
+        // among them, a producer must answer as it answers for that user alone,
+        // or naming the case tells this tenant that such a user exists (round-7 R7-S2).
+        const ownedHere = matches.every(
+          (m) => owningTenantOf(m.tenantId, m.tenantMemberships.filter((tm) => tm.deactivatedAt === null)) === tenantId,
+        );
+        resolved.set(email, { kind: "ambiguous", ownedHere });
         continue;
       }
       const [user] = matches;

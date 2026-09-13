@@ -83,6 +83,11 @@ export function realignmentBySignIn(userId: string): RealignmentCause {
  * therefore records the system as actor and keeps `source`, which alone answers
  * its question. A sign-in is the one cause whose actor is the moved user, a
  * principal the releasing tenant already knows, so it keeps them.
+ *
+ * Since round 6, SCIM and directory sync realign only a user this tenant already
+ * owns, so a releasing row from them arises only when ownership changed between
+ * their check and their commit (round-7 F-R7-5). Sign-in, and the operator
+ * command, are the producers that move a column in the ordinary course.
  */
 async function emitRealignment(
   tx: TxOrPrisma,

@@ -144,6 +144,7 @@
   "SCIM_USER_UPDATE": "SCIM ユーザーを更新",
   "SCIM_USER_DEACTIVATE": "SCIM ユーザーを無効化",
   "SCIM_USER_REACTIVATE": "SCIM ユーザーを再有効化",
+  "SCIM_USER_REACTIVATION_REFUSED": "SCIM によるユーザー再有効化を拒否 (他組織が管理)",
   "SCIM_USER_DELETE": "SCIM ユーザーを削除",
   "SCIM_GROUP_UPDATE": "SCIM グループメンバーシップを更新",
   "WATCHTOWER_ALERT_SENT": "Watchtower 漏洩アラートを送信",

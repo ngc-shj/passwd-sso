@@ -6,7 +6,7 @@ import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { usersOwnedByAnotherTenant, wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
+import { usersOwnedByAnotherTenant } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import {
   invalidateUserSessions,
@@ -37,10 +37,12 @@ import { REALIGNMENT_SOURCE, realignAfterActivation, type RealignmentCause } fro
 type Params = { params: Promise<{ id: string }> };
 
 /**
- * Move a reactivated member's owning column after the tenant context commits: the
- * member may have been filed under another tenant while deactivated here, and this
- * tenant's context cannot write that users row. Logged on failure rather than
- * answered as a failed request whose reactivation already committed.
+ * Move a reactivated member's owning column after the tenant context commits.
+ * A race backstop since round 6: the ownership refusal lets through only a member
+ * this tenant owns, whose column already names it, so this normally reads and
+ * writes nothing. It moves the column only when another writer changed ownership
+ * between that read and the commit (round-7 F-R7-5). Logged on failure rather
+ * than answered as a failed request whose reactivation already committed.
  */
 async function realignReactivatedMember(
   userId: string,
@@ -56,18 +58,37 @@ async function realignReactivatedMember(
 
 /**
  * The response refusing a SCIM token's reactivation of this member, or null when
- * it may proceed. Two questions, in this order: would it make a second active
- * membership (uniqueness), and does this tenant own the user at all (authority).
- * A membership row here answers neither — see `usersOwnedByAnotherTenant`.
+ * it may proceed: refused when another tenant owns the user. A membership row
+ * here is not ownership — see `usersOwnedByAnotherTenant`.
+ *
+ * One question, not two (round-7 R7-S3). A user active in another tenant is
+ * owned by it, so asking "would this make a second active membership" first
+ * refused nobody the ownership question lets through; it only added a second 409
+ * detail, which told the token holder whether that tenant had the user active or
+ * suspended.
+ *
+ * Recorded, as directory sync records the same decision: the detail is
+ * deliberately uninformative, and this tenant's operator — who has to act, by
+ * having the user sign in here — would otherwise see a deactivated member and an
+ * IdP error explaining nothing (round-7 F-R7-3). Nothing of the other tenant is
+ * in the row.
  */
-async function reactivationRefusal(userId: string, tenantId: string): Promise<Response | null> {
-  if (await wouldCreateSecondActiveMembership(userId, tenantId)) {
-    return scimError(409, "User already belongs to another organization", "uniqueness");
-  }
-  if ((await usersOwnedByAnotherTenant(tenantId, [userId])).has(userId)) {
-    return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
-  }
-  return null;
+async function reactivationRefusal(
+  req: NextRequest,
+  userId: string,
+  tenantId: string,
+  actor: Pick<RealignmentCause, "actorUserId" | "actorType">,
+): Promise<Response | null> {
+  if (!(await usersOwnedByAnotherTenant(tenantId, [userId])).has(userId)) return null;
+  await logAuditAsync({
+    ...tenantAuditBase(req, actor.actorUserId, tenantId),
+    actorType: actor.actorType,
+    action: AUDIT_ACTION.SCIM_USER_REACTIVATION_REFUSED,
+    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+    targetId: userId,
+    metadata: { reason: "owned_by_another_tenant" },
+  });
+  return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
 }
 
 // GET /api/scim/v2/Users/[id]
@@ -102,10 +123,10 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
 
   const { id } = await params;
 
-  // The reactivation guard the create path has and these arms did not. It must
-  // run BETWEEN two tenant contexts, not inside one: the foreign membership row
-  // is what RLS hides inside a tenant context, and opening a bypass inside one is
-  // refused by the nesting guard. Sequential contexts are allowed; nested are not.
+  // The ownership refusal. It must run BETWEEN two tenant contexts, not inside
+  // one: another tenant's membership and users row are what RLS hides inside a
+  // tenant context, and opening a bypass inside one is refused by the nesting
+  // guard. Sequential contexts are allowed; nested are not.
   // The id is resolved inside the guard's OWN bypass, not in a tenant context:
   // `resolveUserId` is explicitly tenant-scoped by argument, so it is safe there,
   // and this keeps the guard's reads off the mutation path entirely. The mutation
@@ -118,7 +139,10 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   );
   if (!resolvedUserId) return scimError(404, "User not found");
   if (active !== false) {
-    const refusal = await reactivationRefusal(resolvedUserId, tenantId);
+    const refusal = await reactivationRefusal(req, resolvedUserId, tenantId, {
+      actorUserId: auditUserId,
+      actorType: putActorType,
+    });
     if (refusal) return refusal;
   }
 
@@ -131,12 +155,12 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
       }),
     );
   } catch (e) {
-    // The one-active-membership index, reached only on the race the guard above
-    // cannot close: it runs in its own context a round trip earlier, and another
-    // tenant can activate in between. Mapped to the same 409 the guard returns,
-    // with its own message so the two are distinguishable in the log.
+    // The one-active-membership index: another tenant activated the user between
+    // the ownership read and this write. That tenant owns them now, so the answer
+    // is the ownership refusal's detail — a separate one told the token holder
+    // whether another tenant had the user active (round-7 R7-S3).
     if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
-      return scimError(409, "User already belongs to another organization", "uniqueness");
+      return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
     }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
@@ -204,10 +228,10 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
 
   const { id } = await params;
 
-  // The reactivation guard the create path has and these arms did not. It must
-  // run BETWEEN two tenant contexts, not inside one: the foreign membership row
-  // is what RLS hides inside a tenant context, and opening a bypass inside one is
-  // refused by the nesting guard. Sequential contexts are allowed; nested are not.
+  // The ownership refusal. It must run BETWEEN two tenant contexts, not inside
+  // one: another tenant's membership and users row are what RLS hides inside a
+  // tenant context, and opening a bypass inside one is refused by the nesting
+  // guard. Sequential contexts are allowed; nested are not.
   // The id is resolved inside the guard's OWN bypass, not in a tenant context:
   // `resolveUserId` is explicitly tenant-scoped by argument, so it is safe there,
   // and this keeps the guard's reads off the mutation path entirely. The mutation
@@ -225,7 +249,10 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   // and must not be refused. PUT's schema defaults `active` to true and
   // `replaceScimUser` writes unconditionally, so `!== false` is right there.
   if (patchOps.active === true) {
-    const refusal = await reactivationRefusal(resolvedUserId, tenantId);
+    const refusal = await reactivationRefusal(req, resolvedUserId, tenantId, {
+      actorUserId: auditUserId,
+      actorType: patchActorType,
+    });
     if (refusal) return refusal;
   }
 
@@ -238,12 +265,12 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
       }),
     );
   } catch (e) {
-    // The one-active-membership index, reached only on the race the guard above
-    // cannot close: it runs in its own context a round trip earlier, and another
-    // tenant can activate in between. Mapped to the same 409 the guard returns,
-    // with its own message so the two are distinguishable in the log.
+    // The one-active-membership index: another tenant activated the user between
+    // the ownership read and this write. That tenant owns them now, so the answer
+    // is the ownership refusal's detail — a separate one told the token holder
+    // whether another tenant had the user active (round-7 R7-S3).
     if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
-      return scimError(409, "User already belongs to another organization", "uniqueness");
+      return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
     }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
@@ -303,12 +330,12 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
       }),
     );
   } catch (e) {
-    // The one-active-membership index, reached only on the race the guard above
-    // cannot close: it runs in its own context a round trip earlier, and another
-    // tenant can activate in between. Mapped to the same 409 the guard returns,
-    // with its own message so the two are distinguishable in the log.
+    // The one-active-membership index: another tenant activated the user between
+    // the ownership read and this write. That tenant owns them now, so the answer
+    // is the ownership refusal's detail — a separate one told the token holder
+    // whether another tenant had the user active (round-7 R7-S3).
     if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
-      return scimError(409, "User already belongs to another organization", "uniqueness");
+      return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
     }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);

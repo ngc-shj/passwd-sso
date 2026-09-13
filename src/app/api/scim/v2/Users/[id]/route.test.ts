@@ -278,14 +278,17 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(mockRealignAfterActivation).not.toHaveBeenCalled();
   });
 
-  it("refuses PUT reactivation when the user is active in another tenant", async () => {
+  it("refuses PUT reactivation of a member active in another tenant, with the one detail and an audit row", async () => {
     // The guard the CREATE path has always had and the reactivation arms did
     // not. Reachable by a holder of THIS tenant's SCIM token — a principal with
     // no authority in the tenant the user actually belongs to. Two active
     // memberships makes `resolveUserTenantIdFromClient` throw, and the proxy
     // auth gate calls it on every request, so the effect is that this tenant can
     // invalidate every session of a user who belongs to another.
-    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+    // As production has it: an active membership in another tenant makes that
+    // tenant the owner (R7-T2). A fixture with one and not the other built a state
+    // that cannot exist, and let the refusal's order go unpinned.
+    ownership.active = [{ tenantId: "other-tenant" }];
 
     const res = await PUT(
       makeReq({
@@ -300,9 +303,18 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     );
 
     expect(res!.status).toBe(409);
+    // The detail a suspended user gets too (round-7 R7-S3).
+    expect(JSON.stringify(await res!.json())).toContain("cannot be provisioned by this organization");
     // Positive: nothing was written. A 409 with the update already applied would
     // be the same status and the opposite outcome.
     expect(mockTenantMember.update).not.toHaveBeenCalled();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SCIM_USER_REACTIVATION_REFUSED",
+        targetId: "user-1",
+        metadata: { reason: "owned_by_another_tenant" },
+      }),
+    );
   });
 
   it("refuses PUT reactivation of a member another tenant owns, though they are active nowhere", async () => {
@@ -323,6 +335,13 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
     expect(mockTenantMember.update).not.toHaveBeenCalled();
     expect(mockRealignAfterActivation).not.toHaveBeenCalled();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SCIM_USER_REACTIVATION_REFUSED",
+        targetId: "user-1",
+        metadata: { reason: "owned_by_another_tenant" },
+      }),
+    );
   });
 
   it("allows PUT reactivation when the user's only active membership is this tenant", async () => {
@@ -332,7 +351,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() })
       .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: null });
-    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "tenant-1" }]);
+    ownership.active = [{ tenantId: "tenant-1" }];
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     // Wired here, not inherited: `vi.clearAllMocks()` clears calls, not
     // implementations, so a cell that relied on a sibling's `$transaction` stub
@@ -363,6 +382,9 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
     expect(res!.status).toBe(200);
     expect(mockTenantMember.update).toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SCIM_USER_REACTIVATION_REFUSED" }),
+    );
   });
 
   it("answers 200 and logs when the realignment after a committed reactivation fails", async () => {
@@ -411,7 +433,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
       .mockResolvedValueOnce({ userId: "user-1", deactivatedAt: new Date() });
-    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+    ownership.active = [{ tenantId: "other-tenant" }];
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
     // Wired here, not inherited: `vi.clearAllMocks()` clears calls, not
     // implementations, so a cell that relied on a sibling's `$transaction` stub
@@ -951,11 +973,14 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     expect(res!.status).toBe(404);
   });
 
-  it("refuses PATCH reactivation when the user is active in another tenant", async () => {
+  it("refuses PATCH reactivation of a member active in another tenant, with the one detail and an audit row", async () => {
     // The PUT twin got three cells and this one got none — deleting the whole
     // PATCH guard block left the entire suite green (measured). Same twin-drift
     // shape the round itself was reviewing.
-    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+    // As production has it: an active membership in another tenant makes that
+    // tenant the owner (R7-T2). A fixture with one and not the other built a state
+    // that cannot exist, and let the refusal's order go unpinned.
+    ownership.active = [{ tenantId: "other-tenant" }];
 
     const res = await PATCH(
       makeReq({
@@ -969,9 +994,17 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     );
 
     expect(res!.status).toBe(409);
+    expect(JSON.stringify(await res!.json())).toContain("cannot be provisioned by this organization");
     // Nothing was written. A 409 with the update already applied is the same
     // status and the opposite outcome.
     expect(mockTenantMember.update).not.toHaveBeenCalled();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SCIM_USER_REACTIVATION_REFUSED",
+        targetId: "user-1",
+        metadata: { reason: "owned_by_another_tenant" },
+      }),
+    );
   });
 
   it("refuses PATCH reactivation of a member another tenant owns, though they are active nowhere", async () => {
@@ -992,6 +1025,13 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     expect(JSON.stringify(await res!.json())).toContain("cannot be provisioned by this organization");
     expect(mockTenantMember.update).not.toHaveBeenCalled();
     expect(mockRealignAfterActivation).not.toHaveBeenCalled();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SCIM_USER_REACTIVATION_REFUSED",
+        targetId: "user-1",
+        metadata: { reason: "owned_by_another_tenant" },
+      }),
+    );
   });
 
   it("does not refuse a name-only PATCH, which cannot reactivate", async () => {
@@ -1000,8 +1040,8 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     // display-name PATCH performs no transition — gating it on `!== false`
     // (PUT's predicate) 409'd it. PUT's schema defaults `active` to true and
     // writes unconditionally, so `!== false` is correct there and wrong here.
-    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
     ownership.column = "other-tenant";
+    ownership.active = [{ tenantId: "other-tenant" }];
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date("2024-01-01T00:00:00.000Z") })

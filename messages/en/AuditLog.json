@@ -144,6 +144,7 @@
   "SCIM_USER_UPDATE": "SCIM user updated",
   "SCIM_USER_DEACTIVATE": "SCIM user deactivated",
   "SCIM_USER_REACTIVATE": "SCIM user reactivated",
+  "SCIM_USER_REACTIVATION_REFUSED": "SCIM user reactivation refused (managed by another organization)",
   "SCIM_USER_DELETE": "SCIM user deleted",
   "SCIM_GROUP_UPDATE": "SCIM group membership updated",
   "WATCHTOWER_ALERT_SENT": "Watchtower breach alert sent",

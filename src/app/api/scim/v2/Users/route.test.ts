@@ -320,6 +320,7 @@ describe("POST /api/scim/v2/Users", () => {
     const res = await POST(postReq("elsewhere@example.com"));
 
     expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain("cannot be provisioned by this organization");
     // Nothing was provisioned: the tenant context never opened.
     expect(mockWithTenantRls).not.toHaveBeenCalled();
   });
@@ -385,11 +386,11 @@ describe("POST /api/scim/v2/Users", () => {
     expect(mockWithTenantRls).not.toHaveBeenCalled();
   });
 
-  it("does not refuse an inactive provision on the second-active-membership guard", async () => {
-    // F4: PUT's predicate. A membership created inactive cannot become a second
-    // active one, so the guard's answer does not apply to it.
-    existingUsers = [ownedUser("user-1", "inactive@example.com")];
-    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+  it("provisions a user this tenant owns, active or inactive, without a separate uniqueness read", async () => {
+    // Round-7 F-R7-4: owning the user means no active membership in another
+    // tenant, so the uniqueness read POST also made could refuse nobody. Its 409
+    // was unreachable, and it cost a bypass transaction per provision.
+    existingUsers = [ownedUser("user-1", "own@example.com")];
     applyTxHolder.current = {
       tenantMember: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -398,12 +399,9 @@ describe("POST /api/scim/v2/Users", () => {
       scimExternalMapping: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn(), deleteMany: vi.fn() },
     };
 
-    const inactive = await POST(postReq("inactive@example.com", { active: false }));
-    expect(inactive.status).toBe(201);
-
-    // The deny side: the same user provisioned active is still refused.
-    const active = await POST(postReq("inactive@example.com"));
-    expect(active.status).toBe(409);
+    expect((await POST(postReq("own@example.com", { active: false }))).status).toBe(201);
+    expect((await POST(postReq("own@example.com"))).status).toBe(201);
+    expect(mockGuardMember.findMany).not.toHaveBeenCalled();
   });
 
   it("answers 201 and logs when the realignment after a committed provision fails", async () => {

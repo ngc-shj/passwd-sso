@@ -71,9 +71,13 @@ export interface SyncResult {
 const REFUSAL_REASON = {
   /** The user holds an active membership in another tenant. */
   ACTIVE_IN_ANOTHER_TENANT: "active_in_another_tenant",
-  /** The user is owned by another tenant and has no membership here. */
+  /**
+   * Another tenant owns the user. For an email this tenant holds no membership
+   * for, also the answer when several users share it and any of them is another
+   * tenant's: naming that ambiguity told this tenant such a user exists (round-7 R7-S2).
+   */
   OWNED_BY_ANOTHER_TENANT: "owned_by_another_tenant",
-  /** Several existing users share the provider's email under different casing. */
+  /** Several existing users share the provider's email under different casing, all of them this tenant's. */
   AMBIGUOUS_EMAIL: "ambiguous_email",
 } as const;
 
@@ -495,7 +499,9 @@ export async function runDirectorySync(
     );
     const declinedAttachment = (pu: ProviderUser): RefusalReason | null => {
       const resolution = existingUsers.get(pu.email.toLowerCase());
-      if (resolution?.kind === "ambiguous") return REFUSAL_REASON.AMBIGUOUS_EMAIL;
+      if (resolution?.kind === "ambiguous") {
+        return resolution.ownedHere ? REFUSAL_REASON.AMBIGUOUS_EMAIL : REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT;
+      }
       if (resolution?.kind === "foreign" && !resolution.memberHere) {
         return REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT;
       }
@@ -515,8 +521,9 @@ export async function runDirectorySync(
 
     // 7. Apply changes (if not dryRun)
     if (!dryRun) {
-      // Members this run activated whose users row already existed. Their owning
-      // column may name another tenant, so each is realigned after the commit.
+      // Members this run activated whose users row already existed, realigned after
+      // the commit. A race backstop since round 6: the ownership checks let through
+      // only users this tenant owns, whose column already names it (round-7 F-R7-5).
       const activated: string[] = [];
       await withTenantRls(prisma, tenantId, async (tx) => {
         const userByEmail = new Map<string, { id: string }>();
@@ -565,10 +572,9 @@ export async function runDirectorySync(
               // tenant's internal id is not its to learn (round-6 R6-S4).
               userId: null,
               email: pu.email,
-              reason:
-                resolution?.kind === "ambiguous"
-                  ? REFUSAL_REASON.AMBIGUOUS_EMAIL
-                  : REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT,
+              // The lookup's answer; a foreign user whose membership row here was
+              // deleted since the lookup falls to the ownership reason.
+              reason: declinedAttachment(pu) ?? REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT,
             });
             continue;
           }

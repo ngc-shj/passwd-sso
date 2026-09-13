@@ -40,7 +40,6 @@ import {
   resolveUserTenantIdFromClient,
   resolveOwningTenantIdFromClient,
   realignOwningTenantColumn,
-  wouldCreateSecondActiveMembership,
   usersActiveInAnotherTenant,
   resolveExistingUsersForTenant,
   usersOwnedByAnotherTenant,
@@ -172,7 +171,7 @@ describe("resolveOwningTenantIdFromClient", () => {
   });
 });
 
-// ─── wouldCreateSecondActiveMembership ─────────────────────
+// ─── realignOwningTenantColumn ─────────────────────────────
 
 describe("realignOwningTenantColumn", () => {
   // The one writer that moves the column WITHOUT moving the rows it scopes. Its
@@ -223,29 +222,6 @@ describe("realignOwningTenantColumn", () => {
     });
   });
 });
-
-describe("wouldCreateSecondActiveMembership", () => {
-  it("is true when the only active membership is another tenant's", async () => {
-    mockFindMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
-
-    expect(await wouldCreateSecondActiveMembership("user-1", "this-tenant")).toBe(true);
-  });
-
-  it("is false when this tenant's membership is already active", async () => {
-    // Nothing is being activated, so nothing can become a second.
-    mockFindMany.mockResolvedValue([{ tenantId: "this-tenant" }]);
-
-    expect(await wouldCreateSecondActiveMembership("user-1", "this-tenant")).toBe(false);
-  });
-
-  it("is false when the user has no active membership anywhere", async () => {
-    // The ordinary reactivation, which must keep working.
-    mockFindMany.mockResolvedValue([]);
-
-    expect(await wouldCreateSecondActiveMembership("user-1", "this-tenant")).toBe(false);
-  });
-});
-
 
 // ─── usersActiveInAnotherTenant ────────────────────────────
 //
@@ -480,6 +456,14 @@ describe("usersOwnedByAnotherTenant", () => {
       new Set(["active-there"]),
     );
   });
+
+  it("leaves out a user with no users row, rather than calling them another tenant's", async () => {
+    // R7-T5: the documented contract. Reporting a missing row as foreign would
+    // refuse a reactivation for a user who does not exist, and no cell said so.
+    mockUserFindMany.mockResolvedValue([row("own", "this-tenant")]);
+
+    expect(await usersOwnedByAnotherTenant("this-tenant", ["own", "ghost"])).toEqual(new Set());
+  });
 });
 
 // ─── resolveExistingUsersForTenant ─────────────────────────
@@ -578,6 +562,18 @@ describe("resolveExistingUsersForTenant", () => {
     ]);
 
     expect((await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"])).get("erin@example.com"))
-      .toEqual({ kind: "ambiguous" });
+      .toEqual({ kind: "ambiguous", ownedHere: true });
+  });
+
+  it("does not call an ambiguity this tenant's own when another tenant's user is among the matches", async () => {
+    // Round-7 R7-S2: a producer answering "ambiguous" for such an email told this
+    // tenant that another tenant holds a case variant of it.
+    mockUserFindMany.mockResolvedValue([
+      user({ id: "u-1", email: "Erin@example.com" }),
+      user({ id: "u-2", email: "erin@EXAMPLE.com", tenantId: "other-tenant" }),
+    ]);
+
+    expect((await resolveExistingUsersForTenant("this-tenant", ["erin@example.com"])).get("erin@example.com"))
+      .toEqual({ kind: "ambiguous", ownedHere: false });
   });
 });

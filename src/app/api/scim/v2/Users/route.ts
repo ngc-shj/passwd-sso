@@ -19,7 +19,7 @@ import { scimUserSchema } from "@/lib/scim/validations";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { resolveExistingUsersForTenant, wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
+import { resolveExistingUsersForTenant } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { REALIGNMENT_SOURCE, realignAfterActivation } from "@/lib/tenant/tenant-realignment";
@@ -159,16 +159,10 @@ async function handlePOST(req: NextRequest) {
   if (resolution && resolution.kind !== "owned") {
     return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
   }
+  // No uniqueness read for an owned user: owning them means no active membership
+  // in another tenant, so that 409 could no longer be reached (round-7 F-R7-4).
+  // The race in which another tenant activates them first is the index handler's.
   const existingUserId = resolution?.kind === "owned" ? resolution.userId : null;
-  // `active !== false`, as PUT: a membership provisioned inactive cannot become a
-  // second active one, so it is not this guard's to refuse (F4).
-  if (
-    existingUserId &&
-    active !== false &&
-    (await wouldCreateSecondActiveMembership(existingUserId, tenantId))
-  ) {
-    return scimError(409, "User already belongs to another organization", "uniqueness");
-  }
 
   try {
     const created = await withTenantRls(prisma, tenantId, async (tx) => {
@@ -279,12 +273,12 @@ async function handlePOST(req: NextRequest) {
     if (isScimExternalMappingUniqueViolation(e)) {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
     }
-    // The one-active-membership index, reached only on the race the guard above
-    // cannot close: it runs in its own context a round trip earlier, and another
-    // tenant can activate in between. Mapped to the same 409 the guard returns,
-    // with its own message so the two are distinguishable in the log.
+    // The one-active-membership index: another tenant activated the user between
+    // the ownership read and this write. That tenant owns them now, so the answer
+    // is the ownership refusal's detail — a separate one told the token holder
+    // whether another tenant had the user active (round-7 R7-S3).
     if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
-      return scimError(409, "User already belongs to another organization", "uniqueness");
+      return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
     }
     // Cross-tenant email collision: user.email is globally unique
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
