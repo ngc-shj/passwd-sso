@@ -128,6 +128,24 @@ describe("replaceScimGroup", () => {
     expect(result.removed).toBe(0);
   });
 
+  it("reports only members with an active membership in this tenant", async () => {
+    mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
+    mockTeamMemberFindMany.mockResolvedValue([]);
+
+    await replaceScimGroup(
+      TENANT_ID,
+      SCIM_ID,
+      { displayName: "core:ADMIN", memberUserIds: [] },
+      BASE_URL,
+    );
+
+    // The last teamMember read is loadGroupMembers, after the writes.
+    const loadCall = mockTeamMemberFindMany.mock.calls.at(-1)?.[0];
+    expect(loadCall.where.user).toEqual({
+      tenantMemberships: { some: { tenantId: TENANT_ID, deactivatedAt: null } },
+    });
+  });
+
   it("removes multiple users in a single batch", async () => {
     mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     const currentMembers = [

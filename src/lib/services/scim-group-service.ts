@@ -111,11 +111,23 @@ function buildGroupResource(
 
 async function loadGroupMembers(
   db: TxOrPrisma,
+  tenantId: string,
   teamId: string,
   role: TeamRole,
 ): Promise<ScimGroupMemberInput[]> {
   const members = await db.teamMember.findMany({
-    where: { teamId, role, deactivatedAt: null },
+    where: {
+      teamId,
+      role,
+      deactivatedAt: null,
+      // Only users with an ACTIVE membership in this tenant. A team guest from
+      // another primary tenant is not this IdP's user to report, and their users
+      // row is one RLS hides in this context: the REQUIRED relation came back null
+      // for them (measured: Prisma does not throw) and reading its email failed
+      // the whole group. The filter is itself evaluated through that relation, so
+      // a hidden user is excluded here rather than dereferenced below.
+      user: { tenantMemberships: { some: { tenantId, deactivatedAt: null } } },
+    },
     include: { user: { select: { id: true, email: true } } },
   });
   return members
@@ -256,7 +268,7 @@ export async function fetchScimGroup(
   });
   if (!mapping) return null;
 
-  const members = await loadGroupMembers(db, mapping.teamId, mapping.role);
+  const members = await loadGroupMembers(db, tenantId, mapping.teamId, mapping.role);
   return buildGroupResource(
     mapping.externalGroupId,
     toDisplayName(mapping.team.slug, mapping.role),
@@ -341,7 +353,7 @@ export async function replaceScimGroup(
     rethrowScimGroupErrors(e);
   }
 
-  const members = await loadGroupMembers(db, mapping.teamId, mapping.role);
+  const members = await loadGroupMembers(db, tenantId, mapping.teamId, mapping.role);
   const resource = buildGroupResource(
     mapping.externalGroupId,
     toDisplayName(mapping.team.slug, mapping.role),
@@ -430,7 +442,7 @@ export async function patchScimGroup(
     rethrowScimGroupErrors(e);
   }
 
-  const members = await loadGroupMembers(db, mapping.teamId, mapping.role);
+  const members = await loadGroupMembers(db, tenantId, mapping.teamId, mapping.role);
   const resource = buildGroupResource(
     mapping.externalGroupId,
     toDisplayName(mapping.team.slug, mapping.role),

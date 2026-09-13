@@ -129,6 +129,17 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
       expect.objectContaining({ value: "user-2", display: "u2@example.com" }),
     ]);
   });
+
+  it("reports only members with an active membership in this tenant", async () => {
+    mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
+    mockTeamMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeReq(), makeParams("grp-1"));
+    expect(res.status).toBe(200);
+    expect(mockTeamMember.findMany.mock.calls[0][0].where.user).toEqual({
+      tenantMemberships: { some: { tenantId: "tenant-1", deactivatedAt: null } },
+    });
+  });
 });
 
 describe("PATCH /api/scim/v2/Groups/[id]", () => {

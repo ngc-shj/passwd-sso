@@ -833,6 +833,23 @@ is corrected here and in the comments.
 - Red proof: re-adding both relations to the service's includes failed the two new
   route cells; swapping the bypass purpose failed the same two.
 
+##### Resolution — SCIM Groups
+
+- Action: the three member reads — the list's batch query, the create response's
+  `loadGroupMembers`, and `loadGroupMembers` in scim-group-service behind GET, PUT
+  and PATCH — now require an active membership in the authenticated tenant,
+  written as a relation filter. This is the remedy decided for this member rather
+  than hydration: a team guest from another primary tenant is not this IdP's user,
+  and hydrating would hand their email to it. The filter is evaluated through the
+  users relation itself, so a row whose user RLS hides is excluded before anything
+  reads its email; the dereference that failed the whole group cannot be reached.
+- What it still depends on: an active member here whose owning column is stale is
+  excluded too, silently, until the column is realigned. Closing the producers of
+  that state is U2.
+- Red proof: removing the predicate from the service failed the service cell and
+  the `[id]` GET cell; removing it from the route's two queries failed the list and
+  create cells.
+
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 
 - Action: an admin-authorized reset is refused while the target still owns
