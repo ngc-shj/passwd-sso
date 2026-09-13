@@ -17,7 +17,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mock
       findFirst: vi.fn(),
       create: vi.fn(),
     },
-    mockPrismaUser: { findUnique: vi.fn() },
+    mockPrismaUser: { findUnique: vi.fn(), findMany: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn() },
     mockPrismaTeamMember: { findUnique: vi.fn() },
     mockRequireTeamPermission: vi.fn(),
@@ -49,6 +49,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 }));
 
 import { GET, POST } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
 
 const TEAM_ID = "team-123";
@@ -89,9 +90,10 @@ describe("GET /api/teams/[teamId]/invitations", () => {
         status: INVITATION_STATUS.PENDING,
         expiresAt: now,
         createdAt: now,
-        invitedBy: { id: "u1", name: "Admin", email: "admin@test.com" },
+        invitedById: "u1",
       },
     ]);
+    mockPrismaUser.findMany.mockResolvedValue([{ id: "u1", name: "Admin", email: "admin@test.com", image: null }]);
 
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`),
@@ -102,6 +104,37 @@ describe("GET /api/teams/[teamId]/invitations", () => {
     expect(json).toHaveLength(1);
     expect(json[0].email).toBe("user@test.com");
     expect(json[0]).not.toHaveProperty("token");
+    expect(json[0].invitedBy).toEqual({ id: "u1", name: "Admin", email: "admin@test.com" });
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+  });
+
+  it("lists an invitation whose inviter's users row does not come back, with an id-only inviter, and reads no user relation in the tenant context", async () => {
+    mockPrismaTeamInvitation.findMany.mockResolvedValue([
+      {
+        id: "inv-1",
+        email: "user@test.com",
+        role: TEAM_ROLE.MEMBER,
+        token: "abc123",
+        status: INVITATION_STATUS.PENDING,
+        expiresAt: now,
+        createdAt: now,
+        invitedById: "u-departed",
+      },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json[0].invitedBy).toEqual({ id: "u-departed", name: null, email: null });
+    expect(mockPrismaTeamInvitation.findMany.mock.calls[0][0]).not.toHaveProperty("include");
   });
 });
 

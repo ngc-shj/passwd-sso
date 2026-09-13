@@ -12,10 +12,16 @@ const { mockRequireTeamMember } = vi.hoisted(() => ({
   mockRequireTeamMember: vi.fn(),
 }));
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findMany: mockFindMany },
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/auth/access/team-auth", () => ({
@@ -31,6 +37,10 @@ vi.mock("@/lib/auth/access/team-auth", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { GET } from "@/app/api/share-links/mine/route";
@@ -49,7 +59,6 @@ function makeShare(overrides: Record<string, unknown> = {}) {
     revokedAt: null,
     createdAt: new Date(),
     createdById: DEFAULT_SESSION.user.id,
-    createdBy: { id: DEFAULT_SESSION.user.id, name: "Alice", email: "alice@example.com" },
     passwordEntryId: "pe-1",
     teamPasswordEntryId: null,
     passwordEntry: { id: "pe-1" },
@@ -62,6 +71,10 @@ describe("GET /api/share-links/mine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequireTeamMember.mockResolvedValue({ id: "member-1", role: TEAM_ROLE.ADMIN });
+    mockUserFindMany.mockResolvedValue([
+      { id: DEFAULT_SESSION.user.id, name: "Alice", email: "alice@example.com", image: null },
+      { id: "user-2", name: "Bob", email: "bob@example.com", image: null },
+    ]);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -140,7 +153,7 @@ describe("GET /api/share-links/mine", () => {
       makeShare({
         passwordEntryId: null,
         teamPasswordEntryId: "ope-1",
-        createdBy: { id: "user-2", name: "Bob", email: "bob@example.com" },
+        createdById: "user-2",
         passwordEntry: null,
         teamPasswordEntry: { id: "ope-1", team: { name: "Acme Corp" } },
       }),

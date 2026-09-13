@@ -19,7 +19,7 @@ import {
   isValidCursorId,
 } from "@/lib/audit/audit-query";
 import type { Prisma } from "@prisma/client";
-import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
+import { displayUserOf, fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
@@ -72,9 +72,10 @@ async function handleGET(
         tenantId: actor.tenantId,
         requesterId: userId,
       },
-      include: {
-        targetUser: { select: { id: true, name: true, email: true, image: true } },
-      },
+      // The target's identity is looked up below with the log actors, outside
+      // this tenant context: a target who has since left this tenant has a users
+      // row RLS hides here, and the REQUIRED relation came back null — measured:
+      // Prisma does not throw.
     }),
   );
 
@@ -230,7 +231,7 @@ async function handleGET(
   const { items, nextCursor } = paginateResult(logs, limit);
 
   // Batch-lookup user display info
-  const bgUserMap = await fetchAuditUserMap(items.map((l) => l.userId));
+  const bgUserMap = await fetchAuditUserMap([...items.map((l) => l.userId), grant.targetUserId]);
 
   return NextResponse.json({
     items: items.map((log) => {
@@ -251,7 +252,7 @@ async function handleGET(
     // No entryOverviews — admin cannot decrypt the target user's vault
     grant: {
       grantId: grant.id,
-      targetUser: grant.targetUser,
+      targetUser: displayUserOf(bgUserMap, grant.targetUserId),
       expiresAt: grant.expiresAt,
     },
   });

@@ -46,10 +46,16 @@ const {
   };
 });
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     operatorToken: mockPrismaOperatorToken,
+    user: { findMany: mockUserFindMany },
     // The cap-check + create now run under an advisory lock inside one
     // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
     // lock before count/create. The withTenantRls mock passes prisma as tx.
@@ -63,6 +69,7 @@ vi.mock("@/lib/auth/access/tenant-auth", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -80,6 +87,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { GET, POST } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 // Module-scope snapshot: route.ts's module-level `createRateLimiter(...)`
 // call runs at import time above. Must be captured before any
@@ -146,17 +154,53 @@ describe("GET /api/tenant/operator-tokens", () => {
         createdAt: new Date("2026-04-27"),
         subjectUserId: USER_ID,
         createdByUserId: USER_ID,
-        subjectUser: { id: USER_ID, name: "Test User", email: "test@example.com" },
-        createdBy: { id: USER_ID, name: "Test User", email: "test@example.com" },
       },
     ];
     mockPrismaOperatorToken.findMany.mockResolvedValue(tokens);
+    mockUserFindMany.mockResolvedValue([
+      { id: USER_ID, name: "Test User", email: "test@example.com", image: null },
+    ]);
 
     const res = await GET(createRequest("GET", "http://localhost/api/tenant/operator-tokens"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.tokens).toHaveLength(1);
     expect(body.tokens[0].id).toBe("tok-1");
+    expect(body.tokens[0].subjectUser).toEqual({ id: USER_ID, name: "Test User", email: "test@example.com" });
+    expect(body.tokens[0].createdBy).toEqual({ id: USER_ID, name: "Test User", email: "test@example.com" });
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+  });
+
+  it("lists a token whose creator RLS hides, with an id-only creator, and reads no user relation in the tenant context", async () => {
+    mockPrismaOperatorToken.findMany.mockResolvedValue([
+      {
+        id: "tok-1",
+        prefix: "op_xxxxx",
+        name: "My token",
+        scope: "maintenance",
+        expiresAt: new Date("2026-12-01"),
+        revokedAt: null,
+        lastUsedAt: null,
+        createdAt: new Date("2026-04-27"),
+        subjectUserId: USER_ID,
+        createdByUserId: "user-departed",
+      },
+    ]);
+    mockUserFindMany.mockResolvedValue([
+      { id: USER_ID, name: "Test User", email: "test@example.com", image: null },
+    ]);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/operator-tokens"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tokens[0].createdBy).toEqual({ id: "user-departed", name: null, email: null });
+    const { select } = mockPrismaOperatorToken.findMany.mock.calls[0][0];
+    expect(select).not.toHaveProperty("subjectUser");
+    expect(select).not.toHaveProperty("createdBy");
   });
 
   it("returns 429 when rate limited", async () => {

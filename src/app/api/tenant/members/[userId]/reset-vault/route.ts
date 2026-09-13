@@ -13,7 +13,8 @@ import {
   isTenantRoleAbove,
 } from "@/lib/auth/access/tenant-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
@@ -309,10 +310,10 @@ async function handleGET(
       const [resets, targetMember] = await Promise.all([
         tx.adminVaultReset.findMany({
           where: { targetUserId, tenantId: actor.tenantId },
-          include: {
-            initiatedBy: { select: { id: true, name: true, email: true } },
-            approvedBy: { select: { id: true, name: true, email: true } },
-          },
+          // Initiator and approver are hydrated below, outside this tenant
+          // context: an admin who has since left this tenant has a users row RLS
+          // hides here; the REQUIRED initiator relation came back null (Prisma does
+          // not throw) and dereferencing it failed the whole history.
           orderBy: { createdAt: "desc" },
           take: VAULT_RESET_HISTORY_LIMIT,
         }),
@@ -329,6 +330,10 @@ async function handleGET(
     },
   );
 
+  const users = await fetchUserDisplayMap(
+    resets.flatMap((r) => [r.initiatedById, r.approvedById]),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
   // Deactivated/missing target → no admin can be strictly above them, so
   // every row's eligibility collapses to insufficient_role (UI hides the
   // button rather than surfacing an action the server would reject).
@@ -352,14 +357,8 @@ async function handleGET(
       approvedAt: r.approvedAt,
       executedAt: r.executedAt,
       revokedAt: r.revokedAt,
-      initiatedBy: {
-        id: r.initiatedBy.id,
-        name: r.initiatedBy.name,
-        email: r.initiatedBy.email,
-      },
-      approvedBy: r.approvedBy
-        ? { id: r.approvedBy.id, name: r.approvedBy.name, email: r.approvedBy.email }
-        : null,
+      initiatedBy: displayIdentityOf(users, r.initiatedById),
+      approvedBy: r.approvedById ? displayIdentityOf(users, r.approvedById) : null,
       // Backfilled rows (very old data) may have null targetEmailAtInitiate;
       // empty string is the safe display value.
       targetEmailAtInitiate: r.targetEmailAtInitiate ?? "",

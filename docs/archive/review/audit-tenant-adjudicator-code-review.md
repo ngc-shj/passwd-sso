@@ -752,9 +752,28 @@ name-keyed pass that its generic relation descent still defeats.
 
 S2 was fixed at `api/tenant/members` without deriving its member set. Derived from
 the schema — a read whose projection reaches a REQUIRED to-one `User` relation —
-there are 33 such reads (a positive control found 2 of 2). Under
+there are 33 such reads (a positive control found 2 of 2); counting writes that
+return the relation (`update`, `create`) adds four more. Under
 `users_tenant_isolation` a tenant context cannot see a user whose owning-tenant
-column names another tenant, and the required relation then fails the query.
+column names another tenant.
+
+What that does was MEASURED, not assumed — a throwaway integration test, app role,
+tenant A context, a deactivated membership in A for a user owned by B:
+
+- `include` of the required `user` relation, via `findMany` and via `findUnique`:
+  the membership row comes back with `user: null`. Prisma does NOT throw.
+- a relation filter (`where: { user: { is: { … } } }`): the row is silently
+  excluded.
+- the `users` row itself: `null`.
+
+So the failure is never the query. It is the null a non-null type promised: a
+server-side dereference that takes the whole response down (the member list, the
+reset history, the revoke notification, the share-link page, SCIM Groups, the
+directory-sync load phase); a null handed to the client (operator tokens, service
+accounts, break-glass, team invitations and history); or a silent omission (the
+SCIM user list's email filter). Earlier text in this document and in several code
+comments said the relation "fails the query"; that mechanism was never observed and
+is corrected here and in the comments.
 
 - Safe: 9 under a bypass; 1 reading the caller's own row; 5 restricted to active
   memberships, which hold an aligned column once U2's producers are closed.
@@ -773,6 +792,37 @@ column names another tenant, and the required relation then fails the query.
   realignment: it was not. Before it, a divergent user (column B, active membership
   A) broke the same reads in tenant A; the realignment moves the breakage to the
   tenant the user left.
+- Correction to the classification above: `share-links/mine` was counted as
+  reading the caller's own row. In the team context it lists every member's shares,
+  so it is a reachable team-context read like the others.
+
+##### Resolution — the members a route owns
+
+- Action: operator tokens, service accounts (list; detail GET and PUT), break-glass
+  (list and logs), the reset history, the reset revoke notification, team
+  invitations, team password history and `share-links/mine` no longer read the
+  user relation inside the tenant or team context. They keep the foreign key and
+  hydrate it after the context closes through `fetchUserDisplayMap`
+  (`CROSS_TENANT_LOOKUP`). A row that does not come back yields
+  `{ id, name: null, email: null }` (`displayUserOf` / `displayIdentityOf`), so each
+  response keeps its shape instead of carrying a null its type rules out. The
+  revoke notification reads the target's contact through `fetchUserContact`, and
+  only when a membership row in this tenant exists.
+- Constraint that shapes the rest: `withBypassRls` refuses to open inside an RLS
+  context, so hydration can only run after the context closes. The members still
+  open — the SCIM user and group reads, the directory-sync load phase, team
+  password creators and updaters — run inside a context a service owns, so each
+  needs its own restructuring and lands separately.
+- Tests: a cell per route for an identity that does not come back and for the
+  absence of the relation in the context-scoped query, in both test trees where a
+  module has two. Several existing cells were vacuous: their fixtures omitted the
+  foreign-key column, so hydration never ran and nothing checked the identity
+  (team invitations, service accounts).
+- Red proof, on worktree copies: removing the placeholder failed the ten id-only
+  cells plus two existing cells whose fixture ids miss the lookup; re-adding the
+  relation to each query and dropping the revoke membership gate failed exactly the
+  twelve cells written for them; swapping the bypass purpose failed the eight
+  purpose cells.
 
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 

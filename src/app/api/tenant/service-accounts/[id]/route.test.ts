@@ -32,6 +32,11 @@ const {
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
@@ -58,10 +63,12 @@ vi.mock("@/lib/prisma", () => ({
       updateMany: mockServiceAccountTokenUpdateMany,
     },
     $transaction: mockPrismaArrayTransaction,
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -79,6 +86,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { GET, PUT, DELETE } from "@/app/api/tenant/service-accounts/[id]/route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
@@ -94,7 +102,7 @@ const makeSA = (overrides: Record<string, unknown> = {}) => ({
   tenantId: "tenant-1",
   createdAt: new Date(),
   updatedAt: new Date(),
-  createdBy: { id: DEFAULT_SESSION.user.id, name: "Test User", email: "user@example.com" },
+  createdById: DEFAULT_SESSION.user.id,
   _count: { tokens: 2 },
   ...overrides,
 });
@@ -106,6 +114,7 @@ describe("GET /api/tenant/service-accounts/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockServiceAccountFindUnique.mockResolvedValue(makeSA());
+    mockUserFindMany.mockResolvedValue([{ id: DEFAULT_SESSION.user.id, name: "Test User", email: "user@example.com", image: null }]);
 
     const req = createRequest("GET", `http://localhost/api/tenant/service-accounts/${SA_ID}`);
     const res = await GET(req, createParams({ id: SA_ID }));
@@ -114,6 +123,29 @@ describe("GET /api/tenant/service-accounts/[id]", () => {
     expect(status).toBe(200);
     expect(json.id).toBe(SA_ID);
     expect(json.name).toBe("ci-bot");
+    expect(json.createdBy).toEqual({ id: DEFAULT_SESSION.user.id, name: "Test User", email: "user@example.com" });
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+  });
+
+  it("returns an account whose creator's users row does not come back, with an id-only creator, and reads no user relation in the tenant context", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue(makeSA({ createdById: "user-departed" }));
+    mockUserFindMany.mockResolvedValue([]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/tenant/service-accounts/${SA_ID}`),
+      createParams({ id: SA_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.createdBy).toEqual({ id: "user-departed", name: null, email: null });
+    expect(mockServiceAccountFindUnique.mock.calls[0][0].select).not.toHaveProperty("createdBy");
   });
 
   it("returns 404 when service account not found", async () => {
@@ -183,6 +215,8 @@ describe("PUT /api/tenant/service-accounts/[id]", () => {
 
     expect(status).toBe(200);
     expect(json.name).toBe("ci-bot-v2");
+    expect(json.createdBy).toEqual({ id: DEFAULT_SESSION.user.id, name: null, email: null });
+    expect(mockServiceAccountUpdate.mock.calls[0][0].select).not.toHaveProperty("createdBy");
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SERVICE_ACCOUNT_UPDATE",

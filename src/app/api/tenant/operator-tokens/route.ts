@@ -10,7 +10,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import {
@@ -95,7 +96,7 @@ async function handleGET(req: NextRequest) {
   const rl = await listTokenLimiter.check(`rl:op_token_list:${session.user.id}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
-  const tokens = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+  const rows = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.operatorToken.findMany({
       where: { tenantId: actor.tenantId },
       select: {
@@ -109,12 +110,24 @@ async function handleGET(req: NextRequest) {
         createdAt: true,
         subjectUserId: true,
         createdByUserId: true,
-        subjectUser: { select: { id: true, name: true, email: true } },
-        createdBy: { select: { id: true, name: true, email: true } },
+        // Identity is hydrated below, outside this tenant context. A token whose
+        // subject or creator has since left this tenant has a users row RLS hides
+        // here, and the REQUIRED relation comes back null for it — measured: Prisma
+        // does not throw — so this route returned a null its type says cannot exist.
       },
       orderBy: { createdAt: "desc" },
     }),
   );
+
+  const users = await fetchUserDisplayMap(
+    rows.flatMap((r) => [r.subjectUserId, r.createdByUserId]),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+  const tokens = rows.map((r) => ({
+    ...r,
+    subjectUser: displayIdentityOf(users, r.subjectUserId),
+    createdBy: displayIdentityOf(users, r.createdByUserId),
+  }));
 
   return NextResponse.json({ tokens });
 }

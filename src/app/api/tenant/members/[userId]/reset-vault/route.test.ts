@@ -85,6 +85,10 @@ const {
   };
 });
 
+const { mockUserFindMany } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
@@ -104,6 +108,7 @@ vi.mock("@/lib/prisma", () => ({
     // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the lock
     // before count/create. mockWithTenantRls passes this prisma object as tx.
     $executeRaw: mockExecuteRaw,
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -611,8 +616,6 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     approvedById: null,
     executedAt: null,
     revokedAt: null,
-    initiatedBy: { id: ACTOR_USER_ID, name: "Admin User", email: "admin@example.com" },
-    approvedBy: null,
   };
 
   beforeEach(() => {
@@ -620,6 +623,10 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     mockAuth.mockResolvedValue({ user: { id: ACTOR_USER_ID } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockPrismaAdminVaultResetFindMany.mockResolvedValue([BASE_RESET]);
+    mockUserFindMany.mockResolvedValue([
+      { id: ACTOR_USER_ID, name: "Admin User", email: "admin@example.com", image: null },
+      { id: "approver-1", name: "Approver", email: "approver@example.com", image: null },
+    ]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -682,7 +689,6 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
         ...BASE_RESET,
         approvedAt: new Date("2024-01-01T01:00:00Z"),
         approvedById: "approver-1",
-        approvedBy: { id: "approver-1", name: "Approver", email: "approver@example.com" },
       },
     ]);
     const res = await GET(
@@ -812,5 +818,17 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     expect(json).toHaveLength(1);
     // ACTION is hierarchy-gated: the row is not approvable by this actor.
     expect(json[0].approveEligibility).toBe("insufficient_role");
+  });
+
+  it("returns the history when the initiator's users row is hidden, with an id-only initiator, and reads no user relation in the tenant context", async () => {
+    mockUserFindMany.mockResolvedValue([]);
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json[0].initiatedBy).toEqual({ id: ACTOR_USER_ID, name: null, email: null });
+    expect(mockPrismaAdminVaultResetFindMany.mock.calls[0][0]).not.toHaveProperty("include");
   });
 });

@@ -42,9 +42,10 @@ async function handleGET(req: NextRequest) {
           scimManaged: true,
           // Identity is NOT read through the relation. `users_tenant_isolation`
           // filters a member whose `users` row lives in another tenant — an
-          // ordinary outcome of a realignment — and because the relation is
-          // REQUIRED, that filtered row took the whole member list down rather
-          // than just its own entry. Hydrated below, outside this context.
+          // ordinary outcome of a realignment — and the REQUIRED relation comes
+          // back null for that row (measured: Prisma does not throw), so reading
+          // its name took the whole member list down. Hydrated below, outside
+          // this context.
         },
         orderBy: { createdAt: "asc" },
       }),

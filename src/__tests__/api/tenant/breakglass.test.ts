@@ -32,6 +32,11 @@ const {
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
@@ -50,6 +55,7 @@ vi.mock("@/lib/auth/access/tenant-auth", () => {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     tenantMember: { findFirst: mockTenantMemberFindFirst },
+    user: { findMany: mockUserFindMany },
     personalLogAccessGrant: {
       findFirst: mockPersonalLogAccessGrantFindFirst,
       create: mockPersonalLogAccessGrantCreate,
@@ -60,6 +66,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -266,12 +273,10 @@ describe("GET /api/tenant/breakglass", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     const grant = makeGrant();
-    mockPersonalLogAccessGrantFindMany.mockResolvedValue([
-      {
-        ...grant,
-        requester: { id: DEFAULT_SESSION.user.id, name: "Test User", email: "user@example.com", image: null },
-        targetUser: { id: TARGET_USER_ID, name: "Target User", email: "target@example.com", image: null },
-      },
+    mockPersonalLogAccessGrantFindMany.mockResolvedValue([grant]);
+    mockUserFindMany.mockResolvedValue([
+      { id: DEFAULT_SESSION.user.id, name: "Test User", email: "user@example.com", image: null },
+      { id: TARGET_USER_ID, name: "Target User", email: "target@example.com", image: null },
     ]);
     const req = createRequest("GET", "http://localhost/api/tenant/breakglass");
     const res = await GET(req);
@@ -280,6 +285,7 @@ describe("GET /api/tenant/breakglass", () => {
     expect(Array.isArray(json.items)).toBe(true);
     expect(json.items).toHaveLength(1);
     expect(json.items[0].id).toBe(GRANT_ID);
+    expect(json.items[0].targetUser.name).toBe("Target User");
   });
 
   it("computes status as active for non-expired, non-revoked grant", async () => {
@@ -290,7 +296,7 @@ describe("GET /api/tenant/breakglass", () => {
       revokedAt: null,
     });
     mockPersonalLogAccessGrantFindMany.mockResolvedValue([
-      { ...activeGrant, requester: null, targetUser: null },
+      activeGrant,
     ]);
     const req = createRequest("GET", "http://localhost/api/tenant/breakglass");
     const res = await GET(req);
@@ -306,7 +312,7 @@ describe("GET /api/tenant/breakglass", () => {
       revokedAt: null,
     });
     mockPersonalLogAccessGrantFindMany.mockResolvedValue([
-      { ...expiredGrant, requester: null, targetUser: null },
+      expiredGrant,
     ]);
     const req = createRequest("GET", "http://localhost/api/tenant/breakglass");
     const res = await GET(req);
@@ -321,7 +327,7 @@ describe("GET /api/tenant/breakglass", () => {
       revokedAt: new Date(Date.now() - 30 * MS_PER_MINUTE),
     });
     mockPersonalLogAccessGrantFindMany.mockResolvedValue([
-      { ...revokedGrant, requester: null, targetUser: null },
+      revokedGrant,
     ]);
     const req = createRequest("GET", "http://localhost/api/tenant/breakglass");
     const res = await GET(req);

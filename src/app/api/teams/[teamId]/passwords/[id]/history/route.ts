@@ -6,6 +6,8 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -40,8 +42,15 @@ async function handleGET(req: NextRequest, { params }: Params) {
       where: { entryId: id },
       orderBy: { changedAt: "desc" },
       take: HISTORY_PAGE_SIZE,
-      include: { changedBy: { select: { id: true, name: true, email: true } } },
+      // The changer is hydrated below, outside the team's tenant context: a guest
+      // from another primary tenant, or a member who has since left, has a users
+      // row RLS hides there, and the REQUIRED relation comes back null — measured:
+      // Prisma does not throw.
     }),
+  );
+  const changers = await fetchUserDisplayMap(
+    histories.map((h) => h.changedById),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
 
   return NextResponse.json(
@@ -57,7 +66,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       teamKeyVersion: h.teamKeyVersion,
       itemKeyVersion: h.itemKeyVersion,
       changedAt: h.changedAt,
-      changedBy: h.changedBy,
+      changedBy: displayIdentityOf(changers, h.changedById),
     })),
   );
 }

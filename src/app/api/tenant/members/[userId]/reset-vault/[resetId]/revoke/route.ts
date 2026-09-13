@@ -10,13 +10,14 @@ import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
 } from "@/lib/auth/access/tenant-auth";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { fetchUserContact } from "@/lib/audit/audit-user-lookup";
 
 export const runtime = "nodejs";
 
@@ -122,20 +123,25 @@ async function handlePOST(
   }
 
   // Fetch target user for notification + email
-  const targetUser = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+  const targetMember = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.tenantMember.findFirst({
       where: {
         tenantId: actor.tenantId,
         userId: targetUserId,
       },
-      include: {
-        user: { select: { email: true, name: true, locale: true } },
-      },
+      select: { id: true },
     }),
   );
+  // Contact details are read outside the tenant context: a target who has since
+  // left this tenant has a users row RLS hides here, and the REQUIRED relation
+  // this read used to include came back null (Prisma does not throw); reading its
+  // locale threw after the revoke had already committed.
+  const targetUser = targetMember
+    ? await fetchUserContact(targetUserId, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
+    : null;
 
   if (targetUser) {
-    const locale = resolveUserLocale(targetUser.user.locale);
+    const locale = resolveUserLocale(targetUser.locale);
 
     createNotification({
       userId: targetUserId,
@@ -145,10 +151,10 @@ async function handlePOST(
       body: notificationBody("ADMIN_VAULT_RESET_REVOKED", locale),
     });
 
-    if (targetUser.user.email) {
+    if (targetUser.email) {
       const adminName = session.user.name ?? session.user.email ?? "";
       const { subject, html, text } = adminVaultResetRevokedEmail(locale, adminName);
-      void sendEmail({ to: targetUser.user.email, subject, html, text });
+      void sendEmail({ to: targetUser.email, subject, html, text });
     }
   }
 

@@ -5,7 +5,8 @@ import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { GRANT_STATUS } from "@/lib/constants/integrations/breakglass";
 import type { GrantStatus } from "@/lib/constants/integrations/breakglass";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
@@ -250,15 +251,18 @@ async function handleGET(_req: NextRequest) {
   const grants = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.personalLogAccessGrant.findMany({
       where: { tenantId: actor.tenantId },
-      include: {
-        requester: { select: { id: true, name: true, email: true, image: true } },
-        targetUser: { select: { id: true, name: true, email: true, image: true } },
-      },
+      // Requester and target are hydrated below, outside this tenant context:
+      // either may have since left this tenant, and a REQUIRED relation to a
+      // users row RLS hides comes back null — measured: Prisma does not throw.
       orderBy: { createdAt: "desc" },
       take: BREAKGLASS_USER_LIST_LIMIT,
     }),
   );
 
+  const users = await fetchUserDisplayMap(
+    grants.flatMap((g) => [g.requesterId, g.targetUserId]),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
   const now = new Date();
 
   return NextResponse.json({
@@ -283,8 +287,8 @@ async function handleGET(_req: NextRequest) {
         revokedAt: grant.revokedAt,
         createdAt: grant.createdAt,
         status,
-        requester: grant.requester,
-        targetUser: grant.targetUser,
+        requester: displayUserOf(users, grant.requesterId),
+        targetUser: displayUserOf(users, grant.targetUserId),
       };
     }),
   });
