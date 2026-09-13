@@ -824,6 +824,15 @@ is corrected here and in the comments.
   twelve cells written for them; swapping the bypass purpose failed the eight
   purpose cells.
 
+##### Resolution — team password creators and updaters
+
+- Action: `listTeamPasswords` and `getTeamPassword` no longer include `createdBy` or
+  `updatedBy`; they return the two ids, and the list and detail routes hydrate them
+  after `withTeamTenantRls` closes, in the same response shape (creator with image,
+  updater without).
+- Red proof: re-adding both relations to the service's includes failed the two new
+  route cells; swapping the bypass purpose failed the same two.
+
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 
 - Action: an admin-authorized reset is refused while the target still owns

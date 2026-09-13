@@ -9,6 +9,8 @@ import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { displayIdentityOf, displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
@@ -58,7 +60,19 @@ async function handleGET(req: NextRequest, { params }: Params) {
   // Trash auto-purge runs in the retention-gc worker (PER_TENANT_TRASH registry
   // entry for team_password_entries), not on this read path. GET is read-only.
 
-  return NextResponse.json(entries);
+  // Identity is hydrated after the team context closes; see listTeamPasswords.
+  const users = await fetchUserDisplayMap(
+    entries.flatMap((e) => [e.createdById, e.updatedById]),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+
+  return NextResponse.json(
+    entries.map(({ createdById, updatedById, ...entry }) => ({
+      ...entry,
+      createdBy: displayUserOf(users, createdById),
+      updatedBy: displayIdentityOf(users, updatedById),
+    })),
+  );
 }
 
 // POST /api/teams/[teamId]/passwords — Create team password (E2E: client encrypts)

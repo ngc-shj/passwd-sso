@@ -12,6 +12,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { displayIdentityOf, displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
@@ -43,6 +45,12 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  // Identity is hydrated after the team context closes; see listTeamPasswords.
+  const users = await fetchUserDisplayMap(
+    [entry.createdById, entry.updatedById],
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+
   return NextResponse.json({
     id: entry.id,
     entryType: entry.entryType,
@@ -50,8 +58,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     isArchived: entry.isArchived,
     teamFolderId: entry.teamFolderId,
     tags: entry.tags,
-    createdBy: entry.createdBy,
-    updatedBy: entry.updatedBy,
+    createdBy: displayUserOf(users, entry.createdById),
+    updatedBy: displayIdentityOf(users, entry.updatedById),
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
     encryptedBlob: entry.encryptedBlob,
