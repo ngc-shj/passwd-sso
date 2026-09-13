@@ -37,8 +37,8 @@ by the RLS opener it is lexically inside** — across all of `src/`:
 | # | Site | What the stale value decides |
 |---|---|---|
 | 1 | `src/app/api/mcp/authorize/consent/route.ts:169` | authz predicate, passkey policy, **the tenant persisted onto the authorization code and thence the access/refresh tokens**, DCR claim + per-tenant cap, 4 audit rows |
-| 2 | `src/auth.ts:651` | SSO-tenant sign-in rejection + the audit row's tenant |
-| 3 | `src/auth.ts:814` | passkey enforcement state |
+| 2 | `src/auth.ts` — the `signIn` callback's SSO-tenant check | SSO-tenant sign-in rejection + the audit row's tenant |
+| 3 | `src/auth.ts` — the session callback's passkey-enforcement read | passkey enforcement state |
 | 4 | `src/app/api/auth/passkey/verify/route.ts:101` | SSO-tenant restriction + `Session.tenantId` |
 | 5 | `src/app/api/auth/passkey/options/email/route.ts:102` | SSO-tenant gate |
 | 6 | `src/lib/auth/session/auth-adapter.ts:102` | `Session.tenantId`, `Account.tenantId`, concurrent-session cap |
@@ -47,7 +47,7 @@ by the RLS opener it is lexically inside** — across all of `src/`:
 | 9 | `src/lib/notification.ts:63` | `Notification.tenantId` |
 | 10 | `src/app/api/user/passkey-status/route.ts:35` | passkey enforcement state |
 | 11 | `src/app/api/tenant/policy/route.ts:88` | which tenant's policy is displayed |
-| 12 | `src/app/[locale]/mcp/authorize/page.tsx:65` | authz comparison |
+| 12 | `src/app/[locale]/mcp/authorize/page.tsx` — the client-tenant comparison | authz comparison |
 
 ## Findings
 
@@ -119,7 +119,7 @@ multi-membership: this one picks the oldest, `resolveUserTenantIdFromClient`
 throws, `getTenantMembership` is `findFirst` with no `orderBy` at all.
 
 Security argued the *direction* is wrong — oldest is structurally the tenant the
-user may have left — and that `directory-sync/engine.ts:458,504` can reactivate
+user may have left — and that the two reactivation arms of `src/lib/directory-sync/engine.ts` could reactivate
 an old membership without the cross-tenant guard `scim/v2/Users` applies.
 Functionality could not ground a reachable second active membership and filed it
 as a question.
@@ -151,8 +151,8 @@ never reached there today. **Open.**
 
 ## Adjacent Findings
 
-- `[Adjacent] Major` (Functionality) — `src/app/[locale]/mcp/authorize/page.tsx:64-70`
-  uses the stale column as an authorization comparison. Routed to Security;
+- `[Adjacent] Major` (Functionality) — `src/app/[locale]/mcp/authorize/page.tsx` (the
+  client-tenant comparison) used the stale column as an authorization comparison. Routed to Security;
   became member 12.
 - `[Adjacent] Major` (Testing) — the three unfixed members it found are
   correctness/tenancy defects, not test defects. Routed to Functionality/Security.
@@ -164,8 +164,8 @@ expert counts were superseded by the AST derivation rather than adopted.
 
 The one seed finding pair was disposed of by the Testing expert as **Rejected ×2**,
 both with reproducing evidence:
-- the `take: 1`/`orderBy` shape *is* pinned (`audit.test.ts:542-551` asserts the
-  select object literally) — the seed's "no test would catch it" does not reproduce;
+- the `take: 1`/`orderBy` shape *is* pinned (the "resolves tenantId from user when only userId is
+  provided" cell in `src/lib/audit/audit.test.ts` asserts the select object literally) — the seed's "no test would catch it" does not reproduce;
 - the EA-vault route contains no `user.findUnique` at all (`grep -n findUnique`
   returns only `emergencyAccessGrant.findUnique`), so the seed's premise is false.
 
@@ -215,7 +215,7 @@ before each integration run and restarted after.
 ## Resolution Status
 
 ### S1 [Critical] MCP consent bound the token and the passkey gate to the stale column
-- Action: `consent/route.ts:167` resolves through `resolveOwningTenantIdFromClient`.
+- Action: `src/app/api/mcp/authorize/consent/route.ts` resolves through `resolveOwningTenantIdFromClient`.
   The comment states why this handler — not the GET — is the boundary.
 - New cell: `consent/route.test.ts` — "binds the token and the passkey gate to
   the active membership". Asserts `derivePasskeyState` **and**
@@ -226,7 +226,7 @@ before each integration run and restarted after.
 ### F2/S4 [Major] the lockout divergence this branch created
 - Action: `tenantId` added to `LockoutNotifyParams` as **required**;
   `lockout-admin-notify.ts` no longer selects or reads `tenantId`;
-  `account-lockout.ts:366` threads its own `resolvedTenantId` and is guarded on
+  `recordFailure` in `src/lib/auth/policy/account-lockout.ts` threads its own `resolvedTenantId` and is guarded on
   the same `if (resolvedTenantId)` boundary the audit emits use.
 - Boundary: with no resolvable tenant there is no admin set, so the alert is
   skipped rather than sent somewhere — matching the audit rows two blocks above.
@@ -296,7 +296,8 @@ with **no `select`** returns every scalar, `tenantId` included, and
 `selectsTenantIdentity` answered `false` for it — so the completeness half, the
 half the header credits with stopping the class growing silently, never fired.
 `include:`, `findMany` and the `*OrThrow` variants were the same. One of the
-blind shapes was already in the tree (`api/scim/v2/Users/route.ts:133`).
+blind shapes was already in the tree (the SCIM Users list's `tenantMember.findMany` with `include: { user }` in
+`src/app/api/scim/v2/Users/route.ts`).
 
 **Resolved.** The predicate now fails CLOSED: an absent or non-inline projection
 is the BROADEST shape, not an exempt one. `usesHelper` requires a call rather
@@ -1279,4 +1280,14 @@ RT1 (T4). All other rows checked with no issue or not applicable.
 - Action: the test's `withBypassRls` mock is hoisted, and a cell asserts the
   initiator hydration reads the initiator id under `CROSS_TENANT_LOOKUP`.
 - Red proof: the purpose changed to `AUDIT_WRITE` failed it.
+
+#### Round 5 verification
+
+- Unit: 1033 files / 15610 tests pass; `next build` passes; `scripts/pre-pr.sh`
+  passes on the committed tree.
+- Integration (real database, app role, both compose workers stopped for the run):
+  113 files / 682 tests pass.
+- Citation gate over this document: the round-1 inventory rows and four later
+  citations named lines that this branch's edits moved; they now name their
+  subject (function, cell or call) instead of a line.
 
