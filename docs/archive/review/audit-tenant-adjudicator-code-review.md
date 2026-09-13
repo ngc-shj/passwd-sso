@@ -712,8 +712,11 @@ Open: U1, U2, T1, T2, T4, and the Minors (C3, S3, S4, T5–T8).
   owner's over their own rows, it was reachable for a divergent user before this
   branch (so not a widening), and refusing it would be a false deny on the
   last-resort recovery path with no operator tooling to lift it.
-- Two regressions the fix introduced and gates caught, recorded because every
-  unit test stayed green through both:
+- Two regressions the fix introduced, recorded because the tests for the changed
+  modules stayed green through both. The full suite caught each only through a
+  gate self-test that runs against the real repo. (The S1 commit message says
+  "every unit test stayed green" — that overstates it: it describes the targeted
+  run, not the full suite.)
   1. Moving the destructive body into a non-exported helper behind a differently
      named wrapper declassified `/api/vault/admin-reset`:
      `check-permanent-delete-stepup` exited 1 (`STALE_EXEMPT`) and
