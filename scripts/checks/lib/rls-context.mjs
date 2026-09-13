@@ -14,20 +14,34 @@
  *     outside it was trusted as a bypass;
  *   - `import { withTenantRls as withBypassRls }` was trusted by its spelling.
  *
- * The answer is the NEAREST enclosing call that opens a context around the
- * argument the node is in:
+ * The answer is the NEAREST enclosing call that opens a context around the code
+ * the node is in:
+ *   - an argument is evaluated before its call runs, in the context around the
+ *     call. Only a function written inside the argument runs when the callee
+ *     decides, so a node outside any such function is stepped over;
+ *   - an opener opens its context around its CALLBACK argument only — the
+ *     position is in OPENERS. The client, tenant id and purpose are evaluated
+ *     before the context exists (round 6, R49: a read inside `withBypassRls`'s
+ *     client argument was trusted as a bypass). A spread at or before the
+ *     callback's position hides which argument lands there: UNKNOWN;
  *   - a local name resolves to its innermost visible declaration (scope-bindings);
  *     only when none is visible does an import answer, by its ORIGINAL name;
  *   - a local wrapper opens a context only if it passes that argument's parameter
- *     into an opener (followed through further local wrappers);
- *   - a parameter, a `let`, a body-less declaration, or a wrapper that also uses
- *     the callback outside its opener is UNKNOWN — the caller decides what runs,
- *     and a gate must not read that as either context.
+ *     into an opener's callback position (followed through further local
+ *     wrappers). A spread at the call site hides which parameter receives the
+ *     argument, so every parameter it could reach is asked;
+ *   - a parameter, a `let`, a body-less declaration, a destructured or rest
+ *     parameter, or a wrapper that also uses the callback outside its opener is
+ *     UNKNOWN — the caller decides what runs, and a gate must not read that as
+ *     either context.
  * A call that opens nothing this file can see (a `.map`, an imported helper that is
- * not an opener) is stepped over, and the walk continues outward.
+ * not an opener) is stepped over, and the walk continues outward. That includes a
+ * helper handed a function inside an opener's callback argument
+ * (`withBypassRls(prisma, pick(async (tx) => …), P)`): whether `pick` runs it
+ * before the bypass opens is not in this file.
  */
 import { SyntaxKind } from "ts-morph";
-import { resolveLocalFunction, unwrapExpression, visibleBinding } from "./scope-bindings.mjs";
+import { FN_KINDS, resolveLocalFunction, unwrapExpression, visibleBinding } from "./scope-bindings.mjs";
 
 export const RLS_CONTEXT = Object.freeze({
   BYPASS: "bypass",
@@ -35,14 +49,17 @@ export const RLS_CONTEXT = Object.freeze({
   UNKNOWN: "unknown",
 });
 
-const BYPASS_OPENER = "withBypassRls";
-const TENANT_OPENERS = new Set(["withTenantRls", "withUserTenantRls", "withTeamTenantRls"]);
-
-function openerContext(name) {
-  if (name === BYPASS_OPENER) return RLS_CONTEXT.BYPASS;
-  if (TENANT_OPENERS.has(name)) return RLS_CONTEXT.TENANT;
-  return null;
-}
+/**
+ * Each opener, the context it opens, and the argument index of the callback it
+ * runs inside it — from the signatures in src/lib/tenant-rls.ts and
+ * src/lib/tenant-context.ts.
+ */
+const OPENERS = new Map([
+  ["withBypassRls", { context: RLS_CONTEXT.BYPASS, callback: 1 }], // (prisma, fn, purpose)
+  ["withTenantRls", { context: RLS_CONTEXT.TENANT, callback: 2 }], // (prisma, tenantId, fn)
+  ["withUserTenantRls", { context: RLS_CONTEXT.TENANT, callback: 1 }], // (userId, fn)
+  ["withTeamTenantRls", { context: RLS_CONTEXT.TENANT, callback: 1 }], // (teamId, fn)
+]);
 
 /** The exported name behind a local import binding, or null if `name` is not imported. */
 function importedNameOf(name, sf) {
@@ -57,17 +74,44 @@ function importedNameOf(name, sf) {
 
 const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
 
+/** Is `node` inside a function written within `arg` — code that runs when that function is called? */
+function runsLater(node, arg) {
+  for (let p = node.getParent(); p; p = p.getParent()) {
+    if (FN_KINDS.has(p.getKind())) return true;
+    if (sameNode(p, arg)) return false;
+  }
+  return false;
+}
+
 /**
  * What a call to `calleeName` at `at` does to its argument at `argIndex`: opens a
  * context around it, might (UNKNOWN), or nothing this file can see (null).
  */
 function contextOfCall(calleeName, at, argIndex, sf, bindingsFor, seen) {
+  // Arguments before the first spread sit at their own index; from the spread on,
+  // the index a parameter sees depends on the spread's length.
+  const spread = at.getArguments().findIndex((arg) => arg.getKind() === SyntaxKind.SpreadElement);
+  const shifted = spread !== -1 && spread <= argIndex;
+
   const binding = visibleBinding(calleeName, at, bindingsFor);
-  if (!binding) return openerContext(importedNameOf(calleeName, sf) ?? calleeName);
+  if (!binding) {
+    const opener = OPENERS.get(importedNameOf(calleeName, sf) ?? calleeName);
+    if (!opener) return null;
+    if (shifted && spread <= opener.callback) return RLS_CONTEXT.UNKNOWN;
+    return argIndex === opener.callback ? opener.context : null;
+  }
   const fn = resolveLocalFunction(calleeName, at, bindingsFor);
   // Bound locally but not to a function this file can read: a parameter, a
   // `let`, a body-less signature. Whatever runs is chosen elsewhere.
   if (!fn) return RLS_CONTEXT.UNKNOWN;
+  if (shifted) {
+    // Any parameter from the spread's index on may receive this argument. If none
+    // of them reaches an opener, the call opens nothing whichever one it is.
+    for (let i = spread; i < fn.getParameters().length; i += 1) {
+      if (wrapperContext(fn, i, sf, bindingsFor, seen)) return RLS_CONTEXT.UNKNOWN;
+    }
+    return null;
+  }
   return wrapperContext(fn, argIndex, sf, bindingsFor, seen);
 }
 
@@ -77,7 +121,12 @@ function wrapperContext(fn, argIndex, sf, bindingsFor, seen) {
   if (seen.has(key)) return RLS_CONTEXT.UNKNOWN;
   seen.add(key);
 
-  const param = fn.getParameters()[argIndex];
+  const params = fn.getParameters();
+  const last = params.at(-1);
+  // A rest parameter also collects every argument past its own index; reading
+  // only `params[argIndex]` made those look like no parameter at all (null), and an
+  // outer opener then answered for a callback this wrapper runs.
+  const param = params[argIndex] ?? (last?.isRestParameter() ? last : null);
   if (!param) return null;
   const nameNode = param.getNameNode();
   // Destructured or rest: which value lands where is not something the tree says.
@@ -105,7 +154,8 @@ function wrapperContext(fn, argIndex, sf, bindingsFor, seen) {
       }
     }
     // Called directly, returned, stored, or handed to something that opens
-    // nothing: the callback also runs where no opener is known.
+    // nothing — including an opener's non-callback argument: the callback also
+    // runs where no opener is known.
     usedOutside = true;
   }
 
@@ -123,10 +173,12 @@ function wrapperContext(fn, argIndex, sf, bindingsFor, seen) {
 export function rlsContextOf(node, sf, bindingsFor) {
   for (let n = node.getParent(); n; n = n.getParent()) {
     if (n.getKind() !== SyntaxKind.CallExpression) continue;
-    const argIndex = n
-      .getArguments()
-      .findIndex((arg) => arg.getStart() <= node.getStart() && node.getEnd() <= arg.getEnd());
+    const args = n.getArguments();
+    const argIndex = args.findIndex((arg) => arg.getStart() <= node.getStart() && node.getEnd() <= arg.getEnd());
     if (argIndex === -1) continue;
+    // Evaluated while the call's arguments are built, so in whatever context
+    // encloses the call — whichever callee this is.
+    if (!runsLater(node, args[argIndex])) continue;
     const callee = unwrapExpression(n.getExpression());
     if (callee?.getKind() !== SyntaxKind.Identifier) continue;
     const context = contextOfCall(callee.getText(), n, argIndex, sf, bindingsFor, new Set());

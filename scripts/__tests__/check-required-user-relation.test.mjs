@@ -354,3 +354,209 @@ describe("check-required-user-relation — where given by name, and nested (roun
   });
 });
 
+describe("check-required-user-relation — an opener's context covers its callback only (round 6 R49)", () => {
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+
+  it("does not trust a read in withBypassRls's client argument", () => {
+    // Evaluated before the bypass opens, in whatever context the caller has.
+    write(
+      "src/lib/a.ts",
+      "export async function f() {\n" +
+        "  return withBypassRls(clientFor(await prisma.tenantMember.findFirst({ include: { user: true } })), async (tx) => tx.share.findMany(), PURPOSE);\n}\n",
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TenantMember.user");
+  });
+
+  it("does not trust a read in a function handed to withBypassRls's client argument", () => {
+    // Inside a function, so only the callback position — not the rule for code
+    // evaluated while arguments are built — keeps this out of the bypass.
+    write(
+      "src/lib/a.ts",
+      "export async function f() {\n" +
+        "  return withBypassRls(await clientFor(async () => prisma.tenantMember.findFirst({ include: { user: true } })), async (tx) => tx.share.findMany(), PURPOSE);\n}\n",
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a read evaluated while the callback argument is built", () => {
+    write(
+      "src/lib/a.ts",
+      "export async function f() {\n" +
+        "  return withBypassRls(prisma, pick(await prisma.tenantMember.findFirst({ include: { user: true } })), PURPOSE);\n}\n",
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust an opener whose callback position a spread hides", () => {
+    write("src/lib/a.ts", `export async function f(args) {\n  return withBypassRls(...args, async (tx) => ${READ});\n}\n`);
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a local wrapper when a spread hides which parameter receives the callback", () => {
+    write(
+      "src/lib/a.ts",
+      "const run = (client, fn) => withBypassRls(client, fn, PURPOSE);\n" +
+        `export const f = (args) => run(...args, async (tx) => ${READ});\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not let an outer bypass answer for a callback a rest parameter collects", () => {
+    // There is no `params[1]`, so the wrapper looked like it had no parameter there
+    // (null) and the walk went on to the bypass around the call.
+    write(
+      "src/lib/a.ts",
+      "const run = (...args) => withTenantRls(prisma, t, args[1]);\n" +
+        `export const f = () => withBypassRls(prisma, async () => run(prisma, async (tx) => ${READ}), PURPOSE);\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+});
+
+describe("check-required-user-relation — every fail-closed branch has a cell (round 6 RT7/RT10)", () => {
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+  /** A read in a tenant context with a `let` in scope — a value no literal answers for. */
+  const withLet = (read) =>
+    `export async function f(t, userId) {\n  let built = { id: "1" };\n  return withTenantRls(prisma, t, async (tx) => ${read});\n}\n`;
+
+  it("does not trust a wrapper whose callback parameter is destructured", () => {
+    write(
+      "src/lib/a.ts",
+      "const run = ({ fn }) => withBypassRls(prisma, fn, PURPOSE);\n" +
+        `export const f = () => run({ fn: async (tx) => ${READ} });\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a wrapper whose callback parameter is a rest parameter", () => {
+    write(
+      "src/lib/a.ts",
+      "const run = (...args) => withBypassRls(prisma, args[0], PURPOSE);\n" +
+        `export const f = () => run(async (tx) => ${READ});\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust mutually recursive wrappers, and terminates on them", () => {
+    write(
+      "src/lib/a.ts",
+      "function ping(fn) {\n  return pong(fn);\n}\nfunction pong(fn) {\n  return ping(fn);\n}\n" +
+        `export const f = () => ping(async (tx) => ${READ});\n`,
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    // A report, not a stack overflow: both exit 1.
+    expect(out).toContain("TenantMember.user");
+  });
+
+  it("does not let an outer bypass answer for a callee bound to a parameter", () => {
+    // The one shape where null and UNKNOWN differ: null walks on to the bypass.
+    write(
+      "src/lib/a.ts",
+      `export function f(run) {\n  return withBypassRls(prisma, async () => run(async (tx) => ${READ}), PURPOSE);\n}\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("reports a where something deletes from", () => {
+    write(
+      "src/lib/a.ts",
+      "export function f(t, all) {\n  const where = { deactivatedAt: null };\n  if (all) delete where.deactivatedAt;\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where }));\n}\n",
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TenantMember.where<unreadable-where>");
+  });
+
+  it("reports a where something Object.assigns onto", () => {
+    write(
+      "src/lib/a.ts",
+      "export function f(t, email) {\n  const where = { deactivatedAt: null };\n  if (email) Object.assign(where, { user: { is: { email } } });\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where }));\n}\n",
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TenantMember.where<unreadable-where>");
+  });
+
+  it("reports a conditional where whose other branch it cannot read", () => {
+    write("src/lib/a.ts", withLet("tx.tenantMember.count({ where: userId ? { userId } : built })"));
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TenantMember.where<unreadable-where>");
+  });
+
+  it("reports a logical branch it cannot read", () => {
+    write("src/lib/a.ts", withLet("tx.tenantMember.count({ where: { OR: [built] } })"));
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TenantMember.where.OR<unreadable-where>");
+  });
+
+  it("reports a relation filter operand it cannot read", () => {
+    write("src/lib/a.ts", withLet("tx.teamMember.findMany({ where: { team: { is: built } } })"));
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TeamMember.where.team.is<unreadable-where>");
+  });
+
+  it("reports a nested relation filter it cannot read", () => {
+    write("src/lib/a.ts", withLet("tx.team.findMany({ where: { members: built } })"));
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("Team.where.members<unreadable-where>");
+  });
+
+  it("reads a where whose name is shared only by a sibling function's deleted binding", () => {
+    write(
+      "src/lib/a.ts",
+      "export function g() {\n  const where = { deactivatedAt: null };\n  delete where.deactivatedAt;\n  return where;\n}\n" +
+        "export function f(t, userId) {\n  const where = { userId };\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where }));\n}\n",
+    );
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+});
+
+describe("check-required-user-relation — a name is resolved where it is written (round 6 R46)", () => {
+  it("resolves a name inside a followed where at its own position, not the call's", () => {
+    // The calling function declares its own `userFilter`; the OR branch means the
+    // module-level one, which filters through the required relation.
+    write(
+      "src/lib/a.ts",
+      'const userFilter = { user: { is: { email: "x" } } };\nconst where = { OR: [userFilter] };\n' +
+        'export function f(t) {\n  const userFilter = { id: "1" };\n' +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.findMany({ where }));\n}\n",
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TenantMember.where.OR.user<filter>");
+  });
+});
+
+describe("check-required-user-relation — a disposition excuses only its kind of hit (round 6)", () => {
+  it("refuses a dynamic-where entry as the excuse for a projection", () => {
+    write("src/lib/a.ts", inTenant("tx.teamMember.findMany({ include: { user: true } })"));
+    manifest({ "src/lib/a.ts": { disposition: "dynamic-where", reason: "sets teamId only", calls: 1 } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain('disposition "dynamic-where" cannot excuse TeamMember.user');
+  });
+
+  it("refuses any other disposition as the excuse for a where it cannot read", () => {
+    write(
+      "src/lib/a.ts",
+      "export function f(email) {\n  const where = { deactivatedAt: null };\n  if (email) where.userId = email;\n" +
+        "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where }));\n}\n",
+    );
+    manifest({ "src/lib/a.ts": { disposition: "actor", reason: "the requesting user", calls: 1 } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain('disposition "actor" cannot excuse TenantMember.where<unreadable-where>');
+  });
+});
+

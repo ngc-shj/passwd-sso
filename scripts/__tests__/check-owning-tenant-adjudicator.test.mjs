@@ -462,3 +462,60 @@ describe("check-owning-tenant-adjudicator — context by scope, not by spelling 
   });
 });
 
+describe("check-owning-tenant-adjudicator — an opener's context covers its callback only (round 6 R49)", () => {
+  const TENANT_SCOPED_FILE = { "src/lib/thing.ts": { disposition: "tenant-scoped" } };
+  const TENANT_READ = "prisma.user.findUnique({ where: { id }, select: { tenantId: true } })";
+
+  it("does not treat a read in withTenantRls's tenantId argument as tenant-scoped", () => {
+    // The tenant id is computed before the context opens, so the read supplying it
+    // returns the unconstrained copy.
+    write("src/lib/thing.ts", `await withTenantRls(prisma, (await ${TENANT_READ}).tenantId, async (tx) => {});\n`);
+    manifest(TENANT_SCOPED_FILE);
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("OUTSIDE any tenant-scoped context");
+  });
+
+  it("does not treat a read in a function handed to withTenantRls's tenantId argument as tenant-scoped", () => {
+    write("src/lib/thing.ts", `await withTenantRls(prisma, await tenantOf(async () => ${TENANT_READ}), async (tx) => {});\n`);
+    manifest(TENANT_SCOPED_FILE);
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("OUTSIDE any tenant-scoped context");
+  });
+});
+
+describe("check-owning-tenant-adjudicator — every fail-closed branch has a cell (round 6 RT7/RT10)", () => {
+  const TENANT_SCOPED_FILE = { "src/lib/thing.ts": { disposition: "tenant-scoped" } };
+
+  it("does not trust a wrapper whose callback parameter is destructured", () => {
+    write(
+      "src/lib/thing.ts",
+      "const scoped = ({ fn }) => withUserTenantRls(userId, fn);\n" +
+        `export const f = () => scoped({ fn: async (tx) => {\n${RAW_READ}} });\n`,
+    );
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a wrapper whose callback parameter is a rest parameter", () => {
+    write(
+      "src/lib/thing.ts",
+      "const scoped = (...args) => withUserTenantRls(userId, args[0]);\n" +
+        `export const f = () => scoped(async (tx) => {\n${RAW_READ}});\n`,
+    );
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+
+  it("does not let an outer tenant opener answer for a callee bound to a parameter", () => {
+    // The one shape where null and UNKNOWN differ: null walks on to the opener.
+    write(
+      "src/lib/thing.ts",
+      `export function f(run) {\n  return withUserTenantRls(userId, async () => run(async (tx) => {\n${RAW_READ}}));\n}\n`,
+    );
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+});
+

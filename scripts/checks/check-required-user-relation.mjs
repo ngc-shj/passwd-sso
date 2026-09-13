@@ -36,13 +36,19 @@
  *     can set — or the type that bounds them — so a reviewer can see none is a
  *     required User relation. Weaker than the others: a later edit to the builder
  *     does not change the count. Prefer a literal the gate can read.
+ * A disposition is a claim about one kind of hit, so it excuses only that kind:
+ * "dynamic-where" only a path through `<unreadable-where>`, and no other
+ * disposition such a path. Matching the count alone let a "dynamic-where" entry
+ * excuse a projection that returns the relation, which its reason says nothing
+ * about (round 6).
  *
  * Where it looks. A call's `select`/`include`, followed through nested relations;
  * its `where`, through `AND`/`OR`/`NOT` and `is`/`isNot`/`some`/`every`/`none`; the
  * `where` of a nested relation inside a projection, and inside `_count.select`. A
  * `where` given as a name or a shorthand (`{ where }`) is followed to the `const`
- * object literal it is bound to at the call, provided nothing in the file assigns
- * into it; otherwise it is reported as `<unreadable-where>` when the model — or,
+ * object literal the name is bound to where it is written — a name inside a
+ * followed literal at its own position, not the call's — provided nothing in the
+ * file assigns into, deletes from, or `Object.assign`s onto it; otherwise it is reported as `<unreadable-where>` when the model — or,
  * for a nested filter, the related model — declares a required User relation.
  * (Round 5, T3: `tenantMember.count({ where: prismaWhere })` was an S2 member this
  * gate did not report.)
@@ -89,6 +95,8 @@ const DISPOSITIONS = new Set(["active-membership", "actor", "caller-bypass", "dy
 
 const LOGICAL = new Set(["AND", "OR", "NOT"]);
 const RELATION_FILTERS = new Set(["is", "isNot", "some", "every", "none"]);
+/** Marks a path through a filter this gate could not read; the manifest check keys on it. */
+const UNREADABLE_WHERE = "<unreadable-where>";
 
 /**
  * `model -> (field -> { type, list, optional })` from the schema itself, plus the
@@ -186,8 +194,9 @@ function assignedInto(name, declaration, ctx) {
 
 /**
  * The object literals a `where` (or a filter inside one) can be: the literal
- * itself, the `const` a bare name is bound to at the call provided nothing assigns
- * into it, or both branches of a conditional. Null when this file cannot say.
+ * itself, the `const` a bare name is bound to where the name is written provided
+ * nothing assigns into it, or both branches of a conditional. Null when this file
+ * cannot say.
  */
 function filterLiterals(node, ctx) {
   const value = unwrapExpression(node);
@@ -199,7 +208,11 @@ function filterLiterals(node, ctx) {
     return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
   }
   if (value.getKind() !== SyntaxKind.Identifier) return null;
-  const literal = resolveLocalObjectLiteral(value.getText(), ctx.at, ctx.bindingsFor);
+  // Resolved at the name itself. A name inside a literal followed from the call —
+  // an OR branch of a module-level `where` — means the binding visible THERE, and
+  // resolving it at the call let a same-named local of the calling function answer
+  // for it (round 6, R46).
+  const literal = resolveLocalObjectLiteral(value.getText(), value, ctx.bindingsFor);
   if (!literal) return null;
   return assignedInto(value.getText(), literal.getParent(), ctx) ? null : [literal];
 }
@@ -218,7 +231,7 @@ function scanWhereOf(node, model, trail, hits, ctx) {
   if (!value) return;
   const wheres = filterLiterals(value, ctx);
   if (wheres) for (const where of wheres) scanWhere(where, model, [...trail, "where"], hits, ctx);
-  else if (hasRequiredUser(model)) hits.push([...trail, "where<unreadable-where>"].join("."));
+  else if (hasRequiredUser(model)) hits.push([...trail, `where${UNREADABLE_WHERE}`].join("."));
 }
 
 /** `_count: { select: { relation: { where } } }` filters its counts through relations. */
@@ -293,7 +306,7 @@ function scanWhere(where, model, trail, hits, ctx) {
       for (const branch of branches) {
         const objs = filterLiterals(branch, ctx);
         if (objs) for (const obj of objs) scanWhere(obj, model, [...trail, key], hits, ctx);
-        else if (branch && hasRequiredUser(model)) hits.push([...trail, `${key}<unreadable-where>`].join("."));
+        else if (branch && hasRequiredUser(model)) hits.push([...trail, `${key}${UNREADABLE_WHERE}`].join("."));
       }
       continue;
     }
@@ -306,7 +319,7 @@ function scanWhere(where, model, trail, hits, ctx) {
     }
     const nestedFilters = filterLiterals(value, ctx);
     if (!nestedFilters) {
-      if (value && hasRequiredUser(field.type)) hits.push(`${here.join(".")}<unreadable-where>`);
+      if (value && hasRequiredUser(field.type)) hits.push(`${here.join(".")}${UNREADABLE_WHERE}`);
       continue;
     }
     for (const nested of nestedFilters) {
@@ -322,7 +335,7 @@ function scanWhere(where, model, trail, hits, ctx) {
         if (!opValue) continue;
         const subs = filterLiterals(opValue, ctx);
         if (subs) for (const sub of subs) scanWhere(sub, field.type, [...here, op], hits, ctx);
-        else if (hasRequiredUser(field.type)) hits.push(`${[...here, op].join(".")}<unreadable-where>`);
+        else if (hasRequiredUser(field.type)) hits.push(`${[...here, op].join(".")}${UNREADABLE_WHERE}`);
       }
     }
   }
@@ -364,7 +377,7 @@ for (const { rel, sf } of sourceFilesFrom(createAstProject(), files, ROOT)) {
     const args = asObject(call.getArguments()[0]);
     if (!args) continue;
 
-    const ctx = { at: call, bindingsFor };
+    const ctx = { bindingsFor };
     const hits = [];
     if (RETURNING.has(method)) {
       for (const root of ["select", "include"]) {
@@ -403,6 +416,21 @@ for (const [rel, calls] of found) {
     failures.push(`${rel}: unknown disposition "${entry.disposition}" (expected one of ${[...DISPOSITIONS].join(", ")}).`);
   }
   if (!entry.reason) failures.push(`${rel}: manifest entry has no reason.`);
+  if (DISPOSITIONS.has(entry.disposition)) {
+    // See the header: an entry excuses only the kind of hit its disposition describes.
+    const excusesUnreadable = entry.disposition === "dynamic-where";
+    for (const c of calls) {
+      for (const path of c.paths) {
+        if (path.includes(UNREADABLE_WHERE) === excusesUnreadable) continue;
+        failures.push(
+          `${rel}:${c.line}: disposition "${entry.disposition}" cannot excuse ${path}. ` +
+            (excusesUnreadable
+              ? `"dynamic-where" covers only a where this gate cannot read; this path was read, and reaches the relation.`
+              : `Only "dynamic-where" covers a where this gate cannot read, with a reason naming every key it can hold.`),
+        );
+      }
+    }
+  }
   if (entry.calls !== calls.length) {
     failures.push(
       `${rel}: manifest covers ${entry.calls} call(s) but the file has ${calls.length}. ` +
