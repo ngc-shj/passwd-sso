@@ -38,7 +38,7 @@ MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs         
 
 MIGRATION_DATABASE_URL=<privileged-url> npm run migrate:account-tokens               # Encrypt legacy plaintext OAuth tokens (idempotent; --dry-run available)
 
-MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list|unmapped|preflight|add|remove|history  # SSO tenant claim registry (lockout diagnosis/recovery); `remove` now requires --by <label> (breaking); see README.md's "IdP domain changed / tenant locked out"
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list|unmapped|preflight|add|remove|history|realign  # SSO tenant claim registry (lockout diagnosis/recovery); `remove` now requires --by <label> (breaking); `realign --user <uuid|email> --tenant <ref> --by <label>` moves a departed member active nowhere back onto a tenant holding their membership row; see README.md's "IdP domain changed / tenant locked out"
 ```
 
 Audit outbox worker (separate process):

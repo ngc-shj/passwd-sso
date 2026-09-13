@@ -83,5 +83,9 @@
   "src/lib/tenant-context.ts": {
     "disposition": "column-intended",
     "reason": "this IS the adjudicator"
+  },
+  "src/lib/tenant/owning-column.ts": {
+    "disposition": "column-intended",
+    "reason": "realignOwningTenantColumn reads and writes the denormalized column itself: the question is what the copy currently says, which only the copy answers. Moved out of tenant-context.ts so the offline operator CLI can call it without the application's Prisma singleton."
   }
 }

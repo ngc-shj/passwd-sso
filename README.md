@@ -427,6 +427,14 @@ None of this fires on Google-`hd`-only deployments, which is the shape of the in
   ```
 - *Absorbed personal vaults.* A bootstrap-tenant user's first sign-in presenting the claim reassigns their **entire personal estate** into the tenant, in one transaction: `User`/`Account`, `passwordEntry`, `tag`, `folder`, `session`, `extensionToken`, `passwordEntryHistory`, `vaultKey`, `audit_logs` (via the `audit_log_tenant_migrate` procedure), `emergencyAccessGrant`, `emergencyAccessKeyPair`, `passwordShare`, `shareAccessLog`, `attachment`, `notification`, `apiKey`, `webAuthnCredential`, and `TenantMember` (see the bootstrap-migration block in `src/auth.ts`). Every table is updated **in place** — there is no history table recording the previous `tenantId`, and the migrated user's own `audit_logs` rows are reassigned to the new tenant by that same transaction, so nothing in the database still says "this used to belong to tenant X." **This case may be irreversible.** The closest available evidence is circumstantial: the affected user's `AUTH_LOGIN` row in `audit_logs` around the time the claim was live, cross-referenced against the removed claim's `tenant_claims.createdAt` / `revokedAt`.
 
+**A departed member another tenant now owns.** SCIM and directory sync reactivate a member only for a tenant that owns the user. A user who left tenant A, joined tenant B through B's IdP and was then suspended by B is owned by B, so A's SCIM `PUT`/`PATCH` answers `409` (recorded as `SCIM_USER_REACTIVATION_REFUSED`) and A's directory sync refuses them (`DIRECTORY_SYNC_ACTIVATION_REFUSED`, reason `owned_by_another_tenant`). If A has a tenant claim, the user signing in through A's IdP moves them back. If A has none, move them with:
+
+```bash
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- realign --user <uuid-or-email> --tenant <A-ref> --by <operator-label>
+```
+
+`realign` refuses a user with an active membership in any tenant, a target where the user holds no membership row, and an email that matches more than one user (name them by UUID). It moves only the owning column: the user's rows stay under the tenant they were filed under, their membership in A stays deactivated until A reactivates it, and both tenants receive a `USER_TENANT_REALIGNED` audit row with source `operator` and the `--by` label.
+
 ### 3. Start services
 
 **Development:**

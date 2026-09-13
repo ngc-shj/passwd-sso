@@ -1,4 +1,4 @@
-import type { Prisma, AuditScope, AuditAction, ActorType } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 // `prismaBase`, not `prisma`. The exported `prisma` is a Proxy: while an RLS
 // context is active its `$transaction` arm does not open a transaction, it
 // invokes the callback with the OUTER transaction client. The three
@@ -11,47 +11,22 @@ import { prismaBase } from "@/lib/prisma";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID } from "@/lib/constants/app";
 
-export interface AuditOutboxPayload {
-  scope: AuditScope;
-  action: AuditAction;
-  userId: string;
-  actorType: ActorType;
-  serviceAccountId: string | null;
-  teamId: string | null;
-  targetType: string | null;
-  targetId: string | null;
-  metadata: Record<string, unknown> | null;
-  ip: string | null;
-  userAgent: string | null;
-}
+import { enqueueAuditInTx as enqueueAuditRowInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox-in-tx";
 
+export type { AuditOutboxPayload };
+
+/**
+ * Enqueue one audit outbox row on the caller's transaction. The implementation is
+ * `audit-outbox-in-tx.ts`'s; it stays exported from here, as a function of this
+ * module, because application callers import it from here and a test spies on
+ * this export.
+ */
 export async function enqueueAuditInTx(
   tx: Prisma.TransactionClient,
   tenantId: string,
   payload: AuditOutboxPayload,
 ): Promise<void> {
-  const [ctx] = await tx.$queryRaw<{ bypass_rls: string; tenant_id: string }[]>`
-    SELECT current_setting('app.bypass_rls', true) AS bypass_rls,
-           current_setting('app.tenant_id', true)  AS tenant_id`;
-  if (ctx.bypass_rls !== "on" && ctx.tenant_id !== tenantId) {
-    throw new Error(
-      `enqueueAuditInTx called outside withBypassRls/withTenantRls scope; ` +
-      `bypass_rls=${ctx.bypass_rls}, tenant_id=${ctx.tenant_id}, expected=${tenantId}`,
-    );
-  }
-  const [tenantExists] = await tx.$queryRaw<{ ok: boolean }[]>`
-    SELECT EXISTS (SELECT 1 FROM tenants WHERE id = ${tenantId}::uuid) AS ok`;
-  if (!tenantExists?.ok) {
-    throw new Error(
-      `enqueueAuditInTx: tenantId ${tenantId} does not exist`,
-    );
-  }
-  await tx.auditOutbox.create({
-    data: {
-      tenantId,
-      payload: payload as unknown as Prisma.InputJsonValue,
-    },
-  });
+  await enqueueAuditRowInTx(tx, tenantId, payload);
 }
 
 export async function enqueueAudit(

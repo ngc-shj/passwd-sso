@@ -1766,3 +1766,63 @@ mutation failed exactly the cells listed.
 - The three self-test files pass (224).
 - All three gates exit 0 on the real tree, each run unpiped.
 - eslint passes.
+
+#### F-R7-2 Major — an audited operator command for the member no producer may take back
+
+- **Decision:** the user chose an operator command. They chose it over documenting
+  the limit, and over restoring reactivation by membership row, which would
+  re-open R6-S2.
+- **Implementation choice:** `@/lib/prisma` builds its pool at import and throws
+  without `DATABASE_URL`, while offline CLIs run on `MIGRATION_DATABASE_URL`
+  alone. The user chose to extract the in-transaction code into modules that
+  never import the singleton. A lazy singleton was rejected: it changes a pinned
+  fail-fast, and nothing else validates `DATABASE_URL` at boot.
+- **Action, extraction (no runtime behaviour change in the application):**
+  - `audit-payload.ts`: the payload builder and metadata bounding, re-exported by
+    `audit.ts`.
+  - `audit-outbox-in-tx.ts`: the in-transaction enqueue. `audit-outbox.ts` keeps
+    `enqueueAuditInTx` as its own function, because a test spies on that export.
+  - `stranded-rows.ts` and `owning-column.ts`: re-exported by `tenant-context.ts`.
+    `owning-column.ts` gains a `column-intended` manifest entry, because the raw
+    column read moved with it.
+  - `tenant-realignment-core.ts`: the move and its record, with the audit writer
+    and column helpers passed in. `tenant-realignment.ts` passes the application's
+    functions at each call, so the 16 test files that mock `@/lib/audit/audit` and
+    `tenant-realignment.test.ts`'s `@/lib/tenant-context` mock still reach this
+    path.
+- **Action, the command:** `tenant-domain realign --user <uuid|email> --tenant
+  <ref> --by <label> [--yes]`.
+  - It reuses the CLI's `--by` validation, tenant resolution, confirmation seam
+    and migration client.
+  - It refuses:
+    - a user with an active membership anywhere;
+    - a target where the user holds no membership row;
+    - an email matching more than one user;
+    - the sentinel tenant.
+  - It moves only the column. The membership stays deactivated for the tenant to
+    reactivate, now that it owns the user.
+  - Both tenants get `USER_TENANT_REALIGNED` with the system actor, source
+    `operator` (new), and `by` set to the label.
+  - It is not atomic against an activation elsewhere between the check and the
+    write; that is stated in its doc.
+  - The README recovery section and the CLAUDE.md admin line document it.
+- **Guard:** `scripts/__tests__/tenant-domain-import-graph.test.ts` walks the CLI's
+  runtime import graph and fails on any path to `src/lib/prisma.ts`. A control
+  cell proves the walker does see the singleton through a module that imports it.
+- **Red proof** (worktree copy):
+  - A runtime import of the singleton added to the core failed the guard.
+  - Not recording the label failed the unit operator cell.
+  - At integration level (real database, app role), with the realign cells green
+    at baseline, each mutation failed exactly its own cell:
+    - active-membership refusal removed;
+    - membership-row refusal removed;
+    - `--by` validation skipped;
+    - confirmation assumed;
+    - email matched case-sensitively.
+
+#### Verification — operator command slice
+
+- Unit: 1034 files / 15683 tests pass. `next build` passes. eslint reports no
+  warning on any changed file. The three tenant gates exit 0 on the real tree.
+- Integration, with both workers stopped: 113 files / 692 tests pass, including
+  the seven `realign` cells and the missing-URL cell, which now covers `realign`.

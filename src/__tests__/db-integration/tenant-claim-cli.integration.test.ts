@@ -30,6 +30,7 @@ import {
   cmdAdd,
   cmdRemove,
   cmdHistory,
+  cmdRealign,
   formatUnmappedMessage,
   migrationClientFactory,
   DEFAULT_UNMAPPED_WINDOW_DAYS,
@@ -39,7 +40,7 @@ import {
   SIGNIN_ACTOR_LABEL,
   DEREGISTER_ACTOR_LABEL,
 } from "@/lib/tenant/tenant-claim-event";
-import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 // C3 (CF13): bucketOf/UNMAPPED_BUCKET are imported directly rather than
 // through cmdUnmapped's own module — tenant-domain.ts imports them for its
 // own use but does not re-export them, and this file needs to assert the
@@ -2666,6 +2667,165 @@ describe("tenant-domain CLI (C7)", () => {
     });
   });
 
+  describe("realign (round 7 F-R7-2)", () => {
+    /**
+     * A user who left `former` for `owning` and was suspended there: active in no
+     * tenant, filed under `owning`, with a deactivated membership row in `former`.
+     * SCIM and directory sync in `former` may not take them back, and a claimless
+     * `former` has no sign-in that would.
+     */
+    async function seedDeparted() {
+      const owning = await ctx.createTenant();
+      const former = await ctx.createTenant();
+      const userId = await ctx.createUser(owning);
+      await ctx.su.prisma.$executeRawUnsafe(
+        `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        owning,
+        userId,
+      );
+      await ctx.su.prisma.$executeRawUnsafe(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
+        randomUUID(),
+        former,
+        userId,
+      );
+      return { owning, former, userId };
+    }
+
+    const columnOf = async (userId: string) =>
+      (await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { tenantId: true } })).tenantId;
+
+    const realignRows = (tenantIds: string[]) =>
+      ctx.su.prisma.auditOutbox.findMany({
+        where: { tenantId: { in: tenantIds }, payload: { path: ["action"], equals: "USER_TENANT_REALIGNED" } },
+        select: { tenantId: true, payload: true },
+      });
+
+    it.skipIf(SKIP)("moves a user active in no tenant onto a tenant where they hold a membership row, recorded for both tenants", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true, code: 0, tenantId: former });
+      expect(await columnOf(userId)).toBe(former);
+      // The membership is not reactivated: that is the tenant's to do, now that it owns the user.
+      const [member] = await ctx.su.prisma.tenantMember.findMany({ where: { tenantId: former, userId } });
+      expect(member.deactivatedAt).not.toBeNull();
+      const rows = await realignRows([owning, former]);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.payload).toMatchObject({
+          userId: SYSTEM_ACTOR_ID,
+          actorType: "SYSTEM",
+          metadata: expect.objectContaining({ source: "operator", by: "test-op" }),
+        });
+      }
+      expect(rows.find((r) => r.tenantId === former)?.payload).toMatchObject({
+        metadata: expect.objectContaining({ previousTenantId: owning, movedUserId: userId }),
+      });
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("finds the user by email, matched case-insensitively", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const { email } = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+
+      const result = await cmdRealign({ user: (email as string).toUpperCase(), tenant: former, by: "test-op", yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect(await columnOf(userId)).toBe(former);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("refuses a user with an active membership anywhere, writing nothing", async () => {
+      // The deny side: an active membership decides ownership.
+      const owning = await ctx.createTenant();
+      const former = await ctx.createTenant();
+      const userId = await ctx.createUser(owning); // ACTIVE in owning
+      await ctx.su.prisma.$executeRawUnsafe(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
+        randomUUID(),
+        former,
+        userId,
+      );
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", yes: true });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("active membership");
+      expect(await columnOf(userId)).toBe(owning);
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("refuses a target where the user holds no membership row", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const stranger = await ctx.createTenant();
+
+      const result = await cmdRealign({ user: userId, tenant: stranger, by: "test-op", yes: true });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("holds no membership row");
+      expect(await columnOf(userId)).toBe(owning);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+      await ctx.deleteTestData(stranger);
+    });
+
+    it.skipIf(SKIP)("answers that nothing is to be done when the column already names the target, recording nothing", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: owning, by: "test-op", yes: true });
+
+      // owning holds a (deactivated) row too, so the target is valid and already current.
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect(result.message).toContain("nothing to do");
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("refuses a --by label carrying a bidi control, before building a client", async () => {
+      const createSpy = vi.spyOn(migrationClientFactory, "create");
+      try {
+        const result = await cmdRealign({
+          user: randomUUID(),
+          tenant: randomUUID(),
+          by: `ops${String.fromCodePoint(0x202e)}admin`,
+          yes: true,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.message).toContain("--by contains a control, bidi or zero-width character");
+        expect(createSpy).not.toHaveBeenCalled();
+      } finally {
+        createSpy.mockRestore();
+      }
+    });
+
+    it.skipIf(SKIP)("aborts without writing when the operator does not confirm", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: alwaysNo });
+
+      expect(result).toMatchObject({ ok: false, message: "Aborted: not confirmed." });
+      expect(await columnOf(userId)).toBe(owning);
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+  });
+
   describe("missing MIGRATION_DATABASE_URL", () => {
     // M11 / C7: "no connection attempted" was in the test name and in the
     // acceptance criterion but asserted nowhere — an implementation that
@@ -2686,6 +2846,7 @@ describe("tenant-domain CLI (C7)", () => {
           cmdPreflight(),
           cmdAdd({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
           cmdRemove({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
+          cmdRealign({ user: randomUUID(), tenant: "acmecorp", by: "test-op", yes: true }),
         ]);
         for (const result of results) {
           expect(result.ok).toBe(false);

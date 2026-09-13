@@ -39,6 +39,7 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove  --tenant <ref> --domain <domain> --by <label> [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid> [--after <seq>]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- realign --user <uuid|email> --tenant <ref> --by <label> [--yes]
 //
 // `--tenant <ref>` accepts the tenant's UUID, one of its already-registered
 // claims (normalised the same way `add`/`remove` normalise `--domain`), or its
@@ -87,7 +88,7 @@ import {
   operatorDomainSchema,
   NON_PRINTABLE_ASCII_SQL_CLASS,
 } from "@/lib/tenant/tenant-claim-registry";
-import { UUID_RE, SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { UUID_RE, SYSTEM_TENANT_ID, SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import {
   escapeUnsafeDisplayChars,
   UNSAFE_DISPLAY_CHARS_RE,
@@ -97,7 +98,16 @@ import {
   SIGNIN_ACTOR_LABEL,
   TENANT_CLAIM_EVENT_OPERATION,
 } from "@/lib/tenant/tenant-claim-event";
-import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
+import { ACTOR_TYPE, AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
+// `realign`'s I/O, from modules that never import the application's Prisma
+// singleton: it throws at import without DATABASE_URL, and this tool runs on
+// MIGRATION_DATABASE_URL alone (round-7 F-R7-2). `tenant-domain-import-graph.test.ts`
+// fails when anything this file imports reaches it.
+import { buildOutboxPayload } from "@/lib/audit/audit-payload";
+import { enqueueAuditInTx } from "@/lib/audit/audit-outbox-in-tx";
+import { countStrandedRows } from "@/lib/tenant/stranded-rows";
+import { realignOwningTenantColumn } from "@/lib/tenant/owning-column";
+import { REALIGNMENT_SOURCE, realignToMembershipInTxWith } from "@/lib/tenant/tenant-realignment-core";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import {
   asciiPrintable, AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
@@ -1603,6 +1613,171 @@ export async function cmdHistory(args: {
   }
 }
 
+// ─── realign ─────────────────────────────────────────────────────
+
+const REALIGN_WARNING = [
+  "This moves the user's owning column onto the target tenant, and nothing else:",
+  "their rows stay filed under the tenant they are filed under now (counted above),",
+  "and their membership in the target tenant stays deactivated until that tenant",
+  "reactivates it — through SCIM or directory sync, which it may do once it owns them.",
+  "Both tenants receive a USER_TENANT_REALIGNED audit row with source \"operator\"",
+  "and your --by label.",
+].join("\n");
+
+/**
+ * Move a user's owning column onto a tenant where they already hold a membership
+ * row — the one case no producer may resolve (round-7 F-R7-2).
+ *
+ * SCIM and directory sync reactivate a member only for a tenant that owns the
+ * user (round-6 R6-S2), and the way back that leaves — signing in through the
+ * tenant's IdP — exists only for a tenant with a tenant claim. A member who left
+ * a claimless tenant, joined another and was suspended there is owned by that
+ * other tenant for good. This command is the sanctioned, recorded exit.
+ *
+ * Refused:
+ * - a user with an ACTIVE membership anywhere: that membership decides ownership,
+ *   and moving the column away from it splits the two;
+ * - a target where the user holds no membership row: the move follows an existing
+ *   membership, it does not create one;
+ * - an email matching more than one user (case variants): name the user by UUID.
+ *
+ * The move is `tenant-realignment-core.ts`'s, so the record is the application's:
+ * USER_TENANT_REALIGNED on both tenants, the system as actor, source "operator",
+ * and `--by` as `by`. Not atomic against a concurrent activation elsewhere between
+ * the check and the write; an operator runs this once, deliberately.
+ */
+export async function cmdRealign(args: {
+  user: string;
+  tenant: string;
+  by: string;
+  yes?: boolean;
+  confirm?: ConfirmFn;
+}): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        const tenant = await resolveTenantRef(tx, args.tenant);
+        if (!tenant) {
+          return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(args.tenant)}` };
+        }
+        if (tenant.id === SYSTEM_TENANT_ID) {
+          return {
+            ok: false,
+            code: 1,
+            message: "The target is the sentinel tenant, which encodes \"no owning tenant\" and must hold no accounts.",
+          };
+        }
+
+        const select = { id: true, email: true, tenantId: true } as const;
+        const users = UUID_RE.test(args.user)
+          ? await tx.user.findMany({ where: { id: args.user }, select })
+          : await tx.user.findMany({ where: { email: { equals: args.user, mode: "insensitive" } }, select });
+        if (users.length === 0) {
+          return { ok: false, code: 1, message: `User not found: ${escapeUnsafeDisplayChars(args.user)}` };
+        }
+        if (users.length > 1) {
+          return {
+            ok: false,
+            code: 1,
+            message:
+              `More than one user matches "${escapeUnsafeDisplayChars(args.user)}" (emails differing only in case). ` +
+              "Name the user by UUID.",
+          };
+        }
+        const [user] = users;
+
+        const active = await tx.tenantMember.findMany({
+          where: { userId: user.id, deactivatedAt: null },
+          select: { tenantId: true },
+        });
+        if (active.length > 0) {
+          return {
+            ok: false,
+            code: 1,
+            message:
+              `User ${user.id} has an active membership in tenant ${active.map((m) => m.tenantId).join(", ")}. ` +
+              "realign is only for a user active in no tenant: an active membership decides who owns the user, " +
+              "and moving the column away from it would split the two.",
+          };
+        }
+
+        const member = await tx.tenantMember.findUnique({
+          where: { tenantId_userId: { tenantId: tenant.id, userId: user.id } },
+          select: { id: true },
+        });
+        if (!member) {
+          return {
+            ok: false,
+            code: 1,
+            message:
+              `User ${user.id} holds no membership row in tenant ${tenant.id}. ` +
+              "realign follows an existing membership; it does not create one.",
+          };
+        }
+
+        if (user.tenantId === tenant.id) {
+          return {
+            ok: true,
+            code: 0,
+            tenantId: tenant.id,
+            message: `User ${user.id} is already filed under tenant ${tenant.id}; nothing to do.`,
+          };
+        }
+
+        const leftBehind = await countStrandedRows(tx, user.id, user.tenantId);
+        printTenantSummary(tenant, await activeMemberCount(tx, tenant.id), "Target tenant:");
+        console.log(`User:            ${user.id} (${escapeUnsafeDisplayChars(user.email ?? "-")})`);
+        console.log(`Filed under now: ${user.tenantId}`);
+        console.log(`Rows that stay under it: ${JSON.stringify(leftBehind)}`);
+        console.log(REALIGN_WARNING);
+        const confirmed = args.yes === true ? true : await (args.confirm ?? defaultConfirm)("Proceed?");
+        if (!confirmed) {
+          return { ok: false, code: 1, message: "Aborted: not confirmed." };
+        }
+
+        const previous = await realignToMembershipInTxWith(
+          {
+            logAuditInTx: (atx, tenantId, params) => enqueueAuditInTx(atx, tenantId, buildOutboxPayload(params)),
+            realignOwningTenantColumn,
+            countStrandedRows,
+          },
+          tx,
+          {
+            userId: user.id,
+            memberId: member.id,
+            tenantId: tenant.id,
+            cause: {
+              source: REALIGNMENT_SOURCE.OPERATOR,
+              actorUserId: SYSTEM_ACTOR_ID,
+              actorType: ACTOR_TYPE.SYSTEM,
+              label: args.by,
+            },
+          },
+        );
+        return {
+          ok: true,
+          code: 0,
+          tenantId: tenant.id,
+          message:
+            `Realigned user ${user.id} from tenant ${previous} to tenant ${tenant.id}. ` +
+            "Their membership there is still deactivated; that tenant can now reactivate it.",
+        };
+      },
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 // ─── CLI wrapper ─────────────────────────────────────────────────
 
 function printUsage(): void {
@@ -1615,10 +1790,13 @@ function printUsage(): void {
       "  tenant-domain add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
       "  tenant-domain remove  --tenant <ref> --domain <domain> --by <label> [--yes]",
       "  tenant-domain history --domain <claim> | --tenant <uuid> [--after <seq>]",
+      "  tenant-domain realign --user <uuid|email> --tenant <ref> --by <label> [--yes]",
       "",
       "<ref> is a tenant UUID, one of its registered claims, or its external id (not its slug).",
       "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
       "UUID only, and `add` refuses if it does not match the row's actual owner.",
+      "realign moves a user active in no tenant onto a tenant where they hold a",
+      "membership row, for the member SCIM and directory sync may not take back.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",
@@ -1702,6 +1880,18 @@ async function main(): Promise<void> {
         tenant: getStringFlag(flags, "tenant"),
         after: getStringFlag(flags, "after"),
       });
+      break;
+    }
+    case "realign": {
+      const user = getStringFlag(flags, "user");
+      const tenant = getStringFlag(flags, "tenant");
+      const by = getStringFlag(flags, "by");
+      if (!user || !tenant || !by) {
+        printUsage();
+        process.exitCode = 1;
+        return;
+      }
+      result = await cmdRealign({ user, tenant, by, yes });
       break;
     }
     default:

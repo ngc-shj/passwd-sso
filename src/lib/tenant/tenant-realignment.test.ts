@@ -99,6 +99,27 @@ describe("realignToMembershipInTx", () => {
     expect(released[2].metadata).toEqual({ leftBehind: { passwordEntry: 3 }, source: "scim" });
   });
 
+  it("records an operator's move under the system actor with the --by label on both rows", async () => {
+    // Round-7 F-R7-2: `tenant-domain realign` runs the same move. Neither tenant's
+    // principal acted, so both rows carry the system; the label says who ran it.
+    mockRealignOwningTenantColumn.mockResolvedValue(RELEASED);
+
+    await realignToMembershipInTx({} as never, {
+      userId: USER_ID,
+      memberId: "m-1",
+      tenantId: JOINED,
+      cause: { source: REALIGNMENT_SOURCE.OPERATOR, actorUserId: SYSTEM_ACTOR_ID, actorType: "SYSTEM", label: "ops-oncall" },
+    });
+
+    const [joined, released] = mockLogAuditInTx.mock.calls;
+    expect(joined[2]).toMatchObject({
+      userId: SYSTEM_ACTOR_ID,
+      metadata: { source: "operator", by: "ops-oncall", movedUserId: USER_ID },
+    });
+    expect(released[2]).toMatchObject({ userId: SYSTEM_ACTOR_ID, actorType: "SYSTEM" });
+    expect(released[2].metadata).toEqual({ leftBehind: { passwordEntry: 3 }, source: "operator", by: "ops-oncall" });
+  });
+
   it("records a sign-in as the user's own move, as it was recorded before causes existed", async () => {
     mockRealignOwningTenantColumn.mockResolvedValue(RELEASED);
 
