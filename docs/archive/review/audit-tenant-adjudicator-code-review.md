@@ -958,6 +958,31 @@ before either, dereferencing `member.user.name`.
 - U2 is closed with this: every producer that activates a membership — sign-in rows
   4 and 5, SCIM POST/PUT/PATCH, directory sync — now moves the owning column.
 
+#### The CI guard for S2's class — `check-required-user-relation`
+
+- What it enforces: a Prisma call whose projection (`select` / `include`, followed
+  through nested relations) or whose `where` (through `AND`/`OR`/`NOT` and
+  `is`/`some`/`every`/`none`) reaches a REQUIRED to-one `User` relation, and that is
+  not enclosed — in its own file, directly or through a local wrapper — by
+  `withBypassRls`. Row-returning writes, counts and bulk writes are covered with
+  reads. Anything else fails closed, because a service function has no opener of
+  its own and runs in whatever context its caller opened; the class had members in
+  three services.
+- Exceptions are per file with a disposition, a reason and the NUMBER of calls they
+  cover, so a call added to a listed file fails instead of being excused by an entry
+  written for another — the per-file hole `check-bypass-rls` names in its own header.
+  Today: ten calls restricted to ACTIVE memberships (which the realignment keeps
+  aligned), the service-account create returning its own creator, and
+  `vault-auto-promote`, whose only caller opens the bypass. A stale entry fails.
+- Stated limits, in the header: `where` spreads are not followed (a projection
+  spread fails closed), computed keys are skipped, raw SQL and clients obtained from
+  calls are not seen, and context is decided per file.
+- Red proof: on the real tree, restoring `createdBy` to the operator-token list and
+  withdrawing the SCIM group service's entry failed the gate naming both; in the
+  self-test, counting optional relations, never trusting a bypass and dropping the
+  count check failed the five cells written for them. Wired into `pre-pr.sh` beside
+  `check-owning-tenant-adjudicator`.
+
 #### S1 Major — admin vault reset destroyed rows outside the authorizing tenant
 
 - Action: an admin-authorized reset is refused while the target still owns
