@@ -2809,12 +2809,196 @@ on one-file fixtures.
   - The first full run, taken while the red-proof worktree jobs were running, failed one
     cell outside this change: `block-bare-decrypt-hook.test.mjs`, "allows the
     bearer-token variant", received 2 (refused) instead of 0.
-  - For that command the hook allows on its logic alone. Its exit-2 paths that do not
-    depend on the command are the fail-closed ones: `python3` could not parse the input,
-    or `grep` could not run.
   - The cell passes alone (3 of 3), in eight parallel runs, and in the full run above,
-    taken with nothing else running. The test records only the exit code, so which
-    fail-closed path fired is not recorded.
+    taken with nothing else running.
+  - (Corrected in round 14, T-R14-4: this note blamed a fail-closed path unrelated to the
+    command, `python3` or `grep` failing to run. The measured cause depends on the
+    command. The hook's `matches()` piped `printf '%s' "$COMMAND"` into `grep -qE` under
+    `pipefail`; `grep -q` exits at its first matching line, printf's next write takes
+    SIGPIPE, and the pipeline's 141 was refused. The bearer command is multi-line with
+    its match on the first line, so it lost the race intermittently. Measured on the
+    pipe: 0 of 10 unpadded, 3 of 10 with a 70 KB line, 10 of 10 with a 200 KB line.
+    Fixed in round 14.)
+- **Integration:** not re-run. Nothing under `src/` changed; round 11's run (113 files /
+  710 tests) covers the unchanged runtime.
+- **Citation gate:** passes over this document and the SSO deviation log.
+
+## Round 14
+
+Reviewed range: `b353518e2..f814d65c0`, the round-13 fix commit. The experts' raw
+outputs and full Recurring Issue Checks are kept in the round's working files.
+
+### Changes from Previous Round
+
+Round 13's rule refuses what it targeted:
+- **Spellings:** the value-level spellings security probed (`export default`,
+  `module.exports`, a shorthand property, `new`, a tagged template, `Reflect.apply`,
+  `Object.values` and others) are refused, as are the 18 recorded ones.
+- **Counts:** the real-tree gate exits 0 with unchanged counts, and no allowlist
+  changed.
+- **Red proofs:** testing re-ran six of them, and every count reproduced.
+
+The rule still recognised helpers by spelling, and that let three things through:
+- a regression;
+- an unrecognised alias;
+- a class of paths the header did not declare.
+
+### Findings
+
+- **S-R14-1 — Major, R43 regression (security).** `localHelperNames` recorded a
+  destructured run-time load in a file-wide map, one entry per name. Writing
+  `{ withTenantRls: withBypassRls } = await import(…)` in any function rebound the name,
+  so a real `withBypassRls(…)` call elsewhere in the file was classified as
+  `withTenantRls`. That call then skipped the file allowlist, the purpose check and the
+  model scan. Six shapes that `b353518e2` refused passed, including:
+  - an allowlisted file reaching a model its entry does not allow;
+  - an entry the gate then called stale.
+- **S-R14-2 / F-R14-2 — Major, convergent security+functionality (R42/R47/R49),
+  pre-existing.** A helper carried any way the gate did not recognise was neither
+  followed nor reported:
+  - a re-export or `export *` barrel imported under an alias;
+  - a computed or variable `import()` specifier, a renamed `require` or `createRequire`;
+  - a quoted or computed destructuring key;
+  - `x.withBypassRls.call(…)` on an unknown receiver.
+
+  The header declared only the renaming re-export.
+- **F-R14-1 — Major (functionality).** A `QualifiedName` was skipped as a type position.
+  But `import wb = rls.withBypassRls;` is a value alias: `wb(…)` passed in a file on no
+  allowlist, and TypeScript and SWC both accept it.
+- **T-R14-1 — Major (RT7).** Three branches no cell pinned; each one-line mutation kept
+  every cell green while a file on no allowlist passed:
+  - a computed namespace member;
+  - a namespace helper member read as a value;
+  - the run-time specifier regex.
+- **T-R14-5 — Major, [Adjacent] (testing), pre-existing.** The Round 13 hook failure was a
+  race in `.claude/hooks/block-bare-decrypt.sh`, not the environment. `matches()` piped
+  `printf '%s' "$COMMAND"` into `grep -qE` under `pipefail`, and `grep -q` exits at its
+  first matching line. printf's next write then takes SIGPIPE, and the pipeline's 141 was
+  refused. A multi-line /use-credential command whose match precedes its last line was
+  refused intermittently. Testing reported every run past 64 KB; measured here on the
+  pipe, launched as the test launches it, a 70 KB line was refused in 3 of 10 runs and a
+  200 KB line in 10 of 10.
+- **Minor:**
+  - **F-R14-3 / T-R14-3:** `bypassCallFiles` now holds files with an indirect reference.
+    Its comment still said "a real `withBypassRls` call", and no cell pinned the effect.
+  - **T-R14-2:** the allow side of a renamed run-time destructure and of a non-helper
+    namespace member was unpinned.
+  - **T-R14-4:** the Round 13 hook note named the wrong cause.
+  - **S-R14-A1 / F-R14-A1:** no cell pinned a name collision or the `QualifiedName`
+    exemption.
+
+### Resolution Status — round 14
+
+The user chose to fix the regression and the unrecognised alias, and to declare the
+remaining recognition limit, rather than move `check-bypass-rls` to a TypeScript Program
+in this branch. The user also chose to fix the hook race here.
+
+#### S-R14-1 Major — a name bound to two helpers is refused wherever it is used
+
+- **Action:** a run-time destructure that binds a helper under a name already bound to a
+  different helper marks that name ambiguous. It does not overwrite the earlier binding.
+  - A call through an ambiguous name is not counted as any helper's call.
+  - Every use of the name, a direct call included, is reported as a reference the gate
+    cannot follow, and the report says the name is bound to more than one helper.
+  - A name bound to the same helper twice, as the two vault routes do alongside the
+    seeded canonical name, is not ambiguous.
+- **Cells:**
+  - refusals through the canonical name, a static alias, and two run-time loads, in a
+    file on no allowlist;
+  - the same shadow in an allowlisted file, refused and not called stale;
+  - an allow cell for the same helper bound twice.
+
+#### F-R14-1 Major — an import-equals alias of a helper is a reference
+
+- **Action:** a qualified name stays a type position, except inside
+  `import … = …` or `export import … = …` whose right-hand name is a helper. That
+  qualified name is reported.
+- **Cells:**
+  - refusals for `import wb = rls.withBypassRls` and its exported form;
+  - an allow cell for `typeof rls.withBypassRls` beside `import Purpose =
+    rls.BYPASS_PURPOSE`.
+
+#### T-R14-1 Major, T-R14-2 / T-R14-3 / F-R14-3 Minor — the branches are pinned
+
+- **Deny cells:** a computed namespace member, a namespace helper member read as a value,
+  and a namespace member's `.call`.
+- **Counted cells:** renamed destructured loads through `./tenant-rls` and
+  `@/lib/tenant-rls.js`. Each asserts the file-allowlist message and no refusal, and the
+  existing renamed cell now asserts no refusal too.
+- **Allow cell:** a non-helper namespace member read as a value in an allowlisted file.
+- **`bypassCallFiles`:** the allowlisted-file refusal cells assert the file is not called
+  stale, and the comment says what the set holds and why.
+
+#### S-R14-2 / F-R14-2 Major (convergent) — Accepted, and the limit declared
+
+- **Action:** the `check-bypass-rls.mjs` header now names the unrecognised paths as a
+  known limit, replacing the renaming-re-export bullet:
+  - a re-export or `export *` barrel, renamed or not;
+  - a non-literal load, `createRequire`, or a renamed `require`;
+  - a quoted or computed destructuring key;
+  - a helper-named member read off an object the file cannot prove to be the module.
+
+  It also states that only literal-specifier loads and identifier-keyed destructuring
+  are followed.
+- **Anti-Deferral check:** pre-existing on main. Closing it needs a TypeScript Program to
+  resolve each reference to its declaration, which is a new mechanism for this gate. Each
+  spelling added in rounds 13 and 14 opened another path or a regression.
+- **Worst case:** a barrel re-exporting the helpers, imported under an alias, lets a new
+  `withBypassRls` call pass without an allowlist entry, so it skips its security review
+  and model scan.
+- **Likelihood:** low today. Measured over the non-test files the prefilter selects:
+  - no export specifier or `export *` of a helper;
+  - no `withBypassRls`/`withTenantRls` imported from another module; the 111 imports from
+    other modules are `withUserTenantRls`/`withTeamTenantRls` from `tenant-context`, where
+    they are defined;
+  - no non-literal load;
+  - no helper-named member read that is not a direct call;
+  - helper-keyed destructuring only in the two vault routes' literal loads.
+- **Cost to fix:** a Program-based rewrite of `check-bypass-rls`, tracked outside this
+  branch.
+
+#### T-R14-5 Major, T-R14-4 Minor — the hook matcher reads a here-string, and its test says why it refused
+
+- **Action, `.claude/hooks/block-bare-decrypt.sh`:** `matches()` runs
+  `grep -qE "$pattern" <<<"$COMMAND"`, with no pipe to lose. The comment records the race.
+- **Action, `scripts/__tests__/block-bare-decrypt-hook.test.mjs`:** the 30 assertions go
+  through `expectHook` / `expectHookRaw`, which pass the hook's stderr as the assertion
+  message.
+- **Cell:** an allow cell for the bearer-token pattern padded to 200 KB. The first version
+  padded 70 KB; the red proof showed the pipe let it through in most runs, so the cell
+  could not fail for the race it names. At 200 KB the pipe refused 10 of 10 runs and the
+  here-string 0 of 10.
+- **Record:** the Round 13 note is corrected in place.
+
+#### Red proof — round 14
+
+Run in a worktree copy over the bypass gate and hook self-tests. Each mutation was
+applied on its own; at baseline all 173 cells pass.
+
+| Mutation | Cells that failed |
+|---|---|
+| a second binding overwrites the name (the round-13 map) | the three name-collision refusals and the allowlisted-shadow refusal (4) |
+| an ambiguous name's direct call is exempt | the same four cells (4) |
+| a second binding to the same helper is ambiguous too | the two destructured dynamic-import direct-call cells and the same-helper allow cell (3) |
+| an import-equals alias is not a reference | the two import-equals refusals (2) |
+| any import-equals member is a reference | the type-position and non-helper import-equals allow cell (1) |
+| a computed namespace member is not refused | the computed-member refusal (1) |
+| a namespace helper member read as a value is not refused | the static and run-time element-access refusals, the member-as-value refusal and the member `.call` refusal (4) |
+| a run-time load is recognised only as `@/lib/tenant-rls` | the relative and `.js` specifier counted cells (2) |
+| an indirect reference does not keep the entry live | the two allowlisted-file refusals that assert the entry is not called stale (2) |
+| the hook's matcher pipes printf into `grep -q` again | the 200 KB bearer-token allow cell (1) |
+
+The first run of the last row padded the cell to 70 KB and failed nothing, because the
+pipe let that command through in 7 of 10 runs; the cell now pads to 200 KB.
+
+#### Round 14 verification
+
+- **Unit:** 1034 files / 15839 tests pass; `next build` passes. eslint reports nothing on
+  any changed file, and `bash -n` passes on the hook. All five tenant/RLS gates exit 0 on
+  the real tree, with `check-bypass-rls` still at 243 of 1023 files parsed and 25 call
+  sites handed off.
+  - The full run was taken while the round's red-proof jobs ran, the load under which
+    round 13's hook cell failed; the hook cell passed.
 - **Integration:** not re-run. Nothing under `src/` changed; round 11's run (113 files /
   710 tests) covers the unchanged runtime.
 - **Citation gate:** passes over this document and the SSO deviation log.

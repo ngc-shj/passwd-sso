@@ -33,15 +33,27 @@
  * at run time (`await import("@/lib/tenant-rls")`, `require`) binds the helpers
  * like an import: a destructured binding is followed as one, the module object as
  * a namespace, and any other use of the load is reported (runtimeHelperModulesIn).
+ * Only a load whose specifier is a literal naming the module is recognised, and only
+ * identifier-keyed destructuring is followed. A name bound to two different helpers
+ * in one file is reported wherever it is used, a direct call included, and
+ * `import wb = rls.withBypassRls` is a reference like any other (round 14).
  *
  *   - Check 2 (BYPASS_PURPOSE) is FILE-scoped, not call-scoped: one
  *     `BYPASS_PURPOSE.X` anywhere satisfies it for every call in the file, and
  *     its receiver test is name equality, so an aliased import is a false
  *     positive. Pre-existing granularity, unchanged by the AST move.
- *   - The prefilter cannot see a call reached through a RENAMING re-export
- *     (`export { withBypassRls as wb } from "@/lib/tenant-rls"`), because the
- *     caller's text names neither the helper nor the module. No such re-export
- *     exists today (`rg 'export .*from.*tenant-rls' src/` is empty).
+ *   - A helper that reaches a file other than straight from the tenant-rls module
+ *     is neither followed nor reported: through a re-export or an `export *` barrel,
+ *     renamed or not; a load whose specifier is not a literal naming the module
+ *     (computed, concatenated, a variable, `createRequire`, a renamed `require`); a
+ *     quoted or computed destructuring key; or a helper-named member read off an
+ *     object this file cannot prove to be the module. Recognition is by spelling, and
+ *     resolving these needs a Program, which no gate in this tree carries
+ *     (audit-tenant-adjudicator round 14, S-R14-2). Measured in round 14 over the
+ *     non-test files the prefilter selects: no export specifier or `export *` of a
+ *     helper, no `withBypassRls`/`withTenantRls` imported from another module, no
+ *     non-literal load, no helper-named member read that is not a direct call, and
+ *     helper-keyed destructuring only in the two vault routes' literal loads.
  *   - The scan root is `src/` only. `scripts/tenant-domain.ts` and
  *     `scripts/manual-tests/*.ts` call these helpers and are examined by nothing.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
@@ -407,6 +419,9 @@ function runtimeHelperModulesIn(sf) {
   return loads;
 }
 
+/** Marks a local name bound to more than one RLS helper in the file (round 14, S-R14-1). */
+const AMBIGUOUS_HELPER = "<ambiguous>";
+
 function localHelperNames(sf) {
   const byLocalName = new Map([...HELPER_NAMES].map((n) => [n, n]));
   for (const imp of sf.getImportDeclarations()) {
@@ -427,7 +442,14 @@ function localHelperNames(sf) {
     for (const element of binding.getElements()) {
       if (element.getDotDotDotToken() || element.getNameNode().getKind() !== SyntaxKind.Identifier) continue;
       const canonical = (element.getPropertyNameNode() ?? element.getNameNode()).getText();
-      if (HELPER_NAMES.has(canonical)) byLocalName.set(element.getNameNode().getText(), canonical);
+      if (!HELPER_NAMES.has(canonical)) continue;
+      // The map is file-wide. A binding that names a different helper under a name
+      // already bound — `{ withTenantRls: withBypassRls }` in another function —
+      // reclassified every call spelled with that name, and a real bypass call
+      // reached none of the checks. The name is ambiguous instead (round 14, S-R14-1).
+      const local = element.getNameNode().getText();
+      const previous = byLocalName.get(local);
+      byLocalName.set(local, previous === undefined || previous === canonical ? canonical : AMBIGUOUS_HELPER);
     }
   }
   return byLocalName;
@@ -486,7 +508,19 @@ function indirectHelperReferencesIn(sf) {
     const parent = id.getParent();
     const kind = parent?.getKind();
     if (kind === SyntaxKind.ImportSpecifier || kind === SyntaxKind.NamespaceImport || kind === SyntaxKind.ExportSpecifier) continue;
-    if (kind === SyntaxKind.TypeQuery || kind === SyntaxKind.QualifiedName) continue;
+    if (kind === SyntaxKind.TypeQuery) continue;
+    if (kind === SyntaxKind.QualifiedName) {
+      // A type position, except in `import wb = rls.withBypassRls`, which binds a
+      // value alias the calls below then go through (round 14, F-R14-1).
+      if (
+        parent.getFirstAncestorByKind(SyntaxKind.ImportEqualsDeclaration) &&
+        sameNode(parent.getRight(), id) &&
+        HELPER_NAMES.has(name)
+      ) {
+        refs.push(parent);
+      }
+      continue;
+    }
     if (NAMED_DECLARATION_KINDS.has(kind) && sameNode(parent.getNameNode?.(), id)) continue;
     if (kind === SyntaxKind.BindingElement && sameNode(parent.getPropertyNameNode?.(), id)) continue;
     if (kind === SyntaxKind.PropertyAccessExpression && sameNode(parent.getNameNode(), id)) continue;
@@ -507,7 +541,7 @@ function indirectHelperReferencesIn(sf) {
     }
 
     if (!byLocalName.has(name)) continue;
-    if (isDirectCallee(id)) continue;
+    if (byLocalName.get(name) !== AMBIGUOUS_HELPER && isDirectCallee(id)) continue;
     refs.push(id);
   }
   return refs;
@@ -526,7 +560,7 @@ function helperCallsIn(sf) {
       expr.getKind() === SyntaxKind.PropertyAccessExpression
         ? (HELPER_NAMES.has(expr.getName()) ? expr.getName() : undefined)
         : byLocalName.get(expr.getText());
-    if (helper) calls.push({ call, helper });
+    if (helper && helper !== AMBIGUOUS_HELPER) calls.push({ call, helper });
   }
   return calls;
 }
@@ -1088,7 +1122,11 @@ const modelViolations = [];
 const usedModels = new Map();
 const undecidableFiles = new Set();
 let handedOffSites = 0;
-/** Files that make at least one real `withBypassRls` call — the whole-entry check reads it. */
+/**
+ * Files that make at least one real `withBypassRls` call, or hold a helper reference
+ * this gate reports as unfollowable (round 13). The whole-entry check reads it: such a
+ * file already fails, and telling its reviewer to delete the entry would be wrong.
+ */
 const bypassCallFiles = new Set();
 const purposeViolations = [];
 const txLessViolations = [];
@@ -1142,9 +1180,15 @@ for (const file of sourceFiles) {
 
   // A helper this gate cannot follow as a direct call reaches none of the checks
   // below, so the reference itself fails (round 13).
+  const helperNames = localHelperNames(sf);
   const indirect = indirectHelperReferencesIn(sf);
   for (const ref of indirect) {
-    indirectHelperReferences.push({ file, line: ref.getStartLineNumber(), text: ref.getText() });
+    const ambiguous = helperNames.get(ref.getText()) === AMBIGUOUS_HELPER;
+    indirectHelperReferences.push({
+      file,
+      line: ref.getStartLineNumber(),
+      text: ambiguous ? `${ref.getText()} (bound to more than one RLS helper in this file)` : ref.getText(),
+    });
   }
   if (indirect.length > 0) bypassCallFiles.add(file);
   const allowedModels = ALLOWED_USAGE.get(file);

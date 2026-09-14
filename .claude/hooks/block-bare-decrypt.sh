@@ -55,7 +55,13 @@ print(cmd)
 matches() {
   local pattern="$1" status
   set +e
-  printf '%s' "$COMMAND" | grep -qE "$pattern"
+  # A here-string, not `printf '%s' "$COMMAND" | grep -qE`: grep -q exits at its
+  # first matching line, printf's next write then takes SIGPIPE, and under
+  # pipefail the pipeline reports 141, which the case below refuses. A multi-line
+  # /use-credential command whose match came before its last line was refused at
+  # random: 3 of 10 runs with a 70 KB line, 10 of 10 with a 200 KB line
+  # (audit-tenant-adjudicator round 14, T-R14-5).
+  grep -qE "$pattern" <<<"$COMMAND"
   status=$?
   set -e
   case "$status" in

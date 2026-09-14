@@ -1788,6 +1788,7 @@ describe("a helper reference the gate cannot follow as a direct call is refused 
     );
     expect(code, stderr).toBe(1);
     expect(stderr).toContain(REFUSAL);
+    expect(stderr).not.toContain("makes no withBypassRls call");
   });
 
   it("passes the same allowlisted file calling the helper directly (control)", () => {
@@ -1844,6 +1845,7 @@ describe("a helper module loaded at run time is followed like an import (audit-t
     );
     expect(code, stderr).toBe(1);
     expect(stderr).toContain(NOT_ALLOWLISTED);
+    expect(stderr).not.toContain(REFUSAL);
   });
 
   it("passes a destructured dynamic import called directly in an allowlisted file", () => {
@@ -1863,6 +1865,102 @@ describe("a helper module loaded at run time is followed like an import (audit-t
     const { code, stderr } = run("src/lib/probe.ts", inAsync(body));
     expect(code, stderr).toBe(1);
     expect(stderr).toContain(REFUSAL);
+  });
+});
+
+describe("a name bound to two helpers, an import-equals alias, and the branches round 13 left unpinned (audit-tenant-adjudicator round 14)", () => {
+  const CB = "async (tx) => tx.user.findMany()";
+  const P = "BYPASS_PURPOSE.SYSTEM_MAINTENANCE";
+  const REFUSAL = "referenced in a form this gate cannot follow as a direct call";
+  const AMBIGUOUS = "bound to more than one RLS helper in this file";
+  const NOT_ALLOWLISTED = "withBypassRls usage found in files not on the allowlist";
+  const IMPORTS = `import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";\nimport * as rls from "@/lib/tenant-rls";\n`;
+  const SHADOW = (name) =>
+    `export async function g() {\n  const { withTenantRls: ${name} } = await import("@/lib/tenant-rls");\n  return null;\n}\n`;
+
+  // S-R14-1: the helper-name map was file-wide, so a destructured load binding a
+  // different helper under a name already in use reclassified every call spelled with
+  // it, and the real bypass call reached none of the checks.
+  it.each([
+    ["the canonical name", `${IMPORTS}${SHADOW("withBypassRls")}export const f = () => withBypassRls(prisma, ${CB}, ${P});\n`],
+    ["a static alias", `import { withBypassRls as run, BYPASS_PURPOSE } from "@/lib/tenant-rls";\n${SHADOW("run")}export const f = () => run(prisma, ${CB}, ${P});\n`],
+    [
+      "two run-time loads",
+      `${SHADOW("open")}export async function f() {\n  const { withBypassRls: open, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");\n  return open(prisma, ${CB}, ${P});\n}\n`,
+    ],
+  ])("refuses a name bound to two helpers through %s, in a file on no allowlist", (_label, source) => {
+    const { code, stderr } = run("src/lib/probe.ts", source);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(AMBIGUOUS);
+  });
+
+  it("refuses the same shadow in an allowlisted file, and does not call its entry stale", () => {
+    const { code, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `${IMPORTS}${SHADOW("withBypassRls")}export const f = () => withBypassRls(prisma, async (tx) => tx.user.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(AMBIGUOUS);
+    expect(stderr).not.toContain("makes no withBypassRls call");
+  });
+
+  it("passes a name bound to the same helper twice", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";\nexport async function g() {\n  const { withBypassRls } = await import("@/lib/tenant-rls");\n  return withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n}\nexport const f = () => withBypassRls(prisma, async (tx) => tx.auditOutbox.count(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+
+  // F-R14-1: `import wb = rls.withBypassRls` was skipped as a type position.
+  it.each([
+    ["an import-equals alias", `${IMPORTS}import wb = rls.withBypassRls;\nexport const f = () => wb(prisma, ${CB}, ${P});\n`],
+    ["an exported import-equals alias", `${IMPORTS}export import wb = rls.withBypassRls;\nexport const f = () => wb(prisma, ${CB}, ${P});\n`],
+  ])("refuses %s", (_label, source) => {
+    const { code, stderr } = run("src/lib/probe.ts", source);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+  });
+
+  it("passes a qualified helper name in a type position and an import-equals alias of a non-helper member", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/probe.ts",
+      `import * as rls from "@/lib/tenant-rls";\nexport type Opener = typeof rls.withBypassRls;\nimport Purpose = rls.BYPASS_PURPOSE;\nexport const p = Purpose;\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+
+  // T-R14-1: three branches no round-13 cell reached.
+  it.each([
+    ["a computed namespace member", `(() => { const k = "withBypassRls"; return rls[k](prisma, ${CB}, ${P}); })()`],
+    ["a namespace member read as a value", `(() => { const g = rls.withBypassRls; return g(prisma, ${CB}, ${P}); })()`],
+    ["a namespace member's .call", `rls.withBypassRls.call(null, prisma, ${CB}, ${P})`],
+  ])("refuses %s", (_label, expr) => {
+    const { code, stderr } = run("src/lib/probe.ts", `${IMPORTS}export const f = () => ${expr};\n`);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+  });
+
+  it.each([["a relative specifier", "./tenant-rls"], ["a .js specifier", "@/lib/tenant-rls.js"]])(
+    "counts a renamed destructured load through %s",
+    (_label, specifier) => {
+      const { code, stderr } = run(
+        "src/lib/probe.ts",
+        `export async function f() {\n  const { withBypassRls: wb, BYPASS_PURPOSE } = await import("${specifier}");\n  return wb(prisma, ${CB}, ${P});\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(NOT_ALLOWLISTED);
+      expect(stderr).not.toContain(REFUSAL);
+    },
+  );
+
+  // T-R14-2: a namespace member that is not a helper is not a reference to one.
+  it("passes a non-helper namespace member read as a value in an allowlisted file", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `import * as rls from "@/lib/tenant-rls";\nimport { BYPASS_PURPOSE } from "@/lib/tenant-rls";\nexport const purposes = rls.BYPASS_PURPOSE;\nexport const f = () => rls.withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
   });
 });
 
