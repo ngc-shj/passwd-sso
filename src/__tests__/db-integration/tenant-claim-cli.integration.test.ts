@@ -3045,6 +3045,8 @@ describe("tenant-domain CLI (C7)", () => {
       // `finally` waited on that connection forever and this cell timed out.
       const port = await listenLocally();
       vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      // The connect timeout is this cell's to choose, not .env's (round 11 T-R11-4).
+      vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "");
       shortenBudget({ timeout: 1000, maxWait: 300 });
 
       await expect(
@@ -3059,6 +3061,8 @@ describe("tenant-domain CLI (C7)", () => {
         socket.once("data", () => socket.write(STARTUP_OK));
       });
       vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      // The connect timeout is this cell's to choose, not .env's (round 11 T-R11-4).
+      vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "");
       shortenBudget({ timeout: 1000, maxWait: 5000 });
 
       await expect(
@@ -3074,11 +3078,26 @@ describe("tenant-domain CLI (C7)", () => {
       vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "300");
       shortenBudget({ timeout: 1000, maxWait: 8000 });
 
+      // Pinned to pg's connect-timeout text (round 11 T-R11-3): any fast failure
+      // before connecting would satisfy a bare rejection and the time bound.
       const started = Date.now();
       await expect(
         cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
-      ).rejects.toThrow();
+      ).rejects.toThrow("Connection terminated due to connection timeout");
       expect(Date.now() - started).toBeLessThan(3000);
+    });
+
+    it("treats DB_POOL_CONNECTION_TIMEOUT_MS=0 as the default, not as no limit (round 11 S-R11-2)", { timeout: 15_000 }, async () => {
+      // pg reads 0 as "wait forever". Honoured here, `$disconnect()` would wait on the
+      // unanswered connection after `maxWait` failed the command: the F-R9-1 hang.
+      const port = await listenLocally();
+      vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "0");
+      shortenBudget({ timeout: 1000, maxWait: 300 });
+
+      await expect(
+        cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+      ).rejects.toThrow("Unable to start a transaction in the given time");
     });
   });
 

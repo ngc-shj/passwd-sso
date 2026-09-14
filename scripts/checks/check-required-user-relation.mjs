@@ -66,6 +66,12 @@
  *   - A computed projection key is skipped.
  *   - Raw SQL, and a client obtained from a call (`const db = wrap(tx)`) whose
  *     handle the tree cannot resolve to a model.
+ *   - The receiver is matched by NAME (`tx.tenantMember.findMany`), so a read
+ *     through an aliased model handle (`const m = prisma.tenantMember;
+ *     m.findFirst(…)`) is not seen, inside an opener or outside one. The same limit
+ *     as `check-owning-tenant-adjudicator.mjs` and `check-bypass-rls.mjs`:
+ *     resolving it needs a Program, which no gate in this tree carries (declared in
+ *     audit-tenant-adjudicator round 11, S-R11-3).
  *   - Context is decided per file. A read in a helper the caller wraps in a bypass
  *     from another file is reported, and belongs in the manifest as
  *     "caller-bypass".

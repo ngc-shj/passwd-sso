@@ -164,9 +164,11 @@ function missingUrlResult(): CmdResult {
 // Two client-side limits, because pg sets neither by default and `$disconnect()`
 // in each command's `finally` waits on any connection still busy:
 //   - connectionTimeoutMillis, read from DB_POOL_CONNECTION_TIMEOUT_MS with the app
-//     pool's default and bounds (src/lib/prisma.ts): a server that accepts the
+//     pool's default and upper bound (src/lib/prisma.ts): a server that accepts the
 //     connection and never answers hung the command after `maxWait` had already
-//     failed it (round 9, F-R9-1; the variable, round 10 F-R10-4);
+//     failed it (round 9, F-R9-1; the variable, round 10 F-R10-4). 0, which pg
+//     reads as no limit and the app accepts, falls back to the default here: the
+//     lockout-recovery CLI must not hang (round 11, S-R11-2);
 //   - query_timeout, the confirmation budget: a server that stops answering after
 //     connecting left a query — Prisma's own timeout ROLLBACK included — waiting
 //     with no limit (round 10, F-R10-5). No query outlasts its transaction anyway.
@@ -174,7 +176,7 @@ export const migrationClientFactory = {
   create(connectionString: string): PrismaClient {
     const adapter = new PrismaPg({
       connectionString,
-      connectionTimeoutMillis: envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5 * MS_PER_SECOND, { min: 0, max: MS_PER_MINUTE }),
+      connectionTimeoutMillis: envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5 * MS_PER_SECOND, { min: 1, max: MS_PER_MINUTE }),
       query_timeout: confirmationTransaction.options().timeout,
     });
     return new PrismaClient({ adapter });

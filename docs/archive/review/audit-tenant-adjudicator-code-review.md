@@ -2335,7 +2335,8 @@ fix had introduced three regressions.
   `withUserTenantRls`, which the proxy in `src/lib/prisma.ts` runs on the opener's
   own transaction. The read, the advisory lock and `applyAttachmentMigration` now
   run directly in `withUserTenantRls`'s callback, on the same transaction as before,
-  with no manifest entry. Its route test mocks the client the callback uses and pins
+  under the file's existing `tenant-scoped` manifest entry, which is unchanged
+  (corrected in round 11, F-R11-2: this said "with no manifest entry"). Its route test mocks the client the callback uses and pins
   that the lock precedes the read, both inside the tenant callback.
 - **All five tenant/RLS gates** still pass on the real tree
   (`check-owning-tenant-adjudicator`, `check-required-user-relation`,
@@ -2435,4 +2436,164 @@ Integration (real database, app role, workers stopped):
   per-member cells are gone); `next build` and `tsc --noEmit` pass. eslint reports
   nothing on any changed file. All five tenant/RLS gates exit 0 on the real tree.
 - **Integration:** 113 files / 709 tests pass, with both workers stopped.
+- **Citation gate:** passes over this document and the SSO deviation log.
+
+## Round 11
+
+Reviewed range: `3d5fd2af9..816b32a27`, the round-10 fix commit, reviewed past the
+loop limit at the user's direction to confirm the strict rule. The experts' raw
+outputs and full Recurring Issue Checks are kept in the round's working files.
+
+### Changes from Previous Round
+
+Round 10's fixes hold:
+- **Strict rule:** security re-ran its 21 round-10 escape shapes, and both gates
+  refuse all of them. Running the HEAD gates over the `3d5fd2af9` source failed
+  exactly one read, at the migrate route, so nothing else relied on the old trust.
+- **Migrate route:** behaviour is identical. The lock, the read and every query in
+  `applyAttachmentMigration` run on the tenant transaction through the proxy, and
+  nothing reaches `prismaBase`.
+- **CLI:** the query timeout cannot make "nothing was written" follow a commit.
+- **Recorded numbers:** the red-proof counts (53, 4, 11, 2) and the `prismaBase`
+  four-file count reproduce.
+
+### Converged across experts (severity floored by convergence)
+
+- **F-R11-1 / S-R11-1 — Major, convergent functionality+security (R42/R47).**
+  Deferred evaluation with no function-like node was still trusted: a class instance
+  or `accessor` field initializer written in the callback, which runs at `new`, and
+  a callback that is itself a generator, whose body runs when something iterates it.
+  Security's runtime mirror ran both under another opener's open bypass transaction.
+  No such shape exists in the real tree.
+- **S-R11-2 / T-R11-A1 — Major (floored from Minor), convergent.** `envInt` accepted
+  `DB_POOL_CONNECTION_TIMEOUT_MS=0`, which pg reads as no connect timeout, bringing
+  back the F-R9-1 hang for the CLI. The round-10 commit subject said every wait was
+  bounded.
+
+### Other findings
+
+- **F-R11-2 — Minor (R29).** Two stale passages:
+  - The `rls-context.mjs` header still contrasted a `.map` "stepped over" with
+    `pick(...)`, and said a nested read "needs a manifest entry". The owning-tenant
+    gate has no disposition that would admit one.
+  - The round-10 record said the migrate route has "no manifest entry". It has had
+    a `tenant-scoped` entry all along.
+- **T-R11-1 — Minor (RT10/RT7).** Two `timingIn` branches that answer NOW (the read
+  is the argument; the walk stops at the argument) had no allow cell. Round 10 had
+  flipped the only cell that pinned the first. The owning gate had no
+  wrapped-callback allow cell.
+- **T-R11-2 — Minor (RT7).** Deny cells that asserted only exit code 1 remained: 16
+  in the owning gate, and rounds 5–6 in the required-user gate. A gate crash passed
+  them.
+- **T-R11-3 — Minor (RT7).** The pool-timeout cell asserted a bare rejection and a
+  time bound, which any fast failure before connecting satisfies.
+- **T-R11-4 — Minor (R16).** The silent-server cells inherited
+  `DB_POOL_CONNECTION_TIMEOUT_MS` from `.env`, which integration setup loads.
+- **S-R11-3 — Minor, pre-existing.** The required-user gate matches the receiver by
+  name, so it misses a read through an aliased model handle, and its header did not
+  say so. F-R10-A1's worst case also omitted a `prisma.<model>` handle captured at
+  module scope, which resolves to the base client.
+
+### Resolution Status — round 11
+
+#### F-R11-1 / S-R11-1 Major (convergent) — a class body and a generator callback defer too
+
+- **Action, `scripts/checks/lib/rls-context.mjs`:**
+  - `FUNCTION_LIKE` now includes `ClassDeclaration` and `ClassExpression`. A read in
+    a class body is NESTED, so UNKNOWN. A static block, which runs where the class
+    is written, is refused with it; no real-tree read needs one.
+  - `timingIn` treats a callback that is a generator (sync or async) as NESTED: its
+    body runs when something iterates it.
+- **Cells (both gates):** deny cells for an instance field initializer, an
+  `accessor` field initializer, a class declared in the callback, a static block,
+  and a generator and an async generator callback.
+
+#### S-R11-2 / T-R11-A1 Major (floored) — 0 does not disable the CLI's connect bound
+
+- **Action:** `migrationClientFactory` reads `DB_POOL_CONNECTION_TIMEOUT_MS` with a
+  floor of 1, so 0 falls back to the 5 s default. The app pool still accepts 0.
+- **Cell:** `DB_POOL_CONNECTION_TIMEOUT_MS=0` against a silent server: `remove` fails
+  at `maxWait` and returns, instead of hanging.
+
+#### F-R11-2 Minor — the stale passages are corrected
+
+- The module header says a nested read is UNKNOWN and is fixed by writing the read
+  in the callback itself. It says a value argument of a non-opener call runs where
+  the call does, and a function argument of one is UNKNOWN.
+- The round-10 entry names the route's existing `tenant-scoped` manifest entry,
+  with the correction marked.
+
+#### T-R11-1 / T-R11-2 Minor — the NOW branches are pinned, and every refusal names itself
+
+- **Allow cells (both gates):**
+  - a read that IS an inner opener's callback argument, which is evaluated in the
+    outer context;
+  - a read in a value argument of a helper in an inner opener's callback position.
+- **Owning gate:** a callback written with a type assertion now has an allow cell.
+- **Refusal messages:**
+  - The owning gate's 16 exit-code-only deny cells assert "OUTSIDE any tenant-scoped
+    context".
+  - The required-user gate's 13 remaining ones assert the relation they refuse.
+    Twelve name `TenantMember.user`; the named-where cell names
+    `TenantMember.where.user<filter>`.
+
+#### T-R11-3 / T-R11-4 Minor — the integration cells say what they test
+
+- **T-R11-3:** the pool-timeout cell asserts pg's connect-timeout text, "Connection
+  terminated due to connection timeout", measured against a silent server at 375 ms.
+- **T-R11-4:** both silent-server cells stub `DB_POOL_CONNECTION_TIMEOUT_MS` to the
+  default, so `.env` cannot change their outcome.
+
+#### S-R11-3 Minor — aliased model handles — Accepted, and the limit declared
+
+- **Action:**
+  - `check-required-user-relation.mjs` now declares the limit in its known-limits
+    list, as `check-owning-tenant-adjudicator.mjs` and `check-bypass-rls.mjs`
+    already do.
+  - F-R10-A1's worst case is extended here: an aliased model handle, or a
+    `prisma.<model>` handle captured at module scope, is read by neither gate
+    whatever its context.
+- **Anti-Deferral check:** pre-existing, and shared by three gates. Resolving an
+  alias needs a TypeScript Program, which no gate in this tree carries. Refusing
+  alias spellings one by one is the per-spelling rule rounds 8 to 10 showed does not
+  close.
+- **Worst case:** a read through `const m = prisma.tenantMember` in tenant-scoped
+  code is not checked, so a required User relation it returns can come back null.
+- **Likelihood:** low. `grep -rnE "=\s*(prisma|prismaBase|tx|client|db)\.[a-z][A-Za-z]*\s*;" src`
+  finds no such binding outside tests.
+- **Cost to fix:** a type-aware receiver check in all three gates, a new mechanism.
+
+#### Red proof — round 11, unit and gate
+
+Run in a worktree copy. Each mutation was applied on its own; at baseline all 199
+gate cells pass.
+
+| Mutation | Cells that failed |
+|---|---|
+| `ClassExpression` not function-like | the instance-field, `accessor`-field and static-block cells in both gates (6) |
+| `ClassDeclaration` not function-like | the class-declared-in-the-callback cells (2) |
+| a generator callback is not deferred | the generator and async-generator callback cells (4) |
+| a read that is the argument is not NOW | the read-is-an-inner-opener's-argument allow cells (2) |
+| the walk does not stop at the argument | the value-argument-of-a-helper allow cells (2) |
+| the callback is not unwrapped | the type-assertion callback allow cells (2) |
+| the gates crash on a nested read | 76 of 199 cells, every refusal of a nested read among them: each now names what it refused |
+
+#### Red proof — round 11, integration
+
+Run in a worktree copy against the real database, workers stopped. Each mutation
+was applied on its own.
+
+| Mutation | Cells that failed |
+|---|---|
+| control: `DB_POOL_CONNECTION_TIMEOUT_MS=100` in the environment, stub kept | none (the never-starts cell passes) |
+| the CLI accepts 0 again | the zero-timeout cell (the command never returns) |
+| the command fails before connecting | the pool-timeout cell, through its pinned message; a bare rejection would have passed |
+| the never-starts cell's env stub removed, with `DB_POOL_CONNECTION_TIMEOUT_MS=100` in the environment | the never-starts cell |
+
+#### Round 11 verification
+
+- **Unit:** 1034 files / 15778 tests pass; `next build` and `tsc --noEmit` pass.
+  eslint reports nothing on any changed file. All five tenant/RLS gates exit 0 on
+  the real tree.
+- **Integration:** 113 files / 710 tests pass, with both workers stopped.
 - **Citation gate:** passes over this document and the SSO deviation log.

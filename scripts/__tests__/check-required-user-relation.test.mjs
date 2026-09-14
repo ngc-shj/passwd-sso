@@ -138,7 +138,7 @@ describe("check-required-user-relation", () => {
       "function either(fn, admin) {\n  return admin ? withBypassRls(prisma, fn, PURPOSE) : withTenantRls(prisma, t, fn);\n}\n" +
         "export const f = () => either(async (tx) => tx.tenantMember.findMany({ include: { user: true } }), false);\n",
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("flags a count whose where filters through a required User relation", () => {
@@ -238,7 +238,7 @@ describe("check-required-user-relation — context by scope, not by spelling (ro
       'import { withTenantRls as withBypassRls } from "@/lib/tenant-rls";\n' +
         `export const f = () => withBypassRls(prisma, async (tx) => ${READ});\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("trusts the bypass opener imported under another name", () => {
@@ -256,7 +256,7 @@ describe("check-required-user-relation — context by scope, not by spelling (ro
       "const run = (fn) => withBypassRls(prisma, fn, PURPOSE);\n" +
         `export async function b(run) {\n  return run(async (tx) => ${READ});\n}\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("resolves a wrapper name to the declaration in its own function, not a sibling's", () => {
@@ -276,7 +276,7 @@ describe("check-required-user-relation — context by scope, not by spelling (ro
       "async function guarded(fn) {\n  await withBypassRls(prisma, async (tx) => tx.share.findMany(), PURPOSE);\n  return fn(prisma);\n}\n" +
         `export const f = () => guarded(async (tx) => ${READ});\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 });
 
@@ -298,7 +298,10 @@ describe("check-required-user-relation — where given by name, and nested (roun
       "export function f() {\n  const prismaWhere = { user: { is: { email: { not: null } } } };\n" +
         "  return withTenantRls(prisma, t, async (tx) => tx.tenantMember.count({ where: prismaWhere }));\n}\n",
     );
-    expect(run().code).toBe(1);
+    // A filter hit names its path through the where (round 11 T-R11-2).
+    const { code, out } = run();
+    expect(code, out).toBe(1);
+    expect(out).toContain("TenantMember.where.user<filter>");
   });
 
   it("reports a where it cannot read because something assigns into it", () => {
@@ -384,7 +387,7 @@ describe("check-required-user-relation — an opener's context covers its callba
       "export async function f() {\n" +
         "  return withBypassRls(await clientFor(async () => prisma.tenantMember.findFirst({ include: { user: true } })), async (tx) => tx.share.findMany(), PURPOSE);\n}\n",
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a read evaluated while the callback argument is built", () => {
@@ -393,12 +396,12 @@ describe("check-required-user-relation — an opener's context covers its callba
       "export async function f() {\n" +
         "  return withBypassRls(prisma, pick(await prisma.tenantMember.findFirst({ include: { user: true } })), PURPOSE);\n}\n",
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust an opener whose callback position a spread hides", () => {
     write("src/lib/a.ts", `export async function f(args) {\n  return withBypassRls(...args, async (tx) => ${READ});\n}\n`);
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a local wrapper when a spread hides which parameter receives the callback", () => {
@@ -407,7 +410,7 @@ describe("check-required-user-relation — an opener's context covers its callba
       "const run = (client, fn) => withBypassRls(client, fn, PURPOSE);\n" +
         `export const f = (args) => run(...args, async (tx) => ${READ});\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not let an outer bypass answer for a callback a rest parameter collects", () => {
@@ -418,7 +421,7 @@ describe("check-required-user-relation — an opener's context covers its callba
       "const run = (...args) => withTenantRls(prisma, t, args[1]);\n" +
         `export const f = () => withBypassRls(prisma, async () => run(prisma, async (tx) => ${READ}), PURPOSE);\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 });
 
@@ -434,7 +437,7 @@ describe("check-required-user-relation — every fail-closed branch has a cell (
       "const run = ({ fn }) => withBypassRls(prisma, fn, PURPOSE);\n" +
         `export const f = () => run({ fn: async (tx) => ${READ} });\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a wrapper whose callback parameter is a rest parameter", () => {
@@ -443,7 +446,7 @@ describe("check-required-user-relation — every fail-closed branch has a cell (
       "const run = (...args) => withBypassRls(prisma, args[0], PURPOSE);\n" +
         `export const f = () => run(async (tx) => ${READ});\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust mutually recursive wrappers, and terminates on them", () => {
@@ -464,7 +467,7 @@ describe("check-required-user-relation — every fail-closed branch has a cell (
       "src/lib/a.ts",
       `export function f(run) {\n  return withBypassRls(prisma, async () => run(async (tx) => ${READ}), PURPOSE);\n}\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("reports a where something deletes from", () => {
@@ -807,11 +810,43 @@ describe("check-required-user-relation — no function nested inside the callbac
     ["an event listener", `emitter.on("x", () => ${READ})`],
     ["a function pushed onto a list", `{\n  list.push(() => ${READ});\n  return list;\n}`],
     ["setTimeout", `setTimeout(() => ${READ}, 0)`],
+    ["a class instance field initializer", `class {\n  rows = ${READ};\n}`],
+    ["a class declared in the callback", `{\n  class Rows {\n    rows = ${READ};\n  }\n  return new Rows();\n}`],
+    ["an accessor field initializer", `class {\n  accessor rows = ${READ};\n}`],
+    ["a class static block", `class {\n  static {\n    ${READ};\n  }\n}`],
     ["a getter", `({ get load() {\n  return ${READ};\n} })`],
     ["a setter", `({ set load(v) {\n  ${READ};\n} })`],
     ["a class constructor", `class {\n  constructor() {\n    ${READ};\n  }\n}`],
   ])("does not trust a read in %s", (_label, body, prefix = "") => {
     write("src/lib/a.ts", inBypass(body, prefix));
     expectRefusal();
+  });
+});
+
+describe("check-required-user-relation — deferral with no nested function, and where a read is evaluated (round 11 F-R11-1/S-R11-1/T-R11-1)", () => {
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+
+  it("does not trust a read in a generator callback", () => {
+    // Its body runs when something iterates it, not when withBypassRls calls it.
+    write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, function* (tx) {\n  yield ${READ};\n}, PURPOSE);\n`);
+    expectRefusal();
+  });
+
+  it("does not trust a read in an async generator callback", () => {
+    write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, async function* (tx) {\n  yield ${READ};\n}, PURPOSE);\n`);
+    expectRefusal();
+  });
+
+  it("passes a read that IS an inner opener's callback argument: it runs in the outer bypass", () => {
+    // Evaluated before withTenantRls is called, so in the bypass around that call.
+    write("src/lib/a.ts", `export const f = (t) => withBypassRls(prisma, async (tx) => withTenantRls(prisma, t, ${READ}), PURPOSE);\n`);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+
+  it("passes a read in a value argument of a helper in an inner opener's callback position", () => {
+    write("src/lib/a.ts", `export const f = (t) => withBypassRls(prisma, async (tx) => withTenantRls(prisma, t, pick(${READ})), PURPOSE);\n`);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
   });
 });

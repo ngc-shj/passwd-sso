@@ -29,8 +29,10 @@
  *     callback, a returned promise nobody awaits, a shadowed `Promise`. When a
  *     function runs is decided by its receiver and caller, which one file's
  *     syntax does not show, so no nested function is trusted: a read in one is
- *     UNKNOWN and needs a manifest entry (round 10). A node evaluated at the
- *     call is stepped over; anything else is UNKNOWN — see `timingIn`;
+ *     UNKNOWN, and the remedy is to write it in the callback itself (round 10).
+ *     A class body and a generator callback defer the same way (round 11). A
+ *     node evaluated at the call is stepped over; anything else is UNKNOWN —
+ *     see `timingIn`;
  *   - an opener opens its context around its CALLBACK argument only — the
  *     position is in OPENERS. The client, tenant id and purpose are evaluated
  *     before the context exists (round 6, R49: a read inside `withBypassRls`'s
@@ -47,12 +49,11 @@
  *     UNKNOWN — the caller decides what runs, and a gate must not read that as
  *     either context.
  * A call that opens nothing this file can see (a `.map`, an imported helper that is
- * not an opener) is stepped over, and the walk continues outward, whatever
- * functions the argument holds: when such a helper runs them says nothing about
- * the context around the call. A helper handed a function inside an OPENER's
- * callback argument (`withBypassRls(prisma, pick(async (tx) => …), P)`) is the
- * other way round — whether `pick` runs it before the bypass opens is not in this
- * file — so that read is UNKNOWN, not trusted.
+ * not an opener) is stepped over and the walk continues outward. A read in a value
+ * argument of such a call runs where the call does. A read in a function argument
+ * of it is UNKNOWN once the walk reaches the opener, because that function lies
+ * between the read and the callback — a `.map` callback and
+ * `pick(async (tx) => …)` in an opener's callback position alike.
  */
 import { SyntaxKind } from "ts-morph";
 import { FN_KINDS, resolveLocalFunction, unwrapExpression, visibleBinding } from "./scope-bindings.mjs";
@@ -92,9 +93,12 @@ const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getE
 const TIMING = Object.freeze({ NOW: "now", LATER: "later", NESTED: "nested" });
 
 /**
- * Every node that holds code which runs only when something calls it. FN_KINDS
+ * Every node that holds code which runs when something else decides. FN_KINDS
  * alone missed an object method and a nested `function` declaration, so a read
- * in one read as if it ran where it was written (round 8, R8-S2).
+ * in one read as if it ran where it was written (round 8, R8-S2). A class body
+ * too: an instance or `accessor` field initializer runs at `new`, whenever that
+ * is (round 11, F-R11-1/S-R11-1). A static block, which runs where the class is
+ * written, is refused with it; no real-tree read needs one.
  */
 const FUNCTION_LIKE = new Set([
   ...FN_KINDS,
@@ -103,7 +107,12 @@ const FUNCTION_LIKE = new Set([
   SyntaxKind.GetAccessor,
   SyntaxKind.SetAccessor,
   SyntaxKind.Constructor,
+  SyntaxKind.ClassDeclaration,
+  SyntaxKind.ClassExpression,
 ]);
+
+/** A generator's body runs when something iterates it, not when it is called (round 11). */
+const isGenerator = (fnNode) => typeof fnNode.isGenerator === "function" && fnNode.isGenerator();
 
 /**
  * When `node`, inside `arg`, runs relative to the call that `arg` is passed to.
@@ -111,7 +120,8 @@ const FUNCTION_LIKE = new Set([
  * - NOW: evaluated while the arguments are built — `node` is the argument itself,
  *   or no function lies between them.
  * - LATER: written directly in the function that IS the argument, after unwrapping
- *   parentheses and type assertions. The callee decides when that runs.
+ *   parentheses and type assertions, when that function is not a generator. The
+ *   callee decides when that runs.
  * - NESTED: any other function lies between them — an IIFE, a callback, a method,
  *   a declaration, a generator. When it runs is not in this file (round 10).
  *
@@ -127,7 +137,7 @@ function timingIn(node, arg) {
   let nested = false;
   for (let p = node.getParent(); p; p = p.getParent()) {
     if (FUNCTION_LIKE.has(p.getKind())) {
-      if (sameNode(p, fn)) return nested ? TIMING.NESTED : TIMING.LATER;
+      if (sameNode(p, fn)) return nested || isGenerator(p) ? TIMING.NESTED : TIMING.LATER;
       nested = true;
     }
     if (sameNode(p, arg)) break;
