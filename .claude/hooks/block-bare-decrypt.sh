@@ -24,6 +24,14 @@
 #     `<cli> <sub> x | cat` both satisfied those and both printed the value.
 #   - refusing the sanctioned pattern, which made the workflow its own error
 #     message recommends impossible to run.
+#
+# The printer refusal — a captured value echoed back — is a best-effort tripwire,
+# not a closed class. It matches `echo`, `printf`, `cat` and `tee` as command words
+# followed by `$_CRED` or `${_CRED}` on the same line. `declare -p`, `set`, a heredoc
+# body, an encoder such as `base64`, brace expansion and a line continuation all print
+# the value unseen (audit-tenant-adjudicator round 16, S-R16-2). Adding names does not
+# close that, as round 15's additions showed by reopening forms round 14 refused; a
+# decrypt surface that never returns plaintext does.
 
 set -euo pipefail
 
@@ -140,10 +148,14 @@ fi
 if matches "_CRED=\\\$\\([^)]*${DECRYPT_RE}"; then
   # Still refuse if the captured value is then printed — the accident the
   # skill's own rules forbid.
-  # The printer as a command word followed by a blank — `application/json` holds
-  # `cat`, and `--mode=noecho ` ends in `echo` — and the variable as the skill
-  # itself spells it, `${_CRED}`, as well as `$_CRED` (round 15, S-R15-3).
-  if matches '(^|[^[:alnum:]_])(echo|printf|cat|tee)[[:space:]][^|]*\$\{?_CRED'; then
+  # The printer as a command word. Preceded by no word character, which keeps
+  # `--mode=noecho` out. Ended by a blank or a redirection, optionally after the quote
+  # of a quoted command word, which keeps `catalog` and `printf_wrapper` out while
+  # `cat<<<"$_CRED"`, `printf>&2 …` and `"printf" …` stay in. `application/json` is
+  # kept out by either clause — round 15 required a blank and let those three through (round 16,
+  # F-R16-1/S-R16-1). The variable as the skill spells it, `${_CRED}`, as well as
+  # `$_CRED` (round 15, S-R15-3). The header says what this does not see.
+  if matches '(^|[^[:alnum:]_])(echo|printf|cat|tee)["'"'"']?([[:space:]]|[<>])[^|]*\$\{?_CRED'; then
     echo '{"error": "BLOCKED: do not echo/print the credential variable. Pass $_CRED directly to the command that consumes it."}' >&2
     exit 2
   fi

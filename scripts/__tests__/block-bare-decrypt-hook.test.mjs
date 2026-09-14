@@ -18,7 +18,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -247,38 +247,50 @@ describe("block-bare-decrypt hook — failures refuse, and the printer check rea
   const PAD = `  # ${"x".repeat(200_000)}\n`;
 
   /** Run the hook where bash cannot write a here-string's temp file (a 1-block file-size limit). */
-  function expectHookWithoutTempFiles(command) {
+  function runHookWithoutTempFiles(command) {
     const payload = JSON.stringify({ tool_input: { command } });
-    const r = spawnSync("bash", ["-c", 'ulimit -f 1; trap "" XFSZ; exec bash "$0"', HOOK], { input: payload, encoding: "utf8" });
-    return expect(r.status, r.stderr);
+    return spawnSync("bash", ["-c", 'ulimit -f 1; trap "" XFSZ; exec bash "$0"', HOOK], { input: payload, encoding: "utf8" });
   }
 
   it("refuses a 200 KB bare decrypt when the here-string cannot be written (F-R15-1/S-R15-1)", () => {
     // grep never ran and the status was 1, which read as "no match": the hook allowed it.
-    expectHookWithoutTempFiles(`passwd-sso ${SUB} item\n${PAD}`).toBe(BLOCK);
+    const r = runHookWithoutTempFiles(`passwd-sso ${SUB} item\n${PAD}`);
+    expect(r.status, r.stderr).toBe(BLOCK);
+    expect(r.stderr).toContain("grep exit 3");
   });
 
   it("refuses when a later check cannot run, rather than exiting with that check's status (S-R15-1)", () => {
-    // The occurrence count pipes through `wc`. Without it the pipeline fails, and set -e
-    // alone ended the hook with 127 — any status but 2 lets the command through.
+    // The occurrence count pipes through `wc`. When it fails, set -e alone ended the hook
+    // with that pipeline's status, and any status but 2 lets the command through. A
+    // failing `wc` stub goes first on the inherited PATH (round 16 T-R16-4: rebuilding
+    // PATH from `command -v` broke under version-manager shims and exported functions).
     const bin = mkdtempSync(join(tmpdir(), "hook-path-"));
     try {
-      for (const tool of ["bash", "python3", "grep", "cat"]) {
-        const found = spawnSync("bash", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
-        symlinkSync(found, join(bin, tool));
-      }
+      writeFileSync(join(bin, "wc"), "#!/bin/sh\nexit 1\n", "utf8");
+      chmodSync(join(bin, "wc"), 0o755);
       const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -u "user:\${_CRED}" https://example.test\n) 2>/dev/null`;
       const payload = JSON.stringify({ tool_input: { command: cmd } });
-      const r = spawnSync(join(bin, "bash"), [HOOK], { input: payload, encoding: "utf8", env: { PATH: bin } });
-      expect(r.status, r.stderr).toBe(BLOCK);
-      expect(r.stderr).toContain("failed while checking this command");
+      const withStub = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+      expect(withStub.status, withStub.stderr).toBe(BLOCK);
+      expect(withStub.stderr).toContain("failed while checking this command");
+      // The same command without the stub is sanctioned, so the stub is what refused it.
+      const without = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8" });
+      expect(without.status, without.stderr).toBe(ALLOW);
     } finally {
       rmSync(bin, { recursive: true, force: true });
     }
   });
 
-  it("still refuses a short bare decrypt under the same limit (control)", () => {
-    expectHookWithoutTempFiles(`passwd-sso ${SUB} item`).toBe(BLOCK);
+  it("still refuses a short bare decrypt under the same limit", () => {
+    const r = runHookWithoutTempFiles(`passwd-sso ${SUB} item`);
+    expect(r.status, r.stderr).toBe(BLOCK);
+  });
+
+  it("still allows a short sanctioned command under the same limit (control)", () => {
+    // Round 16 T-R16-1: without this, a hook that refused every command whenever a temp
+    // file could not be written kept every cell green.
+    const r = runHookWithoutTempFiles(`(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -u "user:\${_CRED}" https://example.test\n) 2>/dev/null`);
+    expect(r.status, r.stderr).toBe(ALLOW);
   });
 
   it("refuses an echo of the credential placed past 200 KB (T-R15-1, the allow cell's deny twin)", () => {
@@ -302,10 +314,41 @@ describe("block-bare-decrypt hook — failures refuse, and the printer check rea
   });
 
   it("allows a consuming command whose argument merely contains `cat` (S-R15-3)", () => {
-    // `application/json` holds the letters of `cat`; the blank the printer check
-    // requires after the name is what keeps it from matching.
+    // `application/json` holds the letters of `cat`, with a word character on each side;
+    // either the boundary before the name or the blank-or-redirection after it keeps it
+    // out, so this cell pins neither alone (`--mode=noecho` and `catalog` do).
     const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -H "Content-Type: application/json" -d "{\\"token\\":\\"\${_CRED}\\"}" https://example.test\n) 2>/dev/null`;
     expectHook(cmd).toBe(ALLOW);
+  });
+});
+
+describe("block-bare-decrypt hook — a printer command word ends at a blank or a redirection (round 16)", () => {
+  const capture = (line) => `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  ${line}\n) 2>/dev/null`;
+
+  // F-R16-1 / S-R16-1: round 15 required a blank after the name and let these through;
+  // each prints the credential, and round 14 refused each.
+  it.each([
+    ["cat reading a here-string with no blank", `cat<<<"$_CRED"`],
+    ["printf redirected to stderr with no blank", `printf>&2 '%s' "\${_CRED}"`],
+    ["a quoted printf command word", `"printf" '%s' "\${_CRED}"`],
+  ])("refuses %s", (_label, line) => {
+    expectHook(capture(line)).toBe(BLOCK);
+  });
+
+  it("allows a command whose name only begins with a printer name", () => {
+    // `catalog` starts with `cat`; the blank-or-redirection after the name keeps it out.
+    expectHook(capture(`catalog --token "\${_CRED}"`)).toBe(ALLOW);
+  });
+
+  // S-R16-2: the printer refusal is a declared tripwire for four names, not a closed
+  // class. These print the value and are allowed; the cells pin the declared limit, so
+  // a change that widens the name list shows up here as a decision, not as silence.
+  it.each([
+    ["declare -p", `declare -p _CRED`],
+    ["a heredoc body", `cat <<EOF\n\${_CRED}\nEOF`],
+    ["an encoder", `base64 <<<"$_CRED"`],
+  ])("known printer evasion: allows %s", (_label, line) => {
+    expectHook(capture(line)).toBe(ALLOW);
   });
 });
 

@@ -3124,3 +3124,148 @@ through the blank the check requires, not through the boundary.
 - **Integration:** not re-run. Nothing under `src/` changed; round 11's run (113 files /
   710 tests) covers the unchanged runtime.
 - **Citation gate:** passes over this document and the SSO deviation log.
+
+## Round 16
+
+Reviewed range: `2986ce42d..d60605a97`, the round-15 fix commit. The experts' raw
+outputs and full Recurring Issue Checks are kept in the round's working files.
+
+The user set the stopping rule for this round: fix a Critical or Major that this branch
+itself introduced, move one in tangential tooling to a follow-up, and open the pull
+request without a further review round once the fixes are verified.
+
+### Changes from Previous Round
+
+Round 15's fixes hold:
+- **S-R15-1 is closed:** under `ulimit -f 1` the hook refuses a 70 KB and a 200 KB bare
+  decrypt that `2986ce42d` allowed. The recorded red proofs and counts reproduce.
+- **`grep -cE` on a here-string:** it prints `0` and exits 1 on no match, and prints
+  nothing and exits 2 on an error. An empty count therefore always means grep did not
+  run, and the here-string's trailing newline cannot change the result for the hook's
+  patterns.
+- **ERR trap:** it fires only where `set -e` would have exited, and no sanctioned
+  command reaches it. The SKILL.md patterns and a non-decrypt command still exit 0.
+- **Pipe gate:** CI runs it from a full checkout, and `.claude/settings.json` wires only
+  the one `.sh` hook it now scans.
+- **Availability trade:** under the same fault, every command over about 64 KB is
+  refused. That is the intended fail-closed trade.
+
+### Findings
+
+- **F-R16-1 / S-R16-1 — Major, convergent functionality+security (R43 against
+  `2986ce42d`).** Round 15's printer check required a blank right after the name.
+  `cat<<<"$_CRED"`, `printf>&2 '%s' "$_CRED"`, `cat>&2<<<"$_CRED"` and a quoted
+  `"printf"` command word therefore passed. Each prints the credential, and round 14
+  refused each. The test comment's reason for the blank was also wrong: the word
+  boundary, not the blank, keeps `application/json` out.
+- **S-R16-2 — Minor (R47/R49), pre-existing.** The printer refusal is a four-name list
+  with no declared evasion set. `declare -p _CRED`, `set | grep`, a heredoc body,
+  `base64` and brace expansion print the value at every build. Round 15 added names,
+  and that reopened forms round 14 refused, so adding more does not close it.
+- **S-R16-A1 — Minor [Adjacent], pre-existing, found by reading the code, not by
+  running it.** `check-no-pipe-into-grep-q` captures each file's scan as
+  `hits=$(awk … || true)`. An awk failure therefore scans as clean.
+
+### Resolution Status — round 16
+
+#### F-R16-1 / S-R16-1 Major (convergent) — a printer command word ends at a blank or a redirection
+
+- **Action, `.claude/hooks/block-bare-decrypt.sh`:** the printer check is
+  `(^|[^[:alnum:]_])(echo|printf|cat|tee)["']?([[:space:]]|[<>])[^|]*\$\{?_CRED`:
+  - The name is a command word, preceded by no word character. This keeps
+    `--mode=noecho` out.
+  - The word ends at a blank or a redirection, optionally after the quote of a quoted
+    command word. This keeps `catalog` and `printf_wrapper` out, while
+    `cat<<<"$_CRED"`, `printf>&2 …` and `"printf" …` stay in.
+  - `application/json` is kept out by either clause, so its cell pins neither; the
+    `--mode=noecho` and `catalog` cells pin one each (corrected after testing's
+    T-R16-2).
+  - The comment states each reason, and the `application/json` cell's comment is
+    corrected.
+- **Cells:**
+  - refusals for `cat<<<"$_CRED"`, `printf>&2 '%s' "${_CRED}"` and `"printf" '%s' "${_CRED}"`;
+  - an allow cell for `catalog --token "${_CRED}"`.
+
+#### S-R16-2 Minor — the printer refusal's limit is declared and pinned
+
+- **Action:** the hook header now declares the printer refusal a best-effort tripwire for
+  four names and two spellings. It names what it does not see: `declare -p`, `set`, a
+  heredoc body, an encoder, brace expansion, a line continuation. It says the closure is
+  a decrypt surface that never returns plaintext.
+- **Cells:** a known-printer-evasions group asserts ALLOW for `declare -p _CRED`, a
+  heredoc body `${_CRED}` and `base64 <<<"$_CRED"`. Widening the name list shows up
+  there as a decision.
+
+#### S-R16-A1 Minor — follow-up
+
+- **Anti-Deferral check:** pre-existing. It applied to `scripts/` before this branch
+  widened the gate to `.claude/hooks`. It is not reachable today: awk is present
+  wherever the gate runs, and every scanned file is readable. Per the round's stopping
+  rule it is recorded as a follow-up rather than fixed here.
+- **Worst case:** a scan that could not run reads as clean.
+- **Likelihood:** low.
+- **Cost to fix:** drop `|| true` so the gate fails when awk does, plus a cell.
+- **Also follow-up:** the pipe gate finds hooks by `*.sh` glob rather than by the wiring
+  in `.claude/settings.json`, so a hook without that extension would go unscanned. None
+  exists.
+
+#### Testing findings — round 16
+
+Testing reported after the fix above was written. All eight applicable round-15 red
+proofs reproduce over 96 cells. Its findings, and what was done with each:
+
+- **T-R16-1 — Minor (RT8/RT10), fixed.** The cell labelled "(control)" under the
+  file-size limit expected a refusal, and the 200 KB cell asserted status only. A hook
+  that refused every command whenever a temp file could not be written therefore kept
+  every cell green.
+  - A real control now asserts that a short sanctioned command is allowed under the
+    same limit.
+  - The 200 KB cell now asserts that the refusal names `grep exit 3`.
+- **T-R16-2 — Minor (RT7/R29), fixed.** Round 15's blank-after-name clause was pinned by
+  no cell; round 16's `catalog` cell now pins its successor. The `application/json`
+  cell's comment, the hook comment and this record credited one clause, but either
+  clause alone keeps it out. All three now say so.
+- **T-R16-4 — Minor, fixed.** The missing-`wc` cell rebuilt `PATH` from `command -v`
+  and stripped the environment, so a version-manager shim or an exported function made
+  it fail for an unrelated reason.
+  - It now puts a failing `wc` stub first on the inherited `PATH`.
+  - It also asserts that the same command without the stub is allowed.
+- **T-R16-3 — Minor (RT7), follow-up.** The pipe gate's rule that `.claude/hooks` must
+  exist on the real tree is pinned by no cell, because every self-test sets
+  `NO_PIPE_GREP_Q_ROOT`. A copied-gate cell can pin it without touching the real tree.
+- **T-R16-A1 — Minor [Adjacent], follow-up.** An empty count overwrites grep's own
+  status with 3, so a missing grep is reported as `grep exit 3`. It still refuses.
+- **T-R16-A2 — Minor [Adjacent], pre-existing, follow-up.** The pipe gate takes its repo
+  root from the caller's working directory, not from the script's location.
+
+Each follow-up is recorded per the round's stopping rule. None is reachable in a
+working checkout today, and none weakens a refusal.
+
+#### Red proof — round 16
+
+Run in a worktree copy over the hook self-test. Each mutation was applied on its own; at
+baseline all 47 cells pass.
+
+| Mutation | Cells that failed |
+|---|---|
+| only a blank ends the printer word (the round-15 rule) | the `cat<<<"$_CRED"` and `printf>&2` refusals (2) |
+| a quoted printer word is not seen | the `"printf"` refusal (1) |
+| anything may follow the printer name | the `catalog` allow cell (1) |
+| no command-word boundary before the name | the `--mode=noecho` allow cell (1) |
+| `base64` added to the printer names | the known-evasion encoder cell (1) |
+| every matcher call goes through a temp file (after the testing fixes; baseline 48 cells) | the sanctioned-command control under the file-size limit (1) |
+| an unwritten here-string is reported as `grep exit 2` | the 200 KB cell's reason assertion (1) |
+| no `ERR` trap | the failing-`wc`-stub cell (1) |
+
+#### Round 16 verification
+
+- **Unit:** 1034 files / 15858 tests pass; `next build` passes.
+  - The hook test file was re-run after the testing-review edits: 48 of 48 pass.
+  - eslint reports nothing on the changed test file, and `bash -n` passes on the hook.
+  - `check-no-pipe-into-grep-q` scans 46 scripts and 1 hook script, exit 0.
+- **Integration:** not re-run. Nothing under `src/` changed; round 11's run (113 files /
+  710 tests) covers the unchanged runtime.
+- **Citation gate:** passes over this document and the SSO deviation log.
+- **Review loop:** closed here per the user's stopping rule. Round 16's Major was this
+  branch's own regression and is fixed and red-proved; its Minors are fixed or recorded as
+  follow-ups above.
