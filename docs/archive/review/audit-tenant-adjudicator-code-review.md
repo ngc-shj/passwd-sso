@@ -2559,8 +2559,12 @@ Round 10's fixes hold:
   close.
 - **Worst case:** a read through `const m = prisma.tenantMember` in tenant-scoped
   code is not checked, so a required User relation it returns can come back null.
-- **Likelihood:** low. `grep -rnE "=\s*(prisma|prismaBase|tx|client|db)\.[a-z][A-Za-z]*\s*;" src`
-  finds no such binding outside tests.
+- **Likelihood:** low. Measured over 2189 source files with the client receiver
+  names derived from the tree, a Prisma model delegate never escapes as a value in
+  production code: no alias, destructuring, `X["model"]`, delegate passed as an
+  argument or returned, or delegate-typed parameter. The only hits are five computed
+  accesses in test mocks. (Corrected in round 12, S-R12-2: this cited a one-line
+  grep that missed every spelling but `= prisma.<model>;`.)
 - **Cost to fix:** a type-aware receiver check in all three gates, a new mechanism.
 
 #### Red proof — round 11, unit and gate
@@ -2596,4 +2600,90 @@ was applied on its own.
   eslint reports nothing on any changed file. All five tenant/RLS gates exit 0 on
   the real tree.
 - **Integration:** 113 files / 710 tests pass, with both workers stopped.
+- **Citation gate:** passes over this document and the SSO deviation log.
+
+## Round 12
+
+Reviewed range: `816b32a27..b68923475`, the round-11 fix commit. The experts' raw
+outputs and full Recurring Issue Checks are kept in the round's working files.
+
+### Changes from Previous Round
+
+Round 11's fixes hold:
+- every round-11 shape that ran outside the opener's context is refused by both gates;
+- a class declared outside an opener, whose method opens its own context, still answers
+  LATER;
+- `isGenerator` is read only on the callback, and is a function on every kind that
+  carries it;
+- the CLI floor bounds the connect wait for every value, and a silent network after
+  commit or mid-query no longer hangs the process (security's runs);
+- the recorded counts reproduce (199 gate cells, the 16 and 13 conversions, 15778 unit
+  tests, 76 of 199 under the crash mutation, 70 of them refusals of a nested read).
+
+### Converged across experts (severity floored by convergence)
+
+- **F-R12-1 / S-R12-1 — Major, convergent functionality+security (R43 widening).**
+  Round 11 added `ClassExpression` to `FUNCTION_LIKE`, so a class expression passed AS
+  the opener's callback answered LATER: `timingIn` reached it as the callback itself. A
+  class is not a function. Its static field initializers, static blocks and `extends`
+  clause run while the call's arguments are built, before the opener opens anything,
+  and the opener's `fn(tx)` then throws. Both gates had refused this at `816b32a27`.
+  The runtime mirror ran the read with no context, or under the outer opener. No such
+  shape exists in the real tree.
+
+### Other findings
+
+- **T-R12-1 — Minor (RT9/RT10).** A plain function-expression callback answering LATER
+  (the non-generator side of `isGenerator`) was pinned in the required-user gate only.
+- **T-R12-2 — Minor (R29), pre-existing.** The owning-tenant gate's header still said
+  callees resolve "one level deep" and an unresolved read "needs a manifest entry", the
+  sibling of the passage F-R11-2 corrected in `rls-context.mjs`.
+- **S-R12-2 — Minor (R29).** S-R11-3's likelihood cited a one-line grep that missed
+  destructuring, element access, a delegate passed or returned, typed parameters, and
+  receivers named other than the five it listed. Security's broader measure found none
+  in production code, so the decision stands; the evidence did not.
+
+### Resolution Status — round 12
+
+#### F-R12-1 / S-R12-1 Major (convergent) — only an arrow or function-expression callback runs in the opener's context
+
+- **Action:** `timingIn` answers LATER only when the callback is an arrow or a function
+  expression (`FN_KINDS`) and not a generator. A class expression passed as the callback
+  is NESTED, so UNKNOWN. A class body nested inside a callback stays refused through
+  `FUNCTION_LIKE`. The `timingIn` doc, the `FUNCTION_LIKE` comment and the module header
+  say which parts of a class run before the opener opens.
+- **Cells (both gates):** deny cells for a class expression callback's static field,
+  static block and `extends` clause, cast as the tests' `Fn`, and a static field written
+  without a cast.
+- **Real tree:** all five tenant/RLS gates still pass, with no manifest change.
+
+#### T-R12-1 / T-R12-2 / S-R12-2 Minor
+
+- **T-R12-1:** the owning gate has a function-expression callback allow cell.
+- **T-R12-2:** the owning gate's header says context is decided by `lib/rls-context.mjs`,
+  that an undecided read fails under "adjudicator" or "tenant-scoped" with the remedy the
+  gate prints, and that "column-intended" is only for a read whose unconstrained answer is
+  the point. The replaced wording is quoted.
+- **S-R12-2:** the S-R11-3 likelihood line now gives the measure: 2189 source files, the
+  client receiver names derived from the tree, and every way a model delegate can escape
+  as a value. The only hits are five computed accesses in test mocks. The correction is
+  marked in place.
+
+#### Red proof — round 12
+
+Run in a worktree copy. Each mutation was applied on its own; at baseline all 208 gate
+cells pass.
+
+| Mutation | Cells that failed |
+|---|---|
+| any function-like callback answers LATER (the round-11 rule) | the class-expression callback cells in both gates: static field, static block, `extends`, uncast static field (8) |
+| every function expression counts as a generator | the function-expression callback allow cells, one per gate (2) |
+
+#### Round 12 verification
+
+- **Unit:** 1034 files / 15787 tests pass; `next build` passes. eslint reports nothing on
+  any changed file. All five tenant/RLS gates exit 0 on the real tree.
+- **Integration:** not re-run. This round changed only the gate library, one gate's
+  header, the two gate self-tests and this record; no runtime code or integration test.
+  Round 11's run (113 files / 710 tests) covers the unchanged runtime.
 - **Citation gate:** passes over this document and the SSO deviation log.

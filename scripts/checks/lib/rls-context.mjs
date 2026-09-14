@@ -30,7 +30,9 @@
  *     function runs is decided by its receiver and caller, which one file's
  *     syntax does not show, so no nested function is trusted: a read in one is
  *     UNKNOWN, and the remedy is to write it in the callback itself (round 10).
- *     A class body and a generator callback defer the same way (round 11). A
+ *     A class body and a generator callback are refused too (rounds 11 and 12):
+ *     instance fields and a generator's body run later, and a class's static
+ *     parts and `extends` clause run before the opener opens. A
  *     node evaluated at the call is stepped over; anything else is UNKNOWN —
  *     see `timingIn`;
  *   - an opener opens its context around its CALLBACK argument only — the
@@ -97,8 +99,9 @@ const TIMING = Object.freeze({ NOW: "now", LATER: "later", NESTED: "nested" });
  * alone missed an object method and a nested `function` declaration, so a read
  * in one read as if it ran where it was written (round 8, R8-S2). A class body
  * too: an instance or `accessor` field initializer runs at `new`, whenever that
- * is (round 11, F-R11-1/S-R11-1). A static block, which runs where the class is
- * written, is refused with it; no real-tree read needs one.
+ * is (round 11, F-R11-1/S-R11-1). A static block, a static field initializer and
+ * the `extends` clause, which run where the class is written, are refused with it;
+ * no real-tree read needs one.
  */
 const FUNCTION_LIKE = new Set([
   ...FN_KINDS,
@@ -120,8 +123,11 @@ const isGenerator = (fnNode) => typeof fnNode.isGenerator === "function" && fnNo
  * - NOW: evaluated while the arguments are built — `node` is the argument itself,
  *   or no function lies between them.
  * - LATER: written directly in the function that IS the argument, after unwrapping
- *   parentheses and type assertions, when that function is not a generator. The
- *   callee decides when that runs.
+ *   parentheses and type assertions, when that function is an arrow or a function
+ *   expression and not a generator. The callee decides when that runs. A class
+ *   expression passed as the callback is not a function: its static parts and
+ *   `extends` clause run while the arguments are built, before the opener opens
+ *   anything (round 12, F-R12-1/S-R12-1).
  * - NESTED: any other function lies between them — an IIFE, a callback, a method,
  *   a declaration, a generator. When it runs is not in this file (round 10).
  *
@@ -137,7 +143,7 @@ function timingIn(node, arg) {
   let nested = false;
   for (let p = node.getParent(); p; p = p.getParent()) {
     if (FUNCTION_LIKE.has(p.getKind())) {
-      if (sameNode(p, fn)) return nested || isGenerator(p) ? TIMING.NESTED : TIMING.LATER;
+      if (sameNode(p, fn)) return nested || !FN_KINDS.has(p.getKind()) || isGenerator(p) ? TIMING.NESTED : TIMING.LATER;
       nested = true;
     }
     if (sameNode(p, arg)) break;

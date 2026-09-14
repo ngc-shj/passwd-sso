@@ -747,3 +747,31 @@ describe("check-owning-tenant-adjudicator — deferral with no nested function, 
   it("passes a callback written with a type assertion", () =>
     passes(`export const f = () => withUserTenantRls(userId, (async (tx) => ${READ}) as Fn);\n`));
 });
+
+describe("check-owning-tenant-adjudicator — a class expression passed as the callback is not a function (round 12 F-R12-1/S-R12-1/T-R12-1)", () => {
+  // Its static parts and `extends` clause run while withUserTenantRls's arguments
+  // are built, before any tenant context exists; round 11 answered LATER for them.
+  const TENANT_SCOPED_FILE = { "src/lib/thing.ts": { disposition: "tenant-scoped" } };
+  const READ = "prisma.user.findUnique({ where: { id }, select: { tenantId: true } })";
+
+  it.each([
+    ["a static field", `(class {\n  static rows = ${READ};\n}) as unknown as Fn`],
+    ["a static block", `(class {\n  static {\n    ${READ};\n  }\n}) as unknown as Fn`],
+    ["an extends clause", `(class extends base(${READ}) {}) as unknown as Fn`],
+    ["static field, written without a cast", `class {\n  static rows = ${READ};\n}`],
+  ])("does not treat a read in a class expression callback's %s as tenant-scoped", (_label, callback) => {
+    write("src/lib/thing.ts", `export const f = () => withUserTenantRls(userId, ${callback});\n`);
+    manifest(TENANT_SCOPED_FILE);
+    expectOutsideTenantScope();
+  });
+
+  it("passes a function-expression callback", () => {
+    // The other side of the generator check: a plain function expression runs in
+    // the callback (round 12 T-R12-1; the required-user gate already has this cell).
+    write("src/lib/thing.ts", `export const f = () => withUserTenantRls(userId, async function (tx) {\n  return ${READ};\n});\n`);
+    manifest(TENANT_SCOPED_FILE);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+    expect(out).toContain("no unconstrained read");
+  });
+});

@@ -850,3 +850,19 @@ describe("check-required-user-relation — deferral with no nested function, and
     expect(code, out).toBe(0);
   });
 });
+
+describe("check-required-user-relation — a class expression passed as the callback is not a function (round 12 F-R12-1/S-R12-1)", () => {
+  // Its static parts and `extends` clause run while withBypassRls's arguments are
+  // built, before any bypass exists; round 11 answered LATER for them.
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+
+  it.each([
+    ["a static field", `(class {\n  static rows = ${READ};\n}) as unknown as Fn`],
+    ["a static block", `(class {\n  static {\n    ${READ};\n  }\n}) as unknown as Fn`],
+    ["an extends clause", `(class extends base(${READ}) {}) as unknown as Fn`],
+    ["static field, written without a cast", `class {\n  static rows = ${READ};\n}`],
+  ])("does not trust a read in a class expression callback's %s", (_label, callback) => {
+    write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, ${callback}, PURPOSE);\n`);
+    expectRefusal();
+  });
+});

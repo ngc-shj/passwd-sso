@@ -33,10 +33,17 @@
  * their reads in a local `withVaultTenantRls`, declared in the same file as
  * `tenantId ? withTenantRls(...) : withUserTenantRls(...)`. Both are safe, and a
  * name-matching pass reports them as unconstrained — measured, on the discovery
- * pass that produced this manifest. So each enclosing callee identifier is
- * resolved against the file's own declarations one level deep. Anything that
- * cannot be resolved to a tenant-scoped opener counts as UNCONSTRAINED and needs
- * a manifest entry: "could not decide" must not be spelled like "safe".
+ * pass that produced this manifest. So the context a read runs in is decided by
+ * `lib/rls-context.mjs`: names resolve by scope, local wrappers are followed to the
+ * opener they reach, and only a read written directly in an opener's callback is
+ * trusted to run in its context. Anything that cannot be resolved to a
+ * tenant-scoped opener counts as UNCONSTRAINED: "could not decide" must not be
+ * spelled like "safe". Under "adjudicator" or "tenant-scoped" such a read fails
+ * with the remedy this gate prints — resolve it through
+ * `resolveOwningTenantIdFromClient`, or move it inside a tenant-scoped opener's
+ * callback. "column-intended" is only for a read whose unconstrained answer is the
+ * point (round 12, T-R12-2: this said callees resolve "one level deep" and that an
+ * unresolved read "needs a manifest entry").
  *
  * ─── Dispositions ───
  *
