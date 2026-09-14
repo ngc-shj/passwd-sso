@@ -14,6 +14,12 @@ import { tmpdir } from "node:os";
 const origEnv = { ...process.env };
 let testHome: string;
 
+// Mock homedir for legacy path detection; read lazily so each test's testHome applies
+vi.mock("node:os", async () => {
+  const actual = await vi.importActual<typeof import("node:os")>("node:os");
+  return { ...actual, homedir: () => testHome };
+});
+
 describe("migrate", () => {
   beforeEach(() => {
     testHome = mkdtempSync(join(tmpdir(), "psso-migrate-"));
@@ -22,12 +28,6 @@ describe("migrate", () => {
     // Point XDG dirs to test locations
     process.env.XDG_CONFIG_HOME = join(testHome, ".config");
     process.env.XDG_DATA_HOME = join(testHome, ".local", "share");
-
-    // Mock homedir for legacy path detection
-    vi.mock("node:os", async () => {
-      const actual = await vi.importActual<typeof import("node:os")>("node:os");
-      return { ...actual, homedir: () => testHome };
-    });
   });
 
   afterEach(() => {
