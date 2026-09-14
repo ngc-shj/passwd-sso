@@ -23,7 +23,7 @@ import type {
   VerifyAuthenticationResponseOpts,
   VerifiedRegistrationResponse,
   VerifiedAuthenticationResponse,
-  AuthenticatorTransportFuture,
+  AuthenticatorTransport,
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
   WebAuthnCredential,
@@ -114,7 +114,7 @@ export async function generateRegistrationOpts(
   // PublicKeyCredentialDescriptorFuture wrapping, no base64urlToUint8Array conversion.
   const excludeCredentials = existingCredentials.map((c) => ({
     id: c.credentialId,
-    transports: (c.transports ?? []) as AuthenticatorTransportFuture[],
+    transports: (c.transports ?? []) as AuthenticatorTransport[],
   }));
 
   const opts: GenerateRegistrationOptionsOpts = {
@@ -183,7 +183,7 @@ export async function generateAuthenticationOpts(
   // PublicKeyCredentialDescriptorFuture wrapping, no base64urlToUint8Array conversion.
   const allow = allowCredentials.map((c) => ({
     id: c.credentialId,
-    transports: (c.transports ?? []) as AuthenticatorTransportFuture[],
+    transports: (c.transports ?? []) as AuthenticatorTransport[],
   }));
 
   const opts: GenerateAuthenticationOptionsOpts = {
