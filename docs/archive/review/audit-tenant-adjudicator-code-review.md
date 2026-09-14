@@ -3002,3 +3002,125 @@ pipe let that command through in 7 of 10 runs; the cell now pads to 200 KB.
 - **Integration:** not re-run. Nothing under `src/` changed; round 11's run (113 files /
   710 tests) covers the unchanged runtime.
 - **Citation gate:** passes over this document and the SSO deviation log.
+
+## Round 15
+
+Reviewed range: `f814d65c0..2986ce42d`, the round-14 fix commit. The experts' raw
+outputs and full Recurring Issue Checks are kept in the round's working files.
+
+### Changes from Previous Round
+
+Round 14's gate fixes hold:
+- **S-R14-1 regressions:** all six refused, plus a load-order case that `f814d65c0`
+  passed.
+- **R43:** no shape refused at `f814d65c0` or `b353518e2` is accepted, and security
+  added 26 new ambiguity and import-equals probes.
+- **Declared S-R14-2 class:** its header description is accurate.
+- **Real tree:** unchanged counts.
+- **Hook:** old pipe and new here-string reach the same verdict on 26 refusal and
+  adversarial commands, except the intended padded allow.
+- **Red proofs and counts:** all ten recorded rows reproduce. Testing measured the race
+  at 30/30 on the pipe version and 0/30 on the here-string version at 150 KB and above.
+
+### Findings
+
+- **F-R15-1 / S-R15-1 — Major, convergent functionality+security (R43 vs
+  `f814d65c0`).** The here-string fails open when bash cannot write it.
+  - **Mechanism:** bash writes a here-string past about 64 KB to a temp file, and every
+    here-string on macOS's bash 3.2. When that write fails (tmp full or read-only, a
+    file-size limit), grep never runs and the status is 1. `matches()` read 1 as "no
+    match", so a 200 KB bare decrypt was allowed, where the pipe had refused it.
+  - **Related:** an unhandled failure elsewhere, for one a failed occurrence count, ended
+    the hook under `set -e` with its own status. Only exit 2 blocks.
+- **F-R15-2 — Minor.** `check-no-pipe-into-grep-q` forbids the round-14 race's exact
+  shape but scanned `scripts/` only, so it never saw the hook.
+- **S-R15-2 — Minor (R29).** The bypass gate header claimed too much:
+  - It said every name bound to two helpers is reported, but only a run-time destructure
+    is merged; two static imports under one name are not.
+  - It said every literal-specifier load is recognised, but not `import rls = require(…)`.
+
+  TypeScript rejects both forms (TS2300, TS1202).
+- **S-R15-3 — Minor, pre-existing.** The echo/printf/cat refusal matched only `$_CRED`,
+  not the skill's own `${_CRED}`.
+- **T-R15-1 — Minor (RT10).** The 200 KB allow cell had no deny twin of the same size,
+  so a matcher reading only a 64 KB prefix kept every cell green.
+
+### Resolution Status — round 15
+
+#### F-R15-1 / S-R15-1 Major (convergent) — a check that could not run refuses
+
+- **Action, `.claude/hooks/block-bare-decrypt.sh`:**
+  - `matches()` counts with `grep -cE` on the here-string, and treats an empty count (grep
+    never ran) as a matcher failure, which refuses.
+  - An `ERR` trap turns any other unhandled top-level failure into exit 2 with a named
+    refusal. A first version also set errtrace (`set -E`); the red proof showed no cell
+    depended on it, since every failure inside `matches()` is handled there, so it was
+    dropped rather than left as an unproven claim.
+- **Cells:**
+  - a 200 KB bare decrypt under a one-block file-size limit, refused, beside a short bare
+    decrypt under the same limit;
+  - the hook run with a `PATH` that lacks `wc`, so the occurrence count fails, refused with
+    exit 2 instead of 127.
+
+#### F-R15-2 Minor — the pipe gate scans the hooks
+
+- **Action:** `check-no-pipe-into-grep-q.sh` also scans `.claude/hooks`. On the real tree
+  the directory must exist and hold at least one script; a fixture tree may omit it.
+- **Cells:** a pipe into `grep -q` in a hook script, refused; a here-string hook, passing;
+  a hooks directory with no script, `EMPTY_SCAN`.
+- **Real tree:** 46 scripts and 1 hook script scanned, exit 0.
+
+#### S-R15-3 / T-R15-1 Minor — the printer check reads the whole command and both spellings
+
+- **Action:** the refusal matches `echo`, `printf`, `cat` or `tee` as a command word
+  followed by a blank, then `$_CRED` or `${_CRED}`. The blank keeps the `cat` in
+  `application/json` from matching; the word boundary keeps a flag that ends in a
+  printer name, `--mode=noecho `, from matching.
+- **Cells:**
+  - refusals for `echo "${_CRED}"`, `printf '%s' "${_CRED}"` and `tee <<<"$_CRED"`;
+  - allow cells for a `curl` whose JSON body carries `${_CRED}` and for a
+    `--mode=noecho` flag beside `${_CRED}`;
+  - the 200 KB deny twin, an `echo $_CRED` placed after 200 KB of padding.
+
+#### S-R15-2 Minor — the header says what the gate checks
+
+- The `check-bypass-rls.mjs` header now says:
+  - only `import()`/`require()` calls with a literal specifier are recognised, not
+    `import … = require`;
+  - only a run-time destructure makes a name ambiguous;
+  - duplicate static imports and `import … = require` are left to TypeScript, which
+    rejects both.
+
+#### Red proof — round 15
+
+Run in a worktree copy over the hook and pipe-gate self-tests. Each mutation was applied
+on its own; at baseline all 96 cells pass.
+
+| Mutation | Cells that failed |
+|---|---|
+| an unwritten here-string reads as no match | the 200 KB bare decrypt under a file-size limit (1) |
+| no `ERR` trap | the missing-`wc` cell, which exited 127 (1) |
+| the printer check sees only `$_CRED` | the `echo` and `printf` of `${_CRED}` cells (2) |
+| the printer is not matched as a command word | the `--mode=noecho` allow cell (1) |
+| `tee` is not a printer | the `tee <<<"$_CRED"` cell (1) |
+| the matcher reads only a 64 KB prefix | the `echo $_CRED` past 200 KB cell (1) |
+| hook scripts are not scanned | the hook pipe-into-`grep -q` cell (1) |
+| the hook directory has no floor | the hook `EMPTY_SCAN` cell (1) |
+
+The first run also tried dropping errtrace and dropping the command-word boundary, and
+neither failed a cell. Errtrace was removed from the hook as unproven. The boundary gained
+the `--mode=noecho` cell, because the `application/json` cell it was meant to cover passes
+through the blank the check requires, not through the boundary.
+
+#### Round 15 verification
+
+- **Unit:** 1034 files / 15850 tests pass; `next build` passes. The hook test file was
+  re-run after the last hook edit (errtrace removed, one allow cell added): 40 of 40 pass.
+  eslint reports nothing on any changed file, and `bash -n` passes on the hook and the
+  pipe gate.
+- **Gates:**
+  - `check-no-pipe-into-grep-q` scans 46 scripts and 1 hook script, exit 0.
+  - `check-bypass-rls` exits 0 at 243 of 1023 files and 25 call sites handed off.
+- **Integration:** not re-run. Nothing under `src/` changed; round 11's run (113 files /
+  710 tests) covers the unchanged runtime.
+- **Citation gate:** passes over this document and the SSO deviation log.

@@ -18,7 +18,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { resolve, dirname } from "node:path";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -240,3 +242,70 @@ describe("block-bare-decrypt hook", () => {
     });
   });
 });
+
+describe("block-bare-decrypt hook — failures refuse, and the printer check reads the whole command (round 15)", () => {
+  const PAD = `  # ${"x".repeat(200_000)}\n`;
+
+  /** Run the hook where bash cannot write a here-string's temp file (a 1-block file-size limit). */
+  function expectHookWithoutTempFiles(command) {
+    const payload = JSON.stringify({ tool_input: { command } });
+    const r = spawnSync("bash", ["-c", 'ulimit -f 1; trap "" XFSZ; exec bash "$0"', HOOK], { input: payload, encoding: "utf8" });
+    return expect(r.status, r.stderr);
+  }
+
+  it("refuses a 200 KB bare decrypt when the here-string cannot be written (F-R15-1/S-R15-1)", () => {
+    // grep never ran and the status was 1, which read as "no match": the hook allowed it.
+    expectHookWithoutTempFiles(`passwd-sso ${SUB} item\n${PAD}`).toBe(BLOCK);
+  });
+
+  it("refuses when a later check cannot run, rather than exiting with that check's status (S-R15-1)", () => {
+    // The occurrence count pipes through `wc`. Without it the pipeline fails, and set -e
+    // alone ended the hook with 127 — any status but 2 lets the command through.
+    const bin = mkdtempSync(join(tmpdir(), "hook-path-"));
+    try {
+      for (const tool of ["bash", "python3", "grep", "cat"]) {
+        const found = spawnSync("bash", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
+        symlinkSync(found, join(bin, tool));
+      }
+      const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -u "user:\${_CRED}" https://example.test\n) 2>/dev/null`;
+      const payload = JSON.stringify({ tool_input: { command: cmd } });
+      const r = spawnSync(join(bin, "bash"), [HOOK], { input: payload, encoding: "utf8", env: { PATH: bin } });
+      expect(r.status, r.stderr).toBe(BLOCK);
+      expect(r.stderr).toContain("failed while checking this command");
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("still refuses a short bare decrypt under the same limit (control)", () => {
+    expectHookWithoutTempFiles(`passwd-sso ${SUB} item`).toBe(BLOCK);
+  });
+
+  it("refuses an echo of the credential placed past 200 KB (T-R15-1, the allow cell's deny twin)", () => {
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n${PAD}  echo $_CRED\n) 2>/dev/null`;
+    expectHook(cmd).toBe(BLOCK);
+  });
+
+  it.each([
+    ["echo of ${_CRED}", `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  echo "\${_CRED}"\n) 2>/dev/null`],
+    ["printf of ${_CRED}", `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  printf '%s' "\${_CRED}"\n) 2>/dev/null`],
+    ["tee of $_CRED", `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  tee <<<"$_CRED"\n) 2>/dev/null`],
+  ])("refuses %s (S-R15-3)", (_label, cmd) => {
+    expectHook(cmd).toBe(BLOCK);
+  });
+
+  it("allows a consuming command whose flag merely ends in `echo` (S-R15-3)", () => {
+    // `--mode=noecho ` ends in `echo` followed by a blank; only the command-word
+    // boundary keeps it from reading as a printer.
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  some-tool --mode=noecho --token "\${_CRED}"\n) 2>/dev/null`;
+    expectHook(cmd).toBe(ALLOW);
+  });
+
+  it("allows a consuming command whose argument merely contains `cat` (S-R15-3)", () => {
+    // `application/json` holds the letters of `cat`; the blank the printer check
+    // requires after the name is what keeps it from matching.
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -H "Content-Type: application/json" -d "{\\"token\\":\\"\${_CRED}\\"}" https://example.test\n) 2>/dev/null`;
+    expectHook(cmd).toBe(ALLOW);
+  });
+});
+

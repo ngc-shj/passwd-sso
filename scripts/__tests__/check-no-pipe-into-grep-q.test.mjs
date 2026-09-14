@@ -431,3 +431,35 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     expect(r.status, r.stdout + r.stderr).toBe(0);
   });
 });
+
+describe("the credential hook directory is scanned too (audit-tenant-adjudicator round 15, F-R15-2)", () => {
+  // The round-14 race in .claude/hooks/block-bare-decrypt.sh was this exact shape,
+  // and the gate never looked outside scripts/.
+  function writeHook(name, body) {
+    mkdirSync(join(root, ".claude", "hooks"), { recursive: true });
+    writeFileSync(join(root, ".claude", "hooks", `${name}.sh`), body, "utf8");
+  }
+
+  it("fails on a pipeline into grep -q in a hook script", () => {
+    writeHook("guard", `#!/usr/bin/env bash\nset -euo pipefail\nif printf '%s' "$COMMAND" | grep -qE "decrypt"; then exit 2; fi\n`);
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(1);
+    expect(stdout).toContain(".claude/hooks/guard.sh:3:");
+  });
+
+  it("passes a hook script that reads a here-string", () => {
+    writeHook("guard", `#!/usr/bin/env bash\nset -euo pipefail\nif grep -qE "decrypt" <<<"$COMMAND"; then exit 2; fi\n`);
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+    expect(stdout).toContain("1 hook script(s) scanned");
+  });
+
+  it("EMPTY_SCAN: fails when the hook directory holds no shell script", () => {
+    mkdirSync(join(root, ".claude", "hooks"), { recursive: true });
+    writeFileSync(join(root, ".claude", "hooks", "README.md"), "not a script\n", "utf8");
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(1);
+    expect(stdout).toContain("EMPTY_SCAN: no shell scripts found under .claude/hooks/");
+  });
+});
+

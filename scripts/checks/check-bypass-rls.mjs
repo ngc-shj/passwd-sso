@@ -33,10 +33,14 @@
  * at run time (`await import("@/lib/tenant-rls")`, `require`) binds the helpers
  * like an import: a destructured binding is followed as one, the module object as
  * a namespace, and any other use of the load is reported (runtimeHelperModulesIn).
- * Only a load whose specifier is a literal naming the module is recognised, and only
- * identifier-keyed destructuring is followed. A name bound to two different helpers
- * in one file is reported wherever it is used, a direct call included, and
- * `import wb = rls.withBypassRls` is a reference like any other (round 14).
+ * Only an `import()` or `require()` call whose specifier is a literal naming the
+ * module is recognised (not `import rls = require(…)`), and only identifier-keyed
+ * destructuring is followed. A run-time destructure that binds a name already bound
+ * to a different helper makes that name ambiguous, and it is reported wherever it is
+ * used, a direct call included; two STATIC imports under one name are not checked,
+ * since TypeScript rejects them (TS2300), as it rejects `import … = require` under
+ * this repo's module setting (TS1202). `import wb = rls.withBypassRls` is a
+ * reference like any other (rounds 14 and 15).
  *
  *   - Check 2 (BYPASS_PURPOSE) is FILE-scoped, not call-scoped: one
  *     `BYPASS_PURPOSE.X` anywhere satisfies it for every call in the file, and
