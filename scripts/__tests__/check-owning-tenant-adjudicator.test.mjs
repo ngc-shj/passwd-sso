@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { ARRAY_ITERATORS, PROMISE_CHAIN, PROMISE_COMBINATORS, TRANSACTION_RUNNERS } from "../checks/lib/rls-context.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
@@ -636,12 +635,13 @@ describe("check-owning-tenant-adjudicator — a function that outlives the callb
     expect(run().code).toBe(1);
   });
 
-  it("passes a read in an IIFE inside the callback", () => {
+  it("does not treat a read in an IIFE inside the callback as tenant-scoped", () => {
+    // Round 10: passed in rounds 8 and 9.
     write("src/lib/thing.ts", inTenant(`{\n  await (async () => {\n${RAW_READ}})();\n}`));
     manifest(TENANT_SCOPED_FILE);
     const { code, out } = run();
-    expect(code, out).toBe(0);
-    expect(out).toContain("no unconstrained read");
+    expect(code).toBe(1);
+    expect(out).toContain("OUTSIDE any tenant-scoped context");
   });
 
   it("does not let an outer tenant opener answer for a function a helper receives inside an inner bypass callback", () => {
@@ -654,79 +654,53 @@ describe("check-owning-tenant-adjudicator — a function that outlives the callb
   });
 });
 
-describe("check-owning-tenant-adjudicator — only a closed list of shapes runs inline (round 9 F-R9-2/S-R9-1/T-R9-1)", () => {
+describe("check-owning-tenant-adjudicator — no function nested inside the callback is trusted (round 10 F-R10-1/S-R10-1/S-R10-2/T-R10-1)", () => {
   const TENANT_SCOPED_FILE = { "src/lib/thing.ts": { disposition: "tenant-scoped" } };
   const READ = "prisma.user.findUnique({ where: { id }, select: { tenantId: true } })";
   const inTenant = (body, prefix = "") =>
     `${prefix}export const f = (ids, p, client, list, emitter) => withUserTenantRls(userId, async (tx) => ${body});\n`;
-  const passes = (body, prefix) => {
-    write("src/lib/thing.ts", inTenant(body, prefix));
+
+  // Control flow is not a function: these run in the callback itself.
+  it.each([
+    ["an awaited read in a block", `{\n  const rows = await ${READ};\n  return rows;\n}`],
+    ["a read in a loop and a branch", `{\n  for (const id of ids) {\n    if (id) {\n      await ${READ};\n    }\n  }\n  return null;\n}`],
+    ["a read in try/catch", `{\n  try {\n    return await ${READ};\n  } catch {\n    return null;\n  }\n}`],
+  ])("passes %s written directly in the callback", (_label, body) => {
+    write("src/lib/thing.ts", inTenant(body));
     manifest(TENANT_SCOPED_FILE);
     const { code, out } = run();
     expect(code, out).toBe(0);
     expect(out).toContain("no unconstrained read");
-  };
-  const refuses = (body, prefix) => {
+  });
+
+  // Rounds 8 and 9 trusted the first group: an allowlist of call shapes that run
+  // their function while the callback runs. Round 10 escaped it with the rest.
+  it.each([
+    ["a sync map callback", `{\n  ids.map((id) => ${READ});\n  return null;\n}`],
+    ["an async map handed to an awaited Promise.all", `Promise.all(ids.map(async (id) => ${READ}))`],
+    ["an awaited IIFE", `{\n  await (async () => ${READ})();\n  return null;\n}`],
+    ["a returned .then callback", `p.then(async () => ${READ})`],
+    ["a returned $transaction callback", `client.$transaction(async (t) => ${READ})`],
+    ["a Promise executor", `new Promise((resolve) => resolve(${READ}))`],
+    ["an object method called at once", `({ load() {\n  return ${READ};\n} }).load()`],
+    ["a function declared and called in the callback", `{\n  function load() {\n    return ${READ};\n  }\n  return load();\n}`],
+    ["a forEach callback returning a promise nobody awaits", `{\n  ids.forEach((id) => p.then(() => ${READ}));\n  return null;\n}`],
+    ["an async executor, after resolve", `new Promise(async (resolve) => {\n  resolve(null);\n  await p;\n  return ${READ};\n})`],
+    ["a generator IIFE", `{\n  (function* () {\n    yield ${READ};\n  })();\n  return null;\n}`],
+    ["a lazy iterator helper", `{\n  new Set(ids).values().map((id) => ${READ});\n  return null;\n}`],
+    ["the executor of a shadowed Promise", `new Promise((resolve) => resolve(${READ}))`, "class Promise {\n  constructor(fn) {\n    this.fn = fn;\n  }\n}\n"],
+    ["next/server's after()", `after(() => ${READ})`],
+    ["an event listener", `emitter.on("x", () => ${READ})`],
+    ["a function pushed onto a list", `{\n  list.push(() => ${READ});\n  return list;\n}`],
+    ["setTimeout", `setTimeout(() => ${READ}, 0)`],
+    ["a getter", `({ get load() {\n  return ${READ};\n} })`],
+    ["a setter", `({ set load(v) {\n  ${READ};\n} })`],
+    ["a class constructor", `class {\n  constructor() {\n    ${READ};\n  }\n}`],
+  ])("does not treat a read in %s as tenant-scoped", (_label, body, prefix = "") => {
     write("src/lib/thing.ts", inTenant(body, prefix));
     manifest(TENANT_SCOPED_FILE);
     const { code, out } = run();
     expect(code).toBe(1);
     expect(out).toContain("OUTSIDE any tenant-scoped context");
-  };
-
-  // Written out, not generated from the exported sets: cells generated from a set
-  // lose a member's cell when the member is dropped, so they cannot go red for it.
-  // The equality cell turns an added member without a cell red too.
-  const ITERATORS = ["map", "flatMap", "forEach", "filter", "find", "findIndex", "findLast", "findLastIndex", "some", "every", "reduce", "reduceRight", "sort", "toSorted"];
-  const COMBINATORS = ["all", "allSettled"];
-  const CHAIN = ["then", "catch", "finally"];
-  const RUNNERS = ["$transaction"];
-
-  it("has a cell for every member of each inline set", () => {
-    expect([...ARRAY_ITERATORS]).toEqual(ITERATORS);
-    expect([...PROMISE_COMBINATORS]).toEqual(COMBINATORS);
-    expect([...PROMISE_CHAIN]).toEqual(CHAIN);
-    expect([...TRANSACTION_RUNNERS]).toEqual(RUNNERS);
   });
-  it.each(ITERATORS)("passes a read in a sync %s callback", (method) => {
-    passes(`{\n  ids.${method}((id) => ${READ});\n  return null;\n}`);
-  });
-  it.each(COMBINATORS)("passes an async map handed to a returned Promise.%s", (combinator) => {
-    passes(`Promise.${combinator}(ids.map(async (id) => ${READ}))`);
-  });
-  it.each(CHAIN)("passes a read in a returned .%s callback", (method) => {
-    passes(`p.${method}(async () => ${READ})`);
-  });
-  it.each(RUNNERS)("passes a read in a returned %s callback", (method) => {
-    passes(`client.${method}(async (t) => ${READ})`);
-  });
-
-  it("passes a read in a Promise executor", () => passes(`new Promise((resolve) => resolve(${READ}))`));
-  it("passes an async IIFE in an array handed to an awaited Promise.all", () =>
-    passes(`{\n  await Promise.all([(async () => ${READ})()]);\n  return null;\n}`));
-  it("passes a callback continued by an awaited chain", () =>
-    passes(`{\n  await p.then(async () => ${READ}).catch(() => null);\n  return null;\n}`));
-
-  it.each([
-    ["next/server's after()", `after(() => ${READ})`],
-    ["an event listener", `emitter.on("x", () => ${READ})`],
-    ["a function pushed onto a list", `{\n  list.push(() => ${READ});\n  return list;\n}`],
-    ["setTimeout.call", `setTimeout.call(null, () => ${READ}, 0)`],
-    ["an element-access scheduler", `globalThis["setTimeout"](() => ${READ}, 0)`],
-    ["process.nextTick", `process.nextTick(() => ${READ})`],
-    ["queueMicrotask", `queueMicrotask(() => ${READ})`],
-    ["an async map nothing waits for", `{\n  ids.map(async (id) => ${READ});\n  return null;\n}`],
-    ["an async map handed to Promise.race", `Promise.race(ids.map(async (id) => ${READ}))`],
-    ["an async forEach, even awaited", `{\n  await ids.forEach(async (id) => ${READ});\n  return null;\n}`],
-    ["a .then nothing waits for", `{\n  void p.then(async () => ${READ});\n  return null;\n}`],
-    ["an async IIFE nothing waits for", `{\n  (async () => ${READ})();\n  return null;\n}`],
-    ["a $transaction nothing waits for", `{\n  void client.$transaction(async (t) => ${READ});\n  return null;\n}`],
-    ["a Promise executor that is not the first argument", `new Promise(executor, () => ${READ})`],
-    ["a getter", `({ get load() {\n  return ${READ};\n} })`],
-    ["a setter", `({ set load(v) {\n  ${READ};\n} })`],
-    ["a class constructor", `class {\n  constructor() {\n    ${READ};\n  }\n}`],
-  ])("does not treat a read in %s as tenant-scoped", (_label, body) => refuses(body));
-
-  it("does not treat a read in a function a local helper keeps as tenant-scoped", () =>
-    refuses(`register(() => ${READ})`, "const register = (cb) => {\n  list.push(cb);\n};\n"));
 });

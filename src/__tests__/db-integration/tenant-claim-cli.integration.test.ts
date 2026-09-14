@@ -12,9 +12,9 @@
  * this file inserts is derived from the shared fixtures with a random
  * per-run suffix, following src/__tests__/db-integration/tenant-claim.integration.test.ts.
  */
-import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, onTestFinished, vi } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
-import { createServer, type AddressInfo } from "node:net";
+import { createServer, type AddressInfo, type Socket } from "node:net";
 import { AuditScope, AuditAction, ActorType, AuditOutboxStatus } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
@@ -2909,14 +2909,10 @@ describe("tenant-domain CLI (C7)", () => {
     it.skipIf(SKIP)("names a confirmation that outlived the transaction, and writes nothing", async () => {
       // Round-8 F-R8-2: the budget is shortened through its seam; the default is minutes.
       const { owning, former, userId } = await seedDeparted();
-      const options = vi.spyOn(confirmationTransaction, "options").mockReturnValue({ timeout: 1000, maxWait: 2000 });
-      try {
-        const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: confirmAfter(2500) });
-        expect(result.ok).toBe(false);
-        expect(result.message).toContain("took longer than this command's transaction allows");
-      } finally {
-        options.mockRestore();
-      }
+      shortenBudget({ timeout: 1000, maxWait: 2000 });
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: confirmAfter(2500) });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("took longer than this command's transaction allows");
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
 
@@ -2991,14 +2987,10 @@ describe("tenant-domain CLI (C7)", () => {
       const gainingTenant = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
-      const options = vi.spyOn(confirmationTransaction, "options").mockReturnValue({ timeout: 1000, maxWait: 2000 });
-      try {
-        const result = await cmdAdd({ tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: confirmAfter(2500) });
-        expect(result.ok).toBe(false);
-        expect(result.message).toContain("took longer than this command's transaction allows");
-      } finally {
-        options.mockRestore();
-      }
+      shortenBudget({ timeout: 1000, maxWait: 2000 });
+      const result = await cmdAdd({ tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: confirmAfter(2500) });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("took longer than this command's transaction allows");
       expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.tenantId).toBe(losingTenant);
 
       await ctx.deleteTestData(losingTenant);
@@ -3009,14 +3001,10 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${PRIMARY_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
-      const options = vi.spyOn(confirmationTransaction, "options").mockReturnValue({ timeout: 1000, maxWait: 2000 });
-      try {
-        const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: confirmAfter(2500) });
-        expect(result.ok).toBe(false);
-        expect(result.message).toContain("took longer than this command's transaction allows");
-      } finally {
-        options.mockRestore();
-      }
+      shortenBudget({ timeout: 1000, maxWait: 2000 });
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: confirmAfter(2500) });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("took longer than this command's transaction allows");
       expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.revokedAt).toBeNull();
 
       await ctx.deleteTestData(tenantId);
@@ -3050,24 +3038,47 @@ describe("tenant-domain CLI (C7)", () => {
       await ctx.deleteTestData(tenantId);
     });
 
-    it("a transaction that never starts is not reported as a slow confirmation, and the command returns", async () => {
+    it("a transaction that never starts is not reported as a slow confirmation, and the command returns", { timeout: 15_000 }, async () => {
       // F-R9-1: P2028 also covers `maxWait`. A server that accepts the connection
       // and never answers holds the transaction start past it, before any prompt.
       // Without the client's connection timeout, `$disconnect()` in the command's
       // `finally` waited on that connection forever and this cell timed out.
-      const silent = createServer(() => {});
-      await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
-      const { port } = silent.address() as AddressInfo;
+      const port = await listenLocally();
       vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
-      const options = vi.spyOn(confirmationTransaction, "options").mockReturnValue({ timeout: 1000, maxWait: 300 });
-      try {
-        await expect(
-          cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
-        ).rejects.toThrow("Unable to start a transaction in the given time");
-      } finally {
-        options.mockRestore();
-        silent.close();
-      }
+      shortenBudget({ timeout: 1000, maxWait: 300 });
+
+      await expect(
+        cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+      ).rejects.toThrow("Unable to start a transaction in the given time");
+    });
+
+    it("a server that stops answering after connecting does not hang the command (round 10 F-R10-5)", { timeout: 15_000 }, async () => {
+      // The handshake completes, then no query is ever answered. Without a query
+      // timeout the command's first query, and `$disconnect()` after it, waited forever.
+      const port = await listenLocally((socket) => {
+        socket.once("data", () => socket.write(STARTUP_OK));
+      });
+      vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      shortenBudget({ timeout: 1000, maxWait: 5000 });
+
+      await expect(
+        cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+      ).rejects.toThrow("Query read timeout");
+    });
+
+    it("connects with the pool timeout DB_POOL_CONNECTION_TIMEOUT_MS sets (round 10 F-R10-4)", { timeout: 15_000 }, async () => {
+      // The default is 5 s; maxWait here is longer, so only an honoured 300 ms
+      // fails the command in well under that.
+      const port = await listenLocally();
+      vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "300");
+      shortenBudget({ timeout: 1000, maxWait: 8000 });
+
+      const started = Date.now();
+      await expect(
+        cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+      ).rejects.toThrow();
+      expect(Date.now() - started).toBeLessThan(3000);
     });
   });
 
@@ -3384,3 +3395,31 @@ describe("tenant-domain CLI (C7)", () => {
     });
   });
 });
+
+/** AuthenticationOk, then ReadyForQuery: a PostgreSQL handshake that asks for no password. */
+const STARTUP_OK = Buffer.from([0x52, 0, 0, 0, 8, 0, 0, 0, 0, 0x5a, 0, 0, 0, 5, 0x49]);
+
+/**
+ * A local server standing in for a database that misbehaves. Its sockets are
+ * destroyed and the server closed when the cell ends — including when the cell
+ * times out, which is how these cells fail (round 10 T-R10-4).
+ */
+async function listenLocally(onConnection: (socket: Socket) => void = () => {}): Promise<number> {
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    onConnection(socket);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  onTestFinished(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  return (server.address() as AddressInfo).port;
+}
+
+/** Shortens the confirmation budget for the current cell only, restored however the cell ends. */
+function shortenBudget(options: { timeout: number; maxWait: number }): void {
+  const spy = vi.spyOn(confirmationTransaction, "options").mockReturnValue(options);
+  onTestFinished(() => spy.mockRestore());
+}

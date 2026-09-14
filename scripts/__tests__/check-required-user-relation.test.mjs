@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { ARRAY_ITERATORS, PROMISE_CHAIN, PROMISE_COMBINATORS, TRANSACTION_RUNNERS } from "../checks/lib/rls-context.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
@@ -35,6 +34,13 @@ function write(rel, body) {
 
 function manifest(obj) {
   write(MANIFEST_REL, JSON.stringify(obj, null, 2));
+}
+
+/** A refusal names the relation, so a gate that crashes — also exit 1 — does not pass (round 10 T-R10-2). */
+function expectRefusal() {
+  const { code, out } = run();
+  expect(code, out).toBe(1);
+  expect(out).toContain("TenantMember.user");
 }
 
 /**
@@ -579,7 +585,7 @@ describe("check-required-user-relation — a read runs in an opener's context on
       "src/lib/a.ts",
       "const inBypass = (fn) => withBypassRls(prisma, fn, PURPOSE);\n" + `export const f = async () => inBypass(${EARLY});\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust an arrow IIFE in the callback position", () => {
@@ -588,7 +594,7 @@ describe("check-required-user-relation — a read runs in an opener's context on
       "src/lib/a.ts",
       `export const f = () => withBypassRls(prisma, (() => {\n  const early = ${EARLY};\n  return async (tx) => early;\n})(), PURPOSE);\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a function-expression IIFE in the callback position", () => {
@@ -596,7 +602,7 @@ describe("check-required-user-relation — a read runs in an opener's context on
       "src/lib/a.ts",
       `export const f = () => withBypassRls(prisma, (function () {\n  const early = ${EARLY};\n  return async (tx) => early;\n})(), PURPOSE);\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust an awaited IIFE in the callback position", () => {
@@ -604,20 +610,20 @@ describe("check-required-user-relation — a read runs in an opener's context on
       "src/lib/a.ts",
       `export async function f() {\n  return withBypassRls(prisma, await (async () => {\n    const early = await ${EARLY};\n    return async (tx) => early;\n  })(), PURPOSE);\n}\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a function a helper receives inside the callback argument", () => {
     // Whether `pick` runs it before the bypass opens is not in this file.
     write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, pick(async (tx) => ${READ}), PURPOSE);\n`);
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a function passed in withBypassRls's purpose position", () => {
     // Pins the callback position itself: the function IS the argument, so only
     // the opener's position table keeps it out of the bypass.
     write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, cb, async () => ${EARLY});\n`);
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("passes a callback written with a type assertion", () => {
@@ -632,13 +638,14 @@ describe("check-required-user-relation — a read runs in an opener's context on
     expect(code, out).toBe(0);
   });
 
-  it("passes a read in a function nested inside the callback", () => {
+  it("does not trust a read in a function nested inside the callback", () => {
+    // Round 10: passed through round 9. No nested function is trusted to run in
+    // the callback's context; when it runs is decided by its receiver and caller.
     write(
       "src/lib/a.ts",
       `export const f = (ids) => withBypassRls(prisma, async (tx) => Promise.all(ids.map(async (id) => ${READ})), PURPOSE);\n`,
     );
-    const { code, out } = run();
-    expect(code, out).toBe(0);
+    expectRefusal();
   });
 
   it("does not trust a read a non-opener helper wraps inside the callback", () => {
@@ -649,7 +656,7 @@ describe("check-required-user-relation — a read runs in an opener's context on
       "src/lib/a.ts",
       `export const f = () => withBypassRls(prisma, async (tx) => helper(pick(async () => ${READ})), PURPOSE);\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 });
 
@@ -665,7 +672,7 @@ describe("check-required-user-relation — a wrong null cannot hide behind an ou
       "src/lib/a.ts",
       "const run = ({ fn }) => withTenantRls(prisma, t, fn);\n" + inOuterBypass(`run({ fn: async (tx) => ${READ} })`),
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not defer to an outer bypass for mutually recursive wrappers", () => {
@@ -674,7 +681,7 @@ describe("check-required-user-relation — a wrong null cannot hide behind an ou
       "function ping(fn) {\n  return pong(fn);\n}\nfunction pong(fn) {\n  return ping(fn);\n}\n" +
         inOuterBypass(`ping(async (tx) => ${READ})`),
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not defer to an outer bypass for a rest callback parameter", () => {
@@ -682,7 +689,7 @@ describe("check-required-user-relation — a wrong null cannot hide behind an ou
       "src/lib/a.ts",
       "const run = (...args) => withTenantRls(prisma, t, args[0]);\n" + inOuterBypass(`run(async (tx) => ${READ})`),
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not defer to an outer bypass when a spread hides which wrapper parameter receives the callback", () => {
@@ -690,7 +697,7 @@ describe("check-required-user-relation — a wrong null cannot hide behind an ou
       "src/lib/a.ts",
       "const run = (client, fn) => withTenantRls(client, t, fn);\n" + inOuterBypass(`run(...args, async (tx) => ${READ})`),
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 });
 
@@ -724,33 +731,33 @@ describe("check-required-user-relation — a function that outlives the callback
   it("does not trust a closure returned out of the callback", () => {
     // Called after withBypassRls has resolved, with no context at all.
     write("src/lib/a.ts", inBypass(`() => ${READ}`));
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a closure stored and handed out of the callback", () => {
     write("src/lib/a.ts", inBypass(`{\n  const later = () => ${READ};\n  return later;\n}`));
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust an object method built in the callback", () => {
     write("src/lib/a.ts", inBypass(`({ load() {\n  return ${READ};\n} })`));
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a function declared in the callback", () => {
     write("src/lib/a.ts", inBypass(`{\n  function load() {\n    return ${READ};\n  }\n  return load;\n}`));
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
   it("does not trust a callback handed to a scheduler", () => {
     write("src/lib/a.ts", inBypass(`{\n  setTimeout(() => ${READ}, 0);\n}`));
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 
-  it("passes a read in an IIFE inside the callback", () => {
+  it("does not trust a read in an IIFE inside the callback", () => {
+    // Round 10: passed in rounds 8 and 9.
     write("src/lib/a.ts", inBypass(`(async () => ${READ})()`));
-    const { code, out } = run();
-    expect(code, out).toBe(0);
+    expectRefusal();
   });
 
   it("does not let an outer bypass answer for a function a helper receives inside an inner tenant callback", () => {
@@ -760,77 +767,51 @@ describe("check-required-user-relation — a function that outlives the callback
       "src/lib/a.ts",
       `export const f = (t) => withBypassRls(prisma, async () => withTenantRls(prisma, t, pick(async (tx) => ${READ})), PURPOSE);\n`,
     );
-    expect(run().code).toBe(1);
+    expectRefusal();
   });
 });
 
-describe("check-required-user-relation — only a closed list of shapes runs inline (round 9 F-R9-2/S-R9-1/T-R9-1)", () => {
+describe("check-required-user-relation — no function nested inside the callback is trusted (round 10 F-R10-1/S-R10-1/S-R10-2/T-R10-1)", () => {
   const READ = "tx.tenantMember.findMany({ include: { user: true } })";
   const inBypass = (body, prefix = "") =>
     `${prefix}export const f = (ids, p, client, list, emitter) => withBypassRls(prisma, async (tx) => ${body}, PURPOSE);\n`;
-  const passes = (body, prefix) => {
-    write("src/lib/a.ts", inBypass(body, prefix));
+
+  // Control flow is not a function: these run in the callback itself.
+  it.each([
+    ["an awaited read in a block", `{\n  const rows = await ${READ};\n  return rows;\n}`],
+    ["a read in a loop and a branch", `{\n  for (const id of ids) {\n    if (id) {\n      await ${READ};\n    }\n  }\n  return null;\n}`],
+    ["a read in try/catch", `{\n  try {\n    return await ${READ};\n  } catch {\n    return null;\n  }\n}`],
+  ])("passes %s written directly in the callback", (_label, body) => {
+    write("src/lib/a.ts", inBypass(body));
     const { code, out } = run();
     expect(code, out).toBe(0);
-  };
-  const refuses = (body, prefix) => {
-    write("src/lib/a.ts", inBypass(body, prefix));
-    expect(run().code).toBe(1);
-  };
-
-  // Written out, not generated from the exported sets: cells generated from a set
-  // lose a member's cell when the member is dropped, so they cannot go red for it.
-  // The equality cell turns an added member without a cell red too.
-  const ITERATORS = ["map", "flatMap", "forEach", "filter", "find", "findIndex", "findLast", "findLastIndex", "some", "every", "reduce", "reduceRight", "sort", "toSorted"];
-  const COMBINATORS = ["all", "allSettled"];
-  const CHAIN = ["then", "catch", "finally"];
-  const RUNNERS = ["$transaction"];
-
-  it("has a cell for every member of each inline set", () => {
-    expect([...ARRAY_ITERATORS]).toEqual(ITERATORS);
-    expect([...PROMISE_COMBINATORS]).toEqual(COMBINATORS);
-    expect([...PROMISE_CHAIN]).toEqual(CHAIN);
-    expect([...TRANSACTION_RUNNERS]).toEqual(RUNNERS);
-  });
-  it.each(ITERATORS)("passes a read in a sync %s callback", (method) => {
-    passes(`{\n  ids.${method}((id) => ${READ});\n  return null;\n}`);
-  });
-  it.each(COMBINATORS)("passes an async map handed to a returned Promise.%s", (combinator) => {
-    passes(`Promise.${combinator}(ids.map(async (id) => ${READ}))`);
-  });
-  it.each(CHAIN)("passes a read in a returned .%s callback", (method) => {
-    passes(`p.${method}(async () => ${READ})`);
-  });
-  it.each(RUNNERS)("passes a read in a returned %s callback", (method) => {
-    passes(`client.${method}(async (t) => ${READ})`);
   });
 
-  it("passes a read in a Promise executor", () => passes(`new Promise((resolve) => resolve(${READ}))`));
-  it("passes an async IIFE in an array handed to an awaited Promise.all", () =>
-    passes(`{\n  await Promise.all([(async () => ${READ})()]);\n  return null;\n}`));
-  it("passes a callback continued by an awaited chain", () =>
-    passes(`{\n  await p.then(async () => ${READ}).catch(() => null);\n  return null;\n}`));
-
+  // Rounds 8 and 9 trusted the first group: an allowlist of call shapes that run
+  // their function while the callback runs. Round 10 escaped it with the rest.
   it.each([
+    ["a sync map callback", `{\n  ids.map((id) => ${READ});\n  return null;\n}`],
+    ["an async map handed to an awaited Promise.all", `Promise.all(ids.map(async (id) => ${READ}))`],
+    ["an awaited IIFE", `{\n  await (async () => ${READ})();\n  return null;\n}`],
+    ["a returned .then callback", `p.then(async () => ${READ})`],
+    ["a returned $transaction callback", `client.$transaction(async (t) => ${READ})`],
+    ["a Promise executor", `new Promise((resolve) => resolve(${READ}))`],
+    ["an object method called at once", `({ load() {\n  return ${READ};\n} }).load()`],
+    ["a function declared and called in the callback", `{\n  function load() {\n    return ${READ};\n  }\n  return load();\n}`],
+    ["a forEach callback returning a promise nobody awaits", `{\n  ids.forEach((id) => p.then(() => ${READ}));\n  return null;\n}`],
+    ["an async executor, after resolve", `new Promise(async (resolve) => {\n  resolve(null);\n  await p;\n  return ${READ};\n})`],
+    ["a generator IIFE", `{\n  (function* () {\n    yield ${READ};\n  })();\n  return null;\n}`],
+    ["a lazy iterator helper", `{\n  new Set(ids).values().map((id) => ${READ});\n  return null;\n}`],
+    ["the executor of a shadowed Promise", `new Promise((resolve) => resolve(${READ}))`, "class Promise {\n  constructor(fn) {\n    this.fn = fn;\n  }\n}\n"],
     ["next/server's after()", `after(() => ${READ})`],
     ["an event listener", `emitter.on("x", () => ${READ})`],
     ["a function pushed onto a list", `{\n  list.push(() => ${READ});\n  return list;\n}`],
-    ["setTimeout.call", `setTimeout.call(null, () => ${READ}, 0)`],
-    ["an element-access scheduler", `globalThis["setTimeout"](() => ${READ}, 0)`],
-    ["process.nextTick", `process.nextTick(() => ${READ})`],
-    ["queueMicrotask", `queueMicrotask(() => ${READ})`],
-    ["an async map nothing waits for", `{\n  ids.map(async (id) => ${READ});\n  return null;\n}`],
-    ["an async map handed to Promise.race", `Promise.race(ids.map(async (id) => ${READ}))`],
-    ["an async forEach, even awaited", `{\n  await ids.forEach(async (id) => ${READ});\n  return null;\n}`],
-    ["a .then nothing waits for", `{\n  void p.then(async () => ${READ});\n  return null;\n}`],
-    ["an async IIFE nothing waits for", `{\n  (async () => ${READ})();\n  return null;\n}`],
-    ["a $transaction nothing waits for", `{\n  void client.$transaction(async (t) => ${READ});\n  return null;\n}`],
-    ["a Promise executor that is not the first argument", `new Promise(executor, () => ${READ})`],
+    ["setTimeout", `setTimeout(() => ${READ}, 0)`],
     ["a getter", `({ get load() {\n  return ${READ};\n} })`],
     ["a setter", `({ set load(v) {\n  ${READ};\n} })`],
     ["a class constructor", `class {\n  constructor() {\n    ${READ};\n  }\n}`],
-  ])("does not trust a read in %s", (_label, body) => refuses(body));
-
-  it("does not trust a read in a function a local helper keeps", () =>
-    refuses(`register(() => ${READ})`, "const register = (cb) => {\n  list.push(cb);\n};\n"));
+  ])("does not trust a read in %s", (_label, body, prefix = "") => {
+    write("src/lib/a.ts", inBypass(body, prefix));
+    expectRefusal();
+  });
 });

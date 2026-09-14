@@ -2250,3 +2250,189 @@ was applied on its own; at baseline the seven filtered cells pass.
   real tree.
 - **Integration:** 113 files / 707 tests pass, with both workers stopped.
 - **Citation gate:** passes over this document and the SSO deviation log.
+
+## Round 10
+
+Reviewed range: `2df065f5c..3d5fd2af9`, the round-9 fix commit. The experts' raw
+outputs and full Recurring Issue Checks are kept in the round's working files.
+
+### Changes from Previous Round
+
+Round 9's CLI claims hold. Security and functionality both read the Prisma 7
+runtime:
+- the expiry message is raised only for a transaction closed by its timeout,
+  which is a rollback, so the named result never follows a commit;
+- the connect timeout fires only before `BEGIN`.
+
+The round-8 escapes are closed, and testing re-ran six recorded red proofs, all of
+which reproduce. The allowlist rule itself did not hold.
+
+### Converged across experts (severity floored by convergence)
+
+- **F-R10-1 / S-R10-1 / S-R10-2 — Major, convergent functionality+security
+  (R42/R47/R49).** The allowlist judged a call's shape, not when its function runs:
+  - a function returning a promise without `async` counted as settled when its
+    caller discarded the return value (`forEach`, a sync IIFE nobody awaits);
+  - a generator, a lazy iterator helper (`set.values().map`), and a receiver whose
+    own `then`/`map`/`$transaction` keeps its callback all read as inline.
+
+  Security's runtime probe showed a generator body, an iterator-helper callback and
+  a shadowed `Promise` executor running under another opener's open bypass
+  transaction. No such shape exists in the real tree.
+- **F-R10-2 / S-R10-2 — Major (R43 widening).** An async `new Promise` executor was
+  trusted when the constructed promise was settled, but the constructor discards the
+  executor's own promise. Round 9 had refused every executor.
+- **F-R10-4 / S-R10-A1 — Major (floored from Minor), convergent.** The CLI
+  hardcoded the 5 s connect timeout that the app reads from
+  `DB_POOL_CONNECTION_TIMEOUT_MS`.
+
+### Security findings
+
+- **S-R10-3 — Minor (R46), a regression for the executor form.** `Promise` was
+  matched by its spelling, so a local class named `Promise` was trusted.
+
+### Testing findings
+
+- **T-R10-1 — Major (RT7/R42).** Five conditions that decide "settled" or "a
+  Promise", and one `COLLECTING_ITERATORS` member, could each flip toward trusting
+  more with every committed cell green.
+- **T-R10-2 — Minor (RT7).** The required-user gate's deny cells asserted only exit
+  code 1, so a gate crash passed them.
+- **T-R10-3 — Minor (RT10).** Six allow-side conditions were unpinned.
+- **T-R10-4 — Minor (RT11).** The silent-server cell restored its budget spy and
+  closed its server only in `finally`, which a timed-out cell never reaches, so a
+  hang leaked `maxWait: 300` into later CLI cells.
+
+### Functionality findings
+
+- **F-R10-3 — Minor (R49).** Several inline shapes were refused beyond the three
+  the doc named.
+- **F-R10-5 — Minor.** Only connection setup was bounded. A server that goes silent
+  after the handshake still hung the command.
+- **F-R10-A1 — Minor (Adjacent), pre-existing.** The gates judge context by where a
+  call is nested, not by which client makes the read.
+
+### Resolution Status — round 10
+
+Round 10 is the loop's limit. The user chose to replace the allowlist rather than
+refine it again, after it had been escaped in rounds 8, 9 and 10 and round 9's own
+fix had introduced three regressions.
+
+#### F-R10-1 / F-R10-2 / S-R10-1 / S-R10-2 / S-R10-3 / T-R10-1 / T-R10-3 / F-R10-3 — no nested function is trusted
+
+- **Action:** `timingIn` in `scripts/checks/lib/rls-context.mjs` answers LATER only
+  for a read written directly in the function that IS the opener's callback, after
+  unwrapping parentheses and type assertions. Any function between them is NESTED,
+  so UNKNOWN: an IIFE, a callback, a method, an accessor, a constructor, a
+  declaration, a generator. `runsInline`, `isSettled`, `reachesSettledCombinator`
+  and the exported inline sets are deleted, so the conditions T-R10-1 and T-R10-3
+  asked to pin, the `Promise` spelling S-R10-3 names, and the refused-inline list
+  F-R10-3 names no longer exist. The module header records why each round's rule
+  fell, and that when a function runs is decided by its receiver and caller, which
+  one file's syntax does not show.
+- **Real tree:** the only nested read either gate had trusted was the migrate
+  attachment route. Its read ran in a `prisma.$transaction` callback inside
+  `withUserTenantRls`, which the proxy in `src/lib/prisma.ts` runs on the opener's
+  own transaction. The read, the advisory lock and `applyAttachmentMigration` now
+  run directly in `withUserTenantRls`'s callback, on the same transaction as before,
+  with no manifest entry. Its route test mocks the client the callback uses and pins
+  that the lock precedes the read, both inside the tenant callback.
+- **All five tenant/RLS gates** still pass on the real tree
+  (`check-owning-tenant-adjudicator`, `check-required-user-relation`,
+  `check-bypass-rls`, `check-rls-read-context`, `check-null-tenant-fail-closed`).
+- **Cells (both gates):**
+  - allow cells for a read written directly in the callback: awaited in a block,
+    in a loop and a branch, and in try/catch;
+  - deny cells for every shape rounds 8 to 10 trusted or found:
+    - the former allow shapes: sync `map`, `Promise.all(map async)`, awaited
+      IIFE, returned `.then` and `$transaction`, Promise executor, an object
+      method called at once, a function declared and called;
+    - the round-10 escapes: a `forEach` returning a promise, an async executor
+      after `resolve`, a generator IIFE, a lazy iterator helper, a shadowed
+      `Promise`;
+    - the round-8 and round-9 shapes: `after`, listener, `push`, `setTimeout`,
+      getter, setter, constructor.
+  - Round 7's nested `Promise.all(map)` cell and round 8's IIFE cells are deny
+    cells now.
+
+#### T-R10-2 Minor — a refusal must name what it refused
+
+- **Action:** the required-user gate's deny cells from round 7 on assert that the
+  output names `TenantMember.user`, not only exit code 1.
+
+#### F-R10-4 / S-R10-A1 Major (floored) and F-R10-5 Minor — the CLI's client-side limits
+
+- **Action:** `migrationClientFactory` reads `DB_POOL_CONNECTION_TIMEOUT_MS` through
+  `envInt` in `src/lib/env/env-utils.ts`, with the app pool's default and bounds.
+  It sets `query_timeout` to the confirmation budget, since no query outlasts its
+  transaction.
+- **Found by probe:** against a server that completes the startup handshake and
+  then answers nothing, a transaction with no query timeout failed at `maxWait`, and
+  `$disconnect()` then waited indefinitely. With a query timeout, the query failed
+  and the client disconnected at once.
+- **Cells:** a server silent after the handshake makes `remove` reject with pg's
+  "Query read timeout" and return. `DB_POOL_CONNECTION_TIMEOUT_MS=300` fails the
+  command in well under the 5 s default.
+
+#### T-R10-4 Minor — a timed-out cell still cleans up
+
+- **Action:** the CLI integration file's shortened budgets and local servers
+  register their cleanup with `onTestFinished` (`shortenBudget`, `listenLocally`):
+  the spy is restored, sockets are destroyed, and the server close is awaited. Each
+  server cell has its own 15 s timeout.
+
+#### F-R10-A1 Minor (Adjacent) — context judged by nesting, not by client — Accepted
+
+- **Anti-Deferral check:** pre-existing in a file this branch changed, not
+  introduced by it. It is recorded rather than fixed here because deciding which
+  client issues a read needs type information that neither gate has.
+- **Worst case:** a read through `prismaBase`, or through a second client's
+  `$transaction` written inside an opener, is trusted as running in that opener's
+  context although it carries none of its settings.
+- **Likelihood:** low. Outside tests, `prismaBase` is referenced in four files:
+  - its definition, `src/lib/prisma.ts`;
+  - `src/lib/audit/audit-outbox.ts`;
+  - two gate scripts that name it.
+
+  No gated read uses it or a second client.
+- **Cost to fix:** a type-aware (TypeScript program) receiver check in both gates —
+  a new mechanism rather than a change to this rule.
+
+#### Also resolved — the dev database leftovers
+
+- The eight test tenants round 8's failing runs left on the dev database were
+  deleted, with the user's approval. The deletion ran in one transaction, in the
+  integration cleanup's order, behind a check that each id was a `test-` tenant
+  with no users, members, claims or tags. It also removed each tenant's
+  `webhook_deliveries`, `audit_outbox` and `audit_logs` rows. None remain.
+
+#### Red proof — round 10
+
+Run in worktree copies. Each mutation was applied on its own, and at baseline every
+cell passes.
+
+| Mutation | Cells that failed |
+|---|---|
+| a nested function runs in the callback's context (the round-7 rule) | every nested-function deny cell in both gates, round 7's and round 8's included (53) |
+| getter not function-like | the getter cells (2) |
+| constructor not function-like | the constructor cells (2) |
+| function declaration not function-like | the declared-function cells (4) |
+| method not function-like | the object-method cells (4) |
+| a block counts as a function | the direct-read allow cells, and every older cell whose read sits in a block callback (11) |
+| the gate crashes on a getter | the getter cells in both gates, the required-user one through its refusal message (2) |
+| migrate route reads before taking the lock | the lock-then-read cell |
+
+Integration (real database, app role, workers stopped):
+
+| Mutation | Cells that failed |
+|---|---|
+| no query timeout, whole CLI file | the silent-after-handshake cell only; the other 100 pass, so its hang no longer leaks into later cells |
+| connection timeout ignores `DB_POOL_CONNECTION_TIMEOUT_MS` | the pool-timeout cell |
+
+#### Round 10 verification
+
+- **Unit:** 1034 files / 15761 tests pass (fewer than round 9: the allowlist's
+  per-member cells are gone); `next build` and `tsc --noEmit` pass. eslint reports
+  nothing on any changed file. All five tenant/RLS gates exit 0 on the real tree.
+- **Integration:** 113 files / 709 tests pass, with both workers stopped.
+- **Citation gate:** passes over this document and the SSO deviation log.

@@ -109,6 +109,7 @@ import { countStrandedRows } from "@/lib/tenant/stranded-rows";
 import { realignOwningTenantColumn } from "@/lib/tenant/owning-column";
 import { REALIGNMENT_SOURCE, realignToMembershipInTxWith } from "@/lib/tenant/tenant-realignment-core";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
+import { envInt } from "@/lib/env/env-utils";
 import {
   asciiPrintable, AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 import { createPrompter } from "./lib/prompt";
@@ -160,13 +161,23 @@ function missingUrlResult(): CmdResult {
 // CmdResult can distinguish. The integration test spies on `.create` to prove
 // it. Same motivation as the `confirm` seam below.
 //
-// connectionTimeoutMillis, the app pool's default (src/lib/prisma.ts): pg waits
-// for a server that accepts the connection and never answers with no limit, and
-// `$disconnect()` in each command's `finally` waited on that connection, so the
-// command hung after `maxWait` had already failed it (round 9, F-R9-1).
+// Two client-side limits, because pg sets neither by default and `$disconnect()`
+// in each command's `finally` waits on any connection still busy:
+//   - connectionTimeoutMillis, read from DB_POOL_CONNECTION_TIMEOUT_MS with the app
+//     pool's default and bounds (src/lib/prisma.ts): a server that accepts the
+//     connection and never answers hung the command after `maxWait` had already
+//     failed it (round 9, F-R9-1; the variable, round 10 F-R10-4);
+//   - query_timeout, the confirmation budget: a server that stops answering after
+//     connecting left a query — Prisma's own timeout ROLLBACK included — waiting
+//     with no limit (round 10, F-R10-5). No query outlasts its transaction anyway.
 export const migrationClientFactory = {
   create(connectionString: string): PrismaClient {
-    return new PrismaClient({ adapter: new PrismaPg({ connectionString, connectionTimeoutMillis: 5 * MS_PER_SECOND }) });
+    const adapter = new PrismaPg({
+      connectionString,
+      connectionTimeoutMillis: envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5 * MS_PER_SECOND, { min: 0, max: MS_PER_MINUTE }),
+      query_timeout: confirmationTransaction.options().timeout,
+    });
+    return new PrismaClient({ adapter });
   },
 };
 

@@ -4,25 +4,19 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 import { clearMigrateLimitForUser } from "@/__tests__/helpers/rate-limiters";
 import { ATTACHMENT_MIGRATE_PAYLOAD_MAX } from "@/lib/validations/common";
 
-const { mockAuth, mockPrismaTransaction, mockApplyAttachmentMigration, mockWithUserTenantRls, mockLogAuditAsync } = vi.hoisted(() => ({
+const { mockAuth, mockPrisma, mockApplyAttachmentMigration, mockWithUserTenantRls, mockLogAuditAsync } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaTransaction: vi.fn(),
+  // Inside withUserTenantRls, `prisma` resolves to the opener's transaction: the lock
+  // and the user read go through it directly.
+  mockPrisma: { $executeRaw: vi.fn(), user: { findUnique: vi.fn() } },
   mockApplyAttachmentMigration: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAuditAsync: vi.fn(),
 }));
 
-// Tx mock with advisory lock + user.findUnique (called inside the lock)
-const txMock = {
-  $executeRaw: vi.fn(),
-  user: { findUnique: vi.fn() },
-};
-
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    $transaction: mockPrismaTransaction,
-  },
+  prisma: mockPrisma,
 }));
 vi.mock("@/lib/vault/rotate-key-server", () => {
   class LegacyAttachmentInconsistentVersionError extends Error {
@@ -96,9 +90,9 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
-    txMock.$executeRaw.mockResolvedValue(undefined);
-    txMock.user.findUnique.mockResolvedValue({ tenantId: "tenant-1", keyVersion: 1 });
+    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
+    mockPrisma.$executeRaw.mockResolvedValue(undefined);
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: "tenant-1", keyVersion: 1 });
     mockApplyAttachmentMigration.mockResolvedValue({ encryptionMode: 2, fromKeyVersion: 1 });
     mockLogAuditAsync.mockResolvedValue(undefined);
     // Clear rate limit state between tests
@@ -195,7 +189,7 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
   });
 
   it("rejects when cekKeyVersion !== user.keyVersion → 409 ATTACHMENT_INCONSISTENT_VERSION", async () => {
-    // Server's keyVersion is 1 (set in beforeEach via tx.user.findUnique mock),
+    // Server's keyVersion is 1 (set in beforeEach via the prisma.user.findUnique mock),
     // but request sends 2. The check now lives inside the advisory-locked tx.
     const res = await PUT(
       createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
@@ -212,7 +206,7 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
   });
 
   it("rejects when user record vanishes inside tx → 404", async () => {
-    txMock.user.findUnique.mockResolvedValueOnce(null);
+    mockPrisma.user.findUnique.mockResolvedValueOnce(null);
     const res = await PUT(
       createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
         body: validMigrateBody,
@@ -221,6 +215,38 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
     );
     expect(res.status).toBe(404);
     expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
+  it("takes the advisory lock, then reads the user, both inside the tenant context", async () => {
+    // Round 10: the read moved out of a nested `prisma.$transaction` callback into
+    // withUserTenantRls's own, which the proxy runs on the same transaction.
+    const order: string[] = [];
+    let inside = false;
+    mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => {
+      inside = true;
+      try {
+        return await fn();
+      } finally {
+        inside = false;
+      }
+    });
+    mockPrisma.$executeRaw.mockImplementation(async () => {
+      order.push(`lock:${inside}`);
+    });
+    mockPrisma.user.findUnique.mockImplementation(async () => {
+      order.push(`read:${inside}`);
+      return { tenantId: "tenant-1", keyVersion: 1 };
+    });
+
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: validMigrateBody,
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["lock:true", "read:true"]);
+    expect(mockApplyAttachmentMigration).toHaveBeenCalledWith(mockPrisma, expect.objectContaining({ tenantId: "tenant-1" }));
   });
 
   // Payload-size guard (Fix #4)

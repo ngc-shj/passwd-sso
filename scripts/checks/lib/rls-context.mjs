@@ -18,15 +18,19 @@
  * the node is in:
  *   - an argument is evaluated before its call runs, in the context around the
  *     call. Only the function that IS the argument runs when the callee
- *     decides, and a read inside it runs in the context only through functions
- *     that run while it runs — a closed list of shapes, `runsInline`. Round 7:
- *     a read that is itself the argument, or sits in a function nested inside
- *     the argument, was trusted. Round 8: a closure returned or stored out of
- *     the callback, an object method, a nested declaration or a `setTimeout`
- *     callback was trusted, and runs after the context has closed. Round 9:
- *     every call but five scheduler names was trusted to run its function
- *     inline. A node evaluated at the call is stepped over;
- *     anything else is UNKNOWN — see `timingIn`;
+ *     decides, and only a read written directly in that function — with no
+ *     other function between them — is trusted to run in its context.
+ *     Round 7: a read that is itself the argument, or sits in a function nested
+ *     inside the argument, was trusted. Rounds 8 to 10: each rule for which
+ *     nested functions run while the callback runs (not scheduled; not
+ *     returned, stored or declared; an allowlist of inline call shapes whose
+ *     promise is awaited) was escaped by a spelling the next round found —
+ *     generators, lazy iterator helpers, a receiver whose `then`/`map` keeps its
+ *     callback, a returned promise nobody awaits, a shadowed `Promise`. When a
+ *     function runs is decided by its receiver and caller, which one file's
+ *     syntax does not show, so no nested function is trusted: a read in one is
+ *     UNKNOWN and needs a manifest entry (round 10). A node evaluated at the
+ *     call is stepped over; anything else is UNKNOWN — see `timingIn`;
  *   - an opener opens its context around its CALLBACK argument only — the
  *     position is in OPENERS. The client, tenant id and purpose are evaluated
  *     before the context exists (round 6, R49: a read inside `withBypassRls`'s
@@ -101,151 +105,15 @@ const FUNCTION_LIKE = new Set([
   SyntaxKind.Constructor,
 ]);
 
-/** Array methods that call their function argument before they return. */
-export const ARRAY_ITERATORS = new Set([
-  "map",
-  "flatMap",
-  "forEach",
-  "filter",
-  "find",
-  "findIndex",
-  "findLast",
-  "findLastIndex",
-  "some",
-  "every",
-  "reduce",
-  "reduceRight",
-  "sort",
-  "toSorted",
-]);
-/** Array methods whose result holds each callback's return value, so an async callback's promise can still be awaited. */
-const COLLECTING_ITERATORS = new Set(["map", "flatMap"]);
-/** Promise methods whose callback runs once the promise settles. */
-export const PROMISE_CHAIN = new Set(["then", "catch", "finally"]);
-/** `Promise.*` combinators that settle only once every promise handed to them has. */
-export const PROMISE_COMBINATORS = new Set(["all", "allSettled"]);
-/** Client methods that run their callback inside a transaction they settle before returning. */
-export const TRANSACTION_RUNNERS = new Set(["$transaction"]);
-
-const WRAPPER_KINDS = new Set([
-  SyntaxKind.ParenthesizedExpression,
-  SyntaxKind.AsExpression,
-  SyntaxKind.NonNullExpression,
-  SyntaxKind.SatisfiesExpression,
-]);
-
-/** `expr`'s outermost parenthesis or type assertion, and what holds that. */
-function climbWrappers(expr) {
-  let child = expr;
-  let parent = expr.getParent();
-  while (parent && WRAPPER_KINDS.has(parent.getKind())) {
-    child = parent;
-    parent = parent.getParent();
-  }
-  return { child, parent };
-}
-
-const isAsyncFunction = (fnNode) => typeof fnNode.isAsync === "function" && fnNode.isAsync();
-
-/** Is `expr` handed, directly or as an array element, to a settled `Promise.all`/`allSettled`? */
-function reachesSettledCombinator(expr) {
-  let { child, parent } = climbWrappers(expr);
-  if (parent?.getKind() === SyntaxKind.ArrayLiteralExpression) ({ child, parent } = climbWrappers(parent));
-  if (parent?.getKind() !== SyntaxKind.CallExpression) return false;
-  if (!parent.getArguments().some((arg) => sameNode(arg, child))) return false;
-  const callee = unwrapExpression(parent.getExpression());
-  return (
-    callee?.getKind() === SyntaxKind.PropertyAccessExpression &&
-    callee.getExpression().getText() === "Promise" &&
-    PROMISE_COMBINATORS.has(callee.getName()) &&
-    isSettled(parent)
-  );
-}
-
-/**
- * Does the function that encloses `expr` wait for the promise `expr` makes before it
- * finishes? Awaited, returned (a `return` or an arrow's expression body), handed to
- * a settled combinator, or continued by a settled `.then`/`.catch`/`.finally`.
- */
-function isSettled(expr) {
-  const { child, parent } = climbWrappers(expr);
-  switch (parent?.getKind()) {
-    case SyntaxKind.AwaitExpression:
-    case SyntaxKind.ReturnStatement:
-      return true;
-    case SyntaxKind.ArrowFunction:
-      return sameNode(parent.getBody(), child);
-    case SyntaxKind.PropertyAccessExpression: {
-      const call = parent.getParent();
-      return (
-        sameNode(parent.getExpression(), child) &&
-        PROMISE_CHAIN.has(parent.getName()) &&
-        call?.getKind() === SyntaxKind.CallExpression &&
-        sameNode(call.getExpression(), parent) &&
-        isSettled(call)
-      );
-    }
-    default:
-      return reachesSettledCombinator(expr);
-  }
-}
-
-/**
- * Does a function nested inside a callback run while that callback runs? Only in the
- * shapes listed here; anything else is not trusted (round 9, F-R9-2/S-R9-1).
- *
- * Round 8 trusted every function handed to a call that was not one of five
- * scheduler names, so `after(fn)`, `emitter.on(…, fn)`, `list.push(fn)`,
- * `setTimeout.call(null, fn)` and a local `register(fn)` read as running in the
- * context, though each runs whenever something later calls it — under whatever
- * context that caller has. Deferral has no closed list of spellings; running inline
- * does:
- *   - an IIFE, or the executor of `new Promise(…)`: sync, or its promise settled;
- *   - an ARRAY_ITERATORS callback: sync, or — for `map`/`flatMap` — async with the
- *     resulting array handed to a settled Promise combinator;
- *   - a PROMISE_CHAIN or TRANSACTION_RUNNERS callback whose call is settled.
- * "Settled" is `isSettled`: an async function whose promise nothing waits for keeps
- * running after the callback has returned.
- *
- * Refused although they do run inline (fail closed, no real-tree use): a local
- * helper that calls its parameter, a named function passed by reference, `.call`.
- */
-function runsInline(fnNode) {
-  const { child, parent } = climbWrappers(fnNode);
-  const async = isAsyncFunction(fnNode);
-  const kind = parent?.getKind();
-
-  if (kind === SyntaxKind.CallExpression && sameNode(parent.getExpression(), child)) {
-    return !async || isSettled(parent);
-  }
-  if (kind === SyntaxKind.NewExpression) {
-    return (
-      parent.getExpression().getText() === "Promise" &&
-      sameNode(parent.getArguments()[0], child) &&
-      (!async || isSettled(parent))
-    );
-  }
-  if (kind !== SyntaxKind.CallExpression || !parent.getArguments().some((arg) => sameNode(arg, child))) return false;
-  const callee = unwrapExpression(parent.getExpression());
-  if (callee?.getKind() !== SyntaxKind.PropertyAccessExpression) return false;
-  const method = callee.getName();
-  if (PROMISE_CHAIN.has(method) || TRANSACTION_RUNNERS.has(method)) return isSettled(parent);
-  if (ARRAY_ITERATORS.has(method)) return !async || (COLLECTING_ITERATORS.has(method) && reachesSettledCombinator(parent));
-  return false;
-}
-
 /**
  * When `node`, inside `arg`, runs relative to the call that `arg` is passed to.
  *
  * - NOW: evaluated while the arguments are built — `node` is the argument itself,
  *   or no function lies between them.
- * - LATER: inside the function that IS the argument, after unwrapping parentheses
- *   and type assertions, and reached only through functions that run while it
- *   runs (`runsInline`). The callee decides when that runs.
- * - NESTED: anything else with a function in between — a function written within
- *   the argument that is not the argument (an IIFE, which runs BEFORE the callee,
- *   or `pick(fn)`, whose timing this file cannot see), or a function inside the
- *   callback that outlives it (round 8, R8-S2).
+ * - LATER: written directly in the function that IS the argument, after unwrapping
+ *   parentheses and type assertions. The callee decides when that runs.
+ * - NESTED: any other function lies between them — an IIFE, a callback, a method,
+ *   a declaration, a generator. When it runs is not in this file (round 10).
  *
  * Round 7 (R7-S1 / F-R7-1): the walk used to start at the node's parent and answer
  * "later" at the first function it met. A node that is the argument never meets
@@ -257,12 +125,10 @@ function timingIn(node, arg) {
   if (sameNode(node, arg)) return TIMING.NOW;
   const fn = unwrapExpression(arg);
   let nested = false;
-  let outlives = false;
   for (let p = node.getParent(); p; p = p.getParent()) {
     if (FUNCTION_LIKE.has(p.getKind())) {
-      if (sameNode(p, fn)) return outlives ? TIMING.NESTED : TIMING.LATER;
+      if (sameNode(p, fn)) return nested ? TIMING.NESTED : TIMING.LATER;
       nested = true;
-      if (!runsInline(p)) outlives = true;
     }
     if (sameNode(p, arg)) break;
   }
