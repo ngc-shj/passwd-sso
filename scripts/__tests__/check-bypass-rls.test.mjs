@@ -1746,3 +1746,123 @@ export async function drain(tx) {
     expect(files.filter((f) => !existsSync(join(repoRoot, f)))).toEqual([]);
   });
 });
+
+describe("a helper reference the gate cannot follow as a direct call is refused (audit-tenant-adjudicator round 13)", () => {
+  // Every one of these escaped Check 1: a file on no allowlist passed with "OK".
+  // Only a direct call reached helperCallsIn; the gate matched the callee's
+  // spelling. The rule is now the other way round: a helper referenced anywhere
+  // but a direct callee or a type position is reported, whatever its spelling.
+  const IMPORT = `import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";\nimport * as rls from "@/lib/tenant-rls";\n`;
+  const CB = "async (tx) => tx.user.findMany()";
+  const P = "BYPASS_PURPOSE.SYSTEM_MAINTENANCE";
+  const REFUSAL = "referenced in a form this gate cannot follow as a direct call";
+
+  it.each([
+    ["a namespace element access", `rls["withBypassRls"](prisma, ${CB}, ${P})`],
+    ["a non-null callee", `withBypassRls!(prisma, ${CB}, ${P})`],
+    ["a parenthesized callee", `(withBypassRls)(prisma, ${CB}, ${P})`],
+    ["an `as` callee", `(withBypassRls as typeof withBypassRls)(prisma, ${CB}, ${P})`],
+    ["a `satisfies` callee", `(withBypassRls satisfies unknown as typeof withBypassRls)(prisma, ${CB}, ${P})`],
+    ["an angle-bracket callee", `(<typeof withBypassRls>withBypassRls)(prisma, ${CB}, ${P})`],
+    ["a comma callee", `(0, withBypassRls)(prisma, ${CB}, ${P})`],
+    [".call", `withBypassRls.call(null, prisma, ${CB}, ${P})`],
+    [".apply", `withBypassRls.apply(null, [prisma, ${CB}, ${P}])`],
+    [".bind", `withBypassRls.bind(null)(prisma, ${CB}, ${P})`],
+    ["a local alias", `(() => { const wb = withBypassRls; return wb(prisma, ${CB}, ${P}); })()`],
+    ["a destructured namespace member", `(() => { const { withBypassRls: wb } = rls; return wb(prisma, ${CB}, ${P}); })()`],
+    ["the helper passed to another function", `run(withBypassRls, prisma, ${CB})`],
+    ["the helper stored in an object", `({ open: withBypassRls }).open(prisma, ${CB}, ${P})`],
+    ["a conditional callee", `(flag ? withBypassRls : other)(prisma, ${CB}, ${P})`],
+    ["the namespace object itself", `(() => { const r = rls; return r.withBypassRls(prisma, ${CB}, ${P}); })()`],
+  ])("refuses %s in a file on no allowlist", (_label, expr) => {
+    const { code, stderr } = run("src/lib/probe.ts", `${IMPORT}export const f = () => ${expr};\n`);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+    expect(stderr).toContain("src/lib/probe.ts:");
+  });
+
+  it("refuses an indirect reference in an allowlisted file too: its callback's model access is not scanned", () => {
+    const { code, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `${IMPORT}export const f = () => (withBypassRls)(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+  });
+
+  it("passes the same allowlisted file calling the helper directly (control)", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `${IMPORT}export const f = () => withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+    expect(stderr).not.toContain(REFUSAL);
+  });
+
+  it("passes a helper named only in a type position", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/probe.ts",
+      `import { withBypassRls } from "@/lib/tenant-rls";\nexport type Opener = typeof withBypassRls;\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+
+  it("passes a property that only shares the helper's name", () => {
+    // Not the imported binding: an object key and a member of some other object.
+    const { code, stdout, stderr } = run(
+      "src/lib/probe.ts",
+      `// with*Rls names below are plain keys\nexport const shape = { withBypassRls: 1 };\nexport const read = (o) => o.withBypassRls;\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+});
+
+describe("a helper module loaded at run time is followed like an import (audit-tenant-adjudicator round 13)", () => {
+  // Two vault routes destructure `await import("@/lib/tenant-rls")`. The gate took
+  // helper names from static imports only, so a renamed destructured binding, an
+  // element access on the loaded module, or the module used unbound reached no check.
+  const CB = "async (tx) => tx.user.findMany()";
+  const P = "BYPASS_PURPOSE.SYSTEM_MAINTENANCE";
+  const REFUSAL = "referenced in a form this gate cannot follow as a direct call";
+  const NOT_ALLOWLISTED = "withBypassRls usage found in files not on the allowlist";
+  const inAsync = (body) => `export async function f() {\n  ${body}\n}\n`;
+
+  it("counts a destructured dynamic import's direct call: a file on no allowlist is refused", () => {
+    const { code, stderr } = run(
+      "src/lib/probe.ts",
+      inAsync(`const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");\n  return withBypassRls(prisma, ${CB}, ${P});`),
+    );
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(NOT_ALLOWLISTED);
+    expect(stderr).not.toContain(REFUSAL);
+  });
+
+  it("counts a call through a renamed destructured binding", () => {
+    const { code, stderr } = run(
+      "src/lib/probe.ts",
+      inAsync(`const { withBypassRls: wb, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");\n  return wb(prisma, ${CB}, ${P});`),
+    );
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(NOT_ALLOWLISTED);
+  });
+
+  it("passes a destructured dynamic import called directly in an allowlisted file", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      inAsync(`const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");\n  return withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);`),
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+
+  it.each([
+    ["an element access on the loaded module", `const rls = await import("@/lib/tenant-rls");\n  return rls["withBypassRls"](prisma, ${CB}, ${P});`],
+    ["the loaded module used without a binding", `return import("@/lib/tenant-rls").then((m) => m.withBypassRls(prisma, ${CB}, ${P}));`],
+    ["a rest element holding the helpers", `const { ...rls } = await import("@/lib/tenant-rls");\n  return rls.withBypassRls(prisma, ${CB}, ${P});`],
+    ["a required module's helper through a wrapped callee", `const { withBypassRls: wb } = require("@/lib/tenant-rls");\n  return (wb)(prisma, ${CB}, ${P});`],
+  ])("refuses %s", (_label, body) => {
+    const { code, stderr } = run("src/lib/probe.ts", inAsync(body));
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+  });
+});
+

@@ -775,3 +775,35 @@ describe("check-owning-tenant-adjudicator — a class expression passed as the c
     expect(out).toContain("no unconstrained read");
   });
 });
+
+describe("check-owning-tenant-adjudicator — every wrapper unwrapExpression strips is pinned (round 13 T-R13-1)", () => {
+  // Parentheses and `as` had cells; `satisfies` and non-null had none, so dropping
+  // both from unwrapExpression left every cell in the four RLS gate tests green.
+  const TENANT_SCOPED_FILE = { "src/lib/thing.ts": { disposition: "tenant-scoped" } };
+  const READ = "prisma.user.findUnique({ where: { id }, select: { tenantId: true } })";
+  const passes = (source) => {
+    write("src/lib/thing.ts", source);
+    manifest(TENANT_SCOPED_FILE);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+    expect(out).toContain("no unconstrained read");
+  };
+
+  it("passes a callback written with `satisfies`", () =>
+    passes(`export const f = () => withUserTenantRls(userId, (async (tx) => ${READ}) satisfies Fn);\n`));
+
+  it("passes a callback written with a non-null assertion", () =>
+    passes(`export const f = () => withUserTenantRls(userId, (async (tx) => ${READ})!);\n`));
+
+  it("passes a callback through a chain of wrappers", () =>
+    passes(`export const f = () => withUserTenantRls(userId, ((async (tx) => ${READ}) satisfies Fn) as Fn);\n`));
+
+  it("passes an opener whose callee carries a non-null assertion", () =>
+    passes(`export const f = () => withUserTenantRls!(userId, async (tx) => ${READ});\n`));
+
+  it("does not treat a generator callback written with `satisfies` as tenant-scoped", () => {
+    write("src/lib/thing.ts", `export const f = () => withUserTenantRls(userId, (function* (tx) {\n  yield ${READ};\n}) satisfies Fn);\n`);
+    manifest(TENANT_SCOPED_FILE);
+    expectOutsideTenantScope();
+  });
+});

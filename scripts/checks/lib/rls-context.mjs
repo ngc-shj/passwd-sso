@@ -31,8 +31,9 @@
  *     syntax does not show, so no nested function is trusted: a read in one is
  *     UNKNOWN, and the remedy is to write it in the callback itself (round 10).
  *     A class body and a generator callback are refused too (rounds 11 and 12):
- *     instance fields and a generator's body run later, and a class's static
- *     parts and `extends` clause run before the opener opens. A
+ *     instance fields and a generator's body run later, and a class passed AS
+ *     the callback runs its static parts and `extends` clause before the opener
+ *     opens. A
  *     node evaluated at the call is stepped over; anything else is UNKNOWN —
  *     see `timingIn`;
  *   - an opener opens its context around its CALLBACK argument only — the
@@ -123,7 +124,8 @@ const isGenerator = (fnNode) => typeof fnNode.isGenerator === "function" && fnNo
  * - NOW: evaluated while the arguments are built — `node` is the argument itself,
  *   or no function lies between them.
  * - LATER: written directly in the function that IS the argument, after unwrapping
- *   parentheses and type assertions, when that function is an arrow or a function
+ *   parentheses, `as`, `satisfies` and non-null assertions (not the angle-bracket
+ *   `<T>x` form, which stays UNKNOWN), when that function is an arrow or a function
  *   expression and not a generator. The callee decides when that runs. A class
  *   expression passed as the callback is not a function: its static parts and
  *   `extends` clause run while the arguments are built, before the opener opens

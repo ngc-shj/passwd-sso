@@ -23,6 +23,17 @@
  * was is why round 5 had to find the rest — so this header no longer makes that
  * claim, and states instead what is known not to be covered:
  *
+ * (audit-tenant-adjudicator round 13) Call discovery was the same defect again: a
+ * call counted only when its callee was spelled `helper(…)` or `ns.helper(…)`, so
+ * `(withBypassRls)(…)`, `withBypassRls!(…)`, `.call`, a local alias, the helper
+ * passed to another function and eleven other spellings reached no check at all —
+ * a file on no allowlist passed. Rather than list spellings, every reference to a
+ * helper that is not a direct call or a type position is now reported
+ * (indirectHelperReferencesIn); the tree had none outside tests. A module loaded
+ * at run time (`await import("@/lib/tenant-rls")`, `require`) binds the helpers
+ * like an import: a destructured binding is followed as one, the module object as
+ * a namespace, and any other use of the load is reported (runtimeHelperModulesIn).
+ *
  *   - Check 2 (BYPASS_PURPOSE) is FILE-scoped, not call-scoped: one
  *     `BYPASS_PURPOSE.X` anywhere satisfies it for every call in the file, and
  *     its receiver test is name equality, so an aliased import is a false
@@ -368,20 +379,138 @@ function getSourceFiles() {
  * but the file allowlist itself. The canonical names are seeded too, for the
  * defining module and for any helper imported from elsewhere.
  */
+const TENANT_RLS_MODULE_RE = /(^|\/)tenant-rls(\.[cm]?[jt]sx?)?$/;
+
+/**
+ * Every run-time load of the helpers' module — `import("…tenant-rls")` or
+ * `require("…tenant-rls")` — with the binding it lands in: an object pattern, an
+ * identifier (the module object, used like a namespace import), or null when the
+ * loaded module is used any other way (round 13).
+ */
+function runtimeHelperModulesIn(sf) {
+  const loads = [];
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const isLoad =
+      expr.getKind() === SyntaxKind.ImportKeyword ||
+      (expr.getKind() === SyntaxKind.Identifier && expr.getText() === "require");
+    if (!isLoad) continue;
+    const spec = literalMemberName(call.getArguments()[0]);
+    if (spec === null || !TENANT_RLS_MODULE_RE.test(spec)) continue;
+    let holder = call.getParent();
+    while (holder && (holder.getKind() === SyntaxKind.AwaitExpression || holder.getKind() === SyntaxKind.ParenthesizedExpression)) {
+      holder = holder.getParent();
+    }
+    const binding = holder?.getKind() === SyntaxKind.VariableDeclaration ? holder.getNameNode() : null;
+    loads.push({ call, binding });
+  }
+  return loads;
+}
+
 function localHelperNames(sf) {
   const byLocalName = new Map([...HELPER_NAMES].map((n) => [n, n]));
   for (const imp of sf.getImportDeclarations()) {
     // Match the module, not a text tail: `@/lib/tenant-rls.js` and a relative
     // `../../lib/tenant-rls` are the same module as `@/lib/tenant-rls`, and an
     // aliased import from a spelling this misses escapes the file allowlist.
-    if (!/(^|\/)tenant-rls(\.[cm]?[jt]sx?)?$/.test(imp.getModuleSpecifierValue())) continue;
+    if (!TENANT_RLS_MODULE_RE.test(imp.getModuleSpecifierValue())) continue;
     for (const named of imp.getNamedImports()) {
       const canonical = named.getName();
       if (!HELPER_NAMES.has(canonical)) continue;
       byLocalName.set(named.getAliasNode()?.getText() ?? canonical, canonical);
     }
   }
+  // A destructured run-time load binds the helpers as a named import does, so a
+  // call through `const { withBypassRls: wb } = await import(…)` is still a call.
+  for (const { binding } of runtimeHelperModulesIn(sf)) {
+    if (binding?.getKind() !== SyntaxKind.ObjectBindingPattern) continue;
+    for (const element of binding.getElements()) {
+      if (element.getDotDotDotToken() || element.getNameNode().getKind() !== SyntaxKind.Identifier) continue;
+      const canonical = (element.getPropertyNameNode() ?? element.getNameNode()).getText();
+      if (HELPER_NAMES.has(canonical)) byLocalName.set(element.getNameNode().getText(), canonical);
+    }
+  }
   return byLocalName;
+}
+
+const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
+
+/** Nodes whose name child is a name, not a reference to a binding of that name. */
+const NAMED_DECLARATION_KINDS = new Set([
+  SyntaxKind.PropertyAssignment,
+  SyntaxKind.PropertySignature,
+  SyntaxKind.PropertyDeclaration,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.MethodSignature,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.SetAccessor,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.VariableDeclaration,
+  SyntaxKind.Parameter,
+  SyntaxKind.EnumMember,
+  SyntaxKind.BindingElement,
+]);
+
+const isDirectCallee = (node) => {
+  const parent = node.getParent();
+  return parent?.getKind() === SyntaxKind.CallExpression && sameNode(parent.getExpression(), node);
+};
+
+/**
+ * Every reference to an RLS helper that is neither a direct call nor a type
+ * position (round 13). helperCallsIn sees only `helper(…)`, `helper?.(…)` and
+ * `ns.helper(…)`; anything else — a wrapped or aliased callee, `.call`/`.apply`/
+ * `.bind`, an element access, the helper or its namespace handed on as a value —
+ * reaches none of the checks, so it is reported here instead of being followed.
+ */
+function indirectHelperReferencesIn(sf) {
+  const byLocalName = localHelperNames(sf);
+  const namespaces = new Set();
+  for (const imp of sf.getImportDeclarations()) {
+    if (!TENANT_RLS_MODULE_RE.test(imp.getModuleSpecifierValue())) continue;
+    const ns = imp.getNamespaceImport();
+    if (ns) namespaces.add(ns.getText());
+  }
+  const refs = [];
+  for (const { call, binding } of runtimeHelperModulesIn(sf)) {
+    if (!binding) refs.push(call);
+    else if (binding.getKind() === SyntaxKind.Identifier) namespaces.add(binding.getText());
+    else if (binding.getKind() === SyntaxKind.ObjectBindingPattern) {
+      for (const element of binding.getElements()) {
+        if (element.getDotDotDotToken() || element.getNameNode().getKind() !== SyntaxKind.Identifier) refs.push(element);
+      }
+    } else refs.push(binding);
+  }
+  for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    const name = id.getText();
+    const parent = id.getParent();
+    const kind = parent?.getKind();
+    if (kind === SyntaxKind.ImportSpecifier || kind === SyntaxKind.NamespaceImport || kind === SyntaxKind.ExportSpecifier) continue;
+    if (kind === SyntaxKind.TypeQuery || kind === SyntaxKind.QualifiedName) continue;
+    if (NAMED_DECLARATION_KINDS.has(kind) && sameNode(parent.getNameNode?.(), id)) continue;
+    if (kind === SyntaxKind.BindingElement && sameNode(parent.getPropertyNameNode?.(), id)) continue;
+    if (kind === SyntaxKind.PropertyAccessExpression && sameNode(parent.getNameNode(), id)) continue;
+
+    if (namespaces.has(name)) {
+      const isObject =
+        (kind === SyntaxKind.PropertyAccessExpression || kind === SyntaxKind.ElementAccessExpression) &&
+        sameNode(parent.getExpression(), id);
+      if (!isObject) {
+        refs.push(id);
+        continue;
+      }
+      const member =
+        kind === SyntaxKind.PropertyAccessExpression ? parent.getName() : literalMemberName(parent.getArgumentExpression());
+      if (member === null) refs.push(parent);
+      else if (HELPER_NAMES.has(member) && !(kind === SyntaxKind.PropertyAccessExpression && isDirectCallee(parent))) refs.push(parent);
+      continue;
+    }
+
+    if (!byLocalName.has(name)) continue;
+    if (isDirectCallee(id)) continue;
+    refs.push(id);
+  }
+  return refs;
 }
 
 /** Every helper call in the file, paired with the canonical helper it resolves to. */
@@ -964,6 +1093,7 @@ const bypassCallFiles = new Set();
 const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
+const indirectHelperReferences = [];
 const unresolvedClients = [];
 const unresolvedModels = [];
 const f3UnusedTxViolations = [];
@@ -1009,6 +1139,14 @@ for (const file of sourceFiles) {
   const calls = helperCallsIn(sf);
   const bypassCalls = calls.filter(({ helper }) => helper === "withBypassRls");
   if (bypassCalls.length > 0) bypassCallFiles.add(file);
+
+  // A helper this gate cannot follow as a direct call reaches none of the checks
+  // below, so the reference itself fails (round 13).
+  const indirect = indirectHelperReferencesIn(sf);
+  for (const ref of indirect) {
+    indirectHelperReferences.push({ file, line: ref.getStartLineNumber(), text: ref.getText() });
+  }
+  if (indirect.length > 0) bypassCallFiles.add(file);
   const allowedModels = ALLOWED_USAGE.get(file);
 
   // Check 1: a file that really calls withBypassRls must be on the allowlist.
@@ -1326,6 +1464,20 @@ if (indirectCallbacks.length > 0) {
   console.error("");
   for (const { file, line, helper } of indirectCallbacks) {
     console.error(`  ${file}:${line}  ${helper}`);
+  }
+}
+
+if (indirectHelperReferences.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("with*Rls helper referenced in a form this gate cannot follow as a direct call.");
+  console.error(
+    "The file allowlist, the purpose check and the model scan see only `helper(…)` and",
+  );
+  console.error("`ns.helper(…)`, so these references were NOT checked. Call the helper directly:");
+  console.error("");
+  for (const { file, line, text } of indirectHelperReferences) {
+    console.error(`  ${file}:${line}  ${text}`);
   }
 }
 

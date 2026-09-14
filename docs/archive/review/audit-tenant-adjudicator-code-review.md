@@ -2687,3 +2687,134 @@ cells pass.
   header, the two gate self-tests and this record; no runtime code or integration test.
   Round 11's run (113 files / 710 tests) covers the unchanged runtime.
 - **Citation gate:** passes over this document and the SSO deviation log.
+
+## Round 13
+
+Reviewed range: `b68923475..b353518e2`, the round-12 fix commit. The experts' raw
+outputs and full Recurring Issue Checks are kept in the round's working files.
+
+### Changes from Previous Round
+
+Round 12's fix narrows and never widens. Of the kinds `timingIn` treats as function-like,
+only a class expression can be an argument without being an arrow or a function
+expression, and it moves from trusted to refused. Security's 93-shape probe differs
+from `b68923475` in 12 rows per gate, all trusted to refused. The recorded counts
+reproduce: 208 gate cells, 8 and 2 under the two mutations, 15787 unit tests. The
+integration skip is justified: nothing under `src/` changed.
+
+### Findings
+
+- **F-R13-1 — Minor (R29/R49).** The `timingIn` doc said type assertions are unwrapped;
+  the angle-bracket `<T>x` form is not (it stays UNKNOWN, fail-closed). Security added a
+  wording note: the header said a class's static parts run before the opener opens,
+  which holds only for a class passed AS the callback.
+- **T-R13-1 — Minor (RT7/RT10), pre-existing.** `unwrapExpression`'s `satisfies` and
+  non-null cases were pinned by no RLS gate cell: dropping both left all 352 cells in
+  the four gate test files green.
+- **T-R13-A1 — raised from [Adjacent] Minor to Major by measurement (security gate
+  fail-open), pre-existing.** Testing asked whether `check-bypass-rls` still counts a
+  wrapped helper call. Measured here with the real gate on one-file fixtures, it did
+  not. Call discovery (`helperCallsIn`) counted a call only when its callee was spelled
+  `helper(…)`, `helper?.(…)` or `ns.helper(…)`. Fifteen other spellings reached no check
+  at all, and a file on no allowlist passed with "OK":
+  - an element access on the namespace;
+  - a non-null, parenthesized, `as`, `satisfies`, angle-bracket or comma callee;
+  - `.call`, `.apply` and `.bind`;
+  - a local alias, a destructured namespace member, the helper passed to another
+    function, stored in an object, or chosen by a conditional.
+
+  The same call discovery exists on main. The file allowlist is the control that sends
+  every bypass to security review. Writing the fix exposed a second path: helper names
+  came from static imports only, so a module loaded at run time
+  (`await import("@/lib/tenant-rls")`, as two vault routes do) could be renamed,
+  read by element access or used unbound and reach no check either.
+
+### Resolution Status — round 13
+
+#### T-R13-A1 Major — every reference to an RLS helper is a direct call or is refused
+
+- **Action, `scripts/checks/check-bypass-rls.mjs`:** rather than add spellings,
+  `indirectHelperReferencesIn` reports every reference to a helper that is neither a
+  direct call nor a type position, whatever its spelling. It covers the helper bindings
+  a file has (named imports, their aliases, the canonical names) and the namespace
+  object (`ns.helper(…)` passes; any other use of `ns`, or `ns["helper"]`, is
+  reported). Declaration names, object keys, other objects' members and `typeof` are
+  not references. The report names the file, line and spelling, and says the
+  allowlist, purpose and model checks could not see it.
+- **Run-time loads (`runtimeHelperModulesIn`):** `import("…tenant-rls")` and
+  `require("…tenant-rls")` bind the helpers like an import.
+  - A destructured binding is followed as a named import, renamed or not, so a call
+    through it is counted.
+  - A module object bound to a name is followed as a namespace.
+  - A rest element, or a load used without a binding, is reported.
+- **Real tree:** before the fix, nothing outside tests referenced a helper indirectly,
+  so only the header records it. The two run-time loads, in
+  `src/app/api/vault/delegation/check/route.ts` and
+  `src/app/api/vault/ssh/sign-authorize/route.ts`, destructure the module and call the
+  helper directly, and pass. All five tenant/RLS gates exit 0 with unchanged counts.
+  The 18-spelling probe is refused 18 of 18: 3 by the file allowlist as before, 15 by
+  the new report.
+- **Cells, `check-bypass-rls.test.mjs`:**
+  - refusals for each of the 15 spellings plus the namespace object passed on, in a
+    file on no allowlist;
+  - an indirect reference refused in an allowlisted file too, beside a direct-call
+    control that passes;
+  - allow cells for `typeof` and for a property that only shares the name;
+  - for run-time loads:
+    - destructured and renamed calls counted (refused by the file allowlist, not by
+      the new report);
+    - an allowlisted destructured call passing;
+    - element access, an unbound load, a rest element and a `require`d alias through
+      a wrapped callee refused.
+
+#### T-R13-1 Minor — `satisfies` and non-null are pinned
+
+- **Cells (both tenant gates):** allow cells for a callback written with `satisfies`,
+  with a non-null assertion, and through a `satisfies`-then-`as` chain, and for an
+  opener whose callee carries `!`; a deny cell for a generator callback written with
+  `satisfies`.
+
+#### F-R13-1 Minor — the doc says what is unwrapped
+
+- The `timingIn` doc names parentheses, `as`, `satisfies` and non-null assertions, and
+  says the angle-bracket form stays UNKNOWN. The header says static parts run before the
+  opener opens only for a class passed as the callback.
+
+#### Red proof — round 13
+
+Run in a worktree copy over the three RLS gate self-tests. Each mutation was applied on
+its own; at baseline all 346 cells pass.
+
+| Mutation | Cells that failed |
+|---|---|
+| indirect references are not collected | the 16 spelling refusals, the allowlisted-file refusal, and the four run-time-load refusals (21) |
+| a direct call is not exempt | every allow cell with a direct call, the dynamic-import direct-call cells among them (34) |
+| a type position is not exempt | the `typeof` allow cell (1) |
+| a declaration name is not exempt | the shared-name property cell and both destructured dynamic-import direct-call cells (3) |
+| a run-time destructured binding is not a helper alias | the renamed destructured call cell and the `require`d alias cell (2) |
+| an unbound run-time load is not refused | the unbound-load cell (1) |
+| a run-time module object is not a namespace | the element-access-on-the-loaded-module cell (1) |
+| a rest element over the loaded module is not refused | the rest-element cell (1) |
+| a namespace member read by element access is not refused | the static and run-time element-access cells (2) |
+| `unwrapExpression` does not strip `satisfies` | the `satisfies` and wrapper-chain callback cells in both tenant gates (4) |
+| `unwrapExpression` does not strip non-null | the non-null callback and non-null callee cells in both tenant gates (4) |
+
+Measured by probe, not a cell: the 18-spelling probe is refused 18 of 18 by the real gate
+on one-file fixtures.
+
+#### Round 13 verification
+
+- **Unit:** 1034 files / 15824 tests pass; `next build` passes. eslint reports nothing on
+  any changed file. All five tenant/RLS gates exit 0 on the real tree.
+  - The first full run, taken while the red-proof worktree jobs were running, failed one
+    cell outside this change: `block-bare-decrypt-hook.test.mjs`, "allows the
+    bearer-token variant", received 2 (refused) instead of 0.
+  - For that command the hook allows on its logic alone. Its exit-2 paths that do not
+    depend on the command are the fail-closed ones: `python3` could not parse the input,
+    or `grep` could not run.
+  - The cell passes alone (3 of 3), in eight parallel runs, and in the full run above,
+    taken with nothing else running. The test records only the exit code, so which
+    fail-closed path fired is not recorded.
+- **Integration:** not re-run. Nothing under `src/` changed; round 11's run (113 files /
+  710 tests) covers the unchanged runtime.
+- **Citation gate:** passes over this document and the SSO deviation log.

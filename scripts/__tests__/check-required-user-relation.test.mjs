@@ -866,3 +866,31 @@ describe("check-required-user-relation — a class expression passed as the call
     expectRefusal();
   });
 });
+
+describe("check-required-user-relation — every wrapper unwrapExpression strips is pinned (round 13 T-R13-1)", () => {
+  // Parentheses and `as` had cells; `satisfies` and non-null had none, so dropping
+  // both from unwrapExpression left every cell in the four RLS gate tests green.
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+  const passes = (source) => {
+    write("src/lib/a.ts", source);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  };
+
+  it("passes a callback written with `satisfies`", () =>
+    passes(`export const f = () => withBypassRls(prisma, (async (tx) => ${READ}) satisfies Fn, PURPOSE);\n`));
+
+  it("passes a callback written with a non-null assertion", () =>
+    passes(`export const f = () => withBypassRls(prisma, (async (tx) => ${READ})!, PURPOSE);\n`));
+
+  it("passes a callback through a chain of wrappers", () =>
+    passes(`export const f = () => withBypassRls(prisma, ((async (tx) => ${READ}) satisfies Fn) as Fn, PURPOSE);\n`));
+
+  it("passes an opener whose callee carries a non-null assertion", () =>
+    passes(`export const f = () => withBypassRls!(prisma, async (tx) => ${READ}, PURPOSE);\n`));
+
+  it("does not trust a generator callback written with `satisfies`", () => {
+    write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, (function* (tx) {\n  yield ${READ};\n}) satisfies Fn, PURPOSE);\n`);
+    expectRefusal();
+  });
+});
