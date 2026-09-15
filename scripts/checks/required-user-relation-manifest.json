@@ -1,0 +1,62 @@
+{
+  "src/app/api/admin/rotate-master-key/initiate/route.ts": {
+    "disposition": "active-membership",
+    "reason": "Reads the tenant's ACTIVE OWNER/ADMIN memberships (deactivatedAt: null) to notify approvers; an active member's owning column is the one the realignment keeps on this tenant.",
+    "calls": 1
+  },
+  "src/app/api/scim/v2/Groups/route.ts": {
+    "disposition": "active-membership",
+    "reason": "Both member reads require an active membership in the authenticated tenant as a relation filter (user.tenantMemberships.some). A team guest is excluded by design, and a user this context cannot see is excluded by that filter before any email is read.",
+    "calls": 2
+  },
+  "src/app/api/share-links/mine/route.ts": {
+    "disposition": "dynamic-where",
+    "reason": "`where` (typed Prisma.PasswordShareWhereInput) starts empty and is assembled per context and status. The keys it can set: teamPasswordEntry (a TeamPasswordEntry relation, { teamId }), createdById, passwordEntryId, shareType, teamPasswordEntryId, revokedAt, expiresAt. None is the required createdBy relation; the creator is hydrated after the context closes.",
+    "calls": 1
+  },
+  "src/app/api/share-links/route.ts": {
+    "disposition": "dynamic-where",
+    "reason": "GET's `where` starts as { createdById: session user } and conditionally adds passwordEntryId and teamPasswordEntryId. All three are scalar columns.",
+    "calls": 1
+  },
+  "src/app/api/tenant/breakglass/route.ts": {
+    "disposition": "active-membership",
+    "reason": "The grant target must hold an ACTIVE membership here (deactivatedAt: null) before a grant is created.",
+    "calls": 1
+  },
+  "src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts": {
+    "disposition": "active-membership",
+    "reason": "Reads the reset target's ACTIVE membership (deactivatedAt: null).",
+    "calls": 1
+  },
+  "src/app/api/tenant/members/[userId]/reset-vault/route.ts": {
+    "disposition": "active-membership",
+    "reason": "The reset target's ACTIVE membership, and the tenant's other ACTIVE OWNER/ADMIN memberships for approver notifications (both deactivatedAt: null).",
+    "calls": 2
+  },
+  "src/app/api/tenant/members/[userId]/route.ts": {
+    "disposition": "active-membership",
+    "reason": "Role updates on the target membership the same request has just read with deactivatedAt: null.",
+    "calls": 2
+  },
+  "src/app/api/tenant/service-accounts/route.ts": {
+    "disposition": "actor",
+    "reason": "The create returns its creator, who is the requesting user (createdById: session.user.id) and visible in their own tenant context.",
+    "calls": 1
+  },
+  "src/lib/auth/webauthn/webauthn-server.ts": {
+    "disposition": "dynamic-where",
+    "reason": "verifyAssertionCore's credential lookup uses `where: buildWhere(responseCredentialId)`, whose return type is declared as `{ id, userId, credentialId } | { userId, credentialId }` \u2014 scalar columns only, enforced by the type rather than by this entry.",
+    "calls": 1
+  },
+  "src/lib/emergency-access/vault-auto-promote.ts": {
+    "disposition": "caller-bypass",
+    "reason": "Its only caller, api/emergency-access/[id]/vault, runs it inside withBypassRls and hands it that transaction.",
+    "calls": 1
+  },
+  "src/lib/services/scim-group-service.ts": {
+    "disposition": "active-membership",
+    "reason": "loadGroupMembers requires an active membership in the tenant as a relation filter; the same restriction as the Groups route entry.",
+    "calls": 1
+  }
+}

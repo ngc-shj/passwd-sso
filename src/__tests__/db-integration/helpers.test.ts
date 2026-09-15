@@ -9,6 +9,7 @@ import {
   runCleanupSweep,
   TenantClaimEventsPurgeError,
   appConnectionString,
+  assertRlsApplies,
 } from "./helpers";
 
 /**
@@ -332,4 +333,39 @@ describe("sweepLeakedTenants", () => {
       expect(disconnectAll).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+/**
+ * R7-T3: the guard stands between an RLS-dependent integration file and a
+ * connection RLS does not apply to. Only its superuser arm had ever run, by hand.
+ */
+describe("assertRlsApplies", () => {
+  const probe = (rows: unknown[]) => ({ $queryRawUnsafe: vi.fn().mockResolvedValue(rows) }) as never;
+
+  it("passes a role RLS applies to", async () => {
+    await expect(
+      assertRlsApplies(probe([{ name: "passwd_app", rolsuper: false, rolbypassrls: false }])),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses a superuser, naming the role", async () => {
+    await expect(
+      assertRlsApplies(probe([{ name: "passwd_user", rolsuper: true, rolbypassrls: false }])),
+    ).rejects.toThrow("connects as passwd_user");
+  });
+
+  it("refuses a role with BYPASSRLS", async () => {
+    await expect(
+      assertRlsApplies(probe([{ name: "rds_admin", rolsuper: false, rolbypassrls: true }])),
+    ).rejects.toThrow("connects as rds_admin");
+  });
+
+  it("refuses when the probe finds no role row", async () => {
+    await expect(assertRlsApplies(probe([]))).rejects.toThrow("an unknown role");
+  });
+
+  it("fails when the probe itself fails", async () => {
+    const failing = { $queryRawUnsafe: vi.fn().mockRejectedValue(new Error("connection refused")) } as never;
+    await expect(assertRlsApplies(failing)).rejects.toThrow("connection refused");
+  });
 });

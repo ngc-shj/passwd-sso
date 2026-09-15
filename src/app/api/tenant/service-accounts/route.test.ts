@@ -33,6 +33,11 @@ const {
   };
 });
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
@@ -59,10 +64,12 @@ vi.mock("@/lib/prisma", () => ({
     // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
     // lock before count/create. The withTenantRls mock passes prisma as tx.
     $executeRaw: mockExecuteRaw,
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -80,6 +87,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 }));
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
 
@@ -116,13 +124,20 @@ const makeSA = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+// The list selects the creator's id, not the relation; the route hydrates identity.
+const makeListRow = (createdById: string = DEFAULT_SESSION.user.id) => {
+  const { createdBy: _createdBy, ...row } = makeSA();
+  return { ...row, createdById };
+};
+
 describe("GET /api/tenant/service-accounts", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns list of service accounts for tenant", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
-    mockServiceAccountFindMany.mockResolvedValue([makeSA()]);
+    mockServiceAccountFindMany.mockResolvedValue([makeListRow()]);
+    mockUserFindMany.mockResolvedValue([{ id: DEFAULT_SESSION.user.id, name: "Test User", email: "user@example.com", image: null }]);
 
     const req = createRequest("GET", "http://localhost/api/tenant/service-accounts");
     const res = await GET(req);
@@ -133,6 +148,27 @@ describe("GET /api/tenant/service-accounts", () => {
     expect(json).toHaveLength(1);
     expect(json[0].id).toBe("sa-1");
     expect(json[0].name).toBe("ci-bot");
+    expect(json[0].createdBy).toEqual({ id: DEFAULT_SESSION.user.id, name: "Test User", email: "user@example.com" });
+    expect(json[0]).not.toHaveProperty("createdById");
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+  });
+
+  it("lists an account whose creator's users row does not come back, with an id-only creator, and reads no user relation in the tenant context", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindMany.mockResolvedValue([makeListRow("user-departed")]);
+    mockUserFindMany.mockResolvedValue([]);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/service-accounts"));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json[0].createdBy).toEqual({ id: "user-departed", name: null, email: null });
+    expect(mockServiceAccountFindMany.mock.calls[0][0].select).not.toHaveProperty("createdBy");
   });
 
   it("returns 401 for unauthenticated users", async () => {

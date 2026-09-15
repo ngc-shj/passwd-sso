@@ -9,3 +9,17 @@
  * (these intentionally include archived entries).
  */
 export const ACTIVE_ENTRY_WHERE = { deletedAt: null, isArchived: false };
+
+/**
+ * Escape `%`, `_` and `\\` for a Prisma `contains` / `startsWith` / `endsWith`
+ * filter, which Prisma hands to LIKE/ILIKE without escaping: in user-supplied
+ * text those characters are otherwise wildcards.
+ *
+ * For an exact case-insensitive match use `{ in: [value], mode: "insensitive" }`
+ * instead. `equals` with `mode: "insensitive"` is an unescaped ILIKE too, while
+ * `in` compiles to LOWER(column) IN (LOWER($1)) (audit-tenant-adjudicator round 8,
+ * R8-S1/R8-S4).
+ */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[%_\\]/g, "\\$&");
+}

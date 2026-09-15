@@ -14,6 +14,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { TEAM_INVITATION_TTL_MS } from "@/lib/constants/team/invitation";
+import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -35,13 +36,16 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const invitations = await withTeamTenantRls(teamId, async () =>
     prisma.teamInvitation.findMany({
       where: { teamId: teamId, status: INVITATION_STATUS.PENDING },
-      include: {
-        invitedBy: {
-          select: { id: true, name: true, email: true },
-        },
-      },
+      // The inviter is hydrated below, outside the team's tenant context: a guest
+      // from another primary tenant, or a member who has since left, has a users
+      // row RLS hides there, and the REQUIRED relation comes back null — measured:
+      // Prisma does not throw.
       orderBy: { createdAt: "desc" },
     }),
+  );
+  const inviters = await fetchUserDisplayMap(
+    invitations.map((inv) => inv.invitedById),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
 
   return NextResponse.json(
@@ -51,7 +55,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       role: inv.role,
       status: inv.status,
       expiresAt: inv.expiresAt,
-      invitedBy: inv.invitedBy,
+      invitedBy: displayIdentityOf(inviters, inv.invitedById),
       createdAt: inv.createdAt,
     }))
   );

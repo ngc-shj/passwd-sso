@@ -4,7 +4,7 @@ const {
   mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
-  mockPrismaTransaction, mockWithBypassRls, mockQueryRaw,
+  mockPrismaTransaction, mockWithBypassRls, mockQueryRaw, mockLogAuditInTx,
 } = vi.hoisted(() => {
   // assertCurrentKeyVersion-style row lock — the early users FOR UPDATE
   // added for lock-order consistency with rotation. Result value is
@@ -16,11 +16,11 @@ const {
     user: { update: vi.fn() },
     passwordEntry: { deleteMany: vi.fn() },
     attachment: { deleteMany: vi.fn() },
-    passwordShare: { deleteMany: vi.fn() },
-    vaultKey: { deleteMany: vi.fn() },
-    tag: { deleteMany: vi.fn() },
-    folder: { deleteMany: vi.fn() },
-    emergencyAccessGrant: { updateMany: vi.fn() },
+    passwordShare: { deleteMany: vi.fn(), count: vi.fn() },
+    vaultKey: { deleteMany: vi.fn(), count: vi.fn() },
+    tag: { deleteMany: vi.fn(), count: vi.fn() },
+    folder: { deleteMany: vi.fn(), count: vi.fn() },
+    emergencyAccessGrant: { updateMany: vi.fn(), count: vi.fn() },
     teamMemberKey: { deleteMany: vi.fn() },
     teamMember: { updateMany: vi.fn() },
     $queryRaw: mockQueryRaw,
@@ -38,6 +38,7 @@ const {
     mockPrismaTeamMemberKey: txClient.teamMemberKey,
     mockPrismaTeamMember: txClient.teamMember,
     mockQueryRaw,
+    mockLogAuditInTx: vi.fn(),
     // Execute the callback with the tx client so individual model mocks are invoked
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockPrismaTransaction: vi.fn((cb: any) => cb(txClient)),
@@ -66,13 +67,17 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditInTx: mockLogAuditInTx,
+}));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-import { executeVaultReset } from "./vault-reset";
+import { executeVaultReset, type VaultResetAtomicAudit } from "./vault-reset";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 describe("executeVaultReset", () => {
   beforeEach(() => {
@@ -91,6 +96,11 @@ describe("executeVaultReset", () => {
     mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.update.mockResolvedValue({});
     mockQueryRaw.mockResolvedValue([{ id: "user-1" }]);
+    mockPrismaTag.count.mockResolvedValue(0);
+    mockPrismaFolder.count.mockResolvedValue(0);
+    mockPrismaVaultKey.count.mockResolvedValue(0);
+    mockPrismaPasswordShare.count.mockResolvedValue(0);
+    mockPrismaEmergencyGrant.count.mockResolvedValue(0);
     // Re-bind withBypassRls to invoke its callback (cleared by clearAllMocks)
     mockWithBypassRls.mockImplementation(
       (prismaArg: unknown, fn: (tx: unknown) => unknown) => fn(prismaArg),
@@ -220,7 +230,7 @@ describe("executeVaultReset", () => {
   });
 
   it("works identically regardless of the caller (self-reset or admin)", async () => {
-    // The function takes only targetUserId — no caller context
+    // Without options the reset is the same for any caller
     const resultA = await executeVaultReset("self-user");
     expect(resultA).toEqual({ deletedEntries: 10, deletedAttachments: 3 });
 
@@ -262,5 +272,116 @@ describe("executeVaultReset", () => {
     // withBypassRls callback form (the second withBypassRls call).
     const bodyCallback = mockWithBypassRls.mock.calls[1][1];
     expect(typeof bodyCallback).toBe("function");
+  });
+
+  describe("tenant-scoped reset", () => {
+    const AUDIT: VaultResetAtomicAudit = {
+      tenantId: "tenant-a",
+      params: {
+        scope: AUDIT_SCOPE.TENANT,
+        action: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
+        userId: "user-1",
+      },
+    };
+
+    /**
+     * What the scope check finds under tenants OTHER than the authorizing one.
+     * A count without a tenant predicate is the reset's own pre-count and keeps
+     * its default, so the two questions cannot be answered by one blanket stub.
+     */
+    function holdOutside(outside: Partial<Record<string, number>>) {
+      const scoped =
+        (model: string, fallback: number) =>
+        async ({ where }: { where: { tenantId?: unknown } }) =>
+          where.tenantId === undefined ? fallback : (outside[model] ?? 0);
+      mockPrismaPasswordEntry.count.mockImplementation(scoped("passwordEntry", 10));
+      mockPrismaAttachment.count.mockImplementation(scoped("attachment", 3));
+      mockPrismaTag.count.mockImplementation(scoped("tag", 0));
+      mockPrismaFolder.count.mockImplementation(scoped("folder", 0));
+      mockPrismaVaultKey.count.mockImplementation(scoped("vaultKey", 0));
+      mockPrismaPasswordShare.count.mockImplementation(scoped("passwordShare", 0));
+      mockPrismaEmergencyGrant.count.mockImplementation(scoped("emergencyAccessGrant", 0));
+    }
+
+    it("refuses, deleting nothing, when personal vault rows are held under another tenant", async () => {
+      // Left there by a realignment and reattachable. The unscoped reset deleted
+      // them on the authority of a tenant that has none over them.
+      holdOutside({ passwordEntry: 7 });
+
+      await expect(executeVaultReset("user-1", AUDIT, { scopeTenantId: "tenant-a" })).rejects.toMatchObject({
+        name: "VaultResetOutsideTenantError",
+        outside: { passwordEntry: 7 },
+      });
+      expect(mockPrismaPasswordEntry.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrismaAttachment.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrismaUser.update).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    });
+
+    it("names only the kinds actually held outside", async () => {
+      holdOutside({ tag: 2, emergencyAccessGrant: 1 });
+
+      await expect(executeVaultReset("user-1", AUDIT, { scopeTenantId: "tenant-a" })).rejects.toMatchObject({
+        outside: { tag: 2, emergencyAccessGrant: 1 },
+      });
+    });
+
+    it("resets when every personal vault row is under the authorizing tenant", async () => {
+      // The allow side: without it a check that always refused would pass the
+      // cells above.
+      holdOutside({});
+
+      const result = await executeVaultReset("user-1", AUDIT, { scopeTenantId: "tenant-a" });
+
+      expect(result).toEqual({ deletedEntries: 10, deletedAttachments: 3 });
+      expect(mockPrismaPasswordEntry.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-1" } });
+      expect(mockLogAuditInTx).toHaveBeenCalledWith(expect.anything(), "tenant-a", expect.anything());
+    });
+
+    it("asks after locking the user row, inside the deleting transaction", async () => {
+      // A realignment updates the same users row, so the lock serializes it
+      // against this check instead of letting it land between check and delete.
+      holdOutside({});
+
+      await executeVaultReset("user-1", AUDIT, { scopeTenantId: "tenant-a" });
+
+      const lockOrder = mockQueryRaw.mock.invocationCallOrder[0];
+      const scopedIndex = mockPrismaPasswordEntry.count.mock.calls.findIndex(
+        ([args]) => (args as { where: { tenantId?: unknown } }).where.tenantId !== undefined,
+      );
+      expect(scopedIndex).toBeGreaterThanOrEqual(0);
+      expect(mockPrismaPasswordEntry.count.mock.invocationCallOrder[scopedIndex]).toBeGreaterThan(lockOrder);
+    });
+
+    it("does not count team-side rows a guest legitimately holds under a team's tenant", async () => {
+      // A row under exactly the authorizing tenant is inside (`not`), and an
+      // attachment or share on a TEAM entry is not the user's vault. No count
+      // mock exists for teamMemberKey, so asking about it would throw here.
+      holdOutside({});
+
+      await executeVaultReset("user-1", AUDIT, { scopeTenantId: "tenant-a" });
+
+      expect(mockPrismaAttachment.count).toHaveBeenCalledWith({
+        where: { createdById: "user-1", teamPasswordEntryId: null, tenantId: { not: "tenant-a" } },
+      });
+      expect(mockPrismaPasswordShare.count).toHaveBeenCalledWith({
+        where: { createdById: "user-1", teamPasswordEntryId: null, tenantId: { not: "tenant-a" } },
+      });
+    });
+
+    it("leaves the owner's own reset unscoped", async () => {
+      // `/api/vault/reset`: the owner's authority covers all of their rows.
+      holdOutside({ passwordEntry: 7 });
+
+      await expect(executeVaultReset("user-1")).resolves.toEqual({
+        deletedEntries: 10,
+        deletedAttachments: 3,
+      });
+      expect(
+        mockPrismaPasswordEntry.count.mock.calls.some(
+          ([args]) => (args as { where: { tenantId?: unknown } }).where.tenantId !== undefined,
+        ),
+      ).toBe(false);
+    });
   });
 });

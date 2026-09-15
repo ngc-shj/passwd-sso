@@ -135,6 +135,27 @@ describe("GET /api/teams/[teamId]/members/search", () => {
     ]);
   });
 
+  it("matches the query literally: LIKE wildcards in it are escaped", async () => {
+    // Round 9 T-R9-3: `a_b%` must not match every name with any character
+    // between an `a` and a `b`.
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members/search`, {
+        searchParams: { q: "a_b%\\" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(mockPrismaUser.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { name: { contains: "a\\_b\\%\\\\", mode: "insensitive" } },
+            { email: { contains: "a\\_b\\%\\\\", mode: "insensitive" } },
+          ],
+        }),
+      }),
+    );
+  });
+
   it("excludes active team members", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([{ userId: "u1" }]);
     mockPrismaUser.findMany.mockResolvedValue([]);

@@ -20,8 +20,13 @@ import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
+import {
+  resolveOwningTenantIdFromClient,
+  resolveUserTenantId,
+  resolveUserTenantIdFromClient,
+} from "@/lib/tenant-context";
 import { getLogger } from "@/lib/logger";
+import { realignmentBySignIn, realignToMembershipInTx } from "@/lib/tenant/tenant-realignment";
 import {
   emitAuthLoginFailure,
   type AuthLoginFailureReason,
@@ -386,20 +391,53 @@ async function claimedTenantMembership(
         };
       }
 
-      await tx.tenantMember.upsert({
+      const joined = await tx.tenantMember.upsert({
         where: { tenantId_userId: { tenantId: target.id, userId } },
         create: { tenantId: target.id, userId, role: TENANT_ROLE.MEMBER },
         update: {},
+        select: { id: true },
+      });
+
+      // This branch is the producer of the column/membership divergence the
+      // adjudicator exists to survive: the membership moves and, until now, the
+      // column did not. A user released by one tenant and signed in through
+      // another's IdP was left with `User.tenantId` naming the tenant that
+      // released them, and `users_tenant_isolation` then hid their own row from
+      // their own requests — vault unlock reporting the vault as not set up,
+      // vault setup returning unauthorized, and eleven more routes taking their
+      // not-found arm.
+      //
+      // The column follows the membership. The DATA does not, and that is the
+      // decision rather than an oversight: see `realignOwningTenantColumn`. The
+      // counts it records are what stop it being a silent one — a member arriving
+      // with rows stranded in a tenant they no longer belong to is a condition
+      // an operator can act on, and nobody can act on a state nothing reports.
+      await realignToMembershipInTx(tx, {
+        userId,
+        memberId: joined.id,
+        tenantId: target.id,
+        cause: realignmentBySignIn(userId),
       });
       return { ok: true };
     }
 
     if (lookup.kind === "tenant" && existingTenantId === lookup.id) {
       // Row 5: already a member of the claimed tenant.
-      await tx.tenantMember.upsert({
+      const member = await tx.tenantMember.upsert({
         where: { tenantId_userId: { tenantId: lookup.id, userId } },
         create: { tenantId: lookup.id, userId, role: TENANT_ROLE.MEMBER },
         update: {},
+        select: { id: true },
+      });
+      // "Already a member" is answered from the active membership first, so the
+      // column can still name another tenant here — a user SCIM or directory sync
+      // reactivated before those producers moved it. Row 4's move, for the same
+      // reason; a no-op read when the column already agrees.
+      await realignToMembershipInTx(tx, {
+        userId,
+        memberId: member.id,
+        tenantId: lookup.id,
+        cause: realignmentBySignIn(userId),
       });
       return { ok: true };
     }
@@ -647,15 +685,43 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return false;
         }
 
-        const existingUser = await withBypassRls(prisma, async (tx) =>
-          tx.user.findUnique({
+        // The active membership's tenant, not the `User.tenantId` column: this
+        // gate rejects magic-link sign-in for SSO-tenant users, and the column is
+        // a denormalized copy with no invalidation, so against a stale value the
+        // gate consults the tenant the user has left.
+        const existingUser = await withBypassRls(prisma, async (tx) => {
+          const found = await tx.user.findUnique({
             where: { email: params.user.email! },
-            select: {
-              id: true,
-              tenant: { select: { isBootstrap: true, id: true } },
-            },
-          }),
-        BYPASS_PURPOSE.AUTH_FLOW);
+            select: { id: true },
+          });
+          if (!found) return null;
+          const tenantId = await resolveOwningTenantIdFromClient(tx, found.id);
+          const tenant = tenantId
+            ? await tx.tenant.findUnique({
+                where: { id: tenantId },
+                select: { isBootstrap: true, id: true },
+              })
+            : null;
+          return { id: found.id, tenant };
+        }, BYPASS_PURPOSE.AUTH_FLOW);
+        // An existing user whose tenant does not resolve, or whose resolved
+        // tenant row is absent, leaves this gate's question — is this an SSO
+        // tenant? — unanswered. The arm below reads "no answer" as "not SSO" and
+        // admits the magic link, so the undecidable case had to be split out:
+        // `createSession` in auth-adapter treats exactly this state as
+        // corruption and refuses, and an authentication gate must not be the one
+        // reader that takes it for a default. `provider_error` is this
+        // deployment's existing reason for "the sign-in machinery failed",
+        // which is what a missing tenant row is.
+        if (existingUser && !existingUser.tenant) {
+          await emitAuthLoginFailure({
+            email: emailForAudit,
+            provider: "nodemailer",
+            reason: "provider_error",
+            userId: existingUser.id,
+          });
+          return false;
+        }
         // Existing user in a non-bootstrap (SSO) tenant → reject
         if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
           await emitAuthLoginFailure({
@@ -809,22 +875,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       let fetchFavicons = false;
       try {
         const passkeyData = await withBypassRls(prisma, async (tx) => {
-          const [credCount, tenant] = await Promise.all([
+          // The active membership decides whose passkey enforcement applies.
+          // `fetchFavicons` still comes off the user row; only the tenant is
+          // re-sourced, because traversing `user.tenant` follows the stale column.
+          const [credCount, userRow, tenantId] = await Promise.all([
             tx.webAuthnCredential.count({ where: { userId: user.id } }),
             tx.user.findUnique({
               where: { id: user.id },
-              select: {
-                fetchFavicons: true,
-                tenant: {
-                  select: {
-                    requirePasskey: true,
-                    requirePasskeyEnabledAt: true,
-                    passkeyGracePeriodDays: true,
-                  },
-                },
-              },
+              select: { fetchFavicons: true },
             }),
+            resolveOwningTenantIdFromClient(tx, user.id),
           ]);
+          // Same fail-closed stance as the null-tenant throw below: a missing
+          // user row on a successful query is corruption, not a default.
+          if (!userRow) {
+            throw new Error(`session passkey policy: user ${user.id} not found`);
+          }
+          // An unresolvable tenant is the same corruption case as the null row
+          // below, so it throws here rather than becoming a `null` the guard
+          // then has to distinguish.
+          if (!tenantId) {
+            throw new Error(`session passkey policy: tenant for user ${user.id} not resolved`);
+          }
+          // Bound to a plain identifier, and guarded on that same identifier
+          // below. check-null-tenant-fail-closed resolves the binding, and a
+          // tenant read buried in a conditional or an object literal is
+          // UNGUARDED to it — measured, that shape failed the gate.
+          const tenant = await tx.tenant.findUnique({
+            where: { id: tenantId },
+            select: {
+              requirePasskey: true,
+              requirePasskeyEnabledAt: true,
+              passkeyGracePeriodDays: true,
+            },
+          });
           // FAIL-CLOSED on a null tenant: User.tenantId is a non-null FK
           // (onDelete: Restrict), so a null tenant on a SUCCESSFUL query means
           // the user row itself vanished mid-session (or FK-orphaned corruption)
@@ -832,10 +916,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // fail-closed catch below (same stance as derivePasskeyState, which
           // throws on a missing tenant) rather than defaulting requirePasskey
           // to false (a fail-open on the success path).
-          if (!tenant?.tenant) {
+          if (!tenant) {
             throw new Error(`session passkey policy: tenant for user ${user.id} not found`);
           }
-          return { credCount, tenant: tenant.tenant, fetchFavicons: tenant.fetchFavicons };
+          return { credCount, tenant, fetchFavicons: userRow.fetchFavicons };
         }, BYPASS_PURPOSE.AUTH_FLOW);
 
         hasPasskey = passkeyData.credCount > 0;

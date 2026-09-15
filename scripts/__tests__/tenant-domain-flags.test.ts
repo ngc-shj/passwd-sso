@@ -191,8 +191,9 @@ describe("tenant-domain flag parsing", () => {
     expect([...read].sort().filter((f) => !declared.has(f))).toEqual([]);
     // And the literal pin, so ADDING a flag to the tables is a deliberate edit
     // rather than something that slips in with an unrelated change. "after"
-    // (20260731170000) is `history`'s pagination cursor.
-    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "after", "yes"]);
+    // (20260731170000) is `history`'s pagination cursor; "user" (round 7,
+    // F-R7-2) names `realign`'s user.
+    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "after", "user", "yes"]);
     expect(read.size).toBeGreaterThan(0);
   });
 
@@ -201,7 +202,7 @@ describe("tenant-domain flag parsing", () => {
   // names a different losing tenant, with `--yes` removing the visual check.
   // Same rule as the valueless guard; the member set was derived from the
   // parser's state machine rather than from the spellings that got reported.
-  it.each(["tenant", "domain", "by", "from", "days"])(
+  it.each(["tenant", "domain", "by", "from", "days", "user"])(
     "refuses a repeated --%s instead of taking the last one",
     (name) => {
       const error = errorOf([`--${name}`, "a", `--${name}`, "b"]);

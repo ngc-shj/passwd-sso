@@ -163,11 +163,21 @@ describe("extractExternalIdValue", () => {
 });
 
 describe("filterToPrismaWhere", () => {
-  it("converts userName eq to Prisma where with case-insensitive equals", () => {
+  it("converts userName eq to an exact case-insensitive match, not a pattern", () => {
+    // Round-8 R8-S4: insensitive `equals` compiles to an unescaped ILIKE.
     const ast = parseScimFilter('userName eq "test@example.com"');
     const where = filterToPrismaWhere(ast);
     expect(where).toEqual({
-      user: { is: { email: { equals: "test@example.com", mode: "insensitive" } } },
+      user: { is: { email: { in: ["test@example.com"], mode: "insensitive" } } },
+    });
+  });
+
+  it("escapes LIKE wildcards in userName co and sw values", () => {
+    expect(filterToPrismaWhere(parseScimFilter('userName co "a_b%c"'))).toEqual({
+      user: { is: { email: { contains: "a\\_b\\%c", mode: "insensitive" } } },
+    });
+    expect(filterToPrismaWhere(parseScimFilter('userName sw "_x"'))).toEqual({
+      user: { is: { email: { startsWith: "\\_x", mode: "insensitive" } } },
     });
   });
 

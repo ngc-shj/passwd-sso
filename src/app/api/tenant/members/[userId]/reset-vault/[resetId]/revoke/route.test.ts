@@ -43,6 +43,11 @@ const {
   };
 });
 
+const { mockUserFindUnique, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindUnique: vi.fn(),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -53,6 +58,7 @@ vi.mock("@/lib/prisma", () => ({
     tenantMember: {
       findFirst: mockPrismaTenantMemberFindFirst,
     },
+    user: { findUnique: mockUserFindUnique },
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -72,7 +78,7 @@ vi.mock("@/lib/auth/access/tenant-auth", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
-  withBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: mockNotificationTitle,
@@ -85,6 +91,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 const TENANT_ID = "tenant-1";
 const TARGET_USER_ID = "user-target";
@@ -98,16 +105,12 @@ const ACTOR = {
   role: "OWNER",
 };
 
-const TARGET_MEMBER = {
-  id: "membership-target",
-  tenantId: TENANT_ID,
-  userId: TARGET_USER_ID,
-  role: "MEMBER",
-  user: {
-    email: "target@example.com",
-    name: "Target User",
-    locale: null,
-  },
+const TARGET_MEMBER = { id: "membership-target" };
+
+const TARGET_CONTACT = {
+  email: "target@example.com",
+  name: "Target User",
+  locale: null,
 };
 
 // Default findUnique mock — row exists in scope, was approved (so target
@@ -126,6 +129,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke", () =>
     mockPrismaAdminVaultResetFindUnique.mockResolvedValue(APPROVED_FIND_UNIQUE);
     mockPrismaAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
     mockPrismaTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
+    mockUserFindUnique.mockResolvedValue(TARGET_CONTACT);
     mockResolveUserLocale.mockReturnValue("en");
     mockAdminVaultResetRevokedEmail.mockReturnValue({
       subject: "Vault reset revoked",
@@ -310,13 +314,41 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke", () =>
     expect(res.status).toBe(200);
     expect(mockCreateNotification).not.toHaveBeenCalled();
     expect(mockSendEmail).not.toHaveBeenCalled();
+    // No membership row in this tenant: the contact is not read at all.
+    expect(mockUserFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("reads the target's contact under a cross-tenant bypass, not through the tenant-scoped relation", async () => {
+    await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault/${RESET_ID}/revoke`),
+      createParams({ userId: TARGET_USER_ID, resetId: RESET_ID }),
+    );
+    const memberQuery = mockPrismaTenantMemberFindFirst.mock.calls[0][0];
+    expect(memberQuery).not.toHaveProperty("include");
+    expect(memberQuery.select).toEqual({ id: true });
+    expect(mockUserFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: TARGET_USER_ID } }),
+    );
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+  });
+
+  it("skips notification and email when the target's users row does not come back", async () => {
+    mockUserFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault/${RESET_ID}/revoke`),
+      createParams({ userId: TARGET_USER_ID, resetId: RESET_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   it("skips email but sends notification when target user has no email", async () => {
-    mockPrismaTenantMemberFindFirst.mockResolvedValue({
-      ...TARGET_MEMBER,
-      user: { ...TARGET_MEMBER.user, email: null },
-    });
+    mockUserFindUnique.mockResolvedValue({ ...TARGET_CONTACT, email: null });
     const res = await POST(
       createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault/${RESET_ID}/revoke`),
       createParams({ userId: TARGET_USER_ID, resetId: RESET_ID }),

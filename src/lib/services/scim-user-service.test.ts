@@ -50,16 +50,11 @@ import {
 
 const TENANT_ID = "tenant-1";
 const USER_ID = "user-1";
-const BASE_URL = "http://localhost:3000/api/scim/v2";
 
-// fetchScimUser makes a second tenantMember.findUnique call with an `include`
-// and a scimExternalMapping.findFirst call — we provide a valid shape for both.
-function mockFetchScimUser() {
-  mockTenantMemberFindUnique.mockResolvedValueOnce({
-    userId: USER_ID,
-    deactivatedAt: null,
-    user: { id: USER_ID, email: "user@example.com", name: "Test User" },
-  });
+// loadScimUserSnapshot makes a second tenantMember.findUnique call and a
+// scimExternalMapping.findFirst call — we provide a valid shape for both.
+function mockSnapshotRead() {
+  mockTenantMemberFindUnique.mockResolvedValueOnce({ userId: USER_ID, deactivatedAt: null });
   mockScimExternalMappingFindFirst.mockResolvedValueOnce(null);
 }
 
@@ -74,7 +69,7 @@ describe("patchScimUser", () => {
     mockScimExternalMappingFindFirst.mockResolvedValue(null);
 
     await expect(
-      patchScimUser(TENANT_ID, USER_ID, { active: false }, BASE_URL),
+      patchScimUser(TENANT_ID, USER_ID, { active: false }),
     ).rejects.toThrow(ScimUserNotFoundError);
   });
 
@@ -86,7 +81,7 @@ describe("patchScimUser", () => {
     });
 
     await expect(
-      patchScimUser(TENANT_ID, USER_ID, { active: false }, BASE_URL),
+      patchScimUser(TENANT_ID, USER_ID, { active: false }),
     ).rejects.toThrow(ScimOwnerProtectedError);
     expect(mockTenantMemberUpdate).not.toHaveBeenCalled();
   });
@@ -98,9 +93,9 @@ describe("patchScimUser", () => {
       role: "MEMBER",
       deactivatedAt: null,
     });
-    mockFetchScimUser();
+    mockSnapshotRead();
 
-    const result = await patchScimUser(TENANT_ID, USER_ID, { active: false }, BASE_URL);
+    const result = await patchScimUser(TENANT_ID, USER_ID, { active: false });
 
     expect(result.auditAction).toBe("SCIM_USER_DEACTIVATE");
     expect(result.needsSessionInvalidation).toBe(true);
@@ -113,9 +108,9 @@ describe("patchScimUser", () => {
       role: "MEMBER",
       deactivatedAt: new Date("2024-01-01T00:00:00.000Z"),
     });
-    mockFetchScimUser();
+    mockSnapshotRead();
 
-    const result = await patchScimUser(TENANT_ID, USER_ID, { active: true }, BASE_URL);
+    const result = await patchScimUser(TENANT_ID, USER_ID, { active: true });
 
     expect(result.auditAction).toBe("SCIM_USER_REACTIVATE");
     expect(result.needsSessionInvalidation).toBe(false);
@@ -128,9 +123,9 @@ describe("patchScimUser", () => {
       role: "MEMBER",
       deactivatedAt: null,
     });
-    mockFetchScimUser();
+    mockSnapshotRead();
 
-    const result = await patchScimUser(TENANT_ID, USER_ID, { active: true }, BASE_URL);
+    const result = await patchScimUser(TENANT_ID, USER_ID, { active: true });
 
     expect(result.auditAction).toBe("SCIM_USER_UPDATE");
     expect(result.needsSessionInvalidation).toBe(false);
@@ -142,9 +137,9 @@ describe("patchScimUser", () => {
       role: "MEMBER",
       deactivatedAt: null,
     });
-    mockFetchScimUser();
+    mockSnapshotRead();
 
-    await patchScimUser(TENANT_ID, USER_ID, { active: false }, BASE_URL);
+    await patchScimUser(TENANT_ID, USER_ID, { active: false });
 
     expect(mockTenantMemberUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -152,6 +147,18 @@ describe("patchScimUser", () => {
         data: expect.objectContaining({ scimManaged: true, provisioningSource: "SCIM" }),
       }),
     );
+  });
+
+  it("returns the membership snapshot and reads no user relation", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
+    mockSnapshotRead();
+
+    const result = await patchScimUser(TENANT_ID, USER_ID, { active: true });
+
+    expect(result.snapshot).toEqual({ userId: USER_ID, deactivatedAt: null, externalId: undefined });
+    const snapshotRead = mockTenantMemberFindUnique.mock.calls[1][0];
+    expect(snapshotRead).not.toHaveProperty("include");
+    expect(snapshotRead.select).toEqual({ userId: true, deactivatedAt: true });
   });
 });
 
@@ -173,45 +180,25 @@ describe("deactivateScimUser", () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({
       id: "tm1",
       role: "OWNER",
-      user: { email: "owner@example.com" },
     });
 
     await expect(deactivateScimUser(TENANT_ID, USER_ID)).rejects.toThrow(ScimOwnerProtectedError);
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
-  it("returns userId and userEmail from the selected user relation", async () => {
-    // Verifies the `select: { id, role, user: { select: { email } } }` shape is used correctly
-    mockTenantMemberFindUnique.mockResolvedValueOnce({
-      id: "tm1",
-      role: "MEMBER",
-      user: { email: "user@example.com" },
-    });
+  it("returns userId and reads no user relation", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
 
     const result = await deactivateScimUser(TENANT_ID, USER_ID);
 
-    expect(result.userId).toBe(USER_ID);
-    expect(result.userEmail).toBe("user@example.com");
-    expect(result.needsSessionInvalidation).toBe(true);
-  });
-
-  it("returns null userEmail when user has no email", async () => {
-    mockTenantMemberFindUnique.mockResolvedValueOnce({
-      id: "tm1",
-      role: "MEMBER",
-      user: null,
-    });
-
-    const result = await deactivateScimUser(TENANT_ID, USER_ID);
-
-    expect(result.userEmail).toBeNull();
+    expect(result).toEqual({ userId: USER_ID, needsSessionInvalidation: true });
+    expect(mockTenantMemberFindUnique.mock.calls[0][0].select).toEqual({ id: true, role: true });
   });
 
   it("runs deletion in a transaction", async () => {
     mockTenantMemberFindUnique.mockResolvedValueOnce({
       id: "tm1",
       role: "MEMBER",
-      user: { email: "user@example.com" },
     });
 
     await deactivateScimUser(TENANT_ID, USER_ID);

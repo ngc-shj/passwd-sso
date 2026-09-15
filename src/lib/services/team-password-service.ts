@@ -162,10 +162,12 @@ export async function listTeamPasswords(
       ...(folderId ? { teamFolderId: folderId } : {}),
       ...(entryType ? { entryType } : {}),
     },
+    // No creator or updater relation: a guest from another primary tenant, or a
+    // member who has since left, has a users row RLS hides in the team context, and
+    // the REQUIRED relation comes back null (Prisma does not throw). The caller
+    // hydrates both ids after the context closes.
     include: {
       tags: { select: { id: true, name: true, color: true } },
-      createdBy: { select: { id: true, name: true, email: true, image: true } },
-      updatedBy: { select: { id: true, name: true, email: true } },
       favorites: {
         where: userId ? { userId } : { userId: "" },
         select: { id: true },
@@ -200,8 +202,8 @@ export async function listTeamPasswords(
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     tags: entry.tags,
-    createdBy: entry.createdBy,
-    updatedBy: entry.updatedBy,
+    createdById: entry.createdById,
+    updatedById: entry.updatedById,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
     deletedAt: entry.deletedAt,
@@ -311,10 +313,9 @@ export async function getTeamPassword(
 ) {
   return prisma.teamPasswordEntry.findUnique({
     where: { id: passwordId },
+    // Creator and updater are hydrated by the caller; see listTeamPasswords.
     include: {
       tags: { select: { id: true, name: true, color: true } },
-      createdBy: { select: { id: true, name: true, email: true, image: true } },
-      updatedBy: { select: { id: true, name: true, email: true } },
       favorites: {
         where: userId ? { userId } : { userId: "" },
         select: { id: true },

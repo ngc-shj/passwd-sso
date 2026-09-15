@@ -46,6 +46,11 @@ const {
   };
 });
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
@@ -61,10 +66,12 @@ vi.mock("@/lib/prisma", () => ({
     tenantMember: {
       findFirst: mockTenantMemberFindFirst,
     },
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -94,6 +101,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { GET, POST } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { MS_PER_DAY } from "@/lib/constants/time";
 
 // Module-scope snapshot: route.ts's `rateLimiter = createRateLimiter(...)` runs
@@ -141,20 +149,10 @@ const makeGrant = (overrides: Record<string, unknown> = {}) => ({
   expiresAt: FUTURE,
   revokedAt: null,
   createdAt: NOW,
-  requester: {
-    id: ACTOR_USER_ID,
-    name: "Test User",
-    email: "user@example.com",
-    image: null,
-  },
-  targetUser: {
-    id: TARGET_USER_ID,
-    name: "Target User",
-    email: "target@example.com",
-    image: null,
-  },
   ...overrides,
 });
+
+const ACTOR_USER = { id: ACTOR_USER_ID, name: "Test User", email: "user@example.com", image: null };
 
 describe("GET /api/tenant/breakglass", () => {
   beforeEach(() => {
@@ -162,6 +160,7 @@ describe("GET /api/tenant/breakglass", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockGrantFindMany.mockResolvedValue([makeGrant()]);
+    mockUserFindMany.mockResolvedValue([ACTOR_USER, TARGET_MEMBER.user]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -201,8 +200,8 @@ describe("GET /api/tenant/breakglass", () => {
       reason: "Security incident investigation",
       incidentRef: "INC-001",
       status: "active",
-      requester: { id: ACTOR_USER_ID },
-      targetUser: { id: TARGET_USER_ID },
+      requester: ACTOR_USER,
+      targetUser: TARGET_MEMBER.user,
     });
   });
 
@@ -245,6 +244,25 @@ describe("GET /api/tenant/breakglass", () => {
       expect.anything(),
       TENANT_ID,
       expect.any(Function),
+    );
+  });
+
+  it("lists a grant whose requester RLS hides, with an id-only requester", async () => {
+    mockUserFindMany.mockResolvedValue([TARGET_MEMBER.user]);
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/breakglass"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(200);
+    expect(json.items[0].requester).toEqual({ id: ACTOR_USER_ID, name: null, email: null, image: null });
+    expect(json.items[0].targetUser).toEqual(TARGET_MEMBER.user);
+  });
+
+  it("hydrates identity under a cross-tenant bypass, not through the tenant-scoped relations", async () => {
+    await GET(createRequest("GET", "http://localhost/api/tenant/breakglass"));
+    expect(mockGrantFindMany.mock.calls[0][0]).not.toHaveProperty("include");
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
     );
   });
 });

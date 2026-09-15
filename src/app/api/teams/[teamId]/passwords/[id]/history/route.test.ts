@@ -16,6 +16,11 @@ const {
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
 }));
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/team-auth", () => {
   class TeamAuthError extends Error {
@@ -32,13 +37,19 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: { findUnique: mockEntryFindUnique },
     teamPasswordEntryHistory: { findMany: mockHistoryFindMany },
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
+}));
 
 import { GET } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { TeamAuthError } from "@/lib/auth/access/team-auth";
 
 const TEAM_ID = "team-1";
@@ -92,6 +103,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     mockRequireTeamMember.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ teamId: TEAM_ID });
     const changedAt = new Date("2025-06-01");
+    mockUserFindMany.mockResolvedValue([{ id: "u1", name: "Admin", email: "admin@test.com", image: null }]);
     mockHistoryFindMany.mockResolvedValue([
       {
         id: "h1",
@@ -103,7 +115,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
         teamKeyVersion: 2,
         itemKeyVersion: null,
         changedAt,
-        changedBy: { id: "u1", name: "Admin", email: "admin@test.com" },
+        changedById: "u1",
       },
     ]);
 
@@ -114,11 +126,44 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     expect(json).toHaveLength(1);
     expect(json[0].encryptedBlob).toEqual({ ciphertext: "cipher", iv: "iv", authTag: "tag" });
     expect(json[0].teamKeyVersion).toBe(2);
-    expect(json[0].changedBy.name).toBe("Admin");
+    expect(json[0].changedBy).toEqual({ id: "u1", name: "Admin", email: "admin@test.com" });
 
     // Verify take:20 is passed to findMany
     expect(mockHistoryFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ take: 20 }),
+    );
+  });
+
+  it("returns history whose changer's users row does not come back, with an id-only changer, and reads no user relation in the tenant context", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamMember.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ teamId: TEAM_ID });
+    mockUserFindMany.mockResolvedValue([]);
+    mockHistoryFindMany.mockResolvedValue([
+      {
+        id: "h1",
+        entryId: ENTRY_ID,
+        encryptedBlob: "cipher",
+        blobIv: "iv",
+        blobAuthTag: "tag",
+        aadVersion: 1,
+        teamKeyVersion: 2,
+        itemKeyVersion: null,
+        changedAt: new Date("2025-06-01"),
+        changedById: "u1",
+      },
+    ]);
+
+    const res = await GET(createRequest("GET"), makeParams());
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json[0].changedBy).toEqual({ id: "u1", name: null, email: null });
+    expect(mockHistoryFindMany.mock.calls[0][0]).not.toHaveProperty("include");
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
     );
   });
 

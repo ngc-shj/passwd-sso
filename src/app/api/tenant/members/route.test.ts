@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTenantMember, mockPrismaAdminVaultReset, mockRequireTenantPermission, mockWithTenantRls, TenantAuthError } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTenantMember, mockPrismaAdminVaultReset, mockRequireTenantPermission, mockWithTenantRls, mockFetchUserDisplayMap, TenantAuthError } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -19,6 +19,7 @@ const { mockAuth, mockPrismaTenantMember, mockPrismaAdminVaultReset, mockRequire
       groupBy: vi.fn(),
     },
     mockRequireTenantPermission: vi.fn(),
+    mockFetchUserDisplayMap: vi.fn(),
     mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     TenantAuthError: _TenantAuthError,
   };
@@ -30,6 +31,9 @@ vi.mock("@/lib/prisma", () => ({
     tenantMember: mockPrismaTenantMember,
     adminVaultReset: mockPrismaAdminVaultReset,
   },
+}));
+vi.mock("@/lib/audit/audit-user-lookup", () => ({
+  fetchUserDisplayMap: mockFetchUserDisplayMap,
 }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
@@ -80,6 +84,13 @@ describe("GET /api/tenant/members", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockPrismaTenantMember.findMany.mockResolvedValue(MEMBERS);
+    mockFetchUserDisplayMap.mockResolvedValue(
+      new Map([
+        ["user-1", { id: "user-1", name: "Alice Owner", email: "alice@example.com", image: null }],
+        ["user-2", { id: "user-2", name: "Bob Admin", email: "bob@example.com", image: null }],
+        ["user-3", { id: "user-3", name: "Carol Member", email: "carol@example.com", image: null }],
+      ]),
+    );
     mockPrismaAdminVaultReset.groupBy.mockResolvedValue([]);
   });
 
@@ -162,6 +173,44 @@ describe("GET /api/tenant/members", () => {
     expect(json[0].pendingResets).toBe(0); // owner: no pending resets
     expect(json[1].pendingResets).toBe(2); // admin: 2 pending resets
     expect(json[2].pendingResets).toBe(1); // member: 1 pending reset
+  });
+
+  it("still lists a member whose users row lives in another tenant", async () => {
+    // The defect this shape exists for. Identity used to come from a REQUIRED
+    // `user` relation inside withTenantRls, so `users_tenant_isolation` filtering
+    // one member's row took the WHOLE list down — and a realignment makes that an
+    // ordinary state for the tenant that released the user.
+    mockFetchUserDisplayMap.mockResolvedValue(
+      new Map([
+        ["user-1", { id: "user-1", name: "Alice Owner", email: "alice@example.com", image: null }],
+        ["user-3", { id: "user-3", name: "Carol Member", email: "carol@example.com", image: null }],
+      ]),
+    );
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/members"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(3);
+    // Explicit nulls for the unresolvable one — distinguishable from a user who
+    // simply has no name, and NOT an omission from the list.
+    const orphan = body.find((m: { userId: string }) => m.userId === "user-2");
+    expect(orphan).toMatchObject({ userId: "user-2", name: null, email: null, image: null });
+    // The allow half: the members that DID resolve still carry their identity, so
+    // a route that returned nulls for everyone cannot satisfy this cell.
+    expect(body.find((m: { userId: string }) => m.userId === "user-1")).toMatchObject({
+      name: "Alice Owner",
+      email: "alice@example.com",
+    });
+  });
+
+  it("hydrates identity outside the tenant context, for every listed member", async () => {
+    await GET(createRequest("GET", "http://localhost/api/tenant/members"));
+
+    expect(mockFetchUserDisplayMap).toHaveBeenCalledWith(
+      ["user-1", "user-2", "user-3"],
+      expect.any(String),
+    );
   });
 
   it("calls requireTenantPermission with MEMBER_MANAGE permission", async () => {

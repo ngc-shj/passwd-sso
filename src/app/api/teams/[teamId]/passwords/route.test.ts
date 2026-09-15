@@ -31,6 +31,8 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFold
   };
 });
 
+const { mockUserFindMany } = vi.hoisted(() => ({ mockUserFindMany: vi.fn() }));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -40,6 +42,7 @@ vi.mock("@/lib/prisma", () => ({
     team: mockPrismaTeam,
     teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/auth/access/team-auth", () => ({
@@ -59,6 +62,7 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 
 import { GET, POST } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
 const TEAM_ID = "team-123";
@@ -67,6 +71,7 @@ const now = new Date("2025-01-01T00:00:00Z");
 describe("GET /api/teams/[teamId]/passwords", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockUserFindMany.mockResolvedValue([{ id: "u1", name: "User", email: "user@example.com", image: null }]);
     mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
@@ -116,8 +121,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
         isArchived: false,
         favorites: [{ id: "fav-1" }],
         tags: [],
-        createdBy: { id: "u1", name: "User", email: "user@example.com", image: null },
-        updatedBy: { id: "u1", name: "User", email: "user@example.com" },
+        createdById: "u1",
+        updatedById: "u1",
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
@@ -141,6 +146,46 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     expect(json[0].username).toBeUndefined();
   });
 
+  it("hydrates creator and updater after the team context, with an id-only updater whose users row does not come back", async () => {
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
+      {
+        id: "pw-1",
+        entryType: ENTRY_TYPE.LOGIN,
+        encryptedOverview: "enc-overview",
+        overviewIv: "aabbccdd11223344",
+        overviewAuthTag: "aabbccdd11223344aabbccdd11223344",
+        aadVersion: 1,
+        teamKeyVersion: 1,
+        isArchived: false,
+        favorites: [],
+        tags: [],
+        createdById: "u1",
+        updatedById: "u-departed",
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json[0].createdBy).toEqual({ id: "u1", name: "User", email: "user@example.com", image: null });
+    expect(json[0].updatedBy).toEqual({ id: "u-departed", name: null, email: null });
+    expect(json[0]).not.toHaveProperty("createdById");
+    const { include } = mockPrismaTeamPasswordEntry.findMany.mock.calls[0][0];
+    expect(include).not.toHaveProperty("createdBy");
+    expect(include).not.toHaveProperty("updatedBy");
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+  });
+
   it("includes encrypted blobs when include=blob is requested", async () => {
     mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
       {
@@ -157,8 +202,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
         isArchived: false,
         favorites: [],
         tags: [],
-        createdBy: { id: "u1", name: "User", email: "user@example.com", image: null },
-        updatedBy: { id: "u1", name: "User", email: "user@example.com" },
+        createdById: "u1",
+        updatedById: "u1",
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
@@ -336,8 +381,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
         expiresAt: expiresDate,
         favorites: [],
         tags: [],
-        createdBy: { id: "u1", name: "User", email: "user@example.com", image: null },
-        updatedBy: { id: "u1", name: "User", email: "user@example.com" },
+        createdById: "u1",
+        updatedById: "u1",
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
@@ -380,8 +425,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
         isArchived: false,
         favorites: [],
         tags: [],
-        createdBy: { id: "ext-user-id", name: "Ext", email: "ext@example.com", image: null },
-        updatedBy: { id: "ext-user-id", name: "Ext", email: "ext@example.com" },
+        createdById: "ext-user-id",
+        updatedById: "ext-user-id",
         createdAt: now,
         updatedAt: now,
         deletedAt: null,

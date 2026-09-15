@@ -26,6 +26,7 @@ const {
   mockNotificationBody,
   mockEncryptResetToken,
   mockRequireRecentSession,
+  mockFindVaultRowsOutsideTenant,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -79,9 +80,15 @@ const {
     mockNotificationBody: vi.fn(),
     mockEncryptResetToken: vi.fn(),
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+    mockFindVaultRowsOutsideTenant: vi.fn(),
     TenantAuthError: _TenantAuthError,
   };
 });
+
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
@@ -102,6 +109,7 @@ vi.mock("@/lib/prisma", () => ({
     // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the lock
     // before count/create. mockWithTenantRls passes this prisma object as tx.
     $executeRaw: mockExecuteRaw,
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -118,6 +126,9 @@ vi.mock("@/lib/email/templates/admin-vault-reset-pending", () => ({
   adminVaultResetPendingEmail: mockAdminVaultResetPendingEmail,
 }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: mockResolveUserLocale }));
+vi.mock("@/lib/vault/vault-reset", () => ({
+  findVaultRowsOutsideTenant: mockFindVaultRowsOutsideTenant,
+}));
 vi.mock("@/lib/vault/admin-reset-token-crypto", () => ({
   encryptResetToken: mockEncryptResetToken,
 }));
@@ -134,7 +145,7 @@ vi.mock("@/lib/auth/access/tenant-role-hierarchy", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
-  withBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: mockNotificationTitle,
@@ -148,6 +159,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST, GET } from "./route";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 // Module-scope snapshot: route.ts:40 `adminResetLimiter = createRateLimiter(...)`
 // then :46 `targetResetLimiter = createRateLimiter(...)` run at import time above,
@@ -228,6 +240,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     mockAdminLimiterCheck.mockResolvedValue({ allowed: true });
     mockTargetLimiterCheck.mockResolvedValue({ allowed: true });
     mockResolveUserLocale.mockReturnValue("en");
+    mockFindVaultRowsOutsideTenant.mockResolvedValue({});
     mockEncryptResetToken.mockReturnValue("psoenc1:0:cipher");
     mockAdminVaultResetPendingEmail.mockReturnValue({
       subject: "Vault reset awaiting approval",
@@ -378,6 +391,26 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     expect(res.status).toBe(429);
     const json = await res.json();
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a reset this tenant could not execute, before the rate limiters count it", async () => {
+    // The user's vault rows still filed under another tenant are outside this
+    // tenant's authority, and the execute route refuses on the same predicate —
+    // so creating the reset would only strand an unexecutable token. Refused
+    // ahead of the limiters: the target limiter allows one initiate a day.
+    mockFindVaultRowsOutsideTenant.mockResolvedValue({ tag: 2 });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("VAULT_RESET_DATA_OUTSIDE_TENANT");
+    expect(mockFindVaultRowsOutsideTenant).toHaveBeenCalledWith(TARGET_USER_ID, TENANT_ID);
+    expect(mockAdminLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTargetLimiterCheck).not.toHaveBeenCalled();
     expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
   });
 
@@ -585,8 +618,6 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     approvedById: null,
     executedAt: null,
     revokedAt: null,
-    initiatedBy: { id: ACTOR_USER_ID, name: "Admin User", email: "admin@example.com" },
-    approvedBy: null,
   };
 
   beforeEach(() => {
@@ -594,6 +625,10 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     mockAuth.mockResolvedValue({ user: { id: ACTOR_USER_ID } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockPrismaAdminVaultResetFindMany.mockResolvedValue([BASE_RESET]);
+    mockUserFindMany.mockResolvedValue([
+      { id: ACTOR_USER_ID, name: "Admin User", email: "admin@example.com", image: null },
+      { id: "approver-1", name: "Approver", email: "approver@example.com", image: null },
+    ]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -656,7 +691,6 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
         ...BASE_RESET,
         approvedAt: new Date("2024-01-01T01:00:00Z"),
         approvedById: "approver-1",
-        approvedBy: { id: "approver-1", name: "Approver", email: "approver@example.com" },
       },
     ]);
     const res = await GET(
@@ -786,5 +820,35 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     expect(json).toHaveLength(1);
     // ACTION is hierarchy-gated: the row is not approvable by this actor.
     expect(json[0].approveEligibility).toBe("insufficient_role");
+  });
+
+  it("returns the history when the initiator's users row is hidden, with an id-only initiator, and reads no user relation in the tenant context", async () => {
+    mockUserFindMany.mockResolvedValue([]);
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json[0].initiatedBy).toEqual({ id: ACTOR_USER_ID, name: null, email: null });
+    expect(mockPrismaAdminVaultResetFindMany.mock.calls[0][0]).not.toHaveProperty("include");
+  });
+
+  it("hydrates initiators under the cross-tenant lookup purpose", async () => {
+    // The bypass is justified by the purpose it records; an AUDIT_WRITE bypass
+    // here would file a read of other tenants' users as an audit write (round-5 T6).
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockUserFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: [ACTOR_USER_ID] } } }),
+    );
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
   });
 });

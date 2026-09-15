@@ -102,6 +102,7 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
       usersCreated: result.usersCreated,
       usersUpdated: result.usersUpdated,
       usersDeactivated: result.usersDeactivated,
+      usersRefused: result.usersRefused,
       abortedSafety: result.abortedSafety,
     },
   });

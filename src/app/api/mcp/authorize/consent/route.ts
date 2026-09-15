@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import {
   MCP_CLIENT_ID_MAX_LENGTH,
@@ -164,14 +165,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.redirect(authorizeUrl.toString(), 303);
   }
 
-  // Tenant check
-  const userRecord = await withBypassRls(prisma, async (tx) =>
-    tx.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
+  // Tenant check.
+  //
+  // This is the AUTHORITATIVE boundary for MCP OAuth issuance — the GET handler
+  // in ../route.ts only redirects here, and this POST depends on nothing it did,
+  // so a client reaching this endpoint directly still gets a token. The id
+  // resolved here therefore has to be the same one that handler resolves, or the
+  // pre-filter and the gate it fronts disagree about which tenant's passkey
+  // enforcement governs the flow.
+  //
+  // It is also the tenant persisted onto the authorization code below, and from
+  // there onto the access and refresh tokens: `User.tenantId` is a denormalized
+  // copy of the user's active membership with nothing invalidating it, and a
+  // token minted against the stale copy is bound to a tenant the actor holds no
+  // active membership in.
+  const userTenantId = await withBypassRls(prisma, async (tx) =>
+    resolveOwningTenantIdFromClient(tx, session.user.id),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-  const userTenantId = userRecord?.tenantId;
   if (!userTenantId || (foundClient.tenantId && foundClient.tenantId !== userTenantId)) {
     return NextResponse.json({ error: "access_denied" }, { status: 403 });
   }

@@ -12,6 +12,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -193,12 +194,16 @@ export async function recordFailure(
   // Resolve tenantId before the transaction (getLockoutThresholds is async)
   let resolvedTenantId = tenantId;
   if (!resolvedTenantId) {
-    const userRow = await withBypassRls(
-      prisma,
-      (tx) => tx.user.findUnique({ where: { id: userId }, select: { tenantId: true } }),
-      BYPASS_PURPOSE.AUTH_FLOW,
-    );
-    resolvedTenantId = userRow?.tenantId;
+    // The active membership, not the `User.tenantId` column: this value picks
+    // both the tenant whose lockout thresholds apply and the tenant the audit
+    // row is filed under, and a bypass context does not constrain the read the
+    // way a tenant-scoped one does.
+    resolvedTenantId =
+      (await withBypassRls(
+        prisma,
+        (tx) => resolveOwningTenantIdFromClient(tx, userId),
+        BYPASS_PURPOSE.AUTH_FLOW,
+      )) ?? undefined;
   }
 
   // Fetch per-tenant thresholds before acquiring the row lock. An unresolved
@@ -358,9 +363,15 @@ export async function recordFailure(
             userAgent: meta.userAgent,
           });
         }
-        if (result.thresholdCrossed) {
+        // Threaded, not re-derived: the alert and the audit row two blocks above
+        // record the same lockout, and a callee that resolves its own tenant is
+        // a second adjudicator that disagrees with this one. Guarded on the same
+        // boundary the audit emits use — with no resolvable tenant there is no
+        // admin set to notify, so it is skipped rather than sent somewhere.
+        if (result.thresholdCrossed && resolvedTenantId) {
           void notifyAdminsOfLockout({
             userId,
+            tenantId: resolvedTenantId,
             attempts: result.attempts,
             lockMinutes: result.lockMinutes!,
             ip: meta.ip,

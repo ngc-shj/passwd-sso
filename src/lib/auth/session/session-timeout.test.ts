@@ -5,6 +5,11 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findUnique: vi.fn(),
     },
+    // The tenant policy is loaded by id now, not traversed through the
+    // `user.tenant` relation — the relation follows the stale column.
+    tenant: {
+      findUnique: vi.fn(),
+    },
   },
 }));
 
@@ -22,32 +27,50 @@ import {
 } from "./session-timeout";
 
 const mockFindUnique = prisma.user.findUnique as ReturnType<typeof vi.fn>;
+const mockTenantFindUnique = prisma.tenant.findUnique as ReturnType<typeof vi.fn>;
 
+//
+// `membershipTenantId` defaults to `tenantId` so every existing cell keeps the
+// agreeing fixture it was written against; only the divergent cell below splits
+// them, and it replaces the tenant stub with one that answers per id.
 function seedUser(params: {
   tenantId?: string;
+  membershipTenantId?: string;
   tenantIdle?: number;
   tenantAbsolute?: number;
   teams?: Array<{ idle?: number | null; absolute?: number | null }>;
 }) {
-  mockFindUnique.mockResolvedValue({
-    tenantId: params.tenantId ?? "tenant-1",
-    tenant: {
-      sessionIdleTimeoutMinutes: params.tenantIdle ?? 480,
-      sessionAbsoluteTimeoutMinutes: params.tenantAbsolute ?? 43200,
-    },
-    teamMemberships: (params.teams ?? []).map((t) => ({
-      team: {
-        policy: {
-          sessionIdleTimeoutMinutes: t.idle ?? null,
-          sessionAbsoluteTimeoutMinutes: t.absolute ?? null,
-        },
-      },
-    })),
+  const tenantId = params.tenantId ?? "tenant-1";
+  const membershipTenantId = params.membershipTenantId ?? tenantId;
+  // Two distinct user reads now, keyed off the select so each returns only its
+  // own fields as Prisma would: `resolveOwningTenantIdFromClient`'s
+  // (tenantId + active memberships), then the teamMemberships one. The
+  // membership row must carry the tenant id — a column-only mock would resolve
+  // through the FALLBACK while reading like the ordinary case.
+  mockFindUnique.mockImplementation(
+    async ({ select }: { select: Record<string, unknown> }) =>
+      "tenantMemberships" in select
+        ? { tenantId, tenantMemberships: [{ tenantId: membershipTenantId }] }
+        : {
+            teamMemberships: (params.teams ?? []).map((t) => ({
+              team: {
+                policy: {
+                  sessionIdleTimeoutMinutes: t.idle ?? null,
+                  sessionAbsoluteTimeoutMinutes: t.absolute ?? null,
+                },
+              },
+            })),
+          },
+  );
+  mockTenantFindUnique.mockResolvedValue({
+    sessionIdleTimeoutMinutes: params.tenantIdle ?? 480,
+    sessionAbsoluteTimeoutMinutes: params.tenantAbsolute ?? 43200,
   });
 }
 
 beforeEach(() => {
   mockFindUnique.mockReset();
+  mockTenantFindUnique.mockReset();
   _internal.clear();
 });
 
@@ -145,7 +168,10 @@ describe("resolveEffectiveSessionTimeouts", () => {
     });
     await resolveEffectiveSessionTimeouts("user-cache", null);
     await resolveEffectiveSessionTimeouts("user-cache", null);
-    expect(mockFindUnique).toHaveBeenCalledTimes(1);
+    // One uncached resolution is TWO user reads now (the tenant-id resolve plus
+    // the teamMemberships read) and one tenant read; the second call adds none.
+    expect(mockFindUnique).toHaveBeenCalledTimes(2);
+    expect(mockTenantFindUnique).toHaveBeenCalledTimes(1);
   });
 
   it("cache entry is per-provider-agnostic and returns the same resolved values", async () => {
@@ -158,7 +184,8 @@ describe("resolveEffectiveSessionTimeouts", () => {
     const webauthn = await resolveEffectiveSessionTimeouts("user-9", "webauthn");
     expect(webauthn.idleMinutes).toBe(480);
     expect(webauthn.absoluteMinutes).toBe(43200);
-    expect(mockFindUnique).toHaveBeenCalledTimes(1);
+    // Two user reads for the single uncached resolution — see above.
+    expect(mockFindUnique).toHaveBeenCalledTimes(2);
   });
 
   it("ignores team values that are <= 0 (defensive)", async () => {
@@ -171,6 +198,38 @@ describe("resolveEffectiveSessionTimeouts", () => {
     const result = await resolveEffectiveSessionTimeouts("user-10", null);
     expect(result.idleMinutes).toBe(480);
     expect(result.absoluteMinutes).toBe(43200);
+  });
+
+  it("loads the timeout policy from the active membership, not User.tenantId", async () => {
+    // Every cell above seeds the same id in both places and a tenant stub that
+    // returns one policy for any id, so the resolved timeouts are identical
+    // whichever source is read — the fixture cannot see precedence.
+    //
+    // Here the two ids carry different policies, so the returned minutes are the
+    // discriminator, not merely the id echoed back in `result.tenantId`. Reading
+    // the stale column would hand the user the tenant's OLD, laxer idle window,
+    // and cache it under a tenant id that
+    // `invalidateSessionTimeoutCacheForTenant` on their real tenant never sweeps.
+    seedUser({
+      tenantId: "stale-home-tenant",
+      membershipTenantId: "scim-provisioned-tenant",
+    });
+    mockTenantFindUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) =>
+        where.id === "scim-provisioned-tenant"
+          ? { sessionIdleTimeoutMinutes: 15, sessionAbsoluteTimeoutMinutes: 600 }
+          : { sessionIdleTimeoutMinutes: 480, sessionAbsoluteTimeoutMinutes: 43200 },
+    );
+
+    const result = await resolveEffectiveSessionTimeouts("user-scim-moved", null);
+
+    expect(result).toEqual({
+      idleMinutes: 15,
+      absoluteMinutes: 600,
+      tenantId: "scim-provisioned-tenant",
+    });
+    // The cache key the tenant-wide invalidation matches on is this same id.
+    expect(_internal.cache.get("user-scim-moved")?.tenantId).toBe("scim-provisioned-tenant");
   });
 
   it("falls back to restrictive values when the user is not found", async () => {
@@ -218,6 +277,7 @@ describe("session timeout cache eviction — TTL sweep before FIFO", () => {
   beforeEach(() => {
     _internal.clear();
     mockFindUnique.mockReset();
+    mockTenantFindUnique.mockReset();
   });
 
   it("evicts expired entries first when the cache fills, preserving fresh entries", async () => {

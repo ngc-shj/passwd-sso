@@ -8,6 +8,8 @@ import { TEAM_ROLE, SHARE_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { isValidCursorId } from "@/lib/audit/audit-query";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 
 // GET /api/share-links/mine
 // - Personal context (no `team`): links created by current user, personal entries only
@@ -82,10 +84,11 @@ async function handleGET(req: NextRequest) {
         orderBy: { createdAt: "desc" },
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        // The creator is hydrated below, outside the tenant context. In the team
+        // context this lists other members' shares, and a creator who has since
+        // left has a users row RLS hides here — the REQUIRED relation came back
+        // null (Prisma does not throw) and dereferencing it failed the whole page.
         include: {
-          createdBy: {
-            select: { id: true, name: true, email: true },
-          },
           passwordEntry: {
             select: { id: true },
           },
@@ -102,6 +105,14 @@ async function handleGET(req: NextRequest) {
   const hasMore = shares.length > limit;
   const items = hasMore ? shares.slice(0, limit) : shares;
   const nextCursor = hasMore ? items[items.length - 1].id : null;
+  const creators = await fetchUserDisplayMap(
+    items.map((s) => s.createdById),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+  const sharedByOf = (userId: string) => {
+    const creator = displayUserOf(creators, userId);
+    return creator.name?.trim() || creator.email || null;
+  };
 
   return NextResponse.json({
     items: items.map((s) => ({
@@ -120,11 +131,8 @@ async function handleGET(req: NextRequest) {
       teamPasswordEntryId: s.teamPasswordEntryId,
       teamName: s.teamPasswordEntry?.team?.name ?? null,
       hasPersonalEntry: !!s.passwordEntry,
-      sharedBy:
-        s.createdBy.name?.trim() ||
-        s.createdBy.email ||
-        null,
-      canRevoke: s.createdBy.id === session.user.id,
+      sharedBy: sharedByOf(s.createdById),
+      canRevoke: s.createdById === session.user.id,
       isActive:
         !s.revokedAt &&
         s.expiresAt > now &&

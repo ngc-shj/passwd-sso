@@ -18,7 +18,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { resolve, dirname } from "node:path";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -30,17 +32,19 @@ const HOOK = resolve(REPO_ROOT, ".claude/hooks/block-bare-decrypt.sh");
 const CLI = "npx tsx " + REPO_ROOT + "/cli/src/index.ts";
 const SUB = "dec" + "rypt";
 
-/** Run the hook with a tool_input payload; returns its exit status. */
-function runHook(command) {
-  const payload = JSON.stringify({ tool_input: { command } });
-  const r = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8" });
-  return r.status;
+/**
+ * Run the hook with a tool_input payload and expect on its exit status. The hook's
+ * stderr names the branch that decided, so it is the assertion message: a refusal
+ * that recorded only its status once cost a review round to trace (round 14, T-R14-4).
+ */
+function expectHook(command) {
+  return expectHookRaw(JSON.stringify({ tool_input: { command } }));
 }
 
-/** Run the hook with a raw (possibly malformed) stdin payload. */
-function runHookRaw(payload) {
+/** The same, for a raw (possibly malformed) stdin payload. */
+function expectHookRaw(payload) {
   const r = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8" });
-  return r.status;
+  return expect(r.status, r.stderr);
 }
 
 const ALLOW = 0;
@@ -53,17 +57,27 @@ describe("block-bare-decrypt hook", () => {
     // error message tells the caller to do — a contradiction that shipped once.
     it("allows _CRED assigned in a subshell and consumed by curl", () => {
       const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -u "user:\${_CRED}" https://example.test\n) 2>/dev/null`;
-      expect(runHook(cmd)).toBe(ALLOW);
+      expectHook(cmd).toBe(ALLOW);
     });
 
     it("allows the bearer-token variant", () => {
       const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -H "Authorization: Bearer \${_CRED}" https://example.test\n) 2>/dev/null`;
-      expect(runHook(cmd)).toBe(ALLOW);
+      expectHook(cmd).toBe(ALLOW);
+    });
+
+    it("allows the bearer-token variant padded to 200 KB, where the matcher's pipe lost its race every time", () => {
+      // Round 14 T-R14-5: `printf '%s' "$COMMAND" | grep -qE` under pipefail. grep -q
+      // exits at its first matching line, printf's next write takes SIGPIPE, and the
+      // pipeline's 141 was refused. Measured on the pipe: 0 of 10 unpadded, 3 of 10 with
+      // a 70 KB line, 10 of 10 with a 200 KB line — so this cell pads to 200 KB.
+      const padding = `  # ${"x".repeat(200_000)}\n`;
+      const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -H "Authorization: Bearer \${_CRED}" https://example.test\n${padding}) 2>/dev/null`;
+      expectHook(cmd).toBe(ALLOW);
     });
 
     it("allows the generic consuming-command variant (Pattern C)", () => {
       const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  some-tool --token "\${_CRED}"\n) 2>/dev/null`;
-      expect(runHook(cmd)).toBe(ALLOW);
+      expectHook(cmd).toBe(ALLOW);
     });
 
     // Patterns D and E do NOT use _CRED — they pipe straight into a clipboard
@@ -72,52 +86,52 @@ describe("block-bare-decrypt hook", () => {
     // flows could not run.
     it("allows the macOS clipboard pattern (Pattern D)", () => {
       const cmd = `(\n  ${CLI} ${SUB} ID --field password | pbcopy\n  echo "Copied to clipboard"\n) 2>/dev/null`;
-      expect(runHook(cmd)).toBe(ALLOW);
+      expectHook(cmd).toBe(ALLOW);
     });
 
     it("allows the Linux clipboard pattern (Pattern E)", () => {
       const cmd = `(\n  ${CLI} ${SUB} ID --field password | xclip -selection clipboard\n  echo "Copied to clipboard"\n) 2>/dev/null`;
-      expect(runHook(cmd)).toBe(ALLOW);
+      expectHook(cmd).toBe(ALLOW);
     });
   });
 
   describe("blocks shapes that put the credential on stdout", () => {
     it("blocks a bare run", () => {
-      expect(runHook(`passwd-sso ${SUB} item`)).toBe(BLOCK);
+      expectHook(`passwd-sso ${SUB} item`).toBe(BLOCK);
     });
 
     it("blocks a subshell that does not capture into _CRED", () => {
       // A leading paren was once treated as proof of safety. It is not: stdout
       // still goes to stdout.
-      expect(runHook(`(passwd-sso ${SUB} item)`)).toBe(BLOCK);
+      expectHook(`(passwd-sso ${SUB} item)`).toBe(BLOCK);
     });
 
     it("blocks a pipe whose last stage prints", () => {
       // A pipe was once treated as proof of safety. `cat` writes it out.
-      expect(runHook(`passwd-sso ${SUB} item | cat`)).toBe(BLOCK);
+      expectHook(`passwd-sso ${SUB} item | cat`).toBe(BLOCK);
     });
 
     it("blocks a sanctioned subshell that echoes the credential", () => {
       const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID)\n  echo $_CRED\n)`;
-      expect(runHook(cmd)).toBe(BLOCK);
+      expectHook(cmd).toBe(BLOCK);
     });
 
     it("blocks a decoy _CRED that captures something else", () => {
       // The allow must be anchored on the decrypt OCCURRENCE. Testing "starts
       // with (" and "contains _CRED=$(" independently accepted this: the
       // assignment captured `true` while the real decrypt ran bare beside it.
-      expect(runHook(`(_CRED=$(true); passwd-sso ${SUB} item)`)).toBe(BLOCK);
+      expectHook(`(_CRED=$(true); passwd-sso ${SUB} item)`).toBe(BLOCK);
     });
 
     it("blocks a pipe into a sink that prints", () => {
       // The clipboard allow is a closed set. `tee` writes to stdout, so it is
       // not a consuming sink even though it looks like one.
-      expect(runHook(`${CLI} ${SUB} ID | tee /tmp/x`)).toBe(BLOCK);
+      expectHook(`${CLI} ${SUB} ID | tee /tmp/x`).toBe(BLOCK);
     });
 
     it("blocks a pipe into an unknown command", () => {
       // A decrypt piped into something this lint cannot vouch for.
-      expect(runHook(`${CLI} ${SUB} ID | some-unknown-tool`)).toBe(BLOCK);
+      expectHook(`${CLI} ${SUB} ID | some-unknown-tool`).toBe(BLOCK);
     });
   });
 
@@ -127,18 +141,18 @@ describe("block-bare-decrypt hook", () => {
     // cannot ask "is every occurrence safe?", so the hook requires exactly one
     // occurrence and judges that. Every documented pattern has exactly one.
     it("blocks a capture followed by a bare decrypt", () => {
-      expect(runHook(`_CRED=$(passwd-sso ${SUB} safe); passwd-sso ${SUB} exposed`)).toBe(BLOCK);
+      expectHook(`_CRED=$(passwd-sso ${SUB} safe); passwd-sso ${SUB} exposed`).toBe(BLOCK);
     });
 
     it("blocks a clipboard sink followed by a bare decrypt", () => {
-      expect(runHook(`passwd-sso ${SUB} safe | pbcopy; passwd-sso ${SUB} exposed`)).toBe(BLOCK);
+      expectHook(`passwd-sso ${SUB} safe | pbcopy; passwd-sso ${SUB} exposed`).toBe(BLOCK);
     });
 
     it("blocks a quoted decoy used to justify a bare decrypt", () => {
       // The decoy is inside a string literal and never runs, but it was enough
       // to satisfy the existence check for the real one beside it.
       const cmd = `echo 'passwd-sso ${SUB} x | pbcopy'; passwd-sso ${SUB} exposed`;
-      expect(runHook(cmd)).toBe(BLOCK);
+      expectHook(cmd).toBe(BLOCK);
     });
   });
 
@@ -147,25 +161,25 @@ describe("block-bare-decrypt hook", () => {
     // matching the sink by NAME let the credential through a sanctioned-looking
     // pipe. xclip -filter and xsel --output both write stdin to stdout.
     it("blocks xclip -filter after a selection argument", () => {
-      expect(runHook(`passwd-sso ${SUB} item | xclip -selection clipboard -filter`)).toBe(BLOCK);
+      expectHook(`passwd-sso ${SUB} item | xclip -selection clipboard -filter`).toBe(BLOCK);
     });
 
     it("blocks a bare xclip -filter", () => {
-      expect(runHook(`passwd-sso ${SUB} item | xclip -filter`)).toBe(BLOCK);
+      expectHook(`passwd-sso ${SUB} item | xclip -filter`).toBe(BLOCK);
     });
 
     it("blocks xsel --output", () => {
-      expect(runHook(`passwd-sso ${SUB} item | xsel --output`)).toBe(BLOCK);
+      expectHook(`passwd-sso ${SUB} item | xsel --output`).toBe(BLOCK);
     });
 
     it("still allows xsel in its documented input form", () => {
       // The allow side of the same clause: pinning the shape must not break the
       // legitimate one.
-      expect(runHook(`${CLI} ${SUB} ID | xsel --clipboard --input`)).toBe(ALLOW);
+      expectHook(`${CLI} ${SUB} ID | xsel --clipboard --input`).toBe(ALLOW);
     });
 
     it("still allows wl-copy", () => {
-      expect(runHook(`${CLI} ${SUB} ID | wl-copy`)).toBe(ALLOW);
+      expectHook(`${CLI} ${SUB} ID | wl-copy`).toBe(ALLOW);
     });
   });
 
@@ -173,19 +187,19 @@ describe("block-bare-decrypt hook", () => {
     // A guard that cannot parse its input has not cleared that input. Each of
     // these once mapped to an empty command and took the "not a decrypt" path.
     it("blocks malformed JSON", () => {
-      expect(runHookRaw("{bad json")).toBe(BLOCK);
+      expectHookRaw("{bad json").toBe(BLOCK);
     });
 
     it("blocks a missing command key", () => {
-      expect(runHookRaw(JSON.stringify({ tool_input: {} }))).toBe(BLOCK);
+      expectHookRaw(JSON.stringify({ tool_input: {} })).toBe(BLOCK);
     });
 
     it("blocks a null command", () => {
-      expect(runHookRaw(JSON.stringify({ tool_input: { command: null } }))).toBe(BLOCK);
+      expectHookRaw(JSON.stringify({ tool_input: { command: null } })).toBe(BLOCK);
     });
 
     it("blocks a non-string command", () => {
-      expect(runHookRaw(JSON.stringify({ tool_input: { command: 123 } }))).toBe(BLOCK);
+      expectHookRaw(JSON.stringify({ tool_input: { command: 123 } })).toBe(BLOCK);
     });
   });
 
@@ -193,15 +207,15 @@ describe("block-bare-decrypt hook", () => {
     // The over-blocking direction. A hook that refuses everything gets disabled,
     // which is strictly worse than one with known gaps.
     it("allows an unrelated command", () => {
-      expect(runHook("git status")).toBe(ALLOW);
+      expectHook("git status").toBe(ALLOW);
     });
 
     it("allows a different subcommand of the same CLI", () => {
-      expect(runHook("passwd-sso list")).toBe(ALLOW);
+      expectHook("passwd-sso list").toBe(ALLOW);
     });
 
     it("allows prose that merely contains the word", () => {
-      expect(runHook("echo decrypting files")).toBe(ALLOW);
+      expectHook("echo decrypting files").toBe(ALLOW);
     });
   });
 
@@ -216,15 +230,125 @@ describe("block-bare-decrypt hook", () => {
     // If one of these flips to BLOCK, do not simply update the expectation —
     // the hook's reach changed, and its header's scope statement needs revising.
     it("does not see a quoted subcommand", () => {
-      expect(runHook(`passwd-sso '${SUB}' item`)).toBe(ALLOW);
+      expectHook(`passwd-sso '${SUB}' item`).toBe(ALLOW);
     });
 
     it("does not see a subcommand split across quotes", () => {
-      expect(runHook(`passwd-sso decr"ypt" item`)).toBe(ALLOW);
+      expectHook(`passwd-sso decr"ypt" item`).toBe(ALLOW);
     });
 
     it("does not see a subcommand passed through a variable", () => {
-      expect(runHook(`sub=${SUB}; passwd-sso "$sub" item`)).toBe(ALLOW);
+      expectHook(`sub=${SUB}; passwd-sso "$sub" item`).toBe(ALLOW);
     });
   });
 });
+
+describe("block-bare-decrypt hook — failures refuse, and the printer check reads the whole command (round 15)", () => {
+  const PAD = `  # ${"x".repeat(200_000)}\n`;
+
+  /** Run the hook where bash cannot write a here-string's temp file (a 1-block file-size limit). */
+  function runHookWithoutTempFiles(command) {
+    const payload = JSON.stringify({ tool_input: { command } });
+    return spawnSync("bash", ["-c", 'ulimit -f 1; trap "" XFSZ; exec bash "$0"', HOOK], { input: payload, encoding: "utf8" });
+  }
+
+  it("refuses a 200 KB bare decrypt when the here-string cannot be written (F-R15-1/S-R15-1)", () => {
+    // grep never ran and the status was 1, which read as "no match": the hook allowed it.
+    const r = runHookWithoutTempFiles(`passwd-sso ${SUB} item\n${PAD}`);
+    expect(r.status, r.stderr).toBe(BLOCK);
+    expect(r.stderr).toContain("grep exit 3");
+  });
+
+  it("refuses when a later check cannot run, rather than exiting with that check's status (S-R15-1)", () => {
+    // The occurrence count pipes through `wc`. When it fails, set -e alone ended the hook
+    // with that pipeline's status, and any status but 2 lets the command through. A
+    // failing `wc` stub goes first on the inherited PATH (round 16 T-R16-4: rebuilding
+    // PATH from `command -v` broke under version-manager shims and exported functions).
+    const bin = mkdtempSync(join(tmpdir(), "hook-path-"));
+    try {
+      writeFileSync(join(bin, "wc"), "#!/bin/sh\nexit 1\n", "utf8");
+      chmodSync(join(bin, "wc"), 0o755);
+      const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -u "user:\${_CRED}" https://example.test\n) 2>/dev/null`;
+      const payload = JSON.stringify({ tool_input: { command: cmd } });
+      const withStub = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+      expect(withStub.status, withStub.stderr).toBe(BLOCK);
+      expect(withStub.stderr).toContain("failed while checking this command");
+      // The same command without the stub is sanctioned, so the stub is what refused it.
+      const without = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8" });
+      expect(without.status, without.stderr).toBe(ALLOW);
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("still refuses a short bare decrypt under the same limit", () => {
+    const r = runHookWithoutTempFiles(`passwd-sso ${SUB} item`);
+    expect(r.status, r.stderr).toBe(BLOCK);
+  });
+
+  it("still allows a short sanctioned command under the same limit (control)", () => {
+    // Round 16 T-R16-1: without this, a hook that refused every command whenever a temp
+    // file could not be written kept every cell green.
+    const r = runHookWithoutTempFiles(`(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -u "user:\${_CRED}" https://example.test\n) 2>/dev/null`);
+    expect(r.status, r.stderr).toBe(ALLOW);
+  });
+
+  it("refuses an echo of the credential placed past 200 KB (T-R15-1, the allow cell's deny twin)", () => {
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n${PAD}  echo $_CRED\n) 2>/dev/null`;
+    expectHook(cmd).toBe(BLOCK);
+  });
+
+  it.each([
+    ["echo of ${_CRED}", `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  echo "\${_CRED}"\n) 2>/dev/null`],
+    ["printf of ${_CRED}", `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  printf '%s' "\${_CRED}"\n) 2>/dev/null`],
+    ["tee of $_CRED", `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  tee <<<"$_CRED"\n) 2>/dev/null`],
+  ])("refuses %s (S-R15-3)", (_label, cmd) => {
+    expectHook(cmd).toBe(BLOCK);
+  });
+
+  it("allows a consuming command whose flag merely ends in `echo` (S-R15-3)", () => {
+    // `--mode=noecho ` ends in `echo` followed by a blank; only the command-word
+    // boundary keeps it from reading as a printer.
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  some-tool --mode=noecho --token "\${_CRED}"\n) 2>/dev/null`;
+    expectHook(cmd).toBe(ALLOW);
+  });
+
+  it("allows a consuming command whose argument merely contains `cat` (S-R15-3)", () => {
+    // `application/json` holds the letters of `cat`, with a word character on each side;
+    // either the boundary before the name or the blank-or-redirection after it keeps it
+    // out, so this cell pins neither alone (`--mode=noecho` and `catalog` do).
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -H "Content-Type: application/json" -d "{\\"token\\":\\"\${_CRED}\\"}" https://example.test\n) 2>/dev/null`;
+    expectHook(cmd).toBe(ALLOW);
+  });
+});
+
+describe("block-bare-decrypt hook — a printer command word ends at a blank or a redirection (round 16)", () => {
+  const capture = (line) => `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  ${line}\n) 2>/dev/null`;
+
+  // F-R16-1 / S-R16-1: round 15 required a blank after the name and let these through;
+  // each prints the credential, and round 14 refused each.
+  it.each([
+    ["cat reading a here-string with no blank", `cat<<<"$_CRED"`],
+    ["printf redirected to stderr with no blank", `printf>&2 '%s' "\${_CRED}"`],
+    ["a quoted printf command word", `"printf" '%s' "\${_CRED}"`],
+  ])("refuses %s", (_label, line) => {
+    expectHook(capture(line)).toBe(BLOCK);
+  });
+
+  it("allows a command whose name only begins with a printer name", () => {
+    // `catalog` starts with `cat`; the blank-or-redirection after the name keeps it out.
+    expectHook(capture(`catalog --token "\${_CRED}"`)).toBe(ALLOW);
+  });
+
+  // S-R16-2: the printer refusal is a declared tripwire for four names, not a closed
+  // class. These print the value and are allowed; the cells pin the declared limit, so
+  // a change that widens the name list shows up here as a decision, not as silence.
+  it.each([
+    ["declare -p", `declare -p _CRED`],
+    ["a heredoc body", `cat <<EOF\n\${_CRED}\nEOF`],
+    ["an encoder", `base64 <<<"$_CRED"`],
+  ])("known printer evasion: allows %s", (_label, line) => {
+    expectHook(capture(line)).toBe(ALLOW);
+  });
+});
+

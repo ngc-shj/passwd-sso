@@ -50,6 +50,7 @@
   "logUsersCreated": "作成ユーザー数",
   "logUsersUpdated": "更新ユーザー数",
   "logUsersDeactivated": "無効化ユーザー数",
+  "logUsersRefused": "有効化を拒否した数",
   "logGroupsUpdated": "更新グループ数",
   "logErrorMessage": "エラー",
   "loadMore": "もっと読み込む",

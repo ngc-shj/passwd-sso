@@ -192,10 +192,14 @@ jobs:
 
       - name: Run integration tests
         env:
-          # Explicit superuser URL: helpers.ts:23 prefers MIGRATION_DATABASE_URL
-          # over DATABASE_URL when both are set. They point to the same role
-          # here (postgres = single SUPERUSER), but setting it explicitly
-          # documents intent and makes a future role-separation change a
-          # one-line edit.
+          # The superuser, for the test harness: helpers.ts seeds and cleans up
+          # through MIGRATION_DATABASE_URL.
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
+          # The application role, for the code under test: `@/lib/prisma` connects
+          # with DATABASE_URL, and the job-level value is the superuser, which RLS
+          # does not apply to. Every cell whose subject is a row RLS hides passed
+          # there regardless of the code (audit-tenant-adjudicator round 6, T1).
+          # This is the role local runs have always used via .env; files that
+          # depend on it assert it with `assertRlsApplies`.
+          DATABASE_URL: postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_test
         run: npm run test:integration

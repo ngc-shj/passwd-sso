@@ -8,7 +8,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -49,7 +50,7 @@ async function handleGET(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const accounts = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+  const rows = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.serviceAccount.findMany({
       where: { tenantId: actor.tenantId },
       select: {
@@ -61,7 +62,7 @@ async function handleGET(req: NextRequest) {
         teamId: true,
         createdAt: true,
         updatedAt: true,
-        createdBy: { select: { id: true, name: true, email: true } },
+        createdById: true,
         _count: {
           select: {
             tokens: { where: { revokedAt: null } },
@@ -71,6 +72,18 @@ async function handleGET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     }),
   );
+
+  // Creators are hydrated outside the tenant context: one who has since left this
+  // tenant has a users row RLS hides here, and the REQUIRED relation came back
+  // null for that account — measured: Prisma does not throw.
+  const users = await fetchUserDisplayMap(
+    rows.map((r) => r.createdById),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+  const accounts = rows.map(({ createdById, ...account }) => ({
+    ...account,
+    createdBy: displayIdentityOf(users, createdById),
+  }));
 
   return NextResponse.json(accounts);
 }

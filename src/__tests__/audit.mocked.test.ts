@@ -664,7 +664,7 @@ describe("logAuditAsync — refusal inside an RLS context (C2)", () => {
     mockEnqueueAudit.mockResolvedValue(undefined);
     mockEnqueueAuditBulk.mockResolvedValue(undefined);
     mockExecuteRaw.mockResolvedValue(0);
-    mockUserFindUnique.mockResolvedValue({ tenantId: CTX_TENANT_ID });
+    mockUserFindUnique.mockResolvedValue({ tenantId: CTX_TENANT_ID, tenantMemberships: [] });
   });
 
   it("writes nothing and records one refusal inside a tenant context with an explicit tenantId", async () => {

@@ -58,9 +58,20 @@ function buildGroupResource(
   };
 }
 
-async function loadGroupMembers(teamId: string, role: TeamRole): Promise<ScimGroupMemberInput[]> {
+async function loadGroupMembers(
+  tenantId: string,
+  teamId: string,
+  role: TeamRole,
+): Promise<ScimGroupMemberInput[]> {
   const members = await prisma.teamMember.findMany({
-    where: { teamId, role, deactivatedAt: null },
+    // Only users with an active membership in this tenant; see `loadGroupMembers`
+    // in scim-group-service for why the filter, not a null check, is what holds.
+    where: {
+      teamId,
+      role,
+      deactivatedAt: null,
+      user: { tenantMemberships: { some: { tenantId, deactivatedAt: null } } },
+    },
     include: { user: { select: { id: true, email: true } } },
   });
 
@@ -93,7 +104,12 @@ async function handleGET(req: NextRequest) {
     const teamIds = Array.from(new Set(mappings.map((m) => m.teamId)));
     const roles = Array.from(new Set(mappings.map((m) => m.role)));
     const allMembers = teamIds.length === 0 ? [] : await tx.teamMember.findMany({
-      where: { teamId: { in: teamIds }, role: { in: roles }, deactivatedAt: null },
+      where: {
+        teamId: { in: teamIds },
+        role: { in: roles },
+        deactivatedAt: null,
+        user: { tenantMemberships: { some: { tenantId, deactivatedAt: null } } },
+      },
       include: { user: { select: { id: true, email: true } } },
     });
     const membersByTeamRole = new Map<string, ScimGroupMemberInput[]>();
@@ -196,7 +212,7 @@ async function handlePOST(req: NextRequest) {
       });
     }
 
-    const members = await loadGroupMembers(team.id, matchedRole);
+    const members = await loadGroupMembers(tenantId, team.id, matchedRole);
 
     return scimResponse(
       buildGroupResource(

@@ -26,6 +26,10 @@ const {
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
+const { mockUserFindMany } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/team-auth", () => {
   class TeamAuthError extends Error {
@@ -46,7 +50,7 @@ vi.mock("@/lib/prisma", () => ({
       create: mockInvitationCreate,
     },
     team: mockPrismaTeam,
-    user: { findUnique: mockUserFindUnique },
+    user: { findUnique: mockUserFindUnique, findMany: mockUserFindMany },
     teamMember: { findUnique: mockTeamMemberFindUnique },
   },
 }));
@@ -89,6 +93,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
   it("returns pending invitations", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockUserFindMany.mockResolvedValue([{ id: "u1", name: "Admin", email: "admin@test.com", image: null }]);
     mockInvitationFindMany.mockResolvedValue([
       {
         id: "inv-1",
@@ -97,7 +102,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
         token: "tok",
         status: "PENDING",
         expiresAt: new Date(),
-        invitedBy: { id: "u1", name: "Admin", email: "admin@test.com" },
+        invitedById: "u1",
         createdAt: new Date(),
       },
     ]);
@@ -107,6 +112,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
     expect(status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].email).toBe("new@test.com");
+    expect(json[0].invitedBy).toEqual({ id: "u1", name: "Admin", email: "admin@test.com" });
   });
 });
 

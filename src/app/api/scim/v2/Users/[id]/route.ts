@@ -5,7 +5,9 @@ import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
 import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { usersOwnedByAnotherTenant } from "@/lib/tenant-context";
+import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import {
   invalidateUserSessions,
   type InvalidateUserSessionsResult,
@@ -17,18 +19,77 @@ import { prisma } from "@/lib/prisma";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
   resolveUserId,
-  fetchScimUser,
+  loadScimUserSnapshot,
+  toScimUserResource,
   replaceScimUser,
   patchScimUser,
   deactivateScimUser,
+  SCIM_USER_NOT_PROVISIONABLE_DETAIL,
   ScimUserNotFoundError,
   ScimOwnerProtectedError,
   ScimExternalIdConflictError,
   ScimDeleteConflictError,
 } from "@/lib/services/scim-user-service";
 import { errorLogFields } from "@/lib/logger/error-fields";
+import { fetchUserContact } from "@/lib/audit/audit-user-lookup";
+import { REALIGNMENT_SOURCE, realignAfterActivation, type RealignmentCause } from "@/lib/tenant/tenant-realignment";
 
 type Params = { params: Promise<{ id: string }> };
+
+/**
+ * Move a reactivated member's owning column after the tenant context commits.
+ * A race backstop since round 6: the ownership refusal lets through only a member
+ * this tenant owns, whose column already names it, so this normally reads and
+ * writes nothing. It moves the column only when another writer changed ownership
+ * between that read and the commit (round-7 F-R7-5). Logged on failure rather
+ * than answered as a failed request whose reactivation already committed.
+ */
+async function realignReactivatedMember(
+  userId: string,
+  tenantId: string,
+  actor: Pick<RealignmentCause, "actorUserId" | "actorType">,
+): Promise<void> {
+  try {
+    await realignAfterActivation(userId, tenantId, { source: REALIGNMENT_SOURCE.SCIM, ...actor });
+  } catch (error) {
+    getLogger().error({ tenantId, userId, error: errorLogFields(error) }, "scim.realign-failed");
+  }
+}
+
+/**
+ * The response refusing a SCIM token's reactivation of this member, or null when
+ * it may proceed: refused when another tenant owns the user. A membership row
+ * here is not ownership — see `usersOwnedByAnotherTenant`.
+ *
+ * One question, not two (round-7 R7-S3). A user active in another tenant is
+ * owned by it, so asking "would this make a second active membership" first
+ * refused nobody the ownership question lets through; it only added a second 409
+ * detail, which told the token holder whether that tenant had the user active or
+ * suspended.
+ *
+ * Recorded, as directory sync records the same decision: the detail is
+ * deliberately uninformative, and this tenant's operator — who has to act, by
+ * having the user sign in here — would otherwise see a deactivated member and an
+ * IdP error explaining nothing (round-7 F-R7-3). Nothing of the other tenant is
+ * in the row.
+ */
+async function reactivationRefusal(
+  req: NextRequest,
+  userId: string,
+  tenantId: string,
+  actor: Pick<RealignmentCause, "actorUserId" | "actorType">,
+): Promise<Response | null> {
+  if (!(await usersOwnedByAnotherTenant(tenantId, [userId])).has(userId)) return null;
+  await logAuditAsync({
+    ...tenantAuditBase(req, actor.actorUserId, tenantId),
+    actorType: actor.actorType,
+    action: AUDIT_ACTION.SCIM_USER_REACTIVATION_REFUSED,
+    targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+    targetId: userId,
+    metadata: { reason: "owned_by_another_tenant" },
+  });
+  return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
+}
 
 // GET /api/scim/v2/Users/[id]
 async function handleGET(req: NextRequest, { params }: Params) {
@@ -36,20 +97,18 @@ async function handleGET(req: NextRequest, { params }: Params) {
   if (!auth.ok) return auth.response;
   const { tenantId } = auth.data;
 
-  return withTenantRls(prisma, tenantId, async (tx) => {
-    const { id } = await params;
+  const { id } = await params;
+  const snapshot = await withTenantRls(prisma, tenantId, async (tx) => {
     const userId = await resolveUserId(tenantId, id, tx);
-    if (!userId) {
-      return scimError(404, "User not found");
-    }
-
-    const resource = await fetchScimUser(tenantId, userId, getScimBaseUrl());
-    if (!resource) {
-      return scimError(404, "User not found");
-    }
-
-    return scimResponse(resource);
+    return userId ? loadScimUserSnapshot(tenantId, userId) : null;
   });
+  // Identity is read after the tenant context closes; see loadScimUserSnapshot.
+  const resource = snapshot ? await toScimUserResource(snapshot, getScimBaseUrl()) : null;
+  if (!resource) {
+    return scimError(404, "User not found");
+  }
+
+  return scimResponse(resource);
 }
 
 // PUT /api/scim/v2/Users/[id] — Full replace
@@ -64,15 +123,45 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
 
   const { id } = await params;
 
+  // The ownership refusal. It must run BETWEEN two tenant contexts, not inside
+  // one: another tenant's membership and users row are what RLS hides inside a
+  // tenant context, and opening a bypass inside one is refused by the nesting
+  // guard. Sequential contexts are allowed; nested are not.
+  // The id is resolved inside the guard's OWN bypass, not in a tenant context:
+  // `resolveUserId` is explicitly tenant-scoped by argument, so it is safe there,
+  // and this keeps the guard's reads off the mutation path entirely. The mutation
+  // callback below resolves it again through its own `tx`, which is what keeps
+  // that callback in the `(tx) =>` form `check-bypass-rls` requires.
+  const resolvedUserId = await withBypassRls(
+    prisma,
+    (tx) => resolveUserId(tenantId, id, tx),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+  if (!resolvedUserId) return scimError(404, "User not found");
+  if (active !== false) {
+    const refusal = await reactivationRefusal(req, resolvedUserId, tenantId, {
+      actorUserId: auditUserId,
+      actorType: putActorType,
+    });
+    if (refusal) return refusal;
+  }
+
   let serviceResult;
   try {
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
       resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
-        return replaceScimUser(tenantId, userId, { active, externalId, name }, getScimBaseUrl());
+        return replaceScimUser(tenantId, userId, { active, externalId, name });
       }),
     );
   } catch (e) {
+    // The one-active-membership index: another tenant activated the user between
+    // the ownership read and this write. That tenant owns them now, so the answer
+    // is the ownership refusal's detail — a separate one told the token holder
+    // whether another tenant had the user active (round-7 R7-S3).
+    if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
+      return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
+    }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
     if (e instanceof ScimExternalIdConflictError) {
@@ -81,7 +170,10 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     throw e;
   }
 
-  const { resource, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  if (auditAction === AUDIT_ACTION.SCIM_USER_REACTIVATE) {
+    await realignReactivatedMember(userId, tenantId, { actorUserId: auditUserId, actorType: putActorType });
+  }
 
   // Session invalidation on deactivation (fail-open)
   let invalidationCounts: InvalidateUserSessionsResult | undefined;
@@ -110,6 +202,8 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     },
   });
 
+  const resource = await toScimUserResource(snapshot, getScimBaseUrl());
+  if (!resource) return scimError(404, "User not found");
   return scimResponse(resource);
 }
 
@@ -134,21 +228,59 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
 
   const { id } = await params;
 
+  // The ownership refusal. It must run BETWEEN two tenant contexts, not inside
+  // one: another tenant's membership and users row are what RLS hides inside a
+  // tenant context, and opening a bypass inside one is refused by the nesting
+  // guard. Sequential contexts are allowed; nested are not.
+  // The id is resolved inside the guard's OWN bypass, not in a tenant context:
+  // `resolveUserId` is explicitly tenant-scoped by argument, so it is safe there,
+  // and this keeps the guard's reads off the mutation path entirely. The mutation
+  // callback below resolves it again through its own `tx`, which is what keeps
+  // that callback in the `(tx) =>` form `check-bypass-rls` requires.
+  const resolvedUserId = await withBypassRls(
+    prisma,
+    (tx) => resolveUserId(tenantId, id, tx),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+  if (!resolvedUserId) return scimError(404, "User not found");
+  // `=== true`, not `!== false`, because PATCH and PUT reach the transition
+  // differently: `patchScimUser` touches `deactivatedAt` only when
+  // `operations.active !== undefined`, so a name-only PATCH cannot reactivate
+  // and must not be refused. PUT's schema defaults `active` to true and
+  // `replaceScimUser` writes unconditionally, so `!== false` is right there.
+  if (patchOps.active === true) {
+    const refusal = await reactivationRefusal(req, resolvedUserId, tenantId, {
+      actorUserId: auditUserId,
+      actorType: patchActorType,
+    });
+    if (refusal) return refusal;
+  }
+
   let serviceResult;
   try {
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
       resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
-        return patchScimUser(tenantId, userId, patchOps, getScimBaseUrl());
+        return patchScimUser(tenantId, userId, patchOps);
       }),
     );
   } catch (e) {
+    // The one-active-membership index: another tenant activated the user between
+    // the ownership read and this write. That tenant owns them now, so the answer
+    // is the ownership refusal's detail — a separate one told the token holder
+    // whether another tenant had the user active (round-7 R7-S3).
+    if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
+      return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
+    }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
     throw e;
   }
 
-  const { resource, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
+  if (auditAction === AUDIT_ACTION.SCIM_USER_REACTIVATE) {
+    await realignReactivatedMember(userId, tenantId, { actorUserId: auditUserId, actorType: patchActorType });
+  }
 
   // Session invalidation on deactivation (fail-open)
   let patchInvalidationCounts: InvalidateUserSessionsResult | undefined;
@@ -176,6 +308,8 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     },
   });
 
+  const resource = await toScimUserResource(snapshot, getScimBaseUrl());
+  if (!resource) return scimError(404, "User not found");
   return scimResponse(resource);
 }
 
@@ -196,6 +330,13 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
       }),
     );
   } catch (e) {
+    // The one-active-membership index: another tenant activated the user between
+    // the ownership read and this write. That tenant owns them now, so the answer
+    // is the ownership refusal's detail — a separate one told the token holder
+    // whether another tenant had the user active (round-7 R7-S3).
+    if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
+      return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
+    }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
     if (e instanceof ScimDeleteConflictError) {
@@ -204,7 +345,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     throw e;
   }
 
-  const { userId, userEmail, needsSessionInvalidation } = serviceResult;
+  const { userId, needsSessionInvalidation } = serviceResult;
 
   // Session invalidation after deletion (fail-open)
   let deleteInvalidationCounts: InvalidateUserSessionsResult | undefined;
@@ -218,6 +359,17 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     }
   }
 
+  // Read after the tenant context closes: the membership read inside it can no
+  // longer reach the email of a member whose users row names another tenant. A
+  // failure costs the email, not the audit row: the deletion has already committed,
+  // and answering it with a 500 left SCIM_USER_DELETE unwritten (round-5 F2).
+  let contact: Awaited<ReturnType<typeof fetchUserContact>> = null;
+  try {
+    contact = await fetchUserContact(userId, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  } catch (error) {
+    getLogger().error({ tenantId, userId, error: errorLogFields(error) }, "scim.delete-contact-read-failed");
+  }
+
   await logAuditAsync({
     ...tenantAuditBase(req, auditUserId, tenantId),
     actorType: deleteActorType,
@@ -225,7 +377,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: {
-      email: userEmail,
+      email: contact?.email ?? null,
       ...(deleteInvalidationCounts ?? {}),
       ...(deleteSessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
     },

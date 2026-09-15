@@ -12,8 +12,9 @@
  * this file inserts is derived from the shared fixtures with a random
  * per-run suffix, following src/__tests__/db-integration/tenant-claim.integration.test.ts.
  */
-import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, onTestFinished, vi } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
+import { createServer, type AddressInfo, type Socket } from "node:net";
 import { AuditScope, AuditAction, ActorType, AuditOutboxStatus } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
@@ -30,6 +31,8 @@ import {
   cmdAdd,
   cmdRemove,
   cmdHistory,
+  cmdRealign,
+  confirmationTransaction,
   formatUnmappedMessage,
   migrationClientFactory,
   DEFAULT_UNMAPPED_WINDOW_DAYS,
@@ -39,7 +42,7 @@ import {
   SIGNIN_ACTOR_LABEL,
   DEREGISTER_ACTOR_LABEL,
 } from "@/lib/tenant/tenant-claim-event";
-import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 // C3 (CF13): bucketOf/UNMAPPED_BUCKET are imported directly rather than
 // through cmdUnmapped's own module — tenant-domain.ts imports them for its
 // own use but does not re-export them, and this file needs to assert the
@@ -70,6 +73,8 @@ function unmappedRow(over: Partial<Parameters<typeof formatUnmappedMessage>[0][n
 
 const alwaysYes = async () => true;
 const alwaysNo = async () => false;
+/** A confirmation that answers yes after `ms` — an operator reading the preview. */
+const confirmAfter = (ms: number) => () => new Promise<boolean>((resolve) => setTimeout(() => resolve(true), ms));
 
 describe("tenant-domain CLI (C7)", () => {
   let ctx: TestContext;
@@ -2666,6 +2671,436 @@ describe("tenant-domain CLI (C7)", () => {
     });
   });
 
+  describe("realign (round 7 F-R7-2)", () => {
+    /**
+     * A user who left `former` for `owning` and was suspended there: active in no
+     * tenant, filed under `owning`, with a deactivated membership row in `former`.
+     * SCIM and directory sync in `former` may not take them back, and a claimless
+     * `former` has no sign-in that would.
+     */
+    async function seedDeparted() {
+      const owning = await ctx.createTenant();
+      const former = await ctx.createTenant();
+      const userId = await ctx.createUser(owning);
+      await ctx.su.prisma.$executeRawUnsafe(
+        `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        owning,
+        userId,
+      );
+      await ctx.su.prisma.$executeRawUnsafe(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
+        randomUUID(),
+        former,
+        userId,
+      );
+      return { owning, former, userId };
+    }
+
+    const columnOf = async (userId: string) =>
+      (await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { tenantId: true } })).tenantId;
+
+    const realignRows = (tenantIds: string[]) =>
+      ctx.su.prisma.auditOutbox.findMany({
+        where: { tenantId: { in: tenantIds }, payload: { path: ["action"], equals: "USER_TENANT_REALIGNED" } },
+        select: { tenantId: true, payload: true },
+      });
+
+    it.skipIf(SKIP)("moves a user active in no tenant onto a tenant where they hold a membership row, recorded for both tenants", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true, code: 0, tenantId: former });
+      expect(await columnOf(userId)).toBe(former);
+      // The membership is not reactivated: that is the tenant's to do, now that it owns the user.
+      const [member] = await ctx.su.prisma.tenantMember.findMany({ where: { tenantId: former, userId } });
+      expect(member.deactivatedAt).not.toBeNull();
+      const rows = await realignRows([owning, former]);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.payload).toMatchObject({
+          userId: SYSTEM_ACTOR_ID,
+          actorType: "SYSTEM",
+          metadata: expect.objectContaining({ source: "operator", by: "test-op" }),
+        });
+      }
+      expect(rows.find((r) => r.tenantId === former)?.payload).toMatchObject({
+        metadata: expect.objectContaining({ previousTenantId: owning, movedUserId: userId }),
+      });
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("finds the user by email, matched case-insensitively", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const { email } = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+
+      const result = await cmdRealign({ user: (email as string).toUpperCase(), tenant: former, by: "test-op", yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect(await columnOf(userId)).toBe(former);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("refuses a user with an active membership anywhere, writing nothing", async () => {
+      // The deny side: an active membership decides ownership.
+      const owning = await ctx.createTenant();
+      const former = await ctx.createTenant();
+      const userId = await ctx.createUser(owning); // ACTIVE in owning
+      await ctx.su.prisma.$executeRawUnsafe(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
+        randomUUID(),
+        former,
+        userId,
+      );
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", yes: true });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("active membership");
+      expect(await columnOf(userId)).toBe(owning);
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("refuses a target where the user holds no membership row", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const stranger = await ctx.createTenant();
+
+      const result = await cmdRealign({ user: userId, tenant: stranger, by: "test-op", yes: true });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("holds no membership row");
+      expect(await columnOf(userId)).toBe(owning);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+      await ctx.deleteTestData(stranger);
+    });
+
+    it.skipIf(SKIP)("answers that nothing is to be done when the column already names the target, recording nothing", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: owning, by: "test-op", yes: true });
+
+      // owning holds a (deactivated) row too, so the target is valid and already current.
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect(result.message).toContain("nothing to do");
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("refuses a --by label carrying a bidi control, before building a client", async () => {
+      const createSpy = vi.spyOn(migrationClientFactory, "create");
+      try {
+        const result = await cmdRealign({
+          user: randomUUID(),
+          tenant: randomUUID(),
+          by: `ops${String.fromCodePoint(0x202e)}admin`,
+          yes: true,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.message).toContain("--by contains a control, bidi or zero-width character");
+        expect(createSpy).not.toHaveBeenCalled();
+      } finally {
+        createSpy.mockRestore();
+      }
+    });
+
+    it.skipIf(SKIP)("aborts without writing when the operator does not confirm", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: alwaysNo });
+
+      expect(result).toMatchObject({ ok: false, message: "Aborted: not confirmed." });
+      expect(await columnOf(userId)).toBe(owning);
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("matches --user literally: `_` and `%` in the typed address are not wildcards", async () => {
+      // Round-8 R8-S1: an insensitive `equals` was an unescaped ILIKE, so a typed
+      // address that is not the user's still selected them.
+      const { owning, former, userId } = await seedDeparted();
+      const { email } = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+      const address = email as string;
+
+      for (const typed of [`_${address.slice(1)}`, `%${address.slice(address.indexOf("@"))}`]) {
+        const result = await cmdRealign({ user: typed, tenant: former, by: "test-op", yes: true });
+        expect(result.ok, typed).toBe(false);
+        expect(result.message).toContain("User not found");
+      }
+      expect(await columnOf(userId)).toBe(owning);
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("refuses an email that names two users differing only in case, moving neither", async () => {
+      const first = await seedDeparted();
+      const second = await seedDeparted();
+      const { email } = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: first.userId }, select: { email: true } });
+      await ctx.su.prisma.$executeRawUnsafe(`UPDATE users SET email = $1 WHERE id = $2::uuid`, (email as string).toUpperCase(), second.userId);
+
+      const result = await cmdRealign({ user: email as string, tenant: first.former, by: "test-op", yes: true });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("More than one user matches");
+      expect(await columnOf(first.userId)).toBe(first.owning);
+      expect(await columnOf(second.userId)).toBe(second.owning);
+      expect(await realignRows([first.owning, first.former, second.owning, second.former])).toEqual([]);
+
+      for (const t of [first.owning, first.former, second.owning, second.former]) await ctx.deleteTestData(t);
+    });
+
+    it.skipIf(SKIP)("refuses the sentinel tenant as the target", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: SYSTEM_TENANT_ID, by: "test-op", yes: true });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("sentinel tenant");
+      expect(await columnOf(userId)).toBe(owning);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("resolves a target by its claim, and records what stays behind and each row's target", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: former, claim, createdBy: "seed" } });
+      await ctx.su.prisma.tag.create({ data: { name: `stranded-${runToken()}`, userId, tenantId: owning } });
+      const { id: memberId } = await ctx.su.prisma.tenantMember.findFirstOrThrow({
+        where: { tenantId: former, userId },
+        select: { id: true },
+      });
+
+      const result = await cmdRealign({ user: userId, tenant: claim, by: "test-op", yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true, tenantId: former });
+      expect(await columnOf(userId)).toBe(former);
+      const rows = await realignRows([owning, former]);
+      expect(rows.find((r) => r.tenantId === former)?.payload).toMatchObject({
+        targetId: memberId,
+        metadata: expect.objectContaining({ leftBehind: { tag: 1 } }),
+      });
+      expect(rows.find((r) => r.tenantId === owning)?.payload).toMatchObject({
+        targetId: userId,
+        metadata: expect.objectContaining({ leftBehind: { tag: 1 } }),
+      });
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("names a confirmation that outlived the transaction, and writes nothing", async () => {
+      // Round-8 F-R8-2: the budget is shortened through its seam; the default is minutes.
+      const { owning, former, userId } = await seedDeparted();
+      shortenBudget({ timeout: 1000, maxWait: 2000 });
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: confirmAfter(2500) });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("took longer than this command's transaction allows");
+      expect(await columnOf(userId)).toBe(owning);
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("commits after a confirmation that took six seconds, past Prisma's default transaction timeout", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: confirmAfter(6000) });
+
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect(await columnOf(userId)).toBe(former);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("rethrows an error that is not an expired confirmation (round 9 T-R9-2)", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const confirm = async (): Promise<boolean> => {
+        throw new Error("boom");
+      };
+
+      await expect(cmdRealign({ user: userId, tenant: former, by: "test-op", confirm })).rejects.toThrow("boom");
+      expect(await columnOf(userId)).toBe(owning);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+  });
+
+  describe("a confirmation read for longer than Prisma's default transaction timeout (round 8 F-R8-2)", () => {
+    it.skipIf(SKIP)("add --from commits after a confirmation that took six seconds", async () => {
+      const losingTenant = await ctx.createTenant();
+      const gainingTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+      const result = await cmdAdd({
+        tenant: gainingTenant,
+        domain: claim,
+        by: "test-op",
+        from: losingTenant,
+        confirm: confirmAfter(6000),
+      });
+
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.tenantId).toBe(gainingTenant);
+
+      await ctx.deleteTestData(losingTenant);
+      await ctx.deleteTestData(gainingTenant);
+    });
+
+    it.skipIf(SKIP)("remove commits after a confirmation that took six seconds", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: confirmAfter(6000) });
+
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.revokedAt).not.toBeNull();
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    // Round 9 T-R9-2: the timeout arm was reached only through realign.
+    it.skipIf(SKIP)("add --from names a confirmation that outlived the transaction, and moves nothing", async () => {
+      const losingTenant = await ctx.createTenant();
+      const gainingTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+      shortenBudget({ timeout: 1000, maxWait: 2000 });
+      const result = await cmdAdd({ tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: confirmAfter(2500) });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("took longer than this command's transaction allows");
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.tenantId).toBe(losingTenant);
+
+      await ctx.deleteTestData(losingTenant);
+      await ctx.deleteTestData(gainingTenant);
+    });
+
+    it.skipIf(SKIP)("remove names a confirmation that outlived the transaction, and revokes nothing", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+      shortenBudget({ timeout: 1000, maxWait: 2000 });
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: confirmAfter(2500) });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("took longer than this command's transaction allows");
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.revokedAt).toBeNull();
+
+      await ctx.deleteTestData(tenantId);
+    });
+  });
+
+  describe("an error that is not an expired confirmation propagates (round 9 T-R9-2/F-R9-1)", () => {
+    const boom = () => async (): Promise<boolean> => {
+      throw new Error("boom");
+    };
+
+    it.skipIf(SKIP)("add rethrows it", async () => {
+      const losingTenant = await ctx.createTenant();
+      const gainingTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+      await expect(cmdAdd({ tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: boom() })).rejects.toThrow("boom");
+
+      await ctx.deleteTestData(losingTenant);
+      await ctx.deleteTestData(gainingTenant);
+    });
+
+    it.skipIf(SKIP)("remove rethrows it", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+      await expect(cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: boom() })).rejects.toThrow("boom");
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    it("a transaction that never starts is not reported as a slow confirmation, and the command returns", { timeout: 15_000 }, async () => {
+      // F-R9-1: P2028 also covers `maxWait`. A server that accepts the connection
+      // and never answers holds the transaction start past it, before any prompt.
+      // Without the client's connection timeout, `$disconnect()` in the command's
+      // `finally` waited on that connection forever and this cell timed out.
+      const port = await listenLocally();
+      vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      // The connect timeout is this cell's to choose, not .env's (round 11 T-R11-4).
+      vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "");
+      shortenBudget({ timeout: 1000, maxWait: 300 });
+
+      await expect(
+        cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+      ).rejects.toThrow("Unable to start a transaction in the given time");
+    });
+
+    it("a server that stops answering after connecting does not hang the command (round 10 F-R10-5)", { timeout: 15_000 }, async () => {
+      // The handshake completes, then no query is ever answered. Without a query
+      // timeout the command's first query, and `$disconnect()` after it, waited forever.
+      const port = await listenLocally((socket) => {
+        socket.once("data", () => socket.write(STARTUP_OK));
+      });
+      vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      // The connect timeout is this cell's to choose, not .env's (round 11 T-R11-4).
+      vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "");
+      shortenBudget({ timeout: 1000, maxWait: 5000 });
+
+      await expect(
+        cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+      ).rejects.toThrow("Query read timeout");
+    });
+
+    it("connects with the pool timeout DB_POOL_CONNECTION_TIMEOUT_MS sets (round 10 F-R10-4)", { timeout: 15_000 }, async () => {
+      // The default is 5 s; maxWait here is longer, so only an honoured 300 ms
+      // fails the command in well under that.
+      const port = await listenLocally();
+      vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "300");
+      shortenBudget({ timeout: 1000, maxWait: 8000 });
+
+      // Pinned to pg's connect-timeout text (round 11 T-R11-3): any fast failure
+      // before connecting would satisfy a bare rejection and the time bound.
+      const started = Date.now();
+      await expect(
+        cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+      ).rejects.toThrow("Connection terminated due to connection timeout");
+      expect(Date.now() - started).toBeLessThan(3000);
+    });
+
+    it("treats DB_POOL_CONNECTION_TIMEOUT_MS=0 as the default, not as no limit (round 11 S-R11-2)", { timeout: 15_000 }, async () => {
+      // pg reads 0 as "wait forever". Honoured here, `$disconnect()` would wait on the
+      // unanswered connection after `maxWait` failed the command: the F-R9-1 hang.
+      const port = await listenLocally();
+      vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "0");
+      shortenBudget({ timeout: 1000, maxWait: 300 });
+
+      await expect(
+        cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+      ).rejects.toThrow("Unable to start a transaction in the given time");
+    });
+  });
+
   describe("missing MIGRATION_DATABASE_URL", () => {
     // M11 / C7: "no connection attempted" was in the test name and in the
     // acceptance criterion but asserted nowhere — an implementation that
@@ -2686,6 +3121,7 @@ describe("tenant-domain CLI (C7)", () => {
           cmdPreflight(),
           cmdAdd({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
           cmdRemove({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
+          cmdRealign({ user: randomUUID(), tenant: "acmecorp", by: "test-op", yes: true }),
         ]);
         for (const result of results) {
           expect(result.ok).toBe(false);
@@ -2978,3 +3414,31 @@ describe("tenant-domain CLI (C7)", () => {
     });
   });
 });
+
+/** AuthenticationOk, then ReadyForQuery: a PostgreSQL handshake that asks for no password. */
+const STARTUP_OK = Buffer.from([0x52, 0, 0, 0, 8, 0, 0, 0, 0, 0x5a, 0, 0, 0, 5, 0x49]);
+
+/**
+ * A local server standing in for a database that misbehaves. Its sockets are
+ * destroyed and the server closed when the cell ends — including when the cell
+ * times out, which is how these cells fail (round 10 T-R10-4).
+ */
+async function listenLocally(onConnection: (socket: Socket) => void = () => {}): Promise<number> {
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    onConnection(socket);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  onTestFinished(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  return (server.address() as AddressInfo).port;
+}
+
+/** Shortens the confirmation budget for the current cell only, restored however the cell ends. */
+function shortenBudget(options: { timeout: number; maxWait: number }): void {
+  const spy = vi.spyOn(confirmationTransaction, "options").mockReturnValue(options);
+  onTestFinished(() => spy.mockRestore());
+}

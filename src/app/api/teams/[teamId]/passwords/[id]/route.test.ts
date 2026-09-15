@@ -39,6 +39,11 @@ const {
   };
 });
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn(),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -48,6 +53,7 @@ vi.mock("@/lib/prisma", () => ({
     teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
     $transaction: mockPrismaTransaction,
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/auth/access/team-auth", () => ({
@@ -59,6 +65,10 @@ vi.mock("@/lib/auth/access/team-auth", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
+}));
 // permanent=true DELETE gates on requireRecentCurrentAuthMethod (step-up).
 // Default: null (fresh session → allow). Stale-session tests override.
 // NOTE: this file uses vi.resetAllMocks() in beforeEach, so the null default is
@@ -69,6 +79,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { NextResponse } from "next/server";
 import { GET, PUT, DELETE } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
@@ -103,8 +114,8 @@ function makeEntryForGET(overrides = {}) {
     expiresAt: null,
     teamFolderId: null,
     tags: [],
-    createdBy: { id: "u1", name: "User", email: "user@example.com", image: null },
-    updatedBy: { id: "u1", name: "User", email: "user@example.com" },
+    createdById: "u1",
+    updatedById: "u1",
     favorites: [],
     createdAt: now,
     updatedAt: now,
@@ -128,6 +139,7 @@ function makeEntryForPUT(overrides = {}) {
 describe("GET /api/teams/[teamId]/passwords/[id]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockUserFindMany.mockResolvedValue([{ id: "u1", name: "User", email: "user@example.com", image: null }]);
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
@@ -168,6 +180,27 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
+  });
+
+  it("hydrates creator and updater after the team context, with an id-only creator whose users row does not come back", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForGET({ createdById: "u-departed" }));
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.createdBy).toEqual({ id: "u-departed", name: null, email: null, image: null });
+    expect(json.updatedBy).toEqual({ id: "u1", name: "User", email: "user@example.com" });
+    const { include } = mockPrismaTeamPasswordEntry.findUnique.mock.calls[0][0];
+    expect(include).not.toHaveProperty("createdBy");
+    expect(include).not.toHaveProperty("updatedBy");
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
   });
 
   it("returns encrypted blobs as-is (E2E mode)", async () => {

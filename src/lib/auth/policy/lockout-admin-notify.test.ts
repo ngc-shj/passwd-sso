@@ -73,6 +73,7 @@ import { notificationBody } from "@/lib/notification/notification-messages";
 
 const baseParams = {
   userId: "user-1",
+  tenantId: "tenant-1",
   attempts: 5,
   lockMinutes: 15,
   ip: "1.2.3.4",
@@ -155,12 +156,34 @@ describe("notifyAdminsOfLockout", () => {
     expect(mockCreateNotification).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing when user has no tenantId", async () => {
+  it("looks the admins up in the CALLER's tenant, not the user's column", async () => {
+    // The divergence this parameter exists to remove. `recordFailure` resolves
+    // the tenant from the active membership and files the lockout's audit row
+    // there; this function used to re-read `User.tenantId` and so alerted a
+    // different tenant's admins — with the locked-out user's email address — for
+    // the same event.
     setupBypassRls({
       userEmail: "victim@test.com",
-      tenantId: null,
-      admins: [],
+      tenantId: "stale-column-tenant",
+      admins: [{ userId: "admin-1", user: { email: "admin1@test.com", locale: "en" } }],
     });
+
+    await notifyAdminsOfLockout({ ...baseParams, tenantId: "caller-resolved-tenant" });
+
+    expect(mockPrismaTenantMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ tenantId: "caller-resolved-tenant" }),
+      }),
+    );
+    // The allow half: the alert still goes out. A fix that simply stopped
+    // notifying would satisfy the assertion above on its own.
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing when the user row is absent", async () => {
+    // The surviving early-out. It is now keyed on the user, not on the tenant —
+    // the tenant can no longer be missing, because the caller supplies it.
+    setupBypassRls(null);
 
     await notifyAdminsOfLockout(baseParams);
 

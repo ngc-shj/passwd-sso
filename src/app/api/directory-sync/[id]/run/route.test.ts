@@ -84,6 +84,7 @@ const SUCCESS_RESULT = {
   usersCreated: 2,
   usersUpdated: 1,
   usersDeactivated: 0,
+  usersRefused: 3,
   abortedSafety: false,
   errorMessage: null,
 };
@@ -245,6 +246,8 @@ describe("POST /api/directory-sync/[id]/run", () => {
           dryRun: true,
           force: false,
           success: true,
+          // Non-zero in the fixture, so dropping the field from the route reds this.
+          usersRefused: 3,
         }),
       }),
     );

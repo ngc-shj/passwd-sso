@@ -27,8 +27,12 @@ FIXTURE_ROOT="${NO_PIPE_GREP_Q_ROOT:-$REPO_ROOT}"
 cd "$FIXTURE_ROOT"
 
 SCAN_DIR="scripts"
+# The credential hook is a shell script too, and a race of exactly this shape lived
+# in it while this gate scanned scripts/ only (audit-tenant-adjudicator round 15,
+# F-R15-2).
+HOOKS_DIR=".claude/hooks"
 
-echo "check-no-pipe-into-grep-q: FIXTURE_ROOT=$FIXTURE_ROOT SCAN_DIR=$SCAN_DIR"
+echo "check-no-pipe-into-grep-q: FIXTURE_ROOT=$FIXTURE_ROOT SCAN_DIR=$SCAN_DIR HOOKS_DIR=$HOOKS_DIR"
 
 # Env-pollution guard: an override under CI needs an explicit acknowledgement,
 # so a stray export cannot point the gate at an empty tree and green it.
@@ -41,6 +45,12 @@ fi
 
 if [ ! -d "$SCAN_DIR" ]; then
   echo "ERROR: $SCAN_DIR/ not found under $FIXTURE_ROOT"
+  exit 1
+fi
+# Required on the real tree. A fixture tree (NO_PIPE_GREP_Q_ROOT) may omit it; when
+# it is present it is scanned and held to its own floor below.
+if [ ! -d "$HOOKS_DIR" ] && [ -z "${NO_PIPE_GREP_Q_ROOT:-}" ]; then
+  echo "ERROR: $HOOKS_DIR/ not found under $FIXTURE_ROOT"
   exit 1
 fi
 
@@ -202,6 +212,18 @@ if [ "${file_count:-0}" -lt "$MIN_FILES" ]; then
   exit 1
 fi
 
+hook_count=0
+if [ -d "$HOOKS_DIR" ]; then
+  hook_files=$(find "$HOOKS_DIR" -name '*.sh' -type f | sort)
+  hook_count=$(grep -c . <<<"$hook_files" || true)
+  if [ "${hook_count:-0}" -lt 1 ]; then
+    echo "EMPTY_SCAN: no shell scripts found under $HOOKS_DIR/ (expected >= 1) — the scan path is wrong, not the tree."
+    exit 1
+  fi
+  files="$files
+$hook_files"
+fi
+
 violations=""
 while IFS= read -r f; do
   [ -z "$f" ] && continue
@@ -223,4 +245,4 @@ if [ -n "$violations" ]; then
   exit 1
 fi
 
-echo "OK ($file_count shell scripts scanned, no pipeline into grep -q)"
+echo "OK ($file_count shell scripts and $hook_count hook script(s) scanned, no pipeline into grep -q)"

@@ -23,14 +23,41 @@
  * was is why round 5 had to find the rest — so this header no longer makes that
  * claim, and states instead what is known not to be covered:
  *
+ * (audit-tenant-adjudicator round 13) Call discovery was the same defect again: a
+ * call counted only when its callee was spelled `helper(…)` or `ns.helper(…)`, so
+ * `(withBypassRls)(…)`, `withBypassRls!(…)`, `.call`, a local alias, the helper
+ * passed to another function and eleven other spellings reached no check at all —
+ * a file on no allowlist passed. Rather than list spellings, every reference to a
+ * helper that is not a direct call or a type position is now reported
+ * (indirectHelperReferencesIn); the tree had none outside tests. A module loaded
+ * at run time (`await import("@/lib/tenant-rls")`, `require`) binds the helpers
+ * like an import: a destructured binding is followed as one, the module object as
+ * a namespace, and any other use of the load is reported (runtimeHelperModulesIn).
+ * Only an `import()` or `require()` call whose specifier is a literal naming the
+ * module is recognised (not `import rls = require(…)`), and only identifier-keyed
+ * destructuring is followed. A run-time destructure that binds a name already bound
+ * to a different helper makes that name ambiguous, and it is reported wherever it is
+ * used, a direct call included; two STATIC imports under one name are not checked,
+ * since TypeScript rejects them (TS2300), as it rejects `import … = require` under
+ * this repo's module setting (TS1202). `import wb = rls.withBypassRls` is a
+ * reference like any other (rounds 14 and 15).
+ *
  *   - Check 2 (BYPASS_PURPOSE) is FILE-scoped, not call-scoped: one
  *     `BYPASS_PURPOSE.X` anywhere satisfies it for every call in the file, and
  *     its receiver test is name equality, so an aliased import is a false
  *     positive. Pre-existing granularity, unchanged by the AST move.
- *   - The prefilter cannot see a call reached through a RENAMING re-export
- *     (`export { withBypassRls as wb } from "@/lib/tenant-rls"`), because the
- *     caller's text names neither the helper nor the module. No such re-export
- *     exists today (`rg 'export .*from.*tenant-rls' src/` is empty).
+ *   - A helper that reaches a file other than straight from the tenant-rls module
+ *     is neither followed nor reported: through a re-export or an `export *` barrel,
+ *     renamed or not; a load whose specifier is not a literal naming the module
+ *     (computed, concatenated, a variable, `createRequire`, a renamed `require`); a
+ *     quoted or computed destructuring key; or a helper-named member read off an
+ *     object this file cannot prove to be the module. Recognition is by spelling, and
+ *     resolving these needs a Program, which no gate in this tree carries
+ *     (audit-tenant-adjudicator round 14, S-R14-2). Measured in round 14 over the
+ *     non-test files the prefilter selects: no export specifier or `export *` of a
+ *     helper, no `withBypassRls`/`withTenantRls` imported from another module, no
+ *     non-literal load, no helper-named member read that is not a direct call, and
+ *     helper-keyed destructuring only in the two vault routes' literal loads.
  *   - The scan root is `src/` only. `scripts/tenant-domain.ts` and
  *     `scripts/manual-tests/*.ts` call these helpers and are examined by nothing.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
@@ -40,7 +67,11 @@
  *     proves the mapping. Where it cannot, the call is SKIPPED, not reported —
  *     which is this gate's remaining fail-open class, and it is wider than
  *     "the callee is imported":
- *       · an imported callee (38 call sites today; resolving it needs a Program)
+ *       · an imported callee — resolving it needs a Program. The count is
+ *         MEASURED and printed on every run rather than stated here: the
+ *         number this line used to carry was frozen prose about a moving
+ *         subject, and it is the same count the over-breadth check below
+ *         uses to decide which files it must not judge.
  *       · `this` — `query.call(tx)` where the body uses `this.model`. Binding it
  *         would mean adding `this` to a client set that is keyed by NAME with no
  *         per-function scope, so every `this.x` in every analysed function would
@@ -79,7 +110,14 @@
  */
 import { SyntaxKind } from "ts-morph";
 import { createAstProject } from "./lib/ast-project.mjs";
-import { readFileSync, readdirSync } from "node:fs";
+import {
+  FN_KINDS,
+  bindingIndex,
+  resolveLocalFunction,
+  resolveLocalObjectLiteral,
+  unwrapExpression,
+} from "./lib/scope-bindings.mjs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, extname } from "node:path";
 
 // Per-file allowlist: file path → allowed Prisma model names.
@@ -87,7 +125,18 @@ import { join, extname } from "node:path";
 // complex transactional code that touches many models by design).
 const ALLOWED_USAGE = new Map([
   ["src/lib/tenant-rls.ts", ["*"]], // definition
-  ["src/lib/tenant-context.ts", ["tenantMember", "team"]],
+  // `user`: `resolveExistingUsersForTenant`, the ownership read SCIM POST and
+  // directory sync consult before attaching an existing user. It must see users
+  // filed under other tenants — to REFUSE them — and it lives here, beside
+  // `resolveOwningTenantIdFromClient`, because it applies the same owning-tenant
+  // rule. Read-only; returns ids and a classification, no identity.
+  ["src/lib/tenant-context.ts", ["tenantMember", "team", "user"]],
+  // The standalone realignment for producers that activate a membership inside a
+  // TENANT context (SCIM, directory sync): that context cannot write a users row
+  // the owning column files under another tenant. Re-reads the membership it
+  // follows — only while still ACTIVE in the tenant named — then moves the column
+  // through `realignOwningTenantColumn` and records both sides.
+  ["src/lib/tenant/tenant-realignment.ts", ["tenantMember"]],
   ["src/lib/auth/session/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit/audit.ts", ["team", "user", "auditLog"]],
@@ -103,10 +152,6 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/extension/key/reset/route.ts", ["extensionToken"]],
   ["src/lib/auth/access/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
-  // C8: passkey-enforcement gate pre-read on the cookieless MCP refresh path.
-  // Resolves userId/tenantId from the refresh-token row (RLS would filter it to
-  // null for a DPoP-bearer request) before re-deriving passkey state + gating.
-  ["src/app/api/mcp/token/route.ts", ["mcpRefreshToken"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
   // A04-4: execute is the only phase that revokes shares system-wide; the
   // master key is global, so old-version shares across ALL tenants must be
@@ -147,8 +192,24 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
   ["src/lib/auth/tokens/api-key.ts", ["apiKey", "tenantMember"]],
   ["src/lib/auth/webauthn/webauthn-authorize.ts", ["webAuthnCredential"]],
-  ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
-  ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
+  // `tenant` reads the policy row directly by id. These files used to reach the
+  // same row by traversing `user.tenant`, which follows the stale `User.tenantId`
+  // column; the adjudicator resolves the active membership first, so the tenant
+  // is now loaded by that id. Same row, same bypass scope, named model.
+  ["src/app/api/auth/passkey/verify/route.ts", ["user", "session", "tenant"]],
+  ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential", "tenant"]],
+  // The cross-tenant reactivation guard: resolves the SCIM id and reads the
+  // user's ACTIVE membership set, both of which are invisible inside the tenant
+  // context this route mutates in. Read-only, and the tenant it compares against
+  // is the authenticated SCIM token's, not caller-supplied.
+  ["src/app/api/scim/v2/Users/[id]/route.ts", ["tenantMember", "scimExternalMapping"]],
+  // The user LIST reads under a bypass: its filter runs through the users
+  // relation, which a tenant context narrows to users whose owning column names
+  // this tenant, silently dropping departed members from the page and the count.
+  // Every query carries the token's tenantId, ANDed so no filter can widen it.
+  // Read-only. (The CREATE verb's ownership read moved into tenant-context.ts's
+  // `resolveExistingUsersForTenant`, so this file no longer reads `user`.)
+  ["src/app/api/scim/v2/Users/route.ts", ["tenantMember", "scimExternalMapping"]],
   // C3: also reads the session row to resolve the bound credential.
   ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential", "session"]],
   ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],
@@ -165,19 +226,19 @@ const ALLOWED_USAGE = new Map([
     "passwordEntry", "attachment", "passwordShare",
     "tenantWebhook", "teamWebhook",
   ]],
-  ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
+  ["src/app/api/tenant/policy/route.ts", ["tenant", "teamPolicy"]],
   ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],
-  ["src/lib/team/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
+  ["src/lib/team/team-policy.ts", ["tenant"]],
   // Team member display: cross-tenant user + home-tenant name hydration for guest members
   ["src/lib/team/team-member-display.ts", ["user", "tenantMember"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
-  ["src/lib/auth/session/session-timeout.ts", ["user"]],
+  ["src/lib/auth/session/session-timeout.ts", ["user", "tenant"]],
   // Extension token refresh: cross-tenant token lookup + family-absolute check
   ["src/app/api/extension/token/refresh/route.ts", ["tenant"]],
   // iOS auth: token row updates (lastUsedIp/UA, replay-detection family revoke)
   // happen across tenant boundary because the bearer token's tenantId is
   // resolved from the row, not the request session.
-  ["src/lib/auth/tokens/mobile-token.ts", ["extensionToken", "tenant"]],
+  ["src/lib/auth/tokens/mobile-token.ts", ["extensionToken"]],
   // iOS authorize: bridge-code creation atomically counts active bridge codes
   // per user across tenants (parity with extension/bridge-code/route.ts).
   ["src/app/api/mobile/authorize/route.ts", ["mobileBridgeCode"]],
@@ -186,7 +247,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/mobile/token/route.ts", ["mobileBridgeCode"]],
   // iOS token refresh: cross-tenant token row read for family-absolute check.
   // C13: deactivated-user rejection requires tenantMember lookup.
-  ["src/app/api/mobile/token/refresh/route.ts", ["tenant", "extensionToken", "tenantMember"]],
+  ["src/app/api/mobile/token/refresh/route.ts", ["extensionToken", "tenantMember"]],
   // Team policy route: pre-write tenant cap check (cross-tenant read of tenant row)
   ["src/app/api/teams/[teamId]/policy/route.ts", ["team"]],
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenant", "auditLog"]],
@@ -197,7 +258,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/health.ts", []],
   ["src/app/api/maintenance/audit-outbox-purge-failed/route.ts", []],
   ["src/app/api/maintenance/audit-chain-verify/route.ts", []],
-  ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user"]],
+  ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user", "tenant"]],
   ["src/app/api/share-links/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_CREATE
   ["src/app/api/share-links/[id]/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_REVOKE
   ["src/app/api/share-links/verify-access/route.ts", ["passwordShare"]],
@@ -225,7 +286,6 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
   ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],
   ["src/app/[locale]/mcp/authorize/page.tsx", ["mcpClient", "user"]],
-  ["src/app/api/maintenance/dcr-cleanup/route.ts", []],
   // JIT access requests: SA self-service path uses bypass for SA lookup; approve reads tenant policy
   ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
@@ -292,8 +352,6 @@ const TX_CLIENT_HELPERS = new Set(["withBypassRls", "withTenantRls"]);
 // this comment would rot the same way twice over.
 const HELPER_MENTION_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/;
 
-const FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
-
 // F3 anti-drift: the ONLY sanctioned with*Rls callbacks that declare `tx` and
 // never use it are the two thin wrappers in tenant-context.ts that delegate to
 // a caller-supplied `fn(tenantId)` public contract (SC1 deferral — threading tx
@@ -337,20 +395,160 @@ function getSourceFiles() {
  * but the file allowlist itself. The canonical names are seeded too, for the
  * defining module and for any helper imported from elsewhere.
  */
+const TENANT_RLS_MODULE_RE = /(^|\/)tenant-rls(\.[cm]?[jt]sx?)?$/;
+
+/**
+ * Every run-time load of the helpers' module — `import("…tenant-rls")` or
+ * `require("…tenant-rls")` — with the binding it lands in: an object pattern, an
+ * identifier (the module object, used like a namespace import), or null when the
+ * loaded module is used any other way (round 13).
+ */
+function runtimeHelperModulesIn(sf) {
+  const loads = [];
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const isLoad =
+      expr.getKind() === SyntaxKind.ImportKeyword ||
+      (expr.getKind() === SyntaxKind.Identifier && expr.getText() === "require");
+    if (!isLoad) continue;
+    const spec = literalMemberName(call.getArguments()[0]);
+    if (spec === null || !TENANT_RLS_MODULE_RE.test(spec)) continue;
+    let holder = call.getParent();
+    while (holder && (holder.getKind() === SyntaxKind.AwaitExpression || holder.getKind() === SyntaxKind.ParenthesizedExpression)) {
+      holder = holder.getParent();
+    }
+    const binding = holder?.getKind() === SyntaxKind.VariableDeclaration ? holder.getNameNode() : null;
+    loads.push({ call, binding });
+  }
+  return loads;
+}
+
+/** Marks a local name bound to more than one RLS helper in the file (round 14, S-R14-1). */
+const AMBIGUOUS_HELPER = "<ambiguous>";
+
 function localHelperNames(sf) {
   const byLocalName = new Map([...HELPER_NAMES].map((n) => [n, n]));
   for (const imp of sf.getImportDeclarations()) {
     // Match the module, not a text tail: `@/lib/tenant-rls.js` and a relative
     // `../../lib/tenant-rls` are the same module as `@/lib/tenant-rls`, and an
     // aliased import from a spelling this misses escapes the file allowlist.
-    if (!/(^|\/)tenant-rls(\.[cm]?[jt]sx?)?$/.test(imp.getModuleSpecifierValue())) continue;
+    if (!TENANT_RLS_MODULE_RE.test(imp.getModuleSpecifierValue())) continue;
     for (const named of imp.getNamedImports()) {
       const canonical = named.getName();
       if (!HELPER_NAMES.has(canonical)) continue;
       byLocalName.set(named.getAliasNode()?.getText() ?? canonical, canonical);
     }
   }
+  // A destructured run-time load binds the helpers as a named import does, so a
+  // call through `const { withBypassRls: wb } = await import(…)` is still a call.
+  for (const { binding } of runtimeHelperModulesIn(sf)) {
+    if (binding?.getKind() !== SyntaxKind.ObjectBindingPattern) continue;
+    for (const element of binding.getElements()) {
+      if (element.getDotDotDotToken() || element.getNameNode().getKind() !== SyntaxKind.Identifier) continue;
+      const canonical = (element.getPropertyNameNode() ?? element.getNameNode()).getText();
+      if (!HELPER_NAMES.has(canonical)) continue;
+      // The map is file-wide. A binding that names a different helper under a name
+      // already bound — `{ withTenantRls: withBypassRls }` in another function —
+      // reclassified every call spelled with that name, and a real bypass call
+      // reached none of the checks. The name is ambiguous instead (round 14, S-R14-1).
+      const local = element.getNameNode().getText();
+      const previous = byLocalName.get(local);
+      byLocalName.set(local, previous === undefined || previous === canonical ? canonical : AMBIGUOUS_HELPER);
+    }
+  }
   return byLocalName;
+}
+
+const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
+
+/** Nodes whose name child is a name, not a reference to a binding of that name. */
+const NAMED_DECLARATION_KINDS = new Set([
+  SyntaxKind.PropertyAssignment,
+  SyntaxKind.PropertySignature,
+  SyntaxKind.PropertyDeclaration,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.MethodSignature,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.SetAccessor,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.VariableDeclaration,
+  SyntaxKind.Parameter,
+  SyntaxKind.EnumMember,
+  SyntaxKind.BindingElement,
+]);
+
+const isDirectCallee = (node) => {
+  const parent = node.getParent();
+  return parent?.getKind() === SyntaxKind.CallExpression && sameNode(parent.getExpression(), node);
+};
+
+/**
+ * Every reference to an RLS helper that is neither a direct call nor a type
+ * position (round 13). helperCallsIn sees only `helper(…)`, `helper?.(…)` and
+ * `ns.helper(…)`; anything else — a wrapped or aliased callee, `.call`/`.apply`/
+ * `.bind`, an element access, the helper or its namespace handed on as a value —
+ * reaches none of the checks, so it is reported here instead of being followed.
+ */
+function indirectHelperReferencesIn(sf) {
+  const byLocalName = localHelperNames(sf);
+  const namespaces = new Set();
+  for (const imp of sf.getImportDeclarations()) {
+    if (!TENANT_RLS_MODULE_RE.test(imp.getModuleSpecifierValue())) continue;
+    const ns = imp.getNamespaceImport();
+    if (ns) namespaces.add(ns.getText());
+  }
+  const refs = [];
+  for (const { call, binding } of runtimeHelperModulesIn(sf)) {
+    if (!binding) refs.push(call);
+    else if (binding.getKind() === SyntaxKind.Identifier) namespaces.add(binding.getText());
+    else if (binding.getKind() === SyntaxKind.ObjectBindingPattern) {
+      for (const element of binding.getElements()) {
+        if (element.getDotDotDotToken() || element.getNameNode().getKind() !== SyntaxKind.Identifier) refs.push(element);
+      }
+    } else refs.push(binding);
+  }
+  for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    const name = id.getText();
+    const parent = id.getParent();
+    const kind = parent?.getKind();
+    if (kind === SyntaxKind.ImportSpecifier || kind === SyntaxKind.NamespaceImport || kind === SyntaxKind.ExportSpecifier) continue;
+    if (kind === SyntaxKind.TypeQuery) continue;
+    if (kind === SyntaxKind.QualifiedName) {
+      // A type position, except in `import wb = rls.withBypassRls`, which binds a
+      // value alias the calls below then go through (round 14, F-R14-1).
+      if (
+        parent.getFirstAncestorByKind(SyntaxKind.ImportEqualsDeclaration) &&
+        sameNode(parent.getRight(), id) &&
+        HELPER_NAMES.has(name)
+      ) {
+        refs.push(parent);
+      }
+      continue;
+    }
+    if (NAMED_DECLARATION_KINDS.has(kind) && sameNode(parent.getNameNode?.(), id)) continue;
+    if (kind === SyntaxKind.BindingElement && sameNode(parent.getPropertyNameNode?.(), id)) continue;
+    if (kind === SyntaxKind.PropertyAccessExpression && sameNode(parent.getNameNode(), id)) continue;
+
+    if (namespaces.has(name)) {
+      const isObject =
+        (kind === SyntaxKind.PropertyAccessExpression || kind === SyntaxKind.ElementAccessExpression) &&
+        sameNode(parent.getExpression(), id);
+      if (!isObject) {
+        refs.push(id);
+        continue;
+      }
+      const member =
+        kind === SyntaxKind.PropertyAccessExpression ? parent.getName() : literalMemberName(parent.getArgumentExpression());
+      if (member === null) refs.push(parent);
+      else if (HELPER_NAMES.has(member) && !(kind === SyntaxKind.PropertyAccessExpression && isDirectCallee(parent))) refs.push(parent);
+      continue;
+    }
+
+    if (!byLocalName.has(name)) continue;
+    if (byLocalName.get(name) !== AMBIGUOUS_HELPER && isDirectCallee(id)) continue;
+    refs.push(id);
+  }
+  return refs;
 }
 
 /** Every helper call in the file, paired with the canonical helper it resolves to. */
@@ -366,139 +564,9 @@ function helperCallsIn(sf) {
       expr.getKind() === SyntaxKind.PropertyAccessExpression
         ? (HELPER_NAMES.has(expr.getName()) ? expr.getName() : undefined)
         : byLocalName.get(expr.getText());
-    if (helper) calls.push({ call, helper });
+    if (helper && helper !== AMBIGUOUS_HELPER) calls.push({ call, helper });
   }
   return calls;
-}
-
-// Node kinds that open a scope, for deciding whether a declaration is visible
-// from a call site.
-const SCOPE_KINDS = new Set([
-  SyntaxKind.SourceFile,
-  SyntaxKind.Block,
-  SyntaxKind.FunctionDeclaration,
-  SyntaxKind.FunctionExpression,
-  SyntaxKind.ArrowFunction,
-  SyntaxKind.MethodDeclaration,
-  SyntaxKind.Constructor,
-  SyntaxKind.GetAccessor,
-  SyntaxKind.SetAccessor,
-  SyntaxKind.ModuleDeclaration,
-]);
-
-/** The nearest ancestor of `node` that introduces a scope. */
-function scopeOf(node) {
-  for (let p = node.getParent(); p; p = p.getParent()) {
-    if (SCOPE_KINDS.has(p.getKind())) return p;
-  }
-  return null;
-}
-
-/**
- * Every declaration in the file that binds a name, indexed by that name.
- * Built once per source file: `callbackOf` consults it per argument, and
- * rebuilding it per lookup would walk the whole tree ~950 times per run.
- *
- * All binding kinds are indexed, not only the function-valued ones. Counting
- * only functions is what let an unrelated `const job = async (tx) => …` in a
- * sibling function satisfy a `job` that actually refers to the enclosing
- * function's own parameter — the gate then scanned a body the call never runs
- * and reported OK, in place of the "could not be resolved" report.
- */
-function bindingIndex(sf) {
-  const index = new Map();
-  const add = (name, decl) => {
-    const bucket = index.get(name);
-    if (bucket) bucket.push(decl);
-    else index.set(name, [decl]);
-  };
-  const kinds = [
-    SyntaxKind.VariableDeclaration,
-    SyntaxKind.FunctionDeclaration,
-    SyntaxKind.Parameter,
-  ];
-  for (const kind of kinds) {
-    for (const decl of sf.getDescendantsOfKind(kind)) {
-      // A destructuring declaration binds each element's name, not the pattern.
-      // `getName()` returns the pattern text ("{ job }"), which no identifier can
-      // equal — so indexing by it would leave `job` looking unbound, and an
-      // unrelated `job` elsewhere would then resolve as the unique candidate.
-      // That is the same getName()-on-a-pattern mistake this file already fixed
-      // in clientBindingsIn and declaresUnusedTx.
-      const nameNode = decl.getNameNode?.();
-      if (nameNode && nameNode.getKind() !== SyntaxKind.Identifier) {
-        for (const el of nameNode.getDescendantsOfKind(SyntaxKind.BindingElement)) {
-          add(el.getName(), decl);
-        }
-        continue;
-      }
-      const name = decl.getName?.();
-      if (name) add(name, decl);
-    }
-  }
-  return index;
-}
-
-/**
- * The callback the helper will invoke. Its position differs per helper
- * (`withBypassRls(prisma, fn, purpose)` vs `withTenantRls(prisma, tenantId, fn)`),
- * so it is found by kind rather than by index.
- *
- * A callback passed by name resolves only when exactly one declaration of that
- * name is visible from the call — visible meaning its own scope encloses the
- * call site, which is what makes the answer about the name at THIS call rather
- * than about the file's vocabulary. Ambiguity, invisibility, or a binding that
- * is not a function all return null, and the caller reports the site: this gate
- * has been wrong four times by guessing, so it no longer guesses.
- */
-function resolveLocalFunction(name, at, bindingsFor, seen = new Set()) {
-  const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
-    const scope = scopeOf(decl);
-    return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
-  });
-  if (visible.length === 0) return null;
-
-  // JavaScript picks the INNERMOST binding, so the gate does too: the visible
-  // declaration whose scope is smallest. Requiring exactly one meant a local
-  // `query` shadowing a module-level `query` resolved to neither, and the call
-  // was skipped in silence.
-  let decl = visible[0];
-  let best = scopeOf(decl).getEnd() - scopeOf(decl).getStart();
-  for (const candidate of visible.slice(1)) {
-    const scope = scopeOf(candidate);
-    const span = scope.getEnd() - scope.getStart();
-    if (span < best) {
-      best = span;
-      decl = candidate;
-    }
-  }
-
-  const id = `${decl.getStart()}:${decl.getEnd()}`;
-  if (seen.has(id)) return null;
-  seen.add(id);
-
-  // A declaration without a body (an ambient or overload signature) says the
-  // implementation is elsewhere, so this file cannot answer.
-  if (decl.getKind() === SyntaxKind.FunctionDeclaration) {
-    return decl.getBody() ? decl : null;
-  }
-
-  // Only a `const` initializer answers "which function runs here". A
-  // parameter's initializer is its DEFAULT — one of the values a caller may
-  // supply, not the one supplied at any call that passes an argument. A
-  // `let`/`var` binding can hold a different function by the time it runs.
-  if (decl.getKind() !== SyntaxKind.VariableDeclaration) return null;
-  if (decl.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
-  const init = unwrapExpression(decl.getInitializer());
-  if (init && FN_KINDS.has(init.getKind())) return init;
-  // `const aliasedQuery = query` names a function without being one. Follow it
-  // from the ALIAS's own position, not the call's — that is where the name it
-  // mentions is resolved — and stop on a declaration already visited, which
-  // ends a cycle without a depth limit a longer chain could step over.
-  if (init?.getKind() === SyntaxKind.Identifier) {
-    return resolveLocalFunction(init.getText(), init, bindingsFor, seen);
-  }
-  return null;
 }
 
 /**
@@ -552,41 +620,6 @@ function calleeFunctionOf(call, bindingsFor) {
     }
   }
   return null;
-}
-
-/** The object literal a local `const` name is bound to, if any. */
-function resolveLocalObjectLiteral(name, at, bindingsFor) {
-  // Pick the binding FIRST, then ask what it holds. Filtering candidates to
-  // object literals before choosing dropped an inner `const helpers = actual`
-  // from candidacy — its initializer is an identifier — so the OUTER object
-  // won, which is the "analysed a different binding" defect one filter-order
-  // away from the one D29 fixed. There is no fallback to an outer declaration:
-  // a binding this file cannot prove holds an object literal returns null, and
-  // null is the D28 class (a propagation whose mapping is unproven), not a
-  // licence to analyse something else.
-  const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
-    const scope = scopeOf(decl);
-    return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
-  });
-  if (visible.length === 0) return null;
-
-  let best = visible[0];
-  let span = scopeOf(best).getEnd() - scopeOf(best).getStart();
-  for (const candidate of visible.slice(1)) {
-    const scope = scopeOf(candidate);
-    const width = scope.getEnd() - scope.getStart();
-    if (width < span) {
-      span = width;
-      best = candidate;
-    }
-  }
-
-  if (best.getKind() !== SyntaxKind.VariableDeclaration) return null;
-  // `let`/`var` can hold a different object by the time the call runs, so only
-  // a `const` initializer answers what this name holds.
-  if (best.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
-  const init = unwrapExpression(best.getInitializer());
-  return init?.getKind() === SyntaxKind.ObjectLiteralExpression ? init : null;
 }
 
 function callbackOf(call, bindingsFor) {
@@ -686,19 +719,6 @@ function staticMemberName(node) {
  * receiver — because the last three defects here were all the two sides
  * reducing an expression differently.
  */
-/** An expression with its type-level wrappers removed. */
-function unwrapExpression(expr) {
-  switch (expr?.getKind()) {
-    case SyntaxKind.ParenthesizedExpression:
-    case SyntaxKind.AsExpression:
-    case SyntaxKind.NonNullExpression:
-    case SyntaxKind.SatisfiesExpression:
-      return unwrapExpression(expr.getExpression());
-    default:
-      return expr;
-  }
-}
-
 function clientKey(expr) {
   if (!expr) return null;
   switch (expr.getKind()) {
@@ -771,7 +791,10 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
   // with an incomplete client set reports "no violations" for a callback it
   // could not read. The caller turns this into a named violation.
   const clientUnresolved = Boolean(clientArg) && !argText;
-  if (!fn) return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes };
+  // Call sites that hand the client to a callee outside this file. The header's
+  // fail-open class, counted rather than asserted in prose.
+  const handedOff = [];
+  if (!fn) return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff };
 
   // A destructuring OUTSIDE the callback is not a bypassed access — it only
   // tells us what the bound names carry. Model references are collected from
@@ -1014,13 +1037,20 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
           .filter((index) => index >= 0);
         if (positions.length === 0) continue;
         const resolved = calleeFunctionOf(inner, bindingsFor);
-        if (!resolved) continue;
+        if (!resolved) {
+          // The client crosses a module boundary this tree cannot open. Recorded
+          // rather than merely skipped: the models it reaches over there are
+          // reached under THIS bypass, so any question of the form "which models
+          // does this file touch" has no answer here.
+          handedOff.push(inner.getStartLineNumber());
+          continue;
+        }
         for (const index of positions) enrol(resolved.fn, index - resolved.argOffset);
       }
     }
   }
 
-  return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes };
+  return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff };
 }
 
 /**
@@ -1087,9 +1117,25 @@ const astProject = createAstProject();
 const unparseableFiles = [];
 const fileViolations = [];
 const modelViolations = [];
+/**
+ * file -> models actually reached under a bypass, and whether anything in
+ * that file defeated the analysis. The second half is what keeps the
+ * over-breadth check below from reading an undecidable file as an unused
+ * permission.
+ */
+const usedModels = new Map();
+const undecidableFiles = new Set();
+let handedOffSites = 0;
+/**
+ * Files that make at least one real `withBypassRls` call, or hold a helper reference
+ * this gate reports as unfollowable (round 13). The whole-entry check reads it: such a
+ * file already fails, and telling its reviewer to delete the entry would be wrong.
+ */
+const bypassCallFiles = new Set();
 const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
+const indirectHelperReferences = [];
 const unresolvedClients = [];
 const unresolvedModels = [];
 const f3UnusedTxViolations = [];
@@ -1134,6 +1180,21 @@ for (const file of sourceFiles) {
 
   const calls = helperCallsIn(sf);
   const bypassCalls = calls.filter(({ helper }) => helper === "withBypassRls");
+  if (bypassCalls.length > 0) bypassCallFiles.add(file);
+
+  // A helper this gate cannot follow as a direct call reaches none of the checks
+  // below, so the reference itself fails (round 13).
+  const helperNames = localHelperNames(sf);
+  const indirect = indirectHelperReferencesIn(sf);
+  for (const ref of indirect) {
+    const ambiguous = helperNames.get(ref.getText()) === AMBIGUOUS_HELPER;
+    indirectHelperReferences.push({
+      file,
+      line: ref.getStartLineNumber(),
+      text: ambiguous ? `${ref.getText()} (bound to more than one RLS helper in this file)` : ref.getText(),
+    });
+  }
+  if (indirect.length > 0) bypassCallFiles.add(file);
   const allowedModels = ALLOWED_USAGE.get(file);
 
   // Check 1: a file that really calls withBypassRls must be on the allowlist.
@@ -1200,9 +1261,13 @@ for (const file of sourceFiles) {
     // callback is the scan node — which is the call's own subtree for an inline
     // callback, and the resolved declaration for one passed by name.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const { clients, modelRefs, clientUnresolved, unresolved, callbackNodes } =
+    const { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff } =
       clientBindingsIn(fn, flowFor(), call.getArguments()[0], bindingsFor);
-    if (clientUnresolved) unresolvedClients.push({ file, line });
+    if (clientUnresolved) { unresolvedClients.push({ file, line }); undecidableFiles.add(file); }
+    if (handedOff.length > 0) {
+      handedOffSites += handedOff.length;
+      undecidableFiles.add(file);
+    }
     const seen = new Set();
     // The call itself (its other arguments can hold model access) plus every
     // callback the analyser reached, wherever each is declared. Overlap is
@@ -1212,6 +1277,8 @@ for (const file of sourceFiles) {
       const key = `${model}:${line}`;
       if (seen.has(key)) return;
       seen.add(key);
+      if (!usedModels.has(file)) usedModels.set(file, new Set());
+      usedModels.get(file).add(model);
       if (!allowedSet.has(model)) modelViolations.push({ file, line, model });
     };
     // Delegates lifted straight off a client by destructuring, then every
@@ -1219,6 +1286,7 @@ for (const file of sourceFiles) {
     for (const ref of modelRefs) report(ref);
     for (const u of unresolved) {
       unresolvedModels.push({ file, line: u.line, text: u.text });
+      undecidableFiles.add(file);
     }
     for (const node of scanNodes) {
       const { refs, unresolved } = modelRefsIn(node, clients);
@@ -1228,9 +1296,56 @@ for (const file of sourceFiles) {
         if (seen.has(key)) continue;
         seen.add(key);
         unresolvedModels.push({ file, line: u.line, text: u.text });
+        undecidableFiles.add(file);
       }
     }
   }
+}
+
+/**
+ * The reverse direction: a model this file is permitted to reach under a
+ * bypass and never does. The permission outlives its reason, and the next
+ * reader takes the entry for the file's documented scope — `notification.ts`
+ * carried `user` for a read it had already moved into the adjudicator.
+ *
+ * Skipped for a file whose analysis was defeated anywhere (an unresolved
+ * client or model access): there, "never reached" means "not seen".
+ */
+const staleAllowances = [];
+for (const [file, models] of ALLOWED_USAGE) {
+  if (models.includes("*") || undecidableFiles.has(file)) continue;
+  const reached = usedModels.get(file);
+  if (!reached) continue; // reached no model: a file with no bypass call is judged whole, below
+  for (const model of models) {
+    if (!reached.has(model)) staleAllowances.push({ file, model });
+  }
+}
+
+/**
+ * The whole-entry form of the same question: an ALLOWED_USAGE entry whose file
+ * makes no `withBypassRls` call at all. The per-model check above skips such a
+ * file — it reached no model because it opened no bypass — and its comment used
+ * to call that "Check 1's business". It is not: Check 1 fires only in the other
+ * direction, a call with no entry, so this direction was checked by nothing.
+ *
+ * NOT judged here, each for a stated reason:
+ *   - `["*"]` entries, the helpers' own definition;
+ *   - a file this run could not parse, which is reported on its own above;
+ *   - a file that sets `app.bypass_rls` through raw SQL. That is a real bypass
+ *     this gate cannot see; `check-raw-sql-usage` requires such a file to be
+ *     allowlisted with a stated purpose, so the entry here documents a scope
+ *     nothing in this gate enforces, rather than one that has gone stale;
+ *   - a file absent from the tree being scanned. The self-test runs this gate on
+ *     one-file fixture trees, so absence is asserted by a real-repo cell there.
+ */
+const RAW_BYPASS_GUC_RE = /set_config\(\s*'app\.bypass_rls'\s*,\s*'on'/;
+const unparseableFileSet = new Set(unparseableFiles.map(({ file }) => file));
+const staleEntries = [];
+for (const [file, models] of ALLOWED_USAGE) {
+  if (models.includes("*") || bypassCallFiles.has(file) || unparseableFileSet.has(file)) continue;
+  if (!existsSync(file)) continue;
+  if (RAW_BYPASS_GUC_RE.test(readFileSync(file, "utf8"))) continue;
+  staleEntries.push(file);
 }
 
 let failed = false;
@@ -1280,6 +1395,33 @@ if (modelViolations.length > 0) {
   console.error("");
   for (const { file, line, model } of modelViolations) {
     console.error(`  ${file}:${line}  prisma.${model}`);
+  }
+}
+
+if (staleEntries.length > 0) {
+  failed = true;
+  if (modelViolations.length > 0) console.error("");
+  console.error("ALLOWED_USAGE has an entry for a file that makes no withBypassRls call.");
+  console.error("Remove it: the entry reads as a bypass this file performs, and it performs none.");
+  console.error("");
+  for (const file of staleEntries) console.error(`  ${file}`);
+}
+
+if (staleAllowances.length > 0) {
+  failed = true;
+  if (modelViolations.length > 0) console.error("");
+  console.error(
+    "ALLOWED_USAGE permits a model the file never reaches under a bypass.",
+  );
+  console.error(
+    "Remove it: a permission that outlives its reason reads to the next",
+  );
+  console.error(
+    "reviewer as the scope this file is meant to have.",
+  );
+  console.error("");
+  for (const { file, model } of staleAllowances) {
+    console.error(`  ${file}  prisma.${model}`);
   }
 }
 
@@ -1373,6 +1515,20 @@ if (indirectCallbacks.length > 0) {
   }
 }
 
+if (indirectHelperReferences.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("with*Rls helper referenced in a form this gate cannot follow as a direct call.");
+  console.error(
+    "The file allowlist, the purpose check and the model scan see only `helper(…)` and",
+  );
+  console.error("`ns.helper(…)`, so these references were NOT checked. Call the helper directly:");
+  console.error("");
+  for (const { file, line, text } of indirectHelperReferences) {
+    console.error(`  ${file}:${line}  ${text}`);
+  }
+}
+
 // A file the parser reported diagnostics on was not scanned at all: the calls
 // this gate exists to find can be missing from a recovered tree, and a dropped
 // call is examined by nothing. "Examined nothing" must not be spelled like
@@ -1403,5 +1559,7 @@ const scannableCount = sourceFiles.filter(
   (f) => !f.includes(".test.") && !f.includes("__tests__"),
 ).length;
 console.log(
-  `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files)`,
+  `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files; ` +
+    `${handedOffSites} call site(s) hand the client to a callee outside the file, ` +
+    `so those files are exempt from the over-breadth check)`,
 );

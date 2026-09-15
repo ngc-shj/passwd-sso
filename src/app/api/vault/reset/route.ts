@@ -78,6 +78,8 @@ async function handlePOST(request: NextRequest) {
   // transaction (executeVaultReset), so an irreversible wipe can never commit
   // without a committed audit record. The invalidation counts below are appended
   // as a best-effort completion event (they are only known post-transaction).
+  // Unscoped: the owner's authority covers all of their vault rows, under every
+  // tenant. Only an admin-authorized reset is limited to one.
   const { deletedEntries, deletedAttachments } = await executeVaultReset(
     userId,
     {

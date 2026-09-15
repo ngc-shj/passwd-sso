@@ -18,9 +18,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CHECKER = fileURLToPath(new URL("../checks/check-bypass-rls.mjs", import.meta.url));
@@ -62,7 +62,7 @@ async function h() {
 // The sanctioned shape: tenant-context.ts is in F3_UNUSED_TX_ALLOWLIST,
 // so its unused-tx delegating wrapper (fn(tenantId) public contract) is allowed.
 // A sibling real (tx) => tx.x callback confirms the file still passes the model
-// allowlist (tenantMember, team).
+// allowlist (tenantMember, team, user).
 const TENANT_CONTEXT_ALLOWED = `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function withTenantContext(tenantId) {
@@ -73,6 +73,17 @@ export async function withTenantContext(tenantId) {
 export async function withTeamContext(tenantId, fn) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) => fn(tenantId));
+}
+// Mirrors resolveTeamTenantId. Present because a fixture at an allowlisted path
+// must reach every model that path permits — see "allowlist over-breadth" below.
+export async function resolveTeamTenantId(teamId) {
+  return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) =>
+    tx.team.findUnique({ where: { id: teamId } }));
+}
+// Mirrors existingUserIdsByEmail, for the same reason.
+export async function existingUserIdsByEmail(emails) {
+  return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) =>
+    tx.user.findMany({ where: { email: { in: emails } }, select: { id: true } }));
 }`;
 
 // A brand-new (non-allowlisted) file that suppresses an unused tx — trips BOTH
@@ -399,17 +410,19 @@ export async function drain() {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
-  it("passes a healthy file that mentions the helper only in prose", () => {
-    // A file whose bypass call was removed but whose explanatory comment and
-    // allowlist entry remain — an ordinary cleanup. Round 3 reported it as
-    // unparseable, naming a file that parsed perfectly. Prior verdict: exit 1.
-    const { code, stdout, stderr } = run("src/lib/audit/audit-outbox.ts", `
+  it("reports a file that mentions the helper only in prose as a stale entry, not as unparseable", () => {
+    // A file whose bypass call was removed while its explanatory comment and
+    // allowlist entry remain. Round 3 reported it as unparseable, naming a file
+    // that parsed perfectly. It is a stale allowlist entry, and that is what it
+    // must be reported as.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 // This used to call withBypassRls(prisma, cb, BYPASS_PURPOSE.AUDIT) before the refactor.
 export const purpose = BYPASS_PURPOSE.AUDIT;`);
-    expect(code).toBe(0);
-    expect(stdout).toContain("check-bypass-rls: OK");
+    expect(code).toBe(1);
     expect(stderr).not.toContain("could not be parsed");
+    expect(stderr).toContain("makes no withBypassRls call");
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts");
   });
 
   it("passes a compliant call in a file whose string quotes an eslint-disable", () => {
@@ -1606,6 +1619,9 @@ export async function sneaky() {
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export default async function Page() {
   const row = await withBypassRls(prisma, async (tx) => tx.${model}.findFirst({}), BYPASS_PURPOSE.SHARE);
+  // shareAccessLog is the other model this path permits; a fixture that reached
+  // only one of the two would now trip the over-breadth check below.
+  await withBypassRls(prisma, async (tx) => tx.shareAccessLog.create({}), BYPASS_PURPOSE.SHARE);
   return <div className="p">{row?.id}</div>;
 }`;
     const denied = run("src/app/s/[token]/page.tsx", source("tenantMember"));
@@ -1618,3 +1634,333 @@ export default async function Page() {
     expect(allowed.stdout).toContain("check-bypass-rls: OK");
   });
 });
+
+// ─── the reverse direction: a permission nothing uses ────────────────────────
+//
+// The allowlist had been read for two rounds as the documented bypass scope of
+// each file, and six entries named models their file had stopped reaching. The
+// forward check cannot see that: it only asks whether what IS reached was
+// permitted.
+
+describe("allowlist over-breadth", () => {
+  it("fails an entry naming a model the file never reaches", () => {
+    // tenant/policy allows tenant + teamPolicy. This fixture reaches only the
+    // first, so the second is a permission with nothing behind it.
+    const { code, stderr } = run("src/app/api/tenant/policy/route.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function GET() {
+  return withBypassRls(prisma, async (tx) => tx.tenant.findUnique({ where: { id } }), BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("permits a model the file never reaches");
+    expect(stderr).toContain("prisma.teamPolicy");
+    // The one it DOES reach must not be reported alongside it, or the message
+    // stops naming what to remove.
+    expect(stderr).not.toContain("prisma.tenant\n");
+  });
+
+  it("passes when every permitted model is reached", () => {
+    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function GET() {
+  return withBypassRls(prisma, async (tx) => {
+    await tx.tenant.findUnique({ where: { id } });
+    return tx.teamPolicy.findMany({});
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("exempts a file that hands the client to a callee it cannot open", () => {
+    // The gate's own fail-open class. Over there the callee may reach every
+    // permitted model; "never reached" here would mean "not seen", and acting on
+    // it would delete a true permission. Eight of the fourteen candidates in the
+    // real tree were exactly this — `notification.ts` among them, whose `user`
+    // read had moved into the adjudicator it now hands `tx` to.
+    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveSomething } from "@/lib/elsewhere";
+export async function GET() {
+  return withBypassRls(prisma, async (tx) => {
+    await tx.tenant.findUnique({ where: { id } });
+    return resolveSomething(tx, id);
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+    // The exemption is counted, not silent: a run that exempts everything and a
+    // run that exempts nothing must not print the same line.
+    expect(stdout).toMatch(/[1-9]\d* call site\(s\) hand the client/);
+  });
+
+  it("does not fire on a file whose bypass reaches no model at all", () => {
+    // A raw-SQL bypass touches no model. Reporting every permitted model as
+    // unused there would make the check fire loudest where it knows least.
+    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function GET() {
+  return withBypassRls(prisma, async (tx) => tx.$executeRaw\`SELECT 1\`, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("fails an entry whose file makes no withBypassRls call at all", () => {
+    // The widest member of the over-breadth class, which the per-model check skips
+    // under a comment that called it "Check 1's business" — Check 1 fires only in
+    // the other direction. The real tree held two: the MCP token route and the 410
+    // DCR-cleanup stub, neither of which bypasses anything now.
+    const { code, stderr } = run("src/app/api/tenant/policy/route.ts", `
+export async function GET() {
+  return new Response(null, { status: 410 });
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("makes no withBypassRls call");
+    expect(stderr).toContain("src/app/api/tenant/policy/route.ts");
+  });
+
+  it("does not judge a file that bypasses through raw SQL", () => {
+    // A real bypass this gate cannot see; `check-raw-sql-usage` governs it.
+    // Flagging the entry would delete the only record here that the file bypasses.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+export async function drain(tx) {
+  await tx.$executeRaw\`SELECT set_config('app.bypass_rls', 'on', true)\`;
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("names only files that exist, in the real repo's allowlist", () => {
+    // Absence is not judged by the gate — it runs on one-file fixture trees, where
+    // every other allowlisted file is absent by construction — so it is asserted
+    // here against the real tree. A deleted file's entry must not outlive it.
+    const repoRoot = join(dirname(CHECKER), "..", "..");
+    const source = readFileSync(CHECKER, "utf8");
+    const start = source.indexOf("const ALLOWED_USAGE = new Map([");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = source.slice(start, source.indexOf("]);", start));
+    const files = [...block.matchAll(/\[\s*"([^"]+)",\s*\[/g)].map((m) => m[1]);
+    // "Parsed nothing" must not read as "nothing missing".
+    expect(files.length).toBeGreaterThan(50);
+    expect(files.filter((f) => !existsSync(join(repoRoot, f)))).toEqual([]);
+  });
+});
+
+describe("a helper reference the gate cannot follow as a direct call is refused (audit-tenant-adjudicator round 13)", () => {
+  // Every one of these escaped Check 1: a file on no allowlist passed with "OK".
+  // Only a direct call reached helperCallsIn; the gate matched the callee's
+  // spelling. The rule is now the other way round: a helper referenced anywhere
+  // but a direct callee or a type position is reported, whatever its spelling.
+  const IMPORT = `import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";\nimport * as rls from "@/lib/tenant-rls";\n`;
+  const CB = "async (tx) => tx.user.findMany()";
+  const P = "BYPASS_PURPOSE.SYSTEM_MAINTENANCE";
+  const REFUSAL = "referenced in a form this gate cannot follow as a direct call";
+
+  it.each([
+    ["a namespace element access", `rls["withBypassRls"](prisma, ${CB}, ${P})`],
+    ["a non-null callee", `withBypassRls!(prisma, ${CB}, ${P})`],
+    ["a parenthesized callee", `(withBypassRls)(prisma, ${CB}, ${P})`],
+    ["an `as` callee", `(withBypassRls as typeof withBypassRls)(prisma, ${CB}, ${P})`],
+    ["a `satisfies` callee", `(withBypassRls satisfies unknown as typeof withBypassRls)(prisma, ${CB}, ${P})`],
+    ["an angle-bracket callee", `(<typeof withBypassRls>withBypassRls)(prisma, ${CB}, ${P})`],
+    ["a comma callee", `(0, withBypassRls)(prisma, ${CB}, ${P})`],
+    [".call", `withBypassRls.call(null, prisma, ${CB}, ${P})`],
+    [".apply", `withBypassRls.apply(null, [prisma, ${CB}, ${P}])`],
+    [".bind", `withBypassRls.bind(null)(prisma, ${CB}, ${P})`],
+    ["a local alias", `(() => { const wb = withBypassRls; return wb(prisma, ${CB}, ${P}); })()`],
+    ["a destructured namespace member", `(() => { const { withBypassRls: wb } = rls; return wb(prisma, ${CB}, ${P}); })()`],
+    ["the helper passed to another function", `run(withBypassRls, prisma, ${CB})`],
+    ["the helper stored in an object", `({ open: withBypassRls }).open(prisma, ${CB}, ${P})`],
+    ["a conditional callee", `(flag ? withBypassRls : other)(prisma, ${CB}, ${P})`],
+    ["the namespace object itself", `(() => { const r = rls; return r.withBypassRls(prisma, ${CB}, ${P}); })()`],
+  ])("refuses %s in a file on no allowlist", (_label, expr) => {
+    const { code, stderr } = run("src/lib/probe.ts", `${IMPORT}export const f = () => ${expr};\n`);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+    expect(stderr).toContain("src/lib/probe.ts:");
+  });
+
+  it("refuses an indirect reference in an allowlisted file too: its callback's model access is not scanned", () => {
+    const { code, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `${IMPORT}export const f = () => (withBypassRls)(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+    expect(stderr).not.toContain("makes no withBypassRls call");
+  });
+
+  it("passes the same allowlisted file calling the helper directly (control)", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `${IMPORT}export const f = () => withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+    expect(stderr).not.toContain(REFUSAL);
+  });
+
+  it("passes a helper named only in a type position", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/probe.ts",
+      `import { withBypassRls } from "@/lib/tenant-rls";\nexport type Opener = typeof withBypassRls;\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+
+  it("passes a property that only shares the helper's name", () => {
+    // Not the imported binding: an object key and a member of some other object.
+    const { code, stdout, stderr } = run(
+      "src/lib/probe.ts",
+      `// with*Rls names below are plain keys\nexport const shape = { withBypassRls: 1 };\nexport const read = (o) => o.withBypassRls;\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+});
+
+describe("a helper module loaded at run time is followed like an import (audit-tenant-adjudicator round 13)", () => {
+  // Two vault routes destructure `await import("@/lib/tenant-rls")`. The gate took
+  // helper names from static imports only, so a renamed destructured binding, an
+  // element access on the loaded module, or the module used unbound reached no check.
+  const CB = "async (tx) => tx.user.findMany()";
+  const P = "BYPASS_PURPOSE.SYSTEM_MAINTENANCE";
+  const REFUSAL = "referenced in a form this gate cannot follow as a direct call";
+  const NOT_ALLOWLISTED = "withBypassRls usage found in files not on the allowlist";
+  const inAsync = (body) => `export async function f() {\n  ${body}\n}\n`;
+
+  it("counts a destructured dynamic import's direct call: a file on no allowlist is refused", () => {
+    const { code, stderr } = run(
+      "src/lib/probe.ts",
+      inAsync(`const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");\n  return withBypassRls(prisma, ${CB}, ${P});`),
+    );
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(NOT_ALLOWLISTED);
+    expect(stderr).not.toContain(REFUSAL);
+  });
+
+  it("counts a call through a renamed destructured binding", () => {
+    const { code, stderr } = run(
+      "src/lib/probe.ts",
+      inAsync(`const { withBypassRls: wb, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");\n  return wb(prisma, ${CB}, ${P});`),
+    );
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(NOT_ALLOWLISTED);
+    expect(stderr).not.toContain(REFUSAL);
+  });
+
+  it("passes a destructured dynamic import called directly in an allowlisted file", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      inAsync(`const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");\n  return withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);`),
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+
+  it.each([
+    ["an element access on the loaded module", `const rls = await import("@/lib/tenant-rls");\n  return rls["withBypassRls"](prisma, ${CB}, ${P});`],
+    ["the loaded module used without a binding", `return import("@/lib/tenant-rls").then((m) => m.withBypassRls(prisma, ${CB}, ${P}));`],
+    ["a rest element holding the helpers", `const { ...rls } = await import("@/lib/tenant-rls");\n  return rls.withBypassRls(prisma, ${CB}, ${P});`],
+    ["a required module's helper through a wrapped callee", `const { withBypassRls: wb } = require("@/lib/tenant-rls");\n  return (wb)(prisma, ${CB}, ${P});`],
+  ])("refuses %s", (_label, body) => {
+    const { code, stderr } = run("src/lib/probe.ts", inAsync(body));
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+  });
+});
+
+describe("a name bound to two helpers, an import-equals alias, and the branches round 13 left unpinned (audit-tenant-adjudicator round 14)", () => {
+  const CB = "async (tx) => tx.user.findMany()";
+  const P = "BYPASS_PURPOSE.SYSTEM_MAINTENANCE";
+  const REFUSAL = "referenced in a form this gate cannot follow as a direct call";
+  const AMBIGUOUS = "bound to more than one RLS helper in this file";
+  const NOT_ALLOWLISTED = "withBypassRls usage found in files not on the allowlist";
+  const IMPORTS = `import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";\nimport * as rls from "@/lib/tenant-rls";\n`;
+  const SHADOW = (name) =>
+    `export async function g() {\n  const { withTenantRls: ${name} } = await import("@/lib/tenant-rls");\n  return null;\n}\n`;
+
+  // S-R14-1: the helper-name map was file-wide, so a destructured load binding a
+  // different helper under a name already in use reclassified every call spelled with
+  // it, and the real bypass call reached none of the checks.
+  it.each([
+    ["the canonical name", `${IMPORTS}${SHADOW("withBypassRls")}export const f = () => withBypassRls(prisma, ${CB}, ${P});\n`],
+    ["a static alias", `import { withBypassRls as run, BYPASS_PURPOSE } from "@/lib/tenant-rls";\n${SHADOW("run")}export const f = () => run(prisma, ${CB}, ${P});\n`],
+    [
+      "two run-time loads",
+      `${SHADOW("open")}export async function f() {\n  const { withBypassRls: open, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");\n  return open(prisma, ${CB}, ${P});\n}\n`,
+    ],
+  ])("refuses a name bound to two helpers through %s, in a file on no allowlist", (_label, source) => {
+    const { code, stderr } = run("src/lib/probe.ts", source);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(AMBIGUOUS);
+  });
+
+  it("refuses the same shadow in an allowlisted file, and does not call its entry stale", () => {
+    const { code, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `${IMPORTS}${SHADOW("withBypassRls")}export const f = () => withBypassRls(prisma, async (tx) => tx.user.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(AMBIGUOUS);
+    expect(stderr).not.toContain("makes no withBypassRls call");
+  });
+
+  it("passes a name bound to the same helper twice", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";\nexport async function g() {\n  const { withBypassRls } = await import("@/lib/tenant-rls");\n  return withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n}\nexport const f = () => withBypassRls(prisma, async (tx) => tx.auditOutbox.count(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+
+  // F-R14-1: `import wb = rls.withBypassRls` was skipped as a type position.
+  it.each([
+    ["an import-equals alias", `${IMPORTS}import wb = rls.withBypassRls;\nexport const f = () => wb(prisma, ${CB}, ${P});\n`],
+    ["an exported import-equals alias", `${IMPORTS}export import wb = rls.withBypassRls;\nexport const f = () => wb(prisma, ${CB}, ${P});\n`],
+  ])("refuses %s", (_label, source) => {
+    const { code, stderr } = run("src/lib/probe.ts", source);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+  });
+
+  it("passes a qualified helper name in a type position and an import-equals alias of a non-helper member", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/probe.ts",
+      `import * as rls from "@/lib/tenant-rls";\nexport type Opener = typeof rls.withBypassRls;\nimport Purpose = rls.BYPASS_PURPOSE;\nexport const p = Purpose;\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+
+  // T-R14-1: three branches no round-13 cell reached.
+  it.each([
+    ["a computed namespace member", `(() => { const k = "withBypassRls"; return rls[k](prisma, ${CB}, ${P}); })()`],
+    ["a namespace member read as a value", `(() => { const g = rls.withBypassRls; return g(prisma, ${CB}, ${P}); })()`],
+    ["a namespace member's .call", `rls.withBypassRls.call(null, prisma, ${CB}, ${P})`],
+  ])("refuses %s", (_label, expr) => {
+    const { code, stderr } = run("src/lib/probe.ts", `${IMPORTS}export const f = () => ${expr};\n`);
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(REFUSAL);
+  });
+
+  it.each([["a relative specifier", "./tenant-rls"], ["a .js specifier", "@/lib/tenant-rls.js"]])(
+    "counts a renamed destructured load through %s",
+    (_label, specifier) => {
+      const { code, stderr } = run(
+        "src/lib/probe.ts",
+        `export async function f() {\n  const { withBypassRls: wb, BYPASS_PURPOSE } = await import("${specifier}");\n  return wb(prisma, ${CB}, ${P});\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(NOT_ALLOWLISTED);
+      expect(stderr).not.toContain(REFUSAL);
+    },
+  );
+
+  // T-R14-2: a namespace member that is not a helper is not a reference to one.
+  it("passes a non-helper namespace member read as a value in an allowlisted file", () => {
+    const { code, stdout, stderr } = run(
+      "src/lib/audit/audit-outbox.ts",
+      `import * as rls from "@/lib/tenant-rls";\nimport { BYPASS_PURPOSE } from "@/lib/tenant-rls";\nexport const purposes = rls.BYPASS_PURPOSE;\nexport const f = () => rls.withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+});
+

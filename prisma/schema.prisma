@@ -977,6 +977,7 @@ enum AuditAction {
   SCIM_USER_UPDATE
   SCIM_USER_DEACTIVATE
   SCIM_USER_REACTIVATE
+  SCIM_USER_REACTIVATION_REFUSED
   SCIM_USER_DELETE
   SCIM_GROUP_UPDATE
   POLICY_UPDATE
@@ -1006,6 +1007,8 @@ enum AuditAction {
   DIRECTORY_SYNC_CONFIG_DELETE
   DIRECTORY_SYNC_RUN
   DIRECTORY_SYNC_STALE_RESET
+  DIRECTORY_SYNC_ACTIVATION_REFUSED
+  USER_TENANT_REALIGNED
   SESSION_EVICTED
   ACCESS_DENIED
   TENANT_ROLE_UPDATE
@@ -1970,6 +1973,10 @@ model DirectorySyncLog {
   usersCreated     Int                 @default(0) @map("users_created")
   usersUpdated     Int                 @default(0) @map("users_updated")
   usersDeactivated Int                 @default(0) @map("users_deactivated")
+  // Memberships the cross-tenant guard declined to activate. Counted apart from
+  // usersUpdated: a refusal is not an update, and a run that reports one as an
+  // update reads to the IdP admin as a sync that worked.
+  usersRefused     Int                 @default(0) @map("users_refused")
   groupsUpdated    Int                 @default(0) @map("groups_updated")
   errorMessage     String?             @map("error_message") @db.Text
 

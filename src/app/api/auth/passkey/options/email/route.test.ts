@@ -13,6 +13,8 @@ const {
   mockGenerateAuthenticationOpts,
   mockAssertOrigin,
   mockPrismaUserFindFirst,
+  mockPrismaUserFindUnique,
+  mockPrismaTenantFindUnique,
   mockPrismaWebAuthnFindMany,
   mockWithBypassRls,
 } = vi.hoisted(() => {
@@ -25,6 +27,8 @@ const {
     mockGenerateAuthenticationOpts: vi.fn(),
     mockAssertOrigin: vi.fn(),
     mockPrismaUserFindFirst: vi.fn(),
+    mockPrismaUserFindUnique: vi.fn(),
+    mockPrismaTenantFindUnique: vi.fn(),
     mockPrismaWebAuthnFindMany: vi.fn(),
     mockWithBypassRls: vi.fn(),
   };
@@ -68,7 +72,11 @@ vi.mock("@/lib/auth/session/csrf", () => ({
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    user: { findFirst: mockPrismaUserFindFirst },
+    // findFirst keys by email and yields the id only; findUnique is
+    // `resolveOwningTenantIdFromClient`'s read, and the tenant is then loaded
+    // by that id rather than traversed through `user.tenant`.
+    user: { findFirst: mockPrismaUserFindFirst, findUnique: mockPrismaUserFindUnique },
+    tenant: { findUnique: mockPrismaTenantFindUnique },
     webAuthnCredential: { findMany: mockPrismaWebAuthnFindMany },
   },
 }));
@@ -98,6 +106,29 @@ const mockCredentials = [
   { credentialId: "cred-2-base64url", transports: ["internal"], prfSalt: null },
 ];
 
+// Seeds the three reads the route now makes: email → id, then the tenant id via
+// `resolveOwningTenantIdFromClient`, then the tenant row. The user read carries
+// the active membership as well as the column — column-only would resolve
+// through the FALLBACK, which is exactly the stale value this gate must not use.
+//
+// `membershipTenantId` defaults to `tenantId` so every existing cell keeps the
+// agreeing fixture it was written against; only the divergent cell below splits
+// them, and it supplies its own `isBootstrap` per id.
+function seedUser(opts: {
+  id: string;
+  tenantId?: string;
+  membershipTenantId?: string;
+  isBootstrap?: boolean;
+}) {
+  const tenantId = opts.tenantId ?? "tenant-1";
+  mockPrismaUserFindFirst.mockResolvedValue({ id: opts.id });
+  mockPrismaUserFindUnique.mockResolvedValue({
+    tenantId,
+    tenantMemberships: [{ tenantId: opts.membershipTenantId ?? tenantId }],
+  });
+  mockPrismaTenantFindUnique.mockResolvedValue({ isBootstrap: opts.isBootstrap ?? true });
+}
+
 // ── Setup ────────────────────────────────────────────────────
 
 describe("POST /api/auth/passkey/options/email", () => {
@@ -120,10 +151,7 @@ describe("POST /api/auth/passkey/options/email", () => {
       (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
     // Default: user found, bootstrap tenant
-    mockPrismaUserFindFirst.mockResolvedValue({
-      id: "user-1",
-      tenant: { isBootstrap: true },
-    });
+    seedUser({ id: "user-1" });
     mockPrismaWebAuthnFindMany.mockResolvedValue(mockCredentials);
   });
 
@@ -184,10 +212,7 @@ describe("POST /api/auth/passkey/options/email", () => {
   });
 
   it("treats SSO tenant user as unknown (returns dummy credentials)", async () => {
-    mockPrismaUserFindFirst.mockResolvedValue({
-      id: "user-sso",
-      tenant: { isBootstrap: false },
-    });
+    seedUser({ id: "user-sso", tenantId: "tenant-sso", isBootstrap: false });
 
     const req = createRequest("POST", ROUTE_URL, {
       body: { email: "sso@corp.com" },
@@ -204,11 +229,19 @@ describe("POST /api/auth/passkey/options/email", () => {
     );
   });
 
-  it("allows user without tenant (null tenant)", async () => {
-    mockPrismaUserFindFirst.mockResolvedValue({
-      id: "user-no-tenant",
-      tenant: null,
-    });
+  it("treats an unresolvable tenant as not-found, matching the verify route", async () => {
+    // Splitting the relation traversal into two reads made this arm reachable,
+    // and it used to land on the ALLOW side while `passkey/verify` rejects the
+    // same state — so the credential list and PRF salts were returned pre-auth
+    // on a state sign-in refuses.
+    //
+    // `toHaveBeenCalled()` cannot express this: the route has TWO
+    // `webAuthnCredential.findMany` sites behind one mock — the real list
+    // (`userId: user.id`) and the dummy list (`userId: NIL_UUID`) — so the
+    // previous version of this cell passed on either path and could not see the
+    // behaviour change. The argument is the discriminator.
+    seedUser({ id: "user-no-tenant" });
+    mockPrismaTenantFindUnique.mockResolvedValue(null);
 
     const req = createRequest("POST", ROUTE_URL, {
       body: { email: "notenant@example.com" },
@@ -216,8 +249,77 @@ describe("POST /api/auth/passkey/options/email", () => {
     });
     const { status } = await parseResponse(await POST(req));
 
+    // Still 200: the route must not leak which emails exist.
     expect(status).toBe(200);
-    expect(mockPrismaWebAuthnFindMany).toHaveBeenCalled();
+    expect(mockPrismaWebAuthnFindMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-no-tenant" } }),
+    );
+  });
+
+  it("returns the real credential list for a bootstrap-tenant user", async () => {
+    // The allow half of the cell above, and the reason it is not vacuous: with
+    // a resolvable bootstrap tenant the REAL list is fetched, so "not called
+    // with the user id" above is a difference, not a constant.
+    seedUser({ id: "user-bootstrap" });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: { email: "test@example.com" },
+      headers: { origin: "http://localhost:3000" },
+    });
+    const { status } = await parseResponse(await POST(req));
+
+    expect(status).toBe(200);
+    expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-bootstrap" } }),
+    );
+  });
+
+  it("runs the bootstrap gate against the active membership, not the stale User.tenantId", async () => {
+    // Every other cell seeds the same id in both places, so `tenant.findUnique`
+    // answers identically whichever source the resolver reads and the outcome is
+    // the same on both — the fixture cannot see precedence at all.
+    //
+    // This is the divergence the route's own comment names: SCIM moves the user
+    // into an SSO tenant while `User.tenantId` still points at the bootstrap one
+    // they left. So the two ids get OPPOSITE `isBootstrap` values, dispatched by
+    // the id the stub is called with (a blanket mockResolvedValue would be as
+    // blind as the same-id fixture). Reading the stale column would return the
+    // real credential list and PRF salts PRE-AUTH for a user whose tenant
+    // forbids passkey sign-in; reading the membership refuses.
+    seedUser({
+      id: "user-scim-moved",
+      tenantId: "stale-home-tenant",
+      membershipTenantId: "scim-provisioned-tenant",
+    });
+    mockPrismaTenantFindUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => ({
+        isBootstrap: where.id !== "scim-provisioned-tenant",
+      }),
+    );
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: { email: "scim-moved@corp.com" },
+      headers: { origin: "http://localhost:3000" },
+    });
+    const { status, json } = await parseResponse(await POST(req));
+
+    // Still 200 with a well-formed options payload — the route must not leak
+    // which emails exist, so refusal is expressed only by WHICH list is fetched.
+    expect(status).toBe(200);
+    expect(json.options).toBeDefined();
+    // The discriminator: the dummy list, not this user's real credentials. The
+    // paired allow half is "returns the real credential list for a
+    // bootstrap-tenant user" above — without it, "not called with the user id"
+    // could be a constant rather than a difference.
+    expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: NIL_UUID } }),
+    );
+    expect(mockPrismaWebAuthnFindMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-scim-moved" } }),
+    );
+    expect(mockPrismaTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
   });
 
   it("returns dummy credentials when user has zero credentials", async () => {

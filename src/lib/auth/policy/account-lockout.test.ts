@@ -126,6 +126,11 @@ describe("recordFailure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateLockoutThresholdCache("tenant-default");
+    // The two adjudicator cells below resolve this one. Without invalidating it
+    // the second is served from the first's cache and never reaches
+    // `tenant.findUnique` — an order dependency, not a failure, until a cell
+    // caches different thresholds under the same key.
+    invalidateLockoutThresholdCache("scim-provisioned-tenant");
   });
 
   // Resolve the user's tenant + its schema-default thresholds so recordFailure
@@ -133,7 +138,13 @@ describe("recordFailure", () => {
   // Without a resolvable tenant the code now fails closed to the strictest
   // threshold (lock at 1) — covered by its own dedicated tests below.
   function mockDefaultTenantThresholds() {
-    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-default" });
+    // Shaped as `resolveOwningTenantIdFromClient` selects it. A mock carrying
+    // only the column would still resolve — through the FALLBACK — so it would
+    // read like the ordinary case while exercising the memberless one.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "tenant-default",
+      tenantMemberships: [{ tenantId: "tenant-default" }],
+    });
     mockPrismaTenant.findUnique.mockResolvedValue({
       lockoutThreshold1: 5,
       lockoutDuration1Minutes: 15,
@@ -154,6 +165,70 @@ describe("recordFailure", () => {
     mockPrismaUser.update.mockResolvedValue(undefined);
     mockDefaultTenantThresholds();
   }
+
+  it("resolves the tenant from the active membership, not the User.tenantId column", async () => {
+    // This value picks the tenant whose lockout thresholds apply AND the tenant
+    // the audit row is filed under. It used to come from `User.tenantId`, a
+    // denormalized copy with no invalidation — after SCIM provisions the user
+    // into another tenant it points at the old one, and the read here runs under
+    // a bypass context, so RLS does not correct it the way it does for the
+    // tenant-scoped call sites.
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+
+    await recordFailure("user-1");
+
+    // The thresholds lookup is where the choice becomes observable: it is keyed
+    // by exactly the id this resolution produced.
+    expect(mockPrismaTenant.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
+    // The other half of what the comment above claims. `VAULT_UNLOCK_FAILED` is
+    // emitted on EVERY failure, so this fixture does reach an audit row even
+    // without crossing a threshold — and its tenant is argument 1.
+    expect(mockLogAuditInTx).toHaveBeenCalled();
+    for (const call of mockLogAuditInTx.mock.calls) {
+      expect(call[1]).toBe("scim-provisioned-tenant");
+    }
+  });
+
+  it("files the lockout audit row under the same tenant the thresholds came from", async () => {
+    // The audit consumer of the resolution, at a fixture that actually crosses a
+    // threshold — misfiling this row is the defect class the adjudicator exists
+    // to close, and at this member site it was otherwise unasserted.
+    setupTransaction({
+      failed_unlock_attempts: 4,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+
+    await recordFailure("user-1");
+
+    // The row this cell is NAMED for, pinned by its action. The all-calls loop
+    // below is the companion: on its own it stays green if
+    // VAULT_LOCKOUT_TRIGGERED stops being emitted, because VAULT_UNLOCK_FAILED
+    // is emitted on every failure and satisfies it.
+    const lockoutRow = mockLogAuditInTx.mock.calls.find(
+      (call) => (call[2] as { action?: string })?.action === "VAULT_LOCKOUT_TRIGGERED",
+    );
+    expect(lockoutRow, "no VAULT_LOCKOUT_TRIGGERED row was emitted").toBeDefined();
+    expect(lockoutRow![1]).toBe("scim-provisioned-tenant");
+
+    for (const call of mockLogAuditInTx.mock.calls) {
+      expect(call[1]).toBe("scim-provisioned-tenant");
+    }
+  });
 
   it("increments counter on first failure", async () => {
     setupTransaction({
@@ -398,6 +473,9 @@ describe("recordFailure", () => {
     await recordFailure("user-1");
     expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
       userId: "user-1",
+      // Threaded from recordFailure's own resolution — see the tenant-adjudicator
+      // cell above. A callee that re-derived this alerted a different tenant.
+      tenantId: "tenant-default",
       attempts: 5,
       lockMinutes: 15,
       ip: null,
@@ -414,6 +492,9 @@ describe("recordFailure", () => {
     await recordFailure("user-1");
     expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
       userId: "user-1",
+      // Threaded from recordFailure's own resolution — see the tenant-adjudicator
+      // cell above. A callee that re-derived this alerted a different tenant.
+      tenantId: "tenant-default",
       attempts: 10,
       lockMinutes: 60,
       ip: null,
@@ -430,6 +511,9 @@ describe("recordFailure", () => {
     await recordFailure("user-1");
     expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
       userId: "user-1",
+      // Threaded from recordFailure's own resolution — see the tenant-adjudicator
+      // cell above. A callee that re-derived this alerted a different tenant.
+      tenantId: "tenant-default",
       attempts: 15,
       lockMinutes: 1440,
       ip: null,

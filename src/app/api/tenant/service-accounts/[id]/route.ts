@@ -9,7 +9,8 @@ import { parseBody } from "@/lib/http/parse-body";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { serviceAccountUpdateSchema } from "@/lib/validations/service-account";
@@ -52,7 +53,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         tenantId: true,
         createdAt: true,
         updatedAt: true,
-        createdBy: { select: { id: true, name: true, email: true } },
+        createdById: true,
         _count: {
           select: {
             tokens: { where: { revokedAt: null } },
@@ -66,7 +67,19 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
-  return NextResponse.json(sa);
+  return NextResponse.json(await withCreatorIdentity(sa));
+}
+
+/**
+ * The account with its creator's identity, hydrated outside the tenant context.
+ * A creator who has since left this tenant has a users row RLS hides there, and
+ * the REQUIRED relation this route used to select came back null — measured:
+ * Prisma does not throw — under a type that says it cannot be.
+ */
+async function withCreatorIdentity<T extends { createdById: string }>(account: T) {
+  const { createdById, ...rest } = account;
+  const users = await fetchUserDisplayMap([createdById], BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  return { ...rest, createdBy: displayIdentityOf(users, createdById) };
 }
 
 // PUT /api/tenant/service-accounts/[id] — Update a service account
@@ -125,7 +138,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
           teamId: true,
           createdAt: true,
           updatedAt: true,
-          createdBy: { select: { id: true, name: true, email: true } },
+          createdById: true,
         },
       }),
     );
@@ -147,7 +160,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     metadata: result.data,
   });
 
-  return NextResponse.json(sa);
+  return NextResponse.json(await withCreatorIdentity(sa));
 }
 
 // DELETE /api/tenant/service-accounts/[id] — Soft-delete a service account and revoke all its tokens

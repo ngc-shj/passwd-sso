@@ -360,10 +360,11 @@ describe("centralize-state-transitions — integration", () => {
     });
 
     // Execute vault reset with a __testHook that throws after bulkTransition.
-    // (atomicAudit is now the 2nd param; the hook is the 3rd.)
     await expect(
-      executeVaultReset(ownerId, undefined, async () => {
-        throw new Error("T16 test hook: intentional rollback");
+      executeVaultReset(ownerId, undefined, {
+        __testHook: async () => {
+          throw new Error("T16 test hook: intentional rollback");
+        },
       }),
     ).rejects.toThrow("T16 test hook: intentional rollback");
 
@@ -398,8 +399,10 @@ describe("centralize-state-transitions — integration", () => {
             action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
           },
         },
-        async () => {
-          throw new Error("T#6 hook: rollback with atomic audit");
+        {
+          __testHook: async () => {
+            throw new Error("T#6 hook: rollback with atomic audit");
+          },
         },
       ),
     ).rejects.toThrow("T#6 hook");
@@ -627,6 +630,60 @@ describe("centralize-state-transitions — integration", () => {
       expect(outcomeRow.rows.map((r) => r.outcome), label).toEqual([label]);
     }
   });
+
+  it.skipIf(SKIP)(
+    "C0: files the activation under the grantee's active membership, not their stale User.tenantId",
+    async () => {
+      // The escrow-release record is the only record this path writes, and it is
+      // read back by a personal-scope reader that opens the grantee's ACTIVE
+      // MEMBERSHIP. This site used to resolve `User.tenantId` directly — a
+      // denormalized copy with no invalidation — so once SCIM had provisioned the
+      // grantee into another tenant the row landed where nobody could read it.
+      //
+      // Not covered by the adjudicator file's cells: those drive `logAuditAsync`
+      // through `resolveTenantId`, and this writer passes its tenant to
+      // `logAuditInTx` explicitly, so it reaches the shared helper by a different
+      // route and was left behind when only `resolveTenantId` was fixed.
+      const scimTenant = await ctx.createTenant();
+      try {
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          await tx.$executeRawUnsafe(
+            `UPDATE tenant_members SET deactivated_at = now() WHERE user_id = $1::uuid`,
+            granteeId,
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now())`,
+            randomUUID(),
+            scimTenant,
+            granteeId,
+          );
+        });
+
+        const grantId = randomUUID();
+        await seedEligible(grantId);
+        const result = await withBypassRls(ctx.app.prisma, async (tx) =>
+          autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() }),
+        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+        // Positive first: the release actually happened, so a missing row under
+        // the old tenant is misfiling rather than nothing to file.
+        expect(result.ok).toBe(true);
+        expect((await fetchGrant(grantId))?.status).toBe("ACTIVATED");
+
+        const rows = await ctx.su.pool.query(
+          `SELECT tenant_id::text FROM audit_outbox WHERE payload->>'targetId' = $1`,
+          [grantId],
+        );
+        expect(rows.rows.map((r) => r.tenant_id)).toEqual([scimTenant]);
+      } finally {
+        // Before the outer afterEach: it deletes users by `users.tenant_id`, and
+        // the membership parked in this tenant would still reference the grantee.
+        await ctx.deleteTestData(scimTenant);
+      }
+    },
+  );
 
   // ─── T18: bulkTransition mixed-status coverage ────────────────────────────────
 

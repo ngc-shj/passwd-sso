@@ -12,6 +12,11 @@ const { mockAuth, mockRequireTeamMember, mockEntryFindUnique, mockHistoryFindMan
   })
 );
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/team-auth", () => {
   class TeamAuthError extends Error {
@@ -31,10 +36,15 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: { findUnique: mockEntryFindUnique },
     teamPasswordEntryHistory: { findMany: mockHistoryFindMany },
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/passwords/[id]/history/route";
@@ -88,6 +98,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     mockRequireTeamMember.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ teamId: "o1" });
     const changedAt = new Date("2025-06-01");
+    mockUserFindMany.mockResolvedValue([{ id: "u1", name: "Admin", email: "admin@test.com", image: null }]);
     mockHistoryFindMany.mockResolvedValue([
       {
         id: "h1",
@@ -98,7 +109,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
         aadVersion: 1,
         teamKeyVersion: 2,
         changedAt,
-        changedBy: { id: "u1", name: "Admin", email: "admin@test.com" },
+        changedById: "u1",
       },
     ]);
 
@@ -110,6 +121,6 @@ describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
     expect(json).toHaveLength(1);
     expect(json[0].encryptedBlob).toEqual({ ciphertext: "cipher", iv: "iv", authTag: "tag" });
     expect(json[0].teamKeyVersion).toBe(2);
-    expect(json[0].changedBy.name).toBe("Admin");
+    expect(json[0].changedBy).toEqual({ id: "u1", name: "Admin", email: "admin@test.com" });
   });
 });

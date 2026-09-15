@@ -78,16 +78,25 @@ async function handleGET(_req: NextRequest) {
     return unauthorized();
   }
 
+  let membership;
   try {
-    await requireTenantPermission(session.user.id, TENANT_PERMISSION.MEMBER_MANAGE);
+    membership = await requireTenantPermission(session.user.id, TENANT_PERMISSION.MEMBER_MANAGE);
   } catch (e) {
     return handleAuthError(e);
   }
 
-  const user = await withBypassRls(prisma, async (tx) =>
-    tx.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenant: { select: {
+  // The tenant this request was ADMITTED to, taken from the authorization result
+  // rather than resolved a second time. PUT already writes to
+  // `membership.tenantId`; a GET that re-resolved could render one tenant's
+  // policy while PUT edited another's, because the two adjudicators differ —
+  // `getTenantMembership` is `findFirst` with no `orderBy` and no fallback,
+  // `resolveOwningTenantIdFromClient` takes the oldest and falls back to the
+  // column. One authorization, one tenant.
+  const user = await withBypassRls(prisma, async (tx) => {
+    return {
+      tenant: await tx.tenant.findUnique({
+        where: { id: membership.tenantId },
+        select: {
         maxConcurrentSessions: true,
         sessionIdleTimeoutMinutes: true,
         sessionAbsoluteTimeoutMinutes: true,
@@ -126,9 +135,10 @@ async function handleGET(_req: NextRequest) {
         jitTokenMaxTtlSec: true,
         delegationDefaultTtlSec: true,
         delegationMaxTtlSec: true,
-      } } },
-    }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+        },
+      }),
+    };
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   return NextResponse.json({
     maxConcurrentSessions: user?.tenant?.maxConcurrentSessions ?? null,

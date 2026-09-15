@@ -313,12 +313,17 @@ describe("unattributable audit events", () => {
     const otherTenantId = await newTenant();
     const userId = await ctx.createUser(homeTenantId);
 
+    // DEACTIVATED, so the allow arm still isolates the sentinel CHECK. The user
+    // already holds an active membership in `homeTenantId`, and
+    // `tenant_members_one_active_per_user` now refuses a second ACTIVE row — an
+    // allow arm that hit THAT would pass or fail for a reason this cell is not
+    // about. The CHECK applies to the row regardless of its activation state.
     const insertMembership = (tenantId: string) =>
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
-          `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
-           VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now())`,
+          `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
           randomUUID(),
           tenantId,
           userId,

@@ -64,7 +64,13 @@ describe("createNotification", () => {
   });
 
   it("resolves tenantId from user when not provided", async () => {
-    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "resolved-tenant" });
+    // Shaped as `resolveOwningTenantIdFromClient` selects it. A mock carrying
+    // only the column would still resolve — through the FALLBACK — so it would
+    // read like the ordinary case while exercising the memberless one.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "resolved-tenant",
+      tenantMemberships: [{ tenantId: "resolved-tenant" }],
+    });
     mockPrismaNotification.create.mockResolvedValue({});
 
     createNotification({
@@ -80,12 +86,54 @@ describe("createNotification", () => {
 
     expect(mockPrismaUser.findUnique).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      select: { tenantId: true },
+      select: {
+        tenantId: true,
+        tenantMemberships: {
+          where: { deactivatedAt: null },
+          select: { tenantId: true },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
+      },
     });
 
     expect(mockPrismaNotification.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         tenantId: "resolved-tenant",
+      }),
+    });
+  });
+
+  it("files the row under the active membership when it differs from User.tenantId", async () => {
+    // The divergent half of the cell above, and the only shape that can tell the
+    // two sources apart: with the same id in both, `notification.create` receives
+    // the same `tenantId` whichever one the resolver reads, so the assertion
+    // there passes against a body that ignores the membership entirely.
+    //
+    // The consumer discriminates directly — `tenantId` is written onto the row,
+    // not passed to a stub that answers identically for any id. A notification
+    // filed under the stale column lands in a tenant the user has left, where
+    // `/api/notifications` (which reads under the membership) never lists it.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+    mockPrismaNotification.create.mockResolvedValue({});
+
+    createNotification({
+      userId: "user-1",
+      type: "NEW_DEVICE_LOGIN" as never,
+      title: "New login",
+      body: "From Chrome on macOS",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockPrismaNotification.create).toHaveBeenCalled();
+    });
+
+    expect(mockPrismaNotification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "scim-provisioned-tenant",
       }),
     });
   });

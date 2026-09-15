@@ -132,6 +132,19 @@ describe("GET /api/scim/v2/Groups", () => {
       expect.objectContaining({ value: "user-2", display: "u2@example.com" }),
     ]);
   });
+
+  it("lists only members with an active membership in this tenant", async () => {
+    mockScimGroupMapping.findMany.mockResolvedValue([
+      { externalGroupId: "grp-1", role: "ADMIN", teamId: "team-1", team: { slug: "core" } },
+    ]);
+    mockTeamMember.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeReq());
+    expect(res.status).toBe(200);
+    expect(mockTeamMember.findMany.mock.calls[0][0].where.user).toEqual({
+      tenantMemberships: { some: { tenantId: "tenant-1", deactivatedAt: null } },
+    });
+  });
 });
 
 describe("POST /api/scim/v2/Groups", () => {
@@ -159,6 +172,27 @@ describe("POST /api/scim/v2/Groups", () => {
     );
     expect(res.status).toBe(201);
     expect(mockScimGroupMapping.create).toHaveBeenCalled();
+  });
+
+  it("reports only members with an active membership in this tenant in the created group", async () => {
+    mockScimGroupMapping.findUnique.mockResolvedValue(null);
+    mockScimGroupMapping.create.mockResolvedValue({});
+    mockTeam.findFirst.mockResolvedValue({ id: "team-1", slug: "core" });
+    mockTeamMember.findMany.mockResolvedValue([]);
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:ADMIN",
+          externalId: "grp-1",
+        },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockTeamMember.findMany.mock.calls[0][0].where.user).toEqual({
+      tenantMemberships: { some: { tenantId: "tenant-1", deactivatedAt: null } },
+    });
   });
 
   it("returns 400 when externalId is missing", async () => {

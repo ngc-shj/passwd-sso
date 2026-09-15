@@ -38,7 +38,8 @@ describe("mergeActionGroups", () => {
     const result = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
     const scimActions = result[AUDIT_ACTION_GROUP.SCIM];
 
-    // Both sides have the same 8 SCIM actions — union is idempotent
+    // The tenant side also carries SCIM_USER_REACTIVATION_REFUSED, a tenant-only
+    // refusal; the union keeps every action exactly once.
     const tenantScim = AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SCIM];
     const teamScim = AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.SCIM];
     const expectedUnion = [...new Set([...tenantScim, ...teamScim])];

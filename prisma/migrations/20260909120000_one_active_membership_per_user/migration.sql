@@ -1,0 +1,56 @@
+-- At most one ACTIVE `tenant_members` row per user.
+--
+-- Three readers assert this invariant and each behaves differently when it does
+-- not hold: `resolveUserTenantIdFromClient` THROWS
+-- `MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED`, `getTenantMembership` picks an
+-- arbitrary row (`findFirst`, no `orderBy`), and `resolveOwningTenantIdFromClient`
+-- takes the oldest. Until now it was enforced by application guards at each
+-- writer, added one at a time as review found them: the SCIM create path, its
+-- PUT and PATCH arms, and directory sync's create and reactivate arms.
+--
+-- Guards at N writers cannot close this, for three reasons this index does:
+--
+--   1. The guard has to run OUTSIDE a tenant context — the foreign membership
+--      row is exactly what RLS hides inside one, and a nested bypass is refused
+--      by `assertNoActiveRlsContext`. So every guard is a separate round trip
+--      before its own mutation, with a window between them. Unique-index
+--      enforcement sits below RLS and does not care which context the write is
+--      in, so the window closes.
+--   2. The guard set was derived twice and grew both times. A writer added later
+--      inherits nothing.
+--   3. `resolveUserTenantIdFromClient`'s throw is reached by the proxy auth gate
+--      on EVERY request. One tenant's SCIM admin reactivating a membership for a
+--      user who belongs to another tenant therefore invalidated that user's
+--      sessions — a cross-tenant effect from a write the acting tenant is
+--      entitled to make. With the state unrepresentable, so is the effect.
+--
+-- PARTIAL, on `deactivated_at IS NULL`: any number of deactivated rows stay
+-- legal, so leaving a tenant and rejoining it later is unaffected, and the
+-- historical rows SCIM and directory sync rely on are untouched.
+--
+-- NOT `CONCURRENTLY`: Prisma runs each migration in a transaction, and
+-- `CREATE INDEX CONCURRENTLY` cannot run inside one. `tenant_members` is small
+-- and the lock is brief. If that stops being true, create the index by hand
+-- with `CONCURRENTLY` first and re-run — the statement below is idempotent by
+-- name and will then be a no-op.
+--
+-- THIS MIGRATION FAILS LOUDLY on existing duplicates, which is the correct
+-- failure: it means the invariant is already violated in that database and a
+-- human has to decide which membership survives. Measure first:
+--
+--   SELECT user_id, count(*) FROM tenant_members
+--    WHERE deactivated_at IS NULL GROUP BY user_id HAVING count(*) > 1;
+--
+-- On the development database that is 0 rows (measured 2026-09-09). Dev being
+-- clean is not evidence that production is: the precondition for the state —
+-- a user with zero active memberships signing in through another tenant's IdP —
+-- has never occurred on dev either. See
+-- docs/archive/review/audit-tenant-adjudicator-design.md.
+--
+-- The application guards are kept rather than removed. They turn the constraint
+-- violation into the 409 the SCIM spec wants, and they name the reason; this
+-- index is what makes them non-load-bearing.
+
+CREATE UNIQUE INDEX IF NOT EXISTS "tenant_members_one_active_per_user"
+  ON "tenant_members" ("user_id")
+  WHERE "deactivated_at" IS NULL;

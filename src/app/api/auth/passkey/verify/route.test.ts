@@ -10,6 +10,7 @@ const {
   mockAuthorizeWebAuthn,
   mockLogAudit,
   mockPrismaFindUnique,
+  mockPrismaTenantFindUnique,
   mockPrismaSessionDeleteMany,
   mockPrismaSessionFindMany,
   mockPrismaSessionCreate,
@@ -29,6 +30,7 @@ const {
     mockAuthorizeWebAuthn: vi.fn(),
     mockLogAudit: vi.fn(),
     mockPrismaFindUnique: vi.fn(),
+    mockPrismaTenantFindUnique: vi.fn(),
     mockPrismaSessionDeleteMany: vi.fn(),
     mockPrismaSessionFindMany: vi.fn(),
     mockPrismaSessionCreate: vi.fn(),
@@ -90,6 +92,8 @@ vi.mock("@/lib/auth/tokens/extension-token", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mockPrismaFindUnique },
+    // The tenant is loaded by id now, not traversed through `user.tenant`.
+    tenant: { findUnique: mockPrismaTenantFindUnique },
     $transaction: mockPrismaTransaction,
     session: {
       deleteMany: mockPrismaSessionDeleteMany,
@@ -165,6 +169,29 @@ const mockUser = {
   credentialRowId: "cred-uuid-1",
 };
 
+// Three reads now: email → id, then `resolveOwningTenantIdFromClient`'s select,
+// then the tenant by id. The two user reads are keyed off the select so each
+// returns only its own fields, as Prisma would. The membership must carry the
+// tenant id — a column-only mock resolves through the FALLBACK, which is the
+// stale value this bootstrap gate must never admit on.
+//
+// `membershipTenantId` defaults to `tenantId` so every existing cell keeps the
+// agreeing fixture it was written against; only the divergent cell below splits
+// them, and it supplies its own `isBootstrap` per id.
+function seedUser(
+  opts: { tenantId?: string; membershipTenantId?: string; isBootstrap?: boolean } = {},
+) {
+  const tenantId = opts.tenantId ?? "tenant-1";
+  const membershipTenantId = opts.membershipTenantId ?? tenantId;
+  mockPrismaFindUnique.mockImplementation(
+    async ({ select }: { select: Record<string, unknown> }) =>
+      "tenantMemberships" in select
+        ? { tenantId, tenantMemberships: [{ tenantId: membershipTenantId }] }
+        : { id: mockUser.id },
+  );
+  mockPrismaTenantFindUnique.mockResolvedValue({ isBootstrap: opts.isBootstrap ?? true });
+}
+
 // ── Setup ────────────────────────────────────────────────────
 
 describe("POST /api/auth/passkey/verify", () => {
@@ -186,10 +213,7 @@ describe("POST /api/auth/passkey/verify", () => {
     );
 
     // SSO tenant guard: user is in bootstrap tenant (allowed)
-    mockPrismaFindUnique.mockResolvedValue({
-      tenantId: "tenant-1",
-      tenant: { isBootstrap: true },
-    });
+    seedUser();
 
     // $transaction: execute callback with a mock tx that has session methods
     mockPrismaTransaction.mockImplementation(
@@ -285,6 +309,43 @@ describe("POST /api/auth/passkey/verify", () => {
     // The stored digest must equal hash(excludeSessionToken) — proving the
     // just-created session (stored by digest) is the one excluded from the wipe.
     expect(storedDigest).toBe(`hashed:${excludeArg}`);
+  });
+
+  it("gates on and stamps the active membership, not the stale User.tenantId", async () => {
+    // The cell above seeds the same id in both places, so `tenantId: "tenant-1"`
+    // on the session row is satisfied by either source — it cannot distinguish
+    // the membership from the column, and neither can the tenant read, which is
+    // stubbed to one value for any id.
+    //
+    // Both ids are bootstrap here, deliberately: the point is not that the gate
+    // refuses, but that the id it gated on is the id it then stamps. The route's
+    // comment requires those to be the SAME value and the membership's — a
+    // session filed under the stale tenant is one `/api/sessions` (which opens
+    // the membership) can neither list nor revoke, while reporting success.
+    seedUser({
+      tenantId: "stale-home-tenant",
+      membershipTenantId: "scim-provisioned-tenant",
+      isBootstrap: true,
+    });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const res = await POST(req);
+
+    // Positive first: sign-in completed. A route that rejected everything would
+    // satisfy the two pins below by never reaching the session write.
+    expect(res.status).toBe(200);
+    expect(mockPrismaTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
+    expect(mockPrismaSessionCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        tenantId: "scim-provisioned-tenant",
+      }),
+    });
   });
 
   it("calls deleteMany before create", async () => {
@@ -470,10 +531,7 @@ describe("POST /api/auth/passkey/verify", () => {
   });
 
   it("returns 401 for SSO tenant user (non-bootstrap)", async () => {
-    mockPrismaFindUnique.mockResolvedValue({
-      tenantId: "tenant-sso",
-      tenant: { isBootstrap: false },
-    });
+    seedUser({ tenantId: "tenant-sso", isBootstrap: false });
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
@@ -486,7 +544,9 @@ describe("POST /api/auth/passkey/verify", () => {
   });
 
   it("returns 401 when tenant relation is null (orphaned FK)", async () => {
-    mockPrismaFindUnique.mockResolvedValue({ tenantId: "tenant-1", tenant: null });
+    // The orphaned-FK arm is the separate tenant read returning null now.
+    seedUser();
+    mockPrismaTenantFindUnique.mockResolvedValue(null);
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
@@ -510,7 +570,12 @@ describe("POST /api/auth/passkey/verify", () => {
   });
 
   it("returns 401 when user has no tenantId", async () => {
-    mockPrismaFindUnique.mockResolvedValue({ tenantId: null, tenant: null });
+    // `User.tenantId` is NOT NULL, so the resolve yields null only when the row
+    // itself is gone — the second read, by id, missing it.
+    mockPrismaFindUnique.mockImplementation(
+      async ({ select }: { select: Record<string, unknown> }) =>
+        "tenantMemberships" in select ? null : { id: mockUser.id },
+    );
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,

@@ -7,7 +7,11 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { logAuditAsync, teamAuditBase, tenantAuditBase } from "@/lib/audit/audit";
-import { executeVaultReset } from "@/lib/vault/vault-reset";
+import {
+  executeVaultReset,
+  findVaultRowsOutsideTenant,
+  VaultResetOutsideTenantError,
+} from "@/lib/vault/vault-reset";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -104,6 +108,16 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.VAULT_RESET_NOT_APPROVED);
   }
 
+  // Refused BEFORE the token is consumed. The CAS below spends it, and a user
+  // whose vault rows are still filed under another tenant — left there by a
+  // realignment, reattachable, and invisible to both this user and the admins
+  // who authorized the reset — must be able to run this same reset once that is
+  // resolved. This tenant's authority does not extend to those rows.
+  const outside = await findVaultRowsOutsideTenant(session.user.id, resetRecord.tenantId);
+  if (Object.keys(outside).length > 0) {
+    return errorResponse(API_ERROR.VAULT_RESET_DATA_OUTSIDE_TENANT);
+  }
+
   // TOCTOU prevention: atomically mark the token as executed BEFORE deleting
   // vault data. This ensures a concurrent revoke cannot succeed after data
   // deletion has already started. NULL `encryptedToken` so the at-rest
@@ -129,26 +143,39 @@ async function handlePOST(req: NextRequest) {
   // fact-of-reset audit is enqueued ATOMICALLY inside the deletion transaction,
   // so an admin wipe can never commit without a committed audit record. The
   // invalidation counts are appended as a best-effort completion event below.
-  const { deletedEntries, deletedAttachments } = await executeVaultReset(
-    session.user.id,
-    {
-      tenantId: resetRecord.tenantId,
-      params: {
-        ...(resetRecord.teamId
-          ? teamAuditBase(req, session.user.id, resetRecord.teamId)
-          : tenantAuditBase(req, session.user.id, resetRecord.tenantId)),
+  let deletedEntries: number;
+  let deletedAttachments: number;
+  try {
+    ({ deletedEntries, deletedAttachments } = await executeVaultReset(
+      session.user.id,
+      {
         tenantId: resetRecord.tenantId,
-        action: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
-        targetType: "User",
-        targetId: session.user.id,
-        metadata: {
-          phase: "committed",
-          initiatedById: resetRecord.initiatedById,
-          approvedById: resetRecord.approvedById,
+        params: {
+          ...(resetRecord.teamId
+            ? teamAuditBase(req, session.user.id, resetRecord.teamId)
+            : tenantAuditBase(req, session.user.id, resetRecord.tenantId)),
+          tenantId: resetRecord.tenantId,
+          action: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
+          targetType: "User",
+          targetId: session.user.id,
+          metadata: {
+            phase: "committed",
+            initiatedById: resetRecord.initiatedById,
+            approvedById: resetRecord.approvedById,
+          },
         },
       },
-    },
-  );
+      { scopeTenantId: resetRecord.tenantId },
+    ));
+  } catch (err) {
+    // The in-transaction check caught what the pre-check above could not: a
+    // realignment of this user that committed in between. Nothing was deleted,
+    // but the token is already spent, so the reset has to be initiated again.
+    if (err instanceof VaultResetOutsideTenantError) {
+      return errorResponse(API_ERROR.VAULT_RESET_DATA_OUTSIDE_TENANT);
+    }
+    throw err;
+  }
 
   // Invalidate every authentication artifact for the target across ALL
   // tenants (FR7 + F3+S2). The target may hold Session rows in tenants

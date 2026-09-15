@@ -10,6 +10,7 @@ const {
   mockTenantClaimGetStore,
   mockSessionMetaGetStore,
   mockLogAudit,
+  mockLogAuditInTx,
   mockLoggerWarn,
   mockLoggerError,
   mockEmitAuthLoginFailure,
@@ -36,12 +37,15 @@ const {
     },
     passwordEntry: {
       updateMany: vi.fn(),
+      count: vi.fn(),
     },
     tag: {
       updateMany: vi.fn(),
+      count: vi.fn(),
     },
     folder: {
       updateMany: vi.fn(),
+      count: vi.fn(),
     },
     session: {
       findMany: vi.fn(),
@@ -113,6 +117,7 @@ const {
     mockTenantClaimGetStore: vi.fn(),
     mockSessionMetaGetStore: vi.fn(),
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
     // Stable warn spy: the getLogger() mock must return THIS spy on every call
     // so session-callback tests can observe getLogger().warn(...) (a fresh spy
     // per getLogger() call would be unobservable).
@@ -144,6 +149,7 @@ vi.mock("@/lib/auth/session/auth-adapter", () => ({
 
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
 }));
 
 vi.mock("@/lib/auth/session/session-meta", () => ({
@@ -272,6 +278,21 @@ function checkViolation(message: string): Error {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const nextAuthInitArgs = (mockNextAuth.mock.calls as any[])[0];
 
+const STRANDED_MODEL_HANDLES = ["account", "apiKey", "attachment", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey", "teamPasswordFavorite", "vaultKey", "webAuthnCredential"] as const;
+
+/**
+ * The mocked delegate for a model `countStrandedRows` counts, created on demand.
+ * `mockPrisma` predates the helper and declares only some of these; a missing
+ * one would make the production call throw rather than return a count, which is
+ * the RT1 shape (a mock that no longer matches what production calls).
+ */
+function strandedDelegate(handle: string): { count: ReturnType<typeof vi.fn> } {
+  const client = mockPrisma as unknown as Record<string, Record<string, unknown>>;
+  client[handle] ??= {};
+  client[handle].count ??= vi.fn();
+  return client[handle] as unknown as { count: ReturnType<typeof vi.fn> };
+}
+
 describe("assertBootstrapSingleMember", () => {
   it("does not throw when tenant has exactly one active member", async () => {
     const countFn = vi.fn().mockResolvedValue(1);
@@ -322,9 +343,22 @@ describe("ensureTenantMembershipForSignIn", () => {
       return null;
     });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
-    mockPrisma.tenantMember.upsert.mockResolvedValue({});
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
     mockPrisma.tenantMember.deleteMany.mockResolvedValue({ count: 1 });
+    // Every model `countStrandedRows` counts. Built from the same list the
+    // production helper iterates, so a model added there surfaces here as an
+    // undefined delegate rather than as a silently missing count.
+    for (const handle of STRANDED_MODEL_HANDLES) {
+      strandedDelegate(handle).count.mockResolvedValue(0);
+    }
     mockPrisma.user.update.mockResolvedValue({});
+    // The column already names the tenant being joined: the ordinary case,
+    // where realignOwningTenantColumn writes nothing. The divergent cells
+    // below override it, and every pre-existing cell keeps its behaviour.
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_CLAIMED });
+    mockPrisma.passwordEntry.count.mockResolvedValue(0);
+    mockPrisma.tag.count.mockResolvedValue(0);
+    mockPrisma.folder.count.mockResolvedValue(0);
     mockPrisma.account.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.user.count.mockResolvedValue(0);
     mockPrisma.passwordEntry.updateMany.mockResolvedValue({ count: 0 });
@@ -559,7 +593,108 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { tenantId_userId: { tenantId: TENANT_CLAIMED, userId: "user-1" } },
       create: { tenantId: TENANT_CLAIMED, userId: "user-1", role: "MEMBER" },
       update: {},
+      select: { id: true },
     });
+  });
+
+  // Row 4, the divergent half: the branch that PRODUCES the column/membership
+  // divergence the whole adjudicator exists to survive.
+
+  it("row 4: realigns the column onto the joined tenant and reports what it left behind", async () => {
+    // A user released by TENANT_OTHER, signing in through TENANT_CLAIMED's IdP.
+    // Before this, only the membership moved: `users_tenant_isolation` then hid
+    // their own row from their own requests, which is what left vault unlock
+    // reporting the vault as not set up.
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
+    mockPrisma.passwordEntry.count.mockResolvedValue(7);
+    mockPrisma.webAuthnCredential.count.mockResolvedValue(2);
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({ ok: true });
+    expect(mockPrisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { tenantId: TENANT_CLAIMED },
+    });
+    // The rows are COUNTED where they are, not moved: the sibling
+    // bootstrap-migration path moves three tables by tenant id alone, which is
+    // sound only for a single-member tenant.
+    expect(mockPrisma.passwordEntry.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.passwordEntry.count).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_OTHER },
+    });
+    // Counted beyond the vault: a passkey stranded in the old tenant is listed
+    // under the NEW tenant's RLS and counted for enforcement under a bypass, so
+    // the user is told they have one and sees none. A fixed entries/tags/folders
+    // triple reported that as zero.
+    expect(mockPrisma.webAuthnCredential.count).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_OTHER },
+    });
+  });
+
+  it("row 4: records the realignment in the transaction that performed it, for BOTH tenants", async () => {
+    // logAuditInTx, not logAuditAsync: the record is what the whole decision
+    // rests on, and a post-commit enqueue loses it to a crash in the window.
+    // Two rows, because the releasing tenant keeps the data and its own member
+    // list breaks — it used to be told nothing at all.
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
+    mockPrisma.passwordEntry.count.mockResolvedValue(7);
+
+    await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(2);
+    const [joined, released] = mockLogAuditInTx.mock.calls;
+    expect(joined[1]).toBe(TENANT_CLAIMED);
+    expect(joined[2]).toMatchObject({
+      action: "USER_TENANT_REALIGNED",
+      targetType: "TenantMember",
+      // The MEMBERSHIP row, not the user id — an operator joining
+      // audit_logs.target_id to tenant_members.id resolved nothing before.
+      targetId: "member-joined",
+      metadata: { previousTenantId: TENANT_OTHER, leftBehind: { passwordEntry: 7 } },
+    });
+    expect(released[1]).toBe(TENANT_OTHER);
+    // The releasing tenant is not told where the user went.
+    expect(JSON.stringify(released[2])).not.toContain(TENANT_CLAIMED);
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "USER_TENANT_REALIGNED" }),
+    );
+  });
+
+  it("row 4: reports only the models that actually hold rows", async () => {
+    // Zero-valued keys are dropped, so `leftBehind` names what is stranded
+    // rather than burying two numbers among twenty-one zeroes.
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
+    mockPrisma.tag.count.mockResolvedValue(3);
+
+    await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    const [[, , params]] = mockLogAuditInTx.mock.calls;
+    expect((params as { metadata: { leftBehind: Record<string, number> } }).metadata.leftBehind)
+      .toEqual({ tag: 3 });
+  });
+
+  it("row 4: writes nothing when the column already names the tenant being joined", async () => {
+    // The zero the cell above is measured against. A realignment that fired on
+    // every join would satisfy that cell and say nothing about divergence — and
+    // it would put a write and three counts on the ordinary sign-in path.
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({ ok: true });
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.passwordEntry.count).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("row 4: leaves the column alone when the user row is gone", async () => {
+    // `realignOwningTenantColumn` returns null rather than writing on a user it
+    // cannot read. Reported here because the caller keys its emit on that null.
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({ ok: true });
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
   });
 
   // Row 5: claim resolves to the user's existing tenant -> upsert -> allow.
@@ -571,6 +706,31 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(result.ok).toBe(true);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledTimes(1);
+    // The column already agrees: the realignment is one read and no write.
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
+  it("row 5: realigns a column that still names another tenant, and records it", async () => {
+    // "Already a member" is answered from the ACTIVE membership, so a user SCIM
+    // or directory sync reactivated here while their column named another tenant
+    // reaches this arm with the divergence row 4 exists to repair. Before this
+    // arm moved it, their own requests kept failing to see their own row.
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_CLAIMED }]);
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result.ok).toBe(true);
+    expect(mockPrisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { tenantId: TENANT_CLAIMED },
+    });
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT_CLAIMED,
+      expect.objectContaining({ action: "USER_TENANT_REALIGNED", targetId: "member-joined" }),
+    );
   });
 
   // Regression (acceptance criterion): a second claim registered against the
@@ -734,6 +894,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { tenantId_userId: { tenantId: TENANT_NEW, userId: "user-1" } },
       create: { tenantId: TENANT_NEW, userId: "user-1", role: "MEMBER" },
       update: {},
+      select: { id: true },
     });
   });
 
@@ -1002,6 +1163,75 @@ describe("signIn callback", () => {
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
   });
 
+  it("records the realignment end-to-end on a real sign-in", async () => {
+    // The callback level, not the resolver's: this is where a sign-in actually
+    // reaches the audit trail. The emit itself moved INTO the resolver's
+    // transaction (logAuditInTx) so the record cannot outlive a rollback of the
+    // column move it reports — the callback used to emit it best-effort.
+    const TENANT_JOINED = "00000000-0000-4000-a000-000000000001";
+    const TENANT_LEFT = "00000000-0000-4000-a000-000000000003";
+    mockExtractTenantClaimValue.mockReturnValue(
+      extraction({ kind: "claim", value: "tenant-acme" }),
+    );
+    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_JOINED }));
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
+    mockPrisma.user.update.mockResolvedValue({});
+    mockPrisma.user.findUnique.mockImplementation(
+      async ({ select }: { select?: Record<string, unknown> }) =>
+        select && "tenantId" in select
+          ? { tenantId: TENANT_LEFT }
+          : { id: "real-db-id" },
+    );
+    for (const handle of STRANDED_MODEL_HANDLES) {
+      strandedDelegate(handle).count.mockResolvedValue(0);
+    }
+    strandedDelegate("passwordEntry").count.mockResolvedValue(7);
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "moved@corp.com" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(true);
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(2);
+    expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({
+      action: "USER_TENANT_REALIGNED",
+      targetId: "member-joined",
+      metadata: { previousTenantId: TENANT_LEFT, leftBehind: { passwordEntry: 7 } },
+    });
+    // And the releasing tenant gets its own row — it keeps the data.
+    expect(mockLogAuditInTx.mock.calls[1][1]).toBe(TENANT_LEFT);
+  });
+
+  it("emits no realignment when the ordinary join changes nothing", async () => {
+    // The zero arm: without it a callback that emitted on every claim sign-in
+    // would satisfy the cell above.
+    const TENANT_JOINED = "00000000-0000-4000-a000-000000000001";
+    mockExtractTenantClaimValue.mockReturnValue(
+      extraction({ kind: "claim", value: "tenant-acme" }),
+    );
+    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_JOINED }));
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
+    mockPrisma.user.findUnique.mockImplementation(
+      async ({ select }: { select?: Record<string, unknown> }) =>
+        select && "tenantId" in select
+          ? { tenantId: TENANT_JOINED }
+          : { id: "real-db-id" },
+    );
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "ordinary@corp.com" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(true);
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+  });
+
   it("returns true for new user with pre-generated id not in DB", async () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
 
@@ -1166,7 +1396,7 @@ describe("signIn callback", () => {
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
-    mockPrisma.tenantMember.upsert.mockResolvedValue({});
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
@@ -1355,6 +1585,34 @@ describe("signIn callback", () => {
   });
 
   describe("nodemailer provider", () => {
+    // The gate makes three user reads now — email → id, the tenant-id resolve
+    // by id, then the userId lookup by email — plus a tenant read by id. Keyed
+    // off the select so each returns only its own fields, as Prisma would; the
+    // membership carries the tenant id, because a column-only mock would resolve
+    // through the FALLBACK and read like the ordinary case.
+    //
+    // `membershipTenantId` defaults to `tenantId` so every existing cell keeps
+    // the agreeing fixture it was written against; only the divergent cell below
+    // splits them, and it supplies its own tenant stub keyed by id.
+    function seedExistingUser(opts: {
+      isBootstrap: boolean;
+      tenantId?: string;
+      membershipTenantId?: string;
+    }) {
+      const tenantId = opts.tenantId ?? "tenant-1";
+      const membershipTenantId = opts.membershipTenantId ?? tenantId;
+      mockPrisma.user.findUnique.mockImplementation(
+        async ({ select }: { select: Record<string, unknown> }) =>
+          "tenantMemberships" in select
+            ? { tenantId, tenantMemberships: [{ tenantId: membershipTenantId }] }
+            : { id: "real-db-id" },
+      );
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        isBootstrap: opts.isBootstrap,
+        id: tenantId,
+      });
+    }
+
     it("returns true for new user (no existing DB record)", async () => {
       // user.findUnique returns null twice: once for nodemailer check, once for userId lookup
       mockPrisma.user.findUnique.mockResolvedValue(null);
@@ -1371,13 +1629,9 @@ describe("signIn callback", () => {
     });
 
     it("returns true for existing user in bootstrap tenant", async () => {
-      // First findUnique (nodemailer guard): existing user with bootstrap tenant
-      mockPrisma.user.findUnique
-        .mockResolvedValueOnce({ id: "real-db-id", tenant: { isBootstrap: true } })
-        // Second findUnique (userId lookup via email): existing user
-        .mockResolvedValueOnce({ id: "real-db-id" });
+      seedExistingUser({ isBootstrap: true });
       mockPrisma.tenantMember.findMany.mockResolvedValue([]);
-      mockPrisma.tenantMember.upsert.mockResolvedValue({});
+      mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "bootstrap@example.com" },
@@ -1389,11 +1643,8 @@ describe("signIn callback", () => {
     });
 
     it("returns false for existing user in SSO (non-bootstrap) tenant", async () => {
-      // nodemailer guard findUnique: user exists in a non-bootstrap (SSO) tenant
-      mockPrisma.user.findUnique.mockResolvedValueOnce({
-        id: "real-db-id",
-        tenant: { isBootstrap: false },
-      });
+      // nodemailer guard: user exists in a non-bootstrap (SSO) tenant
+      seedExistingUser({ isBootstrap: false, tenantId: "tenant-sso" });
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "sso-user@corp.com" },
@@ -1406,12 +1657,85 @@ describe("signIn callback", () => {
       expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
     });
 
+    it("gates magic-link sign-in on the active membership, not the stale User.tenantId", async () => {
+      // Both cells above seed the same id in both places, so the tenant read is
+      // answered identically whichever source the resolver picks and the verdict
+      // is the same either way — neither can see precedence.
+      //
+      // This is the divergence the gate exists for: SCIM moved the user into an
+      // SSO tenant while `User.tenantId` still names the bootstrap one they left.
+      // The stub therefore dispatches on the id it is called with (a blanket
+      // mockResolvedValue would be as blind as the same-id fixture). Reading the
+      // stale column reports a bootstrap tenant and ADMITS a magic-link sign-in
+      // the user's real tenant forbids.
+      seedExistingUser({
+        isBootstrap: true,
+        tenantId: "stale-home-tenant",
+        membershipTenantId: "scim-provisioned-tenant",
+      });
+      mockPrisma.tenant.findUnique.mockImplementation(
+        async ({ where }: { where: { id: string } }) => ({
+          isBootstrap: where.id !== "scim-provisioned-tenant",
+          id: where.id,
+        }),
+      );
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "scim-moved@corp.com" },
+        account: { provider: "nodemailer" },
+        profile: null,
+      });
+
+      expect(result).toBe(false);
+      // Not just "refused": the refusal must name the membership tenant. A
+      // blanket deny would satisfy the verdict alone while filing the audit
+      // under the tenant the user left — this is where the id is observable.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "scim-moved@corp.com",
+        tenantId: "scim-provisioned-tenant",
+        provider: "nodemailer",
+        reason: "tenant_mismatch",
+        userId: "real-db-id",
+      });
+      expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+      );
+    });
+
+    it("refuses an existing user whose tenant row is absent", async () => {
+      // The undecidable arm. The gate asks "is this an SSO tenant?"; with no
+      // tenant row there is no answer, and the SSO check reads the absence as
+      // "not SSO" and ADMITS. `createSession` treats the same state as
+      // corruption and refuses, so this reader used to be the one that did not.
+      mockPrisma.user.findUnique.mockImplementation(
+        async ({ select }: { select: Record<string, unknown> }) =>
+          "tenantMemberships" in select
+            ? { tenantId: "tenant-1", tenantMemberships: [{ tenantId: "tenant-1" }] }
+            : { id: "real-db-id" },
+      );
+      mockPrisma.tenant.findUnique.mockResolvedValue(null);
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "orphaned@corp.com" },
+        account: { provider: "nodemailer" },
+        profile: null,
+      });
+
+      expect(result).toBe(false);
+      // Refused as a deployment fault, not as a tenant mismatch: the operator
+      // reading this is looking for a missing row, not a misrouted user.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "orphaned@corp.com",
+        provider: "nodemailer",
+        reason: "provider_error",
+        userId: "real-db-id",
+      });
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    });
+
     it("returns false when ensureTenantMembershipForSignIn throws unexpected error", async () => {
-      // First findUnique (nodemailer guard): bootstrap user — allowed through
-      mockPrisma.user.findUnique
-        .mockResolvedValueOnce({ id: "real-db-id", tenant: { isBootstrap: true } })
-        // Second findUnique (userId lookup): user exists
-        .mockResolvedValueOnce({ id: "real-db-id" });
+      // nodemailer guard: bootstrap user — allowed through
+      seedExistingUser({ isBootstrap: true });
       // tenantMember.findMany throws an unexpected error inside ensureTenantMembershipForSignIn
       mockPrisma.tenantMember.findMany.mockRejectedValueOnce(new Error("unexpected DB failure"));
 
@@ -1571,6 +1895,38 @@ describe("session callback — passkey enforcement fail-closed", () => {
     );
   });
 
+  // The block reads the user row for fetchFavicons, resolves the tenant id via
+  // `resolveOwningTenantIdFromClient`, then loads the tenant by that id. The two
+  // user reads are keyed off the select so each returns only its own fields; the
+  // membership must carry the tenant id, or the resolution rides the FALLBACK
+  // column while the fixture reads like the ordinary case.
+  //
+  // `membershipTenantId` defaults to the column value so every existing cell
+  // keeps the agreeing fixture it was written against; only the divergent cell
+  // below splits them, and it supplies its own tenant stub keyed by id.
+  function seedPasskeyPolicy(opts: {
+    fetchFavicons: boolean;
+    requirePasskey: boolean;
+    requirePasskeyEnabledAt: Date | null;
+    passkeyGracePeriodDays: number | null;
+    tenantId?: string;
+    membershipTenantId?: string;
+  }) {
+    const tenantId = opts.tenantId ?? "tenant-1";
+    const membershipTenantId = opts.membershipTenantId ?? tenantId;
+    mockPrisma.user.findUnique.mockImplementation(
+      async ({ select }: { select: Record<string, unknown> }) =>
+        "tenantMemberships" in select
+          ? { tenantId, tenantMemberships: [{ tenantId: membershipTenantId }] }
+          : { fetchFavicons: opts.fetchFavicons },
+    );
+    mockPrisma.tenant.findUnique.mockResolvedValue({
+      requirePasskey: opts.requirePasskey,
+      requirePasskeyEnabledAt: opts.requirePasskeyEnabledAt,
+      passkeyGracePeriodDays: opts.passkeyGracePeriodDays,
+    });
+  }
+
   it("fails closed when the passkey-enforcement fetch throws (blocks, does not fail open)", async () => {
     // Simulate a transient DB/Redis failure inside the withBypassRls fetch.
     mockWithBypassRls.mockRejectedValueOnce(new Error("db down"));
@@ -1608,13 +1964,11 @@ describe("session callback — passkey enforcement fail-closed", () => {
   it("passes the real tenant values through on the happy path (fetch succeeds)", async () => {
     const enabledAt = new Date("2020-01-01T00:00:00.000Z");
     mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);
-    mockPrisma.user.findUnique.mockResolvedValueOnce({
+    seedPasskeyPolicy({
       fetchFavicons: true,
-      tenant: {
-        requirePasskey: true,
-        requirePasskeyEnabledAt: enabledAt,
-        passkeyGracePeriodDays: 7,
-      },
+      requirePasskey: true,
+      requirePasskeyEnabledAt: enabledAt,
+      passkeyGracePeriodDays: 7,
     });
 
     const result = await sessionCallback(baseParams);
@@ -1628,13 +1982,11 @@ describe("session callback — passkey enforcement fail-closed", () => {
   it("does not block a passkey-holding user on the happy path (fail-closed, not always-closed)", async () => {
     // requirePasskey tenant, grace expired, but the user HAS a passkey.
     mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(1);
-    mockPrisma.user.findUnique.mockResolvedValueOnce({
+    seedPasskeyPolicy({
       fetchFavicons: false,
-      tenant: {
-        requirePasskey: true,
-        requirePasskeyEnabledAt: null, // immediate enforcement window
-        passkeyGracePeriodDays: null,
-      },
+      requirePasskey: true,
+      requirePasskeyEnabledAt: null, // immediate enforcement window
+      passkeyGracePeriodDays: null,
     });
 
     const result = await sessionCallback(baseParams);
@@ -1643,6 +1995,54 @@ describe("session callback — passkey enforcement fail-closed", () => {
     // The real predicate must NOT block a user who has a passkey — proves the
     // fix is fail-CLOSED (blocks the unknown state), not always-closed.
     expect(passkeyEnforcementBlocks(result.user)).toBe(false);
+  });
+
+  it("stamps the session's passkey enforcement from the active membership, not User.tenantId", async () => {
+    // The happy-path cells above seed the same id in both places and a tenant
+    // stub returning one policy for any id, so the four enforcement fields come
+    // out identical whichever source the resolver reads.
+    //
+    // Here the ids carry OPPOSITE enforcement, dispatched by the id the stub is
+    // called with. This is the session callback, so the value decides whether
+    // EVERY subsequent request is blocked: against the stale column a user whose
+    // real tenant mandates passkeys sails through on the old tenant's off switch.
+    mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);
+    seedPasskeyPolicy({
+      fetchFavicons: true,
+      // These three are the STALE tenant's policy — enforcement off. They are
+      // what the fixture returns for any id other than the membership one.
+      requirePasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+      tenantId: "stale-home-tenant",
+      membershipTenantId: "scim-provisioned-tenant",
+    });
+    const enabledAt = new Date("2020-01-01T00:00:00.000Z");
+    mockPrisma.tenant.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) =>
+        where.id === "scim-provisioned-tenant"
+          ? {
+              requirePasskey: true,
+              requirePasskeyEnabledAt: enabledAt,
+              passkeyGracePeriodDays: 7,
+            }
+          : {
+              requirePasskey: false,
+              requirePasskeyEnabledAt: null,
+              passkeyGracePeriodDays: null,
+            },
+    );
+
+    const result = await sessionCallback(baseParams);
+
+    // Positive first: the fetch succeeded, so these are real values and not the
+    // fail-closed bundle, which would pin `requirePasskey: true` for free.
+    expect(result.user.requirePasskeyEnabledAt).toBe(enabledAt.toISOString());
+    expect(result.user.passkeyGracePeriodDays).toBe(7);
+    expect(result.user.requirePasskey).toBe(true);
+    expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
   });
 
   it("still logs auth.session.passkey_data_fetch_failed on fetch failure (ops visibility)", async () => {

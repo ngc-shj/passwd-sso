@@ -513,7 +513,14 @@ describe("createCustomAdapter", () => {
         ip: "192.168.1.1",
         userAgent: "Mozilla/5.0",
       });
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      // Shaped as `resolveOwningTenantIdFromClient` selects it (same for every
+      // user mock in this describe). A mock carrying only the column would still
+      // resolve — through the FALLBACK — so it would read like the ordinary case
+      // while exercising the memberless one.
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -570,7 +577,10 @@ describe("createCustomAdapter", () => {
     // flips from throw to a successful create — it fails.
     it("fails closed (throws) when the tenant row is missing", async () => {
       mockSessionMetaGetStore.mockReturnValue({ ip: null, userAgent: null });
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-gone" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-gone",
+        tenantMemberships: [{ tenantId: "tenant-gone" }],
+      });
       mockTxTenant.findUnique.mockResolvedValue(null);
 
       const adapter = createCustomAdapter();
@@ -586,13 +596,69 @@ describe("createCustomAdapter", () => {
       expect(mockTxSession.create).not.toHaveBeenCalled();
     });
 
+    it("caps and files the session under the active membership, not the stale User.tenantId", async () => {
+      // Every other cell in this describe seeds the same id in both places, so
+      // `tenantId: "tenant-1"` on the session row holds whichever source the
+      // resolver reads, and the tenant stub answers one cap for any id — nothing
+      // here could tell the membership from the column.
+      //
+      // Two consumers, and they must agree on ONE id: the cap read
+      // (`maxConcurrentSessions`) and the `tenantId` stamped on the row. The
+      // adapter comment is explicit that a session filed under the stale copy is
+      // one `/api/sessions` matches zero rows for while reporting a successful
+      // revoke. The cap stub dispatches by id so the eviction behaviour differs
+      // too — the stale tenant has no cap, the membership tenant caps at 1.
+      mockSessionMetaGetStore.mockReturnValue({ ip: null, userAgent: null });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "stale-home-tenant",
+        tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+      });
+      mockTxTenant.findUnique.mockImplementation(
+        async ({ where }: { where: { id: string } }) =>
+          where.id === "scim-provisioned-tenant"
+            ? { maxConcurrentSessions: 1 }
+            : { maxConcurrentSessions: null },
+      );
+      mockTxSession.findMany.mockResolvedValue([
+        { id: "old-s1", sessionToken: "old-tok-1", ipAddress: "1.1.1.1", userAgent: "old-1" },
+      ]);
+      mockTxSession.deleteMany.mockResolvedValue({ count: 1 });
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-scim",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({
+        sessionToken: "tok-scim",
+        userId: "u-1",
+        expires,
+      });
+
+      expect(mockTxTenant.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+      );
+      expect(mockTxSession.create.mock.calls[0][0].data.tenantId).toBe(
+        "scim-provisioned-tenant",
+      );
+      // Behavioural, not just argument-shaped: the cap of 1 belongs to the
+      // membership tenant alone, so the eviction is unreachable from the column.
+      expect(mockTxSession.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ["old-s1"] } },
+      });
+    });
+
     it("records provider from sessionMetaStorage on the session row", async () => {
       mockSessionMetaGetStore.mockReturnValue({
         ip: null,
         userAgent: null,
         provider: "google",
       });
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-prov",
         userId: "u-1",
@@ -608,7 +674,10 @@ describe("createCustomAdapter", () => {
 
     it("sets null when sessionMetaStorage has no store (undefined)", async () => {
       mockSessionMetaGetStore.mockReturnValue(undefined);
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-2" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-2",
+        tenantMemberships: [{ tenantId: "tenant-2" }],
+      });
       mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-2",
         userId: "u-2",
@@ -640,7 +709,10 @@ describe("createCustomAdapter", () => {
         ip: "10.0.0.1",
         userAgent: longUA,
       });
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-3" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-3",
+        tenantMemberships: [{ tenantId: "tenant-3" }],
+      });
       mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-3",
         userId: "u-3",
@@ -667,7 +739,10 @@ describe("createCustomAdapter", () => {
 
     it("evicts oldest session when at concurrent limit", async () => {
       mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "new-device" });
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
       mockTxSession.findMany.mockResolvedValue([
         { id: "old-s1", sessionToken: "old-tok-1", ipAddress: "1.1.1.1", userAgent: "old-1" },
@@ -712,7 +787,10 @@ describe("createCustomAdapter", () => {
 
     it("evicts multiple sessions when well over limit", async () => {
       mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "new" });
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
       mockTxSession.findMany.mockResolvedValue([
         { id: "s1", sessionToken: "tok-s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
@@ -747,7 +825,10 @@ describe("createCustomAdapter", () => {
 
     it("does not evict when under concurrent limit", async () => {
       mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "ok" });
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 3 });
       mockTxSession.findMany.mockResolvedValue([
         { id: "s1", sessionToken: "tok-s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
@@ -773,7 +854,10 @@ describe("createCustomAdapter", () => {
 
     it("does not invalidate cache when the bypass transaction throws (sequencing invariant)", async () => {
       mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "x" });
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       // createSession now runs on the outer withBypassRls tx (inner
       // prisma.$transaction removed). Simulate the DB write failing inside
       // that tx so the whole bypass transaction rolls back.
@@ -794,7 +878,13 @@ describe("createCustomAdapter", () => {
 
   describe("linkAccount", () => {
     it("writes account with resolved tenantId", async () => {
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      // Shaped as `resolveOwningTenantIdFromClient` selects it (same for every
+      // user mock below). Column-only would resolve via the FALLBACK, hiding
+      // the membership precedence this adapter now depends on.
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
 
       const adapter = createCustomAdapter();
@@ -820,6 +910,37 @@ describe("createCustomAdapter", () => {
       });
     });
 
+    it("writes the account under the active membership, not the stale User.tenantId", async () => {
+      // The cell above seeds the same id in both places, so `tenantId:
+      // "tenant-1"` on the account row is satisfied by either source. Here the
+      // ids differ and the written value is the discriminator — `Account` is
+      // RLS-scoped by `tenant_id`, so a row stamped with the tenant the user has
+      // left is invisible to `getAccount` under their real one, and the OAuth
+      // refresh path then behaves as if the account were never linked.
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "stale-home-tenant",
+        tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+      });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-scim" });
+
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "google-scim",
+      });
+
+      expect(mockPrismaAccount.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: "u-1",
+          tenantId: "scim-provisioned-tenant",
+          providerAccountId: "google-scim",
+        }),
+        select: { id: true },
+      });
+    });
+
     it("throws when user does not exist", async () => {
       mockPrismaUser.findUnique.mockResolvedValue(null);
 
@@ -836,7 +957,10 @@ describe("createCustomAdapter", () => {
     });
 
     it("encrypts refresh_token, access_token, and id_token before persisting", async () => {
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
 
       const adapter = createCustomAdapter();
@@ -862,7 +986,10 @@ describe("createCustomAdapter", () => {
     });
 
     it("leaves null/undefined token fields null after encryption", async () => {
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
 
       const adapter = createCustomAdapter();
@@ -884,7 +1011,10 @@ describe("createCustomAdapter", () => {
       // The old colon-format AAD rejected ':' in fields to prevent collision.
       // The binary length-prefixed format eliminates delimiter ambiguity, so
       // SAML providers with ':' in their identifier are now accepted.
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({});
       const adapter = createCustomAdapter();
       await expect(
@@ -1428,7 +1558,12 @@ describe("createCustomAdapter", () => {
     it("decrypts encrypted tokens to plaintext (round-trip with linkAccount)", async () => {
       // Use linkAccount to produce the ciphertext, then mock findFirst to
       // return that ciphertext and verify getAccount decrypts it.
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      // User read shaped as `resolveOwningTenantIdFromClient` selects it —
+      // column-only would resolve through the FALLBACK instead.
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
       const adapter = createCustomAdapter();
       await adapter.linkAccount!({
@@ -1493,7 +1628,10 @@ describe("createCustomAdapter", () => {
     });
 
     it("does NOT emit audit on successful decrypt", async () => {
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-ok" });
       const adapter = createCustomAdapter();
       await adapter.linkAccount!({
@@ -1535,7 +1673,10 @@ describe("createCustomAdapter", () => {
       // that ciphertext from findFirst for a row whose tuple differs. Both
       // userId and providerAccountId differ here, so the AAD bind fails on
       // multiple fields — any single-field mismatch would also fail.
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-source" });
       const adapter = createCustomAdapter();
       await adapter.linkAccount!({
@@ -1598,7 +1739,10 @@ describe("createCustomAdapter", () => {
       // tuple; id_token freshly encrypted for the read-time tuple. getAccount
       // should return id_token plaintext and refresh_token undefined; exactly
       // one TAMPERED audit event must fire (T3 assertion below).
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
       const adapter = createCustomAdapter();
 
@@ -1659,7 +1803,10 @@ describe("createCustomAdapter", () => {
       // succeeds but getMasterKeyByVersion throws (key version not loaded).
       // Use a fresh round-trip ciphertext, then make findFirst return it
       // while spying getMasterKeyByVersion to throw on a non-current version.
-      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        tenantMemberships: [{ tenantId: "tenant-1" }],
+      });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-keymiss" });
       const adapter = createCustomAdapter();
       await adapter.linkAccount!({

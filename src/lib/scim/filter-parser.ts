@@ -6,6 +6,7 @@
  */
 
 import { SCIM_FILTER_MAX_LENGTH } from "@/lib/validations/common.server";
+import { escapeLikePattern } from "@/lib/prisma/prisma-filters";
 
 /** Attributes allowed in SCIM filters. */
 const ALLOWED_FILTER_ATTRIBUTES = new Set([
@@ -243,13 +244,16 @@ function comparisonToPrisma(node: ScimFilterNode): PrismaWhere {
   if (attr === "userName") {
     const normalized = value.toLowerCase();
     const field = "user";
+    // Prisma passes an insensitive `equals` / `contains` / `startsWith` value to
+    // ILIKE unescaped, so `_`, `%` and `\\` in a filter value were wildcards
+    // (round-8 R8-S4). `eq` matches exactly with `in`; `co` and `sw` escape.
     switch (op) {
       case "eq":
-        return { [field]: { is: { email: { equals: normalized, mode: "insensitive" } } } };
+        return { [field]: { is: { email: { in: [normalized], mode: "insensitive" } } } };
       case "co":
-        return { [field]: { is: { email: { contains: normalized, mode: "insensitive" } } } };
+        return { [field]: { is: { email: { contains: escapeLikePattern(normalized), mode: "insensitive" } } } };
       case "sw":
-        return { [field]: { is: { email: { startsWith: normalized, mode: "insensitive" } } } };
+        return { [field]: { is: { email: { startsWith: escapeLikePattern(normalized), mode: "insensitive" } } } };
     }
   }
 

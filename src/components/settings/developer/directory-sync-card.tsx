@@ -82,6 +82,7 @@ interface SyncLog {
   usersCreated: number;
   usersUpdated: number;
   usersDeactivated: number;
+  usersRefused: number;
   groupsUpdated: number;
   errorMessage: string | null;
 }
@@ -776,6 +777,9 @@ export function DirectorySyncCard() {
                       <span>{t("logUsersCreated")}: {log.usersCreated}</span>
                       <span>{t("logUsersUpdated")}: {log.usersUpdated}</span>
                       <span>{t("logUsersDeactivated")}: {log.usersDeactivated}</span>
+                      {log.usersRefused > 0 && (
+                        <span className="text-destructive">{t("logUsersRefused")}: {log.usersRefused}</span>
+                      )}
                       <span>{t("logGroupsUpdated")}: {log.groupsUpdated}</span>
                     </div>
                     {log.errorMessage && (

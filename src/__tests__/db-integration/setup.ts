@@ -8,8 +8,10 @@ import { config } from "dotenv";
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
 
-// For integration tests, superuser must be the default DATABASE_URL
-// so that createTestContext() can create tenants and manage test data.
+// A fallback only, for a runner that exported nothing but MIGRATION_DATABASE_URL.
+// The harness's superuser comes from MIGRATION_DATABASE_URL itself
+// (helpers.ts getConnectionString("superuser")); DATABASE_URL is the
+// application's connection, passwd_app both locally and in CI.
 if (!process.env.DATABASE_URL && process.env.MIGRATION_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.MIGRATION_DATABASE_URL;
 }

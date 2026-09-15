@@ -531,6 +531,8 @@ fi
 run_step "Static: no-deprecated-logAudit" bash -c 'hits=$(grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" || true); if [ -n "$hits" ]; then echo "Residual logAudit() calls found:"; printf "%s\n" "$hits"; exit 1; fi'
 
 run_step "Static: emergency-activate-atomic" node scripts/checks/check-emergency-activate-atomic.mjs
+run_step "Static: owning-tenant-adjudicator" node scripts/checks/check-owning-tenant-adjudicator.mjs
+run_step "Static: required-user-relation" node scripts/checks/check-required-user-relation.mjs
 
 # C21 / C10: forbid imports of Auth.js builtin WebAuthn providers. The project
 # uses Auth.js Credentials provider with a custom authorize() flow that calls

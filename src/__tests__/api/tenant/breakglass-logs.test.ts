@@ -22,6 +22,11 @@ const {
   mockExtractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test-agent" }),
 }));
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
@@ -41,6 +46,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     personalLogAccessGrant: { findFirst: mockGrantFindFirst },
     tenantMember: { findFirst: mockMemberFindFirst },
+    user: { findMany: mockUserFindMany },
     auditLog: {
       create: mockAuditLogCreate,
       findMany: mockAuditLogFindMany,
@@ -49,6 +55,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: mockExtractRequestMeta,
@@ -67,6 +74,12 @@ import { MS_PER_HOUR } from "@/lib/constants/time";
 
 const GRANT_ID = "grant-abc123";
 const TARGET_USER_ID = "cmmtargetuserid00001";
+const TARGET_USER = {
+  id: TARGET_USER_ID,
+  name: "Target User",
+  email: "target@example.com",
+  image: null,
+};
 
 function makeActiveGrant(overrides: Record<string, unknown> = {}) {
   return {
@@ -76,12 +89,6 @@ function makeActiveGrant(overrides: Record<string, unknown> = {}) {
     targetUserId: TARGET_USER_ID,
     revokedAt: null,
     expiresAt: new Date(Date.now() + MS_PER_HOUR), // 1 hour from now
-    targetUser: {
-      id: TARGET_USER_ID,
-      name: "Target User",
-      email: "target@example.com",
-      image: null,
-    },
     ...overrides,
   };
 }
@@ -203,6 +210,7 @@ describe("GET /api/tenant/breakglass/[id]/logs", () => {
     mockMemberFindFirst.mockResolvedValue({ id: "member-1" });
     mockAuditLogCreate.mockResolvedValue({ id: "audit-view-1" });
     mockAuditLogFindMany.mockResolvedValue([makeLog()]);
+    mockUserFindMany.mockResolvedValue([TARGET_USER]);
 
     const req = createRequest("GET", `http://localhost/api/tenant/breakglass/${uniqueGrantId}/logs`);
     const res = await GET(req, createParams({ id: uniqueGrantId }));
@@ -213,7 +221,7 @@ describe("GET /api/tenant/breakglass/[id]/logs", () => {
     expect(json.nextCursor).toBeNull();
     expect(json.grant).toMatchObject({
       grantId: uniqueGrantId,
-      targetUser: expect.objectContaining({ id: TARGET_USER_ID }),
+      targetUser: TARGET_USER,
     });
     // Non-repudiation: VIEW audit was written
     expect(mockAuditLogCreate).toHaveBeenCalledWith(
@@ -224,6 +232,25 @@ describe("GET /api/tenant/breakglass/[id]/logs", () => {
         }),
       }),
     );
+  });
+
+  it("returns the logs of a target RLS hides, with an id-only target, and reads no user relation in the tenant context", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const uniqueGrantId = `grant-hidden-${Date.now()}`;
+    mockGrantFindFirst.mockResolvedValue(makeActiveGrant({ id: uniqueGrantId }));
+    mockMemberFindFirst.mockResolvedValue({ id: "member-1" });
+    mockAuditLogCreate.mockResolvedValue({ id: "audit-view-1" });
+    mockAuditLogFindMany.mockResolvedValue([]);
+    mockUserFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", `http://localhost/api/tenant/breakglass/${uniqueGrantId}/logs`);
+    const res = await GET(req, createParams({ id: uniqueGrantId }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.grant.targetUser).toEqual({ id: TARGET_USER_ID, name: null, email: null, image: null });
+    expect(mockGrantFindFirst.mock.calls[0][0]).not.toHaveProperty("include");
   });
 
   it("deduplicates VIEW audit: second call within 1hr does not create audit", async () => {

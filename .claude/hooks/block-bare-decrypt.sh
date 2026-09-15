@@ -24,8 +24,23 @@
 #     `<cli> <sub> x | cat` both satisfied those and both printed the value.
 #   - refusing the sanctioned pattern, which made the workflow its own error
 #     message recommends impossible to run.
+#
+# The printer refusal — a captured value echoed back — is a best-effort tripwire,
+# not a closed class. It matches `echo`, `printf`, `cat` and `tee` as command words
+# followed by `$_CRED` or `${_CRED}` on the same line. `declare -p`, `set`, a heredoc
+# body, an encoder such as `base64`, brace expansion and a line continuation all print
+# the value unseen (audit-tenant-adjudicator round 16, S-R16-2). Adding names does not
+# close that, as round 15's additions showed by reopening forms round 14 refused; a
+# decrypt surface that never returns plaintext does.
 
 set -euo pipefail
+
+# A top-level command that fails without being handled below would end the hook with
+# its own status, and only exit 2 blocks: a failed occurrence count, for one, exited
+# with its pipeline's status and allowed the command (audit-tenant-adjudicator round
+# 15, S-R15-1). A check that could not finish has not cleared the command. Failures
+# inside matches() are handled there, so the trap needs no errtrace.
+trap 'echo "{\"error\": \"BLOCKED: credential guard failed while checking this command. Refusing rather than allowing.\"}" >&2; exit 2' ERR
 
 # Read tool input from stdin
 INPUT=$(cat)
@@ -53,17 +68,27 @@ print(cmd)
 # "this is not a decrypt command", so the hook exited 0 and allowed the very
 # command it exists to block. An unusable matcher must deny, never allow.
 matches() {
-  local pattern="$1" status
-  set +e
-  printf '%s' "$COMMAND" | grep -qE "$pattern"
-  status=$?
-  set -e
+  local pattern="$1" count status=0
+  # A here-string, not `printf '%s' "$COMMAND" | grep -qE`: grep -q exits at its
+  # first matching line, printf's next write then takes SIGPIPE, and under
+  # pipefail the pipeline reports 141, which the case below refuses. A multi-line
+  # /use-credential command whose match came before its last line was refused at
+  # random: 3 of 10 runs with a 70 KB line, 10 of 10 with a 200 KB line
+  # (audit-tenant-adjudicator round 14, T-R14-5).
+  #
+  # Counting, not -q, because a here-string past ~64 KB (every one, on macOS's bash
+  # 3.2) is written to a temp file first. When that write fails, grep never runs,
+  # the status is 1 — "no match" — and nothing is printed. A count is always
+  # printed when grep ran, so an empty one means it did not (round 15, F-R15-1).
+  count=$(grep -cE "$pattern" <<<"$COMMAND") || status=$?
+  [ -n "$count" ] || status=3
   case "$status" in
     0) return 0 ;;   # matched
     1) return 1 ;;   # did not match
     *)
-      # grep could not evaluate the pattern at all (bad option, unusable regex).
-      # "Could not decide" is not "safe" — refuse, and name the reason.
+      # grep could not evaluate the pattern at all (bad option, unusable regex),
+      # or never ran (3: the here-string could not be written). "Could not
+      # decide" is not "safe" — refuse, and name the reason.
       echo "{\"error\": \"BLOCKED: credential guard could not evaluate its matcher (grep exit $status). Refusing rather than allowing.\"}" >&2
       exit 2
       ;;
@@ -123,7 +148,14 @@ fi
 if matches "_CRED=\\\$\\([^)]*${DECRYPT_RE}"; then
   # Still refuse if the captured value is then printed — the accident the
   # skill's own rules forbid.
-  if matches 'echo[[:space:]]+[^|]*\$_CRED|printf[^|]*\$_CRED|cat[^|]*\$_CRED'; then
+  # The printer as a command word. Preceded by no word character, which keeps
+  # `--mode=noecho` out. Ended by a blank or a redirection, optionally after the quote
+  # of a quoted command word, which keeps `catalog` and `printf_wrapper` out while
+  # `cat<<<"$_CRED"`, `printf>&2 …` and `"printf" …` stay in. `application/json` is
+  # kept out by either clause — round 15 required a blank and let those three through (round 16,
+  # F-R16-1/S-R16-1). The variable as the skill spells it, `${_CRED}`, as well as
+  # `$_CRED` (round 15, S-R15-3). The header says what this does not see.
+  if matches '(^|[^[:alnum:]_])(echo|printf|cat|tee)["'"'"']?([[:space:]]|[<>])[^|]*\$\{?_CRED'; then
     echo '{"error": "BLOCKED: do not echo/print the credential variable. Pass $_CRED directly to the command that consumes it."}' >&2
     exit 2
   fi

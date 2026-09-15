@@ -39,6 +39,7 @@ export const VALUE_FLAG_HINTS = {
   from: "the current owner's tenant UUID, exactly as `list` prints it",
   days: "a positive integer number of days",
   after: "the seq cursor printed by a capped `history` result, to continue from",
+  user: "the user's UUID, or their email (matched case-insensitively)",
 } as const satisfies Record<string, string>;
 
 export type ValueFlag = keyof typeof VALUE_FLAG_HINTS;

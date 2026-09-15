@@ -11,6 +11,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import type { NotificationType } from "@prisma/client";
 import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
@@ -58,13 +59,13 @@ export function createNotification(params: CreateNotificationParams): void {
 
   void (async () => {
     await withBypassRls(prisma, async (tx) => {
+      // The active membership, not the `User.tenantId` column: these rows are
+      // read back by `/api/notifications` under `withUserTenantRls`, so a row
+      // filed under the stale copy is invisible to its own recipient — and the
+      // lockout security alert is one of the things routed through here.
       let resolvedTenantId = tenantId ?? null;
       if (!resolvedTenantId) {
-        const user = await tx.user.findUnique({
-          where: { id: userId },
-          select: { tenantId: true },
-        });
-        resolvedTenantId = user?.tenantId ?? null;
+        resolvedTenantId = await resolveOwningTenantIdFromClient(tx, userId);
       }
       if (!resolvedTenantId) return;
 

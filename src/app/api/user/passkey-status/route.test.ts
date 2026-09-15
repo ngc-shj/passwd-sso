@@ -8,12 +8,14 @@ const {
   mockWithBypassRls,
   mockWebAuthnCredentialCount,
   mockUserFindUnique,
+  mockTenantFindUnique,
 } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockWebAuthnCredentialCount: vi.fn(),
   mockUserFindUnique: vi.fn(),
+  mockTenantFindUnique: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
@@ -28,6 +30,8 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     webAuthnCredential: { count: mockWebAuthnCredentialCount },
     user: { findUnique: mockUserFindUnique },
+    // The policy is loaded by id now, not traversed through `user.tenant`.
+    tenant: { findUnique: mockTenantFindUnique },
   },
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
@@ -53,18 +57,33 @@ function authFail(status = 401) {
   };
 }
 
-function tenantWith(overrides: {
+const TENANT_ID = "tenant-1";
+
+// Two reads to seed: the user one shaped as `resolveOwningTenantIdFromClient`
+// selects it, then the tenant loaded by id. A user mock carrying only the
+// column would still resolve — through the FALLBACK — so it would read like the
+// ordinary case while exercising the memberless one.
+//
+// `membershipTenantId` defaults to the column value so every existing cell keeps
+// the agreeing fixture it was written against; the divergent cell below is the
+// only caller that separates them.
+function seedTenant(overrides: {
   requirePasskey?: boolean;
   requirePasskeyEnabledAt?: Date | null;
   passkeyGracePeriodDays?: number | null;
+  columnTenantId?: string;
+  membershipTenantId?: string;
 }) {
-  return {
-    tenant: {
-      requirePasskey: overrides.requirePasskey ?? false,
-      requirePasskeyEnabledAt: overrides.requirePasskeyEnabledAt ?? null,
-      passkeyGracePeriodDays: overrides.passkeyGracePeriodDays ?? null,
-    },
-  };
+  const columnTenantId = overrides.columnTenantId ?? TENANT_ID;
+  mockUserFindUnique.mockResolvedValue({
+    tenantId: columnTenantId,
+    tenantMemberships: [{ tenantId: overrides.membershipTenantId ?? columnTenantId }],
+  });
+  mockTenantFindUnique.mockResolvedValue({
+    requirePasskey: overrides.requirePasskey ?? false,
+    requirePasskeyEnabledAt: overrides.requirePasskeyEnabledAt ?? null,
+    passkeyGracePeriodDays: overrides.passkeyGracePeriodDays ?? null,
+  });
 }
 
 describe("GET /api/user/passkey-status", () => {
@@ -73,9 +92,7 @@ describe("GET /api/user/passkey-status", () => {
     mockCheckAuth.mockResolvedValue(authOk());
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockWebAuthnCredentialCount.mockResolvedValue(0);
-    mockUserFindUnique.mockResolvedValue(
-      tenantWith({ requirePasskey: false }),
-    );
+    seedTenant({ requirePasskey: false });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -88,9 +105,7 @@ describe("GET /api/user/passkey-status", () => {
 
   it("returns required: false when tenant requirePasskey is false", async () => {
     mockWebAuthnCredentialCount.mockResolvedValue(0);
-    mockUserFindUnique.mockResolvedValue(
-      tenantWith({ requirePasskey: false }),
-    );
+    seedTenant({ requirePasskey: false });
     const res = await GET(
       createRequest("GET", "http://localhost/api/user/passkey-status"),
     );
@@ -101,9 +116,7 @@ describe("GET /api/user/passkey-status", () => {
 
   it("returns hasPasskey: true when user has WebAuthn credentials", async () => {
     mockWebAuthnCredentialCount.mockResolvedValue(2);
-    mockUserFindUnique.mockResolvedValue(
-      tenantWith({ requirePasskey: true }),
-    );
+    seedTenant({ requirePasskey: true });
     const res = await GET(
       createRequest("GET", "http://localhost/api/user/passkey-status"),
     );
@@ -114,9 +127,7 @@ describe("GET /api/user/passkey-status", () => {
 
   it("returns hasPasskey: false when user has no credentials", async () => {
     mockWebAuthnCredentialCount.mockResolvedValue(0);
-    mockUserFindUnique.mockResolvedValue(
-      tenantWith({ requirePasskey: true }),
-    );
+    seedTenant({ requirePasskey: true });
     const res = await GET(
       createRequest("GET", "http://localhost/api/user/passkey-status"),
     );
@@ -128,13 +139,11 @@ describe("GET /api/user/passkey-status", () => {
   it("returns correct gracePeriodRemaining within grace period", async () => {
     const enabledAt = new Date(Date.now() - 2 * MS_PER_DAY); // 2 days ago
     mockWebAuthnCredentialCount.mockResolvedValue(0);
-    mockUserFindUnique.mockResolvedValue(
-      tenantWith({
-        requirePasskey: true,
-        requirePasskeyEnabledAt: enabledAt,
-        passkeyGracePeriodDays: 7,
-      }),
-    );
+    seedTenant({
+      requirePasskey: true,
+      requirePasskeyEnabledAt: enabledAt,
+      passkeyGracePeriodDays: 7,
+    });
     const res = await GET(
       createRequest("GET", "http://localhost/api/user/passkey-status"),
     );
@@ -148,13 +157,11 @@ describe("GET /api/user/passkey-status", () => {
   it("returns gracePeriodRemaining: 0 when grace period has expired", async () => {
     const enabledAt = new Date(Date.now() - 10 * MS_PER_DAY); // 10 days ago
     mockWebAuthnCredentialCount.mockResolvedValue(0);
-    mockUserFindUnique.mockResolvedValue(
-      tenantWith({
-        requirePasskey: true,
-        requirePasskeyEnabledAt: enabledAt,
-        passkeyGracePeriodDays: 7, // only 7 day grace, 10 elapsed → expired
-      }),
-    );
+    seedTenant({
+      requirePasskey: true,
+      requirePasskeyEnabledAt: enabledAt,
+      passkeyGracePeriodDays: 7, // only 7 day grace, 10 elapsed → expired
+    });
     const res = await GET(
       createRequest("GET", "http://localhost/api/user/passkey-status"),
     );
@@ -166,13 +173,11 @@ describe("GET /api/user/passkey-status", () => {
   it("returns gracePeriodRemaining: null when hasPasskey is true", async () => {
     const enabledAt = new Date(Date.now() - 1 * MS_PER_DAY); // 1 day ago
     mockWebAuthnCredentialCount.mockResolvedValue(1); // has passkey
-    mockUserFindUnique.mockResolvedValue(
-      tenantWith({
-        requirePasskey: true,
-        requirePasskeyEnabledAt: enabledAt,
-        passkeyGracePeriodDays: 7,
-      }),
-    );
+    seedTenant({
+      requirePasskey: true,
+      requirePasskeyEnabledAt: enabledAt,
+      passkeyGracePeriodDays: 7,
+    });
     const res = await GET(
       createRequest("GET", "http://localhost/api/user/passkey-status"),
     );
@@ -184,19 +189,65 @@ describe("GET /api/user/passkey-status", () => {
   it("returns gracePeriodRemaining: null when required is false", async () => {
     const enabledAt = new Date(Date.now() - 1 * MS_PER_DAY);
     mockWebAuthnCredentialCount.mockResolvedValue(0);
-    mockUserFindUnique.mockResolvedValue(
-      tenantWith({
-        requirePasskey: false, // not required
-        requirePasskeyEnabledAt: enabledAt,
-        passkeyGracePeriodDays: 7,
-      }),
-    );
+    seedTenant({
+      requirePasskey: false, // not required
+      requirePasskeyEnabledAt: enabledAt,
+      passkeyGracePeriodDays: 7,
+    });
     const res = await GET(
       createRequest("GET", "http://localhost/api/user/passkey-status"),
     );
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.gracePeriodRemaining).toBeNull();
+  });
+
+  it("reads the enforcement policy from the active membership, not User.tenantId", async () => {
+    // Every cell above seeds the same id in both places, so the tenant read is
+    // answered identically whichever source the resolver picks — the response
+    // body cannot see the difference and the fixture proves nothing about
+    // precedence. Here the two ids carry OPPOSITE policies.
+    //
+    // A blanket `mockResolvedValue` would be just as blind, so the tenant stub
+    // dispatches on the id it is called with: the stale column tenant has
+    // enforcement off, the SCIM-provisioned membership tenant has it on. The
+    // response body is then the discriminator — `required: true` is reachable
+    // only by reading the membership.
+    mockWebAuthnCredentialCount.mockResolvedValue(0);
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+    mockTenantFindUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) =>
+        where.id === "scim-provisioned-tenant"
+          ? {
+              requirePasskey: true,
+              requirePasskeyEnabledAt: new Date(Date.now() - 10 * MS_PER_DAY),
+              passkeyGracePeriodDays: 7,
+            }
+          : {
+              requirePasskey: false,
+              requirePasskeyEnabledAt: null,
+              passkeyGracePeriodDays: null,
+            },
+    );
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/user/passkey-status"),
+    );
+
+    // Positive first: the handler completed. A 500 from the catch-all would
+    // otherwise satisfy "not the stale policy" by never producing a body.
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.required).toBe(true);
+    // Grace expired 3 days ago under the membership tenant's policy; the stale
+    // tenant has no grace configured at all, so this value is unreachable from it.
+    expect(json.gracePeriodRemaining).toBe(0);
+    expect(mockTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
   });
 
   it("returns 429 when rate limited", async () => {

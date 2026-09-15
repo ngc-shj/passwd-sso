@@ -13,6 +13,11 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+}));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -28,10 +33,15 @@ vi.mock("@/lib/auth/access/team-auth", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findMany: mockPasswordShareFindMany },
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();
@@ -44,6 +54,7 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { GET } from "./route";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 const USER_ID = "user-1";
 const now = new Date("2025-06-01T00:00:00Z");
@@ -64,7 +75,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
     createdAt: now,
     passwordEntryId: "pw-1",
     teamPasswordEntryId: null,
-    createdBy: { id: USER_ID, name: "Test User", email: "test@example.com" },
+    createdById: USER_ID,
     passwordEntry: { id: "pw-1" },
     teamPasswordEntry: null,
     ...overrides,
@@ -76,6 +87,9 @@ describe("GET /api/share-links/mine", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
     mockPasswordShareFindMany.mockResolvedValue([makeShare()]);
+    mockUserFindMany.mockResolvedValue([
+      { id: USER_ID, name: "Test User", email: "test@example.com", image: null },
+    ]);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -203,12 +217,27 @@ describe("GET /api/share-links/mine", () => {
   it("canRevoke=false when share was created by another user", async () => {
     mockPasswordShareFindMany.mockResolvedValue([
       makeShare({
-        createdBy: { id: "other-user", name: "Other", email: "other@example.com" },
+        createdById: "other-user",
       }),
     ]);
     const res = await GET(createRequest("GET", "http://localhost/api/share-links/mine"));
     const { json } = await parseResponse(res);
     expect(json.items[0].canRevoke).toBe(false);
+  });
+
+  it("lists a share whose creator's users row does not come back, with no sharedBy, and reads no user relation in the tenant context", async () => {
+    mockPasswordShareFindMany.mockResolvedValue([makeShare({ createdById: "departed-user" })]);
+    const res = await GET(createRequest("GET", "http://localhost/api/share-links/mine"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(200);
+    expect(json.items[0].sharedBy).toBeNull();
+    expect(json.items[0].canRevoke).toBe(false);
+    expect(mockPasswordShareFindMany.mock.calls[0][0].include).not.toHaveProperty("createdBy");
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
   });
 
   it("isActive=false when revokedAt is set", async () => {

@@ -173,6 +173,14 @@ const BASE_POLICY = {
   requireMinPinLength: null,
 };
 
+// GET loads the policy by the tenant `requireTenantPermission` admitted the
+// request to. It no longer resolves the tenant itself — the user read this
+// helper used to seed was dead, and removing it changed nothing, which is what
+// said so.
+function seedGetPolicy(policy: Record<string, unknown>) {
+  mockPrismaTenantFindUnique.mockResolvedValue(policy);
+}
+
 // ── Setup ────────────────────────────────────────────────────
 
 describe("GET /api/tenant/policy", () => {
@@ -181,10 +189,27 @@ describe("GET /api/tenant/policy", () => {
 
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTenantPermission.mockResolvedValue(MEMBERSHIP);
-    mockPrismaUserFindUnique.mockResolvedValue({
-      tenant: { ...BASE_POLICY },
-    });
+    seedGetPolicy({ ...BASE_POLICY });
     mockWithBypassRls.mockImplementation((p: unknown, fn: (tx: unknown) => unknown) => fn(p));
+  });
+
+  it("loads the policy for the tenant the request was ADMITTED to", async () => {
+    // The subject nothing pinned: hardcoding a different id in the route left
+    // every cell in both twins green, because the policy stub answers the same
+    // for any id. GET used to resolve the tenant a second time, through an
+    // adjudicator with different rules from the one that authorized the call —
+    // so GET could render one tenant's policy while PUT edited another's.
+    mockRequireTenantPermission.mockResolvedValue({
+      ...MEMBERSHIP,
+      tenantId: "admitted-tenant",
+    });
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/policy"));
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "admitted-tenant" } }),
+    );
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -198,9 +223,7 @@ describe("GET /api/tenant/policy", () => {
   });
 
   it("returns requireMinPinLength from tenant policy", async () => {
-    mockPrismaUserFindUnique.mockResolvedValue({
-      tenant: { ...BASE_POLICY, requireMinPinLength: 6 },
-    });
+    seedGetPolicy({ ...BASE_POLICY, requireMinPinLength: 6 });
 
     const req = createRequest("GET", ROUTE_URL);
     const { status, json } = await parseResponse(await GET(req));
@@ -594,9 +617,7 @@ describe("PATCH /api/tenant/policy", () => {
 
     for (const field of FIELDS) {
       it(`GET returns ${field} from tenant policy`, async () => {
-        mockPrismaUserFindUnique.mockResolvedValue({
-          tenant: { ...BASE_POLICY, [field]: 42 },
-        });
+        seedGetPolicy({ ...BASE_POLICY, [field]: 42 });
         const req = createRequest("GET", ROUTE_URL);
         const { status, json } = await parseResponse(await GET(req));
         expect(status).toBe(200);
@@ -604,7 +625,7 @@ describe("PATCH /api/tenant/policy", () => {
       });
 
       it(`GET returns ${field}=null when not set`, async () => {
-        mockPrismaUserFindUnique.mockResolvedValue({ tenant: { ...BASE_POLICY } });
+        seedGetPolicy({ ...BASE_POLICY });
         const req = createRequest("GET", ROUTE_URL);
         const { status, json } = await parseResponse(await GET(req));
         expect(status).toBe(200);

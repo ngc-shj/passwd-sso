@@ -132,47 +132,51 @@ async function handlePUT(
 
   let result: { encryptionMode: 2; fromKeyVersion: number | null };
   try {
-    result = await withUserTenantRls(userId, async () =>
-      prisma.$transaction(async (tx) => {
-        // Advisory lock prevents concurrent migrations / rotations for the
-        // same user. The user record is read INSIDE the lock so the
-        // keyVersion equality check is not racy against a concurrent
-        // rotation that bumped the keyVersion between request boundary and
-        // lock acquisition.
-        await advisoryXactLock(tx, userId);
+    result = await withUserTenantRls(userId, async () => {
+      // withUserTenantRls opens the transaction, and `prisma` resolves to it
+      // inside this callback (the proxy in src/lib/prisma.ts; the nested
+      // `prisma.$transaction` this used to call ran on that same transaction).
+      // The read is written here rather than in a nested callback so the
+      // owning-tenant gate can see the context it runs in (round 10).
+      //
+      // Advisory lock prevents concurrent migrations / rotations for the
+      // same user. The user record is read INSIDE the lock so the
+      // keyVersion equality check is not racy against a concurrent
+      // rotation that bumped the keyVersion between request boundary and
+      // lock acquisition.
+      await advisoryXactLock(prisma, userId);
 
-        const u = await tx.user.findUnique({
-          where: { id: userId },
-          select: { tenantId: true, keyVersion: true },
-        });
-        if (!u?.tenantId) {
-          throw new Error(API_ERROR.USER_NOT_FOUND);
-        }
-        // I5.6: cekKeyVersion must match the user's current keyVersion at
-        // lock-acquisition time.
-        if (cekKeyVersion !== u.keyVersion) {
-          throw new LegacyAttachmentInconsistentVersionError();
-        }
+      const u = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { tenantId: true, keyVersion: true },
+      });
+      if (!u?.tenantId) {
+        throw new Error(API_ERROR.USER_NOT_FOUND);
+      }
+      // I5.6: cekKeyVersion must match the user's current keyVersion at
+      // lock-acquisition time.
+      if (cekKeyVersion !== u.keyVersion) {
+        throw new LegacyAttachmentInconsistentVersionError();
+      }
 
-        return applyAttachmentMigration(tx, {
-          userId,
-          tenantId: u.tenantId,
-          entryId,
-          attachmentId,
-          payload: {
-            oldEncryptedDataHash,
-            encryptedData,
-            iv,
-            authTag,
-            cekEncrypted,
-            cekIv,
-            cekAuthTag,
-            cekKeyVersion,
-            cekWrapAadVersion,
-          },
-        });
-      }),
-    );
+      return applyAttachmentMigration(prisma, {
+        userId,
+        tenantId: u.tenantId,
+        entryId,
+        attachmentId,
+        payload: {
+          oldEncryptedDataHash,
+          encryptedData,
+          iv,
+          authTag,
+          cekEncrypted,
+          cekIv,
+          cekAuthTag,
+          cekKeyVersion,
+          cekWrapAadVersion,
+        },
+      });
+    });
   } catch (err) {
     if (err instanceof LegacyAttachmentInconsistentVersionError) {
       return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
