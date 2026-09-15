@@ -249,7 +249,12 @@ describe("block-bare-decrypt hook — failures refuse, and the printer check rea
   /** Run the hook where bash cannot write a here-string's temp file (a 1-block file-size limit). */
   function runHookWithoutTempFiles(command) {
     const payload = JSON.stringify({ tool_input: { command } });
-    return spawnSync("bash", ["-c", 'ulimit -f 1; trap "" XFSZ; exec bash "$0"', HOOK], { input: payload, encoding: "utf8" });
+    // The hook path travels in the environment, not the shell's argv, so the -c script stays a constant string.
+    return spawnSync("bash", ["-c", 'ulimit -f 1; trap "" XFSZ; exec bash "$HOOK_PATH"'], {
+      input: payload,
+      encoding: "utf8",
+      env: { ...process.env, HOOK_PATH: HOOK },
+    });
   }
 
   it("refuses a 200 KB bare decrypt when the here-string cannot be written (F-R15-1/S-R15-1)", () => {
