@@ -41,7 +41,9 @@ COPY .npmrc ./
 # CVE-2026-40345 (stack exhaustion on recursive object graphs). MYSQL2_VER:
 # prisma pulls mysql2 for its MySQL connector and <3.22.0 carries
 # GHSA-3f6p-5ww8-9rcr (auth-plugin downgrade to mysql_clear_password leaks the
-# password). We deploy against PostgreSQL, so the connector is never invoked —
+# password), and <=3.23.0 carries GHSA-rgwj-5xj2-c3m3 (unbounded zlib inflate in
+# the compressed protocol handler). We deploy against PostgreSQL, so the
+# connector is never invoked —
 # the pin is here because the copy still SHIPS in the runner and Trivy scans
 # what ships, not what runs. This stage is an ISOLATED `npm init` tree, so the
 # repo's package.json `overrides` do NOT apply here — the override has to be
@@ -50,7 +52,7 @@ COPY .npmrc ./
 RUN PRISMA_VER=7.10.0 && \
     FMW_VER=9.7.0 && \
     DMT_VER=8.0.0 && \
-    MYSQL2_VER=3.22.0 && \
+    MYSQL2_VER=3.23.1 && \
     npm init -y >/dev/null 2>&1 && \
     node -e "const f='package.json',p=require('/prisma-cli/'+f);p.overrides={...p.overrides,'find-my-way':'^${FMW_VER}','deepmerge-ts':'^${DMT_VER}','mysql2':'^${MYSQL2_VER}'};require('fs').writeFileSync(f,JSON.stringify(p,null,2))" && \
     npm install "prisma@${PRISMA_VER}" --ignore-scripts --loglevel=error && \
