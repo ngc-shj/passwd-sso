@@ -193,7 +193,7 @@ Scope contract:
 - **SC2** — A decrypt surface that never returns plaintext (the real closure for C1). Owner: future issue; stays listed in the hook header.
 - **SC3** — Widening `check-bypass-rls`'s scan root beyond `src/` (`scripts/tenant-domain.ts`, `scripts/manual-tests`). Owner: follow-up issue; not part of `#838`.
 - **SC4** — Client-propagation into imported callees in `check-bypass-rls` (the gate's other fail-open class). Owner: follow-up issue; the Program built here is the prerequisite, the analysis is not in `#838`.
-- **SC5** — The partial unique index on active memberships (design note Q11). Owner: after production measurement (2) is known.
+- ~~**SC5** — The partial unique index on active memberships (design note Q11).~~ **Struck: already shipped** by PR `#830` (`prisma/migrations/20260909120000_one_active_membership_per_user/`). The plan asserted it was outstanding without checking the migration tree; see deviation log D1 for what that changes in C4.
 
 ## User operation scenarios
 
@@ -209,3 +209,38 @@ Scope contract:
 | C2  | no-pipe-into-grep-q: root, awk failure, wired hook member set   | locked |
 | C3  | check-bypass-rls: Program cross-check + checker-type refusals   | locked |
 | C4  | owning-column measurement + dry-run backfill                    | locked |
+
+## Implementation Checklist
+
+Files that must appear in the diff, by contract. Derived by `grep -rln` over the touched symbols
+(`requireOptionalModule`, `owningTenantOf`, each gate's basename) across `src`, `scripts`, `e2e`,
+`.github`.
+
+**C1**
+- `.claude/hooks/block-bare-decrypt.sh` — keeps the bash entry point (stdin, exit 0/2, JSON stderr); the decision delegates to the scanner.
+- `.claude/hooks/lib/decrypt-command-scan.py` (new) — the scanner. A separate file, not a heredoc, so A-C1-0's segmentation cells can call it directly.
+- `scripts/__tests__/block-bare-decrypt-hook.test.mjs` — existing cells kept; the 200 KB cell rewritten (A-C1-4); new deny/allow cells; new segmentation cells against the scanner.
+
+**C2**
+- `scripts/checks/check-no-pipe-into-grep-q.sh`, `scripts/__tests__/check-no-pipe-into-grep-q.test.mjs`.
+
+**C3**
+- `scripts/checks/check-bypass-rls.mjs`, `scripts/__tests__/check-bypass-rls.test.mjs`.
+- `scripts/checks/lib/ast-project.mjs` — a tsconfig-backed Program factory beside the existing in-memory one; its docblock lists adopters, so the new entry goes there too.
+- `src/lib/blob-store/runtime-module.ts` (parameter type), `src/lib/blob-store/runtime-module.test.ts` (the two literals).
+
+**C4**
+- `src/lib/tenant/owning-tenant-rule.ts` (new), `src/lib/tenant-context.ts` (imports it).
+- `scripts/tenant-domain.ts` (two verbs, usage text, header comment), `package.json` only if a new npm script is needed (it is not — `tenant-domain` takes a subcommand).
+- `scripts/__tests__/tenant-domain-flags.test.ts` (flag parsing), a new unit test for `owningTenantOf`, and a real-DB test under `src/__tests__/db-integration/`.
+- `README.md` ("IdP domain changed / tenant locked out") and `CLAUDE.md`'s `tenant-domain` line.
+
+**Shared code that MUST be reused, not reimplemented**
+- `validateActorLabel`, `resolveTenantRef`, `migrationClientFactory`, `confirmationTransaction`, `defaultConfirm`, `printTenantSummary`, `missingUrlResult`, `CmdResult` — all in `scripts/tenant-domain.ts`.
+- `realignToMembershipInTxWith` + `REALIGNMENT_SOURCE` (`src/lib/tenant/tenant-realignment-core.ts`), `realignOwningTenantColumn` (`src/lib/tenant/owning-column.ts`), `countStrandedRows` (`src/lib/tenant/stranded-rows.ts`), `enqueueAuditInTx` + `buildOutboxPayload`.
+- `withBypassRls` / `BYPASS_PURPOSE` (`src/lib/tenant-rls.ts`), `UUID_RE` / `SYSTEM_TENANT_ID` / `SYSTEM_ACTOR_ID` (`src/lib/constants/app`), `escapeUnsafeDisplayChars`.
+- `createAstProject` / `sourceFiles` / `collectSourceFiles` / `unresolvedTargets` (`scripts/checks/lib/ast-project.mjs`), `bindingIndex` / `resolveLocalFunction` / `resolveLocalObjectLiteral` / `unwrapExpression` / `FN_KINDS` (`scripts/checks/lib/scope-bindings.mjs`).
+
+**CI parity**: every gate `extract-ci-checks.sh` reports (`npm run check:bypass-rls`, `npm run lint`,
+`npm run typecheck`, the license and drift checks) is already a `queue_step` in `scripts/pre-pr.sh`.
+No parity gap to defer.
