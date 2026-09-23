@@ -18,13 +18,12 @@
  */
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const HOOK = resolve(REPO_ROOT, ".claude/hooks/block-bare-decrypt.sh");
+const SCANNER = resolve(REPO_ROOT, ".claude/hooks/lib/decrypt-command-scan.py");
 
 // Built from fragments so this file's own source does not contain the literal
 // command — the hook is installed on this repo, and a test fixture that spells
@@ -45,6 +44,18 @@ function expectHook(command) {
 function expectHookRaw(payload) {
   const r = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8" });
   return expect(r.status, r.stderr);
+}
+
+/**
+ * Calls the scanner directly, bypassing the hook — A-C1-0's boundary: the
+ * scanner is tested at its OWN contract (parsed segments), not only through
+ * the hook's allow/block verdict, so a hand-rolled quote machine that is
+ * wrong in a way one rule's verdict happens to survive still gets caught.
+ */
+function scanSegments(command) {
+  const r = spawnSync("python3", [SCANNER, "--segments"], { input: command, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`scanner failed (status ${r.status}): ${r.stderr}`);
+  return JSON.parse(r.stdout).segments;
 }
 
 const ALLOW = 0;
@@ -257,33 +268,35 @@ describe("block-bare-decrypt hook — failures refuse, and the printer check rea
     });
   }
 
-  it("refuses a 200 KB bare decrypt when the here-string cannot be written (F-R15-1/S-R15-1)", () => {
-    // grep never ran and the status was 1, which read as "no match": the hook allowed it.
-    const r = runHookWithoutTempFiles(`passwd-sso ${SUB} item\n${PAD}`);
+  it("refuses a 200 KB bare decrypt for the same reason as the unpadded one (A-C1-4)", () => {
+    // The here-string temp-file limit this cell used to probe belonged to
+    // `grep`, which C1 removes from the hook entirely — the scanner reads the
+    // command over a stdin pipe, not a here-string, so there is no size limit
+    // left to hit. What must still hold is the RULE: a bare decrypt refuses
+    // regardless of how much padding surrounds it, decided the same way (not
+    // by a matcher that failed to run) — so this asserts the SAME stderr text
+    // the short unpadded bare-decrypt cell gets, not a scanner-failure message.
+    const r = spawnSync("bash", [HOOK], {
+      input: JSON.stringify({ tool_input: { command: `passwd-sso ${SUB} item\n${PAD}` } }),
+      encoding: "utf8",
+    });
     expect(r.status, r.stderr).toBe(BLOCK);
-    expect(r.stderr).toContain("grep exit 3");
+    expect(r.stderr).not.toContain("command scanner");
+    expect(r.stderr).toContain("this decrypt puts its stdout in the conversation");
   });
 
-  it("refuses when a later check cannot run, rather than exiting with that check's status (S-R15-1)", () => {
-    // The occurrence count pipes through `wc`. When it fails, set -e alone ended the hook
-    // with that pipeline's status, and any status but 2 lets the command through. A
-    // failing `wc` stub goes first on the inherited PATH (round 16 T-R16-4: rebuilding
-    // PATH from `command -v` broke under version-manager shims and exported functions).
-    const bin = mkdtempSync(join(tmpdir(), "hook-path-"));
-    try {
-      writeFileSync(join(bin, "wc"), "#!/bin/sh\nexit 1\n", "utf8");
-      chmodSync(join(bin, "wc"), 0o755);
-      const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -u "user:\${_CRED}" https://example.test\n) 2>/dev/null`;
-      const payload = JSON.stringify({ tool_input: { command: cmd } });
-      const withStub = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
-      expect(withStub.status, withStub.stderr).toBe(BLOCK);
-      expect(withStub.stderr).toContain("failed while checking this command");
-      // The same command without the stub is sanctioned, so the stub is what refused it.
-      const without = spawnSync("bash", [HOOK], { input: payload, encoding: "utf8" });
-      expect(without.status, without.stderr).toBe(ALLOW);
-    } finally {
-      rmSync(bin, { recursive: true, force: true });
-    }
+  it("refuses an input the scanner cannot parse, under its OWN message (A-C1-4, T-F6)", () => {
+    // An unterminated quote is not a decrypt-detection question at all — the
+    // scanner cannot finish walking the command, which item 8 treats as its
+    // own refusal, worded so it is never mistaken for "no match" (a command
+    // this hook has nothing to do with) or for a rule the scanner DID decide.
+    const r = spawnSync("bash", [HOOK], {
+      input: JSON.stringify({ tool_input: { command: `echo "unterminated` } }),
+      encoding: "utf8",
+    });
+    expect(r.status, r.stderr).toBe(BLOCK);
+    expect(r.stderr).toContain("command scanner");
+    expect(r.stderr).not.toContain("this decrypt puts its stdout in the conversation");
   });
 
   it("still refuses a short bare decrypt under the same limit", () => {
@@ -345,15 +358,216 @@ describe("block-bare-decrypt hook — a printer command word ends at a blank or 
     expectHook(capture(`catalog --token "\${_CRED}"`)).toBe(ALLOW);
   });
 
-  // S-R16-2: the printer refusal is a declared tripwire for four names, not a closed
-  // class. These print the value and are allowed; the cells pin the declared limit, so
-  // a change that widens the name list shows up here as a decision, not as silence.
+  // S-R16-2 named `declare -p`, a heredoc body and an encoder as printer
+  // evasions the old regex-based hook could not see. C1's scanner closes all
+  // three (items 2, 5 and 6 below) — they are no longer residual, so their
+  // cells moved out of this "known evasion" framing into the item-specific
+  // describe blocks that decide them.
+});
+
+describe("decrypt-command-scan.py — segmentation (A-C1-0)", () => {
+  // The scanner's own boundary, called directly rather than through the
+  // hook's allow/block verdict — a hand-rolled quote/nesting machine can be
+  // wrong in a way one rule's decision happens to survive, and this is what
+  // catches that instead of relying on the verdict to notice.
+
+  it("adjacent quotes of different kinds concatenate into one word", () => {
+    const [seg] = scanSegments(`echo "a""b"'c'"d"`);
+    expect(seg.words).toEqual(["echo", `"a""b"'c'"d"`]);
+  });
+
+  it("a quote directly before an unquoted operator still splits there", () => {
+    const [first, , third] = scanSegments(`echo "a"|cat|sed s/x/y/`);
+    expect(first.words).toEqual(["echo", `"a"`]);
+    expect(third.join_op).toBe("|");
+    expect(third.words).toEqual(["sed", "s/x/y/"]);
+  });
+
+  it("a quote directly after an unquoted operator still splits there", () => {
+    const [, second] = scanSegments(`true;"echo" hi`);
+    expect(second.join_op).toBe(";");
+    expect(second.words).toEqual([`"echo"`, "hi"]);
+  });
+
+  it("a quoted heredoc delimiter is recorded as quoted, unexpanded", () => {
+    const [seg] = scanSegments(`cat <<'EOF'\nbody\nEOF\n`);
+    expect(seg.heredocs).toEqual([{ delimiter: "EOF", quoted: true, strip_tabs: false, body: "body" }]);
+  });
+
+  it("an unquoted heredoc delimiter is recorded as unquoted", () => {
+    const [seg] = scanSegments(`cat <<EOF\nbody\nEOF\n`);
+    expect(seg.heredocs).toEqual([{ delimiter: "EOF", quoted: false, strip_tabs: false, body: "body" }]);
+  });
+
+  it("a line continuation inside single quotes stays literal", () => {
+    const [seg] = scanSegments("echo 'a\\\nb'");
+    expect(seg.words).toEqual(["echo", "'a\\\nb'"]);
+  });
+
+  it("a line continuation outside quotes is removed, joining the word", () => {
+    const [seg] = scanSegments("ec\\\nho hi");
+    expect(seg.words).toEqual(["echo", "hi"]);
+  });
+
+  it("$( … ) nesting is parsed as its own recursive segment list", () => {
+    const [seg] = scanSegments(`echo $(true | false) done`);
+    expect(seg.words).toEqual(["echo", "$(true | false)", "done"]);
+    expect(seg.nested).toHaveLength(1);
+    expect(seg.nested[0].kind).toBe("cmdsub");
+    const [inner1, inner2] = seg.nested[0].segments;
+    expect(inner1.words).toEqual(["true"]);
+    expect(inner2.join_op).toBe("|");
+    expect(inner2.words).toEqual(["false"]);
+  });
+
+  it("|& splits into two segments joined by |&", () => {
+    const [first, second] = scanSegments(`cmd1 |& cmd2`);
+    expect(first.words).toEqual(["cmd1"]);
+    expect(second.join_op).toBe("|&");
+    expect(second.words).toEqual(["cmd2"]);
+  });
+
+  it("an unparsable command raises rather than returning a partial parse", () => {
+    const r = spawnSync("python3", [SCANNER, "--segments"], { input: `echo "unterminated`, encoding: "utf8" });
+    expect(r.status).not.toBe(0);
+  });
+});
+
+describe("block-bare-decrypt hook — items 1-8 of the Shape-1 scanner (A-C1-1)", () => {
+  // One refusing cell per item. Each was red-proved on a scratchpad copy of
+  // the scanner (disable the one predicate, watch this exact cell go green
+  // to red) — recorded in the review artifact, not re-run here.
+  const capture = (line) => `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  ${line}\n) 2>/dev/null`;
+
+  it("item 1 — a continuation inside the printer's own name is still caught (ec\\<newline>ho $_CRED)", () => {
+    // The red proof disables ONLY the continuation-removal step and leaves
+    // item 6 (the printer rule) intact — the point is that item 6 cannot see
+    // `echo` if item 1 does not first join the two fragments (T-F1).
+    expectHook(capture("ec\\\nho $_CRED")).toBe(BLOCK);
+  });
+
   it.each([
-    ["declare -p", `declare -p _CRED`],
-    ["a heredoc body", `cat <<EOF\n\${_CRED}\nEOF`],
-    ["an encoder", `base64 <<<"$_CRED"`],
-  ])("known printer evasion: allows %s", (_label, line) => {
-    expectHook(capture(line)).toBe(ALLOW);
+    ["declare -p", "declare -p"],
+    ["typeset -p", "typeset -p"],
+    ["bare set", "set"],
+    ["bare env", "env"],
+    ["bare printenv", "printenv"],
+    ["bare export", "export"],
+    ["compgen -v", "compgen -v"],
+  ])("item 2 — refuses a variable dumper regardless of whether _CRED is named: %s", (_label, line) => {
+    expectHook(capture(line)).toBe(BLOCK);
+  });
+
+  it("item 2 — env with an operand is not bare and stays allowed", () => {
+    expectHook(capture(`env DEBUG=1 cmd "$_CRED"`)).toBe(ALLOW);
+  });
+
+  it.each([
+    ["set -x", "set -x"],
+    ["set -o xtrace", "set -o xtrace"],
+    ["bash -x", "bash -x script.sh"],
+    ["BASH_XTRACEFD", "BASH_XTRACEFD=5"],
+  ])("item 3 — refuses tracing: %s", (_label, line) => {
+    expectHook(capture(line)).toBe(BLOCK);
+  });
+
+  it.each([
+    ["a plain assignment", "x=$_CRED"],
+    ["a braced assignment", 'x="${_CRED}"'],
+    ["read into a new variable", 'read x <<<"$_CRED"'],
+    ["printf -v into a new variable", "printf -v x %s $_CRED"],
+    ["a declare -n nameref", "declare -n ref=_CRED"],
+  ])("item 4 — refuses copying _CRED to another name: %s", (_label, line) => {
+    expectHook(capture(line)).toBe(BLOCK);
+  });
+
+  it("item 5 — an unquoted heredoc delimiter with a body referencing _CRED refuses", () => {
+    // `wc`, not `cat`: item 5 refuses on the heredoc body alone, with no
+    // gate on the command word — `cat` is ALSO on item 6's printer list, and
+    // would refuse this cell on its own, defeating the red proof for item 5.
+    expectHook(capture(`wc -l <<DONE\nsome text $_CRED\nDONE`)).toBe(BLOCK);
+  });
+
+  it("item 5 — the same body under a quoted delimiter (no expansion) is allowed", () => {
+    expectHook(capture(`wc -l <<'DONE'\nsome text $_CRED\nDONE`)).toBe(ALLOW);
+  });
+
+  it.each([
+    ["base64", 'base64 <<<"$_CRED"'],
+    ["xxd", 'xxd <<<"$_CRED"'],
+    ["od", 'od <<<"$_CRED"'],
+    ["openssl", 'openssl base64 <<<"$_CRED"'],
+    ["jq", 'jq -R . <<<"$_CRED"'],
+    ["xargs", 'xargs -I{} echo {} <<<"$_CRED"'],
+  ])("item 6 — the widened printer list refuses: %s", (_label, line) => {
+    expectHook(capture(line)).toBe(BLOCK);
+  });
+
+  it("item 6 — printenv naming the bare variable (no $) refuses", () => {
+    expectHook(capture("printenv _CRED")).toBe(BLOCK);
+  });
+
+  it("item 6 — a printer on the list that does not reference _CRED in ITS segment stays allowed", () => {
+    // sed is on the widened list, but this invocation never touches _CRED —
+    // only the later curl does, in a DIFFERENT segment (F-F5/S-F5 shape).
+    expectHook(capture(`sed -i s/a/b/ cfg\n  curl -u "u:$_CRED" https://example.test`)).toBe(ALLOW);
+  });
+
+  it("item 7 — a brace-expansion word referencing _CRED refuses", () => {
+    expectHook(capture("cp file.txt{,.bak-$_CRED}")).toBe(BLOCK);
+  });
+
+  it("item 8 — the scanner's own parse failure refuses under its own message", () => {
+    // Same cell as A-C1-4/T-F6: the red proof for item 8 removes the
+    // scanner's failure handling and shows this cell stops exiting 2.
+    const r = spawnSync("bash", [HOOK], {
+      input: JSON.stringify({ tool_input: { command: `echo "unterminated` } }),
+      encoding: "utf8",
+    });
+    expect(r.status, r.stderr).toBe(BLOCK);
+    expect(r.stderr).toContain("command scanner");
+  });
+});
+
+describe("block-bare-decrypt hook — additional allow cells (A-C1-2)", () => {
+  it("allows a printer earlier in the command that never touches _CRED, followed by the real consumer", () => {
+    expectHook(`sed -i s/a/b/ cfg; curl -u "u:$_CRED" https://example.test`).toBe(ALLOW);
+  });
+
+  it("allows env with an operand ahead of the consuming command", () => {
+    expectHook(`env DEBUG=1 cmd "$_CRED"`).toBe(ALLOW);
+  });
+
+  it("allows a single-quoted argument containing a literal backslash-newline", () => {
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  some-tool --note 'line one\\\nline two' "\${_CRED}"\n) 2>/dev/null`;
+    expectHook(cmd).toBe(ALLOW);
+  });
+
+  it("allows an apostrophe inside an earlier double-quoted word followed by a genuine continuation split (S2-F5)", () => {
+    const cmd =
+      `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -H "it's fine" \\\n` +
+      `    -u "user:\${_CRED}" https://example.test\n) 2>/dev/null`;
+    expectHook(cmd).toBe(ALLOW);
+  });
+});
+
+describe("block-bare-decrypt hook — reproduced leaks, quote/nesting-aware (A-C1-3)", () => {
+  // Each was verified against the pre-change (grep-based) hook to be a false
+  // negative — the red proof is recorded once in the review artifact, not
+  // re-run here.
+
+  it("refuses awk -F'|' reading _CRED from a here-string (F-R2-2)", () => {
+    // The quoted `|` inside `-F'|'` ended the old regex's match window before
+    // `$_CRED` — segmentation being quote-aware is what catches it now.
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  awk -F'|' '{print}' <<<"$_CRED"\n) 2>/dev/null`;
+    expectHook(cmd).toBe(BLOCK);
+  });
+
+  it("refuses echo $(true | false) \"$_CRED\" — one command to bash, not two (S3-F1)", () => {
+    // A quote-only scanner splits this in two at the pipe inside $( … ) and
+    // neither half matches; nesting-aware segmentation reads it as bash does.
+    const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  echo $(true | false) "$_CRED"\n) 2>/dev/null`;
+    expectHook(cmd).toBe(BLOCK);
   });
 });
 
