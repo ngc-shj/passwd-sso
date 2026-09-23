@@ -17,7 +17,7 @@ Finding IDs are prefixed by expert: `F-` functionality, `S-` security, `T-` test
 
 - **F-F1 (Major, design)** — C3's non-literal-load member set is unsupported and incomplete. The
   plan cited "the probe in the review record", which did not exist, and the set missed
-  `src/lib/blob-store/runtime-module.ts:16,20` (`createRequire` bound to a local, then
+  `src/lib/blob-store/runtime-module.ts`'s `requireOptionalModule` (`createRequire` bound to a local, then
   `requireModule(moduleName)`). Resolution: pending — folded into the Opus escalation's member-set
   re-derivation (S-F1), since both concern the same allowlist.
 - **F-F2 (Major, design)** — C3 item 7 would have rewritten the gate header down to two residual
@@ -25,7 +25,7 @@ Finding IDs are prefixed by expert: `F-` functionality, `S-` security, `T-` test
   receiver) plus the BYPASS_PURPOSE file scope and the file-keyed `INDIRECT_CALLBACK_ALLOWLIST`.
   Resolution: **fixed in plan** — item 7 now drops only what C3 closes and keeps the rest verbatim.
 - **F-F3 (Major, design)** — `A-C3-4`'s "seed a shared stub" did not cover
-  `TENANT_CONTEXT_ALLOWED` (`scripts/__tests__/check-bypass-rls.test.mjs:66-79`), a fixture that
+  `TENANT_CONTEXT_ALLOWED` in `scripts/__tests__/check-bypass-rls.test.mjs`, a fixture that
   writes `src/lib/tenant-context.ts` itself and declares neither helper. Resolution: **fixed in
   plan** — the harness copies the real declaring files, and that fixture appends the real
   declarations through one helper (see T-F4).
@@ -46,8 +46,7 @@ Finding IDs are prefixed by expert: `F-` functionality, `S-` security, `T-` test
   all silent. Status: **escalated to the Opus tier** (open).
 - **S-F3 (Major, design)** — `cmdBackfillOwningColumn` was not specified to call
   `validateActorLabel`, the control that keeps a `--by` label from spoofing `signin` or carrying
-  bidi/control characters into audit metadata (its three existing call sites:
-  `scripts/tenant-domain.ts:923,1298,1730`). Resolution: **fixed in plan** — validation before the
+  bidi/control characters into audit metadata (its three existing call sites — `cmdAdd`, `cmdRemove` and `cmdRealign` in `scripts/tenant-domain.ts`). Resolution: **fixed in plan** — validation before the
   client is built, plus acceptance cell A-C4-2c.
 - **S-F4 (Minor, prose)** — the widened printer list omitted equally cheap forms (`tr`, `iconv`,
   `jq`, `xargs`, `column`, `fold`, `fmt`, `nl`, `pr`, `less`, `more`) and nameref indirection
@@ -109,7 +108,7 @@ review artifact.
   plan's syntactic pattern `createRequire(...)(…)` matches none of the real sites (all four spell it
   `const req = createRequire(x); req(y)`), and the real enumeration is `src/i18n/messages.ts:93,111`,
   `src/lib/crypto/crypto-client.ts:150`, `src/lib/key-provider/{aws-sm,azure-kv,gcp-sm}-provider.ts`,
-  `src/lib/blob-store/runtime-module.ts:20`. More important than the count: `requireOptionalModule`
+  `src/lib/blob-store/runtime-module.ts`'s `requireOptionalModule`. More important than the count: `requireOptionalModule`
   is an EXPORTED module-loading capability, so allowlisting its one line — by file, text, or call
   site — licenses every caller in `src/` to load any module name. Resolution: **allowlist removed
   entirely**; the specifier's checker TYPE decides, and the wrapper's parameter narrows to a literal
