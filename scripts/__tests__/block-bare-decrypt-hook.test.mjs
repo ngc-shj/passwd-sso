@@ -571,12 +571,21 @@ describe("block-bare-decrypt hook — items 1-8 of the Shape-1 scanner (A-C1-1)"
 });
 
 describe("block-bare-decrypt hook — additional allow cells (A-C1-2)", () => {
+  // Wrapped in the same capture() the item-1..8 siblings use (:457) so these
+  // reach Shape 1 (`_CRED=$( … decrypt … )`) — without it, the scanner never
+  // detects a decrypt segment and allows before item 6 / item 2 run at all,
+  // which made both cells pass vacuously regardless of what they assert
+  // (finding B, issue-838 follow-ups review). The `;`-joined form here is
+  // still distinct coverage from the `\n`-joined siblings at :478 and :546:
+  // A-C1-2 lists this exact `;` shape as its own allow cell.
+  const capture = (line) => `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  ${line}\n) 2>/dev/null`;
+
   it("allows a printer earlier in the command that never touches _CRED, followed by the real consumer", () => {
-    expectHook(`sed -i s/a/b/ cfg; curl -u "u:$_CRED" https://example.test`).toBe(ALLOW);
+    expectHook(capture(`sed -i s/a/b/ cfg; curl -u "u:$_CRED" https://example.test`)).toBe(ALLOW);
   });
 
   it("allows env with an operand ahead of the consuming command", () => {
-    expectHook(`env DEBUG=1 cmd "$_CRED"`).toBe(ALLOW);
+    expectHook(capture(`env DEBUG=1 cmd "$_CRED"`)).toBe(ALLOW);
   });
 
   it("allows a single-quoted argument containing a literal backslash-newline", () => {
@@ -609,6 +618,120 @@ describe("block-bare-decrypt hook — reproduced leaks, quote/nesting-aware (A-C
     // neither half matches; nesting-aware segmentation reads it as bash does.
     const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  echo $(true | false) "$_CRED"\n) 2>/dev/null`;
     expectHook(cmd).toBe(BLOCK);
+  });
+});
+
+describe("block-bare-decrypt hook — command-word attribution gate (issue-838 follow-ups, C1b)", () => {
+  // Inside Shape 1, having found no leak it can NAME, the scanner asks
+  // whether it can attribute EVERY segment to a plain command word. Where it
+  // cannot — a reserved word, an invocation prefix that execs its own
+  // operand tail, anything not a literal name — it refuses. Several of these
+  // cells are actually decided earlier, by 6b's bare-printer-word check or by
+  // item 6 reading the resolved `env` word, before the gate's own message is
+  // ever reached: the point of each cell is that the command refuses, not
+  // which specific rule names it first (each still pins its real message so
+  // a regression that silently swaps the deciding rule does not pass quietly).
+  const capture = (line) => `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  ${line}\n) 2>/dev/null`;
+
+  it("blocks a `command` prefix ahead of a printer", () => {
+    expectBlockedBy(capture('command echo "$_CRED"'), "appears as a command name in a segment that references _CRED");
+  });
+
+  it("blocks an if/then/fi compound wrapping the printer", () => {
+    expectBlockedBy(capture('if true; then echo "$_CRED"; fi'), "appears as a command name in a segment that references _CRED");
+  });
+
+  it("blocks a brace-group compound wrapping the printer", () => {
+    expectBlockedBy(capture('{ echo "$_CRED"; }'), "appears as a command name in a segment that references _CRED");
+  });
+
+  it("blocks env -i ahead of a printer (env's modelled form stops at NAME=value)", () => {
+    expectBlockedBy(capture('env -i echo "$_CRED"'), "appears as a command name in a segment that references _CRED");
+  });
+
+  it("detects a decrypt behind a transparent `command` prefix (item 6: detection strips it)", () => {
+    // No _CRED capture here at all — this is DETECTION, not the Shape-1
+    // gate: a bare `command passwd-sso decrypt ID` used to be invisible
+    // outright (words[0] was "command", never "passwd-sso"), reaching
+    // stdout in plaintext unseen. It is now seen and refused like any bare
+    // decrypt. Deliberately the `passwd-sso` form, not the `${CLI}` one: the
+    // CLI's own `index.ts`-scanning branch finds the decrypt regardless of
+    // what precedes it, so it would not red-prove the prefix-skip at all.
+    expectBlockedBy(`command passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
+  });
+
+  it("blocks a printer beside a process substitution under item 6, proving the old shard is gone", () => {
+    // Before process substitution became a nested region, the `;` inside
+    // `<(true; false)` split the command early and the tail `"$_CRED"`
+    // landed in a shard whose command word was the fragment `false)` —
+    // neither half matched item 6. Parsed as one nested region, `echo` and
+    // `"$_CRED"` are back in the SAME segment, and item 6 refuses it directly.
+    expectBlockedBy(capture('echo safe <(true; false) "$_CRED"'), "echo references _CRED in this segment");
+  });
+
+  it("blocks env DEBUG=1 echo \"$_CRED\" under item 6, proving the env model resolves the real command word", () => {
+    expectBlockedBy(capture('env DEBUG=1 echo "$_CRED"'), "echo references _CRED in this segment");
+  });
+
+  it("blocks torify echo \"$_CRED\" under 6b, with no torify-specific prefix listed anywhere", () => {
+    expectBlockedBy(capture('torify echo "$_CRED"'), "appears as a command name in a segment that references _CRED");
+  });
+
+  it("allows a process substitution beside the credential (Pattern C + procsub)", () => {
+    expectHook(capture('some-tool <(true; false) "$_CRED"')).toBe(ALLOW);
+  });
+
+  it("allows a comment mentioning the credential by name, never expanding it", () => {
+    // Wrapped in capture() like its siblings so this actually reaches Shape 1
+    // — a bare `echo hi # mentions $_CRED` with no decrypt in the command at
+    // all never reaches item 6 either way, and would pass this cell
+    // vacuously regardless of whether `#` is treated as a comment.
+    expectHook(capture(`echo hi # mentions $_CRED`)).toBe(ALLOW);
+  });
+
+  it("blocks an invocation prefix with no bare printer word anywhere (the gate's own backstop)", () => {
+    // Unlike the cells above, nothing here is a printer word — `nice` and
+    // `some-tool` are both off PRINTER_WORDS, so item 6 and 6b have nothing
+    // to name. Only the gate's own default-refuse catches this: `nice` is an
+    // unattributable invocation prefix, and Shape 1 refuses what it cannot
+    // attribute rather than silently judging `some-tool` as if it were the
+    // command that runs.
+    expectBlockedBy(capture('nice -n5 some-tool "$_CRED"'), "cannot be attributed to a command word");
+  });
+
+  it("allows env DEBUG=1 cmd \"$_CRED\" (the contract's own example)", () => {
+    expectHook(capture('env DEBUG=1 cmd "$_CRED"')).toBe(ALLOW);
+  });
+
+  it("allows a non-printer consumer named by a braced reference, proving the gate is not a name whitelist", () => {
+    expectHook(capture('some-tool --token "${_CRED}"')).toBe(ALLOW);
+  });
+
+  it("allows an if/then/fi with no decrypt in it at all, proving the gate is scoped to Shape 1", () => {
+    expectHook("if true; then echo hi; fi").toBe(ALLOW);
+  });
+
+  it("allows sshpass -p \"$_CRED\" piped into a quoted remote command (6b's quoted escape)", () => {
+    expectHook(`sshpass -p "$_CRED" ssh host 'tail -f x'`).toBe(ALLOW);
+  });
+});
+
+describe("decrypt-command-scan.py — process substitution and comment segmentation (issue-838 follow-ups)", () => {
+  it("a process substitution is ONE segment with a nested procsub region, not two shards split at its `;`", () => {
+    const [seg] = scanSegments(`echo a <(true; false) b`);
+    expect(seg.words).toEqual(["echo", "a", "<(true; false)", "b"]);
+    expect(seg.nested).toHaveLength(1);
+    expect(seg.nested[0].kind).toBe("procsub");
+    const [inner1, inner2] = seg.nested[0].segments;
+    expect(inner1.words).toEqual(["true"]);
+    expect(inner2.join_op).toBe(";");
+    expect(inner2.words).toEqual(["false"]);
+  });
+
+  it("a `#` comment ends its segment at the newline; the next line starts a new one", () => {
+    const [first, second] = scanSegments(`echo hi # note\ncat x`);
+    expect(first.words).toEqual(["echo", "hi"]);
+    expect(second.words).toEqual(["cat", "x"]);
   });
 });
 

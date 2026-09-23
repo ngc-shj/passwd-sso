@@ -2,13 +2,26 @@
 """Command-string scanner for .claude/hooks/block-bare-decrypt.sh.
 
 Walks a shell command ONCE, tracking quote state, nesting depth ($( ), a
-backtick span, a ( ) subshell — each scanned recursively as its own command
-list) and heredoc bodies, and splits it into simple commands ("segments") at
-unquoted, unnested `| |& ; & &&` `||` and newline. This is the ONE adjudicator
-for the hook: every rule below asks a question of one parsed segment, never of
-the raw command text, which is what closes the false negatives a window regex
-cannot see (a quoted operator that ends a text match early; an operator inside
-`$( … )` that a quote-only scanner treats as a real split point).
+backtick span, a ( ) subshell, `<( )`/`>( )` process substitution — each
+scanned recursively as its own command list) and heredoc bodies, and splits
+it into simple commands ("segments") at unquoted, unnested `| |& ; & &&`
+`||` and newline. This is the ONE adjudicator for the hook: every rule below
+asks a question of one parsed segment, never of the raw command text, which
+is what closes the false negatives a window regex cannot see (a quoted
+operator that ends a text match early; an operator inside `$( … )` that a
+quote-only scanner treats as a real split point).
+
+Inside a recognised Shape 1 (`_CRED=$(… decrypt …)`), the segment-level rules
+below are not the only gate: `_effective_command_word` asks, of every
+segment, which word bash would actually run. A segment whose answer it
+cannot attribute — a shell keyword, an invocation prefix like `command` or
+`sudo` that execs its own operand tail, anything not a plain literal name —
+is refused outright rather than judged against rules that assumed a plain
+simple command. `env NAME=value … cmd` is the one prefix this resolves past,
+since the contract keeps that form allowed; every other rule reads the
+resolved word through `_rule_command_word`, falling back to the raw,
+unresolved word so a rule that WOULD refuse it (`bash -x`, `xargs …`) still
+does, under its own message.
 
 Two entry points, both over the command read from stdin:
   --segments   dumps the parsed tree as JSON (the unit-test boundary, A-C1-0).
@@ -273,6 +286,14 @@ class Parser:
         nested_out.append(("backtick", segs))
         return self.s[start:self.i]
 
+    def _consume_procsub(self, nested_out: list) -> str:
+        start = self.i
+        assert self.s[self.i] in "<>" and self.s[self.i + 1] == "("
+        self.i += 2
+        segs = self.parse(terminator=")")
+        nested_out.append(("procsub", segs))
+        return self.s[start:self.i]
+
     def _consume_subshell(self, nested_out: list) -> str:
         start = self.i
         assert self.s[self.i] == "("
@@ -523,6 +544,24 @@ class Parser:
                     self._parse_redirection(state["seg"], pending_heredocs)
                     state["any_token"] = True
                     continue
+            if c == "#":
+                # A `#` STARTING a word is a comment to end of line. Reached
+                # only at a word boundary here (blanks skipped, operators and
+                # redirections already dispatched), so `echo a#b` is untouched.
+                nl = self.s.find("\n", self.i)
+                self.i = self.n if nl == -1 else nl
+                continue
+            if c in "<>" and self._peek(1) == "(":
+                # Process substitution is a NESTED REGION, parsed recursively
+                # like $( … ): without this the `;` inside `<(true; false)` is
+                # read as a top-level split point and the rest of the command
+                # lands in a segment whose command word is the shard `false)`.
+                nested: list = []
+                word = self._consume_procsub(nested)
+                state["seg"].nested.extend(nested)
+                _classify_word(state["seg"], word)
+                state["any_token"] = True
+                continue
             if c in "<>":
                 self._parse_redirection(state["seg"], pending_heredocs)
                 state["any_token"] = True
@@ -679,6 +718,35 @@ def _segment_references_cred(seg: Segment) -> bool:
     return False
 
 
+# Prefixes that run their operand tail with the same stdout. Recognised, NOT
+# closed: one that is not listed reads as "no decrypt here", i.e. the lint's
+# declared spelling residual, never a wrong allow of a shape it did see.
+_TRANSPARENT_PREFIXES = {
+    "command", "builtin", "exec", "env", "nice", "nohup", "stdbuf", "setsid",
+    "ionice", "chrt", "taskset", "time", "sudo", "doas", "unbuffer",
+}
+_MAX_PREFIX_DEPTH = 4
+
+
+def _skip_transparent_prefixes(words: list[str]) -> list[str]:
+    i = 0
+    depth = 0
+    while i < len(words) - 1 and depth < _MAX_PREFIX_DEPTH:
+        head = _strip_quotes(words[i])
+        if head not in _TRANSPARENT_PREFIXES:
+            break
+        i += 1
+        depth += 1
+        if head == "env":
+            while i < len(words) - 1:
+                eq = _unquoted_equals_index(words[i])
+                if eq is not None and _NAME_RE.match(words[i][:eq]):
+                    i += 1
+                    continue
+                break
+    return words[i:]
+
+
 def _is_decrypt_segment(seg: Segment) -> bool:
     """A segment whose command word (or its `npx tsx …` operand) is the CLI
     with `decrypt` as its first operand (F-R3-2).
@@ -689,7 +757,7 @@ def _is_decrypt_segment(seg: Segment) -> bool:
     widens the PRINTER/dumper/tracer command-word matching to see through
     quoting, not this. Narrowing this match would silently close a gap the
     plan does not claim to close (R-1)."""
-    words = seg.words
+    words = _skip_transparent_prefixes(seg.words)
     if not words:
         return False
     cw = words[0]
@@ -743,7 +811,7 @@ def _has_short_flag(words: list[str], letter: str) -> bool:
 
 def _is_dumper(seg: Segment) -> bool | str:
     """Item 2. Returns the reason string, or False."""
-    cw = _strip_quotes(seg.command_word or "")
+    cw = _rule_command_word(seg)
     args = [_strip_quotes(w) for w in seg.words[1:]]
     if cw in _DUMPER_WORDS and _has_short_flag(seg.words[1:], "p"):
         return f"{cw} -p dumps every variable, {CRED_NAME} included"
@@ -756,7 +824,7 @@ def _is_dumper(seg: Segment) -> bool | str:
 
 def _is_tracer(seg: Segment) -> bool | str:
     """Item 3."""
-    cw = _strip_quotes(seg.command_word or "")
+    cw = _rule_command_word(seg)
     words = seg.words[1:]
     args = [_strip_quotes(w) for w in words]
     if cw == "set":
@@ -777,6 +845,106 @@ def _is_tracer(seg: Segment) -> bool | str:
     return False
 
 
+# --------------------------------------------------------------------------
+# Command-word attribution (the Shape-1 gate)
+#
+# Every rule below asks "what is this segment's command word?". words[0] is
+# that word only for a PLAIN simple command. Two things displace it:
+#   * a shell reserved word or grouping token — the segment is a fragment of a
+#     compound command this scanner does not model at all (`then echo …`,
+#     `do echo …`, `{ echo …`, a `case` arm);
+#   * an invocation prefix that execs its operand tail (`command`, `nice`,
+#     `timeout 5`, `sudo -u x`, `bash -c`) — finding the real command word
+#     would mean modelling each prefix's own option grammar.
+# Inside Shape 1 both are REFUSED, not skipped. `env` is the single modelled
+# exception, because item 2 of the contract keeps `env VAR=v cmd …` allowed,
+# and only its NAME=value operand form is modelled.
+# --------------------------------------------------------------------------
+
+_RESERVED_WORDS = {
+    "if", "then", "elif", "else", "fi",
+    "for", "while", "until", "do", "done",
+    "case", "esac", "in", "select", "function", "coproc", "time",
+    "{", "}", "!", "[[", "]]", ";;",
+}
+_PREFIX_WORDS = {
+    "command", "builtin", "exec", "eval", "source", ".",
+    "env", "nice", "nohup", "stdbuf", "setsid", "ionice", "chrt", "taskset",
+    "timeout", "flock", "unbuffer", "script", "watch", "xargs", "parallel",
+    "sudo", "doas", "su", "runuser", "systemd-run", "proot", "chroot",
+    "strace", "ltrace", "ktrace", "valgrind", "gdb", "lldb",
+    "bash", "sh", "zsh", "ksh", "dash", "busybox", "toybox",
+}
+_DISPLACING_WORDS = _RESERVED_WORDS | _PREFIX_WORDS
+
+# A command word this scanner can attribute: a literal name or path, with no
+# expansion in it (`$p "$_CRED"` names a command only bash can resolve).
+_PLAIN_CW_RE = re.compile(r"^[A-Za-z0-9_@%+:,./^~-]+$")
+
+
+def _is_plain_command_word(raw: str, dequoted: str) -> bool:
+    if dequoted in _DISPLACING_WORDS:
+        return False
+    if not _PLAIN_CW_RE.match(dequoted):
+        return False
+    if "$" in raw or "`" in raw:
+        return False
+    return True
+
+
+def _effective_command_word(seg: "Segment"):
+    """(name, attributable). `name` is the word that will BE the command;
+    `attributable` is False when the scanner cannot say which word that is."""
+    words = seg.words
+    if not words:
+        return None, True  # nothing runs here: assignments / redirection / a nested region
+    raw = words[0]
+    cw = _strip_quotes(raw)
+    if cw == "env" and "$" not in raw and "`" not in raw:
+        j = 1
+        while j < len(words):
+            w = words[j]
+            eq = _unquoted_equals_index(w)
+            if eq is not None and _NAME_RE.match(w[:eq]):
+                j += 1
+                continue
+            break
+        if j >= len(words):
+            return cw, True  # `env` with no command operand — item 2's bare-dumper rule owns it
+        nxt_raw = words[j]
+        nxt = _strip_quotes(nxt_raw)
+        if nxt.startswith("-") or not _is_plain_command_word(nxt_raw, nxt):
+            return None, False  # an env option (-i, -u, -C, -S) or a displaced operand: not modelled
+        return nxt, True
+    if not _is_plain_command_word(raw, cw):
+        return None, False
+    return cw, True
+
+
+def _rule_command_word(seg: "Segment") -> str:
+    """What the item 2-6 rules ask about. Every one of them is REFUSAL-only,
+    so when attribution fails we fall back to the literal first word: seeing
+    `bash -x` or `xargs … <<<"$_CRED"` there can only add a refusal under its
+    own precise message, never remove one. The gate below is the backstop for
+    the displaced word no rule names."""
+    name, ok = _effective_command_word(seg)
+    if ok:
+        return name or ""
+    return _strip_quotes(seg.words[0]) if seg.words else ""
+
+
+def _unattributable_reason(seg: "Segment"):
+    _name, ok = _effective_command_word(seg)
+    if ok:
+        return False
+    shown = _strip_quotes(seg.words[0]) if seg.words else "?"
+    if shown in _RESERVED_WORDS:
+        return f"{shown!r} is a shell keyword: this is a fragment of a compound command, not a simple one"
+    if shown in _PREFIX_WORDS or shown == "env":
+        return f"{shown!r} runs another command given in its operands, which this lint does not resolve"
+    return f"{shown!r} is not a plain command name"
+
+
 _NAMEREF_TARGET_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=" + re.escape(CRED_NAME) + r"$")
 
 
@@ -785,7 +953,7 @@ def _is_copy(seg: Segment) -> bool | str:
     for name, value in seg.assignments:
         if name != CRED_NAME and _text_references_cred(value):
             return f"{name}={_strip_quotes(value)!r} copies {CRED_NAME} to another name"
-    cw = _strip_quotes(seg.command_word or "")
+    cw = _rule_command_word(seg)
     args = seg.words[1:]
     dargs = [_strip_quotes(w) for w in args]
     if cw == "read":
@@ -825,9 +993,18 @@ def _heredoc_leaks(seg: Segment) -> bool | str:
 
 def _printer_leaks(seg: Segment) -> bool | str:
     """Item 6."""
-    cw = _strip_quotes(seg.command_word or "")
+    cw = _rule_command_word(seg)
     if cw in PRINTER_WORDS and _segment_references_cred(seg):
         return f"{cw} references {CRED_NAME} in this segment"
+    # 6b: a printer name as a BARE word anywhere in a segment that references
+    # the credential. Closes "<unknown prefix> echo $_CRED" without knowing
+    # the prefix — the printer is visible in the string whatever runs it.
+    if _segment_references_cred(seg):
+        for w in seg.words[1:]:
+            if "$" in w or "`" in w:
+                continue
+            if _strip_quotes(w) in PRINTER_WORDS:
+                return f"{_strip_quotes(w)} appears as a command name in a segment that references {CRED_NAME}"
     return False
 
 
@@ -905,6 +1082,22 @@ def decide(command: str) -> dict:
                             f"({reason}). Pass ${CRED_NAME} directly to the command that consumes it."
                         ),
                     }
+        # The inversion: having found no leak it can NAME, the scanner must
+        # still be able to say, for every segment, which word runs. A segment
+        # it cannot attribute is refused — the rules above were asked of a
+        # tree that does not match what bash will execute.
+        for seg in all_segs:
+            reason = _unattributable_reason(seg)
+            if reason:
+                return {
+                    "decision": "block",
+                    "message": (
+                        "BLOCKED: part of this command cannot be attributed to a command word "
+                        f"({reason}). A {CRED_NAME}=$(… decrypt …) command refuses what it cannot "
+                        "read rather than guessing: run the consuming command as a plain simple "
+                        "command, or move the compound part into its own Bash call."
+                    ),
+                }
         return {"decision": "allow"}
 
     # Shape 2 — the sole decrypt segment piped directly into a documented

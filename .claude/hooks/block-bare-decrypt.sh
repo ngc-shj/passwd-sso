@@ -37,16 +37,24 @@
 # status, the 64 KB here-string temp file silently failing to write, and BSD
 # `grep -P` not existing on macOS.
 #
-# Residual (documented here, not closed by this change): any printer not on
-# the scanner's PRINTER_WORDS list, `eval`, aliases and functions, indirect
-# expansion `${!name}`, `$(< file)` after writing the value to a file, a
-# consuming command that itself echoes its arguments (`curl -v`, a verbose
-# client), and anything whose spelling bash assembles at run time — a quoted
-# or split decrypt subcommand (`passwd-sso 'decrypt' x`), or one reached
-# through a variable (`sub=decrypt; passwd-sso "$sub" x`), stays unseen by
-# design: closing it would mean evaluating bash, which this scanner does not
-# do. A decrypt surface that never returns plaintext is the real closure
-# (SC2); this hook stays a stopgap for accidents.
+# Residual (documented here, not closed by this change): inside a recognised
+# Shape 1 (`_CRED=$(… decrypt …)`), the scanner now refuses any segment it
+# cannot attribute to a plain command word — a reserved word (`if`, `{`, …),
+# an invocation prefix (`command`, `sudo`, `bash -c`, …), anything that is not
+# a literal name — rather than silently skipping it, so what stays open is
+# DETECTION, not a wrong allow: a decrypt reached through a quoted or split
+# subcommand, a variable, `eval`, or an invocation prefix not on the
+# scanner's recognised list degrades to "this scanner never saw a decrypt
+# here" (the command is allowed outright, the same as any unrelated command),
+# never to "saw it and let it through"; a consuming command that itself
+# prints what it is handed (Pattern C grants an arbitrary consumer the
+# credential it is given, by design); and anything whose spelling bash
+# assembles at run time, which this scanner does not evaluate. The cost of
+# the inversion: a compound command or an invocation prefix inside Shape 1 is
+# refused even when it is harmless — `command echo "$_CRED"` refuses under
+# the gate's own message, not because `command` does anything unsafe here.
+# A decrypt surface that never returns plaintext is the real closure (SC2);
+# this hook stays a stopgap for accidents, a lint and not a security boundary.
 
 set -euo pipefail
 
