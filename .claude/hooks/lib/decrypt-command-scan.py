@@ -748,11 +748,23 @@ def _is_decrypt_segment(seg: Segment) -> bool:
     # `sudo -u alice ls`. Scanning positions costs neither: what identifies a
     # decrypt is the CLI token immediately followed by `decrypt`, wherever the
     # pair sits, which is what the `index.ts` spelling already did.
+    # The name is matched as a WHOLE path component, not by equality. Equality
+    # let `./passwd-sso decrypt X` and `/usr/local/bin/passwd-sso decrypt X`
+    # through — both of which the regex this scanner replaced did refuse,
+    # since it matched the name anywhere in the raw text. That was a
+    # regression introduced by this branch, not an inherited gap (round 4,
+    # F2). `dist/index.js` is the CLI's real packaged entry point
+    # (cli/package.json's bin), so it is recognised alongside the `index.ts`
+    # source spelling the /use-credential patterns use; the regex missed that
+    # one on main too, and it is a bare decrypt like any other.
     for j, w in enumerate(words[:-1]):
-        if w == "passwd-sso" and words[j + 1] == "decrypt":
+        if words[j + 1] != "decrypt":
+            continue
+        if w == "passwd-sso" or w.endswith("/passwd-sso"):
             return True
-        # `npx tsx path/to/index.ts decrypt …`, or a direct `path/to/index.ts decrypt …`
-        if "index.ts" in w and words[j + 1] == "decrypt":
+        # `npx tsx path/to/index.ts decrypt …`, a direct `path/to/index.ts
+        # decrypt …`, or the built `node path/to/index.js decrypt …`.
+        if "index.ts" in w or "index.js" in w:
             return True
     return False
 

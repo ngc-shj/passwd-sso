@@ -660,6 +660,29 @@ describe("block-bare-decrypt hook — command-word attribution gate (issue-838 f
     expectBlockedBy(`command passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
   });
 
+  it("sees a path-qualified or built CLI, which name equality missed", () => {
+    // The regex this scanner replaced matched the name anywhere in the raw
+    // text, so `./passwd-sso decrypt X` was refused on main. Word EQUALITY
+    // silently stopped refusing it — a fail-open this branch introduced and
+    // round 4 caught (F2). The name is now a whole path component.
+    expectBlockedBy(`./passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
+    expectBlockedBy(`/usr/local/bin/passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
+    // The packaged entry point (cli/package.json's bin) is the same decrypt
+    // as the `index.ts` source form the /use-credential patterns use. The old
+    // regex missed this one too.
+    expectBlockedBy(`node cli/dist/index.js ${SUB} ID`, "this decrypt puts its stdout in the conversation");
+    // Paired allow: a name that merely CONTAINS the CLI's is a different
+    // program, and a component match must not claim it.
+    expectHook(`my-passwd-sso-helper ${SUB} ID`).toBe(ALLOW);
+  });
+
+  it("does not read a quoted mention as an invocation", () => {
+    // main's regex refused `echo "… passwd-sso decrypt …"` because it matched
+    // raw text; the parsed form sees one quoted word, so writing ABOUT the
+    // command no longer blocks the command that writes it.
+    expectHook(`echo "run passwd-sso ${SUB} ID to fetch it"`).toBe(ALLOW);
+  });
+
   it("sees the decrypt behind an option-taking prefix, without modelling its options", () => {
     // `sudo passwd-sso decrypt X` was refused; `sudo -u alice passwd-sso
     // decrypt X` was ALLOWED, because stripping a listed prefix left `-u`
