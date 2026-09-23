@@ -164,3 +164,7 @@ passwd-sso-backups/
 **/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.partial/
 **/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.[0-9]*.FAILED/
 **/.pgpass.*
+
+# Python bytecode (the hook scanner is executed, never imported as a package)
+__pycache__/
+*.pyc
