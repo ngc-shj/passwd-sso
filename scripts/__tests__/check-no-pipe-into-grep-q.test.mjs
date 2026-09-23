@@ -512,7 +512,7 @@ describe("C2: hook member set is wired ∪ present, parsed from .claude/settings
       writeSettings(["bash .claude/hooks/missing.sh"]);
       const { exitCode, stdout } = runGuard();
       expect(exitCode, stdout).toBe(1);
-      expect(stdout).toContain("wires a hook that does not exist");
+      expect(stdout).toContain("wire(s) a hook that does not exist");
       expect(stdout).toContain(".claude/hooks/missing.sh");
     });
 
@@ -609,6 +609,70 @@ describe("C2: hook member set is wired ∪ present, parsed from .claude/settings
       expect(wiredShellCount).toBe(wiredShell.length);
       expect(scanned).toBe(wiredShell.length);
       expect(scanned).toBeGreaterThan(0);
+    });
+  });
+
+  // issue-838 follow-ups, finding A: Claude Code merges .claude/settings.json
+  // with the git-ignored .claude/settings.local.json (the sanctioned way to
+  // add a personal hook), so a hook wired only there must be scanned too — or
+  // the gate's own "wired ∪ present" header claim is false for that hook.
+  describe("finding A: .claude/settings.local.json is merged into the wired set", () => {
+    /** Writes <root>/.claude/settings.local.json wiring each command, same shape as writeSettings. */
+    function writeSettingsLocal(commands) {
+      mkdirSync(join(root, ".claude"), { recursive: true });
+      writeFileSync(
+        join(root, ".claude", "settings.local.json"),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: "Bash",
+                hooks: commands.map((command) => ({ type: "command", command })),
+              },
+            ],
+          },
+        }),
+        "utf8",
+      );
+    }
+
+    // Wired to a path OUTSIDE .claude/hooks/, so only the WIRED half of
+    // "wired ∪ present" can find it — the PRESENT half (find .claude/hooks
+    // -name '*.sh') never looks there. This isolates the settings.local.json
+    // read path from the pre-existing directory scan, so the cell actually
+    // proves the wiring source, not just that the file happens to sit under
+    // HOOKS_DIR.
+    function writePersonalHook(body) {
+      mkdirSync(join(root, ".claude", "personal-hooks"), { recursive: true });
+      writeFileSync(join(root, ".claude", "personal-hooks", "guard.sh"), body, "utf8");
+    }
+
+    it("FOUND: a hook wired only via settings.local.json whose body races is caught", () => {
+      writePersonalHook(
+        '#!/usr/bin/env bash\nset -euo pipefail\nif printf "%s" "$COMMAND" | grep -qE "decrypt"; then exit 2; fi\n',
+      );
+      writeSettingsLocal(["bash .claude/personal-hooks/guard.sh"]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toContain(".claude/personal-hooks/guard.sh");
+    });
+
+    it("a malformed settings.local.json fails the gate, exactly like a broken settings.json", () => {
+      mkdirSync(join(root, ".claude"), { recursive: true });
+      writeFileSync(join(root, ".claude", "settings.local.json"), "{ not valid json", "utf8");
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toContain("not valid JSON");
+      expect(stdout).toContain("settings.local.json");
+    });
+
+    it("a hook wired in BOTH settings.json and settings.local.json is scanned once (dedup by resolved path)", () => {
+      writeClaudeHook("guard", "#!/usr/bin/env bash\nset -euo pipefail\ntrue\n");
+      writeSettings(["bash .claude/hooks/guard.sh"]);
+      writeSettingsLocal(["bash .claude/hooks/guard.sh"]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+      expect(stdout).toContain("1 hook script(s) scanned");
     });
   });
 });

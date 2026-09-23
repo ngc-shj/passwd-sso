@@ -38,6 +38,12 @@ SCAN_DIR="scripts"
 # F-R15-2).
 HOOKS_DIR=".claude/hooks"
 SETTINGS_FILE=".claude/settings.json"
+# Claude Code merges this git-ignored file with SETTINGS_FILE — the sanctioned
+# way to add a personal hook without touching the shared, committed one. A
+# hook wired only here must be scanned exactly like one wired in
+# SETTINGS_FILE, or a personal hook is never covered while this gate still
+# prints OK (issue-838 follow-ups, finding A).
+SETTINGS_LOCAL_FILE=".claude/settings.local.json"
 
 echo "check-no-pipe-into-grep-q: FIXTURE_ROOT=$FIXTURE_ROOT SCAN_DIR=$SCAN_DIR HOOKS_DIR=$HOOKS_DIR"
 
@@ -231,22 +237,34 @@ fi
 # The hook member set is WIRED ∪ PRESENT, not just PRESENT: a hook can be
 # wired to a path this gate would otherwise never look at, and a script sitting
 # unwired in HOOKS_DIR must still be scanned (that is what F-R15-2 was). Wiring
-# is read from settings — the same file Claude Code itself reads to decide
-# which script actually runs — via `node`'s JSON.parse, not a filename glob or
-# a regex over the file: a hand-rolled parser would drift from what Claude Code
-# accepts as JSON and could be fooled by a comment-like string value.
+# is read from settings — the same files Claude Code itself reads to decide
+# which script actually runs, BOTH SETTINGS_FILE and SETTINGS_LOCAL_FILE — via
+# `node`'s JSON.parse, not a filename glob or a regex over the file: a
+# hand-rolled parser would drift from what Claude Code accepts as JSON and
+# could be fooled by a comment-like string value. Reading only SETTINGS_FILE
+# left a hook wired solely in the git-ignored local file unscanned while this
+# gate still printed OK — the gate's own header claims "wired ∪ present", and
+# the local file is a wiring source Claude Code merges just as much as the
+# shared one.
 #
-# Absence of the settings file is an empty wired set, not a failure — most
-# fixture trees have no `.claude/settings.json` at all. A settings file that
-# fails to parse, or a `command` this gate cannot place into one of the two
-# known shapes, fails the gate instead of being silently skipped: a hook this
-# gate cannot classify is a hook it cannot prove is scanned.
+# Absence of either settings file is an empty wired set for that file, not a
+# failure — most fixture trees, and most real checkouts, have no
+# `.claude/settings.local.json` at all. A settings file that fails to parse,
+# or a `command` this gate cannot place into one of the two known shapes,
+# fails the gate instead of being silently skipped: a hook this gate cannot
+# classify is a hook it cannot prove is scanned. A hook wired in both files is
+# the same physical script either way, so it is scanned once — the existing
+# dedup (`sort -u`) building `scanned_hook_files` below already collapses a
+# path that appears twice in `wired_shell_paths`.
 classify_status=0
 classify_out=$(node -e '
 const fs = require("node:fs");
 const path = require("node:path");
 
-const settingsPath = ".claude/settings.json";
+// Both files Claude Code merges — .claude/settings.local.json is the
+// sanctioned way to add a personal hook without touching the committed one,
+// and a hook wired only there must be classified and scanned the same way.
+const settingsPaths = [".claude/settings.json", ".claude/settings.local.json"];
 
 // Deliberately conservative: only two shapes are RECOGNISED, everything else
 // is UNCLASSIFIABLE and fails the gate rather than being guessed at.
@@ -289,35 +307,40 @@ function classify(command) {
   return { kind: "unclassifiable", detail: `more than one argument: ${command}` };
 }
 
-if (!fs.existsSync(settingsPath)) {
-  process.exit(0);
-}
+// Absence of ONE file is that file contributing an empty wired set, not a
+// failure — the other file (or neither) is read independently.
+function readCommands(settingsPath) {
+  if (!fs.existsSync(settingsPath)) return [];
 
-let raw;
-try {
-  raw = fs.readFileSync(settingsPath, "utf8");
-} catch (err) {
-  console.log(`ERROR: cannot read ${settingsPath}: ${err.message}`);
-  process.exit(1);
-}
+  let raw;
+  try {
+    raw = fs.readFileSync(settingsPath, "utf8");
+  } catch (err) {
+    console.log(`ERROR: cannot read ${settingsPath}: ${err.message}`);
+    process.exit(1);
+  }
 
-let settings;
-try {
-  settings = JSON.parse(raw);
-} catch (err) {
-  console.log(`ERROR: ${settingsPath} is not valid JSON: ${err.message}`);
-  process.exit(1);
-}
+  let settings;
+  try {
+    settings = JSON.parse(raw);
+  } catch (err) {
+    console.log(`ERROR: ${settingsPath} is not valid JSON: ${err.message}`);
+    process.exit(1);
+  }
 
-const commands = [];
-for (const entries of Object.values(settings.hooks ?? {})) {
-  if (!Array.isArray(entries)) continue;
-  for (const entry of entries) {
-    for (const hook of entry?.hooks ?? []) {
-      if (typeof hook?.command === "string") commands.push(hook.command);
+  const commands = [];
+  for (const entries of Object.values(settings.hooks ?? {})) {
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      for (const hook of entry?.hooks ?? []) {
+        if (typeof hook?.command === "string") commands.push(hook.command);
+      }
     }
   }
+  return commands;
 }
+
+const commands = settingsPaths.flatMap(readCommands);
 
 for (const command of commands) {
   const result = classify(command);
@@ -326,7 +349,7 @@ for (const command of commands) {
   } else if (result.kind === "not-shell") {
     console.log(`NOTSHELL\t${result.interpreter}`);
   } else {
-    console.log(`ERROR: unclassifiable hook command in ${settingsPath}: ${command} (${result.detail})`);
+    console.log(`ERROR: unclassifiable hook command: ${command} (${result.detail})`);
     process.exit(1);
   }
 }
@@ -352,12 +375,13 @@ while IFS=$'\t' read -r kind value; do
 done <<<"$classify_out"
 wired_count=$((wired_shell_count + notshell_count))
 
-# A wired shell hook that does not exist is fatal: the settings file is making
-# a promise this tree does not keep, and scanning would silently skip it.
+# A wired shell hook that does not exist is fatal: one of the settings files
+# is making a promise this tree does not keep, and scanning would silently
+# skip it. Not named to a single file — the path may have come from either.
 while IFS= read -r p; do
   [ -z "$p" ] && continue
   if [ ! -f "$p" ]; then
-    echo "ERROR: $SETTINGS_FILE wires a hook that does not exist: $p"
+    echo "ERROR: $SETTINGS_FILE and/or $SETTINGS_LOCAL_FILE wire(s) a hook that does not exist: $p"
     exit 1
   fi
 done <<<"$wired_shell_paths"
