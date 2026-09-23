@@ -144,3 +144,85 @@ All round-1 findings are resolved in the branch; none carries an Anti-Deferral d
 - S-F2 → `2f884104d`
 - T-F1 → `c9176ca5d` (the two cells wrapped) and `f0bb091fd`
 - T-F2, T-F3, T-F4, T-F5 → `f0bb091fd`
+
+---
+
+# Rounds 2-7 — the credential lint, by differential
+
+Date: 2026-09-24 · Review rounds: 2, 3, 4, 5, 6, 7
+
+## Changes from Previous Round
+
+Round 1 closed with the scanner mechanism change. Rounds 2-7 then found six more defects in
+that same file, each by a method the previous round had not used. They are recorded together
+because the sequence is the finding: what closed this file was not another rule, it was changing
+how it was reviewed.
+
+- **Round 2 (Critical, found independently by two reviewers)** — `_skip_transparent_prefixes`
+  capped stripping at four, so five recognised prefixes hid a bare decrypt from detection and the
+  command took the allow arm. Any finite cap reproduces it at cap+1, so the cap went, not up.
+- **Round 3 (Critical)** — the same class through a different door: an option-taking prefix
+  (`sudo -u alice`, `nice -n 10`, `env -i`) left the FLAG where the CLI name was expected.
+  Modelling each prefix's option grammar was already rejected in round 1 as fragile, and refusing
+  the unresolvable was not available — this hook runs on every Bash command, so it would refuse an
+  ordinary `sudo -u alice ls`. The answer was to stop needing prefixes at all: the CLI token
+  followed by `decrypt` is looked for at any position, and the prefix list is gone.
+- **Round 4 (Major ×2)** — the review question changed here, and that is what made the rest
+  findable: not "is the new code good" but "does this branch refuse everything main refused". A
+  parser matches structure; the regex it replaced matched text anywhere. `./passwd-sso decrypt X`
+  and `/usr/local/bin/passwd-sso decrypt X` were refused by main and allowed here — a fail-open
+  this branch introduced. Fixed by matching the name as a whole path component; `index.js` joined
+  `index.ts`, which main missed too.
+- **Round 5 (Critical + Major)** — a 184-command differential, verified against real bash with a
+  sentinel binary. An unquoted heredoc's body is expanded by bash, so `cat <<EOF` /
+  `$(passwd-sso decrypt X)` / `EOF` ran the decrypt and printed it while the branch allowed the
+  command: the body was captured as text and never parsed. Fixing it surfaced a third defect the
+  corpus had masked — closing a backtick region was read as opening another, so EVERY command
+  containing a backtick substitution raised and the hook refused it (`echo \`date\`` included).
+  The entry-point spelling also matched by substring, refusing `myindex.jsx-report decrypt X`.
+- **Round 6 (Major)** — 1008 commands, structurally generated over five axes. Zero Critical
+  regressions: all 66 main-BLOCK/branch-ALLOW candidates were confirmed by real bash to print
+  nothing (main false-positived on inert text). One over-refusal: bash does not treat a heredoc
+  that reaches end of input without its terminator as an error — it warns and runs — while the
+  scanner raised, so a mistyped terminator or any CRLF-authored heredoc refused ordinary work.
+- **Round 7 (convergence, no findings)** — the fix moved exactly the 27 cells round 6 measured and
+  nothing else, and a fresh 304-command sweep of ordinary commands containing no decrypt found no
+  input that bash accepts and the scanner cannot parse.
+
+## What this sequence says
+
+Rounds 1-3 each answered a bypass with a better rule, and each answer was bypassed again. The
+class only closed when round 3 REMOVED the mechanism instead of extending it, and the remaining
+defects were not reachable by reading at all — they needed both hooks run over a generated corpus,
+with real bash as the adjudicator of whether a credential actually reaches stdout.
+
+Two directions of breakage came out of that method, and only one of them is intuitive:
+
+- refusals main had that the parser lost (heredoc expansion, path-qualified names) — fail-open;
+- ordinary commands main allowed that the parser refused (every backtick substitution, every
+  CRLF heredoc) — a lint that blocks normal work gets disabled, so this direction is not cosmetic.
+
+Neither was visible in the unit suite, which tests shapes someone thought of. The differential is
+now the artifact that would catch the next one, and its harnesses are recorded in the scratchpad
+rather than committed, which is a limit worth naming: a future rewrite of this file should
+regenerate the corpus rather than trust these rounds.
+
+## Environment Verification Report (updated)
+
+- **E2** — the macOS/BSD axis shrank again: `grep` left the hook in round 1, and rounds 5-7 removed
+  the last text-matching from detection. What remains platform-sensitive is the C2 gate's awk and
+  both scripts' bash, all POSIX constructs, checked by reading. Still `blocked-deferred` for
+  execution on macOS.
+- **E1**, **E3** — unchanged from round 1.
+
+## Resolution Status (rounds 2-7)
+
+- Round 2 Critical → `3e4d94d4a`
+- Round 3 Critical → `b37609f23`
+- Round 4 Major ×2 → `b37609f23` (path component, `index.js`) and the round-5 commit (substring)
+- Round 5 Critical + Major → `b4752de70`
+- Round 6 Major → `fcd533e95`
+- Round 7 → no findings
+
+Hook suite: 120 cells. Full suite: 15985 passed. The differential corpora (1008 + 304 commands)
+are the evidence behind the convergence claim, not the unit suite alone.
