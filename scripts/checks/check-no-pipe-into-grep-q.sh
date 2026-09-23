@@ -22,7 +22,13 @@
 # them as data.
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd))"
+# Resolved from the script's OWN location, never from `git rev-parse` in the
+# caller's cwd: a gate whose root depends on where it is invoked from can be
+# pointed at the wrong tree by nothing more than a stray `cd`, and a `.git`
+# directory found by walking up from an unrelated cwd (e.g. a submodule, or a
+# worktree checked out elsewhere) would silently scan that tree instead.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FIXTURE_ROOT="${NO_PIPE_GREP_Q_ROOT:-$REPO_ROOT}"
 cd "$FIXTURE_ROOT"
 
@@ -31,6 +37,7 @@ SCAN_DIR="scripts"
 # in it while this gate scanned scripts/ only (audit-tenant-adjudicator round 15,
 # F-R15-2).
 HOOKS_DIR=".claude/hooks"
+SETTINGS_FILE=".claude/settings.json"
 
 echo "check-no-pipe-into-grep-q: FIXTURE_ROOT=$FIXTURE_ROOT SCAN_DIR=$SCAN_DIR HOOKS_DIR=$HOOKS_DIR"
 
@@ -45,12 +52,6 @@ fi
 
 if [ ! -d "$SCAN_DIR" ]; then
   echo "ERROR: $SCAN_DIR/ not found under $FIXTURE_ROOT"
-  exit 1
-fi
-# Required on the real tree. A fixture tree (NO_PIPE_GREP_Q_ROOT) may omit it; when
-# it is present it is scanned and held to its own floor below.
-if [ ! -d "$HOOKS_DIR" ] && [ -z "${NO_PIPE_GREP_Q_ROOT:-}" ]; then
-  echo "ERROR: $HOOKS_DIR/ not found under $FIXTURE_ROOT"
   exit 1
 fi
 
@@ -212,22 +213,173 @@ if [ "${file_count:-0}" -lt "$MIN_FILES" ]; then
   exit 1
 fi
 
-hook_count=0
+# Files physically present under HOOKS_DIR. Absence of the directory itself is
+# NOT an error here — a tree with nothing wired to it either (below) has
+# nothing to scan there and says so. A directory that DOES exist but holds no
+# *.sh is still EMPTY_SCAN: that shape means the scan path is wrong, same as
+# for SCAN_DIR above.
+hook_present_files=""
 if [ -d "$HOOKS_DIR" ]; then
-  hook_files=$(find "$HOOKS_DIR" -name '*.sh' -type f | sort)
-  hook_count=$(grep -c . <<<"$hook_files" || true)
-  if [ "${hook_count:-0}" -lt 1 ]; then
+  hook_present_files=$(find "$HOOKS_DIR" -name '*.sh' -type f | sort)
+  hook_present_count=$(grep -c . <<<"$hook_present_files" || true)
+  if [ "${hook_present_count:-0}" -lt 1 ]; then
     echo "EMPTY_SCAN: no shell scripts found under $HOOKS_DIR/ (expected >= 1) — the scan path is wrong, not the tree."
     exit 1
   fi
+fi
+
+# The hook member set is WIRED ∪ PRESENT, not just PRESENT: a hook can be
+# wired to a path this gate would otherwise never look at, and a script sitting
+# unwired in HOOKS_DIR must still be scanned (that is what F-R15-2 was). Wiring
+# is read from settings — the same file Claude Code itself reads to decide
+# which script actually runs — via `node`'s JSON.parse, not a filename glob or
+# a regex over the file: a hand-rolled parser would drift from what Claude Code
+# accepts as JSON and could be fooled by a comment-like string value.
+#
+# Absence of the settings file is an empty wired set, not a failure — most
+# fixture trees have no `.claude/settings.json` at all. A settings file that
+# fails to parse, or a `command` this gate cannot place into one of the two
+# known shapes, fails the gate instead of being silently skipped: a hook this
+# gate cannot classify is a hook it cannot prove is scanned.
+classify_status=0
+classify_out=$(node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+
+const settingsPath = ".claude/settings.json";
+
+// Deliberately conservative: only two shapes are RECOGNISED, everything else
+// is UNCLASSIFIABLE and fails the gate rather than being guessed at.
+//   - "bash <path>" / "sh <path>" / a bare "<path>.sh", with a literal
+//     relative path -> a shell member, scanned below.
+//   - "node <path>" / "python3 <path>" -> recorded as not-shell, not scanned.
+// Several commands joined by `&&`, `;`, `|`; a variable or
+// `$CLAUDE_PROJECT_DIR` in the path; `bash -c "…"` (the argument is CODE, not
+// a path) — none of these can be resolved to a literal file, so all are
+// unclassifiable.
+function classify(command) {
+  const trimmed = command.trim();
+  if (/[;&|`$]/.test(trimmed)) {
+    return { kind: "unclassifiable", detail: "contains a shell operator or a variable expansion" };
+  }
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) {
+    return { kind: "unclassifiable", detail: "empty command" };
+  }
+  if (tokens.length === 1) {
+    const p = tokens[0];
+    if (!p.endsWith(".sh") || path.isAbsolute(p)) {
+      return { kind: "unclassifiable", detail: `bare command is not a literal relative .sh path: ${command}` };
+    }
+    return { kind: "shell", path: p };
+  }
+  if (tokens.length === 2) {
+    const [interpreter, arg] = tokens;
+    if (interpreter === "bash" || interpreter === "sh") {
+      if (arg === "-c" || path.isAbsolute(arg)) {
+        return { kind: "unclassifiable", detail: `not a literal relative path: ${command}` };
+      }
+      return { kind: "shell", path: arg };
+    }
+    if (interpreter === "node" || interpreter === "python3") {
+      return { kind: "not-shell", interpreter };
+    }
+    return { kind: "unclassifiable", detail: `unrecognized interpreter: ${command}` };
+  }
+  return { kind: "unclassifiable", detail: `more than one argument: ${command}` };
+}
+
+if (!fs.existsSync(settingsPath)) {
+  process.exit(0);
+}
+
+let raw;
+try {
+  raw = fs.readFileSync(settingsPath, "utf8");
+} catch (err) {
+  console.log(`ERROR: cannot read ${settingsPath}: ${err.message}`);
+  process.exit(1);
+}
+
+let settings;
+try {
+  settings = JSON.parse(raw);
+} catch (err) {
+  console.log(`ERROR: ${settingsPath} is not valid JSON: ${err.message}`);
+  process.exit(1);
+}
+
+const commands = [];
+for (const entries of Object.values(settings.hooks ?? {})) {
+  if (!Array.isArray(entries)) continue;
+  for (const entry of entries) {
+    for (const hook of entry?.hooks ?? []) {
+      if (typeof hook?.command === "string") commands.push(hook.command);
+    }
+  }
+}
+
+for (const command of commands) {
+  const result = classify(command);
+  if (result.kind === "shell") {
+    console.log(`SHELL\t${result.path}`);
+  } else if (result.kind === "not-shell") {
+    console.log(`NOTSHELL\t${result.interpreter}`);
+  } else {
+    console.log(`ERROR: unclassifiable hook command in ${settingsPath}: ${command} (${result.detail})`);
+    process.exit(1);
+  }
+}
+') || classify_status=$?
+
+if [ "$classify_status" -ne 0 ]; then
+  echo "$classify_out"
+  exit 1
+fi
+
+wired_shell_paths=""
+wired_shell_count=0
+notshell_count=0
+while IFS=$'\t' read -r kind value; do
+  [ -z "$kind" ] && continue
+  if [ "$kind" = "SHELL" ]; then
+    wired_shell_count=$((wired_shell_count + 1))
+    wired_shell_paths="${wired_shell_paths}${value}
+"
+  elif [ "$kind" = "NOTSHELL" ]; then
+    notshell_count=$((notshell_count + 1))
+  fi
+done <<<"$classify_out"
+wired_count=$((wired_shell_count + notshell_count))
+
+# A wired shell hook that does not exist is fatal: the settings file is making
+# a promise this tree does not keep, and scanning would silently skip it.
+while IFS= read -r p; do
+  [ -z "$p" ] && continue
+  if [ ! -f "$p" ]; then
+    echo "ERROR: $SETTINGS_FILE wires a hook that does not exist: $p"
+    exit 1
+  fi
+done <<<"$wired_shell_paths"
+
+scanned_hook_files=$(printf '%s\n%s\n' "$hook_present_files" "$wired_shell_paths" | sed '/^$/d' | sort -u)
+scanned_hook_count=$(grep -c . <<<"$scanned_hook_files" || true)
+scanned_hook_count=${scanned_hook_count:-0}
+
+if [ -n "$scanned_hook_files" ]; then
   files="$files
-$hook_files"
+$scanned_hook_files"
 fi
 
 violations=""
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  hits=$(awk "$detect_awk" "$f" || true)
+  awk_status=0
+  hits=$(awk "$detect_awk" "$f") || awk_status=$?
+  if [ "$awk_status" -ne 0 ]; then
+    echo "ERROR: scanner failed on $f (awk exit $awk_status)"
+    exit 1
+  fi
   if [ -n "$hits" ]; then
     while IFS= read -r h; do
       [ -z "$h" ] && continue
@@ -245,4 +397,4 @@ if [ -n "$violations" ]; then
   exit 1
 fi
 
-echo "OK ($file_count shell scripts and $hook_count hook script(s) scanned, no pipeline into grep -q)"
+echo "OK ($file_count shell scripts and $scanned_hook_count hook script(s) scanned; $wired_count hook(s) wired ($wired_shell_count shell, $notshell_count not-shell); no pipeline into grep -q)"
