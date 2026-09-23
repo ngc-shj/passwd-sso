@@ -17,6 +17,15 @@
  * one (that membership wins), or hold several (the oldest wins — a multi-active
  * user is decided by this rule, the same as every other caller of it, rather
  * than refused).
+ *
+ * THE CALLER'S ORDER MUST BE TOTAL. "Oldest" is `createdAt`, which carries no
+ * uniqueness guarantee, so two readers ordering by it alone can hand this
+ * function different first elements for the same user and get different answers
+ * — one rule, two verdicts, which is the thing splitting it into this module was
+ * meant to prevent. Every reader therefore orders by `[createdAt, id]`: the
+ * three in `tenant-context.ts`, and the backfill's listing query and its
+ * per-user re-read in `scripts/tenant-domain.ts`, whose disagreement would show
+ * an operator one target and write another.
  */
 export function owningTenantOf(
   column: string,

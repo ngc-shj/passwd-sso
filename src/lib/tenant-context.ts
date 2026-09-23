@@ -83,7 +83,7 @@ export async function resolveOwningTenantIdFromClient(
       tenantMemberships: {
         where: { deactivatedAt: null },
         select: { tenantId: true },
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         take: 1,
       },
     },
@@ -234,7 +234,7 @@ export async function resolveExistingUsersForTenant(
         tenantMemberships: {
           where: { OR: [{ deactivatedAt: null }, { tenantId }] },
           select: { tenantId: true, deactivatedAt: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         },
       },
     });
@@ -305,7 +305,7 @@ export async function usersOwnedByAnotherTenant(
         tenantMemberships: {
           where: { deactivatedAt: null },
           select: { tenantId: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         },
       },
     });

@@ -2031,7 +2031,7 @@ async function listDivergentCandidates(tx: TxClient, limit: number): Promise<Bac
            SELECT tm.tenant_id, count(*) OVER () AS active_count
              FROM tenant_members tm
             WHERE tm.user_id = u.id AND tm.deactivated_at IS NULL
-            ORDER BY tm.created_at ASC
+            ORDER BY tm.created_at ASC, tm.id ASC
             LIMIT 1
          ) m ON true
         WHERE u.id > $1::uuid
@@ -2081,7 +2081,7 @@ async function applyOneCandidate(tx: TxClient, userId: string, by: string): Prom
       tenantMemberships: {
         where: { deactivatedAt: null },
         select: { id: true, tenantId: true },
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       },
     },
   });

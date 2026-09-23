@@ -80,3 +80,24 @@ matcher keeps reading raw text. Dequoting it would close `passwd-sso 'decrypt' x
 carries as a KNOWN evasion under SC2 (the residual a lint cannot close; the closure is a decrypt
 surface that never returns plaintext). Closing it accidentally would have made the hook claim reach
 it does not have everywhere else, so the asymmetry is deliberate and commented.
+
+## D8 — the owning-tenant rule's input order was not total (found by the Phase 2 self-check, fixed)
+
+"Oldest active membership" was read as `ORDER BY created_at ASC` with no secondary key, in every
+reader of the rule — the three in `src/lib/tenant-context.ts` that predate this branch, and the two
+C4 added (the backfill's listing query and its per-user re-read). `created_at` carries no uniqueness
+guarantee, so on a tie two separately-executed queries may pick different rows, and `owningTenantOf`
+then answers the same user differently depending on which reader asked. For the backfill that is
+worse than academic: the operator confirms "user X → tenant A" from the listing and the apply step
+re-reads and could move them to tenant B, both valid under the rule, neither what was shown.
+
+Fixed by making the order total everywhere the rule reads memberships — `[createdAt, id]` in the
+three Prisma readers plus the backfill's re-read, `ORDER BY tm.created_at ASC, tm.id ASC` in the
+listing SQL — and by stating the obligation in `owning-tenant-rule.ts`, which is where a future
+reader will look. `measure`'s three queries stay verbatim from the design note: their `n = 1` filter
+makes the ordered pick irrelevant, and they are the note's text.
+
+This is pre-existing in the production readers, not something this branch introduced; it is fixed
+here rather than deferred because C4 added two more readers of the same rule, which is what turned a
+latent ambiguity into a visible operator-facing one. The three unit assertions that pinned the old
+`orderBy` shape were updated with it (R19).
