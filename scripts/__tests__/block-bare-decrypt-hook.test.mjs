@@ -660,6 +660,26 @@ describe("block-bare-decrypt hook — command-word attribution gate (issue-838 f
     expectBlockedBy(`command passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
   });
 
+  it("strips a prefix chain of any depth, not up to a cap", () => {
+    // The first revision stopped after four prefixes, so a fifth put the
+    // decrypt back out of sight: detection reported "no decrypt here" and the
+    // whole command took the allow arm before any rule ran (round 2, S2-F1).
+    // Any finite cap reproduces that at cap+1, which is why the loop now has
+    // none — it is bounded by the word count and does not recurse.
+    const deep = Array.from({ length: 12 }, () => "command").join(" ");
+    expectBlockedBy(`${deep} passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
+    // Five distinct real prefixes, so the cell cannot pass by a repetition
+    // shortcut that a future implementation might special-case.
+    expectBlockedBy(
+      `nice nohup stdbuf setsid command passwd-sso ${SUB} ID`,
+      "this decrypt puts its stdout in the conversation",
+    );
+    // The paired allow: a prefix chain around something that is NOT a decrypt
+    // stays allowed, so the fix is stripping prefixes rather than refusing
+    // every command that starts with one.
+    expectHook(`${deep} echo hello`).toBe(ALLOW);
+  });
+
   it("blocks a printer beside a process substitution under item 6, proving the old shard is gone", () => {
     // Before process substitution became a nested region, the `;` inside
     // `<(true; false)` split the command early and the tail `"$_CRED"`

@@ -725,18 +725,24 @@ _TRANSPARENT_PREFIXES = {
     "command", "builtin", "exec", "env", "nice", "nohup", "stdbuf", "setsid",
     "ionice", "chrt", "taskset", "time", "sudo", "doas", "unbuffer",
 }
-_MAX_PREFIX_DEPTH = 4
-
-
 def _skip_transparent_prefixes(words: list[str]) -> list[str]:
+    """Strip every leading transparent prefix, with NO depth cap.
+
+    An earlier revision stopped after four. Any finite bound reproduces the
+    defect it was meant to avoid at bound+1: with five,
+    `command command command command command passwd-sso decrypt x` stripped
+    four, saw `command` as the command word, and reported "not a decrypt" —
+    so the whole command took the allow arm before any rule ran, which is a
+    bare decrypt putting plaintext on stdout (round 2, S2-F1). The loop is
+    already bounded by the word count and does not recurse, so the cap bought
+    nothing to begin with.
+    """
     i = 0
-    depth = 0
-    while i < len(words) - 1 and depth < _MAX_PREFIX_DEPTH:
+    while i < len(words) - 1:
         head = _strip_quotes(words[i])
         if head not in _TRANSPARENT_PREFIXES:
             break
         i += 1
-        depth += 1
         if head == "env":
             while i < len(words) - 1:
                 eq = _unquoted_equals_index(words[i])
