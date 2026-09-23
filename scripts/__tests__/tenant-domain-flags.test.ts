@@ -10,6 +10,7 @@ import {
   valuelessError,
 } from "../lib/tenant-domain-flags";
 import { cmdBackfillOwningColumn, migrationClientFactory } from "../tenant-domain";
+import { SIGNIN_ACTOR_LABEL } from "@/lib/tenant/tenant-claim-event";
 
 /**
  * Round-3 M7: this parser and its valueless-flag guard had no test at all —
@@ -273,9 +274,9 @@ describe("backfill-owning-column: --by is validated before any client is built (
     vi.stubEnv("MIGRATION_DATABASE_URL", "postgresql://unreachable.invalid/db");
     const createSpy = vi.spyOn(migrationClientFactory, "create");
     try {
-      const result = await cmdBackfillOwningColumn({ by: "signin", apply: true, yes: true });
+      const result = await cmdBackfillOwningColumn({ by: SIGNIN_ACTOR_LABEL, apply: true, yes: true });
       expect(result.ok).toBe(false);
-      expect(result.message).toContain('--by must not be "signin"');
+      expect(result.message).toContain(`--by must not be "${SIGNIN_ACTOR_LABEL}"`);
       expect(createSpy).not.toHaveBeenCalled();
     } finally {
       createSpy.mockRestore();
