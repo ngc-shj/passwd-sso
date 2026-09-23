@@ -217,11 +217,11 @@ regenerate the corpus rather than trust these rounds.
 
 ## Resolution Status (rounds 2-7)
 
-- Round 2 Critical → `3e4d94d4a`
-- Round 3 Critical → `b37609f23`
-- Round 4 Major ×2 → `b37609f23` (path component, `index.js`) and the round-5 commit (substring)
-- Round 5 Critical + Major → `b4752de70`
-- Round 6 Major → `fcd533e95`
+- Round 2 Critical (depth cap) → `c3ec9377d`
+- Round 3 Critical (option-bearing prefix; position-free detection) → `b37609f23`
+- Round 4 Major (path-qualified name lost against main; `index.js` added) → `57a2d3f40`
+- Round 5 Critical (heredoc expansion) + Major (backtick region; entry-point substring) → `b4752de70`
+- Round 6 Major (unterminated heredoc) → `fcd533e95`
 - Round 7 → no findings
 
 Hook suite: 120 cells. Full suite: 15985 passed. The differential corpora (1008 + 304 commands)
