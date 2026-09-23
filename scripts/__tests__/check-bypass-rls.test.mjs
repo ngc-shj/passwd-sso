@@ -61,6 +61,24 @@ const REAL_TENANT_CONTEXT = readFileSync(join(REPO_ROOT, "src/lib/tenant-context
 // any-callee/one-argument branch for any single-arg call the fixture's own
 // callback makes with it, and into Rule B for any computed index off a query
 // result — both unrelated to a module load or a helper reference.
+// Hand-authored, with nothing tying it to the installed @prisma/client
+// package (finding D, issue-838 follow-ups review). The ONE property this
+// stub must keep, whatever else drifts: `tx` (and `prisma`) must NOT widen to
+// `any`, because an `any` there spuriously trips item 5's any-callee branch
+// and Rule B for code that never touches a module load or a helper reference
+// (see the false-positive walkthrough above) — everything else here exists
+// only in service of that.
+//
+// It is NOT a faithful shape of the real generated client, and does not try
+// to be: the real `PrismaClient` has no string index signature at all (only
+// `[K: symbol]: {...}`), and exposes each model as a named, non-callable
+// getter (`get user(): Prisma.UserDelegate<...>`), never as a blanket
+// `[key: string]` whose delegate is itself callable the way this stub's is.
+// Nothing in this gate indexes a Prisma client dynamically today, so that gap
+// costs nothing here — but a Prisma major-version bump is exactly the kind of
+// change that could invalidate the one property that DOES matter, and this
+// stub will not fail loudly if it does. Re-derive it against the then-current
+// generated `.d.ts` rather than assuming it still holds.
 const PRISMA_CLIENT_STUB = `declare module "@prisma/client" {
   interface PrismaModelDelegate {
     (...args: unknown[]): Promise<unknown>;
@@ -2133,6 +2151,16 @@ describe("C3 Program-backed reference cross-check", () => {
   const RULE_A = "literal-named property access or literal-keyed element access";
   const RULE_B = "receiver whose key is not a string-literal";
   const MODULE_LOAD = "module load specifier could not be proven safe";
+  // The pre-existing round-13 check (indirectHelperReferencesIn) fires
+  // independently of the rule under test whenever a fixture's own text
+  // references the helper-carrying namespace in a form IT does not
+  // recognise either — confirmed below to be unavoidable for item 5c's
+  // destructuring shape and Rule A's `import(...)`-based LOADER (finding E,
+  // issue-838 follow-ups review): forcing the rule-under-test's predicate to
+  // return no violations still exits 1 on this message alone. Cells that hit
+  // it assert it explicitly rather than excluding it, so the confounding is
+  // recorded rather than invisible.
+  const ROUND13 = "referenced in a form this gate cannot follow as a direct call";
 
   describe("item 3: reference cross-check (deny)", () => {
     it("flags a named re-export the consumer imports under a local alias", () => {
@@ -2214,10 +2242,17 @@ describe("C3 Program-backed reference cross-check", () => {
       ]);
       expect(code, stderr).toBe(1);
       expect(stderr).toContain("src/lib/barrelA/outer.ts");
+      expect(stderr).toContain(STAR_EXPORT);
     });
   });
 
   describe("item 5c: quoted / computed destructuring key (deny)", () => {
+    // Both cells also trip round-13 (ROUND13): destructuring `rls` at all —
+    // regardless of the key shape 5c decides on — is itself "referencing the
+    // namespace in a form round-13 does not recognise as a direct call".
+    // Confirmed unavoidable (finding E): forcing `destructuringKeyViolationsIn`
+    // to return [] still exits 1 on ROUND13 alone, so it is asserted
+    // explicitly here rather than excluded.
     it("flags a quoted destructuring key that resolves to a helper", () => {
       const { code, stderr } = run(
         "src/app/consumer.ts",
@@ -2225,6 +2260,7 @@ describe("C3 Program-backed reference cross-check", () => {
       );
       expect(code, stderr).toBe(1);
       expect(stderr).toContain(DESTRUCTURING_KEY);
+      expect(stderr).toContain(ROUND13);
     });
 
     it("flags a computed destructuring key that resolves to a helper", () => {
@@ -2234,6 +2270,7 @@ describe("C3 Program-backed reference cross-check", () => {
       );
       expect(code, stderr).toBe(1);
       expect(stderr).toContain(DESTRUCTURING_KEY);
+      expect(stderr).toContain(ROUND13);
     });
   });
 
@@ -2262,6 +2299,15 @@ describe("C3 Program-backed reference cross-check", () => {
     // (`Promise<typeof import(...)>`) rather than a recognised namespace
     // import — the shape item 6's own text calls out as where Rule A (not the
     // pre-existing indirect-reference check) is the one deciding.
+    //
+    // Every cell also trips ROUND13, unavoidably (finding E): the LOADER's own
+    // body performs `import("@/lib/tenant-rls")`, which `indirectHelperReferencesIn`
+    // flags on its own, independently of whatever `ruleAViolationsIn` decides —
+    // confirmed by forcing `ruleAViolationsIn` to return [] and watching the
+    // gate still exit 1 on ROUND13 alone. There is no LOADER shape that reaches
+    // the generic-before-await case Rule A exists for without an `import(...)`
+    // or `require(...)` expression round-13 also sees, so this is asserted
+    // explicitly rather than excluded.
     const LOADER = `async function loader(): Promise<typeof import("@/lib/tenant-rls")> {\n  return import("@/lib/tenant-rls");\n}\n`;
 
     it("flags `ns[n](…)` on a helper-carrying namespace", () => {
@@ -2271,6 +2317,7 @@ describe("C3 Program-backed reference cross-check", () => {
       );
       expect(code, stderr).toBe(1);
       expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
     });
 
     it("flags the same namespace spread", () => {
@@ -2280,6 +2327,7 @@ describe("C3 Program-backed reference cross-check", () => {
       );
       expect(code, stderr).toBe(1);
       expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
     });
 
     it("flags the same namespace passed as an argument", () => {
@@ -2289,6 +2337,7 @@ describe("C3 Program-backed reference cross-check", () => {
       );
       expect(code, stderr).toBe(1);
       expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
     });
 
     it("flags the same namespace read through Reflect.get", () => {
@@ -2298,6 +2347,7 @@ describe("C3 Program-backed reference cross-check", () => {
       );
       expect(code, stderr).toBe(1);
       expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
     });
 
     it("flags the same namespace assigned to globalThis", () => {
@@ -2307,6 +2357,7 @@ describe("C3 Program-backed reference cross-check", () => {
       );
       expect(code, stderr).toBe(1);
       expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
     });
   });
 

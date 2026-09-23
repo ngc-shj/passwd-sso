@@ -9,7 +9,12 @@ import {
   parseFlags,
   valuelessError,
 } from "../lib/tenant-domain-flags";
-import { cmdBackfillOwningColumn, migrationClientFactory } from "../tenant-domain";
+import {
+  applyOneCandidate,
+  cmdBackfillOwningColumn,
+  listDivergentCandidates,
+  migrationClientFactory,
+} from "../tenant-domain";
 import { SIGNIN_ACTOR_LABEL } from "@/lib/tenant/tenant-claim-event";
 
 /**
@@ -300,5 +305,48 @@ describe("backfill-owning-column: --by is validated before any client is built (
     } finally {
       createSpy.mockRestore();
     }
+  });
+});
+
+/**
+ * issue-838 follow-ups review, finding C. D8 made the owning-tenant rule's
+ * input order total — `[createdAt, id]`, not `createdAt` alone — in every
+ * reader, including the two `backfill-owning-column` added here. The three
+ * ORM readers in src/lib/tenant-context.ts are pinned by mock-call assertions
+ * in tenant-context.test.ts; these two were not. Per D1, no DB fixture can
+ * observe a tie (`tenant_members_one_active_per_user` makes one
+ * unconstructible), so the secondary key can only be pinned by spying the
+ * `tx` client passed in and asserting the SQL text / orderBy shape it sends —
+ * never by a live row.
+ */
+describe("backfill-owning-column readers carry the total order (D8)", () => {
+  it("listDivergentCandidates's raw SQL orders the LATERAL pick by created_at THEN id", async () => {
+    const queryRawUnsafe = vi.fn().mockResolvedValue([]);
+    const tx = { $queryRawUnsafe: queryRawUnsafe } as unknown as Parameters<
+      typeof listDivergentCandidates
+    >[0];
+
+    await listDivergentCandidates(tx, 10);
+
+    expect(queryRawUnsafe).toHaveBeenCalledTimes(1);
+    const [sql] = queryRawUnsafe.mock.calls[0] as [string];
+    expect(sql).toContain("ORDER BY tm.created_at ASC, tm.id ASC");
+  });
+
+  it("applyOneCandidate's re-read orders active memberships by createdAt THEN id", async () => {
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const tx = { user: { findUnique } } as unknown as Parameters<typeof applyOneCandidate>[0];
+
+    await applyOneCandidate(tx, "user-1", "ops-alice");
+
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          tenantMemberships: expect.objectContaining({
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          }),
+        }),
+      }),
+    );
   });
 });

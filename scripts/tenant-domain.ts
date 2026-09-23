@@ -2019,7 +2019,10 @@ export function candidateFromRow(row: CandidateRow): BackfillCandidate {
   };
 }
 
-async function listDivergentCandidates(tx: TxClient, limit: number): Promise<BackfillCandidate[]> {
+// Exported so the total-order fix (D8) can be pinned by a unit test that
+// spies the `tx` client, independently of a live database — same motivation
+// as `candidateFromRow` above.
+export async function listDivergentCandidates(tx: TxClient, limit: number): Promise<BackfillCandidate[]> {
   const candidates: BackfillCandidate[] = [];
   let cursor = NIL_UUID;
   for (;;) {
@@ -2073,7 +2076,8 @@ type BackfillOutcome = { userId: string; moved: boolean; from?: string; to?: str
  * `tx.user.update`/`updateMany` here, so the move is recorded the same way
  * `realign` records one (forbidden-pattern rule, C4 plan).
  */
-async function applyOneCandidate(tx: TxClient, userId: string, by: string): Promise<BackfillOutcome> {
+// Exported for the same reason as listDivergentCandidates above (D8 pin).
+export async function applyOneCandidate(tx: TxClient, userId: string, by: string): Promise<BackfillOutcome> {
   const user = await tx.user.findUnique({
     where: { id: userId },
     select: {
