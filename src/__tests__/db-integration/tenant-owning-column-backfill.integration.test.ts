@@ -16,15 +16,22 @@
  * seeded for exactly this reason.
  *
  * A divergent fixture's `users.tenantId` column and its active membership
- * disagree by construction, so a cleanup call scoped to only one of the two
- * tenants can miss half the rows (`deleteTestData(tenantId)` deletes
- * `tenant_members`/`users` BY tenant_id — whichever tenant currently owns the
- * column decides which call reaches the `users` row at all, and that owner
- * flips the moment `--apply` runs). `cleanupDivergent` below re-reads the
- * column to decide which tenant to delete first, rather than assuming it —
- * see `audit-tenant-adjudicator.integration.test.ts`'s afterEach for the
- * same discipline stated the other way (fixed creation order there, because
- * that file never applies a move mid-test).
+ * disagree by construction, and the column flips the moment `--apply` runs —
+ * so a cleanup scoped to only one of the two tenants can miss the `users`
+ * row (`deleteTestData(tenantId)` deletes `tenant_members`/`users` BY
+ * tenant_id, and only whichever tenant currently owns the column reaches
+ * it). Fixtures below never assume which tenant that is: every tenant and
+ * user id is registered with the shared `afterEach` the MOMENT it is
+ * created (`trackedCreateTenant`/`trackedCreateUser`, used by
+ * `seedDivergent` itself), and that `afterEach` — not a per-cell `finally` —
+ * sweeps everything recorded so far, deleting BOTH tenants a divergent
+ * fixture touches. This closes the leak a `finally` guarding only a
+ * fully-returned seed left open: a throw between `seedDivergent()`'s own
+ * statements, or between two `seedDivergent()` calls in the same test, used
+ * to leave rows nothing deleted (RT11). See
+ * `audit-tenant-adjudicator.integration.test.ts`'s afterEach for the same
+ * discipline stated the other way (fixed creation order there, because that
+ * file never applies a move mid-test).
  *
  * Must run with the compose workers stopped (CLAUDE.md's audit-outbox-worker
  * note): a live worker drains `audit_outbox` rows this file reads back.
@@ -78,6 +85,50 @@ describe("tenant-domain measure / backfill-owning-column (C4/#838)", () => {
     await ctx.cleanup();
   });
 
+  // Acquisition-time cleanup registry (RT11): every tenant/user id created below
+  // is pushed here the MOMENT ctx.createTenant()/ctx.createUser() returns it —
+  // never batched into a pair after a whole seed has finished — so a throw
+  // partway through `seedDivergent()`, or between two `seedDivergent()` calls in
+  // the same test, still leaves every id it got this far a record to clean up.
+  const createdTenantIds: string[] = [];
+  const createdUserIds: string[] = [];
+
+  async function trackedCreateTenant(): Promise<string> {
+    const id = await ctx.createTenant();
+    createdTenantIds.push(id);
+    return id;
+  }
+
+  async function trackedCreateUser(tenantId: string): Promise<string> {
+    const id = await ctx.createUser(tenantId);
+    createdUserIds.push(id);
+    return id;
+  }
+
+  afterEach(async () => {
+    if (SKIP) return;
+    // Every recorded tenant, in any order: each DELETE below is scoped to its
+    // own tenant_id (see the file header's ISOLATION note), so a divergent
+    // fixture's user — whose tenant_id now points at whichever tenant
+    // currently owns it — is caught by THAT tenant's own call regardless of
+    // which one runs first; the other call is simply a no-op for the users row.
+    const tenantIds = createdTenantIds.splice(0, createdTenantIds.length);
+    for (const tenantId of tenantIds) {
+      await ctx.deleteTestData(tenantId);
+    }
+    // Defensive: every recorded user must be gone once its tenant(s) are —
+    // fail loudly rather than let an orphaned row sit on the shared database.
+    const userIds = createdUserIds.splice(0, createdUserIds.length);
+    const leaked: string[] = [];
+    for (const userId of userIds) {
+      const row = await ctx.su.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+      if (row) leaked.push(userId);
+    }
+    if (leaked.length > 0) {
+      throw new Error(`[tenant-owning-column-backfill] user id(s) survived tenant cleanup: ${leaked.join(", ")}`);
+    }
+  });
+
   const columnOf = async (userId: string): Promise<string> =>
     (await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { tenantId: true } })).tenantId;
 
@@ -91,12 +142,14 @@ describe("tenant-domain measure / backfill-owning-column (C4/#838)", () => {
    * A user whose column stays at `homeTenant` while their only active
    * membership moves to `toTenant` — design-note query (1)'s population,
    * same shape as `audit-tenant-adjudicator.integration.test.ts`'s
-   * `repointActiveMembership`.
+   * `repointActiveMembership`. Uses the tracked creators above so a throw
+   * between the two $executeRawUnsafe calls still leaves homeTenant, toTenant
+   * and userId registered for the afterEach sweep.
    */
   async function seedDivergent(): Promise<{ homeTenant: string; toTenant: string; userId: string }> {
-    const homeTenant = await ctx.createTenant();
-    const toTenant = await ctx.createTenant();
-    const userId = await ctx.createUser(homeTenant);
+    const homeTenant = await trackedCreateTenant();
+    const toTenant = await trackedCreateTenant();
+    const userId = await trackedCreateUser(homeTenant);
     await ctx.su.prisma.$executeRawUnsafe(
       `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
       homeTenant,
@@ -112,42 +165,30 @@ describe("tenant-domain measure / backfill-owning-column (C4/#838)", () => {
     return { homeTenant, toTenant, userId };
   }
 
-  /** See the file header's ISOLATION note: deletes the non-owning tenant first, the owning one last. */
-  async function cleanupDivergent(userId: string, tenantA: string, tenantB: string): Promise<void> {
-    const owning = await columnOf(userId);
-    const other = owning === tenantA ? tenantB : tenantA;
-    await ctx.deleteTestData(other);
-    await ctx.deleteTestData(owning);
-  }
-
   describe("backfill-owning-column", () => {
     it.skipIf(SKIP)(
       "lists a divergent user by dry-run with zero writes, and --apply --yes moves exactly that user (A-C4-2)",
       async () => {
         const { homeTenant, toTenant, userId } = await seedDivergent();
-        try {
-          const before = await realignRows([homeTenant, toTenant]);
+        const before = await realignRows([homeTenant, toTenant]);
 
-          const dryRun = await cmdBackfillOwningColumn({ by: "test-op" });
-          expect(dryRun.ok, dryRun.message).toBe(true);
-          const listed = (dryRun.rows as Candidate[]).find((c) => c.userId === userId);
-          expect(listed).toMatchObject({ from: homeTenant, to: toTenant, activeMembershipCount: 1, multiActive: false });
-          expect(await columnOf(userId)).toBe(homeTenant);
-          expect(await realignRows([homeTenant, toTenant])).toEqual(before);
+        const dryRun = await cmdBackfillOwningColumn({ by: "test-op" });
+        expect(dryRun.ok, dryRun.message).toBe(true);
+        const listed = (dryRun.rows as Candidate[]).find((c) => c.userId === userId);
+        expect(listed).toMatchObject({ from: homeTenant, to: toTenant, activeMembershipCount: 1, multiActive: false });
+        expect(await columnOf(userId)).toBe(homeTenant);
+        expect(await realignRows([homeTenant, toTenant])).toEqual(before);
 
-          const applied = await cmdBackfillOwningColumn({ by: "test-op", apply: true, yes: true });
-          expect(applied.ok, applied.message).toBe(true);
-          const outcome = (applied.rows as Outcome[]).find((o) => o.userId === userId);
-          expect(outcome).toMatchObject({ moved: true, from: homeTenant, to: toTenant });
-          expect(await columnOf(userId)).toBe(toTenant);
+        const applied = await cmdBackfillOwningColumn({ by: "test-op", apply: true, yes: true });
+        expect(applied.ok, applied.message).toBe(true);
+        const outcome = (applied.rows as Outcome[]).find((o) => o.userId === userId);
+        expect(outcome).toMatchObject({ moved: true, from: homeTenant, to: toTenant });
+        expect(await columnOf(userId)).toBe(toTenant);
 
-          const after = await realignRows([homeTenant, toTenant]);
-          expect(after.length).toBe(before.length + 2); // one USER_TENANT_REALIGNED row per tenant
-          for (const row of after.filter((r) => !before.some((b) => b.payload === r.payload))) {
-            expect(row.payload).toMatchObject({ metadata: expect.objectContaining({ source: "operator", by: "test-op" }) });
-          }
-        } finally {
-          await cleanupDivergent(userId, homeTenant, toTenant);
+        const after = await realignRows([homeTenant, toTenant]);
+        expect(after.length).toBe(before.length + 2); // one USER_TENANT_REALIGNED row per tenant
+        for (const row of after.filter((r) => !before.some((b) => b.payload === r.payload))) {
+          expect(row.payload).toMatchObject({ metadata: expect.objectContaining({ source: "operator", by: "test-op" }) });
         }
       },
     );
@@ -156,65 +197,53 @@ describe("tenant-domain measure / backfill-owning-column (C4/#838)", () => {
       "skips a user whose membership is deactivated between listing and apply, writing nothing for them (A-C4-2)",
       async () => {
         const { homeTenant, toTenant, userId } = await seedDivergent();
-        try {
-          const before = await realignRows([homeTenant, toTenant]);
+        const before = await realignRows([homeTenant, toTenant]);
 
-          const result = await cmdBackfillOwningColumn({
-            by: "test-op",
-            apply: true,
-            // Lands between the candidate listing and this user's own apply
-            // transaction — exactly the re-check `applyOneCandidate` exists for.
-            confirm: async () => {
-              await ctx.su.prisma.$executeRawUnsafe(
-                `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
-                toTenant,
-                userId,
-              );
-              return true;
-            },
-          });
+        const result = await cmdBackfillOwningColumn({
+          by: "test-op",
+          apply: true,
+          // Lands between the candidate listing and this user's own apply
+          // transaction — exactly the re-check `applyOneCandidate` exists for.
+          confirm: async () => {
+            await ctx.su.prisma.$executeRawUnsafe(
+              `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+              toTenant,
+              userId,
+            );
+            return true;
+          },
+        });
 
-          expect(result.ok, result.message).toBe(true);
-          const outcome = (result.rows as Outcome[]).find((o) => o.userId === userId);
-          expect(outcome).toMatchObject({ moved: false, reason: "no longer divergent" });
-          expect(await columnOf(userId)).toBe(homeTenant);
-          expect(await realignRows([homeTenant, toTenant])).toEqual(before);
-        } finally {
-          await cleanupDivergent(userId, homeTenant, toTenant);
-        }
+        expect(result.ok, result.message).toBe(true);
+        const outcome = (result.rows as Outcome[]).find((o) => o.userId === userId);
+        expect(outcome).toMatchObject({ moved: false, reason: "no longer divergent" });
+        expect(await columnOf(userId)).toBe(homeTenant);
+        expect(await realignRows([homeTenant, toTenant])).toEqual(before);
       },
     );
 
     it.skipIf(SKIP)("never touches a non-divergent user", async () => {
-      const tenantId = await ctx.createTenant();
-      const userId = await ctx.createUser(tenantId);
-      try {
-        const result = await cmdBackfillOwningColumn({ by: "test-op", apply: true, yes: true, limit: 10_000 });
-        expect(result.ok, result.message).toBe(true);
-        expect((result.rows as Outcome[]).some((o) => o.userId === userId)).toBe(false);
-        expect(await columnOf(userId)).toBe(tenantId);
-      } finally {
-        await ctx.deleteTestData(tenantId);
-      }
+      const tenantId = await trackedCreateTenant();
+      const userId = await trackedCreateUser(tenantId);
+      const result = await cmdBackfillOwningColumn({ by: "test-op", apply: true, yes: true, limit: 10_000 });
+      expect(result.ok, result.message).toBe(true);
+      expect((result.rows as Outcome[]).some((o) => o.userId === userId)).toBe(false);
+      expect(await columnOf(userId)).toBe(tenantId);
     });
 
     it.skipIf(SKIP)("--limit 1 moves exactly one of three divergent users (A-C4-2b)", async () => {
       const seeded = [await seedDivergent(), await seedDivergent(), await seedDivergent()];
-      try {
-        const result = await cmdBackfillOwningColumn({ by: "test-op", apply: true, yes: true, limit: 1 });
-        expect(result.ok, result.message).toBe(true);
-        const outcomes = result.rows as Outcome[];
-        expect(outcomes).toHaveLength(1);
-        expect(outcomes[0].moved).toBe(true);
+      const result = await cmdBackfillOwningColumn({ by: "test-op", apply: true, yes: true, limit: 1 });
+      expect(result.ok, result.message).toBe(true);
+      const outcomes = result.rows as Outcome[];
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0].moved).toBe(true);
 
-        const moved = seeded.find((s) => s.userId === outcomes[0].userId);
-        expect(moved, "the moved user must be one of this test's own fixtures").toBeDefined();
-        expect(await columnOf(moved!.userId)).toBe(moved!.toTenant);
-        for (const s of seeded) {
-          if (s.userId !== moved!.userId) expect(await columnOf(s.userId)).toBe(s.homeTenant);
-        }
-      } finally {
-        for (const s of seeded) await cleanupDivergent(s.userId, s.homeTenant, s.toTenant);
+      const moved = seeded.find((s) => s.userId === outcomes[0].userId);
+      expect(moved, "the moved user must be one of this test's own fixtures").toBeDefined();
+      expect(await columnOf(moved!.userId)).toBe(moved!.toTenant);
+      for (const s of seeded) {
+        if (s.userId !== moved!.userId) expect(await columnOf(s.userId)).toBe(s.homeTenant);
       }
     });
 
@@ -234,23 +263,18 @@ describe("tenant-domain measure / backfill-owning-column (C4/#838)", () => {
         // kind of thing that silently stops being true); `candidateFromRow`'s
         // unit cells below pin the `multiActive` FLAG's own logic — the code
         // path this index made unreachable end-to-end, not dead.
-        const tenantId = await ctx.createTenant();
-        const otherTenant = await ctx.createTenant();
-        const userId = await ctx.createUser(tenantId); // one active membership, in tenantId
-        try {
-          await expect(
-            ctx.su.prisma.$executeRawUnsafe(
-              `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
-               VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now())`,
-              randomUUID(),
-              otherTenant,
-              userId,
-            ),
-          ).rejects.toThrow(/tenant_members_one_active_per_user/);
-        } finally {
-          await ctx.deleteTestData(otherTenant);
-          await ctx.deleteTestData(tenantId);
-        }
+        const tenantId = await trackedCreateTenant();
+        const otherTenant = await trackedCreateTenant();
+        const userId = await trackedCreateUser(tenantId); // one active membership, in tenantId
+        await expect(
+          ctx.su.prisma.$executeRawUnsafe(
+            `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now())`,
+            randomUUID(),
+            otherTenant,
+            userId,
+          ),
+        ).rejects.toThrow(/tenant_members_one_active_per_user/);
       },
     );
 
@@ -282,27 +306,22 @@ describe("tenant-domain measure / backfill-owning-column (C4/#838)", () => {
       async () => {
         const baseline = (await cmdMeasure()).rows?.[0] as MeasureCounts;
 
-        const { homeTenant, toTenant, userId: divergentUser } = await seedDivergent();
+        await seedDivergent();
 
-        const zeroActiveTenant = await ctx.createTenant();
-        const zeroActiveUser = await ctx.createUser(zeroActiveTenant);
+        const zeroActiveTenant = await trackedCreateTenant();
+        const zeroActiveUser = await trackedCreateUser(zeroActiveTenant);
         await ctx.su.prisma.$executeRawUnsafe(
           `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
           zeroActiveTenant,
           zeroActiveUser,
         );
 
-        try {
-          const result = await cmdMeasure();
-          expect(result.ok, result.message).toBe(true);
-          const counts = result.rows?.[0] as MeasureCounts;
-          expect(counts.divergent).toBe(baseline.divergent + 1);
-          expect(counts.zeroActive).toBe(baseline.zeroActive + 1);
-          expect(counts.multiActive).toBe(baseline.multiActive);
-        } finally {
-          await cleanupDivergent(divergentUser, homeTenant, toTenant);
-          await ctx.deleteTestData(zeroActiveTenant);
-        }
+        const result = await cmdMeasure();
+        expect(result.ok, result.message).toBe(true);
+        const counts = result.rows?.[0] as MeasureCounts;
+        expect(counts.divergent).toBe(baseline.divergent + 1);
+        expect(counts.zeroActive).toBe(baseline.zeroActive + 1);
+        expect(counts.multiActive).toBe(baseline.multiActive);
       },
     );
   });

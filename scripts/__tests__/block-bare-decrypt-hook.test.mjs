@@ -32,9 +32,13 @@ const CLI = "npx tsx " + REPO_ROOT + "/cli/src/index.ts";
 const SUB = "dec" + "rypt";
 
 /**
- * Run the hook with a tool_input payload and expect on its exit status. The hook's
- * stderr names the branch that decided, so it is the assertion message: a refusal
- * that recorded only its status once cost a review round to trace (round 14, T-R14-4).
+ * Run the hook with a tool_input payload and return an assertion on its exit
+ * status. `r.stderr` is passed as vitest's second `expect()` argument, which
+ * is a custom FAILURE MESSAGE shown only when the assertion fails — it makes
+ * a status mismatch easy to trace, but it is NOT an assertion on `r.stderr`
+ * itself and proves nothing about WHICH rule decided once the status
+ * assertion passes (RT8). Use expectBlockedBy() below for a deny cell that
+ * must pin the refusing branch, not just the exit code.
  */
 function expectHook(command) {
   return expectHookRaw(JSON.stringify({ tool_input: { command } }));
@@ -60,6 +64,19 @@ function scanSegments(command) {
 
 const ALLOW = 0;
 const BLOCK = 2;
+
+/**
+ * Run the hook and assert BOTH that it blocked AND that its stderr names the
+ * branch that decided (RT8) — a message substring unique to the rule under
+ * test, not just the exit status. A change that still exits 2 but for a
+ * DIFFERENT reason (another item's message, or the generic "scanner did not
+ * decide" refusal) reddens the cell instead of passing silently.
+ */
+function expectBlockedBy(command, messageSubstring) {
+  const r = spawnSync("bash", [HOOK], { input: JSON.stringify({ tool_input: { command } }), encoding: "utf8" });
+  expect(r.status, r.stderr).toBe(BLOCK);
+  expect(r.stderr, r.stderr).toContain(messageSubstring);
+}
 
 describe("block-bare-decrypt hook", () => {
   describe("allows the /use-credential pattern", () => {
@@ -443,19 +460,19 @@ describe("block-bare-decrypt hook — items 1-8 of the Shape-1 scanner (A-C1-1)"
     // The red proof disables ONLY the continuation-removal step and leaves
     // item 6 (the printer rule) intact — the point is that item 6 cannot see
     // `echo` if item 1 does not first join the two fragments (T-F1).
-    expectHook(capture("ec\\\nho $_CRED")).toBe(BLOCK);
+    expectBlockedBy(capture("ec\\\nho $_CRED"), "echo references _CRED in this segment");
   });
 
   it.each([
-    ["declare -p", "declare -p"],
-    ["typeset -p", "typeset -p"],
-    ["bare set", "set"],
-    ["bare env", "env"],
-    ["bare printenv", "printenv"],
-    ["bare export", "export"],
-    ["compgen -v", "compgen -v"],
-  ])("item 2 — refuses a variable dumper regardless of whether _CRED is named: %s", (_label, line) => {
-    expectHook(capture(line)).toBe(BLOCK);
+    ["declare -p", "declare -p", "declare -p dumps every variable"],
+    ["typeset -p", "typeset -p", "typeset -p dumps every variable"],
+    ["bare set", "set", "bare set dumps the environment"],
+    ["bare env", "env", "bare env dumps the environment"],
+    ["bare printenv", "printenv", "bare printenv dumps the environment"],
+    ["bare export", "export", "bare export dumps the environment"],
+    ["compgen -v", "compgen -v", "compgen -v lists every variable name"],
+  ])("item 2 — refuses a variable dumper regardless of whether _CRED is named: %s", (_label, line, message) => {
+    expectBlockedBy(capture(line), message);
   });
 
   it("item 2 — env with an operand is not bare and stays allowed", () => {
@@ -463,29 +480,45 @@ describe("block-bare-decrypt hook — items 1-8 of the Shape-1 scanner (A-C1-1)"
   });
 
   it.each([
-    ["set -x", "set -x"],
-    ["set -o xtrace", "set -o xtrace"],
-    ["bash -x", "bash -x script.sh"],
-    ["BASH_XTRACEFD", "BASH_XTRACEFD=5"],
-  ])("item 3 — refuses tracing: %s", (_label, line) => {
-    expectHook(capture(line)).toBe(BLOCK);
+    ["set -x", "set -x", "set -x turns on xtrace"],
+    ["set -o xtrace", "set -o xtrace", "set -o xtrace turns on xtrace"],
+    ["bash -x", "bash -x script.sh", "bash -x turns on xtrace"],
+    ["BASH_XTRACEFD", "BASH_XTRACEFD=5", "BASH_XTRACEFD redirects xtrace output"],
+  ])("item 3 — refuses tracing: %s", (_label, line, message) => {
+    expectBlockedBy(capture(line), message);
+  });
+
+  it("item 3 — set -eu (errexit/nounset, no xtrace) stays allowed", () => {
+    // Boundary-adjacent to the denied `set -x` above. If `_has_short_flag`
+    // widened from checking specifically for the `x` letter to flagging ANY
+    // short flag on `set` as tracing, this would wrongly refuse too — `-eu`
+    // never turns on xtrace.
+    expectHook(capture("set -eu")).toBe(ALLOW);
   });
 
   it.each([
-    ["a plain assignment", "x=$_CRED"],
-    ["a braced assignment", 'x="${_CRED}"'],
-    ["read into a new variable", 'read x <<<"$_CRED"'],
-    ["printf -v into a new variable", "printf -v x %s $_CRED"],
-    ["a declare -n nameref", "declare -n ref=_CRED"],
-  ])("item 4 — refuses copying _CRED to another name: %s", (_label, line) => {
-    expectHook(capture(line)).toBe(BLOCK);
+    ["a plain assignment", "x=$_CRED", "copies _CRED to another name"],
+    ["a braced assignment", 'x="${_CRED}"', "copies _CRED to another name"],
+    ["read into a new variable", 'read x <<<"$_CRED"', "reads _CRED into a new variable"],
+    ["printf -v into a new variable", "printf -v x %s $_CRED", "printf -v copies _CRED into a new variable"],
+    ["a declare -n nameref", "declare -n ref=_CRED", "makes ref a nameref for _CRED"],
+  ])("item 4 — refuses copying _CRED to another name: %s", (_label, line, message) => {
+    expectBlockedBy(capture(line), message);
+  });
+
+  it("item 4 — x=$OTHER (a name copied from something other than _CRED) stays allowed", () => {
+    // Boundary-adjacent to the denied `x=$_CRED` above. If `_text_references_cred`
+    // dropped the name anchor and matched any `$`-prefixed value, or `_is_copy`
+    // stopped checking `name != CRED_NAME`, this — which never references the
+    // credential — would wrongly refuse too.
+    expectHook(capture("x=$OTHER")).toBe(ALLOW);
   });
 
   it("item 5 — an unquoted heredoc delimiter with a body referencing _CRED refuses", () => {
     // `wc`, not `cat`: item 5 refuses on the heredoc body alone, with no
     // gate on the command word — `cat` is ALSO on item 6's printer list, and
     // would refuse this cell on its own, defeating the red proof for item 5.
-    expectHook(capture(`wc -l <<DONE\nsome text $_CRED\nDONE`)).toBe(BLOCK);
+    expectBlockedBy(capture(`wc -l <<DONE\nsome text $_CRED\nDONE`), "heredoc <<DONE body references _CRED");
   });
 
   it("item 5 — the same body under a quoted delimiter (no expansion) is allowed", () => {
@@ -493,18 +526,18 @@ describe("block-bare-decrypt hook — items 1-8 of the Shape-1 scanner (A-C1-1)"
   });
 
   it.each([
-    ["base64", 'base64 <<<"$_CRED"'],
-    ["xxd", 'xxd <<<"$_CRED"'],
-    ["od", 'od <<<"$_CRED"'],
-    ["openssl", 'openssl base64 <<<"$_CRED"'],
-    ["jq", 'jq -R . <<<"$_CRED"'],
-    ["xargs", 'xargs -I{} echo {} <<<"$_CRED"'],
-  ])("item 6 — the widened printer list refuses: %s", (_label, line) => {
-    expectHook(capture(line)).toBe(BLOCK);
+    ["base64", 'base64 <<<"$_CRED"', "base64 references _CRED in this segment"],
+    ["xxd", 'xxd <<<"$_CRED"', "xxd references _CRED in this segment"],
+    ["od", 'od <<<"$_CRED"', "od references _CRED in this segment"],
+    ["openssl", 'openssl base64 <<<"$_CRED"', "openssl references _CRED in this segment"],
+    ["jq", 'jq -R . <<<"$_CRED"', "jq references _CRED in this segment"],
+    ["xargs", 'xargs -I{} echo {} <<<"$_CRED"', "xargs references _CRED in this segment"],
+  ])("item 6 — the widened printer list refuses: %s", (_label, line, message) => {
+    expectBlockedBy(capture(line), message);
   });
 
   it("item 6 — printenv naming the bare variable (no $) refuses", () => {
-    expectHook(capture("printenv _CRED")).toBe(BLOCK);
+    expectBlockedBy(capture("printenv _CRED"), "printenv references _CRED in this segment");
   });
 
   it("item 6 — a printer on the list that does not reference _CRED in ITS segment stays allowed", () => {
@@ -514,7 +547,15 @@ describe("block-bare-decrypt hook — items 1-8 of the Shape-1 scanner (A-C1-1)"
   });
 
   it("item 7 — a brace-expansion word referencing _CRED refuses", () => {
-    expectHook(capture("cp file.txt{,.bak-$_CRED}")).toBe(BLOCK);
+    expectBlockedBy(capture("cp file.txt{,.bak-$_CRED}"), "brace expansion");
+  });
+
+  it("item 7 — cp file.txt{,.bak} (a brace expansion with no _CRED reference) stays allowed", () => {
+    // Boundary-adjacent to the denied brace word above. If `_brace_word_leaks`
+    // stopped checking `_text_references_cred` on the matched group and
+    // treated ANY brace expansion as a leak, this ordinary backup-suffix
+    // expansion would wrongly refuse too.
+    expectHook(capture("cp file.txt{,.bak}")).toBe(ALLOW);
   });
 
   it("item 8 — the scanner's own parse failure refuses under its own message", () => {
