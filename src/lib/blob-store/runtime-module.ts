@@ -15,7 +15,20 @@ const requireBase =
 
 const requireModule = createRequire(requireBase);
 
-export function requireOptionalModule<T = unknown>(moduleName: string): T {
+// The literal union of every optional SDK a caller loads through this wrapper.
+// check-bypass-rls's module-load rule (C3 item 5) judges a `require`-shaped
+// call by the TYPE of its specifier argument, not its spelling — a `string`
+// parameter here made every call site unresolvable (REFUSED), because the
+// checker cannot prove where a `string` points. Narrowing to the closed set
+// this wrapper actually loads is the fix: every future caller is now
+// TypeScript-enforced to pass one of these three, which a file-keyed allowlist
+// could not do (the wrapper is exported — laundering through it was the hole).
+export type OptionalModuleName =
+  | "@aws-sdk/client-s3"
+  | "@google-cloud/storage"
+  | "@azure/storage-blob";
+
+export function requireOptionalModule<T = unknown>(moduleName: OptionalModuleName): T {
   try {
     return requireModule(moduleName) as T;
   } catch (error) {

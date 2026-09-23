@@ -33,12 +33,18 @@
  * at run time (`await import("@/lib/tenant-rls")`, `require`) binds the helpers
  * like an import: a destructured binding is followed as one, the module object as
  * a namespace, and any other use of the load is reported (runtimeHelperModulesIn).
- * Only an `import()` or `require()` call whose specifier is a literal naming the
- * module is recognised (not `import rls = require(…)`), and only identifier-keyed
- * destructuring is followed. A run-time destructure that binds a name already bound
- * to a different helper makes that name ambiguous, and it is reported wherever it is
- * used, a direct call included; two STATIC imports under one name are not checked,
- * since TypeScript rejects them (TS2300), as it rejects `import … = require` under
+ * A run-time load is recognised here only through a LITERAL specifier
+ * (`import "..."`/`require("...")`, not `import rls = require(…)`), and only
+ * identifier-keyed destructuring is followed — this is `runtimeHelperModulesIn`,
+ * the syntactic half of run-time loads. C3 (below, the Program section) adds
+ * the other half: a load whose specifier is NOT a literal — a variable, a
+ * template, a call through an untyped `require`-like value — is judged by the
+ * specifier's checked TYPE instead, which is strictly wider than a syntactic
+ * literal (F-R2-5) and closes what this paragraph used to list as uncovered.
+ * A run-time destructure that binds a name already bound to a different helper
+ * makes that name ambiguous, and it is reported wherever it is used, a direct
+ * call included; two STATIC imports under one name are not checked, since
+ * TypeScript rejects them (TS2300), as it rejects `import … = require` under
  * this repo's module setting (TS1202). `import wb = rls.withBypassRls` is a
  * reference like any other (rounds 14 and 15).
  *
@@ -46,18 +52,28 @@
  *     `BYPASS_PURPOSE.X` anywhere satisfies it for every call in the file, and
  *     its receiver test is name equality, so an aliased import is a false
  *     positive. Pre-existing granularity, unchanged by the AST move.
- *   - A helper that reaches a file other than straight from the tenant-rls module
- *     is neither followed nor reported: through a re-export or an `export *` barrel,
- *     renamed or not; a load whose specifier is not a literal naming the module
- *     (computed, concatenated, a variable, `createRequire`, a renamed `require`); a
- *     quoted or computed destructuring key; or a helper-named member read off an
- *     object this file cannot prove to be the module. Recognition is by spelling, and
- *     resolving these needs a Program, which no gate in this tree carries
- *     (audit-tenant-adjudicator round 14, S-R14-2). Measured in round 14 over the
- *     non-test files the prefilter selects: no export specifier or `export *` of a
- *     helper, no `withBypassRls`/`withTenantRls` imported from another module, no
- *     non-literal load, no helper-named member read that is not a direct call, and
- *     helper-keyed destructuring only in the two vault routes' literal loads.
+ *   - A re-export or an `export *` barrel, renamed or not; a load whose
+ *     specifier is not a literal; a quoted or computed destructuring key; and
+ *     a helper-named member read off an object this file cannot prove to be
+ *     the module — the audit-tenant-adjudicator round 14 (S-R14-2) list this
+ *     paragraph used to carry — are CLOSED by C3's Program section below (a
+ *     real ts-morph Project with dependency resolution, items 1-6 in the
+ *     C3 header there): the reference cross-check follows a re-export or
+ *     `export * as ns` by resolving the underlying symbol rather than
+ *     matching text; a bare `export *` barrel is refused outright because
+ *     that re-export produces no reference for the cross-check to follow; a
+ *     non-literal load is judged by the specifier's checked TYPE; a quoted or
+ *     computed destructuring key resolves through the pattern's type; and a
+ *     helper-named member read off a value whose type carries a helper is
+ *     refused unless it is a literal-named/keyed receiver (Rule A), or, for
+ *     an `any`/`unknown` receiver, unless the key is a string-literal union
+ *     (Rule B). What C3 does NOT close, named there rather than repeated
+ *     here: `export *` itself (the statement's own line — no reference
+ *     exists for item 3 to find, which is why 5b is a separate rule), a
+ *     quoted/computed destructuring key on a receiver whose type cannot be
+ *     read, a specifier typed plain `string` with no literal reduction, and
+ *     one residual UNVERIFIED case — an ambient `.d.ts` declaration that
+ *     types a value as the helper module.
  *   - The scan root is `src/` only. `scripts/tenant-domain.ts` and
  *     `scripts/manual-tests/*.ts` call these helpers and are examined by nothing.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
@@ -108,8 +124,8 @@
  * hold yet, and it is written here rather than in a commit message because the
  * next editor reads this.
  */
-import { SyntaxKind } from "ts-morph";
-import { createAstProject } from "./lib/ast-project.mjs";
+import { SyntaxKind, ts } from "ts-morph";
+import { createAstProject, createProgramProject, ProgramBuildError } from "./lib/ast-project.mjs";
 import {
   FN_KINDS,
   bindingIndex,
@@ -118,7 +134,7 @@ import {
   unwrapExpression,
 } from "./lib/scope-bindings.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, dirname, relative, resolve, sep } from "node:path";
 
 // Per-file allowlist: file path → allowed Prisma model names.
 // "*" means any model is allowed (use sparingly, only for definitions or
@@ -1113,6 +1129,735 @@ function declaresUnusedTx(fn) {
   });
 }
 
+// ─── C3: Program-backed reference cross-check ──────────────────────────────
+//
+// Everything above this point is the syntactic pass: it recognises a helper by
+// how a name is SPELLED — an import specifier's text, an identifier equal to
+// one of HELPER_NAMES. Round 14's header already named the class this misses:
+// reaching a file other than straight from the tenant-rls module — through a
+// re-export or an `export *` barrel, a load whose specifier is not a literal,
+// a quoted or computed destructuring key, or a helper-named member read off an
+// object this file cannot prove to be the module — needs a Program, "which no
+// gate in this tree carries" (round 14). This section is that Program: a real
+// dependency-resolved ts-morph Project (lib/ast-project.mjs's
+// createProgramProject), built from this scan root's tsconfig.json, used for
+// exactly two things the syntactic pass cannot do — find every REAL reference
+// to a helper declaration regardless of spelling (the language service's
+// findReferencesAsNodes, which follows renamed/`export *` re-exports because
+// it resolves the same underlying symbol, not matching text), and ask the
+// type checker what an expression's TYPE actually is.
+//
+// Control class: fail-closed verification gate. Where neither the reference
+// finder nor the checker can decide — a specifier typed `string`, an
+// unresolvable destructuring key, a helper-carrying value used outside a
+// literal member read, an `any` receiver with a non-literal key — the case is
+// REFUSED (reported), not followed.
+const HELPER_DECLARATIONS = [
+  { file: "src/lib/tenant-rls.ts", name: "withBypassRls" },
+  { file: "src/lib/tenant-rls.ts", name: "withTenantRls" },
+  { file: "src/lib/tenant-context.ts", name: "withUserTenantRls" },
+  { file: "src/lib/tenant-context.ts", name: "withTeamTenantRls" },
+];
+
+/** `file` everywhere else in this gate is cwd-relative, POSIX-separated. */
+function toRelPosix(absPath) {
+  return relative(process.cwd(), absPath).split(sep).join("/");
+}
+
+/** The scan root this whole file uses: `src/`, non-test (SC3, unchanged by C3). */
+function isInScopeFile(rel) {
+  return rel.startsWith("src/") && !rel.includes(".test.") && !rel.includes("__tests__");
+}
+
+function programBuildFailed(message) {
+  console.error(`check-bypass-rls: PROGRAM_BUILD_FAILED: ${message}`);
+  console.error(
+    "The Program-backed reference cross-check (C3) cannot run without it — refusing rather than scanning with a Program that cannot answer for itself.",
+  );
+  process.exit(1);
+}
+
+function buildProgram() {
+  const tsConfigFilePath = join(process.cwd(), "tsconfig.json");
+  try {
+    return createProgramProject(tsConfigFilePath);
+  } catch (error) {
+    if (error instanceof ProgramBuildError) programBuildFailed(error.message);
+    throw error;
+  }
+}
+
+/**
+ * The four helper declarations, resolved THROUGH the Program rather than
+ * assumed present — a fixture (or a real tree) missing one, or missing the
+ * file entirely, fails named here (item 1), instead of the reference
+ * cross-check below silently finding zero references and that reading as
+ * "nothing to report". Overloads included: `sf.getFunctions()` returns every
+ * FunctionDeclaration syntax node sharing the name, signatures and
+ * implementation alike, and `withUserTenantRls` / `withTeamTenantRls` are
+ * declared as two overloads plus an implementation.
+ */
+function resolveHelperDeclarations(program) {
+  const byName = new Map();
+  for (const { file, name } of HELPER_DECLARATIONS) {
+    const psf = program.getSourceFile(join(process.cwd(), file));
+    if (!psf) {
+      programBuildFailed(`helper declaration file not found in the Program: ${file}`);
+    }
+    const decls = psf.getFunctions().filter((fn) => fn.getName() === name);
+    const impl = decls.find((d) => d.getBody());
+    if (!impl) {
+      programBuildFailed(`helper declaration not found: ${name} in ${file}`);
+    }
+    byName.set(name, { file, impl, decls });
+  }
+  return byName;
+}
+
+/** A stable identity for a declaration node, for a Set keyed on DECLARATIONS (S2-F2) — not on symbol identity, which a union's synthetic property symbol does not share with any one constituent. */
+function declKey(node) {
+  return `${node.getSourceFile().getFilePath()}:${node.getStart()}`;
+}
+
+/** Every declaration (overloads included) of all four helpers, as one Set of declKey values. */
+function buildHelperDeclKeySet(helperDecls) {
+  const keys = new Set();
+  for (const [, { decls }] of helperDecls) {
+    for (const d of decls) keys.add(declKey(d));
+  }
+  return keys;
+}
+
+/** Follows an alias symbol (a renamed import, a re-export specifier) to the symbol it names — ts-morph throws calling getAliasedSymbol on a non-alias, so a non-alias is its own answer. */
+function resolveAliasedSymbol(symbol) {
+  try {
+    return symbol.getAliasedSymbol() ?? symbol;
+  } catch {
+    return symbol;
+  }
+}
+
+/** Whether `symbol`, alias-resolved, is (one of) the four helper declarations. */
+function symbolIsHelper(symbol, helperDeclKeys) {
+  const resolved = resolveAliasedSymbol(symbol);
+  return (resolved.getDeclarations() ?? []).some((d) => helperDeclKeys.has(declKey(d)));
+}
+
+/**
+ * Item 6's closing line: "a helper-named member that resolves to a different
+ * declaration is provably not the helper and passes." helperCallsIn's
+ * `ns.helper(…)` branch matches on the property NAME alone — deliberately, so
+ * a call it cannot type-check still gets scanned (the safe direction when no
+ * Program exists) — but now that one does, a receiver the checker CAN resolve
+ * narrows that match instead of leaving it a permanent over-approximation:
+ * `x.withBypassRls()` where `x` is a local `{ withBypassRls: () => 0 }` is
+ * provably not the helper, and reporting it as one (an unallowlisted file, a
+ * missing BYPASS_PURPOSE, …) would be reporting a call that cannot happen.
+ * Only PropertyAccessExpression calls are filtered — an Identifier callee is
+ * already resolved through the canonical HELPER_NAMES seed, not a member
+ * name, so there is no "different declaration" question to ask of it here.
+ */
+function filterCallsByReceiverDeclaration(calls, psf, helperDeclKeys) {
+  if (!psf) return calls;
+  const byStart = new Map();
+  for (const c of psf.getDescendantsOfKind(SyntaxKind.CallExpression)) byStart.set(c.getStart(), c);
+  return calls.filter(({ call }) => {
+    const expr = call.getExpression();
+    if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) return true;
+    const pcall = byStart.get(call.getStart());
+    const pexpr = pcall?.getExpression();
+    if (pexpr?.getKind() !== SyntaxKind.PropertyAccessExpression) return true; // could not cross-reference — stay conservative
+    const prop = pexpr.getExpression().getType().getProperty(pexpr.getName());
+    if (!prop) return true; // unresolvable receiver — stay conservative (unprovable, not "provably not")
+    return symbolIsHelper(prop, helperDeclKeys);
+  });
+}
+
+/**
+ * Rule A's "carries a helper": true when any PROPERTY of `type` resolves,
+ * alias-resolved, to a helper declaration. Built over declarations rather than
+ * symbol identity (S2-F2) so a union type is covered for free — the synthetic
+ * property symbol a union yields carries every constituent's own declarations,
+ * with no single shared symbol to compare against.
+ */
+function typeCarriesHelper(type, helperDeclKeys) {
+  for (const prop of type.getProperties()) {
+    if (symbolIsHelper(prop, helperDeclKeys)) return true;
+  }
+  return false;
+}
+
+/**
+ * Every REAL reference to a helper declaration, outside its own defining
+ * file, in scope (src/, non-test) — item 3. findReferencesAsNodes resolves the
+ * underlying symbol, so a renamed re-export, a named re-export under a new
+ * module, and an `export * as ns` namespace all surface the downstream
+ * USE as a reference here even though the syntactic pass above never
+ * recognised the local name as bound to a helper at all (its import module
+ * does not match TENANT_RLS_MODULE_RE). What it does NOT surface (measured):
+ * the `export *`/`export * as ns` statement's own line (the re-export
+ * produces no reference — 5b/item 3's own header note), and a quoted or
+ * computed destructuring key, or a non-literal member name (5c / Rule A/B
+ * exist because of exactly this gap).
+ */
+function collectExternalReferences(program, helperDecls) {
+  const byFile = new Map();
+  const languageService = program.getLanguageService();
+  for (const [name, { file, impl }] of helperDecls) {
+    const refs = languageService.findReferencesAsNodes(impl.getNameNode());
+    for (const ref of refs) {
+      const rel = toRelPosix(ref.getSourceFile().getFilePath());
+      if (rel === file) continue; // inside its own defining file — not "outside", nothing to account for
+      if (!isInScopeFile(rel)) continue; // scan root is src/, non-test (SC3, unchanged)
+      if (!byFile.has(rel)) byFile.set(rel, []);
+      byFile.get(rel).push({ start: ref.getStart(), line: ref.getStartLineNumber(), helperName: name });
+    }
+  }
+  return byFile;
+}
+
+/**
+ * Every position in `sf` (the SYNTACTIC parse of this same file — offsets
+ * agree with the Program's parse because both read the same bytes) that the
+ * syntactic pass already accounts for: a direct call's callee, an
+ * already-reported indirect reference, a recognised import/export
+ * specifier or namespace binding (module matches TENANT_RLS_MODULE_RE), and a
+ * type-only position (`typeof helper`) — a type position cannot run, so the
+ * syntactic pass's own indirectHelperReferencesIn already treats it as
+ * out-of-scope-but-not-a-violation, and item 3 must agree or every `typeof`
+ * use anywhere would misreport as "a form this gate does not analyse".
+ */
+function accountedPositionsIn(sf, calls, indirect) {
+  const positions = new Set();
+  const mark = (node) => {
+    if (node) positions.add(node.getStart());
+  };
+  for (const { call } of calls) {
+    const expr = call.getExpression();
+    mark(expr.getKind() === SyntaxKind.PropertyAccessExpression ? expr.getNameNode() : expr);
+  }
+  for (const node of indirect) mark(node);
+  // Import/export/destructuring DECLARATION sites are never themselves the
+  // violation — item 3's own point is that a re-export's line produces no
+  // Program reference at all, so nothing here needs to suppress it either way.
+  // Marked by the (pre-alias) NAME the specifier carries, NOT by which module
+  // it came through: helperCallsIn/localHelperNames already resolve a bare
+  // call by spelling regardless of import origin (the four canonical names are
+  // pre-seeded), so gating this on TENANT_RLS_MODULE_RE — the way the OLD
+  // per-file import recognition does — made every ordinary
+  // `import { withUserTenantRls } from "@/lib/tenant-context"` (its module
+  // does not match "tenant-rls") read as an unaccounted reference across the
+  // whole real tree: two entirely different defining modules share one
+  // caller-facing spelling convention, and this check must know that too.
+  for (const imp of sf.getImportDeclarations()) {
+    mark(imp.getNamespaceImport());
+    mark(imp.getDefaultImport());
+    for (const named of imp.getNamedImports()) {
+      if (HELPER_NAMES.has(named.getName())) mark(named.getNameNode());
+      mark(named.getAliasNode());
+    }
+  }
+  for (const exp of sf.getExportDeclarations()) {
+    const ns = exp.getNamespaceExport?.();
+    if (ns) mark(ns.getNameNode());
+    for (const named of exp.getNamedExports()) {
+      if (HELPER_NAMES.has(named.getName())) mark(named.getNameNode());
+      mark(named.getAliasNode());
+    }
+  }
+  // A plain-identifier-keyed destructuring element (`const { withBypassRls } =
+  // await import(...)`) is a real property reference the checker follows, and
+  // runtimeHelperModulesIn already recognises and tracks this shape for a
+  // literal, regex-matching load — accounted here the same way, by spelling.
+  for (const el of sf.getDescendantsOfKind(SyntaxKind.BindingElement)) {
+    const propNode = el.getPropertyNameNode() ?? el.getNameNode();
+    if (propNode.getKind() !== SyntaxKind.Identifier) continue;
+    if (HELPER_NAMES.has(propNode.getText())) mark(propNode);
+  }
+  for (const tq of sf.getDescendantsOfKind(SyntaxKind.TypeQuery)) {
+    // `typeof rls.withBypassRls` — a QUALIFIED name, not a bare identifier
+    // (F-R14-1's own fixture shape). The reference sits at the RIGHT-hand
+    // identifier of each level, not at the qualified name's own start.
+    let exprName = tq.getExprName();
+    while (exprName?.getKind() === SyntaxKind.QualifiedName) {
+      mark(exprName.getRight());
+      exprName = exprName.getLeft();
+    }
+    mark(exprName);
+  }
+  return positions;
+}
+
+/** Every export this module makes available, following `export *` chains — checker.getExportsOfModule already does the chasing. */
+function exportsAnyHelper(psf, checker, helperDeclKeys) {
+  const moduleSymbol = psf.getSymbol();
+  if (!moduleSymbol) return false;
+  for (const exported of checker.getExportsOfModule(moduleSymbol)) {
+    if (symbolIsHelper(exported, helperDeclKeys)) return true;
+  }
+  return false;
+}
+
+/**
+ * Item 5b: a bare `export * from SPEC` (no `as ns`, no named list) whose
+ * target exports a helper is a violation wherever it appears outside the two
+ * defining files — the re-export produces no reference (measured: item 3's
+ * probe above never sees the statement's own line), so it is refused
+ * regardless of whether anything downstream actually imports through it.
+ * `export { x } from` and `export * as ns from` DO produce references and are
+ * item 3's job, not this one — both are skipped here so neither rule reports
+ * the same barrel twice under a different name.
+ */
+function bareStarExportViolationsIn(psf, checker, helperDeclKeys) {
+  const violations = [];
+  for (const exp of psf.getExportDeclarations()) {
+    if (exp.getNamedExports().length > 0) continue;
+    if (exp.getNamespaceExport?.()) continue;
+    const target = exp.getModuleSpecifierSourceFile();
+    if (!target) continue;
+    if (exportsAnyHelper(target, checker, helperDeclKeys)) {
+      violations.push({ line: exp.getStartLineNumber(), text: exp.getText() });
+    }
+  }
+  return violations;
+}
+
+/**
+ * A literal-string type, or a union all of whose members are — the shape
+ * `ts.resolveModuleName` and the destructuring-key lookup below both need.
+ * `string`, `any`, `unknown`, or a union that mixes in a non-literal member
+ * all return null: not resolvable to a finite set of names.
+ */
+function stringLiteralsOfType(t) {
+  if (t.isStringLiteral()) return [t.getLiteralValueOrThrow()];
+  if (t.isUnion()) {
+    const parts = t.getUnionTypes();
+    if (parts.length > 0 && parts.every((p) => p.isStringLiteral())) {
+      return parts.map((p) => p.getLiteralValueOrThrow());
+    }
+  }
+  return null;
+}
+
+/**
+ * Item 5c: a destructuring key that is not a plain identifier — quoted
+ * (`{ "withBypassRls": x }`) or computed (`{ [key]: x }`) — resolves through
+ * the PATTERN's type rather than through text, because there is no name here
+ * for the syntactic pass's staticMemberName to read. A computed key's own
+ * candidate name(s) come from ITS type, the same literal-or-union-of-literals
+ * shape item 5 needs for a module specifier. Resolving to a real, non-helper
+ * property is not this gate's concern and passes silently; resolving to a
+ * helper, or failing to resolve at all (the key's type is not a provable
+ * literal, or the pattern's type has no such property), is a violation —
+ * simplified from "bind the local name so a later call is analysed" (the
+ * plan's phrasing) to "report at the binding site immediately": propagating
+ * the binding into the syntactic call-scanner would mean reconciling node
+ * identity across two independently-parsed trees (the Program's and
+ * astProject's) for a shape that, on the measured real tree, occurs nowhere
+ * outside tests — reporting immediately is strictly MORE conservative
+ * (fail-closed), never less, than deferring to a downstream call site that
+ * might not exist.
+ */
+function destructuringKeyViolationsIn(psf, helperDeclKeys) {
+  const violations = [];
+  for (const el of psf.getDescendantsOfKind(SyntaxKind.BindingElement)) {
+    const propNode = el.getPropertyNameNode();
+    if (!propNode) continue; // shorthand `{ x }` — identifier-named, already covered by staticMemberName
+    const kind = propNode.getKind();
+    if (kind === SyntaxKind.Identifier) continue; // `{ withBypassRls: alias }` — already covered
+    if (
+      kind !== SyntaxKind.StringLiteral &&
+      kind !== SyntaxKind.NoSubstitutionTemplateLiteral &&
+      kind !== SyntaxKind.ComputedPropertyName
+    ) {
+      continue;
+    }
+    const pattern = el.getParentOrThrow();
+    if (pattern.getKind() !== SyntaxKind.ObjectBindingPattern) continue;
+    const patternType = pattern.getType();
+
+    let candidates;
+    if (kind === SyntaxKind.ComputedPropertyName) {
+      candidates = stringLiteralsOfType(propNode.getExpression().getType());
+    } else {
+      candidates = [propNode.getLiteralText()];
+    }
+    if (candidates === null) {
+      violations.push({ line: el.getStartLineNumber(), text: el.getText() });
+      continue;
+    }
+
+    // A type answered ENTIRELY by a string index signature (a Prisma client's
+    // `[model: string]: Delegate`, say) has no NAMED property for
+    // getProperty to find, yet the access is fully explained by the type —
+    // it is not "failing to resolve" in item 5c's sense at all, and an index
+    // signature can never BE one of the four helper FunctionDeclarations, so
+    // it is resolved and definitely not a helper. Checked once per pattern,
+    // not per candidate: the signature is a property of the type, not of the
+    // literal name being looked up.
+    const indexType = patternType.getStringIndexType();
+    let resolvedAny = Boolean(indexType);
+    let resolvedHelper = false;
+    for (const name of candidates) {
+      const prop = patternType.getProperty(name);
+      if (!prop) continue;
+      resolvedAny = true;
+      if (symbolIsHelper(prop, helperDeclKeys)) resolvedHelper = true;
+    }
+    if (!resolvedAny || resolvedHelper) {
+      violations.push({ line: el.getStartLineNumber(), text: el.getText() });
+    }
+  }
+  return violations;
+}
+
+/**
+ * Item 6, Rule A: an expression whose type carries a helper (typeCarriesHelper)
+ * may appear ONLY as the receiver of a literal-named property access or
+ * literal-keyed element access — those two positions are simply never queried
+ * here, which is how this stays a type query at specific SYNTACTIC POSITIONS
+ * rather than one at every identifier (S2-F1): a non-literal element access,
+ * a call/new argument (which subsumes Object.values/entries/Reflect.get — all
+ * three are just calls with the value as an argument, needing no special
+ * case), a spread (array, call, or object), a for…in subject, an object-rest
+ * destructuring source, and an assignment to `globalThis`. Every file stays in
+ * the scan; narrowing by import graph is forbidden (a helper-carrying value
+ * reaches a file through an inferred generic or a parameter with no import
+ * edge to follow — SC4's class, the one this rule exists to close).
+ */
+function ruleAViolationsIn(psf, helperDeclKeys) {
+  const violations = [];
+  const flag = (node, reason) => {
+    violations.push({ line: node.getStartLineNumber(), text: node.getText().slice(0, 80), reason });
+  };
+
+  for (const access of psf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
+    const argExpr = access.getArgumentExpression();
+    if (argExpr && literalMemberName(argExpr) !== null) continue; // literal-keyed — allowed
+    if (typeCarriesHelper(access.getExpression().getType(), helperDeclKeys)) {
+      flag(access, "non-literal element access on a helper-carrying receiver");
+    }
+  }
+
+  for (const call of [
+    ...psf.getDescendantsOfKind(SyntaxKind.CallExpression),
+    ...psf.getDescendantsOfKind(SyntaxKind.NewExpression),
+  ]) {
+    for (const arg of call.getArguments()) {
+      if (typeCarriesHelper(arg.getType(), helperDeclKeys)) {
+        flag(arg, "helper-carrying value passed as an argument");
+      }
+    }
+  }
+
+  for (const spread of [
+    ...psf.getDescendantsOfKind(SyntaxKind.SpreadElement),
+    ...psf.getDescendantsOfKind(SyntaxKind.SpreadAssignment),
+  ]) {
+    if (typeCarriesHelper(spread.getExpression().getType(), helperDeclKeys)) {
+      flag(spread, "helper-carrying value spread");
+    }
+  }
+
+  for (const stmt of psf.getDescendantsOfKind(SyntaxKind.ForInStatement)) {
+    if (typeCarriesHelper(stmt.getExpression().getType(), helperDeclKeys)) {
+      flag(stmt, "helper-carrying value used as a for...in subject");
+    }
+  }
+
+  for (const pattern of psf.getDescendantsOfKind(SyntaxKind.ObjectBindingPattern)) {
+    if (!pattern.getElements().some((el) => el.getDotDotDotToken())) continue;
+    const decl = pattern.getParentOrThrow();
+    const init = decl.getKind() === SyntaxKind.VariableDeclaration ? decl.getInitializer() : null;
+    if (init && typeCarriesHelper(init.getType(), helperDeclKeys)) {
+      flag(init, "helper-carrying value destructured with an object-rest element");
+    }
+  }
+  for (const literal of psf.getDescendantsOfKind(SyntaxKind.ObjectLiteralExpression)) {
+    const parent = literal.getParent();
+    if (parent?.getKind() !== SyntaxKind.BinaryExpression || parent.getLeft() !== literal) continue;
+    if (!literal.getProperties().some((p) => p.getKind() === SyntaxKind.SpreadAssignment)) continue;
+    if (typeCarriesHelper(parent.getRight().getType(), helperDeclKeys)) {
+      flag(parent, "helper-carrying value destructured with an object-rest element");
+    }
+  }
+
+  for (const bin of psf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+    if (bin.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) continue;
+    const left = bin.getLeft();
+    const base =
+      left.getKind() === SyntaxKind.PropertyAccessExpression || left.getKind() === SyntaxKind.ElementAccessExpression
+        ? unwrapExpression(left.getExpression())
+        : null;
+    if (base?.getKind() !== SyntaxKind.Identifier || base.getText() !== "globalThis") continue;
+    if (typeCarriesHelper(bin.getRight().getType(), helperDeclKeys)) {
+      flag(bin, "helper-carrying value assigned to globalThis");
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Item 6, Rule B: an element access on a receiver typed `any`/`unknown` whose
+ * KEY type is not a string-literal union is a violation — the receiver could
+ * be anything, including the RLS module reached through an untyped load, so a
+ * key this gate cannot enumerate is refused rather than assumed harmless.
+ * Scoped to ElementAccessExpression nodes only (not every identifier), which
+ * is what keeps this a bounded type query — measured 575 element accesses
+ * under src/ on the real tree, not the whole corpus's identifier count.
+ * A NUMERIC key is not a candidate: Rule B's threat model is a MEMBER NAME
+ * (a helper is reached by property name, never by array index), so `x[0]` on
+ * an any-typed `x` is not this rule's subject — real-tree evidence:
+ * `password-import-parsers.ts`'s `uris[0]`, which the plan's own "2 hits"
+ * count excludes.
+ */
+function ruleBViolationsIn(psf) {
+  const violations = [];
+  for (const access of psf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
+    const recvType = access.getExpression().getType();
+    if (!recvType.isAny() && !recvType.isUnknown()) continue;
+    const argExpr = access.getArgumentExpression();
+    if (!argExpr) continue;
+    const keyType = argExpr.getType();
+    if (keyType.isNumber() || keyType.isNumberLiteral()) continue;
+    const isLiteralUnion =
+      keyType.isStringLiteral() ||
+      (keyType.isUnion() && keyType.getUnionTypes().length > 0 && keyType.getUnionTypes().every((t) => t.isStringLiteral()));
+    if (!isLiteralUnion) {
+      violations.push({ line: access.getStartLineNumber(), text: access.getText().slice(0, 80) });
+    }
+  }
+  return violations;
+}
+
+/** True when `t`'s symbol is TypeScript's own `NodeJS.Require` / `NodeRequire` — the return type of `createRequire(...)`. */
+function isRequireLikeType(t) {
+  const name = t.getSymbol()?.getName();
+  return name === "Require" || name === "NodeRequire";
+}
+
+function couldBeStringSpecifier(t) {
+  if (t.isAny() || t.isUnknown()) return true;
+  if (t.isString() || t.isStringLiteral()) return true;
+  if (t.isUnion()) return t.getUnionTypes().some(couldBeStringSpecifier);
+  return false;
+}
+
+/** The static head of a template specifier — the text before the first `${`. Null for anything else (a plain literal goes through literalMemberName instead). */
+function templateHeadText(node) {
+  if (node.getKind() !== SyntaxKind.TemplateExpression) return null;
+  return node.getHead().getLiteralText();
+}
+
+/** This repo's one `@/*` path alias, read from the Program's own compilerOptions rather than hardcoded — resolveModuleName already applies it for a literal specifier; a template head needs the same mapping done by hand. */
+function resolveAliasPrefix(compilerOptions, cwd) {
+  for (const [pattern, targets] of Object.entries(compilerOptions.paths ?? {})) {
+    if (!pattern.endsWith("/*") || !targets[0]) continue;
+    return { prefix: pattern.slice(0, -1), dir: resolve(cwd, targets[0].replace(/\*$/, "")) };
+  }
+  return null;
+}
+
+/**
+ * `resolveJsonModule` pulls `.json` files into the Program's dependency
+ * graph too (messages.ts's own sibling namespace files, imported statically
+ * elsewhere) — real Program source files, but not ones a template head's
+ * containment check cares about: a helper is declared in a `.ts`/`.tsx`
+ * FunctionDeclaration, never a JSON value, so counting a JSON hit under
+ * `messages/` read `../../messages/` (messages.ts's own passing template) as
+ * "inside the source set" and refused its own legitimate load.
+ */
+function programSourceSetContains(program, dir) {
+  const prefix = dir.endsWith(sep) ? dir : dir + sep;
+  return program.getSourceFiles().some((f) => {
+    const ext = extname(f.getFilePath());
+    if (ext !== ".ts" && ext !== ".tsx") return false;
+    const p = f.getFilePath();
+    return p === dir || p.startsWith(prefix);
+  });
+}
+
+/**
+ * A template specifier's resolution step (S2-F3): its TYPE is plain `string`,
+ * and refusing every template outright would refuse messages.ts. The head
+ * must end in `/` — a head ending mid-segment (`../../lib/tenant-${x}`) names
+ * a filename PREFIX, not a directory, and treating it as one lets a
+ * substitution complete to `tenant-rls.ts` while the containment check looks
+ * under a directory that does not exist (S3-F2). Such a head is REFUSED, as is
+ * an empty head or one with no `/` at all, and one that resolves inside the
+ * Program's source set. An alias head (`@/…`) resolves through tsconfig paths
+ * first and therefore lands inside the source set — refused.
+ */
+function templateHeadVerdict(head, containingFile, program, alias) {
+  if (head === "") return "REFUSED";
+  if (!head.includes("/")) return "REFUSED";
+  if (!head.endsWith("/")) return "REFUSED";
+  const dir =
+    alias && head.startsWith(alias.prefix)
+      ? join(alias.dir, head.slice(alias.prefix.length))
+      : resolve(dirname(containingFile), head);
+  return programSourceSetContains(program, dir) ? "REFUSED" : "PASS";
+}
+
+/**
+ * Item 5: module loads judged by the specifier's TYPE, with no allowlist
+ * (S-F1; NON_LITERAL_LOAD_ALLOWLIST is a forbidden pattern — an allowlist
+ * keyed by file or text cannot see laundering through an exported wrapper).
+ * Subjects: `import(…)`, a `require(…)` call, a call through a value typed
+ * `NodeJS.Require`, and a call through an `any`-typed callee with EXACTLY ONE
+ * argument — the require-shaped arity, which bounds this last branch
+ * (F-R2-3). That branch also selects one-argument calls that have nothing to
+ * do with module loading (F-R3-4): `value.bind(x)` off an untyped Prisma proxy
+ * result, measured on the real tree, is exactly this — its argument's type
+ * (a Prisma transaction client) has no overlap with `string` at all, so
+ * couldBeStringSpecifier is false and the call is never even a candidate,
+ * rather than being refused for an argument that could never be a specifier.
+ * A candidate whose specifier resolves to a literal (or a union of them) is
+ * checked by containment; a candidate typed `string`/`any`/`unknown` with no
+ * literal reduction is REFUSED — the gate cannot prove where it points.
+ *
+ * A plain `import("…tenant-rls")` / `require("…tenant-rls")` — a literal
+ * matching TENANT_RLS_MODULE_RE — is exempted here: runtimeHelperModulesIn
+ * already recognises and tracks it, and re-flagging it as ALSO a violation
+ * under this rule would fail every one of that mechanism's own legitimate
+ * call sites (the two vault routes). The exemption applies to the plain
+ * `import()`/`require()` forms only — a `NodeRequire`-typed value or an
+ * `any`-callee call spelled some other way is not what
+ * runtimeHelperModulesIn's `isLoad` test recognises, literal specifier or
+ * not, so those still go through full resolution.
+ */
+function moduleLoadViolationsIn(psf, program, checker, helperDeclKeys, alias) {
+  const violations = [];
+  const compilerOptions = program.getCompilerOptions();
+  const containingFile = psf.getFilePath();
+
+  const literalHostsHelper = (literal) => {
+    const resolved = ts.resolveModuleName(literal, containingFile, compilerOptions, ts.sys);
+    const resolvedFileName = resolved.resolvedModule?.resolvedFileName;
+    if (!resolvedFileName) return false;
+    const targetSf = program.getSourceFile(resolvedFileName);
+    if (!targetSf) return false;
+    return exportsAnyHelper(targetSf, checker, helperDeclKeys);
+  };
+
+  for (const call of psf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const isImportCall = expr.getKind() === SyntaxKind.ImportKeyword;
+    const isRequireIdent = expr.getKind() === SyntaxKind.Identifier && expr.getText() === "require";
+    const args = call.getArguments();
+
+    let subject = isImportCall || isRequireIdent;
+    if (!subject) {
+      const calleeType = expr.getType();
+      subject = isRequireLikeType(calleeType) || (calleeType.isAny() && args.length === 1);
+    }
+    if (!subject || args.length === 0) continue;
+
+    const argExpr = args[0];
+    // `__filename` / `__dirname` are Node's own ambient globals, typed `string`
+    // — structurally the CURRENT file's own path, never a specifier naming
+    // something to load. Without this, `createRequire(__filename)` (the
+    // key-provider files' own factory call, one line above their real
+    // `req("@aws-sdk/…")` load) is an any-callee, one-argument, string-typed
+    // call like any other and is REFUSED for an argument that could never
+    // have been a module path — recognising a language primitive, the same
+    // way Rule A recognises `globalThis` by identifier text, not judging
+    // application code by its spelling.
+    if (argExpr.getKind() === SyntaxKind.Identifier && (argExpr.getText() === "__filename" || argExpr.getText() === "__dirname")) {
+      continue;
+    }
+    if (isImportCall || isRequireIdent) {
+      const lit = literalMemberName(argExpr);
+      if (lit !== null && TENANT_RLS_MODULE_RE.test(lit)) continue;
+    }
+
+    const headText = templateHeadText(argExpr);
+    if (headText !== null) {
+      if (templateHeadVerdict(headText, containingFile, program, alias) === "REFUSED") {
+        violations.push({
+          line: call.getStartLineNumber(),
+          text: `template specifier with an unprovable or in-scope head: ${JSON.stringify(headText)}`,
+        });
+      }
+      continue;
+    }
+
+    const argType = argExpr.getType();
+    if (!couldBeStringSpecifier(argType)) continue; // not even candidate-shaped — cannot be a specifier
+    const literals = stringLiteralsOfType(argType);
+    if (literals === null) {
+      violations.push({ line: call.getStartLineNumber(), text: "module load specifier is not a provable string literal" });
+      continue;
+    }
+    for (const literal of literals) {
+      if (literalHostsHelper(literal)) {
+        violations.push({
+          line: call.getStartLineNumber(),
+          text: `module load resolves to a helper-exporting file: ${JSON.stringify(literal)}`,
+        });
+        break;
+      }
+    }
+  }
+  return violations;
+}
+
+// "Examined nothing" must not be spelled like "found nothing" at the corpus
+// level either: a wrong cwd, a moved tree or a broken walk would otherwise
+// print OK after scanning zero files. readdirSync throws when `src/` is absent;
+// this covers the present-but-empty case it cannot. Checked BEFORE the Program
+// build below: a missing tsconfig.json and a missing src/ are two different
+// refusals, and a fixture that has neither must still read as "nothing was
+// examined" rather than "the Program could not be built" — the corpus-level
+// question this gate has always asked first.
+const sourceFiles = getSourceFiles();
+if (sourceFiles.length === 0) {
+  console.error("check-bypass-rls: no .ts/.tsx source files found under src/.");
+  console.error("Nothing was examined, so this is not a pass. Check the working directory.");
+  process.exit(1);
+}
+
+const program = buildProgram();
+const helperDecls = resolveHelperDeclarations(program);
+const helperDeclKeys = buildHelperDeclKeySet(helperDecls);
+const checker = program.getTypeChecker();
+const aliasPrefix = resolveAliasPrefix(program.getCompilerOptions(), process.cwd());
+const externalRefsByFile = collectExternalReferences(program, helperDecls);
+const programOnlyFiles = new Set(externalRefsByFile.keys());
+
+const crossCheckViolations = [];
+const starExportViolations = [];
+const destructuringKeyViolations = [];
+const ruleAViolations = [];
+const ruleBViolations = [];
+const moduleLoadViolations = [];
+
+// Items 5, 5b, 5c and 6 read "outside the defining files" the same way 5b's
+// own text does. The two defining files are always the REAL tenant-rls.ts /
+// tenant-context.ts (the fixture harness copies them verbatim rather than
+// hand-writing stubs), and their own unrelated imports are routinely
+// unresolvable in a fixture tree that carries only these two files — an
+// unresolved import widens to `any`, and an `any`-typed one-argument call
+// elsewhere in the SAME file (`UUID_RE.test(tenantId)`, nothing to do with a
+// module load) would otherwise become a type-based false positive for item 5
+// that has nothing to do with what these two files are being scanned FOR.
+// The real tree's own run confirms nothing is lost: with every import
+// resolved, these two files raise zero item 5/6 findings anyway.
+const definingFiles = new Set(HELPER_DECLARATIONS.map((d) => d.file));
+
+for (const psf of program.getSourceFiles()) {
+  const file = toRelPosix(psf.getFilePath());
+  if (!isInScopeFile(file) || definingFiles.has(file)) continue;
+  for (const v of bareStarExportViolationsIn(psf, checker, helperDeclKeys)) starExportViolations.push({ file, ...v });
+  for (const v of destructuringKeyViolationsIn(psf, helperDeclKeys)) destructuringKeyViolations.push({ file, ...v });
+  for (const v of ruleAViolationsIn(psf, helperDeclKeys)) ruleAViolations.push({ file, ...v });
+  for (const v of ruleBViolationsIn(psf)) ruleBViolations.push({ file, ...v });
+  for (const v of moduleLoadViolationsIn(psf, program, checker, helperDeclKeys, aliasPrefix)) {
+    moduleLoadViolations.push({ file, ...v });
+  }
+}
+
 const astProject = createAstProject();
 const unparseableFiles = [];
 const fileViolations = [];
@@ -1140,17 +1885,6 @@ const unresolvedClients = [];
 const unresolvedModels = [];
 const f3UnusedTxViolations = [];
 
-// "Examined nothing" must not be spelled like "found nothing" at the corpus
-// level either: a wrong cwd, a moved tree or a broken walk would otherwise
-// print OK after scanning zero files. readdirSync throws when `src/` is absent;
-// this covers the present-but-empty case it cannot.
-const sourceFiles = getSourceFiles();
-if (sourceFiles.length === 0) {
-  console.error("check-bypass-rls: no .ts/.tsx source files found under src/.");
-  console.error("Nothing was examined, so this is not a pass. Check the working directory.");
-  process.exit(1);
-}
-
 let parsedCount = 0;
 
 for (const file of sourceFiles) {
@@ -1158,7 +1892,10 @@ for (const file of sourceFiles) {
   if (file.includes(".test.") || file.includes("__tests__")) continue;
 
   const content = readFileSync(file, "utf8");
-  if (!HELPER_MENTION_RE.test(content)) continue;
+  // Item 4: a file the Program alone found a helper reference in — a renamed
+  // re-export's downstream use, say — is parsed even when its own text never
+  // mentions a helper at all (HELPER_MENTION_RE would never select it).
+  if (!HELPER_MENTION_RE.test(content) && !programOnlyFiles.has(file)) continue;
 
   parsedCount++;
   const sf = astProject.createSourceFile(file, content, { overwrite: true });
@@ -1178,7 +1915,11 @@ for (const file of sourceFiles) {
     continue;
   }
 
-  const calls = helperCallsIn(sf);
+  const calls = filterCallsByReceiverDeclaration(
+    helperCallsIn(sf),
+    program.getSourceFile(join(process.cwd(), file)),
+    helperDeclKeys,
+  );
   const bypassCalls = calls.filter(({ helper }) => helper === "withBypassRls");
   if (bypassCalls.length > 0) bypassCallFiles.add(file);
 
@@ -1195,6 +1936,21 @@ for (const file of sourceFiles) {
     });
   }
   if (indirect.length > 0) bypassCallFiles.add(file);
+
+  // Item 3: every REAL reference the Program found in this file, that the
+  // syntactic pass above did not already account for (a call, an
+  // already-reported indirect reference, a recognised import/export
+  // binding, or a type position) — a form this gate does not analyse.
+  const externalRefs = externalRefsByFile.get(file);
+  if (externalRefs) {
+    const accounted = accountedPositionsIn(sf, calls, indirect);
+    for (const ref of externalRefs) {
+      if (!accounted.has(ref.start)) {
+        crossCheckViolations.push({ file, line: ref.line, helperName: ref.helperName });
+      }
+    }
+  }
+
   const allowedModels = ALLOWED_USAGE.get(file);
 
   // Check 1: a file that really calls withBypassRls must be on the allowlist.
@@ -1542,6 +2298,104 @@ if (unparseableFiles.length > 0) {
   console.error("");
   for (const { file } of unparseableFiles) {
     console.error(`  ${file}`);
+  }
+}
+
+// C3 item 3: a reference the Program found that no syntactic mechanism above
+// already accounts for — a renamed re-export, a named re-export under an
+// unrelated module, or a namespace reached through `export * as ns`, used in
+// a file the text-based prefilter would never have connected to a helper.
+if (crossCheckViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(
+    "with*Rls helper reached by a form this gate does not analyse (Program cross-check).",
+  );
+  console.error(
+    "The reference is real (the language service resolved it to the helper's own",
+  );
+  console.error(
+    "declaration) but no syntactic recognition here accounts for it — call the helper",
+  );
+  console.error("directly from its own module:");
+  console.error("");
+  for (const { file, line, helperName } of crossCheckViolations) {
+    console.error(`  ${file}:${line}  ${helperName}`);
+  }
+}
+
+// C3 item 5b: a bare `export *` whose target exports a helper — refused at
+// the barrel itself, since the re-export produces no reference for item 3 to
+// find downstream.
+if (starExportViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("`export *` re-exports a module that exports a with*Rls helper.");
+  console.error(
+    "This produces no reference the Program cross-check can follow, so the barrel",
+  );
+  console.error("is refused outright. Export the helper by name, or do not re-export it:");
+  console.error("");
+  for (const { file, line, text } of starExportViolations) {
+    console.error(`  ${file}:${line}  ${text}`);
+  }
+}
+
+// C3 item 5c: a quoted or computed destructuring key over a helper-carrying
+// pattern — resolved, or refused, through the pattern's type.
+if (destructuringKeyViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(
+    "destructuring key is not a plain identifier and either resolves to a with*Rls",
+  );
+  console.error("helper or could not be resolved at all:");
+  console.error("");
+  for (const { file, line, text } of destructuringKeyViolations) {
+    console.error(`  ${file}:${line}  ${text}`);
+  }
+}
+
+// C3 item 6, Rule A: a helper-carrying value used somewhere other than a
+// literal-named/keyed receiver.
+if (ruleAViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(
+    "a value whose type carries a with*Rls helper is used somewhere other than a",
+  );
+  console.error(
+    "literal-named property access or literal-keyed element access:",
+  );
+  console.error("");
+  for (const { file, line, text, reason } of ruleAViolations) {
+    console.error(`  ${file}:${line}  ${reason}: ${text}`);
+  }
+}
+
+// C3 item 6, Rule B: an any/unknown-typed receiver, element-accessed by a key
+// this gate cannot enumerate.
+if (ruleBViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(
+    "element access on an any/unknown-typed receiver whose key is not a string-literal",
+  );
+  console.error("union — this gate cannot prove the access does not reach a with*Rls helper:");
+  console.error("");
+  for (const { file, line, text } of ruleBViolations) {
+    console.error(`  ${file}:${line}  ${text}`);
+  }
+}
+
+// C3 item 5: a module load judged by the specifier's TYPE — no allowlist.
+if (moduleLoadViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("module load specifier could not be proven safe:");
+  console.error("");
+  for (const { file, line, text } of moduleLoadViolations) {
+    console.error(`  ${file}:${line}  ${text}`);
   }
 }
 
