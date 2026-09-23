@@ -435,6 +435,21 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- realign --user <uuid-or-em
 
 `realign` refuses a user with an active membership in any tenant, a target where the user holds no membership row, the sentinel tenant as the target, and an email that matches more than one user. Addresses are compared case-insensitively and literally, so only case variants of one address can match more than one user; name that user by UUID. Its confirmation prompt, like `add`'s and `remove`'s, runs inside the command's transaction: answer within 10 minutes (`confirmationTransaction` in `scripts/tenant-domain.ts`) or re-run the command. Do not leave a prompt open while migrations deploy: the preview's reads hold table locks that a migration's `ALTER TABLE` waits for, and sign-ins then queue behind the migration. It moves only the owning column: the user's rows stay under the tenant they were filed under, their membership in A stays deactivated until A reactivates it, and both tenants receive a `USER_TENANT_REALIGNED` audit row with source `operator` and the `--by` label.
 
+**`User.tenantId` can itself diverge from a user's active membership.** `realign` above is the deliberate, single-user recovery for a member no producer may move; `measure` and `backfill-owning-column` are the fleet-wide diagnosis and (dry-run by default) repair for the same class — `resolveOwningTenantIdFromClient` already reads through the adjudicator (the oldest active membership, falling back to the column), so every *read* is correct today, but the column itself stays stale until something moves it:
+
+```bash
+# Read-only: the three docs/archive/review/audit-tenant-adjudicator-design.md counts.
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- measure
+
+# Dry run (the default — no writes): lists every divergent user.
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- backfill-owning-column --by <operator-label>
+
+# Apply: moves each listed user's column through the same realign machinery.
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- backfill-owning-column --by <operator-label> --apply
+```
+
+`backfill-owning-column` moves each user in its own transaction, re-reading and re-deciding before writing — a user fixed by something else between the listing and the apply is skipped rather than moved on stale data. A user with more than one active membership is included, not refused, and flagged `multiActive` (the adjudicator decides them the same as `resolveOwningTenantIdFromClient` does); `--limit` caps how many candidates one run lists or applies. **`tenant_members_one_active_per_user`** (added by #830) makes a second active membership structurally unrepresentable going forward, so `multiActive` is now unreachable on an ordinary write path — the flag stays for any row that predates that index.
+
 ### 3. Start services
 
 **Development:**

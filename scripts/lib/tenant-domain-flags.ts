@@ -40,12 +40,13 @@ export const VALUE_FLAG_HINTS = {
   days: "a positive integer number of days",
   after: "the seq cursor printed by a capped `history` result, to continue from",
   user: "the user's UUID, or their email (matched case-insensitively)",
+  limit: "the maximum number of backfill candidates to list or apply",
 } as const satisfies Record<string, string>;
 
 export type ValueFlag = keyof typeof VALUE_FLAG_HINTS;
 
-/** Flags that take no value. `--yes` is the only one. */
-export const BOOLEAN_FLAGS = ["yes"] as const;
+/** Flags that take no value. `--yes` and `--apply` (C4) are the only two. */
+export const BOOLEAN_FLAGS = ["yes", "apply"] as const;
 
 export type ParsedFlags = Map<string, string | true>;
 

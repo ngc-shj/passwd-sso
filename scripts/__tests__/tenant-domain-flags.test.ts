@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   parseFlags,
   valuelessError,
 } from "../lib/tenant-domain-flags";
+import { cmdBackfillOwningColumn, migrationClientFactory } from "../tenant-domain";
 
 /**
  * Round-3 M7: this parser and its valueless-flag guard had no test at all —
@@ -192,8 +193,9 @@ describe("tenant-domain flag parsing", () => {
     // And the literal pin, so ADDING a flag to the tables is a deliberate edit
     // rather than something that slips in with an unrelated change. "after"
     // (20260731170000) is `history`'s pagination cursor; "user" (round 7,
-    // F-R7-2) names `realign`'s user.
-    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "after", "user", "yes"]);
+    // F-R7-2) names `realign`'s user; "limit" and "apply" (C4/#838) are
+    // `backfill-owning-column`'s candidate cap and its apply/dry-run switch.
+    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "after", "user", "limit", "yes", "apply"]);
     expect(read.size).toBeGreaterThan(0);
   });
 
@@ -202,7 +204,7 @@ describe("tenant-domain flag parsing", () => {
   // names a different losing tenant, with `--yes` removing the visual check.
   // Same rule as the valueless guard; the member set was derived from the
   // parser's state machine rather than from the spellings that got reported.
-  it.each(["tenant", "domain", "by", "from", "days", "user"])(
+  it.each(["tenant", "domain", "by", "from", "days", "user", "limit"])(
     "refuses a repeated --%s instead of taking the last one",
     (name) => {
       const error = errorOf([`--${name}`, "a", `--${name}`, "b"]);
@@ -214,8 +216,88 @@ describe("tenant-domain flag parsing", () => {
     expect(errorOf(["--yes", "--yes"])).toContain("--yes was given more than once");
   });
 
+  it("parses the boolean --apply", () => {
+    const flags = flagsOf(["--apply"]);
+    expect(flags.get("apply")).toBe(true);
+    expect(findValuelessFlag(flags)).toBeNull();
+  });
+
+  it("does not set --apply when omitted — backfill-owning-column's dry-run default", () => {
+    expect(flagsOf(["--by", "ops"]).get("apply")).toBeUndefined();
+  });
+
+  it("refuses a value on --apply", () => {
+    expect(errorOf(["--apply=true"])).toContain("--apply takes no value");
+  });
+
+  it("refuses a repeated --apply", () => {
+    expect(errorOf(["--apply", "--apply"])).toContain("--apply was given more than once");
+  });
+
   it("refuses a repeat written in the other form", () => {
     // `--days 1 --days=2` is the same instruction twice in two spellings.
     expect(errorOf(["--days", "1", "--days=2"])).toContain("--days was given more than once");
+  });
+});
+
+/**
+ * A-C4-2c. `cmdBackfillOwningColumn` validates `--by` with the shared
+ * `validateActorLabel` before `migrationClientFactory.create` is ever called —
+ * same convention as `cmdRealign`'s bidi cell. These need no live database:
+ * a rejection here returns before the client is built, so
+ * `MIGRATION_DATABASE_URL` only has to be SET, never actually reachable.
+ */
+describe("backfill-owning-column: --by is validated before any client is built (A-C4-2c)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects a --by carrying a bidi control, regardless of --apply", async () => {
+    vi.stubEnv("MIGRATION_DATABASE_URL", "postgresql://unreachable.invalid/db");
+    const createSpy = vi.spyOn(migrationClientFactory, "create");
+    try {
+      const result = await cmdBackfillOwningColumn({
+        by: `ops${String.fromCodePoint(0x202e)}admin`,
+        apply: true,
+        yes: true,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("--by contains a control, bidi or zero-width character");
+      expect(createSpy).not.toHaveBeenCalled();
+    } finally {
+      createSpy.mockRestore();
+    }
+  });
+
+  it("rejects the reserved signin label", async () => {
+    vi.stubEnv("MIGRATION_DATABASE_URL", "postgresql://unreachable.invalid/db");
+    const createSpy = vi.spyOn(migrationClientFactory, "create");
+    try {
+      const result = await cmdBackfillOwningColumn({ by: "signin", apply: true, yes: true });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain('--by must not be "signin"');
+      expect(createSpy).not.toHaveBeenCalled();
+    } finally {
+      createSpy.mockRestore();
+    }
+  });
+
+  it("rejects an empty --by — the CLI's stand-in for --apply without --by", async () => {
+    // main() refuses a bare `backfill-owning-column --apply` (no --by) with
+    // printUsage()+exit 1 before ever calling this command, the same guard
+    // `add`/`remove`/`realign` use — untestable here since main() sets
+    // process.exitCode (module header, "run only when invoked as a CLI").
+    // This pins the command-level backstop under it: an empty label is
+    // refused the same way, so the class is closed at two layers, not one.
+    vi.stubEnv("MIGRATION_DATABASE_URL", "postgresql://unreachable.invalid/db");
+    const createSpy = vi.spyOn(migrationClientFactory, "create");
+    try {
+      const result = await cmdBackfillOwningColumn({ by: "", apply: true, yes: true });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("--by is required");
+      expect(createSpy).not.toHaveBeenCalled();
+    } finally {
+      createSpy.mockRestore();
+    }
   });
 });
