@@ -694,6 +694,22 @@ describe("block-bare-decrypt hook — command-word attribution gate (issue-838 f
     expectHook("cat <<EOF\nhello world\nEOF").toBe(ALLOW);
   });
 
+  it("follows bash in tolerating a heredoc that never meets its terminator", () => {
+    // bash warns and runs the command, using what it collected as the body —
+    // it is not a syntax error. Raising instead turned every such command
+    // into the scanner's "could not decide" refusal, which caught ordinary
+    // work: a mistyped terminator, and any CRLF-authored heredoc, whose
+    // opener keeps the \r while the terminator line does not (round 6).
+    expectHook("cat <<EOF\nbody\nNOTEOF").toBe(ALLOW);
+    expectHook("cat <<EOF\r\nbody\r\nEOF\r").toBe(ALLOW);
+    // The tolerance does not cost detection: the collected body is still
+    // parsed, so a decrypt inside an unterminated heredoc still refuses.
+    expectBlockedBy(
+      `cat <<EOF\n$(passwd-sso ${SUB} ID)\nNOTEOF`,
+      "this decrypt puts its stdout in the conversation",
+    );
+  });
+
   it("decides an ordinary backtick substitution instead of failing to parse it", () => {
     // Consuming a CLOSING backtick as an opener left the region
     // unterminated, so every command containing one — `echo `date`` included

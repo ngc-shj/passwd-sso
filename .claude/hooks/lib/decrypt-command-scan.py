@@ -489,7 +489,7 @@ class Parser:
             lines = []
             while True:
                 if self.i > self.n:
-                    raise ParseError(f"heredoc <<{hd.delim!r} never terminated")
+                    break
                 line_end = self.s.find("\n", self.i)
                 line = self.s[self.i:] if line_end == -1 else self.s[self.i:line_end]
                 probe = line.lstrip("\t") if hd.strip_tabs else line
@@ -498,8 +498,17 @@ class Parser:
                     self.i = self.n if at_end else line_end + 1
                     break
                 lines.append(line.lstrip("\t") if hd.strip_tabs else line)
+                # A heredoc that reaches end of input without its terminator is
+                # NOT a syntax error to bash: it warns and runs the command with
+                # everything collected so far as the body. Raising here made the
+                # hook refuse commands bash accepts — a mistyped terminator, and
+                # every CRLF-authored heredoc, since the opener's delimiter word
+                # keeps the `\r` while the terminator line does not (round 6).
+                # The body still goes through substitution parsing below, so a
+                # decrypt inside one is found either way.
                 if at_end:
-                    raise ParseError(f"heredoc <<{hd.delim!r} never terminated")
+                    self.i = self.n
+                    break
                 self.i = line_end + 1
             hd.body = "\n".join(lines)
             if not hd.quoted:
