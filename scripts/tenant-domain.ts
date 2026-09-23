@@ -2168,6 +2168,9 @@ export async function cmdBackfillOwningColumn(args: {
     return {
       ok: false,
       code: 1,
+      // operator-echo-exempt: `limit` is a number here, not operator text — the
+      // CLI wrapper refuses anything that does not match /^\d+$/ and escapes it
+      // there, so what reaches this arm is a parsed value (NaN included).
       message: `Invalid --limit "${limit}": expected an integer between 1 and ${MAX_BACKFILL_LIMIT}.`,
     };
   }
