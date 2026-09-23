@@ -718,41 +718,6 @@ def _segment_references_cred(seg: Segment) -> bool:
     return False
 
 
-# Prefixes that run their operand tail with the same stdout. Recognised, NOT
-# closed: one that is not listed reads as "no decrypt here", i.e. the lint's
-# declared spelling residual, never a wrong allow of a shape it did see.
-_TRANSPARENT_PREFIXES = {
-    "command", "builtin", "exec", "env", "nice", "nohup", "stdbuf", "setsid",
-    "ionice", "chrt", "taskset", "time", "sudo", "doas", "unbuffer",
-}
-def _skip_transparent_prefixes(words: list[str]) -> list[str]:
-    """Strip every leading transparent prefix, with NO depth cap.
-
-    An earlier revision stopped after four. Any finite bound reproduces the
-    defect it was meant to avoid at bound+1: with five,
-    `command command command command command passwd-sso decrypt x` stripped
-    four, saw `command` as the command word, and reported "not a decrypt" —
-    so the whole command took the allow arm before any rule ran, which is a
-    bare decrypt putting plaintext on stdout (round 2, S2-F1). The loop is
-    already bounded by the word count and does not recurse, so the cap bought
-    nothing to begin with.
-    """
-    i = 0
-    while i < len(words) - 1:
-        head = _strip_quotes(words[i])
-        if head not in _TRANSPARENT_PREFIXES:
-            break
-        i += 1
-        if head == "env":
-            while i < len(words) - 1:
-                eq = _unquoted_equals_index(words[i])
-                if eq is not None and _NAME_RE.match(words[i][:eq]):
-                    i += 1
-                    continue
-                break
-    return words[i:]
-
-
 def _is_decrypt_segment(seg: Segment) -> bool:
     """A segment whose command word (or its `npx tsx …` operand) is the CLI
     with `decrypt` as its first operand (F-R3-2).
@@ -763,23 +728,32 @@ def _is_decrypt_segment(seg: Segment) -> bool:
     widens the PRINTER/dumper/tracer command-word matching to see through
     quoting, not this. Narrowing this match would silently close a gap the
     plan does not claim to close (R-1)."""
-    words = _skip_transparent_prefixes(seg.words)
+    words = seg.words
     if not words:
         return False
-    cw = words[0]
-    if cw == "passwd-sso" and len(words) > 1 and words[1] == "decrypt":
-        return True
-    # `npx tsx path/to/index.ts decrypt …`, or a direct `path/to/index.ts decrypt …`
-    idx = 0
-    if cw == "npx":
-        idx = 1
-        if idx < len(words) and words[idx] == "tsx":
-            idx += 1
-    j = idx
-    while j < len(words) and "index.ts" not in words[j]:
-        j += 1
-    if j < len(words) and j + 1 < len(words) and words[j + 1] == "decrypt":
-        return True
+    # Both spellings are looked for at ANY position, never only at words[0].
+    #
+    # Position-anchoring is what let an invocation prefix hide the call. The
+    # first revision answered that by stripping a list of prefixes, which
+    # works only while the prefix is spelled bare: `sudo passwd-sso decrypt x`
+    # was seen, `sudo -u alice passwd-sso decrypt x` was not, because the
+    # option left `-u` where the CLI name was expected and detection reported
+    # "no decrypt here" — the allow arm, before any rule ran (round 3, R3-F1).
+    # The same held for `nice -n 10`, `env -i`, `ionice -c3`, `exec -a`.
+    #
+    # Modelling each prefix's option grammar is the approach round 1's
+    # escalation already rejected as fragile, and refusing whatever cannot be
+    # resolved is not available here: this hook runs on EVERY Bash command, so
+    # "an option-bearing prefix I cannot resolve" would refuse an ordinary
+    # `sudo -u alice ls`. Scanning positions costs neither: what identifies a
+    # decrypt is the CLI token immediately followed by `decrypt`, wherever the
+    # pair sits, which is what the `index.ts` spelling already did.
+    for j, w in enumerate(words[:-1]):
+        if w == "passwd-sso" and words[j + 1] == "decrypt":
+            return True
+        # `npx tsx path/to/index.ts decrypt …`, or a direct `path/to/index.ts decrypt …`
+        if "index.ts" in w and words[j + 1] == "decrypt":
+            return True
     return False
 
 

@@ -660,6 +660,23 @@ describe("block-bare-decrypt hook — command-word attribution gate (issue-838 f
     expectBlockedBy(`command passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
   });
 
+  it("sees the decrypt behind an option-taking prefix, without modelling its options", () => {
+    // `sudo passwd-sso decrypt X` was refused; `sudo -u alice passwd-sso
+    // decrypt X` was ALLOWED, because stripping a listed prefix left `-u`
+    // where the CLI name was expected and detection answered "no decrypt
+    // here" — the allow arm, before any rule ran (round 3, R3-F1). The fix is
+    // not an option grammar per prefix: the CLI token followed by `decrypt`
+    // is looked for at any position, so no prefix needs to be understood.
+    for (const prefix of ["sudo -u alice", "nice -n 10", "env -i", "ionice -c3", "exec -a fake"]) {
+      expectBlockedBy(`${prefix} passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
+    }
+    // The paired allow, and the reason a "refuse what I cannot resolve"
+    // answer was not available here: this hook runs on EVERY Bash command, so
+    // an unresolved option-bearing prefix must not refuse ordinary work.
+    expectHook("sudo -u alice ls -la").toBe(ALLOW);
+    expectHook("nice -n 10 npm test").toBe(ALLOW);
+  });
+
   it("strips a prefix chain of any depth, not up to a cap", () => {
     // The first revision stopped after four prefixes, so a fifth put the
     // decrypt back out of sight: detection reported "no decrypt here" and the
