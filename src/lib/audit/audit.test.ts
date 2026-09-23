@@ -545,7 +545,7 @@ describe("logAuditAsync", () => {
         tenantMemberships: {
           where: { deactivatedAt: null },
           select: { tenantId: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           take: 1,
         },
       },
