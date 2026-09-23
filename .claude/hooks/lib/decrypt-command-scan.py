@@ -76,13 +76,17 @@ class ParseError(Exception):
 # --------------------------------------------------------------------------
 
 class Heredoc:
-    __slots__ = ("delim", "quoted", "strip_tabs", "body")
+    __slots__ = ("delim", "quoted", "strip_tabs", "body", "nested")
 
     def __init__(self, delim: str, quoted: bool, strip_tabs: bool):
         self.delim = delim
         self.quoted = quoted
         self.strip_tabs = strip_tabs
         self.body = ""
+        # Command substitutions found in the body of an UNQUOTED heredoc.
+        # Bash expands those exactly as it does inside double quotes, so the
+        # commands in them run — see _consume_heredoc_bodies.
+        self.nested: list[tuple[str, list["Segment"]]] = []
 
     def to_json(self):
         return {
@@ -90,6 +94,7 @@ class Heredoc:
             "quoted": self.quoted,
             "strip_tabs": self.strip_tabs,
             "body": self.body,
+            "nested": [{"kind": k, "segments": [s.to_json() for s in segs]} for k, segs in self.nested],
         }
 
 
@@ -354,6 +359,16 @@ class Parser:
                 first = False
                 continue
             if c == "`":
+                # Only an OPENING backtick starts a region. When the innermost
+                # parse is itself waiting for a backtick, this one closes it,
+                # and the word ends here — consuming it as an opener made the
+                # region unterminated, so `echo `date`` (any backtick
+                # substitution at all) raised ParseError and the hook refused
+                # an ordinary command. main allowed those: a parser defect
+                # this branch introduced, found in round 5 while wiring
+                # heredoc bodies.
+                if self._term_stack and self._term_stack[-1] == "`":
+                    break
                 parts.append(self.s[plain_start:self.i])
                 parts.append(self._consume_backtick(nested_out))
                 plain_start = self.i
@@ -459,8 +474,17 @@ class Parser:
     def _consume_heredoc_bodies(self, pending: list[Heredoc]):
         # Consumed in redirection order (F-R3-3), each up to a line that is
         # EXACTLY its delimiter (leading tabs stripped on both sides only for
-        # `<<-`). The body is data, never operator-scannable — item 5 reads it
-        # as text, nothing here re-enters parse().
+        # `<<-`). The body is not operator-scannable: its `;` and `|` are
+        # literal text, which is why item 5 reads it as text.
+        #
+        # It is NOT inert, though, and treating it as inert was a fail-open:
+        # with an unquoted delimiter bash expands `$( … )` and backticks in a
+        # heredoc body exactly as it does inside double quotes, so
+        # `cat <<EOF` / `$(passwd-sso decrypt X)` / `EOF` runs the decrypt and
+        # prints it — and detection, which only ever walked `seg.nested`,
+        # never saw the call (round 5). Those spans are parsed here and hung
+        # on the heredoc, so every rule that walks nested segments reaches
+        # them. A QUOTED delimiter disables expansion, so its body stays text.
         for hd in pending:
             lines = []
             while True:
@@ -478,6 +502,8 @@ class Parser:
                     raise ParseError(f"heredoc <<{hd.delim!r} never terminated")
                 self.i = line_end + 1
             hd.body = "\n".join(lines)
+            if not hd.quoted:
+                hd.nested = _parse_substitutions_in(hd.body)
 
     # -- top-level driver -----------------------------------------------
 
@@ -669,6 +695,34 @@ def _unquoted_equals_index(word: str) -> int | None:
     return None
 
 
+def _parse_substitutions_in(text: str) -> list[tuple[str, list["Segment"]]]:
+    """Every `$( … )` and backtick span inside `text`, parsed as commands.
+
+    Used for the body of an unquoted heredoc, where bash performs the same
+    expansions it performs inside double quotes. A scan of the body's own
+    text is what makes those commands visible to the rules; the body itself
+    is not a command list (its `;` and `|` are literal), so only the
+    substitutions are parsed, exactly as `_consume_double_quoted` does for a
+    word.
+    """
+    found: list[tuple[str, list[Segment]]] = []
+    p = Parser(text)
+    p._term_stack.append(None)
+    while p.i < p.n:
+        ch = p.s[p.i]
+        if ch == "\\":
+            p.i += 2
+            continue
+        if ch == "$" and p._peek(1) == "(":
+            p._consume_cmdsub(found)
+            continue
+        if ch == "`":
+            p._consume_backtick(found)
+            continue
+        p.i += 1
+    return found
+
+
 def parse_command(command: str) -> list[Segment]:
     return Parser(command).parse(terminator=None)
 
@@ -681,6 +735,11 @@ def iter_all_segments(segments: list[Segment]):
         yield seg
         for _kind, inner in seg.nested:
             yield from iter_all_segments(inner)
+        # An unquoted heredoc's body is expanded by bash, so the commands its
+        # substitutions contain do run (round 5).
+        for hd in seg.heredocs:
+            for _kind, inner in hd.nested:
+                yield from iter_all_segments(inner)
 
 
 # --------------------------------------------------------------------------
@@ -763,8 +822,11 @@ def _is_decrypt_segment(seg: Segment) -> bool:
         if w == "passwd-sso" or w.endswith("/passwd-sso"):
             return True
         # `npx tsx path/to/index.ts decrypt …`, a direct `path/to/index.ts
-        # decrypt …`, or the built `node path/to/index.js decrypt …`.
-        if "index.ts" in w or "index.js" in w:
+        # decrypt …`, or the built `node path/to/index.js decrypt …`. A whole
+        # path component, like the name above: substring containment refused
+        # `myindex.jsx-report decrypt X`, a command that invokes nothing
+        # (round 5) — the same defect the name match had one revision earlier.
+        if w in ("index.ts", "index.js") or w.endswith(("/index.ts", "/index.js")):
             return True
     return False
 

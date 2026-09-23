@@ -408,12 +408,23 @@ describe("decrypt-command-scan.py — segmentation (A-C1-0)", () => {
 
   it("a quoted heredoc delimiter is recorded as quoted, unexpanded", () => {
     const [seg] = scanSegments(`cat <<'EOF'\nbody\nEOF\n`);
-    expect(seg.heredocs).toEqual([{ delimiter: "EOF", quoted: true, strip_tabs: false, body: "body" }]);
+    expect(seg.heredocs).toEqual([{ delimiter: "EOF", quoted: true, strip_tabs: false, body: "body", nested: [] }]);
   });
 
   it("an unquoted heredoc delimiter is recorded as unquoted", () => {
     const [seg] = scanSegments(`cat <<EOF\nbody\nEOF\n`);
-    expect(seg.heredocs).toEqual([{ delimiter: "EOF", quoted: false, strip_tabs: false, body: "body" }]);
+    expect(seg.heredocs).toEqual([{ delimiter: "EOF", quoted: false, strip_tabs: false, body: "body", nested: [] }]);
+  });
+
+  it("parses a command substitution in an unquoted heredoc body, and not in a quoted one", () => {
+    // Bash expands $( ) in a heredoc body whose delimiter is unquoted, so the
+    // commands inside it run and must be reachable from the parse (round 5).
+    const [hot] = scanSegments("cat <<EOF\n$(id -u)\nEOF");
+    expect(hot.heredocs[0].nested).toEqual([
+      { kind: "cmdsub", segments: [expect.objectContaining({ words: ["id", "-u"] })] },
+    ]);
+    const [cold] = scanSegments("cat <<'EOF'\n$(id -u)\nEOF");
+    expect(cold.heredocs[0].nested).toEqual([]);
   });
 
   it("a line continuation inside single quotes stays literal", () => {
@@ -658,6 +669,49 @@ describe("block-bare-decrypt hook — command-word attribution gate (issue-838 f
     // CLI's own `index.ts`-scanning branch finds the decrypt regardless of
     // what precedes it, so it would not red-prove the prefix-skip at all.
     expectBlockedBy(`command passwd-sso ${SUB} ID`, "this decrypt puts its stdout in the conversation");
+  });
+
+  it("sees a decrypt inside an unquoted heredoc body, and leaves a quoted one alone", () => {
+    // With an unquoted delimiter bash expands `$( … )` in a heredoc body, so
+    // `cat <<EOF` / `$(<cli> decrypt X)` / `EOF` runs the decrypt and prints
+    // it — verified against real bash. The body was captured as text and
+    // never parsed, so detection saw no decrypt at all and the command took
+    // the allow arm: a fail-open this branch introduced, since main's regex
+    // matched the text wherever it sat (round 5).
+    expectBlockedBy(
+      `cat <<EOF\n$(passwd-sso ${SUB} ID)\nEOF`,
+      "this decrypt puts its stdout in the conversation",
+    );
+    expectBlockedBy(
+      `cat <<EOF\n\`passwd-sso ${SUB} ID\`\nEOF`,
+      "this decrypt puts its stdout in the conversation",
+    );
+    // A QUOTED delimiter disables expansion, so the same body is literal text
+    // and nothing runs. Refusing it would be refusing a document that
+    // mentions the command.
+    expectHook(`cat <<'EOF'\n$(passwd-sso ${SUB} ID)\nEOF`).toBe(ALLOW);
+    // And an ordinary heredoc stays ordinary.
+    expectHook("cat <<EOF\nhello world\nEOF").toBe(ALLOW);
+  });
+
+  it("decides an ordinary backtick substitution instead of failing to parse it", () => {
+    // Consuming a CLOSING backtick as an opener left the region
+    // unterminated, so every command containing one — `echo `date`` included
+    // — raised ParseError and the hook refused it. main allowed those, so
+    // this was an over-refusal on ordinary work, and it hid the leak below
+    // behind the same error (round 5).
+    expectHook("echo `date`").toBe(ALLOW);
+    expectHook("x=`date`; echo hi").toBe(ALLOW);
+    expectBlockedBy("echo `passwd-sso " + SUB + " ID`", "this decrypt puts its stdout in the conversation");
+  });
+
+  it("matches the entry point as a path component, not as a substring", () => {
+    // `myindex.jsx-report decrypt X` invokes nothing, and substring
+    // containment refused it (round 5) — the same defect the CLI name had
+    // before the previous commit, left one spelling later.
+    expectHook(`myindex.jsx-report ${SUB} ID`).toBe(ALLOW);
+    expectHook(`my-index.tsx-thing ${SUB} ID`).toBe(ALLOW);
+    expectBlockedBy(`./index.ts ${SUB} ID`, "this decrypt puts its stdout in the conversation");
   });
 
   it("sees a path-qualified or built CLI, which name equality missed", () => {
