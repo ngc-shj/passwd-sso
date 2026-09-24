@@ -226,3 +226,40 @@ regenerate the corpus rather than trust these rounds.
 
 Hook suite: 120 cells. Full suite: 15985 passed. The differential corpora (1008 + 304 commands)
 are the evidence behind the convergence claim, not the unit suite alone.
+
+---
+
+# Final pass — everything except the scanner
+
+Date: 2026-09-24 · the whole branch diff, the four review artifacts, and the gates, reviewed once
+more after the hook converged. Two Major, four Minor, all resolved.
+
+- **Major — the suite-runtime figure read as a breach.** The deviation log's per-cell budget
+  (142 cells, 37.2 s → 73.2-74.3 s, ≈1.98×) was quoted beside an absolute that has since grown to
+  169 cells / 85.7 s. Re-measured: 0.507 s per cell now against 0.515 s then, so nothing slowed —
+  the suite gained 27 cells, each pinning a defect these rounds found. D6 now records both figures
+  and says which one the budget is about.
+- **Major — an integration cell asserted identity where the contract is a delta.** `--limit 1`
+  checked that the moved user was one of its own three fixtures; the listing pages over the whole
+  table by id, so a row left by a crashed earlier run would win and fail the cell for a reason
+  `--limit` has nothing to do with. Rewritten as a count delta, which is what `--limit` promises.
+- **Minor — two readers outside the rule's own callers still ordered by `created_at` alone**
+  (`maintenance-auth.ts`, `team-member-display.ts`), each with a comment claiming a stable choice.
+  One of them decides which tenant an operator's maintenance action is attributed to. Fixed with
+  the same `[createdAt, id]` order, and the test that pinned the old shape was corrected with it —
+  D8's member set was derived from the rule's callers, and the class is wider than that.
+- **Minor ×3** — the settings paths were spelled twice (now passed into the classifier), the
+  candidate-list docblock sat above the wrong function, and a `chmod 0o000` cell assumes a non-root
+  runner (true of this repo's CI; left as is, noted here).
+
+Verified by the reviewer and re-verified here: the Implementation Checklist matches the diff; D1's
+index claim, D8's five readers, and the round-1 before/after table all still hold; no TODO or dead
+export is left. `check-bypass-rls` 18.2 s against its 30 s budget; `tsc --noEmit`, `lint`, the
+backfill integration cells (workers stopped, restarted after), the full suite and the production
+build all pass, and `scripts/pre-pr.sh` reports 80/80.
+
+## Phase 3 in one line
+
+Ten leak-shapes and three over-refusals were found across eight rounds; the ones that mattered came
+from running both hooks over generated corpora with real bash as the adjudicator, not from reading
+the diff.
