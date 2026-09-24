@@ -1979,22 +1979,6 @@ export type CandidateRow = {
 };
 
 /**
- * The candidate list: users whose column diverges from `owningTenantOf`'s
- * answer, i.e. exactly the rows design-note query (1) would count if it were
- * not restricted to `m.n = 1` — this candidate list deliberately widens that
- * restriction to include multi-active users too (item 4: "the adjudicator
- * decides them"), flagged `multiActive` rather than excluded.
- *
- * The WHERE clause is the SQL form of `owningTenantOf(column, active) !=
- * column`: `m.tenant_id` is that same oldest-active membership (the LATERAL's
- * own `ORDER BY created_at ASC LIMIT 1`), so filtering on `m.tenant_id <>
- * u.tenant_id` in SQL and calling `owningTenantOf` in application code answer
- * identically — proven by construction, not merely believed, because both
- * reduce to "the single row this LATERAL selects". The per-user APPLY step
- * below still calls the real function on a fresh read, which is what actually
- * decides whether a write happens.
- */
-/**
  * Pure row -> candidate mapping, exported so `multiActive` can be pinned by a
  * unit test independently of a live database (same motivation as
  * `formatUnmappedMessage` above).
@@ -2019,6 +2003,22 @@ export function candidateFromRow(row: CandidateRow): BackfillCandidate {
   };
 }
 
+/**
+ * The candidate list: users whose column diverges from `owningTenantOf`'s
+ * answer, i.e. exactly the rows design-note query (1) would count if it were
+ * not restricted to `m.n = 1` — this candidate list deliberately widens that
+ * restriction to include multi-active users too (item 4: "the adjudicator
+ * decides them"), flagged `multiActive` rather than excluded.
+ *
+ * The WHERE clause is the SQL form of `owningTenantOf(column, active) !=
+ * column`: `m.tenant_id` is that same oldest-active membership (the LATERAL's
+ * own `ORDER BY created_at ASC LIMIT 1`), so filtering on `m.tenant_id <>
+ * u.tenant_id` in SQL and calling `owningTenantOf` in application code answer
+ * identically — proven by construction, not merely believed, because both
+ * reduce to "the single row this LATERAL selects". The per-user APPLY step
+ * below still calls the real function on a fresh read, which is what actually
+ * decides whether a write happens.
+ */
 // Exported so the total-order fix (D8) can be pinned by a unit test that
 // spies the `tx` client, independently of a live database — same motivation
 // as `candidateFromRow` above.

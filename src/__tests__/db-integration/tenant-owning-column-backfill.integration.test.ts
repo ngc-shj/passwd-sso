@@ -231,7 +231,14 @@ describe("tenant-domain measure / backfill-owning-column (C4/#838)", () => {
       expect(await columnOf(userId)).toBe(tenantId);
     });
 
-    it.skipIf(SKIP)("--limit 1 moves exactly one of three divergent users (A-C4-2b)", async () => {
+    it.skipIf(SKIP)("--limit 1 writes exactly one move, whichever candidate it picks (A-C4-2b)", async () => {
+      // The listing pages over the WHOLE table by users.id, so which divergent
+      // user `--limit 1` picks is not this test's to decide: a row left by a
+      // crashed earlier run, with a lower id, would win. Asserting "the moved
+      // user is one of mine" therefore fails for a reason that has nothing to
+      // do with --limit. What --limit actually promises is a COUNT, and the
+      // file's own isolation rule says to assert it as a delta.
+      const baseline = (await cmdMeasure()).rows?.[0] as MeasureCounts;
       const seeded = [await seedDivergent(), await seedDivergent(), await seedDivergent()];
       const result = await cmdBackfillOwningColumn({ by: "test-op", apply: true, yes: true, limit: 1 });
       expect(result.ok, result.message).toBe(true);
@@ -239,11 +246,13 @@ describe("tenant-domain measure / backfill-owning-column (C4/#838)", () => {
       expect(outcomes).toHaveLength(1);
       expect(outcomes[0].moved).toBe(true);
 
+      const after = (await cmdMeasure()).rows?.[0] as MeasureCounts;
+      expect(after.divergent, "three seeded, one moved").toBe(baseline.divergent + 2);
+
       const moved = seeded.find((s) => s.userId === outcomes[0].userId);
-      expect(moved, "the moved user must be one of this test's own fixtures").toBeDefined();
-      expect(await columnOf(moved!.userId)).toBe(moved!.toTenant);
       for (const s of seeded) {
-        if (s.userId !== moved!.userId) expect(await columnOf(s.userId)).toBe(s.homeTenant);
+        const expected = s.userId === moved?.userId ? s.toTenant : s.homeTenant;
+        expect(await columnOf(s.userId)).toBe(expected);
       }
     });
 

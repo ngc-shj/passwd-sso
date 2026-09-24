@@ -82,13 +82,16 @@ describe("requireMaintenanceOperator", () => {
     expect(where.deactivatedAt).toBeNull();
   });
 
-  it("orders by createdAt ascending for deterministic multi-tenant resolution", async () => {
+  it("orders by createdAt then id, so the resolution is deterministic even on a tie", async () => {
+    // `createdAt` carries no uniqueness guarantee, so ordering by it alone
+    // leaves two calls free to attribute the same operator to different
+    // tenants. The `id` tiebreak is what makes the claim above true.
     mockFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: TENANT_ROLE.ADMIN });
 
     await requireMaintenanceOperator("user-1");
 
     const args = mockFindFirst.mock.calls[0][0];
-    expect(args.orderBy).toEqual({ createdAt: "asc" });
+    expect(args.orderBy).toEqual([{ createdAt: "asc" }, { id: "asc" }]);
   });
 
   it("does NOT add tenantId to where clause when option is omitted", async () => {

@@ -65,13 +65,23 @@ dominate. The stub is needed for a different reason: without it `Prisma.Transact
 branch and Rule B in fixtures that have nothing to do with a module load. The stub is therefore part
 of the fixture contract, not an optimisation.
 
-## D6 — C3's self-test suite lands at ≈1.98× against a 2× budget
+## D6 — C3's self-test suite: per-cell cost doubled, and the cell count then grew
 
-Interleaved, same 142 pre-existing cells: 37.2 s old, 73.2-74.3 s new. Inside the budget the plan
-set, with almost no headroom; under load it could tip over. The lever the plan sanctions — reusing
-one Program across cells in a worker — was NOT implemented. Recorded as an open cost rather than
-silently accepted: if CI's `app-ci` step tightens, this is the first thing to do, and it is a harness
-change, never a weakening of a rule. Gate runtime itself is ≈17 s against a 30 s budget (old: 1.6 s).
+Two numbers, because one of them was read as the other during review and that is the trap worth
+naming. The BUDGET comparison is per-cell, over the SAME cells: 142 cells at 37.2 s with the old
+gate, 73.2-74.3 s with the new one — ≈1.98×, inside the 2× the plan set, with almost no headroom.
+
+The ABSOLUTE is now higher and keeps rising, because the review rounds added cells: 169 tests /
+85.7 s measured at the end of Phase 3. Per cell that is 0.507 s against the earlier 0.515 s, so
+nothing got slower — the suite got bigger, and each added cell exists because a defect needed
+pinning. Quoting the absolute against the per-cell budget (85.7 s vs "74 s") reads as a breach and
+is not one; both figures are recorded here so the next reader compares like with like.
+
+What holds either way: the gate itself runs ≈18 s against its 30 s budget, and CI's `app-ci` step
+sits at ~13-14 min against a 20 min cap, so the ~12 s the new cells cost is immaterial there. The
+lever the plan sanctions — reusing one Program across cells in a worker — is still NOT implemented,
+and is still the first thing to do if that headroom tightens. It is a harness change, never a
+weakening of a rule.
 
 ## D7 — C1 preserves the SC2 residual deliberately
 

@@ -257,14 +257,22 @@ fi
 # dedup (`sort -u`) building `scanned_hook_files` below already collapses a
 # path that appears twice in `wired_shell_paths`.
 classify_status=0
-classify_out=$(node -e '
+classify_out=$(SETTINGS_FILE="$SETTINGS_FILE" SETTINGS_LOCAL_FILE="$SETTINGS_LOCAL_FILE" node -e '
 const fs = require("node:fs");
 const path = require("node:path");
 
 // Both files Claude Code merges — .claude/settings.local.json is the
 // sanctioned way to add a personal hook without touching the committed one,
 // and a hook wired only there must be classified and scanned the same way.
-const settingsPaths = [".claude/settings.json", ".claude/settings.local.json"];
+// Passed in from the shell rather than repeated here: the same two paths are
+// named in the refusal messages below, and two spellings of one fact drift.
+// (No apostrophes in this block: the whole script is inside a single-quoted
+// shell argument, and one would end it mid-program.)
+const settingsPaths = [process.env.SETTINGS_FILE, process.env.SETTINGS_LOCAL_FILE].filter(Boolean);
+if (settingsPaths.length !== 2) {
+  console.error("SETTINGS_FILE / SETTINGS_LOCAL_FILE not both set — refusing to guess which files carry the wiring");
+  process.exit(1);
+}
 
 // Deliberately conservative: only two shapes are RECOGNISED, everything else
 // is UNCLASSIFIABLE and fails the gate rather than being guessed at.
