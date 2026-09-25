@@ -120,6 +120,14 @@ infra/terraform/**/*.tfvars.json
 # secrets tfvars does (redis_auth_token) plus whatever state it read back.
 infra/terraform/**/*.tfplan
 
+# Out-of-band secret payloads for scripts/put-terraform-secrets.sh. The README
+# and the script's own usage tell you to write app-secrets.json /
+# jackson-secrets.json in the repo root — these hold EVERY app secret in
+# plaintext (AUTH_SECRET, SHARE_MASTER_KEY, SESSION_TOKEN_HMAC_KEY, every DB
+# URL with its password). "Never commit them" was documentation, not a control.
+*-secrets.json
+*-secrets.json.*
+
 # Extension
 extension/dist/
 extension/node_modules/
