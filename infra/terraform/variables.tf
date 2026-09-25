@@ -277,6 +277,45 @@ variable "redis_replicas_per_node_group" {
   default = 1
 }
 
+variable "enable_google_auth" {
+  type        = bool
+  default     = true
+  description = "Pass AUTH_GOOGLE_ID/SECRET to the app. The sign-in page treats Google (or SAML) as 'SSO configured' and HIDES the email and passkey options whenever either is present — see src/app/[locale]/auth/signin/page.tsx. So this is not additive: turning Google on removes magic-link sign-in from the UI."
+}
+
+# ── Magic-link (email) sign-in ────────────────────────────────────────────────
+# Wiring these is what makes EMAIL_PROVIDER=smtp reachable from the app task.
+# Leave smtp_host empty to leave the provider unconfigured; the app then needs
+# Google or Jackson to satisfy the production "at least one auth provider" rule.
+variable "smtp_host" {
+  type        = string
+  default     = ""
+  description = "SMTP host for magic-link email. Empty disables the email provider entirely."
+}
+
+variable "smtp_port" {
+  type        = number
+  default     = 587
+  description = "SMTP port. The app opens an implicit-TLS connection ONLY for 465; every other port connects in the clear and relies on STARTTLS, so 587 is the submission default and 25 is unusable from Fargate (AWS blocks outbound 25)."
+
+  validation {
+    condition     = contains([587, 465, 2525], var.smtp_port)
+    error_message = "smtp_port must be 587 (STARTTLS), 465 (implicit TLS) or 2525. Port 25 is blocked outbound by AWS."
+  }
+}
+
+variable "email_from" {
+  type        = string
+  default     = ""
+  description = "From address for magic-link email. Required when smtp_host is set."
+}
+
+variable "smtp_auth_enabled" {
+  type        = bool
+  default     = true
+  description = "Whether the SMTP server requires credentials. When true, SMTP_USER/SMTP_PASS are read from the app secret; the app only sends AUTH when BOTH are non-empty."
+}
+
 variable "enable_s3_audit_anchors" {
   type        = bool
   default     = true

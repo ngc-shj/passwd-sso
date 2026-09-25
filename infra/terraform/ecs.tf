@@ -102,27 +102,54 @@ resource "aws_ecs_task_definition" "app" {
         var.enable_s3_audit_anchors ? [
           { name = "AUDIT_ANCHOR_PUBLISHER_ENABLED", value = "true" },
           { name = "AUDIT_ANCHOR_DESTINATION_S3_BUCKET", value = aws_s3_bucket.audit_anchors[0].id },
+        ] : [],
+        # Magic-link sign-in. auth.config.ts registers the Nodemailer provider
+        # only when EMAIL_PROVIDER is set, and env-schema.ts additionally
+        # requires SMTP_HOST in production for EMAIL_PROVIDER=smtp — none of
+        # which any task definition passed, so email sign-in was unreachable on
+        # AWS however the secrets were populated.
+        var.smtp_host != "" ? [
+          { name = "EMAIL_PROVIDER", value = "smtp" },
+          { name = "EMAIL_FROM", value = var.email_from },
+          { name = "SMTP_HOST", value = var.smtp_host },
+          { name = "SMTP_PORT", value = tostring(var.smtp_port) },
         ] : []
       )
-      secrets = [
-        { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
-        { name = "AUTH_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_URL::" },
-        { name = "AUTH_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_SECRET::" },
-        { name = "AUTH_GOOGLE_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_ID::" },
-        { name = "AUTH_GOOGLE_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_SECRET::" },
-        { name = "AUTH_JACKSON_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_ID::" },
-        { name = "AUTH_JACKSON_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_SECRET::" },
-        { name = "SHARE_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SHARE_MASTER_KEY::" },
-        # #3: dedicated session-token HMAC key — required in production so the DB
-        # session lookup HMAC is decoupled from SHARE_MASTER_KEY rotation.
-        { name = "SESSION_TOKEN_HMAC_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_TOKEN_HMAC_KEY::" },
-        { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
-        # Also required in production by env-schema.ts — see the environment
-        # block above for how these came to be missing.
-        { name = "VERIFIER_PEPPER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:VERIFIER_PEPPER_KEY::" },
-        { name = "AUDIT_ANCHOR_SIGNING_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_SIGNING_KEY::" },
-        { name = "AUDIT_ANCHOR_TAG_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_TAG_SECRET::" },
-      ]
+      secrets = concat(
+        [
+          { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+          { name = "AUTH_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_URL::" },
+          { name = "AUTH_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_SECRET::" },
+          { name = "AUTH_JACKSON_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_ID::" },
+          { name = "AUTH_JACKSON_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_SECRET::" },
+          { name = "SHARE_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SHARE_MASTER_KEY::" },
+          # #3: dedicated session-token HMAC key — required in production so the DB
+          # session lookup HMAC is decoupled from SHARE_MASTER_KEY rotation.
+          { name = "SESSION_TOKEN_HMAC_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_TOKEN_HMAC_KEY::" },
+          { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
+          # Also required in production by env-schema.ts — see the environment
+          # block above for how these came to be missing.
+          { name = "VERIFIER_PEPPER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:VERIFIER_PEPPER_KEY::" },
+          { name = "AUDIT_ANCHOR_SIGNING_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_SIGNING_KEY::" },
+          { name = "AUDIT_ANCHOR_TAG_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_TAG_SECRET::" },
+        ],
+        # Credentials stay in Secrets Manager rather than task environment. The
+        # app sends AUTH only when both are non-empty, so an unauthenticated
+        # relay is expressed by writing empty strings, not by omitting the keys
+        # (ECS fails the task launch on a missing JSON key).
+        var.smtp_host != "" && var.smtp_auth_enabled ? [
+          { name = "SMTP_USER", valueFrom = "${aws_secretsmanager_secret.app.arn}:SMTP_USER::" },
+          { name = "SMTP_PASS", valueFrom = "${aws_secretsmanager_secret.app.arn}:SMTP_PASS::" },
+        ] : [],
+        # Conditional, because passing these is what DISABLES magic-link and
+        # passkey sign-in: the sign-in page computes hasSso = hasGoogle ||
+        # hasSaml and renders the email/passkey options only when hasSso is
+        # false. The two are alternatives in the UI, not additions.
+        var.enable_google_auth ? [
+          { name = "AUTH_GOOGLE_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_ID::" },
+          { name = "AUTH_GOOGLE_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_SECRET::" },
+        ] : []
+      )
       # Exit EXPLICITLY on both paths. The previous probe armed a bare
       # setTimeout(..., 5000) as its abort timer and never cleared it, so on
       # SUCCESS the process sat idle until that timer fired — every probe cost a
