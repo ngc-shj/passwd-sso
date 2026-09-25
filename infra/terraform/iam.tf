@@ -100,6 +100,31 @@ resource "aws_iam_role_policy" "ecs_migrate_exec_ssm" {
   })
 }
 
+# Anchors are evidence: PUT and GET, deliberately NO s3:DeleteObject. Combined
+# with bucket versioning, a compromised app task can neither erase a published
+# anchor nor overwrite one destructively — which is the whole point of anchoring
+# the chain outside the database.
+resource "aws_iam_role_policy" "ecs_audit_anchor_s3" {
+  count = var.enable_s3_audit_anchors ? 1 : 0
+  name  = "${local.name_prefix}-ecs-audit-anchor-s3"
+  role  = aws_iam_role.ecs_task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject"]
+        Resource = "${aws_s3_bucket.audit_anchors[0].arn}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.audit_anchors[0].arn
+      },
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "ecs_s3_access" {
   count = var.enable_s3_attachments ? 1 : 0
   name  = "${local.name_prefix}-ecs-s3"

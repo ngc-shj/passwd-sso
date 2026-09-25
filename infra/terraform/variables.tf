@@ -277,6 +277,12 @@ variable "redis_replicas_per_node_group" {
   default = 1
 }
 
+variable "enable_s3_audit_anchors" {
+  type        = bool
+  default     = true
+  description = "Create the S3 bucket that receives audit-chain anchors. Production requires AUDIT_ANCHOR_PUBLISHER_ENABLED=true and at least one destination; turn this off only if you configure the GitHub destination instead."
+}
+
 variable "enable_s3_attachments" {
   type        = bool
   default     = true

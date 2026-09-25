@@ -25,6 +25,18 @@ resource "aws_ecs_task_definition" "app" {
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
 
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
+
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = var.task_cpu_architecture
@@ -65,9 +77,20 @@ resource "aws_ecs_task_definition" "app" {
       # (loopback only), the rightmost hop the ALB observed (the real client, or
       # the attacker's own IP — never someone else's) is returned. The ALB is set
       # to xff_header_processing_mode = "append" in alb.tf to pin this behavior.
-      environment = [
-        { name = "TRUST_PROXY_HEADERS", value = "true" },
-      ]
+      environment = concat(
+        [
+          { name = "TRUST_PROXY_HEADERS", value = "true" },
+        ],
+        # Production env validation (src/lib/env-schema.ts) REFUSES to boot
+        # without external audit anchoring, and enabling it pulls in a signing
+        # key, a tag secret and a destination. These were absent, so every app
+        # task crash-looped on "Invalid environment variables" — found only by
+        # reading the task logs after the first successful rollout.
+        var.enable_s3_audit_anchors ? [
+          { name = "AUDIT_ANCHOR_PUBLISHER_ENABLED", value = "true" },
+          { name = "AUDIT_ANCHOR_DESTINATION_S3_BUCKET", value = aws_s3_bucket.audit_anchors[0].id },
+        ] : []
+      )
       secrets = [
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
         { name = "AUTH_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_URL::" },
@@ -81,6 +104,11 @@ resource "aws_ecs_task_definition" "app" {
         # session lookup HMAC is decoupled from SHARE_MASTER_KEY rotation.
         { name = "SESSION_TOKEN_HMAC_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_TOKEN_HMAC_KEY::" },
         { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
+        # Also required in production by env-schema.ts — see the environment
+        # block above for how these came to be missing.
+        { name = "VERIFIER_PEPPER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:VERIFIER_PEPPER_KEY::" },
+        { name = "AUDIT_ANCHOR_SIGNING_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_SIGNING_KEY::" },
+        { name = "AUDIT_ANCHOR_TAG_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_TAG_SECRET::" },
       ]
       healthCheck = {
         command     = ["CMD-SHELL", "node -e \"const c=new AbortController();setTimeout(()=>c.abort(),5000);fetch('http://localhost:3000/api/health/live',{signal:c.signal}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
@@ -102,6 +130,18 @@ resource "aws_ecs_task_definition" "jackson" {
   family                   = "${local.name_prefix}-jackson"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
+
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -154,6 +194,18 @@ resource "aws_ecs_task_definition" "migrate" {
   family                   = "${local.name_prefix}-migrate"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
+
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -300,6 +352,18 @@ resource "aws_ecs_task_definition" "audit_outbox_worker" {
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
 
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
+
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = var.task_cpu_architecture
@@ -338,6 +402,18 @@ resource "aws_ecs_task_definition" "retention_gc_worker" {
   family                   = "${local.name_prefix}-retention-gc-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
+
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
 
   runtime_platform {
     operating_system_family = "LINUX"

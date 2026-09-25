@@ -146,3 +146,66 @@ resource "aws_s3_bucket_policy" "attachments" {
     ]
   })
 }
+
+################################################################################
+# S3 — Audit chain anchors
+#
+# AUDIT_ANCHOR_PUBLISHER_ENABLED=true is REQUIRED in production (env-schema.ts),
+# and enabling it requires a signing key, a tag secret, and at least one
+# destination. Without an external anchor the audit chain only detects tampering
+# inside the database boundary — an attacker with DB write access can rewrite
+# history undetected — so this is a hard boot requirement, not a feature flag.
+#
+# Kept separate from the attachments bucket rather than sharing it under a
+# prefix: the two have opposite access shapes. Attachments are read/write/delete
+# by the app; anchors are evidence, so the task role below gets PUT and GET and
+# NO DeleteObject, and versioning is on so an overwrite cannot erase the prior
+# anchor either. Sharing one bucket would have to grant the union.
+#
+# The filesystem destination is not a usable alternative here: a Fargate task's
+# filesystem is ephemeral, so anchors written there vanish with the task and the
+# tamper-evidence they exist to provide is lost.
+################################################################################
+
+resource "aws_s3_bucket" "audit_anchors" {
+  count  = var.enable_s3_audit_anchors ? 1 : 0
+  bucket = "${local.name_prefix}-audit-anchors"
+
+  object_lock_enabled = var.enable_s3_object_lock
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-audit-anchors" })
+}
+
+resource "aws_s3_bucket_versioning" "audit_anchors" {
+  count  = var.enable_s3_audit_anchors ? 1 : 0
+  bucket = aws_s3_bucket.audit_anchors[0].id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "audit_anchors" {
+  count  = var.enable_s3_audit_anchors ? 1 : 0
+  bucket = aws_s3_bucket.audit_anchors[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = var.s3_kms_key_arn != "" ? "aws:kms" : "AES256"
+      kms_master_key_id = var.s3_kms_key_arn != "" ? var.s3_kms_key_arn : null
+    }
+    bucket_key_enabled = var.s3_kms_key_arn != "" ? true : false
+
+    # See the attachments bucket: an SSE-C write is unreadable to this account
+    # forever, which for the anchor store would destroy the evidence it holds.
+    blocked_encryption_types = ["SSE-C"]
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "audit_anchors" {
+  count                   = var.enable_s3_audit_anchors ? 1 : 0
+  bucket                  = aws_s3_bucket.audit_anchors[0].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
