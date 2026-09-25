@@ -11,10 +11,10 @@ describe("requireOptionalModule", () => {
     }));
 
     const { requireOptionalModule } = await import("./runtime-module");
-    const mod = requireOptionalModule<{ ok: boolean }>("example-module");
+    const mod = requireOptionalModule<{ ok: boolean }>("@google-cloud/storage");
 
     expect(createRequireMock).toHaveBeenCalled();
-    expect(requireMock).toHaveBeenCalledWith("example-module");
+    expect(requireMock).toHaveBeenCalledWith("@google-cloud/storage");
     expect(mod).toEqual({ ok: true });
   });
 
@@ -30,8 +30,8 @@ describe("requireOptionalModule", () => {
     }));
 
     const { requireOptionalModule } = await import("./runtime-module");
-    expect(() => requireOptionalModule("missing-module")).toThrow(
-      'Missing optional dependency "missing-module"',
+    expect(() => requireOptionalModule("@azure/storage-blob")).toThrow(
+      'Missing optional dependency "@azure/storage-blob"',
     );
   });
 });

@@ -40,6 +40,16 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove  --tenant <ref> --domain <domain> --by <label> [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid> [--after <seq>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- realign --user <uuid|email> --tenant <ref> --by <label> [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- measure
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]
+//
+// `measure` prints the three counts docs/archive/review/audit-tenant-adjudicator-design.md's
+// "Measurements" section specifies — divergent column, multi-active-membership
+// users, zero-active-membership users — read-only, no writes. `backfill-owning-column`
+// lists the divergent population (the default, no writes) and, with --apply, moves
+// each through the same adjudicator (`owningTenantOf`, `src/lib/tenant/owning-tenant-rule.ts`)
+// `resolveOwningTenantIdFromClient` uses to answer reads, so this closes the WRITE
+// side of the same class rather than introducing a second rule (C4/#838).
 //
 // `--tenant <ref>` accepts the tenant's UUID, one of its already-registered
 // claims (normalised the same way `add`/`remove` normalise `--domain`), or its
@@ -88,7 +98,7 @@ import {
   operatorDomainSchema,
   NON_PRINTABLE_ASCII_SQL_CLASS,
 } from "@/lib/tenant/tenant-claim-registry";
-import { UUID_RE, SYSTEM_TENANT_ID, SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { UUID_RE, SYSTEM_TENANT_ID, SYSTEM_ACTOR_ID, NIL_UUID } from "@/lib/constants/app";
 import {
   escapeUnsafeDisplayChars,
   UNSAFE_DISPLAY_CHARS_RE,
@@ -108,6 +118,13 @@ import { enqueueAuditInTx } from "@/lib/audit/audit-outbox-in-tx";
 import { countStrandedRows } from "@/lib/tenant/stranded-rows";
 import { realignOwningTenantColumn } from "@/lib/tenant/owning-column";
 import { REALIGNMENT_SOURCE, realignToMembershipInTxWith } from "@/lib/tenant/tenant-realignment-core";
+// The SAME adjudicator `resolveOwningTenantIdFromClient` uses (C4/#838) — no
+// Prisma import in this module (see its own header), so it is reachable here
+// too. Imported directly, not through `tenant-context.ts`: that module's
+// first line is `import { prisma } from "@/lib/prisma"`, which throws without
+// DATABASE_URL, and `tenant-domain-import-graph.test.ts` fails the moment
+// anything this file imports reaches it.
+import { owningTenantOf } from "@/lib/tenant/owning-tenant-rule";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import { envInt } from "@/lib/env/env-utils";
 import {
@@ -1858,6 +1875,368 @@ export async function cmdRealign(args: {
   }
 }
 
+// ─── measure ─────────────────────────────────────────────────────
+
+/**
+ * The three counts `docs/archive/review/audit-tenant-adjudicator-design.md`'s
+ * "Measurements" section specifies, run here rather than left as SQL an
+ * operator pastes by hand: read-only, no writes, no confirmation.
+ *
+ * Query (2) is printed FIRST, ahead of (1) — the divergence count that
+ * motivates `backfill-owning-column` — because it is the one that blocks
+ * `docs/archive/review/audit-tenant-adjudicator-design.md`'s Q11 partial
+ * unique index (SC5) regardless of what an operator decides about the
+ * backfill, and an operator who runs `measure` once should see it before
+ * anything else.
+ *
+ * Each query's predicate is the design note's, verbatim; only the output cast
+ * (`::int`, to keep every count a `number` rather than a driver-dependent
+ * `bigint`) is added.
+ */
+export async function cmdMeasure(): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        const [{ count: multiActiveRaw }] = await tx.$queryRawUnsafe<{ count: number }[]>(
+          `SELECT count(*)::int AS count FROM (
+             SELECT user_id FROM tenant_members WHERE deactivated_at IS NULL
+             GROUP BY user_id HAVING count(*) > 1
+           ) t`,
+        );
+        const [{ count: divergentRaw }] = await tx.$queryRawUnsafe<{ count: number }[]>(
+          `SELECT count(*)::int AS count FROM users u
+           JOIN LATERAL (
+             SELECT tm.tenant_id, count(*) OVER () AS n
+               FROM tenant_members tm
+              WHERE tm.user_id = u.id AND tm.deactivated_at IS NULL
+              ORDER BY tm.created_at ASC LIMIT 1
+           ) m ON true
+          WHERE m.n = 1 AND m.tenant_id <> u.tenant_id`,
+        );
+        const [{ count: zeroActiveRaw }] = await tx.$queryRawUnsafe<{ count: number }[]>(
+          `SELECT count(*)::int AS count FROM users u
+          WHERE NOT EXISTS (
+            SELECT 1 FROM tenant_members tm
+             WHERE tm.user_id = u.id AND tm.deactivated_at IS NULL
+          )`,
+        );
+
+        const multiActive = Number(multiActiveRaw);
+        const divergent = Number(divergentRaw);
+        const zeroActive = Number(zeroActiveRaw);
+
+        console.log("Owning-tenant measurements (docs/archive/review/audit-tenant-adjudicator-design.md):");
+        console.log(`  (2) more than one active membership (blocks the Q11 partial unique index, SC5): ${multiActive}`);
+        console.log(`  (1) divergent — column != the single active membership: ${divergent}`);
+        console.log(`  (3) zero active memberships (the producer's precondition): ${zeroActive}`);
+
+        return {
+          ok: true,
+          code: 0,
+          rows: [{ multiActive, divergent, zeroActive }],
+          message: `divergent=${divergent} multiActive=${multiActive} zeroActive=${zeroActive}`,
+        };
+      },
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+// ─── backfill-owning-column ────────────────────────────────────────
+
+/**
+ * How many candidates one query page reads at a time (S-F8): the candidate
+ * LIST is read in keyset pages ordered by `users.id` (unique), so a single
+ * query never has to materialise more than this many rows, regardless of how
+ * many divergent users the table holds.
+ */
+const BACKFILL_CANDIDATE_PAGE_SIZE = 200;
+
+/** `--limit`'s default and ceiling, named rather than inline (round pattern, see PREFLIGHT_FOLD_SCAN_LIMIT / HISTORY_ROW_CAP above). */
+const DEFAULT_BACKFILL_LIMIT = 100;
+const MAX_BACKFILL_LIMIT = 10_000;
+
+export type BackfillCandidate = {
+  userId: string;
+  from: string;
+  to: string;
+  activeMembershipCount: number;
+  multiActive: boolean;
+};
+
+export type CandidateRow = {
+  user_id: string;
+  column_tenant_id: string;
+  target_tenant_id: string;
+  active_count: number;
+};
+
+/**
+ * Pure row -> candidate mapping, exported so `multiActive` can be pinned by a
+ * unit test independently of a live database (same motivation as
+ * `formatUnmappedMessage` above).
+ *
+ * `tenant_members_one_active_per_user` (`prisma/migrations/20260909120000_one_active_membership_per_user`,
+ * #830 — design-note Q11 / SC5, already shipped) makes `active_count > 1`
+ * structurally unrepresentable going forward: no fixture can drive it in a
+ * real database anymore. The branch stays, for two reasons the index does not
+ * remove: a row written before that migration ran (it fails loudly on
+ * pre-existing duplicates, but does not retroactively scan for rows a restore
+ * or an out-of-band write could still introduce), and `owningTenantOf` itself
+ * is a general rule with no knowledge of this index — decided here on
+ * whatever it is handed, unconditionally, the same way its own unit tests do.
+ */
+export function candidateFromRow(row: CandidateRow): BackfillCandidate {
+  return {
+    userId: row.user_id,
+    from: row.column_tenant_id,
+    to: row.target_tenant_id,
+    activeMembershipCount: row.active_count,
+    multiActive: row.active_count > 1,
+  };
+}
+
+/**
+ * The candidate list: users whose column diverges from `owningTenantOf`'s
+ * answer, i.e. exactly the rows design-note query (1) would count if it were
+ * not restricted to `m.n = 1` — this candidate list deliberately widens that
+ * restriction to include multi-active users too (item 4: "the adjudicator
+ * decides them"), flagged `multiActive` rather than excluded.
+ *
+ * The WHERE clause is the SQL form of `owningTenantOf(column, active) !=
+ * column`: `m.tenant_id` is that same oldest-active membership (the LATERAL's
+ * own `ORDER BY created_at ASC LIMIT 1`), so filtering on `m.tenant_id <>
+ * u.tenant_id` in SQL and calling `owningTenantOf` in application code answer
+ * identically — proven by construction, not merely believed, because both
+ * reduce to "the single row this LATERAL selects". The per-user APPLY step
+ * below still calls the real function on a fresh read, which is what actually
+ * decides whether a write happens.
+ */
+// Exported so the total-order fix (D8) can be pinned by a unit test that
+// spies the `tx` client, independently of a live database — same motivation
+// as `candidateFromRow` above.
+export async function listDivergentCandidates(tx: TxClient, limit: number): Promise<BackfillCandidate[]> {
+  const candidates: BackfillCandidate[] = [];
+  let cursor = NIL_UUID;
+  for (;;) {
+    const page = await tx.$queryRawUnsafe<CandidateRow[]>(
+      `SELECT u.id::text AS user_id, u.tenant_id::text AS column_tenant_id,
+              m.tenant_id::text AS target_tenant_id, m.active_count::int AS active_count
+         FROM users u
+         JOIN LATERAL (
+           SELECT tm.tenant_id, count(*) OVER () AS active_count
+             FROM tenant_members tm
+            WHERE tm.user_id = u.id AND tm.deactivated_at IS NULL
+            ORDER BY tm.created_at ASC, tm.id ASC
+            LIMIT 1
+         ) m ON true
+        WHERE u.id > $1::uuid
+          AND m.tenant_id <> u.tenant_id
+        ORDER BY u.id ASC
+        LIMIT $2::int`,
+      cursor,
+      BACKFILL_CANDIDATE_PAGE_SIZE,
+    );
+    for (const row of page) {
+      candidates.push(candidateFromRow(row));
+      if (candidates.length >= limit) return candidates;
+    }
+    if (page.length < BACKFILL_CANDIDATE_PAGE_SIZE) return candidates; // table exhausted
+    cursor = page[page.length - 1].user_id;
+  }
+}
+
+function printCandidates(candidates: BackfillCandidate[]): void {
+  console.log(`${candidates.length} candidate(s):`);
+  for (const c of candidates) {
+    console.log(
+      `  userId=${c.userId} from=${c.from} to=${c.to} activeMembershipCount=${c.activeMembershipCount}` +
+        (c.multiActive ? " multiActive" : ""),
+    );
+  }
+}
+
+type BackfillOutcome = { userId: string; moved: boolean; from?: string; to?: string; reason?: string };
+
+/**
+ * Move ONE user, inside its own bypass transaction: re-reads the column and
+ * active memberships (never trusts the candidate list's snapshot), recomputes
+ * the target with the real `owningTenantOf`, and skips rather than writes if
+ * the user is no longer divergent — a membership deactivated between listing
+ * and apply is exactly the case this re-check exists for (A-C4-2).
+ *
+ * Goes through `realignToMembershipInTxWith`, never a direct
+ * `tx.user.update`/`updateMany` here, so the move is recorded the same way
+ * `realign` records one (forbidden-pattern rule, C4 plan).
+ */
+// Exported for the same reason as listDivergentCandidates above (D8 pin).
+export async function applyOneCandidate(tx: TxClient, userId: string, by: string): Promise<BackfillOutcome> {
+  const user = await tx.user.findUnique({
+    where: { id: userId },
+    select: {
+      tenantId: true,
+      tenantMemberships: {
+        where: { deactivatedAt: null },
+        select: { id: true, tenantId: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      },
+    },
+  });
+  if (!user) {
+    return { userId, moved: false, reason: "user no longer exists" };
+  }
+
+  const active = user.tenantMemberships;
+  const target = owningTenantOf(user.tenantId, active);
+  if (target === user.tenantId) {
+    return { userId, moved: false, reason: "no longer divergent" };
+  }
+
+  // `target` came out of `active`, so this is always found — defensive rather
+  // than assumed, because the two reads above are not atomic with each other
+  // beyond sharing this transaction's snapshot.
+  const member = active.find((m) => m.tenantId === target);
+  if (!member) {
+    return { userId, moved: false, reason: "target membership row no longer active" };
+  }
+
+  const previous = await realignToMembershipInTxWith(
+    {
+      logAuditInTx: (atx, tenantId, params) => enqueueAuditInTx(atx, tenantId, buildOutboxPayload(params)),
+      realignOwningTenantColumn,
+      countStrandedRows,
+    },
+    tx,
+    {
+      userId,
+      memberId: member.id,
+      tenantId: target,
+      cause: {
+        source: REALIGNMENT_SOURCE.OPERATOR,
+        actorUserId: SYSTEM_ACTOR_ID,
+        actorType: ACTOR_TYPE.SYSTEM,
+        label: by,
+      },
+    },
+  );
+  if (previous === null) {
+    // realignToMembershipInTxWith's own no-op case: the column already named
+    // `target` by the time this transaction's write ran.
+    return { userId, moved: false, reason: "no longer divergent" };
+  }
+  return { userId, moved: true, from: previous, to: target };
+}
+
+/**
+ * List, then optionally apply, the owning-column backfill (C4/#838): users
+ * whose `User.tenantId` diverges from `owningTenantOf`'s answer over their
+ * active memberships — the class `docs/archive/review/audit-tenant-adjudicator-design.md`
+ * measures and defers fixing at the row level, because `resolveOwningTenantIdFromClient`
+ * already reads through the adjudicator, so the rows read correctly today; the
+ * column is what this closes.
+ *
+ * Fail-closed shape, same family as `add`/`remove`/`realign`:
+ * - `--by` is validated BEFORE the client is built (S-F3), so an invalid
+ *   label never reaches even the read-only listing;
+ * - no `--apply` is the DEFAULT: this lists candidates and exits 0 with zero
+ *   writes, always — an operator who forgets the flag gets a report, not a
+ *   migration;
+ * - `--apply` still requires confirmation (or `--yes`) AFTER the same list
+ *   has been printed, so what is confirmed is what was shown;
+ * - each user moves in its OWN transaction (`applyOneCandidate` above), so a
+ *   user divergent at listing time but fixed by another process before apply
+ *   reads as "no longer divergent" rather than being moved on stale data.
+ */
+export async function cmdBackfillOwningColumn(args: {
+  by: string;
+  apply?: boolean;
+  yes?: boolean;
+  limit?: number;
+  confirm?: ConfirmFn;
+}): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
+
+  const limit = args.limit ?? DEFAULT_BACKFILL_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_BACKFILL_LIMIT) {
+    return {
+      ok: false,
+      code: 1,
+      // operator-echo-exempt: `limit` is a number here, not operator text — the
+      // CLI wrapper refuses anything that does not match /^\d+$/ and escapes it
+      // there, so what reaches this arm is a parsed value (NaN included).
+      message: `Invalid --limit "${limit}": expected an integer between 1 and ${MAX_BACKFILL_LIMIT}.`,
+    };
+  }
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    const candidates = await withBypassRls(
+      prisma,
+      (tx) => listDivergentCandidates(tx, limit),
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    );
+
+    printCandidates(candidates);
+
+    if (!args.apply) {
+      return {
+        ok: true,
+        code: 0,
+        rows: candidates,
+        message: `${candidates.length} candidate(s) listed. Dry run — no writes made. Re-run with --apply to move them.`,
+      };
+    }
+
+    if (candidates.length === 0) {
+      return { ok: true, code: 0, rows: [], message: "No divergent users found; nothing to apply." };
+    }
+
+    console.log(
+      `This will move the owning-tenant column for up to ${candidates.length} user(s), ` +
+        'each recorded as a USER_TENANT_REALIGNED audit row with source "operator" on both tenants.',
+    );
+    const confirmed = args.yes === true ? true : await (args.confirm ?? defaultConfirm)("Proceed?");
+    if (!confirmed) {
+      return { ok: false, code: 1, message: "Aborted: not confirmed." };
+    }
+
+    const outcomes: BackfillOutcome[] = [];
+    for (const candidate of candidates) {
+      const outcome = await withBypassRls(
+        prisma,
+        (tx) => applyOneCandidate(tx, candidate.userId, args.by),
+        BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      );
+      outcomes.push(outcome);
+      console.log(
+        outcome.moved
+          ? `  userId=${outcome.userId} realigned from=${outcome.from} to=${outcome.to}`
+          : `  userId=${outcome.userId} skipped (${outcome.reason})`,
+      );
+    }
+    const moved = outcomes.filter((o) => o.moved).length;
+    return {
+      ok: true,
+      code: 0,
+      rows: outcomes,
+      message: `${moved} of ${candidates.length} candidate(s) realigned.`,
+    };
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 // ─── CLI wrapper ─────────────────────────────────────────────────
 
 function printUsage(): void {
@@ -1871,6 +2250,8 @@ function printUsage(): void {
       "  tenant-domain remove  --tenant <ref> --domain <domain> --by <label> [--yes]",
       "  tenant-domain history --domain <claim> | --tenant <uuid> [--after <seq>]",
       "  tenant-domain realign --user <uuid|email> --tenant <ref> --by <label> [--yes]",
+      "  tenant-domain measure",
+      `  tenant-domain backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]  (default ${DEFAULT_BACKFILL_LIMIT}, max ${MAX_BACKFILL_LIMIT})`,
       "",
       "<ref> is a tenant UUID, one of its registered claims, or its external id (not its slug).",
       "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
@@ -1883,6 +2264,13 @@ function printUsage(): void {
       `answer within ${confirmationBudgetText()}, or re-run the command. Do not leave a prompt`,
       "open while migrations deploy: its reads hold table locks a migration waits for,",
       "and sign-ins queue behind that migration.",
+      "",
+      "measure prints the three docs/archive/review/audit-tenant-adjudicator-design.md",
+      "counts (divergent column, multi-active-membership users, zero-active users);",
+      "read-only. backfill-owning-column lists (default) or, with --apply, moves the",
+      "divergent users measure counts, each through the same adjudicator realign uses:",
+      "the oldest active membership wins over the column, and a multi-active user is",
+      "decided, not refused, and flagged multiActive in the listing.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",
@@ -1978,6 +2366,36 @@ async function main(): Promise<void> {
         return;
       }
       result = await cmdRealign({ user, tenant, by, yes });
+      break;
+    }
+    case "measure":
+      result = await cmdMeasure();
+      break;
+    case "backfill-owning-column": {
+      const by = getStringFlag(flags, "by");
+      if (!by) {
+        printUsage();
+        process.exitCode = 1;
+        return;
+      }
+      const rawLimit = getStringFlag(flags, "limit");
+      if (rawLimit !== undefined && !/^\d+$/.test(rawLimit)) {
+        // Escaped: arbitrary operator text that did not match /^\d+$/, printed
+        // before anything has validated it (same convention as `unmapped`'s
+        // --days, round-6 F4).
+        console.error(
+          `Invalid --limit "${escapeUnsafeDisplayChars(rawLimit)}": expected a positive integer.`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      const apply = flags.get("apply") === true;
+      result = await cmdBackfillOwningColumn({
+        by,
+        apply,
+        yes,
+        limit: rawLimit === undefined ? undefined : Number(rawLimit),
+      });
       break;
     }
     default:

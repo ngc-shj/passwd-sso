@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { owningTenantOf } from "@/lib/tenant/owning-tenant-rule";
 
 export async function resolveUserTenantIdFromClient(
   db: Pick<typeof prisma, "tenantMember">,
@@ -82,21 +83,12 @@ export async function resolveOwningTenantIdFromClient(
       tenantMemberships: {
         where: { deactivatedAt: null },
         select: { tenantId: true },
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         take: 1,
       },
     },
   });
   return user ? owningTenantOf(user.tenantId, user.tenantMemberships) : null;
-}
-
-/**
- * The owning-tenant rule itself, over a user's column and their ACTIVE
- * memberships oldest first. One function so that `resolveOwningTenantIdFromClient`
- * and the batch reader below cannot answer the same user differently.
- */
-function owningTenantOf(column: string, activeMemberships: readonly { tenantId: string }[]): string {
-  return activeMemberships[0]?.tenantId ?? column;
 }
 
 export { realignOwningTenantColumn } from "@/lib/tenant/owning-column";
@@ -242,7 +234,7 @@ export async function resolveExistingUsersForTenant(
         tenantMemberships: {
           where: { OR: [{ deactivatedAt: null }, { tenantId }] },
           select: { tenantId: true, deactivatedAt: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         },
       },
     });
@@ -313,7 +305,7 @@ export async function usersOwnedByAnotherTenant(
         tenantMemberships: {
           where: { deactivatedAt: null },
           select: { tenantId: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         },
       },
     });

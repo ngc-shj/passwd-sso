@@ -33,14 +33,26 @@
  * Deliberately NOT adopted (scan intent / Project config genuinely differs —
  * migrating would change behavior, not just shape):
  *   - classify-fail-closed-test: intentionally scans TEST files; walkSourceFiles
- *     excludes them.
- *   - check-dynamic-import-specifiers: Project is tsConfig-based (type-resolving),
- *     not an in-memory no-Program project.
+ *     excludes them. Its own semantic Project is also in-memory with
+ *     `skipFileDependencyResolution: true` — real for symbol lookup, but not a
+ *     dependency-resolved Program, so it is not createProgramProject either.
+ *   - check-dynamic-import-specifiers: Project is tsConfig-based, but adds files
+ *     itself (`skipAddingFilesFromTsConfig: true`) and never calls
+ *     `resolveSourceFileDependencies` — a filesystem-resolution convenience, not
+ *     the reference-answering Program createProgramProject builds.
  *   - check-destructive-wrapper-derivation: Project omits compilerOptions on
  *     purpose; adding jsx:ReactJSX would change how its .tsx inputs parse.
+ *
+ * Adopters of createProgramProject: check-bypass-rls (Program-backed reference
+ * cross-check, C3) — the one gate in this tree whose spelling-based
+ * recognition (an import specifier's text, a `with*Rls` identifier) cannot
+ * prove a reference does NOT exist. Every other gate above answers its
+ * question from the parse tree alone and stays on createAstProject: a real
+ * Program costs 10s+ over this repo (see check-bypass-rls's header) for a
+ * question ("is this reference real") that only a reference cross-check asks.
  */
 import { Project, ts } from "ts-morph";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, relative } from "node:path";
 
 /**
@@ -65,6 +77,58 @@ export function createAstProject() {
     skipFileDependencyResolution: true,
     compilerOptions: { allowJs: true, jsx: ts.JsxEmit.ReactJSX },
   });
+}
+
+/**
+ * A named failure from createProgramProject — the caller decides how to print
+ * it, but every caller must treat it as fail-closed (process.exit(1), not a
+ * caught-and-continued warning). `cause` carries the underlying error, if any,
+ * for a caller that wants to log it.
+ */
+export class ProgramBuildError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "ProgramBuildError";
+  }
+}
+
+/**
+ * A real ts-morph Program, backed by `tsConfigFilePath` with dependency
+ * resolution — the one thing createAstProject's in-memory project cannot give
+ * a gate: a reference the language service will FIND regardless of how it is
+ * spelled (a renamed re-export, an `export * as ns` namespace), because it
+ * resolves the same underlying symbol rather than matching text.
+ *
+ * `skipFileDependencyResolution` MUST NOT be set here — re-exports are
+ * exactly what dependency resolution follows, and a Program built without it
+ * cannot answer a reference cross-check across module boundaries (forbidden
+ * pattern, C3 plan). `resolveSourceFileDependencies()` is called explicitly
+ * rather than relied on implicitly: ts-morph does not guarantee it runs
+ * merely from `tsConfigFilePath` when `addFilesFromTsConfig` families of
+ * options are involved, and a Program that silently skipped it would fail
+ * the same way `skipFileDependencyResolution: true` does, just quietly.
+ *
+ * Throws ProgramBuildError, named, on a missing tsconfig — the caller
+ * distinguishes "the Program could not be built" from "the Program found
+ * nothing", which must never read the same in a CI log (see
+ * check-bypass-rls's own "examined nothing must not be spelled found
+ * nothing" rule).
+ */
+export function createProgramProject(tsConfigFilePath) {
+  if (!existsSync(tsConfigFilePath)) {
+    throw new ProgramBuildError(`no tsconfig.json found at ${tsConfigFilePath}`);
+  }
+  let project;
+  try {
+    project = new Project({ tsConfigFilePath });
+    project.resolveSourceFileDependencies();
+  } catch (error) {
+    throw new ProgramBuildError(
+      `failed to build a Program from ${tsConfigFilePath}: ${error.message}`,
+      { cause: error },
+    );
+  }
+  return project;
 }
 
 /**

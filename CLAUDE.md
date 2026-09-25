@@ -38,7 +38,7 @@ MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs         
 
 MIGRATION_DATABASE_URL=<privileged-url> npm run migrate:account-tokens               # Encrypt legacy plaintext OAuth tokens (idempotent; --dry-run available)
 
-MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list|unmapped|preflight|add|remove|history|realign  # SSO tenant claim registry (lockout diagnosis/recovery); `remove` now requires --by <label> (breaking); `realign --user <uuid|email> --tenant <ref> --by <label>` moves a departed member active nowhere back onto a tenant holding their membership row; see README.md's "IdP domain changed / tenant locked out"
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list|unmapped|preflight|add|remove|history|realign|measure|backfill-owning-column  # SSO tenant claim registry (lockout diagnosis/recovery); `remove` now requires --by <label> (breaking); `realign --user <uuid|email> --tenant <ref> --by <label>` moves a departed member active nowhere back onto a tenant holding their membership row; `measure` prints the owning-column divergence/multi-active/zero-active counts (read-only); `backfill-owning-column --by <label> [--apply] [--limit <n>]` lists (default) or moves the divergent users `measure` counts, through the same adjudicator `resolveOwningTenantIdFromClient` uses; see README.md's "IdP domain changed / tenant locked out"
 ```
 
 Audit outbox worker (separate process):

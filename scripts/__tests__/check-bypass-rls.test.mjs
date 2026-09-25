@@ -22,8 +22,124 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Project } from "ts-morph";
 
 const CHECKER = fileURLToPath(new URL("../checks/check-bypass-rls.mjs", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+
+// C3: the gate now builds a real Program (dependency-resolved, via
+// tsConfigFilePath) over the fixture tree, and resolves the four helper
+// declarations through it before anything else runs — a fixture missing
+// either fails named (item 1). Every fixture therefore needs the REAL
+// tenant-rls.ts / tenant-context.ts and a minimal tsconfig.json, not
+// hand-written stubs (T-F4, F-F3): a stub only the test author wrote could
+// drift from the real file's declarations (overloads included) in a way the
+// gate would never see on the real tree. `run()` below supplies both to every
+// fixture by default; the two cells that deliberately omit one (A-C3-4) call
+// spawnSync directly instead, bypassing this scaffold.
+const REAL_TENANT_RLS = readFileSync(join(REPO_ROOT, "src/lib/tenant-rls.ts"), "utf8");
+const REAL_TENANT_CONTEXT = readFileSync(join(REPO_ROOT, "src/lib/tenant-context.ts"), "utf8");
+
+// Fixtures live under mkdtemp with no node_modules above them (T-F2): real
+// `@prisma/client` cannot resolve there. Left unresolved, `Prisma.TransactionClient`
+// widens to `any`, and that `any` is exactly the callback parameter (`tx`) every
+// with*Rls fixture passes around — cascading into a FALSE POSITIVE under C3 item
+// 5's any-callee/one-argument branch for any single-argument call the fixture's
+// own callback makes with `tx` (`a(tx)`, `queryMember(tx)`, …), unrelated to a
+// module load. A minimal ambient stub (per the plan) fixes this at its root — `TransactionClient` resolves to a real (non-`any`) object
+// type, so `couldBeStringSpecifier` correctly excludes it — and, measured
+// separately, is also the cheaper path: it resolves through `paths` instead of a
+// failing filesystem walk for every fixture spawn (see the measurement notes).
+// Every model/meta-property access (\`tx.auditOutbox\`, \`tx.$transaction\`,
+// \`tx["$executeRaw"]\`, a bracket or template-literal spelling of either) goes
+// through the SAME index signature, so it needs to be both a real object (with
+// named CRUD methods, so \`tx.auditOutbox.findMany()\` types as a concrete
+// Promise, not \`any\`) and CALLABLE (so \`tx.$transaction(fn)\` / a tagged
+// \`tx.$executeRaw\`\`...\`\` typecheck as a real call, not a TS error the
+// checker silently recovers from AS \`any\`). Recovering as \`any\` is exactly
+// the false-positive path: an \`any\`-typed \`tx\` cascades into item 5's
+// any-callee/one-argument branch for any single-arg call the fixture's own
+// callback makes with it, and into Rule B for any computed index off a query
+// result — both unrelated to a module load or a helper reference.
+// Hand-authored, with nothing tying it to the installed @prisma/client
+// package (finding D, issue-838 follow-ups review). The ONE property this
+// stub must keep, whatever else drifts: `tx` (and `prisma`) must NOT widen to
+// `any`, because an `any` there spuriously trips item 5's any-callee branch
+// and Rule B for code that never touches a module load or a helper reference
+// (see the false-positive walkthrough above) — everything else here exists
+// only in service of that.
+//
+// It is NOT a faithful shape of the real generated client, and does not try
+// to be: the real `PrismaClient` has no string index signature at all (only
+// `[K: symbol]: {...}`), and exposes each model as a named, non-callable
+// getter (`get user(): Prisma.UserDelegate<...>`), never as a blanket
+// `[key: string]` whose delegate is itself callable the way this stub's is.
+// Nothing in this gate indexes a Prisma client dynamically today, so that gap
+// costs nothing here — but a Prisma major-version bump is exactly the kind of
+// change that could invalidate the one property that DOES matter, and this
+// stub will not fail loudly if it does. Re-derive it against the then-current
+// generated `.d.ts` rather than assuming it still holds.
+const PRISMA_CLIENT_STUB = `declare module "@prisma/client" {
+  interface PrismaModelDelegate {
+    (...args: unknown[]): Promise<unknown>;
+    findFirst(...args: unknown[]): Promise<Record<string, unknown> | null>;
+    findMany(...args: unknown[]): Promise<Record<string, unknown>[]>;
+    findUnique(...args: unknown[]): Promise<Record<string, unknown> | null>;
+    create(...args: unknown[]): Promise<Record<string, unknown>>;
+    update(...args: unknown[]): Promise<Record<string, unknown>>;
+    updateMany(...args: unknown[]): Promise<{ count: number }>;
+    delete(...args: unknown[]): Promise<Record<string, unknown>>;
+    deleteMany(...args: unknown[]): Promise<{ count: number }>;
+    upsert(...args: unknown[]): Promise<Record<string, unknown>>;
+    count(...args: unknown[]): Promise<number>;
+  }
+  export interface PrismaClientLike {
+    [key: string]: PrismaModelDelegate;
+  }
+  export class PrismaClient implements PrismaClientLike {
+    [key: string]: PrismaModelDelegate;
+  }
+  export namespace Prisma {
+    type TransactionClient = PrismaClientLike;
+  }
+}
+`;
+const FIXTURE_TSCONFIG = JSON.stringify({
+  compilerOptions: {
+    target: "ES2020",
+    module: "esnext",
+    moduleResolution: "bundler",
+    allowJs: true,
+    jsx: "react-jsx",
+    esModuleInterop: true,
+    strict: true,
+    skipLibCheck: true,
+    paths: {
+      "@/*": ["./src/*"],
+      "@prisma/client": ["./types/prisma-client-stub.d.ts"],
+    },
+  },
+  include: ["**/*.ts", "**/*.tsx"],
+});
+
+/**
+ * The one harness helper T-F4/F-F3 asks for: a fixture that writes its OWN
+ * `src/lib/tenant-context.ts` (TENANT_CONTEXT_ALLOWED below) appends the REAL
+ * file's `withUserTenantRls` / `withTeamTenantRls` declarations — overload
+ * signatures and implementation alike — to its own body, read via ts-morph
+ * rather than a hand-copied string, so no fixture carries a divergent copy of
+ * what the real file declares.
+ */
+function withRealTenantContextHelperDeclarations(source) {
+  const project = new Project({ useInMemoryFileSystem: true });
+  const sf = project.createSourceFile("tenant-context.ts", REAL_TENANT_CONTEXT);
+  const decls = sf
+    .getFunctions()
+    .filter((fn) => fn.getName() === "withUserTenantRls" || fn.getName() === "withTeamTenantRls")
+    .map((fn) => fn.getFullText().trim())
+    .join("\n\n");
+  return `${source}\n\n${decls}\n`;
+}
 
 let dir;
 beforeEach(() => {
@@ -34,10 +150,64 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 function run(relPath, source) {
   mkdirSync(join(dir, relPath.split("/").slice(0, -1).join("/")), { recursive: true });
   writeFileSync(join(dir, relPath), source, "utf8");
+  writeFileSync(join(dir, "tsconfig.json"), FIXTURE_TSCONFIG, "utf8");
+  mkdirSync(join(dir, "types"), { recursive: true });
+  writeFileSync(join(dir, "types/prisma-client-stub.d.ts"), PRISMA_CLIENT_STUB, "utf8");
+  mkdirSync(join(dir, "src/lib"), { recursive: true });
+  // The fixture's own file at one of these two paths is the real declaration
+  // source for that file — never overwritten by the scaffold copy.
+  if (relPath !== "src/lib/tenant-rls.ts") {
+    writeFileSync(join(dir, "src/lib/tenant-rls.ts"), REAL_TENANT_RLS, "utf8");
+  }
+  if (relPath !== "src/lib/tenant-context.ts") {
+    writeFileSync(join(dir, "src/lib/tenant-context.ts"), REAL_TENANT_CONTEXT, "utf8");
+  }
   // spawnSync, not execFileSync: the latter surfaces stderr only on the throw
   // path, so a `expect(stderr).not.toContain(...)` paired with `code === 0` was
   // asserting against a hardcoded "" and could never fail. Both streams come
   // from the process on both paths.
+  const r = spawnSync("node", [CHECKER], {
+    cwd: dir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.error) throw r.error;
+  return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/**
+ * Like `run`, but for a fixture needing more than one file of its own (a
+ * barrel plus its consumer, say) — `files` is a `[relPath, source]` array,
+ * all written before the one spawn. The scaffold (tsconfig, Prisma stub, the
+ * two real helper-declaring files) is added the same way `run` adds it.
+ */
+function runMulti(files) {
+  for (const [relPath, source] of files) {
+    mkdirSync(join(dir, relPath.split("/").slice(0, -1).join("/")), { recursive: true });
+    writeFileSync(join(dir, relPath), source, "utf8");
+  }
+  writeFileSync(join(dir, "tsconfig.json"), FIXTURE_TSCONFIG, "utf8");
+  mkdirSync(join(dir, "types"), { recursive: true });
+  writeFileSync(join(dir, "types/prisma-client-stub.d.ts"), PRISMA_CLIENT_STUB, "utf8");
+  mkdirSync(join(dir, "src/lib"), { recursive: true });
+  const written = new Set(files.map(([relPath]) => relPath));
+  if (!written.has("src/lib/tenant-rls.ts")) {
+    writeFileSync(join(dir, "src/lib/tenant-rls.ts"), REAL_TENANT_RLS, "utf8");
+  }
+  if (!written.has("src/lib/tenant-context.ts")) {
+    writeFileSync(join(dir, "src/lib/tenant-context.ts"), REAL_TENANT_CONTEXT, "utf8");
+  }
+  const r = spawnSync("node", [CHECKER], {
+    cwd: dir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.error) throw r.error;
+  return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/** Bare spawnSync with no scaffold at all — the two A-C3-4 cells need a fixture tree missing a piece of it. */
+function runBare() {
   const r = spawnSync("node", [CHECKER], {
     cwd: dir,
     encoding: "utf8",
@@ -63,7 +233,7 @@ async function h() {
 // so its unused-tx delegating wrapper (fn(tenantId) public contract) is allowed.
 // A sibling real (tx) => tx.x callback confirms the file still passes the model
 // allowlist (tenantMember, team, user).
-const TENANT_CONTEXT_ALLOWED = `
+const TENANT_CONTEXT_ALLOWED = withRealTenantContextHelperDeclarations(`
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function withTenantContext(tenantId) {
   return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) => {
@@ -84,7 +254,7 @@ export async function resolveTeamTenantId(teamId) {
 export async function existingUserIdsByEmail(emails) {
   return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) =>
     tx.user.findMany({ where: { email: { in: emails } }, select: { id: true } }));
-}`;
+}`);
 
 // A brand-new (non-allowlisted) file that suppresses an unused tx — trips BOTH
 // the model-allowlist check and F3. Confirms F3 detects the drift even on a file
@@ -1961,6 +2131,363 @@ describe("a name bound to two helpers, an import-equals alias, and the branches 
       `import * as rls from "@/lib/tenant-rls";\nimport { BYPASS_PURPOSE } from "@/lib/tenant-rls";\nexport const purposes = rls.BYPASS_PURPOSE;\nexport const f = () => rls.withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);\n`,
     );
     expect(code, `${stdout}${stderr}`).toBe(0);
+  });
+});
+
+// ─── C3: Program-backed reference cross-check ──────────────────────────────
+//
+// One deny cell per spelling named in #838 (A-C3-1), each naming which item
+// decides it; the allow cells the acceptance criteria name alongside them
+// (A-C3-2, A-C3-2b, A-C3-2c); and the two named-failure cells for a Program
+// that cannot be built at all (A-C3-4). The real tree's own pass (A-C3-3) and
+// the pre-change-gate pass of every deny cell here (A-C3-1's own "run once
+// against the pre-change gate" ask, T-F5) are recorded separately, by command
+// and output, in the branch's review artifact — not re-asserted as a test
+// here, since the pre-change gate is not what CI runs.
+describe("C3 Program-backed reference cross-check", () => {
+  const CROSS_CHECK = "form this gate does not analyse";
+  const STAR_EXPORT = "`export *` re-exports a module that exports a with*Rls helper";
+  const DESTRUCTURING_KEY = "destructuring key is not a plain identifier";
+  const RULE_A = "literal-named property access or literal-keyed element access";
+  const RULE_B = "receiver whose key is not a string-literal";
+  const MODULE_LOAD = "module load specifier could not be proven safe";
+  // The pre-existing round-13 check (indirectHelperReferencesIn) fires
+  // independently of the rule under test whenever a fixture's own text
+  // references the helper-carrying namespace in a form IT does not
+  // recognise either — confirmed below to be unavoidable for item 5c's
+  // destructuring shape and Rule A's `import(...)`-based LOADER (finding E,
+  // issue-838 follow-ups review): forcing the rule-under-test's predicate to
+  // return no violations still exits 1 on this message alone. Cells that hit
+  // it assert it explicitly rather than excluding it, so the confounding is
+  // recorded rather than invisible.
+  const ROUND13 = "referenced in a form this gate cannot follow as a direct call";
+
+  describe("item 3: reference cross-check (deny)", () => {
+    it("flags a named re-export the consumer imports under a local alias", () => {
+      const { code, stderr } = runMulti([
+        ["src/lib/barrel/reexport.ts", `export { withBypassRls } from "@/lib/tenant-rls";\n`],
+        [
+          "src/app/consumer.ts",
+          `import { withBypassRls as consumerAlias } from "@/lib/barrel/reexport";\nexport async function run() {\n  return consumerAlias(null, async (tx) => tx.user.findMany(), "x");\n}\n`,
+        ],
+      ]);
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(CROSS_CHECK);
+    });
+
+    it("flags a renamed re-export", () => {
+      const { code, stderr } = runMulti([
+        ["src/lib/barrel/reexport.ts", `export { withBypassRls as wb } from "@/lib/tenant-rls";\n`],
+        [
+          "src/app/consumer.ts",
+          `import { wb } from "@/lib/barrel/reexport";\nexport async function run() {\n  return wb(null, async (tx) => tx.user.findMany(), "x");\n}\n`,
+        ],
+      ]);
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(CROSS_CHECK);
+    });
+
+    it("flags a member read off an `export * as ns` namespace", () => {
+      // A READ, not a call: `x.withBypassRls()` is item 6's own "resolves to a
+      // real declaration" shape (filterCallsByReceiverDeclaration), which
+      // would ALSO recognise this as a genuine helper call once `ns`'s type is
+      // resolvable — folding this cell into Check 1 instead of the cross-check
+      // this describe block is naming. A bare property read is never a call,
+      // so only the reference cross-check has anything to say about it.
+      const { code, stderr } = runMulti([
+        ["src/lib/barrel/reexport.ts", `export * as ns from "@/lib/tenant-rls";\n`],
+        [
+          "src/app/consumer.ts",
+          `import { ns } from "@/lib/barrel/reexport";\nexport const captured = ns.withBypassRls;\n`,
+        ],
+      ]);
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(CROSS_CHECK);
+    });
+
+    it("flags a literal-keyed element access on a re-exported namespace", () => {
+      const { code, stderr } = runMulti([
+        ["src/lib/barrel/reexport.ts", `export * as ns from "@/lib/tenant-rls";\n`],
+        [
+          "src/app/consumer.ts",
+          `import { ns } from "@/lib/barrel/reexport";\nexport async function run() {\n  return ns["withBypassRls"](null, async (tx) => tx.user.findMany(), "x");\n}\n`,
+        ],
+      ]);
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(CROSS_CHECK);
+    });
+  });
+
+  describe("item 5b: bare `export *` barrel (deny)", () => {
+    it("flags a bare `export *` whose target exports a helper", () => {
+      const { code, stderr } = runMulti([
+        ["src/lib/barrel/star.ts", `export * from "@/lib/tenant-rls";\n`],
+      ]);
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(STAR_EXPORT);
+    });
+
+    it("also proves item 4: a barrel whose OWN text names no helper is still parsed", () => {
+      // outer.ts's text is `export * from "@/lib/barrelB/inner";` — no
+      // "with*Rls" spelling and no "tenant-rls" substring, so HELPER_MENTION_RE
+      // does not select it. Only inner.ts (which DOES mention "tenant-rls")
+      // would be picked up by the old prefilter; outer.ts is reached only
+      // because the Program's export-graph walk (exportsAnyHelper, following
+      // export * through inner.ts) put it in programOnlyFiles.
+      const outerText = `export * from "@/lib/barrelB/inner";\n`;
+      expect(outerText).not.toMatch(/with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/);
+      const { code, stderr } = runMulti([
+        ["src/lib/barrelB/inner.ts", `export * from "@/lib/tenant-rls";\n`],
+        ["src/lib/barrelA/outer.ts", outerText],
+      ]);
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain("src/lib/barrelA/outer.ts");
+      expect(stderr).toContain(STAR_EXPORT);
+    });
+  });
+
+  describe("item 5c: quoted / computed destructuring key (deny)", () => {
+    // Both cells also trip round-13 (ROUND13): destructuring `rls` at all —
+    // regardless of the key shape 5c decides on — is itself "referencing the
+    // namespace in a form round-13 does not recognise as a direct call".
+    // Confirmed unavoidable (finding E): forcing `destructuringKeyViolationsIn`
+    // to return [] still exits 1 on ROUND13 alone, so it is asserted
+    // explicitly here rather than excluded.
+    it("flags a quoted destructuring key that resolves to a helper", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `import * as rls from "@/lib/tenant-rls";\nexport function run() {\n  const { ["withBypassRls"]: quoted } = rls;\n  return quoted;\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(DESTRUCTURING_KEY);
+      expect(stderr).toContain(ROUND13);
+    });
+
+    it("flags a computed destructuring key that resolves to a helper", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `import * as rls from "@/lib/tenant-rls";\nexport function run() {\n  const key = "withBypassRls" as const;\n  const { [key]: computed } = rls;\n  return computed;\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(DESTRUCTURING_KEY);
+      expect(stderr).toContain(ROUND13);
+    });
+  });
+
+  describe("item 5: module loads judged by specifier TYPE (deny)", () => {
+    it("refuses a `string`-typed specifier through a `NodeJS.Require` value", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `import { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nexport function loadIt(moduleName: string) {\n  return req(moduleName);\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(MODULE_LOAD);
+    });
+
+    it("refuses an `any` callee with a non-literal one-argument call", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `declare const req: any;\nexport function loadIt(moduleName: string) {\n  return req(moduleName);\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(MODULE_LOAD);
+    });
+  });
+
+  describe("item 6, Rule A: a helper-carrying value outside a literal receiver (deny)", () => {
+    // Every cell here loads the module through a GENERIC before the await
+    // (`Promise<typeof import(...)>`) rather than a recognised namespace
+    // import — the shape item 6's own text calls out as where Rule A (not the
+    // pre-existing indirect-reference check) is the one deciding.
+    //
+    // Every cell also trips ROUND13, unavoidably (finding E): the LOADER's own
+    // body performs `import("@/lib/tenant-rls")`, which `indirectHelperReferencesIn`
+    // flags on its own, independently of whatever `ruleAViolationsIn` decides —
+    // confirmed by forcing `ruleAViolationsIn` to return [] and watching the
+    // gate still exit 1 on ROUND13 alone. There is no LOADER shape that reaches
+    // the generic-before-await case Rule A exists for without an `import(...)`
+    // or `require(...)` expression round-13 also sees, so this is asserted
+    // explicitly rather than excluded.
+    const LOADER = `async function loader(): Promise<typeof import("@/lib/tenant-rls")> {\n  return import("@/lib/tenant-rls");\n}\n`;
+
+    it("flags `ns[n](…)` on a helper-carrying namespace", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `${LOADER}export async function run(n: string) {\n  const ns = await loader();\n  return ns[n](null, async (tx) => tx.user.findMany(), "x");\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
+    });
+
+    it("flags the same namespace spread", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `${LOADER}export async function run() {\n  const ns = await loader();\n  return { ...ns };\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
+    });
+
+    it("flags the same namespace passed as an argument", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `${LOADER}function sink(x: unknown) { return x; }\nexport async function run() {\n  const ns = await loader();\n  return sink(ns);\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
+    });
+
+    it("flags the same namespace read through Reflect.get", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `${LOADER}export async function run() {\n  const ns = await loader();\n  return Reflect.get(ns, "withBypassRls");\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
+    });
+
+    it("flags the same namespace assigned to globalThis", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `${LOADER}export async function run() {\n  const ns = await loader();\n  globalThis.leaked = ns;\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(RULE_A);
+      expect(stderr).toContain(ROUND13);
+    });
+  });
+
+  describe("item 6, Rule B: any/unknown receiver, non-literal key (deny)", () => {
+    it("flags an any-typed receiver with a non-literal-union key", () => {
+      const { code, stderr } = run(
+        "src/app/consumer.ts",
+        `export function pick(data: any, key: string) {\n  return data[key];\n}\n`,
+      );
+      expect(code, stderr).toBe(1);
+      expect(stderr).toContain(RULE_B);
+    });
+  });
+
+  // ─── A-C3-2: allow cells ────────────────────────────────────────────────
+  describe("allow cells (A-C3-2)", () => {
+    it("passes a local unrelated function named withBypassRls that is never called", () => {
+      const { code, stdout, stderr } = run(
+        "src/app/consumer.ts",
+        `function withBypassRls(x: number) { return x + 1; }\nexport const unrelated = true;\n`,
+      );
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+
+    it("passes a re-export of a NON-helper from tenant-context.ts", () => {
+      const { code, stdout, stderr } = run(
+        "src/app/consumer.ts",
+        `export { realignOwningTenantColumn } from "@/lib/tenant-context";\n`,
+      );
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+
+    it("passes a resolvable receiver whose helper-named member is a different declaration", () => {
+      const { code, stdout, stderr } = run(
+        "src/app/consumer.ts",
+        `const x = { withBypassRls: () => 0 };\nexport const r = x.withBypassRls();\n`,
+      );
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+  });
+
+  // ─── A-C3-2b: allow cells from the real tree's own shapes ──────────────
+  describe("allow cells from the real tree's own shapes (A-C3-2b)", () => {
+    it("passes a template specifier whose static head resolves outside the Program source set (messages.ts shape)", () => {
+      const { code, stdout, stderr } = runMulti([
+        ["data/x/a.json", "{}"],
+        [
+          "src/app/consumer.ts",
+          "export async function load(ns: string) {\n  const mod = await import(`../../data/${ns}/a.json`);\n  return mod;\n}\n",
+        ],
+      ]);
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+
+    it("passes an identifier specifier with a literal type (crypto-client.ts shape)", () => {
+      const { code, stdout, stderr } = run(
+        "src/app/consumer.ts",
+        `export async function load() {\n  const moduleName = "hash-wasm";\n  const mod = await import(/* webpackIgnore: true */ moduleName);\n  return mod;\n}\n`,
+      );
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+
+    it("passes an any callee with a literal argument (key-provider shape)", () => {
+      const { code, stdout, stderr } = run(
+        "src/app/consumer.ts",
+        `declare const req: any;\nexport function loadSdk() {\n  return req("@aws-sdk/client-s3");\n}\n`,
+      );
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+
+    it("passes an any-typed receiver with a literal-union key (auth-gate.ts shape)", () => {
+      const { code, stdout, stderr } = run(
+        "src/app/consumer.ts",
+        `type Field = "a" | "b" | "c";\nexport function pick(data: any, field: Field) {\n  return data?.[field];\n}\n`,
+      );
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+  });
+
+  // ─── A-C3-2c: allow cells for the refusals 5b and 5c bring ─────────────
+  describe("allow cells for 5b and 5c (A-C3-2c)", () => {
+    it("passes `export *` of a module that exports no helper", () => {
+      const { code, stdout, stderr } = runMulti([
+        ["src/lib/other/thing.ts", `export function notAHelper() { return 1; }\n`],
+        ["src/lib/barrel/star.ts", `export * from "@/lib/other/thing";\n`],
+      ]);
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+
+    it("passes a quoted and a computed destructuring key that resolve to a non-helper property", () => {
+      const { code, stdout, stderr } = runMulti([
+        ["src/lib/barrel/star.ts", `export type TenantRlsNs = typeof import("@/lib/tenant-rls");\n`],
+        [
+          "src/app/consumer.ts",
+          `import type { TenantRlsNs } from "@/lib/barrel/star";\nexport function runQuoted(ns: TenantRlsNs) {\n  const { ["advisoryXactLock"]: notHelper } = ns;\n  return notHelper;\n}\nexport function runComputed(ns: TenantRlsNs) {\n  const key = "advisoryXactLock" as const;\n  const { [key]: notHelper } = ns;\n  return notHelper;\n}\n`,
+        ],
+      ]);
+      expect(code, `${stdout}${stderr}`).toBe(0);
+    });
+  });
+
+  // ─── A-C3-4: a fixture missing what item 1/2 requires fails NAMED ───────
+  describe("Program build failures are named, not silent (A-C3-4)", () => {
+    it("fails named when the fixture has no tsconfig.json", () => {
+      mkdirSync(join(dir, "src/lib"), { recursive: true });
+      writeFileSync(join(dir, "src/lib/tenant-rls.ts"), REAL_TENANT_RLS, "utf8");
+      writeFileSync(join(dir, "src/lib/tenant-context.ts"), REAL_TENANT_CONTEXT, "utf8");
+      const { code, stderr } = runBare();
+      expect(code).toBe(1);
+      expect(stderr).toContain("PROGRAM_BUILD_FAILED");
+      expect(stderr).toContain("no tsconfig.json found");
+    });
+
+    it("fails named when tenant-rls.ts is missing a helper declaration", () => {
+      mkdirSync(join(dir, "src/lib"), { recursive: true });
+      mkdirSync(join(dir, "types"), { recursive: true });
+      writeFileSync(join(dir, "tsconfig.json"), FIXTURE_TSCONFIG, "utf8");
+      writeFileSync(join(dir, "types/prisma-client-stub.d.ts"), PRISMA_CLIENT_STUB, "utf8");
+      writeFileSync(join(dir, "src/lib/tenant-context.ts"), REAL_TENANT_CONTEXT, "utf8");
+      // A tenant-rls.ts that defines BYPASS_PURPOSE but not withBypassRls itself.
+      writeFileSync(
+        join(dir, "src/lib/tenant-rls.ts"),
+        `export const BYPASS_PURPOSE = { AUDIT: "audit" } as const;\n`,
+        "utf8",
+      );
+      const { code, stderr } = runBare();
+      expect(code).toBe(1);
+      expect(stderr).toContain("PROGRAM_BUILD_FAILED");
+      expect(stderr).toContain("helper declaration not found: withBypassRls");
+    });
   });
 });
 

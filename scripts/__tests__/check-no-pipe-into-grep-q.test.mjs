@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,7 @@ const GUARD = join(REPO_ROOT, "scripts/checks/check-no-pipe-into-grep-q.sh");
 
 let root;
 
-function runGuard(extraEnv = {}) {
+function runGuard(extraEnv = {}, spawnOpts = {}) {
   const r = spawnSync("bash", [GUARD], {
     encoding: "utf8",
     env: {
@@ -28,6 +28,7 @@ function runGuard(extraEnv = {}) {
       NO_PIPE_GREP_Q_FIXTURE_MODE: "1",
       ...extraEnv,
     },
+    ...spawnOpts,
   });
   return { exitCode: r.status, stdout: r.stdout, stderr: r.stderr };
 }
@@ -35,6 +36,34 @@ function runGuard(extraEnv = {}) {
 /** Writes scripts/<name>.sh under the fixture root. */
 function writeScript(name, body) {
   writeFileSync(join(root, "scripts", `${name}.sh`), body, "utf8");
+}
+
+/** Writes <root>/.claude/hooks/<name>.sh under the fixture root. */
+function writeClaudeHook(name, body) {
+  mkdirSync(join(root, ".claude", "hooks"), { recursive: true });
+  writeFileSync(join(root, ".claude", "hooks", `${name}.sh`), body, "utf8");
+}
+
+/**
+ * Writes <root>/.claude/settings.json wiring each command as its own
+ * PreToolUse hook, mirroring the real file's shape (`hooks.*[].hooks[].command`).
+ */
+function writeSettings(commands) {
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  writeFileSync(
+    join(root, ".claude", "settings.json"),
+    JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Bash",
+            hooks: commands.map((command) => ({ type: "command", command })),
+          },
+        ],
+      },
+    }),
+    "utf8",
+  );
 }
 
 /** The guard needs >= MIN_FILES scripts before it will report at all. */
@@ -460,6 +489,191 @@ describe("the credential hook directory is scanned too (audit-tenant-adjudicator
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(1);
     expect(stdout).toContain("EMPTY_SCAN: no shell scripts found under .claude/hooks/");
+  });
+});
+
+// issue-838 follow-ups, C2: the hook member set is WIRED (read from
+// .claude/settings.json) UNION PRESENT (found under .claude/hooks/*.sh), and
+// the gate fails closed whenever it cannot classify what is wired rather than
+// silently skipping it.
+describe("C2: hook member set is wired ∪ present, parsed from .claude/settings.json", () => {
+  describe("A-C2-1: deny cells", () => {
+    it("awk failure on an unreadable file is fatal, naming the file and the awk exit status", () => {
+      writeScript("unreadable", "#!/usr/bin/env bash\nset -euo pipefail\ntrue\n");
+      chmodSync(join(root, "scripts", "unreadable.sh"), 0o000);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toContain("ERROR: scanner failed on");
+      expect(stdout).toContain("unreadable.sh");
+      expect(stdout).toMatch(/awk exit \d+/);
+    });
+
+    it("FAILS when settings wires a hook that does not exist on disk", () => {
+      writeSettings(["bash .claude/hooks/missing.sh"]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toContain("wire(s) a hook that does not exist");
+      expect(stdout).toContain(".claude/hooks/missing.sh");
+    });
+
+    it.each([
+      ["several commands joined by &&", "bash a.sh && bash b.sh"],
+      [
+        "a variable ($CLAUDE_PROJECT_DIR) in the path",
+        'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/x.sh"',
+      ],
+    ])("FAILS when a wired command is unclassifiable: %s", (_name, command) => {
+      writeSettings([command]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toContain("unclassifiable");
+    });
+
+    it("FAILS when .claude/settings.json is not valid JSON", () => {
+      mkdirSync(join(root, ".claude"), { recursive: true });
+      writeFileSync(join(root, ".claude", "settings.json"), "{ not valid json", "utf8");
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toContain("not valid JSON");
+    });
+
+    it("run from an unrelated cwd gives the same result as from the repo root", () => {
+      // No NO_PIPE_GREP_Q_ROOT override here — this exercises REPO_ROOT
+      // resolution itself (item 1: from ${BASH_SOURCE[0]}, never from
+      // `git rev-parse` in the caller's cwd) against the real tree.
+      const fromRoot = spawnSync("bash", [GUARD], {
+        encoding: "utf8",
+        env: process.env,
+        cwd: REPO_ROOT,
+      });
+      const fromElsewhere = spawnSync("bash", [GUARD], {
+        encoding: "utf8",
+        env: process.env,
+        cwd: tmpdir(),
+      });
+      expect(fromElsewhere.status).toBe(fromRoot.status);
+      expect(fromElsewhere.stdout).toBe(fromRoot.stdout);
+    });
+  });
+
+  describe("A-C2-1b: allow cells", () => {
+    it("no .claude/settings.json and no .claude/hooks/ reports 0 wired / 0 scanned", () => {
+      // The shared beforeEach fixture (padScripts only) is already in this
+      // state — every existing test in this file that never calls
+      // writeSettings/writeClaudeHook relies on this staying an allow cell.
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+      expect(stdout).toMatch(/0 hook\(s\) wired \(0 shell, 0 not-shell\)/);
+      expect(stdout).toContain("0 hook script(s) scanned");
+    });
+
+    it("a `node <path>` hook is reported as not-shell and is not scanned", () => {
+      writeSettings(["node .claude/hooks/notify.mjs"]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+      expect(stdout).toMatch(/1 hook\(s\) wired \(0 shell, 1 not-shell\)/);
+      expect(stdout).toContain("0 hook script(s) scanned");
+    });
+
+    it("wiring BOTH a shell hook and a node hook moves wired/scanned/not-shell independently", () => {
+      writeClaudeHook("guard", "#!/usr/bin/env bash\nset -euo pipefail\ntrue\n");
+      writeSettings(["bash .claude/hooks/guard.sh", "node .claude/hooks/notify.mjs"]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+      expect(stdout).toMatch(/2 hook\(s\) wired \(1 shell, 1 not-shell\)/);
+      expect(stdout).toContain("1 hook script(s) scanned");
+    });
+  });
+
+  describe("A-C2-2: real-tree cell", () => {
+    it("the real tree's scanned hook set equals its wired shell set, and is non-empty", () => {
+      const settings = JSON.parse(
+        readFileSync(join(REPO_ROOT, ".claude", "settings.json"), "utf8"),
+      );
+      const commands = [];
+      for (const entries of Object.values(settings.hooks ?? {})) {
+        for (const entry of entries) {
+          for (const hook of entry.hooks ?? []) commands.push(hook.command);
+        }
+      }
+      const wiredShell = commands.filter((c) => /^(?:bash|sh)\s+\S+\.sh$/.test(c));
+      expect(wiredShell.length).toBeGreaterThan(0);
+
+      const r = spawnSync("bash", [GUARD], { encoding: "utf8", env: process.env });
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      const m = r.stdout.match(
+        /(\d+) hook script\(s\) scanned; (\d+) hook\(s\) wired \((\d+) shell, (\d+) not-shell\)/,
+      );
+      expect(m, r.stdout).not.toBeNull();
+      const [, scanned, , wiredShellCount] = m.map(Number);
+      expect(wiredShellCount).toBe(wiredShell.length);
+      expect(scanned).toBe(wiredShell.length);
+      expect(scanned).toBeGreaterThan(0);
+    });
+  });
+
+  // issue-838 follow-ups, finding A: Claude Code merges .claude/settings.json
+  // with the git-ignored .claude/settings.local.json (the sanctioned way to
+  // add a personal hook), so a hook wired only there must be scanned too — or
+  // the gate's own "wired ∪ present" header claim is false for that hook.
+  describe("finding A: .claude/settings.local.json is merged into the wired set", () => {
+    /** Writes <root>/.claude/settings.local.json wiring each command, same shape as writeSettings. */
+    function writeSettingsLocal(commands) {
+      mkdirSync(join(root, ".claude"), { recursive: true });
+      writeFileSync(
+        join(root, ".claude", "settings.local.json"),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: "Bash",
+                hooks: commands.map((command) => ({ type: "command", command })),
+              },
+            ],
+          },
+        }),
+        "utf8",
+      );
+    }
+
+    // Wired to a path OUTSIDE .claude/hooks/, so only the WIRED half of
+    // "wired ∪ present" can find it — the PRESENT half (find .claude/hooks
+    // -name '*.sh') never looks there. This isolates the settings.local.json
+    // read path from the pre-existing directory scan, so the cell actually
+    // proves the wiring source, not just that the file happens to sit under
+    // HOOKS_DIR.
+    function writePersonalHook(body) {
+      mkdirSync(join(root, ".claude", "personal-hooks"), { recursive: true });
+      writeFileSync(join(root, ".claude", "personal-hooks", "guard.sh"), body, "utf8");
+    }
+
+    it("FOUND: a hook wired only via settings.local.json whose body races is caught", () => {
+      writePersonalHook(
+        '#!/usr/bin/env bash\nset -euo pipefail\nif printf "%s" "$COMMAND" | grep -qE "decrypt"; then exit 2; fi\n',
+      );
+      writeSettingsLocal(["bash .claude/personal-hooks/guard.sh"]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toContain(".claude/personal-hooks/guard.sh");
+    });
+
+    it("a malformed settings.local.json fails the gate, exactly like a broken settings.json", () => {
+      mkdirSync(join(root, ".claude"), { recursive: true });
+      writeFileSync(join(root, ".claude", "settings.local.json"), "{ not valid json", "utf8");
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toContain("not valid JSON");
+      expect(stdout).toContain("settings.local.json");
+    });
+
+    it("a hook wired in BOTH settings.json and settings.local.json is scanned once (dedup by resolved path)", () => {
+      writeClaudeHook("guard", "#!/usr/bin/env bash\nset -euo pipefail\ntrue\n");
+      writeSettings(["bash .claude/hooks/guard.sh"]);
+      writeSettingsLocal(["bash .claude/hooks/guard.sh"]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+      expect(stdout).toContain("1 hook script(s) scanned");
+    });
   });
 });
 

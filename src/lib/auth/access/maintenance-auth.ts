@@ -46,7 +46,10 @@ export async function requireMaintenanceOperator(
         },
         // Deterministic selection when the operator holds admin in multiple
         // tenants — pin to the oldest membership so audit attribution is stable.
-        orderBy: { createdAt: "asc" },
+        // `createdAt` alone is not unique, so two calls could attribute the
+        // same operator to different tenants; `id` makes the order total, the
+        // way the owning-tenant readers do (see owning-tenant-rule.ts).
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: { tenantId: true, role: true },
       }),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE,

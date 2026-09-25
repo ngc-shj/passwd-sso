@@ -163,7 +163,7 @@ describe("resolveOwningTenantIdFromClient", () => {
         tenantMemberships: {
           where: { deactivatedAt: null },
           select: { tenantId: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           take: 1,
         },
       },
@@ -432,7 +432,7 @@ describe("usersOwnedByAnotherTenant", () => {
         tenantMemberships: {
           where: { deactivatedAt: null },
           select: { tenantId: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         },
       },
     });
@@ -497,7 +497,7 @@ describe("resolveExistingUsersForTenant", () => {
         select: expect.objectContaining({
           tenantMemberships: expect.objectContaining({
             where: { OR: [{ deactivatedAt: null }, { tenantId: "this-tenant" }] },
-            orderBy: { createdAt: "asc" },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           }),
         }),
       }),

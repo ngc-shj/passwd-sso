@@ -61,7 +61,9 @@ export async function buildTeamMemberDisplayItems(
       tx.tenantMember.findMany({
         where: { userId: { in: userIds }, deactivatedAt: null },
         select: { userId: true, tenant: { select: { name: true } } },
-        orderBy: { createdAt: "asc" },
+        // `createdAt` is not unique, so it alone does not make the choice
+        // stable — the `id` tiebreak is what does (owning-tenant-rule.ts).
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       }),
     ]),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
