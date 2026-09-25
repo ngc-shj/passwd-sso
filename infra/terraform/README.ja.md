@@ -34,8 +34,10 @@ infra/terraform/
 ├── terraform.tfvars.example
 └── envs/
     ├── dev/
+    │   ├── backend.hcl              # この環境の state key（コミットする）
     │   └── terraform.tfvars.example
     └── prod/
+        ├── backend.hcl
         └── terraform.tfvars.example
 ```
 
@@ -50,14 +52,17 @@ cd infra/terraform
 cp envs/dev/terraform.tfvars.example envs/dev/terraform.tfvars
 # Edit envs/dev/terraform.tfvars with real secrets
 
-terraform init
+# S3 バックエンドは無条件に宣言されているため、バケットとロックテーブルが先に存在
+# している必要があります（"Remote State Backend" 参照）。-backend-config でこの環境の
+# state key を選択します。
+terraform init -reconfigure -backend-config=envs/dev/backend.hcl
 ```
 
 > **シークレットは Terraform state に平文で保存されます。** tfvars で渡した
 > シークレット値は `terraform.tfstate` に平文で書き込まれます（`secrets.tf` の
 > SECURITY 注記を参照）。実シークレットで apply する前に、必ず下記の暗号化 S3
 > リモートバックエンドを設定してください。ローカル state のまま本番デプロイし
-> ないこと。`terraform.tfvars` は gitignore 済みで、実値は決してコミットしない。
+> ないこと。tfvars は全て gitignore 済みで、実値は決してコミットしない。
 
 ### 2. Plan & Apply（既存環境の更新）
 
@@ -152,20 +157,40 @@ docs/operations/deployment.md "Image Signing" を参照。
 
 ## Remote State Backend
 
-State はデフォルトでローカルに保存されます。**実シークレットを含むデプロイでは
-必ず暗号化された S3 + DynamoDB バックエンドを使用してください** — Terraform state
-はシークレット値を平文で保持するため、ローカル state（開発端末や CI アーティファ
-クト上）はシークレット流出です。リモートバックエンドは保存時暗号化
-（`encrypt = true`）・バージョニング・（バケットポリシー/IAM による）厳格なアクセ
-ス制御とアクセスログを提供します。
+`backend.tf` は暗号化 S3 + DynamoDB バックエンドを**無条件に**宣言しているため、
+opt-in ではありません。バケットとロックテーブルが存在するまで `terraform init` は
+失敗します。**先にそれらを作成してください** — 正確なコマンド（バケット＋バージョ
+ニング＋暗号化＋パブリックアクセス遮断＋ロックテーブル）は `backend.tf` のコメント
+にあります。Terraform state はシークレット値を平文で保持するため、ローカル state
+（開発端末や CI アーティファクト上）はシークレット流出です。リモートバックエンドは
+保存時暗号化（`encrypt = true`）・バージョニング・（バケットポリシー/IAM による）
+厳格なアクセス制御とアクセスログを提供します。
 
-セットアップ手順（バケット＋ロックテーブル＋バージョニング）は `backend.tf` の
-コメントを参照。state を移行する前に、バケットが暗号化を強制しパブリックアクセス
-を遮断していることを確認してください。
+### 環境ごとに state を分ける
 
-`terraform.tfvars` は gitignore 済みで、決してコミットしないこと。2026-07 レビュー
-(F3) 以降、シークレット値は tfvars に含めず out-of-band で注入します（下記
-Secrets Management 参照）。
+`backend.tf` は `key = "env/terraform.tfstate"` をハードコードしています。この key は
+全環境で共通なので、同じディレクトリから `dev` と `prod` を実行すると**1つの state に
+衝突します**。環境ごとの key は `envs/<env>/backend.hcl` に置き、init 時に選択します。
+
+```bash
+terraform init -reconfigure -backend-config=envs/dev/backend.hcl
+terraform plan -var-file=envs/dev/terraform.tfvars
+```
+
+環境を切り替えるたびに、別の `backend.hcl` で `init -reconfigure` を再実行する必要が
+あります。backend key と `-var-file` が食い違うと、一方の環境の state がもう一方の
+リソースを指すことになるため、頻繁に切り替えるならチェックアウトや git worktree を
+環境ごとに分けるほうが安全です。
+
+### 変数ファイルは決してコミットしない
+
+Terraform が自動ロードする tfvars の形式（`*.tfvars` / `*.tfvars.json`、`*.auto.tfvars`
+を含む）は `infra/terraform/` 配下の任意の深さで gitignore 済みで、追跡されるのは
+`*.tfvars.example` テンプレートのみです。tfvars は**シークレットフリーではない**ため
+これが効いてきます — 2026-07 レビュー (F3) で app/Jackson のシークレット値は Terraform
+から外れましたが、`redis_auth_token` は変数として渡すしかなく（ElastiCache に AWS 管理
+トークン相当が無いため）、追跡された変数ファイルは認証情報の流出そのものです。
+`backend.hcl` は state key しか持たないのでコミットします。
 
 ## Secrets Management
 

@@ -89,6 +89,25 @@ variable "jackson_image" {
   }
 }
 
+# Fargate CPU architecture for EVERY task definition (app, jackson, migrate, both
+# workers). It must match the architecture of the images you push: Fargate
+# defaults to X86_64 when runtime_platform is absent, so on an arm64 build host
+# `docker build` silently produces an image the task cannot start
+# ("image Manifest does not contain descriptor matching platform"). Making it
+# explicit turns that into a setting rather than a property of whoever ran the
+# build. ARM64 (Graviton) is also ~20% cheaper per vCPU-hour; the node and
+# boxyhq/jackson base images both publish arm64 variants.
+variable "task_cpu_architecture" {
+  type        = string
+  default     = "X86_64"
+  description = "Fargate CPU architecture for all task definitions. Must match the architecture of the pushed images. Use ARM64 when building on an arm64 host (also cheaper)."
+
+  validation {
+    condition     = contains(["X86_64", "ARM64"], var.task_cpu_architecture)
+    error_message = "task_cpu_architecture must be X86_64 or ARM64."
+  }
+}
+
 variable "app_cpu" {
   type        = number
   default     = 512
@@ -155,6 +174,17 @@ variable "db_username" {
 variable "db_name" {
   type    = string
   default = "passwd_sso"
+}
+
+variable "db_engine_version" {
+  type        = string
+  default     = "16"
+  description = "PostgreSQL engine version. Prefer the MAJOR version alone so AWS picks a currently-available minor and auto_minor_version_upgrade does not create plan drift; a full X.Y pin rots when AWS retires that minor."
+
+  validation {
+    condition     = can(regex("^16(\\.[0-9]+)?$", var.db_engine_version))
+    error_message = "db_engine_version must be \"16\" or \"16.<minor>\" — the app targets PostgreSQL 16."
+  }
 }
 
 variable "db_instance_class" {
@@ -245,6 +275,51 @@ variable "redis_num_node_groups" {
 variable "redis_replicas_per_node_group" {
   type    = number
   default = 1
+}
+
+variable "enable_google_auth" {
+  type        = bool
+  default     = true
+  description = "Pass AUTH_GOOGLE_ID/SECRET to the app. The sign-in page treats Google (or SAML) as 'SSO configured' and HIDES the email and passkey options whenever either is present — see src/app/[locale]/auth/signin/page.tsx. So this is not additive: turning Google on removes magic-link sign-in from the UI."
+}
+
+# ── Magic-link (email) sign-in ────────────────────────────────────────────────
+# Wiring these is what makes EMAIL_PROVIDER=smtp reachable from the app task.
+# Leave smtp_host empty to leave the provider unconfigured; the app then needs
+# Google or Jackson to satisfy the production "at least one auth provider" rule.
+variable "smtp_host" {
+  type        = string
+  default     = ""
+  description = "SMTP host for magic-link email. Empty disables the email provider entirely."
+}
+
+variable "smtp_port" {
+  type        = number
+  default     = 587
+  description = "SMTP port. The app opens an implicit-TLS connection ONLY for 465; every other port connects in the clear and relies on STARTTLS, so 587 is the submission default and 25 is unusable from Fargate (AWS blocks outbound 25)."
+
+  validation {
+    condition     = contains([587, 465, 2525], var.smtp_port)
+    error_message = "smtp_port must be 587 (STARTTLS), 465 (implicit TLS) or 2525. Port 25 is blocked outbound by AWS."
+  }
+}
+
+variable "email_from" {
+  type        = string
+  default     = ""
+  description = "From address for magic-link email. Required when smtp_host is set."
+}
+
+variable "smtp_auth_enabled" {
+  type        = bool
+  default     = true
+  description = "Whether the SMTP server requires credentials. When true, SMTP_USER/SMTP_PASS are read from the app secret; the app only sends AUTH when BOTH are non-empty."
+}
+
+variable "enable_s3_audit_anchors" {
+  type        = bool
+  default     = true
+  description = "Create the S3 bucket that receives audit-chain anchors. Production requires AUDIT_ANCHOR_PUBLISHER_ENABLED=true and at least one destination; turn this off only if you configure the GitHub destination instead."
 }
 
 variable "enable_s3_attachments" {

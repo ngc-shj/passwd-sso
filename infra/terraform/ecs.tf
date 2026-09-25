@@ -24,10 +24,27 @@ resource "aws_ecs_task_definition" "app" {
   family                   = "${local.name_prefix}-app"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.app_cpu
-  memory                   = var.app_memory
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.app_cpu
+  memory             = var.app_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  task_role_arn      = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {
@@ -60,25 +77,93 @@ resource "aws_ecs_task_definition" "app" {
       # (loopback only), the rightmost hop the ALB observed (the real client, or
       # the attacker's own IP — never someone else's) is returned. The ALB is set
       # to xff_header_processing_mode = "append" in alb.tf to pin this behavior.
-      environment = [
-        { name = "TRUST_PROXY_HEADERS", value = "true" },
-      ]
-      secrets = [
-        { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
-        { name = "AUTH_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_URL::" },
-        { name = "AUTH_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_SECRET::" },
-        { name = "AUTH_GOOGLE_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_ID::" },
-        { name = "AUTH_GOOGLE_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_SECRET::" },
-        { name = "AUTH_JACKSON_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_ID::" },
-        { name = "AUTH_JACKSON_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_SECRET::" },
-        { name = "SHARE_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SHARE_MASTER_KEY::" },
-        # #3: dedicated session-token HMAC key — required in production so the DB
-        # session lookup HMAC is decoupled from SHARE_MASTER_KEY rotation.
-        { name = "SESSION_TOKEN_HMAC_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_TOKEN_HMAC_KEY::" },
-        { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
-      ]
+      environment = concat(
+        [
+          { name = "TRUST_PROXY_HEADERS", value = "true" },
+          # Bind every interface. The Dockerfile sets ENV HOSTNAME=0.0.0.0, but
+          # ECS overwrites HOSTNAME at runtime with the container's own hostname,
+          # and the Next.js standalone server binds to whatever HOSTNAME names —
+          # so it listened on the task ENI address ONLY. The startup banner shows
+          # it: "Local: http://ip-10-10-10-36...:3000", not 0.0.0.0.
+          #
+          # The ALB reaches the ENI address, so /api/health/ready returned 200
+          # throughout and the service looked healthy; the CONTAINER health
+          # check probes loopback and could therefore never connect, in any
+          # revision. Tasks were killed for failing it while serving traffic
+          # correctly. Setting it here wins because task-definition environment
+          # overrides the image's ENV.
+          { name = "HOSTNAME", value = "0.0.0.0" },
+        ],
+        # Production env validation (src/lib/env-schema.ts) REFUSES to boot
+        # without external audit anchoring, and enabling it pulls in a signing
+        # key, a tag secret and a destination. These were absent, so every app
+        # task crash-looped on "Invalid environment variables" — found only by
+        # reading the task logs after the first successful rollout.
+        var.enable_s3_audit_anchors ? [
+          { name = "AUDIT_ANCHOR_PUBLISHER_ENABLED", value = "true" },
+          { name = "AUDIT_ANCHOR_DESTINATION_S3_BUCKET", value = aws_s3_bucket.audit_anchors[0].id },
+        ] : [],
+        # Magic-link sign-in. auth.config.ts registers the Nodemailer provider
+        # only when EMAIL_PROVIDER is set, and env-schema.ts additionally
+        # requires SMTP_HOST in production for EMAIL_PROVIDER=smtp — none of
+        # which any task definition passed, so email sign-in was unreachable on
+        # AWS however the secrets were populated.
+        var.smtp_host != "" ? [
+          { name = "EMAIL_PROVIDER", value = "smtp" },
+          { name = "EMAIL_FROM", value = var.email_from },
+          { name = "SMTP_HOST", value = var.smtp_host },
+          { name = "SMTP_PORT", value = tostring(var.smtp_port) },
+        ] : []
+      )
+      secrets = concat(
+        [
+          { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+          { name = "AUTH_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_URL::" },
+          { name = "AUTH_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_SECRET::" },
+          { name = "AUTH_JACKSON_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_ID::" },
+          { name = "AUTH_JACKSON_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_SECRET::" },
+          { name = "SHARE_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SHARE_MASTER_KEY::" },
+          # #3: dedicated session-token HMAC key — required in production so the DB
+          # session lookup HMAC is decoupled from SHARE_MASTER_KEY rotation.
+          { name = "SESSION_TOKEN_HMAC_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_TOKEN_HMAC_KEY::" },
+          { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
+          # Also required in production by env-schema.ts — see the environment
+          # block above for how these came to be missing.
+          { name = "VERIFIER_PEPPER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:VERIFIER_PEPPER_KEY::" },
+          { name = "AUDIT_ANCHOR_SIGNING_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_SIGNING_KEY::" },
+          { name = "AUDIT_ANCHOR_TAG_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_TAG_SECRET::" },
+        ],
+        # Credentials stay in Secrets Manager rather than task environment. The
+        # app sends AUTH only when both are non-empty, so an unauthenticated
+        # relay is expressed by writing empty strings, not by omitting the keys
+        # (ECS fails the task launch on a missing JSON key).
+        var.smtp_host != "" && var.smtp_auth_enabled ? [
+          { name = "SMTP_USER", valueFrom = "${aws_secretsmanager_secret.app.arn}:SMTP_USER::" },
+          { name = "SMTP_PASS", valueFrom = "${aws_secretsmanager_secret.app.arn}:SMTP_PASS::" },
+        ] : [],
+        # Conditional, because passing these is what DISABLES magic-link and
+        # passkey sign-in: the sign-in page computes hasSso = hasGoogle ||
+        # hasSaml and renders the email/passkey options only when hasSso is
+        # false. The two are alternatives in the UI, not additions.
+        var.enable_google_auth ? [
+          { name = "AUTH_GOOGLE_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_ID::" },
+          { name = "AUTH_GOOGLE_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_SECRET::" },
+        ] : []
+      )
+      # Exit EXPLICITLY on both paths. The previous probe armed a bare
+      # setTimeout(..., 5000) as its abort timer and never cleared it, so on
+      # SUCCESS the process sat idle until that timer fired — every probe cost a
+      # guaranteed ~5s of a 10s timeout budget (measured in this image: capped at
+      # 4s it is killed, at 10s it passes). On a 0.5 vCPU task spawning a fresh
+      # node every 30s alongside the Next.js server, the remaining margin is not
+      # enough and the probe times out.
+      #
+      # AbortSignal.timeout's timer is unref'd, so it does not hold the loop
+      # open; the body is consumed so no undici stream is left dangling; and
+      # 127.0.0.1 skips DNS (localhost resolves ::1 first in this image, which
+      # only works because fetch falls back).
       healthCheck = {
-        command     = ["CMD-SHELL", "node -e \"const c=new AbortController();setTimeout(()=>c.abort(),5000);fetch('http://localhost:3000/api/health/live',{signal:c.signal}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+        command     = ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health/live',{signal:AbortSignal.timeout(4000)}).then(async r=>{await r.arrayBuffer();process.exit(r.ok?0:1)},()=>process.exit(1))\""]
         interval    = 30
         timeout     = 10
         retries     = 3
@@ -97,9 +182,26 @@ resource "aws_ecs_task_definition" "jackson" {
   family                   = "${local.name_prefix}-jackson"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.jackson_cpu
-  memory                   = var.jackson_memory
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.jackson_cpu
+  memory             = var.jackson_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
 
   container_definitions = jsonencode([
     {
@@ -144,9 +246,26 @@ resource "aws_ecs_task_definition" "migrate" {
   family                   = "${local.name_prefix}-migrate"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 512
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = 256
+  memory             = 512
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
   # DEDICATED migrate task role carrying the ssmmessages:* actions ECS Exec needs
   # (iam.tf). Kept SEPARATE from the app/worker task role so long-lived tasks are
   # not exec-able (least privilege). During bootstrap this task is launched with
@@ -284,10 +403,27 @@ resource "aws_ecs_task_definition" "audit_outbox_worker" {
   family                   = "${local.name_prefix}-audit-outbox-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.worker_cpu
-  memory                   = var.worker_memory
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.worker_cpu
+  memory             = var.worker_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  task_role_arn      = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {
@@ -318,10 +454,27 @@ resource "aws_ecs_task_definition" "retention_gc_worker" {
   family                   = "${local.name_prefix}-retention-gc-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.worker_cpu
-  memory                   = var.worker_memory
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  # Keep the PREVIOUS revision registered. Terraform's default is to deregister
+  # the revision it replaces, and scripts/deploy.sh replaces every task
+  # definition on each run — so by the time its rollout check can fail, the
+  # revision its compensating rollback targets is already INACTIVE and
+  # `update-service` onto it is refused with "TaskDefinition is inactive". The
+  # safety net was therefore unusable on EVERY deploy, not in some edge case.
+  # Observed end to end on the first AWS bootstrap: rollback failed for three
+  # services at once and the script reported MANUAL INTERVENTION REQUIRED.
+  # scripts/__tests__/deploy-rollback.test.mjs stubs the aws CLI, so it asserts
+  # the rollback's control flow and can never see this.
+  skip_destroy = true
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.worker_cpu
+  memory             = var.worker_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  task_role_arn      = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {

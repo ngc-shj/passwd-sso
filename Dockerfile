@@ -340,6 +340,39 @@ COPY --from=builder /app/node_modules/postgres-interval ./node_modules/postgres-
 COPY --from=builder /app/node_modules/split2 ./node_modules/split2
 COPY --from=builder /app/node_modules/xtend ./node_modules/xtend
 
+# Amazon RDS server-certificate trust anchors.
+#
+# RDS presents certificates signed by Amazon's own RDS CAs, which are in NO
+# public trust store. Current node-postgres treats `sslmode=require` as
+# verify-full, so without a root CA every DB connection to RDS fails with
+# SELF_SIGNED_CERT_IN_CHAIN — app, both workers, the migrate task and the audit
+# grant check alike. RDS PostgreSQL 15+ also sets rds.force_ssl=1 by default, so
+# connecting WITHOUT TLS is refused outright: there is no "just drop SSL" path.
+# The DB URLs point at this file via `?sslmode=verify-full&sslrootcert=...`.
+#
+# Fetched, not vendored: `.gitignore` blanket-ignores *.pem to keep private keys
+# out of the repo, so a committed bundle would be silently skipped by `git add`
+# and the image would ship without it. Pinning the digest here keeps the review
+# property that vendoring would have given — a changed trust store shows up as a
+# changed pin in the diff, and an unannounced swap fails the build instead of
+# silently widening what we trust.
+#
+# This is the GLOBAL bundle (all regions). verify-full also pins the hostname,
+# so the extra regions' CAs do not broaden what an attacker can present for our
+# endpoint. An operator wanting the smallest trust set can point sslrootcert at
+# a single-region bundle instead; nothing here hardcodes a region.
+#
+# AWS rotates this bundle. When it does, the build fails on the checksum: fetch
+# the new one, diff the certificate list, and move the pin deliberately.
+ARG RDS_CA_BUNDLE_URL=https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+ARG RDS_CA_BUNDLE_SHA256=e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3
+RUN mkdir -p /app/certs && \
+    wget -qO /app/certs/rds-global-bundle.pem "${RDS_CA_BUNDLE_URL}" && \
+    echo "${RDS_CA_BUNDLE_SHA256}  /app/certs/rds-global-bundle.pem" | sha256sum -c - && \
+    grep -q "BEGIN CERTIFICATE" /app/certs/rds-global-bundle.pem && \
+    ! grep -q "PRIVATE KEY" /app/certs/rds-global-bundle.pem && \
+    chown -R nextjs:nodejs /app/certs && chmod 0444 /app/certs/rds-global-bundle.pem
+
 USER nextjs
 
 EXPOSE 3000

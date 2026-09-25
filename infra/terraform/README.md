@@ -34,8 +34,10 @@ infra/terraform/
 ├── terraform.tfvars.example
 └── envs/
     ├── dev/
+    │   ├── backend.hcl              # state key for this env (committed)
     │   └── terraform.tfvars.example
     └── prod/
+        ├── backend.hcl
         └── terraform.tfvars.example
 ```
 
@@ -50,14 +52,17 @@ cd infra/terraform
 cp envs/dev/terraform.tfvars.example envs/dev/terraform.tfvars
 # Edit envs/dev/terraform.tfvars with real secrets
 
-terraform init
+# The S3 backend is declared unconditionally, so its bucket and lock table must
+# already exist (see "Remote State Backend"); -backend-config picks this env's
+# state key.
+terraform init -reconfigure -backend-config=envs/dev/backend.hcl
 ```
 
 > **Secrets end up in Terraform state.** Any secret value passed via tfvars is
 > written to `terraform.tfstate` in plaintext (see the SECURITY note in
 > `secrets.tf`). Before applying with real secrets you MUST configure the
 > encrypted S3 remote backend below — do not run a real deployment on local
-> state. `terraform.tfvars` is gitignored; never commit real secret values.
+> state. Every tfvars file is gitignored; never commit real secret values.
 
 ### 2. First-time bootstrap (NEW environment)
 
@@ -268,20 +273,42 @@ See docs/operations/deployment.md "Image Signing".
 
 ## Remote State Backend
 
-State is stored locally by default. **Any deployment carrying real secrets MUST
-use the encrypted S3 + DynamoDB backend** — Terraform state holds those secret
-values in plaintext, so local state on a laptop or in a CI artifact is a secret
-exposure. The remote backend provides at-rest encryption (`encrypt = true`),
-versioning, and — via bucket policy/IAM — strict access control and access
-logging.
+`backend.tf` declares the encrypted S3 + DynamoDB backend **unconditionally**, so
+it is not opt-in: `terraform init` fails until the bucket and the lock table
+exist. Create them FIRST — see the comments in `backend.tf` for the exact
+commands (bucket + versioning + encryption + public-access block + lock table).
+Terraform state holds secret values in plaintext, so local state on a laptop or
+in a CI artifact is a secret exposure; the remote backend provides at-rest
+encryption (`encrypt = true`), versioning, and — via bucket policy/IAM — strict
+access control and access logging.
 
-See comments in `backend.tf` for setup steps (bucket + lock table + versioning).
-Verify the bucket enforces encryption and blocks public access before migrating
-state.
+### One state per environment
 
-`terraform.tfvars` is gitignored and must never be committed. As of the 2026-07
-review (F3) it no longer carries secret values — those are injected out-of-band
-(see Secrets Management below).
+`backend.tf` hardcodes `key = "env/terraform.tfstate"`. That single key is shared
+by every environment, so running `dev` and `prod` from this same directory would
+make them collide in ONE state file. Each environment carries its own key in
+`envs/<env>/backend.hcl`, selected at init time:
+
+```bash
+terraform init -reconfigure -backend-config=envs/dev/backend.hcl
+terraform plan -var-file=envs/dev/terraform.tfvars
+```
+
+Switching environments requires re-running `init -reconfigure` with the other
+`backend.hcl`. A mismatch between the backend key and `-var-file` points one
+environment's state at the other's resources, so prefer a separate checkout or
+git worktree per environment if you switch often.
+
+### Variable files are never committed
+
+Every tfvars form Terraform auto-loads is gitignored (`*.tfvars`,
+`*.tfvars.json`, including `*.auto.tfvars`, at any depth under
+`infra/terraform/`); only the `*.tfvars.example` templates are tracked. This
+matters because tfvars is **not** secret-free: the 2026-07 review (F3) moved the
+app/Jackson secret values out of Terraform, but `redis_auth_token` still has to
+be passed as a variable — ElastiCache has no AWS-managed-token equivalent — so a
+tracked variables file is a credential leak. `backend.hcl` holds only a state
+key and IS committed.
 
 ## Secrets Management
 
