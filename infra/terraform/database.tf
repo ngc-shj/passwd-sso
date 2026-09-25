@@ -15,9 +15,16 @@ resource "aws_db_subnet_group" "main" {
 # app connects via DATABASE_URL (app Secrets Manager secret, injected
 # out-of-band), so it does not need the master password here.
 resource "aws_db_instance" "main" {
-  identifier                  = "${local.name_prefix}-db"
-  engine                      = "postgres"
-  engine_version              = "16.3"
+  identifier = "${local.name_prefix}-db"
+  engine     = "postgres"
+  # MAJOR version only. A pinned minor (this was "16.3") stops being creatable
+  # once AWS retires it — CreateDBInstance then fails with "Cannot find version
+  # 16.3 for postgres". It also contradicts auto_minor_version_upgrade below:
+  # the instance drifts off the pin at the next maintenance window and the plan
+  # tries to downgrade. With a major-only value the provider treats the actual
+  # version as matching, so the two settings agree.
+  engine_version              = var.db_engine_version
+  auto_minor_version_upgrade  = true
   instance_class              = var.db_instance_class
   allocated_storage           = var.db_allocated_storage
   db_subnet_group_name        = aws_db_subnet_group.main.name

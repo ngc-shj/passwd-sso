@@ -157,6 +157,17 @@ variable "db_name" {
   default = "passwd_sso"
 }
 
+variable "db_engine_version" {
+  type        = string
+  default     = "16"
+  description = "PostgreSQL engine version. Prefer the MAJOR version alone so AWS picks a currently-available minor and auto_minor_version_upgrade does not create plan drift; a full X.Y pin rots when AWS retires that minor."
+
+  validation {
+    condition     = can(regex("^16(\\.[0-9]+)?$", var.db_engine_version))
+    error_message = "db_engine_version must be \"16\" or \"16.<minor>\" — the app targets PostgreSQL 16."
+  }
+}
+
 variable "db_instance_class" {
   type    = string
   default = "db.t4g.micro"
