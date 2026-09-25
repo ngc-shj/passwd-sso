@@ -108,7 +108,14 @@ saml/
 infra/terraform/.terraform/
 infra/terraform/**/*.tfstate
 infra/terraform/**/*.tfstate.backup
-infra/terraform/envs/*/terraform.tfvars
+# Every tfvars form Terraform auto-loads, at any depth. `redis_auth_token` is a
+# real secret that still lives in tfvars (ElastiCache has no AWS-managed token),
+# so an un-ignored variables file is a credential leak. Ignoring only
+# envs/*/terraform.tfvars left the root infra/terraform/terraform.tfvars — the
+# path its own .example invites you to copy to — tracked and committable.
+# The *.tfvars.example templates do not match these patterns and stay tracked.
+infra/terraform/**/*.tfvars
+infra/terraform/**/*.tfvars.json
 
 # Extension
 extension/dist/
