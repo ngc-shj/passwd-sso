@@ -80,6 +80,19 @@ resource "aws_ecs_task_definition" "app" {
       environment = concat(
         [
           { name = "TRUST_PROXY_HEADERS", value = "true" },
+          # Bind every interface. The Dockerfile sets ENV HOSTNAME=0.0.0.0, but
+          # ECS overwrites HOSTNAME at runtime with the container's own hostname,
+          # and the Next.js standalone server binds to whatever HOSTNAME names —
+          # so it listened on the task ENI address ONLY. The startup banner shows
+          # it: "Local: http://ip-10-10-10-36...:3000", not 0.0.0.0.
+          #
+          # The ALB reaches the ENI address, so /api/health/ready returned 200
+          # throughout and the service looked healthy; the CONTAINER health
+          # check probes loopback and could therefore never connect, in any
+          # revision. Tasks were killed for failing it while serving traffic
+          # correctly. Setting it here wins because task-definition environment
+          # overrides the image's ENV.
+          { name = "HOSTNAME", value = "0.0.0.0" },
         ],
         # Production env validation (src/lib/env-schema.ts) REFUSES to boot
         # without external audit anchoring, and enabling it pulls in a signing
