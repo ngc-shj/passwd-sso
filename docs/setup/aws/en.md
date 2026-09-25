@@ -88,8 +88,46 @@ openssl rand -hex 32     # SHARE_MASTER_KEY
 - Enable backups and Multi-AZ if required
 - Set `DATABASE_URL` as:
 ```
-postgresql://USER:PASSWORD@HOST:PORT/DBNAME
+postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem
 ```
+
+### TLS is mandatory, and verified
+
+**Every** DB URL that points at RDS needs those two parameters — `DATABASE_URL`,
+`MIGRATION_DATABASE_URL`, `OUTBOX_WORKER_DATABASE_URL`,
+`RETENTION_GC_DATABASE_URL`, and Jackson's `DB_URL`. Two independent reasons:
+
+- RDS PostgreSQL 15+ ships `rds.force_ssl = 1`, so a plaintext connection is
+  rejected at authentication time: `no pg_hba.conf entry for host "...", no
+  encryption`.
+- Current node-postgres treats `sslmode=require` as `verify-full`, and RDS
+  certificates chain to Amazon's own RDS CAs, which are in no public trust
+  store. Without `sslrootcert` the handshake fails with
+  `SELF_SIGNED_CERT_IN_CHAIN`.
+
+The Dockerfile fetches the Amazon RDS global CA bundle to
+`/app/certs/rds-global-bundle.pem` under a pinned SHA-256, so that path is
+already present in the app, worker and migrate containers. Point `sslrootcert`
+somewhere else if you prefer a single-region bundle.
+
+Local Docker Compose runs a plain PostgreSQL container with no `force_ssl`, so
+these parameters are AWS-only — the compose URLs stay as they are. That asymmetry
+is why the requirement is invisible until you deploy: a fully green local test
+suite says nothing about it.
+
+### RDS master users are not SUPERUSER
+
+The master user created by `manage_master_user_password` is an `rds_superuser`,
+not a real PostgreSQL superuser (`pg_user.usesuper` is false). Anything needing
+true superuser fails with SQLSTATE 42501, including:
+
+- `ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS / NOREPLICATION` — even when the
+  attribute already has that value. `CREATE ROLE ... NOSUPERUSER` is fine, so
+  role creation works and only re-convergence of an existing role fails.
+- Attaching a placeholder GUC to a routine (`CREATE FUNCTION ... SET app.x`),
+  and `GRANT SET ON PARAMETER` to work around it.
+
+Session-level `SET app.x` and `set_config('app.x', ..., true)` are unrestricted.
 
 ## ECS/Fargate Services
 

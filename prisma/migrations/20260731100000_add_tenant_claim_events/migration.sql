@@ -219,18 +219,49 @@ ALTER TABLE "tenant_claim_events" ENABLE ALWAYS TRIGGER trg_tenant_claim_events_
 -- the record for both. That follows from the one-row design, not from this
 -- predicate; the alternative (delete only when both named tenants are in
 -- scope) would leave such a row unreachable by any single-tenant purge.
+-- The purge window is opened in the BODY, not by a routine-level
+-- `SET app.allow_claim_event_purge = 'on'` clause.
+--
+-- That clause cannot be used on managed PostgreSQL. Attaching a PLACEHOLDER GUC
+-- (one no extension defines) to a routine requires a real SUPERUSER on PG 15+,
+-- and an RDS master user is not one — `CREATE FUNCTION ... SET app.x` fails
+-- 42501 "permission denied to set parameter", which aborts the whole migration.
+-- `GRANT SET ON PARAMETER "app.allow_claim_event_purge"` is refused for the
+-- same reason, so there is no way to grant out of it. Verified against RDS
+-- PostgreSQL 16: session `SET` and `set_config(..., true)` both succeed for the
+-- master role; the routine clause and the GRANT both fail.
+--
+-- The body form below reproduces the clause's SCOPE rather than approximating
+-- it. set_config(..., is_local := true) is transaction-local; the caller's
+-- prior value is captured and restored on the normal path; and the inner
+-- BEGIN/EXCEPTION makes the DELETE a subtransaction, so an error rolls back
+-- the local GUC change together with the DELETE before the exception
+-- propagates. The flag therefore cannot outlive the call on either path.
+--
+-- What this does NOT change: the guard was never an authorization boundary.
+-- Any role may `SET app.allow_claim_event_purge = 'on'` for its own session —
+-- that is true of the routine-clause form too. The BOUND is the table ACL, as
+-- the note above says; this layer covers accident.
 CREATE FUNCTION tenant_claim_events_purge_for_tenant(p_tenant_id UUID)
   RETURNS BIGINT
   LANGUAGE plpgsql
   SECURITY INVOKER
-  SET app.allow_claim_event_purge = 'on'
 AS $$
 DECLARE
   v_deleted BIGINT;
+  v_prev TEXT;
 BEGIN
-  DELETE FROM tenant_claim_events
-   WHERE old_tenant_id = p_tenant_id OR new_tenant_id = p_tenant_id;
-  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  v_prev := current_setting('app.allow_claim_event_purge', true);
+  BEGIN
+    PERFORM set_config('app.allow_claim_event_purge', 'on', true);
+    DELETE FROM tenant_claim_events
+     WHERE old_tenant_id = p_tenant_id OR new_tenant_id = p_tenant_id;
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  EXCEPTION WHEN OTHERS THEN
+    -- Subtransaction rollback has already undone the set_config above.
+    RAISE;
+  END;
+  PERFORM set_config('app.allow_claim_event_purge', COALESCE(v_prev, 'off'), true);
   RETURN v_deleted;
 END;
 $$;
