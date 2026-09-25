@@ -21,6 +21,20 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "attachments" {
       kms_master_key_id = var.s3_kms_key_arn != "" ? var.s3_kms_key_arn : null
     }
     bucket_key_enabled = var.s3_kms_key_arn != "" ? true : false
+
+    # Refuse SSE-C uploads. With customer-provided keys the caller holds the only
+    # copy of the key and S3 stores none of it, so an object written that way is
+    # unreadable to this account forever — the write path of a ransomware attack
+    # on the attachment store, and unrecoverable by any backup of the bucket
+    # itself. Nothing here uses SSE-C: attachments are already E2E-encrypted by
+    # the client before upload, and the server-side layer is SSE-S3/SSE-KMS.
+    #
+    # Stated explicitly because leaving it unset is NOT neutral. AWS now blocks
+    # SSE-C by default on new buckets, and the provider treats an absent argument
+    # as the empty list, so the first apply after bucket creation planned to
+    # UNBLOCK it — silently trading the default protection away as drift
+    # correction. Found on the first AWS bootstrap.
+    blocked_encryption_types = ["SSE-C"]
   }
 }
 
