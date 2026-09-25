@@ -110,8 +110,20 @@ resource "aws_ecs_task_definition" "app" {
         { name = "AUDIT_ANCHOR_SIGNING_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_SIGNING_KEY::" },
         { name = "AUDIT_ANCHOR_TAG_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_TAG_SECRET::" },
       ]
+      # Exit EXPLICITLY on both paths. The previous probe armed a bare
+      # setTimeout(..., 5000) as its abort timer and never cleared it, so on
+      # SUCCESS the process sat idle until that timer fired — every probe cost a
+      # guaranteed ~5s of a 10s timeout budget (measured in this image: capped at
+      # 4s it is killed, at 10s it passes). On a 0.5 vCPU task spawning a fresh
+      # node every 30s alongside the Next.js server, the remaining margin is not
+      # enough and the probe times out.
+      #
+      # AbortSignal.timeout's timer is unref'd, so it does not hold the loop
+      # open; the body is consumed so no undici stream is left dangling; and
+      # 127.0.0.1 skips DNS (localhost resolves ::1 first in this image, which
+      # only works because fetch falls back).
       healthCheck = {
-        command     = ["CMD-SHELL", "node -e \"const c=new AbortController();setTimeout(()=>c.abort(),5000);fetch('http://localhost:3000/api/health/live',{signal:c.signal}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+        command     = ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health/live',{signal:AbortSignal.timeout(4000)}).then(async r=>{await r.arrayBuffer();process.exit(r.ok?0:1)},()=>process.exit(1))\""]
         interval    = 30
         timeout     = 10
         retries     = 3
