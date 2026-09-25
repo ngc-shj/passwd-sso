@@ -24,10 +24,15 @@ resource "aws_ecs_task_definition" "app" {
   family                   = "${local.name_prefix}-app"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.app_cpu
-  memory                   = var.app_memory
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.app_cpu
+  memory             = var.app_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  task_role_arn      = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {
@@ -97,9 +102,14 @@ resource "aws_ecs_task_definition" "jackson" {
   family                   = "${local.name_prefix}-jackson"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.jackson_cpu
-  memory                   = var.jackson_memory
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.jackson_cpu
+  memory             = var.jackson_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
 
   container_definitions = jsonencode([
     {
@@ -144,9 +154,14 @@ resource "aws_ecs_task_definition" "migrate" {
   family                   = "${local.name_prefix}-migrate"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 512
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = 256
+  memory             = 512
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
   # DEDICATED migrate task role carrying the ssmmessages:* actions ECS Exec needs
   # (iam.tf). Kept SEPARATE from the app/worker task role so long-lived tasks are
   # not exec-able (least privilege). During bootstrap this task is launched with
@@ -284,10 +299,15 @@ resource "aws_ecs_task_definition" "audit_outbox_worker" {
   family                   = "${local.name_prefix}-audit-outbox-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.worker_cpu
-  memory                   = var.worker_memory
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.worker_cpu
+  memory             = var.worker_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  task_role_arn      = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {
@@ -318,10 +338,15 @@ resource "aws_ecs_task_definition" "retention_gc_worker" {
   family                   = "${local.name_prefix}-retention-gc-worker"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.worker_cpu
-  memory                   = var.worker_memory
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.worker_cpu
+  memory             = var.worker_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  task_role_arn      = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {

@@ -89,6 +89,25 @@ variable "jackson_image" {
   }
 }
 
+# Fargate CPU architecture for EVERY task definition (app, jackson, migrate, both
+# workers). It must match the architecture of the images you push: Fargate
+# defaults to X86_64 when runtime_platform is absent, so on an arm64 build host
+# `docker build` silently produces an image the task cannot start
+# ("image Manifest does not contain descriptor matching platform"). Making it
+# explicit turns that into a setting rather than a property of whoever ran the
+# build. ARM64 (Graviton) is also ~20% cheaper per vCPU-hour; the node and
+# boxyhq/jackson base images both publish arm64 variants.
+variable "task_cpu_architecture" {
+  type        = string
+  default     = "X86_64"
+  description = "Fargate CPU architecture for all task definitions. Must match the architecture of the pushed images. Use ARM64 when building on an arm64 host (also cheaper)."
+
+  validation {
+    condition     = contains(["X86_64", "ARM64"], var.task_cpu_architecture)
+    error_message = "task_cpu_architecture must be X86_64 or ARM64."
+  }
+}
+
 variable "app_cpu" {
   type        = number
   default     = 512
