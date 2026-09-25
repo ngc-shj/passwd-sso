@@ -116,6 +116,9 @@ infra/terraform/**/*.tfstate.backup
 # The *.tfvars.example templates do not match these patterns and stay tracked.
 infra/terraform/**/*.tfvars
 infra/terraform/**/*.tfvars.json
+# A saved plan embeds the RESOLVED variable values, so it carries the same
+# secrets tfvars does (redis_auth_token) plus whatever state it read back.
+infra/terraform/**/*.tfplan
 
 # Extension
 extension/dist/
