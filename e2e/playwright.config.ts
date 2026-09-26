@@ -86,9 +86,15 @@ export default defineConfig({
     ? {}
     : {
         webServer: {
-          command: process.env.CI
-            ? "npm run build && npm start"
-            : "npx next dev --turbopack",
+          // Additive, never a replacement: CI has always served a production
+          // build here, and the CSP spec (e2e/tests/csp-strict.spec.ts) needs
+          // one locally too because csp-builder reads NODE_ENV at module init
+          // and the dev policy carries 'unsafe-inline'. Swapping `CI` for the
+          // flag would silently move all the other specs onto `next dev`.
+          command:
+            process.env.CI || process.env.E2E_CSP_SERVER === "prod"
+              ? "npm run build && npm start"
+              : "npx next dev --turbopack",
           cwd: "..",
           url: baseURL,
           reuseExistingServer: !process.env.CI,

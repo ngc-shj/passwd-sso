@@ -1,21 +1,9 @@
 "use client";
 
+import { readCspNonce } from "./csp-nonce";
+
 const TAG_STYLE_ID = "tag-color-styles";
 const tagColorRules = new Set<string>();
-let cachedNonce: string | null | undefined;
-
-function getNonce(): string | null {
-  if (cachedNonce !== undefined) return cachedNonce;
-  if (typeof document === "undefined") {
-    cachedNonce = null;
-    return cachedNonce;
-  }
-  const meta = document.querySelector<HTMLMetaElement>(
-    'meta[name="csp-nonce"]'
-  );
-  cachedNonce = meta?.content ?? null;
-  return cachedNonce;
-}
 
 function ensureTagStyleElement(nonce: string | null): HTMLStyleElement | null {
   if (typeof document === "undefined") return null;
@@ -40,7 +28,7 @@ export function getTagColorClass(color: string | null): string | null {
   if (typeof document === "undefined") return className;
 
   if (!tagColorRules.has(className)) {
-    const nonce = getNonce();
+    const nonce = readCspNonce();
     const style = ensureTagStyleElement(nonce);
     if (style) {
       style.appendChild(

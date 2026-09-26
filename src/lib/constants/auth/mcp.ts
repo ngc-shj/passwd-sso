@@ -103,18 +103,37 @@ export const MCP_SERVER_VERSION = "1.0.0";
 //   - DCR (`/api/mcp/register`)
 //   - Manual MCP client management (`/api/tenant/mcp-clients`, `/api/tenant/mcp-clients/[id]`)
 //   - Frontend validator (`mcp-client-card.tsx`)
-// The CSP `form-action` directive in `proxy.ts` MUST mirror the host set
-// accepted here (`localhost`, `127.0.0.1`, `[::1]`) — any host accepted by
-// this regex but missing from the CSP causes the consent-form 302 redirect
-// to be CSP-blocked.
+// The CSP `form-action` directive (src/lib/security/csp-builder.ts) MUST
+// mirror the host set accepted here — any host accepted by this regex but not
+// enforceable in the CSP causes the consent-form 302 redirect to be blocked
+// *after* the authorization audit row has been written, which is a grant the
+// client never receives and the audit trail says it did.
 //
-// RFC 8252 §7.3 mandates loopback IP literal support and "MUST allow any
-// port"; §8.3 marks `localhost` as NOT RECOMMENDED but real OAuth clients
-// (Claude Code, Claude Desktop) use it, so we keep it for compatibility.
+// `[::1]` IS DELIBERATELY ABSENT, and that is the mirror working in the only
+// direction available. CSP3's host-source grammar has no IPv6-literal
+// production, so `http://[::1]:*` in `form-action` is discarded by the browser
+// — measured on Chromium 1243, logged on every production page load. The
+// directive therefore cannot be widened to match a permissive registry; the
+// registry is narrowed to match the enforceable directive instead. A client
+// registering an IPv6-literal callback now fails at registration, where the
+// failure is recoverable and explains itself, rather than after consent.
+// RFC 8252 §7.3 does mandate the literal form, so this is a deliberate,
+// recorded deviation forced by CSP — see
+// docs/archive/review/prod-csp-violation-zero-plan.md (C9).
+//
+// §8.3 marks `localhost` as NOT RECOMMENDED but real OAuth clients (Claude
+// Code, Claude Desktop) use it, so we keep it for compatibility.
 //
 // Pre-filter: callers should run `z.string().url()` first so `new URL()`
 // rejects invalid ports (>65535) before this regex sees them.
-export const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\//;
+export const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost):\d+\//;
+
+/**
+ * One wording for the accept set, so the three route validators and the
+ * settings form cannot drift from each other or from the regex above.
+ */
+export const REDIRECT_URI_ACCEPT_SET_MESSAGE =
+  "must use https:// or http://(127.0.0.1|localhost):<port>/ — IPv6-literal loopback ([::1]) cannot be enforced by the CSP form-action directive and is not accepted; use 127.0.0.1";
 
 // DCR (Dynamic Client Registration) constants
 export const MCP_REFRESH_TOKEN_PREFIX = "mcpr_";

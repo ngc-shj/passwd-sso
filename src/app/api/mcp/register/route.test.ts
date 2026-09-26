@@ -255,12 +255,39 @@ describe("POST /api/mcp/register", () => {
     expect(json.error).toBe("invalid_client_metadata");
   });
 
-  it("accepts http://[::1]:<port>/ IPv6 loopback redirect URIs (RFC 8252 §7.3)", async () => {
+  // RFC 8252 §7.3 mandates the IPv6 literal form, and this route accepted it
+  // until CSP measurement showed the other half of the contract cannot hold:
+  // Chromium discards `http://[::1]:*` from `form-action`, so a client
+  // registering one completes consent, gets an authorization audit row, and
+  // never receives the redirect. Refusing at registration keeps the failure
+  // recoverable. See docs/archive/review/prod-csp-violation-zero-plan.md (C9).
+  it("refuses http://[::1]:<port>/ because form-action cannot enforce it", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
         token_endpoint_auth_method: "none",
         redirect_uris: ["http://[::1]:3000/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+    // The refusal names its own cause — a generic "invalid redirect_uri" would
+    // leave the client guessing at a URI RFC 8252 says is correct.
+    expect(JSON.stringify(json)).toContain("[::1]");
+  });
+
+  // Paired allow case: narrowing the accept set must not take the IPv4
+  // loopback with it. Without this, deleting the host alternation entirely
+  // would still pass the refusal above.
+  it("still accepts http://127.0.0.1:<port>/ after the IPv6 narrowing", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        token_endpoint_auth_method: "none",
+        redirect_uris: ["http://127.0.0.1:3000/callback"],
       },
     });
     const res = await POST(req);

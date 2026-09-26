@@ -24,7 +24,19 @@ describe("buildCspHeader — form-action loopback hosts", () => {
     expect(csp).toMatch(/form-action[^;]*\bhttp:\/\/127\.0\.0\.1:\*/);
   });
 
-  it("allows http://[::1]:* for IPv6 OAuth loopback redirects (RFC 8252 §7.3)", () => {
+  // The literal is still emitted, but it is INERT: CSP3's host-source grammar
+  // has no IPv6-literal production and Chromium discards the source, logging
+  // "contains an invalid source: 'http://[::1]:*'. It will be ignored." on
+  // every page load. This test pins its PRESENCE only; the claim that IPv6
+  // loopback redirects work is false and is not asserted anywhere.
+  //
+  // What closes the gap is the other side of the mirror: DCR refuses to
+  // register an `[::1]` redirect URI at all (LOOPBACK_REDIRECT_RE in
+  // src/lib/constants/auth/mcp.ts), so no consent flow can reach a redirect
+  // this directive would discard. The executable assertion that Chromium
+  // really blocks it lives in e2e/tests/csp-strict.spec.ts, where a browser
+  // adjudicates instead of a string match.
+  it("still emits http://[::1]:* in form-action, though the browser ignores it", () => {
     expect(csp).toMatch(/form-action[^;]*http:\/\/\[::1\]:\*/);
   });
 

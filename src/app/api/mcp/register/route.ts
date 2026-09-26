@@ -19,6 +19,7 @@ import {
   DCR_RATE_LIMIT_WINDOW_MS,
   DCR_RATE_LIMIT_MAX,
   LOOPBACK_REDIRECT_RE,
+  REDIRECT_URI_ACCEPT_SET_MESSAGE,
 } from "@/lib/constants/auth/mcp";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -47,8 +48,7 @@ const dcrSchema = z.object({
           }
         }),
       {
-        message:
-          "redirect_uris must use https:// or http://(127.0.0.1|localhost|[::1]):<port>/",
+        message: `redirect_uris ${REDIRECT_URI_ACCEPT_SET_MESSAGE}`,
       },
     ),
   grant_types: z.array(z.string()).optional(),

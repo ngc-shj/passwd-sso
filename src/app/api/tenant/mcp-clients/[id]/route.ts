@@ -8,7 +8,8 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
+import { MCP_SCOPES, LOOPBACK_REDIRECT_RE,
+  REDIRECT_URI_ACCEPT_SET_MESSAGE } from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
@@ -26,7 +27,7 @@ const updateSchema = z.object({
           return url.protocol === "https:" || LOOPBACK_REDIRECT_RE.test(u);
         } catch { return false; }
       },
-      { message: "redirect_uri must use https:// or http://(127.0.0.1|localhost|[::1]):<port>/" },
+      { message: `redirect_uri ${REDIRECT_URI_ACCEPT_SET_MESSAGE}` },
     ),
   ).min(1).max(10).optional(),
   allowedScopes: z.array(z.enum(MCP_SCOPES as [string, ...string[]])).min(1)

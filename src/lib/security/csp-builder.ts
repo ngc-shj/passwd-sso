@@ -73,6 +73,19 @@ const _staticDirectives = [
   // real OAuth clients (Claude Code, Claude Desktop) use it, so we keep it.
   // Loopback is local-only — these wildcards do not widen the network attack
   // surface.
+  //
+  // `http://[::1]:*` IS INERT. CSP3's host-source grammar has no IPv6-literal
+  // production, and Chromium discards the source on every page load:
+  //   "The source list for the Content Security Policy directive
+  //    'form-action' contains an invalid source: 'http://[::1]:*'.
+  //    It will be ignored."
+  // It is kept in the string because removing it is a behaviour change nobody
+  // asked for and because a future CSP revision may make it meaningful — but
+  // nothing may be built on the belief that it grants what RFC 8252 requires.
+  // The mirror obligation above is therefore satisfied from the OTHER side:
+  // DCR refuses to register an `[::1]` redirect URI at all, so no consent flow
+  // can reach a redirect this directive would discard — `[::1]` was removed
+  // from `LOOPBACK_REDIRECT_RE` in src/lib/constants/auth/mcp.ts.
   "form-action 'self' http://localhost:* http://127.0.0.1:* http://[::1]:*",
   "frame-ancestors 'none'",
   "upgrade-insecure-requests",

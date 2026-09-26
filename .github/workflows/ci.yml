@@ -37,10 +37,22 @@ jobs:
               - "src/**"
               - "prisma/**"
               - "proxy.ts"
-              - "instrumentation.ts"
+              # Root-level client instrumentation entry. Next.js requires it
+              # synchronously before hydration, which is why the CSP nonce
+              # priming and the Zod jitless config live there — a change to it
+              # must run the app jobs. (The former "instrumentation.ts" entry
+              # here matched no file: paths-filter patterns are repo-root
+              # relative and the server hook is src/instrumentation.ts, already
+              # covered by src/**.)
+              - "instrumentation-client.ts"
               - "messages/**"
               - "package.json"
               - "package-lock.json"
+              # A patch-only PR must run the app and e2e jobs: patches/ is the
+              # most direct way to break the sonner CSP fix, and .npmrc governs
+              # how the patch gets applied.
+              - "patches/**"
+              - ".npmrc"
               - "tsconfig*.json"
               - "vitest.config.*"
               - "eslint.config.*"
@@ -494,9 +506,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [changes, app-ci]
+    # `always()` defeats the skip-on-failed-dependency default; it does NOT
+    # supply outputs. When `changes` fails or is skipped its outputs are empty
+    # strings, every `== 'true'` comparison is false, and this job — which
+    # carries the CSP gate — is silently skipped and reported as non-blocking.
+    # The first clause makes an unresolved filter run the gate instead.
     if: |
       always() &&
-      (needs.changes.outputs.app == 'true' ||
+      (needs.changes.result != 'success' ||
+       needs.changes.outputs.app == 'true' ||
        needs.changes.outputs.e2e == 'true' ||
        needs.changes.outputs.ci == 'true') &&
       needs.app-ci.result != 'failure'

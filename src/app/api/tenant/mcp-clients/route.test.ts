@@ -229,7 +229,6 @@ describe("POST /api/tenant/mcp-clients", () => {
   it.each([
     ["http://127.0.0.1:8765/callback"],
     ["http://localhost:8765/callback"],
-    ["http://[::1]:8765/callback"],
   ])("accepts loopback redirect URI %s", async (uri) => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
@@ -254,7 +253,10 @@ describe("POST /api/tenant/mcp-clients", () => {
     ["http://127.0.0.1/callback"],
     ["http://localhost/callback"],
     ["http://[::1]/callback"],
-  ])("rejects loopback redirect URI without port: %s", async (uri) => {
+    // Ported IPv6 literal too: CSP form-action cannot enforce `[::1]`, so the
+    // registry is narrowed to match. See the C9 note in constants/auth/mcp.ts.
+    ["http://[::1]:8765/callback"],
+  ])("rejects loopback redirect URI: %s", async (uri) => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockMcpClientCount.mockResolvedValue(0);

@@ -869,3 +869,80 @@ Rules that fired this round, by expert:
   (F26, F31), R47 (F28, F34), R49 (F20, F29, F28), R50 (F19, F20, F25), R52 (F18), R53 (F28,
   F29), RT1 (F30), RT2 (F22, F29), RT4 (F26), RT5 (F20, F23), RT6 (F27, F30), RT7 (F18, F20, F26,
   F28, F29, F34), RT8 (F29), RT10 (F26). All others Checked or N/A.
+
+---
+
+# Phase 2: RT7 red proof (C6 Go/No-Go precondition)
+Date: 2026-09-27
+
+Subject: the unfixed tree at commit `bbe8d4a57` plus `e2e/tests/csp-strict.spec.ts` and the
+additive `webServer` condition (the gate itself; no C1-C5 fix applied).
+
+Environment, recorded because the plan's Go/No-Go precondition is about exactly this:
+- **Chromium revision 1243** — the pinned revision, installed for this run. Playwright resolves
+  it with no `executablePath`; `chromium.launch()` reports `153.0.8010.12`. The Round-1/2 baseline
+  was taken on 1234; this retake satisfies F25/F6.
+- Production build (`npm run build`, `NODE_ENV=production` via `next start`), `NEXT_PUBLIC_BASE_PATH=""`,
+  served on `http://localhost:3010`. Ports 3000/3001 are held by the developer's own dev servers
+  and were left alone.
+- Throwaway database `passwd_sso_e2e`, migrated, seeded by the existing `e2e/global-setup.ts`
+  (13 users, no new seed — VEC2/F15). Teardown reported clean.
+
+Result: **1 passed, 7 failed.**
+
+The one that passed is the collector self-test (I6.3) — deny arm caught exactly one violation for
+a deliberately nonce-less `<style>`, allow arm caught zero for a nonce'd one. The collector is
+therefore proven working, which is what makes the seven failures evidence rather than noise.
+
+| Route | Violations | Classes |
+|-------|-----------|---------|
+| signin (ja), signin (en), privacy-policy, recovery, vault-reset | 6 each | V1 + V2 + V3×2 + V4×2 |
+| authenticated dashboard, vault unlocked | 6 | same |
+| Radix overlay mounted | 7 | same + V5 |
+
+Per-violation, as Chromium reported them on `signin (ja)`:
+
+```
+script-src-elem blocked=inline @ /ja/auth/signin:1                        V1 next-themes ThemeScript
+script-src      blocked=eval   @ /_next/static/chunks/10cj059i6ixww.js:2  V2 zod allowsEval probe
+style-src-elem  blocked=inline @ /_next/static/chunks/3zxjnyd3ib8fc.js:2  V3 sonner __insertCSS
+style-src-elem  blocked=inline @ /_next/static/chunks/3zxjnyd3ib8fc.js:2  V3 (second call)
+style-src-elem  blocked=inline @ /_next/static/chunks/10kv_yuy5ij-o.js:2  V4 next-themes transition
+style-src-elem  blocked=inline @ /_next/static/chunks/10kv_yuy5ij-o.js:2  V4 (second)
+```
+
+and the overlay route adds:
+
+```
+style-src-elem  blocked=inline @ /_next/static/chunks/20rkjkzx4rp17.js:2  V5 react-style-singleton
+```
+
+## C5 is settled by this run: V6 does not exist
+
+**Not one `style-src-attr` violation was reported on any route**, including the authenticated
+dashboard with the vault unlocked, the sidebar rendered and the password list populated — the
+exact page whose `sidebar-shared.tsx`, `folder-tree.tsx`, `favicon.tsx` and `entry-icon.tsx`
+sites revision 2 listed as "yes, in SSR HTML by default".
+
+This is stronger evidence than counting `style="` in the served HTML, because a style attribute
+that reached the parser *would* have produced a `style-src-attr` violation and none did. Round-2
+F29 was right and revision 2's table was wrong on all six rows.
+
+**Disposition of C5**: no conversions. `sidebar-shared.tsx`, `folder-tree.tsx`, `favicon.tsx`,
+`entry-icon.tsx`, `tag-dialog.tsx` and `password-generator.tsx` are left untouched — converting
+them would change working markup for a violation class that does not occur, and F29's own remedy
+says not to manufacture a deny clause by converting a site that cannot violate. The gate's route
+table keeps the count at zero. `src/components/folders/folder-tree.tsx` remains dead code and
+remains SC4.
+
+## Fixes this red proof licenses
+
+Each of V1-V5 now has an observed failing state, so each fix has something to turn green:
+
+| Class | Contract | Turns green when |
+|-------|----------|------------------|
+| V1, V4 | C1 | `ThemeProvider` receives the request nonce |
+| V2 | C4 | `z.config({ jitless: true })` runs before the first client-side parse |
+| V3 | C3 | the sonner patch sets the nonce before insertion |
+| V5 | C2 | `setNonce` is primed from the document nonce in `instrumentation-client.ts` |
+| V6 | C5 | already zero — nothing to do |
