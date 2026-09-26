@@ -336,15 +336,17 @@ test("no CSP violations: authenticated dashboard, unlocked vault", async ({
   ).toHaveLength(0);
   expect(app, describeViolations("dashboard", app)).toHaveLength(0);
 
-  // C5 — style attributes in the live DOM after the client has rendered. Note
-  // this differs from the served-HTML count: only the SSR ones can violate,
-  // but a non-zero DOM count with a zero violation count is the evidence that
-  // React applied them through CSSOM.
-  const domStyleAttrs = await page.evaluate(
-    () => document.querySelectorAll("[style]").length,
-  );
-  // eslint-disable-next-line no-console -- measurement recorded for the plan's C5 member set
-  console.log(`dashboard: ${domStyleAttrs} element(s) carry a style attribute in the live DOM`);
+  // C5 — pinned here specifically because this is the page whose sidebar,
+  // folder tree and password list were *claimed* to serve `style=` attributes.
+  // They do not: those rows come from client hooks that fetch in an effect and
+  // from a client-decrypted vault, so nothing reaches the SSR parser. Asserting
+  // it on the served HTML keeps that claim falsifiable — if a future change
+  // moves any of it to the server, this reds before the violation count does.
+  const styleAttrs = await countSsrStyleAttributes(page, res!, "dashboard");
+  expect(
+    styleAttrs,
+    `dashboard: ${styleAttrs} style= attribute(s) in served HTML — a nonce cannot cover these`,
+  ).toBe(0);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
