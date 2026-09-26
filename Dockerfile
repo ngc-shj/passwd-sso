@@ -98,7 +98,11 @@ RUN node_modules/.bin/patch-package --error-on-fail
 # Pin the resolved version beside the patch. `--error-on-fail` only fires when
 # a hunk fails to APPLY; a sonner release that leaves __insertCSS's context
 # untouched would apply cleanly and ship unnoticed.
-RUN node -e "const v=require('sonner/package.json').version; if (v !== '2.0.8') { console.error('SONNER_VERSION_DRIFT: expected 2.0.8, got '+v); process.exit(1) }"
+# Read the manifest by PATH, not by package specifier: sonner's `exports` map
+# lists only "." and "./dist/styles.css", so `require('sonner/package.json')`
+# throws ERR_PACKAGE_PATH_NOT_EXPORTED. A relative path bypasses the exports
+# field, which is why the specifier form passed a local check and failed here.
+RUN node -e "const v=JSON.parse(require('fs').readFileSync('node_modules/sonner/package.json','utf8')).version; if (v !== '2.0.8') { console.error('SONNER_VERSION_DRIFT: expected 2.0.8, got '+v); process.exit(1) }"
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 RUN npx next build
 # Verify the patch reached the artifact the runner ships. The subject is the

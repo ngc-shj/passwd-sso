@@ -162,3 +162,50 @@ The Bash wrapper writes a JSON report to `.vitest/json/output.json` on every
 vitest run. It is not produced by `vitest.config.ts` and is not in
 `.gitignore`. Deleted rather than committed; not added to `.gitignore` because
 that is a repo-wide change this task did not ask for. Worth raising separately.
+
+## D11 — the Docker build caught a defect in the guard added for C3
+
+Recorded because it is the second time in this task that a check passed in one
+resolution context and failed in the one that ships.
+
+The sonner version pin was first written as
+`node -e "require('sonner/package.json').version"`. It passed locally, where
+the equivalent probe had been run against a *relative path*. Inside the image
+it threw:
+
+```
+Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './package.json'
+is not defined by "exports" in /app/node_modules/sonner/package.json
+```
+
+sonner's `exports` map lists only `"."` and `"./dist/styles.css"`, so the
+package-specifier form cannot reach the manifest at all; a relative path
+bypasses the exports field, which is exactly why the local check did not
+notice. Rewritten to `readFileSync`, which still exits non-zero when the
+manifest is absent (`ENOENT`, verified with the status read unpiped).
+
+The other self-inflicted instance, caught the same way: the marker grep was
+first written directory-wide and was green whether or not the patch applied,
+because the app's own `csp-nonce.ts` compiles the same selector string into a
+different chunk.
+
+Both were found by *running the thing*, not by reading it. T1 in the manual
+test plan is no longer a deferred step.
+
+## D12 — basePath verification for C1 (closes D4's residual)
+
+D4 declined a second CI job for the basePath configuration. The residual it
+left — "next-themes' nonce under a basePath" — was measured instead, against a
+production build carrying `NEXT_PUBLIC_BASE_PATH=/passwd-sso`:
+
+```
+response CSP nonce            : FmD22JZL/revr0rK2C6kIQ==
+<meta name="csp-nonce">       : FmD22JZL/revr0rK2C6kIQ==   (match)
+inline scripts WITHOUT nonce  : 0   (was 1 — next-themes' ThemeScript)
+inline scripts WITH nonce     : 16, none mismatched
+style= attributes in SSR HTML : 0
+```
+
+So the basePath-scoped nonce cookie still reaches the Server Component that
+renders the meta, and next-themes is nonced under a basePath as well as
+without one. The standing CI job remains deferred on D4's terms.
