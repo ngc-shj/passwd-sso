@@ -233,3 +233,24 @@ opposite of what reading suggested.
 
 Round 2 is not opened. The remaining items are the residuals above, none of which
 is a defect in the tree.
+
+## Post-commit: the bypass-RLS gate caught the new call site
+
+`scripts/pre-pr.sh` failed 1 of 81 on the committed tree:
+`src/lib/security/consent-form-action.ts` uses `withBypassRls` and was not on
+`ALLOWED_USAGE`. That is the gate working — a new cross-tenant read must be named
+before it ships.
+
+The bypass is required and not incidental. The lookup runs in
+`src/lib/proxy/page-route.ts`, a layer that executes before any tenant context is
+established, so there is no RLS session variable to satisfy; it is the same
+lookup `src/app/[locale]/mcp/authorize/page.tsx` already performs, by the unique
+`clientId`, selecting `redirectUris` alone — values the registrant supplied and
+which the consent page already displays to them. Read-only, no identity, and
+every failure path returns no extra CSP sources.
+
+The entry was red-proved rather than trusted: changing its model list to
+`["tenant"]` makes the gate exit 1 with *"ALLOWED_USAGE permits a model the file
+never reaches under a bypass"*, and the correct list exits 0. So the entry grants
+exactly `mcpClient` and the gate can still tell the difference. The gate's own
+169 tests pass, and `pre-pr.sh` is then 81/81.
