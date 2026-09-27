@@ -271,3 +271,37 @@ One harness note worth keeping: the Dockerfile marker guard's shell form must be
 exercised under `/bin/sh`, not zsh. zsh does not word-split `$chunks`, so `$f`
 becomes the whole newline-joined list and a healthy tree reads as a false red.
 The builder stage is `node:24-alpine`, i.e. `sh` — matching the recorded runs.
+
+## D15 — CI gate parity, run locally
+
+`extract-ci-checks.sh` yields 15 gates. Executed individually, judging each by
+its own exit status: **14 pass**.
+
+The one that does not is `node scripts/refactor-phase-verify.mjs --force`, and
+it is the documented local-only false-fail:
+
+```
+Branch is stale vs origin/main.
+  expected: 88c8a859e743963b88b5e84d8f1dc27bb7c438d1
+  current:  712eb6847921e98f12719593e7604c44667d5a80
+```
+
+`88c8a859e` is not a position of `main` — it is a leftover value in the
+git-ignored `.refactor-phase-verify-baseline`, written by an earlier session.
+`git rev-parse origin/main main` both return `712eb6847`, i.e. this branch IS
+based on current main, and `git log 712eb6847..origin/main` is empty. The guard
+is vacuous on CI (a fresh checkout records the baseline on first run) and its
+workflow is branch-scoped. Checked rather than assumed, because "the branch is
+stale" is exactly the kind of message worth verifying before dismissing.
+
+## D16 — Phase 2 verification summary
+
+| Gate | Result |
+|---|---|
+| CSP gate (chromium 1243, production build) | **10/10**, zero violations, both positive controls green |
+| pre-PR aggregate | **81/81**, exit 0. Non-vacuity checked by step label, not exit status: Lint / Test / Build / Typecheck / CLI × 2 / Extension × 2 all present, no "Web steps skipped", 1038 app test files + 61 extension |
+| Typecheck, Lint (`--max-warnings 0`) | clean, read unpiped |
+| Docker image build | succeeds; all five in-image guards execute; `sonner@2.0.8 ✔` |
+| CI gate parity | 14/15, the 15th being D15 |
+| Contract-conformance grep (plan forbidden patterns) | clean on all five |
+| basePath configuration | inline scripts without a nonce 1 → 0; meta nonce == header nonce |
