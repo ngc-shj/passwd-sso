@@ -30,12 +30,14 @@ describe("buildCspHeader — form-action loopback hosts", () => {
   // every page load. This test pins its PRESENCE only; the claim that IPv6
   // loopback redirects work is false and is not asserted anywhere.
   //
-  // What closes the gap is the other side of the mirror: DCR refuses to
-  // register an `[::1]` redirect URI at all (LOOPBACK_REDIRECT_RE in
-  // src/lib/constants/auth/mcp.ts), so no consent flow can reach a redirect
-  // this directive would discard. The executable assertion that Chromium
-  // really blocks it lives in e2e/tests/csp-strict.spec.ts, where a browser
-  // adjudicates instead of a string match.
+  // What closes the gap is the other side of the mirror: `[::1]` is refused at
+  // DCR registration AND re-checked on the stored value at authorize/consent
+  // (isAcceptableRedirectUri in src/lib/constants/auth/mcp.ts), so no flow can
+  // reach a redirect this directive would discard — including one whose row
+  // predates the narrowing. Those refusals have executable tests in the three
+  // route specs; Chromium's own discard of the source was measured and is
+  // recorded in docs/archive/review/prod-csp-violation-zero-review.md, not
+  // re-asserted in a browser test (deviation log D3).
   it("still emits http://[::1]:* in form-action, though the browser ignores it", () => {
     expect(csp).toMatch(/form-action[^;]*http:\/\/\[::1\]:\*/);
   });

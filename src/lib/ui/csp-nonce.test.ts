@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readCspNonce, _resetCspNonceCacheForTests } from "./csp-nonce";
+import { CSP_NONCE_META_NAME } from "@/lib/security/csp-nonce-names";
 
 function addNoncedScript(nonce: string): HTMLScriptElement {
   const s = document.createElement("script");
@@ -13,7 +14,11 @@ function addNoncedScript(nonce: string): HTMLScriptElement {
 
 function addMeta(content: string): HTMLMetaElement {
   const m = document.createElement("meta");
-  m.name = "csp-nonce";
+  // The constant, not the literal: this is what pins the reader against the
+  // name src/app/layout.tsx renders. csp-nonce-names.ts argues the cookie and
+  // meta names are two separate contracts precisely so a gate over one cannot
+  // pass by matching the other — that only holds if both are pinned.
+  m.name = CSP_NONCE_META_NAME;
   m.content = content;
   document.head.appendChild(m);
   return m;

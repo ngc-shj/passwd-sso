@@ -129,8 +129,31 @@ export const MCP_SERVER_VERSION = "1.0.0";
 export const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost):\d+\//;
 
 /**
- * One wording for the accept set, so the three route validators and the
- * settings form cannot drift from each other or from the regex above.
+ * Is this redirect URI one the app is willing to send a user to?
+ *
+ * The single predicate for that question. Registration uses it to refuse a
+ * bad URI, and the authorize / consent path uses it AGAIN on the stored value
+ * — membership in `McpClient.redirectUris` is not sufficient on its own,
+ * because a row written before the accept set was narrowed still contains
+ * whatever was legal then. Without the second check, narrowing the registry
+ * would leave exactly the clients it was meant to protect still able to
+ * complete consent, get an authorization audit row, and never receive the
+ * redirect.
+ */
+export function isAcceptableRedirectUri(uri: string): boolean {
+  try {
+    return new URL(uri).protocol === "https:" || LOOPBACK_REDIRECT_RE.test(uri);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One wording for the accept set. The three route validators and the settings
+ * form's hint string (`MachineIdentity.mcpRedirectUrisHint` in messages/) must
+ * agree with it and with the regex above; the hint is prose in a translation
+ * file and cannot import this constant, so it is change-coupled by review, not
+ * by the type system.
  */
 export const REDIRECT_URI_ACCEPT_SET_MESSAGE =
   "must use https:// or http://(127.0.0.1|localhost):<port>/ — IPv6-literal loopback ([::1]) cannot be enforced by the CSP form-action directive and is not accepted; use 127.0.0.1";

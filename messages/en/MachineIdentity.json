@@ -74,7 +74,7 @@
   "mcpClientSecretWarning": "This secret cannot be shown again. Copy it now.",
   "mcpRedirectUris": "Redirect URIs",
   "mcpRedirectUrisPlaceholder": "One URI per line\nhttps://example.com/callback",
-  "mcpRedirectUrisHint": "Allowed: https:// or a loopback URI like http://localhost:3000/callback (127.0.0.1 / [::1] also supported)",
+  "mcpRedirectUrisHint": "Allowed: https:// or a loopback URI like http://localhost:3000/callback (127.0.0.1 also supported). IPv6-literal loopback ([::1]) is not accepted — use 127.0.0.1.",
   "mcpAllowedScopes": "Allowed scopes",
   "mcpIsActive": "Active",
   "mcpCreated": "MCP client registered",

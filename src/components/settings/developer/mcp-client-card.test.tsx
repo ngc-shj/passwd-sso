@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { REDIRECT_URI_ACCEPT_SET_MESSAGE } from "@/lib/constants/auth/mcp";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
@@ -570,7 +571,10 @@ describe("McpClientCard", () => {
               properties: {
                 redirectUris: {
                   errors: [],
-                  items: [{ errors: ["redirect_uri must use https:// or http://(127.0.0.1|localhost|[::1]):<port>/"] }],
+                  // Mirror the message the route actually emits — a mock that
+                  // pins a string no route can produce stops being a fixture
+                  // and becomes a second, stale copy of the contract.
+                  items: [{ errors: [`redirect_uri ${REDIRECT_URI_ACCEPT_SET_MESSAGE}`] }],
                 },
               },
             },

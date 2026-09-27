@@ -209,3 +209,65 @@ style= attributes in SSR HTML : 0
 So the basePath-scoped nonce cookie still reaches the Server Component that
 renders the meta, and next-themes is nonced under a basePath as well as
 without one. The standing CI job remains deferred on D4's terms.
+
+## D13 — a mutation proof that stays GREEN is the one to distrust
+
+The most useful thing the Phase-2 self-check produced was not a finding in the
+code; it was a finding in the proof harness.
+
+Proving the new authorize-route test discriminating meant copying `route.ts` to
+`route.mutant.ts`, dropping the `isAcceptableRedirectUri` conjunct, and
+repointing the test copy's import. The mutant run came back **18/18 green**,
+which reads as "the test is vacuous". Four increasingly specific probes later —
+the parsed query value, the DB mock's resolved rows, the returned status, the
+call count — every input checked out and the behaviour still contradicted them.
+
+The cause was the repoint. The test imports
+`from "@/app/api/mcp/authorize/route"`, not `from "./route"`, so the string
+substitution matched nothing and **every "mutant" run had been importing the
+real file**. Adding `assert 'from "./route.mutant";' in t` surfaced it
+immediately; with the alias form replaced, the mutation reds exactly the C9
+deny case and nothing else.
+
+The same shape then repeated once more, for a different reason: the consent
+test's first version set `mockTxFindFirst` while the route's lookup resolves
+through `mockFindFirst`, so its `[::1]` row never reached the handler and the
+deny case passed on the default client's URI list. Setting both mocks makes the
+mutation red.
+
+Two rules this leaves behind, both now applied to every red proof in D8:
+
+1. **Assert that the mutation landed AND that the subject was repointed.** A
+   silent no-op in either half produces a green that is indistinguishable from
+   a vacuous test.
+2. **A red proof that produces a RED is self-validating** — the harness cannot
+   fake a failure. A red proof that produces a GREEN proves nothing until the
+   harness itself is verified. Of D8's nine, eight produced reds; the one that
+   produced a green was the one that was broken.
+
+## D14 — Phase 2 self-check dispositions
+
+Three sub-agents ran the R1-R57 / RS* / RT* checklist against the implementation.
+Thirteen distinct findings; every Critical- and Major-rated one is fixed in this
+phase rather than carried to Phase 3.
+
+| Finding | Disposition |
+|---|---|
+| authorize/consent adjudicate a stored row by membership alone, so rows predating the C9 narrowing survive | **Fixed.** `isAcceptableRedirectUri` is now the single predicate, applied at registration AND on the stored value at both authorize and consent. Deny + allow tests in both routes, each red-proved by a real mutation (D13) |
+| the i18n hint and the architecture doc still advertised `[::1]` | **Fixed.** en/ja hints and `docs/architecture/machine-identity.md`. The form no longer recommends what its validator refuses |
+| `container-scan` and nine other jobs skip silently when `changes` cannot decide — and `container-scan` is the only place the Dockerfile guards run | **Fixed as a class, not an instance.** All 17 jobs; none remains fail-open. Verified by parsing the workflow and re-deriving the member set |
+| `"csp-nonce"` is held as a byte literal by the patch and the Dockerfile, which D6 had claimed did not happen | **Fixed.** Both named in `csp-nonce-names.ts` as change-coupled sites. D6's premise was false; the conclusion (no literal scan) still holds, now for a stated reason |
+| NFR5 shipped with no enforcer and no Anti-Deferral entry | **Fixed.** `scripts/checks/check-dockerfile-ignore-scripts.sh` + a 7-case sibling self-test, queued in `pre-pr.sh`. Green on the real Dockerfile, red on a stripped copy, two distinct refusals for the two cannot-run cases |
+| `FOREIGN_ORIGIN_ALLOWLIST` was inverted — allowlisting a origin moved it into a bucket that still failed | **Fixed.** Three buckets: app / foreign (fails, labelled) / excluded (passes) |
+| the gate's header claimed a toast case and an error-page case it did not have | **Fixed by delivering two and withdrawing one.** Added the `s` root segment (a separate layout tree) and an FR2 assertion that sonner's stylesheet is live in `document.styleSheets`; `global-error.tsx` is not reachable by navigation, so the claim is withdrawn rather than faked |
+| the overlay test claimed a scroll-lock assertion it never made | **Fixed.** FR3 now asserts `getComputedStyle(document.body).overflow === "hidden"` before the violation count, so V5 is verified by outcome and not by absence |
+| the SSR style-attribute counter had only ever observed 0 | **Fixed.** A positive control with four fixtures, including two over-report cases (`data-mystyle`, the word in text) |
+| `csp-header.test.ts` cited an e2e assertion that D3 had declined to write | **Fixed.** The citation now points at what exists |
+| `CSP_NONCE_META_NAME` and `REDIRECT_URI_ACCEPT_SET_MESSAGE` were imported by no test | **Fixed.** The meta reader now pins the constant; the message has three assertions including one that it advertises no host the predicate refuses |
+| the mocked 400 body pinned a message no route can emit | **Fixed.** It builds from the constant |
+| the client-side `validateRedirectUris` inherits the narrowed regex but has no `[::1]` fixture | **Partly deferred.** The predicate it mirrors is now pinned in both directions in `src/lib/constants/auth/mcp.test.ts`, and the component imports the same constant rather than a copy. A UI-level fixture would re-test the regex through three layers of form state. What would settle it: a component test if `validateRedirectUris` ever stops delegating to the shared regex |
+
+One harness note worth keeping: the Dockerfile marker guard's shell form must be
+exercised under `/bin/sh`, not zsh. zsh does not word-split `$chunks`, so `$f`
+becomes the whole newline-joined list and a healthy tree reads as a false red.
+The builder stage is `node:24-alpine`, i.e. `sh` — matching the recorded runs.

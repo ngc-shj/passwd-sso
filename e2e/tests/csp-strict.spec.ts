@@ -20,8 +20,11 @@
  *   I6.4  retries are disabled for this spec — Playwright exits 0 on a
  *         retry-passed test, which would launder exactly the order-dependent
  *         violations this gate exists to catch;
- *   I6.5  the route table covers every root segment, an authenticated page, an
- *         overlay interaction, a toast, and the error page;
+ *   I6.5  the route table covers both root segments (`[locale]` and `s`), an
+ *         authenticated page, an overlay interaction, and sonner's stylesheet
+ *         (FR2). `src/app/global-error.tsx` is NOT covered — it renders only
+ *         when the root layout itself throws, which no navigation reproduces;
+ *         see the deviation log;
  *   I6.6  violations from outside the app origin are classified, not ignored.
  *
  * Every "cannot run" outcome raises a named refusal and fails; none of them is
@@ -132,15 +135,25 @@ function describeViolations(label: string, violations: Violation[]): string {
 }
 
 /**
- * I6.6 — split by origin. A violation whose sourceFile is empty counts as
- * app-origin: an unattributable violation must not be excused.
+ * I6.6 — split by origin, into three buckets rather than two:
+ *
+ *   app       — the app's own origin, an unparseable sourceFile, or an empty
+ *               one. An unattributable violation is never excused.
+ *   foreign   — a different origin that is NOT allowlisted. Reported under its
+ *               own label and still fails, so a third party's violation is
+ *               visible as such instead of being silently folded into the app's
+ *               count or silently dropped.
+ *   excluded  — a different origin that IS allowlisted. The only bucket that
+ *               does not fail, which is what makes the allowlist an exception
+ *               register rather than decoration.
  */
 function partitionByOrigin(
   violations: Violation[],
   appOrigin: string,
-): { app: Violation[]; foreign: Violation[] } {
+): { app: Violation[]; foreign: Violation[]; excluded: Violation[] } {
   const app: Violation[] = [];
   const foreign: Violation[] = [];
+  const excluded: Violation[] = [];
   for (const v of violations) {
     if (!v.sourceFile) {
       app.push(v);
@@ -153,20 +166,34 @@ function partitionByOrigin(
       app.push(v);
       continue;
     }
-    if (origin === appOrigin || !FOREIGN_ORIGIN_ALLOWLIST.includes(origin)) {
+    if (origin === appOrigin) {
       app.push(v);
+    } else if (FOREIGN_ORIGIN_ALLOWLIST.includes(origin)) {
+      excluded.push(v);
     } else {
       foreign.push(v);
     }
   }
-  return { app, foreign };
+  return { app, foreign, excluded };
 }
 
 function appOriginOf(page: Page): string {
   return new URL(page.url()).origin;
 }
 
-/** Count `style=` attributes in the SERVED HTML — the only subject CSP checks. */
+/**
+ * Count `style=` attributes in a served HTML body — the only subject CSP
+ * checks, because React applies client-mounted styles through CSSOM, which
+ * CSP never sees.
+ *
+ * Exported shape kept separate from the fetch so it can be given a positive
+ * control: on this codebase the real answer is always 0, so without one a
+ * broken counter and a clean page are the same observation.
+ */
+export function countStyleAttributes(body: string): number {
+  return (body.match(/\sstyle="/g) ?? []).length;
+}
+
 async function countSsrStyleAttributes(
   page: Page,
   response: Response,
@@ -176,7 +203,7 @@ async function countSsrStyleAttributes(
   if (!body) {
     throw new Error(`CSP_GATE_PRECONDITION_FAILED: ${label} served an empty body`);
   }
-  return (body.match(/\sstyle="/g) ?? []).length;
+  return countStyleAttributes(body);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -241,6 +268,21 @@ test("collector self-test: a nonce-less <style> is caught, a nonce'd one is not"
   ).toBe(0);
 });
 
+test("style-attribute counter self-test: counts a real attribute, ignores lookalikes", () => {
+  // Every production observation of this counter is a zero, so on its own it
+  // cannot distinguish "no style attributes" from "the regex stopped
+  // matching". These fixtures are the positive control.
+  expect(countStyleAttributes('<div class="a" style="color:red">x</div>')).toBe(1);
+  expect(
+    countStyleAttributes('<p\n  style="margin:0"><svg style="width:1px"/></p>'),
+  ).toBe(2);
+  // Not a style attribute: a data attribute that merely ends in `style`, and
+  // the word appearing in text. A counter matching these would over-report and
+  // red a clean page.
+  expect(countStyleAttributes('<div data-mystyle="x">style="y"</div>')).toBe(0);
+  expect(countStyleAttributes("")).toBe(0);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // I6.5 — public routes, one per root segment plus the locale variants that
 // exercise different layouts.
@@ -252,6 +294,11 @@ const PUBLIC_ROUTES = [
   { path: "/ja/privacy-policy", label: "privacy-policy" },
   { path: "/ja/recovery", label: "recovery" },
   { path: "/ja/vault-reset", label: "vault-reset" },
+  // The `s` root segment: a different layout tree (src/app/s/layout.tsx),
+  // which mounts its own <Toaster /> and no ThemeProvider. An unknown token
+  // still renders the page, which is all this needs — the subject is the
+  // layout's injectors, not the share payload.
+  { path: "/s/invalid-token-format", label: "share page (s segment)" },
 ] as const;
 
 for (const route of PUBLIC_ROUTES) {
@@ -347,12 +394,39 @@ test("no CSP violations: authenticated dashboard, unlocked vault", async ({
     styleAttrs,
     `dashboard: ${styleAttrs} style= attribute(s) in served HTML — a nonce cannot cover these`,
   ).toBe(0);
+
+  // FR2 — sonner's stylesheet must be LIVE, not merely un-violating. sonner
+  // injects at module evaluation, so a blocked element leaves zero violations
+  // on a later navigation while every toast renders unstyled. A blocked
+  // <style> never enters document.styleSheets, so this reads the outcome
+  // rather than the absence of a symptom.
+  const sonnerCssLive = await page.evaluate(() => {
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList | undefined;
+      try {
+        rules = sheet.cssRules;
+      } catch {
+        continue; // cross-origin sheet; not ours
+      }
+      for (const rule of Array.from(rules ?? [])) {
+        if (rule.cssText.includes("data-sonner-toaster")) return true;
+      }
+    }
+    return false;
+  });
+  expect(
+    sonnerCssLive,
+    "sonner's stylesheet is not in document.styleSheets — it was CSP-blocked, so every toast renders unstyled (FR2)",
+  ).toBe(true);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// I6.5 — an interaction that mounts a Radix overlay (V5) and one that raises a
-// toast (V3). Both assert the positive signal before counting violations: a
-// selector that silently no-ops would otherwise read as a clean page.
+// I6.5 — an interaction that mounts a Radix overlay (V5). It asserts the
+// positive signal before counting violations: a selector that silently no-ops
+// would otherwise read as a clean page. V3 (sonner) needs no interaction of
+// its own — it injects at module evaluation, so every route above already
+// exercises it, and the dashboard case asserts its stylesheet is live rather
+// than merely un-violating.
 // ─────────────────────────────────────────────────────────────────────────────
 
 test("no CSP violations: Radix overlay mounted from the dashboard", async ({
@@ -386,10 +460,20 @@ test("no CSP violations: Radix overlay mounted from the dashboard", async ({
     "CSP_GATE_INTERACTION_NOT_OBSERVED: the overlay did not mount",
   ).toBeVisible({ timeout: 10_000 });
 
-  // The positive signal for react-remove-scroll specifically: it locks body
-  // scroll by injecting a stylesheet. If the injection was CSP-blocked the
-  // lock is absent, so this assertion and the violation count are two views of
-  // the same failure.
+  // FR3 — the positive signal for react-remove-scroll specifically. It locks
+  // body scroll by injecting a stylesheet through react-style-singleton; if
+  // that injection was CSP-blocked the rule never applies, and the overlay
+  // still looks fine while the page behind it scrolls. Reading the computed
+  // style is the outcome; the violation count below is the cause. Asserting
+  // only the latter would leave V5 verified by absence alone.
+  const scrollLocked = await page.evaluate(
+    () => getComputedStyle(document.body).overflow === "hidden",
+  );
+  expect(
+    scrollLocked,
+    "CSP_GATE_INTERACTION_NOT_OBSERVED: the overlay mounted but body scroll is not locked — react-remove-scroll's stylesheet did not apply (FR3)",
+  ).toBe(true);
+
   await page.waitForTimeout(SETTLE_MS);
   const all = await readViolations(page);
   const { app, foreign } = partitionByOrigin(all, appOriginOf(page));
