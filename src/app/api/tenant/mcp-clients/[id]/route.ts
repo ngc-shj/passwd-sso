@@ -8,8 +8,11 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { MCP_SCOPES, LOOPBACK_REDIRECT_RE,
-  REDIRECT_URI_ACCEPT_SET_MESSAGE } from "@/lib/constants/auth/mcp";
+import {
+  MCP_SCOPES,
+  REDIRECT_URI_ACCEPT_SET_MESSAGE,
+  isAcceptableRedirectUri,
+} from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
@@ -21,12 +24,7 @@ const updateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   redirectUris: z.array(
     z.string().url().refine(
-      (u) => {
-        try {
-          const url = new URL(u);
-          return url.protocol === "https:" || LOOPBACK_REDIRECT_RE.test(u);
-        } catch { return false; }
-      },
+      isAcceptableRedirectUri,
       { message: `redirect_uri ${REDIRECT_URI_ACCEPT_SET_MESSAGE}` },
     ),
   ).min(1).max(10).optional(),

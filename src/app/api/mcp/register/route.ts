@@ -12,14 +12,14 @@ import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import {
-  MCP_CLIENT_ID_PREFIX,
-  MCP_SCOPES,
-  MCP_DCR_UNCLAIMED_EXPIRY_SEC,
-  MAX_UNCLAIMED_DCR_CLIENTS,
-  DCR_RATE_LIMIT_WINDOW_MS,
   DCR_RATE_LIMIT_MAX,
-  LOOPBACK_REDIRECT_RE,
+  DCR_RATE_LIMIT_WINDOW_MS,
+  MAX_UNCLAIMED_DCR_CLIENTS,
+  MCP_CLIENT_ID_PREFIX,
+  MCP_DCR_UNCLAIMED_EXPIRY_SEC,
+  MCP_SCOPES,
   REDIRECT_URI_ACCEPT_SET_MESSAGE,
+  isAcceptableRedirectUri,
 } from "@/lib/constants/auth/mcp";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -38,15 +38,7 @@ const dcrSchema = z.object({
     .min(1)
     .max(10)
     .refine(
-      (uris) =>
-        uris.every((u) => {
-          try {
-            const url = new URL(u);
-            return url.protocol === "https:" || LOOPBACK_REDIRECT_RE.test(u);
-          } catch {
-            return false;
-          }
-        }),
+      (uris) => uris.every(isAcceptableRedirectUri),
       {
         message: `redirect_uris ${REDIRECT_URI_ACCEPT_SET_MESSAGE}`,
       },
