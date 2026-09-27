@@ -126,12 +126,14 @@ docker run --rm -p 3100:3000 --env-file <prod-ish env> passwd-sso:csp-t1
 E2E_BASE_URL=http://localhost:3100 npx playwright test e2e/tests/csp-strict.spec.ts
 ```
 
-Expected: 8 passed, 0 violations, and the collector self-test green (so the
-zero is not vacuous).
+Expected: 10 passed, 0 violations, with BOTH self-tests green — the collector
+positive control and the style-attribute counter's — so the zero is not vacuous.
 
 Status: **run against a local production build, not against the image** —
-`npx next build && next start`, chromium 1243, 8/8 passed. The image-based run
-is the part still owed.
+`npx next build && next start` on port 3010 with `NEXT_PUBLIC_BASE_PATH=""`,
+chromium 1243, against the throwaway `passwd_sso_e2e` database seeded by the
+existing `global-setup` — 10/10 passed. The image-based run is the part still
+owed.
 
 ### T7 — the CI paths filter triggers on a patch-only change
 
@@ -179,15 +181,23 @@ artifact is produced. Covered by T2, T3, T5.
 **A2 — the guard is bypassed by dropping `--ignore-scripts`.** The tempting
 "fix" when the explicit patch step misbehaves is to let `postinstall` do it by
 removing `--ignore-scripts` from `Dockerfile`, which re-enables every
-dependency's install scripts inside the image build. The plan's original
-forbidden-pattern for this was red-proved **dead** — it matched nothing, on the
-exact mutated input it existed to reject. It is not shipped as a regex; the
-Dockerfile comment states the constraint and the reason at the line itself.
-**Residual risk, stated plainly: NFR5 has no automated enforcer in this
-change.** What would close it: a `scripts/checks/` gate asserting every
-`RUN npm ci` line in `Dockerfile` carries `--ignore-scripts`, with a sibling
-self-test per `check-gate-selftest-coverage.sh`. Not added here — see the
-deviation log.
+dependency's install script inside the image build.
+
+The plan's original forbidden-pattern for this was red-proved **dead** — it
+matched nothing, on the exact mutated input it existed to reject. What ships
+instead is `scripts/checks/check-dockerfile-ignore-scripts.sh`, with a 13-case
+sibling self-test, queued in `pre-pr.sh` and therefore run by CI's always-on
+`static-checks` job. It flattens `\`-continuations, splits each `RUN` on `&&`,
+and requires `--ignore-scripts` on every `npm ci|install|i|add` segment.
+Executed: green on the real Dockerfile (3 invocations), red on each of five
+mutants (flag stripped; `npm install`; `npm i`; a continuation-line install; a
+compound RUN where only one segment drops it), and two distinct refusals for
+the two cannot-run cases.
+
+**Residual risk, stated plainly:** the gate reads the Dockerfile, so an install
+that reaches the image by another route — a base image that bakes one in, a
+`COPY`d script the build executes — is outside its subject. Nothing in this
+repository does that today.
 
 **A3 — `npx` reaches the network during the image build.** `npx patch-package`
 falls back to a registry fetch when the binary is absent from
@@ -204,16 +214,35 @@ nothing in the build or the type-checker fails. Mitigated by declaring
 asserts single-copy resolution.** The CSP gate's Radix-overlay case observes
 the consequence, which is the recovery path.
 
-**A5 — the nonce is read from a carrier an attacker controls.** The client
-reader prefers `document.querySelector("script[nonce]")?.nonce`. An attacker
-with HTML injection could insert `<script nonce="attacker-value">` — but CSP
-already blocks an injected script from executing, and the injected *attribute*
-would have to be the first `script[nonce]` in document order to win. Even then
-the consequence is a wrong nonce on the app's own runtime styles (a denial of
-styling), not an escalation: the response CSP still carries the real nonce, so
-an attacker-chosen value admits nothing. Measured during the security review:
-an HTML-injection-only attacker cannot read the nonce at all, and a
-script-executing attacker already has it via `'strict-dynamic'`.
+**A5 — the nonce is read from a carrier an attacker controls, or read back out
+of one.** Two directions, and the honest answer differs for each.
+
+*Writing a wrong nonce in.* An attacker with HTML injection could insert
+`<script nonce="attacker-value">`. CSP blocks the injected script from
+executing, and the injected element would additionally have to be the first
+`script[nonce]` in document order to win the read. Even then the consequence is
+a wrong nonce on the app's own runtime styles — a denial of styling, not an
+escalation, because the response CSP still carries the real nonce and an
+attacker-chosen value admits nothing.
+
+*Reading the real nonce out.* `<meta name="csp-nonce">` publishes it in a
+serialisable attribute, deliberately outside the platform's nonce-hiding, and
+the patched sonner and `react-style-singleton` write it back as a visible
+`nonce` attribute on script-created `<style>` elements (hiding applies only to
+parser-inserted nodes). It was measured as not exploitable — an
+`innerHTML`-injected `<script>` does not execute, so an HTML-injection-only
+attacker cannot read the meta with script; CSS attribute-selector exfiltration
+needs an injected `<style>` or a cross-origin `<link>`, both of which
+`style-src 'self' 'nonce-…'` refuses; and `<head>` children are outside the
+render tree, so a `background-image` on the meta never fetches.
+
+**But that is a conjunction of conditions, not an invariant.** `img-src 'self'
+data: https:` does permit dangling-markup exfiltration to an arbitrary https
+host, and the `<meta>` is the first child of `<head>`, ahead of any plausible
+body injection point — that ordering is doing real work. A change that moves
+the meta, or introduces a head-region injection sink, touches this. Record it
+in `docs/security/threat-model.md` §5 as the condition the nonce carrier
+depends on.
 
 **A6 — DCR narrowing as a denial of service.** C9 refuses `http://[::1]:…`
 redirect URIs. A client that works today only because nobody uses IPv6 loopback

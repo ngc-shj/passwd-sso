@@ -113,17 +113,22 @@ RUN npx next build
 # Two-step on purpose: prove sonner is in the bundle at all FIRST, so "sonner
 # was tree-shaken out" cannot be spelled the same as "the patch is absent".
 #
-# The marker is checked PER SONNER CHUNK, not across the whole directory. The
-# app's own nonce reader (src/lib/ui/csp-nonce.ts) compiles the identical
-# selector string into a different chunk, so a directory-wide grep is green
-# whether or not the patch applied — measured, which is why it is not written
-# that way.
+# The marker is 'sonner-csp-nonce-patch', a string literal that ONLY the patch
+# emits. The obvious marker — the `meta[name="csp-nonce"]` selector — is not
+# unique: the app's own src/lib/ui/csp-nonce.ts compiles the identical text, so
+# a grep for it is green whether or not the patch applied. Measured on a real
+# build: 3 chunks carried that selector, 2 carried sonner. Scoping the grep per
+# sonner chunk shrank the window but did not close it, because which chunk a
+# module lands in is a bundler decision nothing here pins.
+#
+# Still per chunk, and still two steps: "sonner was tree-shaken out" must not be
+# spelled the same as "the patch is missing".
 RUN set -e; \
     chunks=$(grep -rlF 'data-sonner-toaster' .next/static/chunks) || true; \
     [ -n "$chunks" ] \
       || { echo "SONNER_PATCH_UNVERIFIABLE: sonner not found in .next/static/chunks — bundle layout changed"; exit 1; }; \
     for f in $chunks; do \
-      grep -qF 'meta[name="csp-nonce"]' "$f" \
+      grep -qF 'sonner-csp-nonce-patch' "$f" \
         || { echo "SONNER_PATCH_MARKER_ABSENT: $f carries sonner but not the CSP-nonce patch"; exit 1; }; \
     done
 RUN npx esbuild scripts/audit-outbox-worker.ts \

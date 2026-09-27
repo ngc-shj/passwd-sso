@@ -25,6 +25,7 @@
     "tenantClientLimit": "テナントのクライアント上限に達しています",
     "nameConflict": "この名前のクライアントはテナントに既に存在します",
     "alreadyClaimedOtherTenant": "このクライアントは別のテナントに属しています",
-    "tenantMismatch": "テナントが一致しません"
+    "tenantMismatch": "テナントが一致しません",
+    "invalidScope": "要求されたスコープはこのクライアントでは利用できません"
   }
 }

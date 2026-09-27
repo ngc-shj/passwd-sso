@@ -22,9 +22,11 @@
  *         violations this gate exists to catch;
  *   I6.5  the route table covers both root segments (`[locale]` and `s`), an
  *         authenticated page, an overlay interaction, and sonner's stylesheet
- *         (FR2). `src/app/global-error.tsx` is NOT covered — it renders only
- *         when the root layout itself throws, which no navigation reproduces;
- *         see the deviation log;
+ *         (FR2). Two of C6's listed classes are NOT covered, both recorded:
+ *         `src/app/global-error.tsx` renders only when the root layout itself
+ *         throws, which no navigation reproduces (deviation log D17), and the
+ *         basePath configuration is a second build rather than a route, so it
+ *         was measured once instead of gated (D4, measurement in D12);
  *   I6.6  violations from outside the app origin are classified, not ignored.
  *
  * Every "cannot run" outcome raises a named refusal and fails; none of them is
@@ -147,9 +149,10 @@ function describeViolations(label: string, violations: Violation[]): string {
  *               does not fail, which is what makes the allowlist an exception
  *               register rather than decoration.
  */
-function partitionByOrigin(
+export function partitionByOrigin(
   violations: Violation[],
   appOrigin: string,
+  allowlist: readonly string[] = FOREIGN_ORIGIN_ALLOWLIST,
 ): { app: Violation[]; foreign: Violation[]; excluded: Violation[] } {
   const app: Violation[] = [];
   const foreign: Violation[] = [];
@@ -168,7 +171,7 @@ function partitionByOrigin(
     }
     if (origin === appOrigin) {
       app.push(v);
-    } else if (FOREIGN_ORIGIN_ALLOWLIST.includes(origin)) {
+    } else if (allowlist.includes(origin)) {
       excluded.push(v);
     } else {
       foreign.push(v);
@@ -191,7 +194,12 @@ function appOriginOf(page: Page): string {
  * broken counter and a clean page are the same observation.
  */
 export function countStyleAttributes(body: string): number {
-  return (body.match(/\sstyle="/g) ?? []).length;
+  // Quote style, case and spacing all vary. React's serialiser always emits
+  // `style="…"`, which is why a narrower pattern measures 0 on every route and
+  // looks correct — but C5's allowlist explicitly does NOT cover a string
+  // arriving through `dangerouslySetInnerHTML`, and raw HTML is exactly where
+  // `style='…'`, `STYLE="…"` and `style = "…"` come from.
+  return (body.match(/\sstyle\s*=\s*["']/gi) ?? []).length;
 }
 
 async function countSsrStyleAttributes(
@@ -268,6 +276,50 @@ test("collector self-test: a nonce-less <style> is caught, a nonce'd one is not"
   ).toBe(0);
 });
 
+test("origin classifier self-test: app / foreign / excluded, and the unattributable case", () => {
+  // The shipped allowlist is empty by design, so the `excluded` arm is
+  // unreachable in production — and this function already shipped INVERTED
+  // once (allowlisting an origin moved it into a bucket that still failed),
+  // caught by reading rather than by a test. The allowlist is a parameter so
+  // the arm can be exercised; the register itself stays empty.
+  const APP = "https://app.example";
+  const v = (sourceFile: string): Violation => ({
+    directive: "style-src-elem",
+    blockedURI: "inline",
+    sourceFile,
+    lineNumber: 1,
+    sample: "",
+  });
+
+  const r = partitionByOrigin(
+    [
+      v(`${APP}/_next/static/chunks/a.js`), // app
+      v("https://cdn.third-party.example/x.js"), // foreign, not allowlisted
+      v("https://known.example/y.js"), // foreign, allowlisted
+      v(""), // unattributable
+      v("not-a-url"), // unparseable
+    ],
+    APP,
+    ["https://known.example"],
+  );
+
+  expect(r.app.map((x) => x.sourceFile)).toEqual([
+    `${APP}/_next/static/chunks/a.js`,
+    "",
+    "not-a-url",
+  ]);
+  expect(r.foreign.map((x) => x.sourceFile)).toEqual([
+    "https://cdn.third-party.example/x.js",
+  ]);
+  // The arm that cannot run in production: allowlisting must EXCLUDE, not
+  // move the violation into the other failing bucket.
+  expect(r.excluded.map((x) => x.sourceFile)).toEqual(["https://known.example/y.js"]);
+
+  // A same-host, different-port source is a different origin and is foreign.
+  const ports = partitionByOrigin([v("https://app.example:8443/x.js")], APP, []);
+  expect(ports.foreign).toHaveLength(1);
+});
+
 test("style-attribute counter self-test: counts a real attribute, ignores lookalikes", () => {
   // Every production observation of this counter is a zero, so on its own it
   // cannot distinguish "no style attributes" from "the regex stopped
@@ -281,6 +333,16 @@ test("style-attribute counter self-test: counts a real attribute, ignores lookal
   // red a clean page.
   expect(countStyleAttributes('<div data-mystyle="x">style="y"</div>')).toBe(0);
   expect(countStyleAttributes("")).toBe(0);
+
+  // The three forms React never emits. Every fixture above uses the one form
+  // it does, which is why a pattern that missed these measured 0 on every
+  // route and read as correct. `dangerouslySetInnerHTML` is the source C5's
+  // allowlist does not cover, and raw HTML is where these come from.
+  expect(countStyleAttributes(`<div style='color:red'>x</div>`)).toBe(1);
+  expect(countStyleAttributes('<div STYLE="color:red">x</div>')).toBe(1);
+  expect(countStyleAttributes('<div style = "color:red">x</div>')).toBe(1);
+  // An empty attribute is still parsed, so it counts.
+  expect(countStyleAttributes('<div style="">x</div>')).toBe(1);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -307,15 +369,34 @@ for (const route of PUBLIC_ROUTES) {
     const res = await page.goto(route.path, { waitUntil: "networkidle" });
     assertStrictCsp(res, route.label);
 
-    // I6.2 allow case: public routes carry no authentication precondition.
-    // The positive signal is that the document hydrated — without it a blank
-    // error page would report zero violations.
-    const hydrated = await page.evaluate(
+    // I6.2 allow case: public routes carry no authentication precondition, so
+    // the positive signal has to be that the document actually hydrated.
+    //
+    // Two checks, because they detect different failures and must not be
+    // spelled the same. `window.next` is assigned at MODULE SCOPE in Next's
+    // client bootstrap (app-bootstrap.js), before `appBootstrap(hydrate)` is
+    // even called — so it proves the entry chunk parsed, which is what catches
+    // a server serving stale chunk hashes, and nothing more. React attaching a
+    // fiber to a real element is what proves hydration ran.
+    const runtimeBooted = await page.evaluate(
       () => typeof (window as unknown as { next?: unknown }).next !== "undefined",
     );
     expect(
+      runtimeBooted,
+      `CSP_GATE_PRECONDITION_FAILED: ${route.label} — the Next runtime never booted (stale or missing chunks?)`,
+    ).toBe(true);
+
+    // Any host element React rendered, not just an interactive one: the share
+    // segment's not-found page hydrates 11 elements and contains no button,
+    // input, anchor or form, so a narrower probe reported it unhydrated.
+    const hydrated = await page.evaluate(() =>
+      Array.from(document.body.querySelectorAll("*")).some((el) =>
+        Object.keys(el).some((k) => k.startsWith("__react")),
+      ),
+    );
+    expect(
       hydrated,
-      `CSP_GATE_PRECONDITION_FAILED: ${route.label} did not hydrate`,
+      `CSP_GATE_PRECONDITION_FAILED: ${route.label} did not hydrate — no React fiber on any interactive element`,
     ).toBe(true);
 
     await page.waitForTimeout(SETTLE_MS);

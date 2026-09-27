@@ -99,13 +99,20 @@ the regex had no consumer. An exported constant nothing imports is dead code.
 | C4 client-chunk marker scan | no | see below |
 
 **C1's literal scan** — Anti-Deferral: the invariant it would enforce is now
-satisfied structurally. Both names live in one module
-(`src/lib/security/csp-nonce-names.ts`) and every other site imports them; a
-new hardcoded literal would have to be written deliberately beside a working
-import. A scan would add a `scripts/checks/` member, which per F18 drags in a
-sibling self-test, to defend a one-line constant. What would settle it: a
-second literal appearing anywhere — then the class is real and the scan earns
-its keep.
+satisfied structurally *in production code*. Both names live in one module
+(`src/lib/security/csp-nonce-names.ts`) and every production site imports them.
+Five TEST sites still hold the byte literal — `src/lib/ui/dynamic-styles.test.ts`,
+`src/__tests__/proxy.test.ts`, `src/lib/proxy/security-headers.test.ts` — and a
+rename reds all of them loudly, which is the behaviour a scan would buy at the
+cost of a new `scripts/checks/` member plus its sibling self-test.
+
+(An earlier revision of this entry claimed "every other site imports them",
+which was false twice over: the patch and the Dockerfile hold the literal by
+necessity, and these five hold it by habit. Both are now named — the first two
+in `csp-nonce-names.ts`'s docstring, the rest here. The conclusion stands; the
+reason it stands had to be rewritten, which is the R29 case exactly.)
+
+What would settle it: a literal appearing in production code again.
 
 **C4's chunk scan** — Anti-Deferral: revision 2's version of it was refuted
 (F-F1: `z.config` is a runtime flag and cannot change the emitted bytes), and
@@ -255,7 +262,7 @@ phase rather than carried to Phase 3.
 |---|---|
 | authorize/consent adjudicate a stored row by membership alone, so rows predating the C9 narrowing survive | **Fixed.** `isAcceptableRedirectUri` is now the single predicate, applied at registration AND on the stored value at both authorize and consent. Deny + allow tests in both routes, each red-proved by a real mutation (D13) |
 | the i18n hint and the architecture doc still advertised `[::1]` | **Fixed.** en/ja hints and `docs/architecture/machine-identity.md`. The form no longer recommends what its validator refuses |
-| `container-scan` and nine other jobs skip silently when `changes` cannot decide — and `container-scan` is the only place the Dockerfile guards run | **Fixed as a class, not an instance.** All 17 jobs; none remains fail-open. Verified by parsing the workflow and re-deriving the member set |
+| `container-scan` and nine other jobs skip silently when `changes` cannot decide — and `container-scan` is the only place the Dockerfile guards run | **Fixed as a class, not an instance.** `ci.yml` has 17 jobs, of which **12** are gated on `needs.changes.outputs`; all 12 now carry the guard and none remains fail-open. (An earlier revision of this row said "17 jobs", conflating the total with the gated set — corrected after re-deriving with a YAML parser.) |
 | `"csp-nonce"` is held as a byte literal by the patch and the Dockerfile, which D6 had claimed did not happen | **Fixed.** Both named in `csp-nonce-names.ts` as change-coupled sites. D6's premise was false; the conclusion (no literal scan) still holds, now for a stated reason |
 | NFR5 shipped with no enforcer and no Anti-Deferral entry | **Fixed.** `scripts/checks/check-dockerfile-ignore-scripts.sh` + a 7-case sibling self-test, queued in `pre-pr.sh`. Green on the real Dockerfile, red on a stripped copy, two distinct refusals for the two cannot-run cases |
 | `FOREIGN_ORIGIN_ALLOWLIST` was inverted — allowlisting a origin moved it into a bucket that still failed | **Fixed.** Three buckets: app / foreign (fails, labelled) / excluded (passes) |
@@ -305,3 +312,109 @@ stale" is exactly the kind of message worth verifying before dismissing.
 | CI gate parity | 14/15, the 15th being D15 |
 | Contract-conformance grep (plan forbidden patterns) | clean on all five |
 | basePath configuration | inline scripts without a nonce 1 → 0; meta nonce == header nonce |
+
+## D17 — C5/C6's `global-error.tsx` exact-baseline criterion is not delivered
+
+The plan states it twice: C5 pins the error page's violation count as "an
+**exact non-zero baseline** — a fifth violation reds, and so does removing one",
+and C6's obligation 5 lists it as required route coverage. The shipped gate does
+not cover it, and until now the only record was a line in the spec header
+withdrawing the claim — which is a corrected overstatement, not a deviation
+entry.
+
+**Anti-Deferral.** What it would cost: `global-error.tsx` renders only when the
+root layout itself throws. No navigation reaches it, so the case needs fault
+injection — a Playwright route interception that breaks the RSC payload, or a
+build-time flag that makes the layout throw. Either adds a failure mode to the
+gate (a broken interception reads as "the error page is clean") for a page whose
+four inline `style=` attributes are already allowlisted by C5 on the grounds
+that moving them to a stylesheet is the wrong trade (R3/P3).
+
+What is lost: nothing detects drift in the one allowlisted non-zero route. A
+fifth inline style added to `global-error.tsx`, or one removed, is invisible to
+every gate in this change.
+
+Worst case: the error page accumulates CSP violations nobody sees. It is the
+page a user reaches when the app has already failed, it carries no secret, and
+its styles are inline precisely because its stylesheet may not have loaded.
+
+What would settle it: a fault-injection route in the gate, with
+`CSP_GATE_ERROR_PAGE_UNREACHABLE` as a named refusal so a broken injection fails
+rather than reporting a clean page, and the count pinned as `=== 4` rather than
+`<= 4`.
+
+## D18 — the `form-action` mirror had a second, larger member: `https:`
+
+Phase 3 found that C9 closed one member of a two-member class. The reviewer's
+claim was measured before acting on it: a page served with this app's exact CSP
+submits a form to `https://example.com` and Chromium reports
+`form-action -> https://example.com/cb`; the same-origin control produces none.
+There is no `https:` source in the directive — only `'self'` and loopback.
+
+Meanwhile `isAcceptableRedirectUri` accepts **any** `https://` host, DCR and
+both tenant routes accept it, and `REDIRECT_URI_ACCEPT_SET_MESSAGE` advertises
+it. So every hosted (non-loopback) MCP client hit exactly the harm
+`csp-builder.ts`'s own comment describes: consent completes, the authorization
+audit row is written, and the browser discards the 302. `[::1]` was the
+minority member of that class; `https:` was the majority one.
+
+**The design, chosen by the user over the two obvious alternatives.** The
+consent page — and only the consent page — carries a per-request `form-action`
+that names the registered callback origins of the client being consented to.
+
+- Adding `https:` to the base policy would let every page in the app submit a
+  form to any https origin, which is the exfiltration the directive exists to
+  stop (NFR1).
+- Narrowing the registry to loopback-only would break every hosted client, and
+  would be the second behaviour change to the accept set in one branch.
+
+Implementation notes that are the security content of it:
+
+- The origins come from the **stored registration**, never from the request.
+  `redirect_uri` in the query string is attacker-chosen; reading it would let
+  anyone name the origin their own page's policy admits. `client_id` is used
+  only as a lookup key.
+- Stored URIs are re-checked with `isAcceptableRedirectUri`, so a row written
+  before the narrowing cannot widen the policy either.
+- Every failure path returns no extra sources: unknown client, inactive
+  client, unparseable URI, lookup error. Failing to an unwidened policy is the
+  safe direction — the page then refuses the redirect anyway.
+- Loopback origins are not repeated; the base policy already covers them with
+  a port wildcard.
+
+Measured end to end against a production build, all four states:
+
+```
+ordinary page                                  form-action 'self' + loopback
+consent page, unknown client                   'self' + loopback
+consent page, ?redirect_uri=https://evil…      'self' + loopback   (query ignored)
+consent page, registered https client          'self' + loopback + https://client.example
+```
+
+Nine unit tests cover both arms including the query-poisoning refusal and the
+throwing-lookup path. The probe client seeded for the live measurement was
+deleted (`DELETE 1`, count 0).
+
+## D19 — Phase 3 Round 1 dispositions
+
+Three experts, 23 findings. Every Critical and Major is fixed in this round.
+
+| Finding | Disposition |
+|---|---|
+| The MCP consent **page** is a third redirect adjudicator deciding by membership alone — and its `invalid_scope` arm redirects off-origin with no click, reachable via a pre-auth-registered unclaimed DCR client whose `tenantId === null` passes the tenant gate by short-circuit (CWE-601 from the product's own domain) | **Fixed.** Shape check added; the redirect arm restricted to a client the viewer's tenant has claimed, error page otherwise. Four tests, deny and allow, plus the `invalidScope` string in both locales |
+| `isAcceptableRedirectUri` declared the single predicate while **four** validators inlined a copy | **Fixed** in all four, including the client-side one |
+| The Dockerfile patch marker is not unique to the patch — the app's own `csp-nonce.ts` compiles the same selector, so per-chunk scoping rests on a bundler accident | **Fixed.** The patch now emits `sonner-csp-nonce-patch`, a literal nothing else produces |
+| The NFR5 gate saw one spelling; two unguarded `npm install`s were already in the Dockerfile, and `;`/`\|` separated commands passed | **Fixed twice.** Verbs + continuations, then the complete POSIX separator set after the same miss recurred. Detection on the real file went 1 → 3 invocations; 13 self-test cases |
+| The public-route precondition checked `window.next`, which Next assigns at module scope **before** hydration — it proves the entry chunk parsed, not that the page rendered | **Fixed.** Both signals, named separately: runtime-booted (catches a stale-chunk server, which is what the recorded incident actually was) and a React fiber on a rendered element. The first version of the fiber probe was itself too narrow — the share page hydrates 11 elements and has no interactive one — caught before commit |
+| `partitionByOrigin`'s `excluded` arm was unreachable and unproven; the function had already shipped inverted once | **Fixed.** Exported, allowlist parameterised for fixtures, five-case self-test including the different-port and unattributable ties |
+| The FR2 and FR3 probes were added after the only run that observed the gate failing, so neither had been seen to fail | **Fixed by execution.** Starving the nonce read (the product state both detect) flips both to false; on the shipped build both are true. Removing the attribute was not enough — the value lives in `[[CryptographicNonce]]`, which is precisely why the IDL read is preferred |
+| `countStyleAttributes` missed single-quoted, uppercase and spaced forms; all four fixtures used the one form React emits | **Fixed**, with the three missed forms and `style=""` added as fixtures. This is the class C5's allowlist explicitly does not cover (`dangerouslySetInnerHTML`) |
+| The `form-action` mirror's second member | **Fixed** — D18 |
+| `npm audit signatures` (C3's open question) | **Answered by execution**: exit 0, 1378 verified signatures |
+| The devDependency tree the new `postinstall` executes was outside every CVE gate | **Fixed.** A dev-scope `npm audit --audit-level=high` step beside the production-scope one, kept separate so the signals stay distinguishable. Measured clean at 0 |
+| `patch-package` was the only new dependency on a caret | **Fixed**, pinned exactly like the two it protects |
+| A2 denied the enforcer that shipped; A5 overclaimed; T6's count was stale | **Fixed** — A2 describes the gate and its real residual, A5 names the `<head>` ordering the argument actually rests on, T6 says 10 |
+| D6's premise, D14's "17 jobs" | **Corrected.** 17 total, 12 gated, 12 hardened — re-derived with a YAML parser |
+| `csp-nonce.ts`'s comment said attribute selectors are hidden, contradicting the presence selector on the next line | **Fixed** |
+| `E2E_CSP_SERVER=prod` never exercised | **Partly.** Port 3000 is held by the developer's own dev server, so the `webServer` branch cannot be booted here. The selection logic was extracted to `e2e/helpers/web-server-command.ts` and pinned in five states, which is what the red proof asked for; the boot itself is still owed |
+| Stale comments, red-proof residue | **Fixed / removed**; `git status` clean |

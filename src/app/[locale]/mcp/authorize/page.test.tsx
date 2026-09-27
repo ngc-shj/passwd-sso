@@ -180,3 +180,92 @@ describe("McpConsentPage tenant check", () => {
     expect(out).toContain("tenantMismatch");
   });
 });
+
+/**
+ * This page is the THIRD adjudicator of "may we send a user to this URI", after
+ * the authorize GET and the consent POST. Phase 3 found it decided by
+ * membership alone, and that its `invalid_scope` arm is the one branch here
+ * that leaves the origin with no user interaction — reachable, because
+ * registration is pre-auth and an unclaimed DCR client passes the tenant gate
+ * by short-circuit on `tenantId === null`.
+ */
+describe("McpConsentPage redirect-URI adjudication", () => {
+  async function invokeWith(overrides: Record<string, string>) {
+    return McpConsentPage({
+      searchParams: Promise.resolve({ ...VALID_PARAMS, ...overrides }),
+    });
+  }
+
+  function seedClientWith(
+    tenantId: string | null,
+    redirectUris: string[],
+    allowedScopes = "passwords:read",
+  ) {
+    mockMcpClientFindFirst.mockResolvedValue({
+      clientId: CLIENT_ID,
+      clientName: "Test Client",
+      tenantId,
+      isActive: true,
+      redirectUris,
+      allowedScopes,
+    });
+  }
+
+  // C9's shape check, at the member the narrowing originally missed. A row
+  // stored before the accept set was narrowed still matches on membership.
+  it("refuses a stored IPv6-literal loopback URI even though it matches the client row", async () => {
+    const ipv6 = "http://[::1]:9000/cb";
+    seedClientWith("scim-provisioned-tenant", [ipv6]);
+    seedUser("scim-provisioned-tenant", "scim-provisioned-tenant");
+
+    const out = render(await invokeWith({ redirect_uri: ipv6 }));
+
+    expect(out).toContain("invalidRedirectUri");
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  // Paired allow: the shape check must not refuse what the accept set permits,
+  // or deleting the whole predicate would satisfy the case above.
+  it("still admits a registered https URI", async () => {
+    seedClientWith("scim-provisioned-tenant", [REDIRECT_URI]);
+    seedUser("scim-provisioned-tenant", "scim-provisioned-tenant");
+
+    const out = render(await invokeWith({}));
+
+    expect(out).toContain('"clientId":"client-1"');
+    expect(out).not.toContain("invalidRedirectUri");
+  });
+
+  // The open redirect. Registration is pre-auth, so anyone can register a
+  // client pointing anywhere; an unclaimed client's null tenantId passes the
+  // tenant gate; a scope the client does not hold empties grantedScopes. Before
+  // this branch, that combination bounced a signed-in user off-origin from the
+  // product's own domain with no click.
+  it("renders an error instead of redirecting when an UNCLAIMED client requests an unheld scope", async () => {
+    seedClientWith(null, ["https://evil.example/x"], "passwords:read");
+    seedUser("scim-provisioned-tenant", "scim-provisioned-tenant");
+
+    const out = render(
+      await invokeWith({ redirect_uri: "https://evil.example/x", scope: "openid" }),
+    );
+
+    expect(mockRedirect).not.toHaveBeenCalled();
+    expect(out).toContain("invalidScope");
+  });
+
+  // Paired allow, and the behaviour the fix must NOT delete: a conforming
+  // client whose tenant has claimed it still receives error=invalid_scope at
+  // its own registered URI, with `state` round-tripped so it can correlate.
+  it("still redirects an unheld scope back to a CLAIMED client, preserving state", async () => {
+    seedClientWith("scim-provisioned-tenant", [REDIRECT_URI], "passwords:read");
+    seedUser("scim-provisioned-tenant", "scim-provisioned-tenant");
+
+    await invokeWith({ scope: "openid", state: "xyz-123" });
+
+    expect(mockRedirect).toHaveBeenCalledTimes(1);
+    const target = new URL(mockRedirect.mock.calls[0][0] as string);
+    expect(target.origin + target.pathname).toBe(REDIRECT_URI);
+    expect(target.searchParams.get("error")).toBe("invalid_scope");
+    expect(target.searchParams.get("state")).toBe("xyz-123");
+  });
+});

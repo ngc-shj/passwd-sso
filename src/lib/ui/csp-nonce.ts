@@ -9,11 +9,13 @@ import { CSP_NONCE_META_NAME } from "@/lib/security/csp-nonce-names";
  * Two carriers, in this order:
  *
  *  1. `document.querySelector("script[nonce]")?.nonce` — the IDL property.
- *     The browser populates it from the parsed attribute and then hides the
- *     attribute from every serialising path (`outerHTML`, attribute selectors)
- *     so an injected stylesheet cannot read it back out. Preferring it means
- *     the app does not have to publish the nonce anywhere wider than the
- *     platform already does.
+ *     The browser parses the attribute into this property and then empties the
+ *     attribute's VALUE, so `outerHTML`, `getAttribute("nonce")` and a
+ *     value-matching selector like `script[nonce^="abc"]` all come back blank
+ *     and an injected stylesheet cannot read it back out. The attribute itself
+ *     remains present, which is why the PRESENCE selector `script[nonce]`
+ *     below still matches. Preferring this read means the app does not publish
+ *     the nonce anywhere wider than the platform already does.
  *  2. `<meta name="csp-nonce">` — the fallback, and the only carrier available
  *     before any nonced script has been parsed. It is serialised in clear,
  *     which is why it is second rather than first.

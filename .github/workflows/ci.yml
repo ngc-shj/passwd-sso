@@ -741,8 +741,20 @@ jobs:
       # is side-effect-free.
       - run: npm ci --ignore-scripts
       - run: npm audit --omit=dev --audit-level=high
+      # Dev scope, separately, because the root `postinstall`
+      # (`patch-package --error-on-fail`) now EXECUTES part of the dev tree on
+      # every plain `npm ci` — including six CI jobs. A devDependency that only
+      # ever ran under a developer's own `npm test` was a different risk from
+      # one that runs during install; `--omit=dev` above cannot see either.
+      # Kept as its own step so the production-scope signal is not diluted:
+      # a high in a never-executed devDep and one in patch-package's own
+      # closure are different decisions, and the two lines say which fired.
+      # Measured clean (0 at every severity) when this was added.
+      - run: npm audit --audit-level=high
       # Verify registry signatures/attestations of installed deps (and our own
       # published versions). Fails closed on tamper; do not mask its exit.
+      # Measured on this branch: exit 0, 1378 verified signatures — the open
+      # question C3 recorded about patch-package is answered.
       - run: npm audit signatures
 
   # ─── Security Audit: Extension ────────────────────────────

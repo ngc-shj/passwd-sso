@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe("check-dockerfile-ignore-scripts", () => {
-  it("passes when every RUN npm ci carries --ignore-scripts", () => {
+  it("passes when every npm install carries --ignore-scripts", () => {
     write(
       "Dockerfile",
       ["FROM node:24-alpine AS deps", "RUN npm ci --ignore-scripts", ""].join("\n"),
@@ -68,6 +68,62 @@ describe("check-dockerfile-ignore-scripts", () => {
     expect(exitCode).toBe(1);
     expect(stderr).toContain("NFR5 violation");
     expect(stderr).toContain("RUN npm ci");
+  });
+
+  // Phase 3 found the first version matched only `RUN npm ci`, while the real
+  // Dockerfile already contained two `npm install`s on continuation lines
+  // inside compound RUNs — present, unguarded, and invisible to the gate.
+  it.each([
+    ["npm install", "RUN npm install evil-pkg"],
+    ["npm i", "RUN npm i evil-pkg"],
+    ["npm add", "RUN npm add evil-pkg"],
+  ])("fails on the %s spelling", (_label, line) => {
+    write("Dockerfile", ["FROM node:24-alpine", "RUN npm ci --ignore-scripts", line, ""].join("\n"));
+
+    expect(runGuard("Dockerfile").exitCode).toBe(1);
+  });
+
+  it("sees an install on a backslash-continued line inside a compound RUN", () => {
+    write(
+      "Dockerfile",
+      [
+        "FROM node:24-alpine",
+        "RUN set -e && \\",
+        "    npm install evil-pkg && \\",
+        "    echo done",
+        "",
+      ].join("\n"),
+    );
+
+    expect(runGuard("Dockerfile").exitCode).toBe(1);
+  });
+
+  // Per `&&` segment, not per instruction: one guarded install must not vouch
+  // for an unguarded one beside it.
+  it("fails when one segment of a compound RUN drops the flag", () => {
+    write(
+      "Dockerfile",
+      ["FROM node:24-alpine", "RUN npm ci --ignore-scripts && npm install other", ""].join("\n"),
+    );
+
+    expect(runGuard("Dockerfile").exitCode).toBe(1);
+  });
+
+  // `npm init` creates a manifest and runs nothing from the registry; the
+  // prisma-cli stage uses it, so treating it as an install would red the real
+  // Dockerfile.
+  it("does not treat npm init as an install", () => {
+    write(
+      "Dockerfile",
+      [
+        "FROM node:24-alpine",
+        "RUN npm init -y && \\",
+        "    npm install prisma --ignore-scripts",
+        "",
+      ].join("\n"),
+    );
+
+    expect(runGuard("Dockerfile").exitCode).toBe(0);
   });
 
   it("fails when only one of several install lines drops the flag", () => {
@@ -110,7 +166,7 @@ describe("check-dockerfile-ignore-scripts", () => {
     expect(stderr).toContain("DOCKERFILE_SUBJECT_MISSING");
   });
 
-  it("refuses when the Dockerfile contains no RUN npm ci at all", () => {
+  it("refuses when the Dockerfile contains no npm install at all", () => {
     write(
       "Dockerfile",
       ["FROM scratch", "# RUN npm ci appears only in this comment", ""].join("\n"),
@@ -119,7 +175,7 @@ describe("check-dockerfile-ignore-scripts", () => {
     const { exitCode, stderr } = runGuard("Dockerfile");
 
     expect(exitCode).toBe(2);
-    expect(stderr).toContain("DOCKERFILE_NO_NPM_CI");
+    expect(stderr).toContain("DOCKERFILE_NO_NPM_INSTALL");
   });
 
   // The guard must hold on the artifact that actually ships, not only on
