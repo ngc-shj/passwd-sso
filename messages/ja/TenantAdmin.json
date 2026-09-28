@@ -70,7 +70,7 @@
   "extensionIdleValidationMin": "{min}分以上で入力してください。",
   "extensionIdleValidationMax": "{max}分以下で入力してください。",
   "extensionAbsoluteMinutes": "クライアントアプリ 絶対タイムアウト（分）",
-  "extensionAbsoluteHelp": "クライアントアプリのトークンファミリーは初回発行から指定時間で失効します。{min}〜{max}分の範囲で指定してください。",
+  "extensionAbsoluteHelp": "クライアントアプリのサインインは、最初に確立してから指定時間が経つと、操作の有無にかかわらず失効します。{min}〜{max}分の範囲で指定してください。",
   "extensionAbsoluteValidationMin": "{min}分以上で入力してください。",
   "extensionAbsoluteValidationMax": "{max}分以下で入力してください。",
   "vaultAutoLockEnabled": "操作がない間は保管庫を自動ロックする",

@@ -70,7 +70,7 @@
   "extensionIdleValidationMin": "Must be at least {min} minutes.",
   "extensionIdleValidationMax": "Must be {max} minutes or less.",
   "extensionAbsoluteMinutes": "Client app absolute timeout (minutes)",
-  "extensionAbsoluteHelp": "Client app token family is revoked after this many minutes from first issue. Range: {min}–{max} minutes.",
+  "extensionAbsoluteHelp": "The client app's sign-in expires this many minutes after it was first established, regardless of activity. Range: {min}–{max} minutes.",
   "extensionAbsoluteValidationMin": "Must be at least {min} minutes.",
   "extensionAbsoluteValidationMax": "Must be {max} minutes or less.",
   "vaultAutoLockEnabled": "Automatically lock the vault after inactivity",
