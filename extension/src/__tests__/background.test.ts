@@ -577,7 +577,10 @@ describe("background message flow", () => {
   it("skips token bridge registration when permission is denied", async () => {
     vi.resetModules();
     chromeMock = installChromeMock();
-    chromeMock?.permissions.contains.mockResolvedValueOnce(false);
+    // Every call, not just the first: swFetch makes the same permissions.contains
+    // call, and a fire-and-forget chain left from an earlier test can reach this
+    // mock first and consume a one-shot value.
+    chromeMock?.permissions.contains.mockResolvedValue(false);
     await loadBackground();
     // WebAuthn interceptor is always registered, but token bridge should not be
     const calls = chromeMock?.scripting.registerContentScripts.mock.calls ?? [];

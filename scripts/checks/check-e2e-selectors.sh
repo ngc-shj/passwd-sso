@@ -401,6 +401,11 @@ if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then
   # `set -f` is on, so list the files with find, and refuse to report success
   # if there are none or the scan fails — an empty haystack would suppress
   # every warning below.
+  if [ ! -d messages/ja ]; then
+    printf '  ERROR: messages/ja/ not found; this check did not run.\n' >&2
+    printf '         Refusing to report success.\n' >&2
+    exit 1
+  fi
   ja_files=$(find messages/ja -name '*.json' -type f | sort)
   if [ -z "$ja_files" ]; then
     printf '  ERROR: no messages/ja/*.json found; this check did not run.\n' >&2

@@ -169,3 +169,14 @@ M1–M5 all pass on a live dev server / device (see long-lived-client-login-manu
 - Worst case: users re-connect a client after signing in elsewhere — the long-lived goal is not met across devices.
 - Likelihood: certain for passkey users with both clients.
 - Cost to fix: small code change plus a policy review of C7.
+
+## Round 12 — T8 fix + e2e-selectors gate fix
+- Testing T9 [Major]: residual flake — `swFetch` shares the `permissions.contains` mock with the bridge registration, so a leftover chain could consume the test's one-shot `false`. Fixed: the test makes every call return `false` (25 consecutive runs green; still fails if registration ignored the permission).
+- Testing T10 [Minor]: missing `messages/ja/` aborted on a raw `find` error before the gate's own message. Fixed with an explicit directory guard.
+- Class note (testing reviewer): fire-and-forget chains from a replaced module reaching the next test's global mocks has surfaced on three mock surfaces (fetch, chrome.scripting, chrome.permissions). Each is fixed; a suite-level remedy (awaiting or cancelling module-scoped chains on reset) is a follow-up.
+
+## Tightening-only skip — Round 12
+Findings applied directly (no Round 13 review):
+- T9 [Major, test-only] permission mock made persistent — `extension/src/__tests__/background.test.ts`
+- T10 [Minor] directory guard — `scripts/checks/check-e2e-selectors.sh`
+Justification: test code and a CI gate's diagnostic path only, inside the Round 12 fix scope; no production behaviour or security boundary changed.
