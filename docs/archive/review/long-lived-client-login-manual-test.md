@@ -14,10 +14,14 @@ Human-run checks for paths automated tests cannot reach (plan VE2/VE3, testing s
 4. Open the popup.
 - Expected: the passphrase unlock screen, not **Connect**. Unlocking with the passphrase works and autofill works afterwards.
 
+Result (2026-09-28, Chrome, dev server): after lock + worker Stop, the popup asked for the passphrase (no Connect); server saw only `unlock/data` + `unlock/verify` 200, no bridge-code. Pass.
+
 ## M2 — extension survives web sign-out (smoke; FR1 is covered by the integration test)
 1. With the extension connected and unlocked, sign out of the web app tab (single session).
 2. Wait for or trigger an extension token refresh (reload the popup after the token's refresh alarm, or shorten the tenant idle/refresh window).
 - Expected: the extension stays connected; API calls keep working.
+
+Result (2026-09-28): pass (user-confirmed).
 
 ## M3 — tenant forces logout on timeout
 1. As tenant admin, enable "Force sign-out on client app vault timeout" and set vault auto-lock to 5 minutes.

@@ -1948,6 +1948,62 @@ describe("session hydration", () => {
     );
   });
 
+  it("does not refresh the token on a 401 while the token is far from expiry", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.some((u) => u.includes(EXT_API_PATH.VAULT_STATUS))).toBe(true);
+    // A generic 401 (e.g. a rejected proof) is not fixable by rotating the token.
+    expect(urls.filter((u) => u.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH))).toHaveLength(0);
+  });
+
+  it("refreshes once and retries once on a 401 when the token is near expiry", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 60_000, // inside the 2-minute refresh buffer
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+        return {
+          ok: true,
+          json: async () => ({
+            token: "refreshed-tok",
+            expiresAt: new Date(Date.now() + 600_000).toISOString(),
+            scope: ["passwords:read"],
+            cnfJkt: STATIC_TEST_JKT,
+          }),
+        };
+      }
+      return { ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.filter((u) => u.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH))).toHaveLength(1);
+    expect(urls.filter((u) => u.includes(EXT_API_PATH.VAULT_STATUS))).toHaveLength(2);
+  });
+
   it("does not refetch the tenant policy when the restored session already has it", async () => {
     vi.resetModules();
     vi.clearAllMocks();

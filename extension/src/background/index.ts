@@ -1224,9 +1224,13 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
 
   // 401 retry (C5 extension technical approach): the token may have expired
   // between issuance and this call. Attempt a single-flight refresh and, on
-  // success, retry ONCE with the new token. Never for the refresh endpoint
-  // itself — attemptTokenRefreshWith already owns that call directly.
-  if (res.status === 401 && path !== EXT_API_PATH.EXTENSION_TOKEN_REFRESH) {
+  // success, retry ONCE with the new token. Only when the token is at or near
+  // its expiry: routes answer every auth failure with a generic 401, and a
+  // refresh cannot fix a rejected proof or a revoked token — it only rotates
+  // the token. Never for the refresh endpoint itself — attemptTokenRefreshWith
+  // already owns that call directly.
+  const nearExpiry = tokenExpiresAt !== null && Date.now() >= tokenExpiresAt - REFRESH_BUFFER_MS;
+  if (res.status === 401 && nearExpiry && path !== EXT_API_PATH.EXTENSION_TOKEN_REFRESH) {
     const refreshed = await refreshTokenSingleFlight();
     if (refreshed && currentToken) {
       return swFetchAuthenticated(path, init, serverUrl, currentToken);
