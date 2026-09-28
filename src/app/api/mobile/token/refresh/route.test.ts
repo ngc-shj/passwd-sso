@@ -216,9 +216,13 @@ describe("POST /api/mobile/token/refresh", () => {
     expect(json).toMatchObject({
       access_token: "new-access",
       refresh_token: "new-refresh",
-      expires_in: 86_400,
       token_type: "DPoP",
     });
+    // C8: expires_in is the rotated access row's actual expiry minus "now" —
+    // not a fixed constant — so allow for the few ms elapsed between the
+    // fixture's `Date.now()` capture and the route's own.
+    expect(json.expires_in).toBeGreaterThan(86_400 - 5);
+    expect(json.expires_in).toBeLessThanOrEqual(86_400);
     expect(res.headers.get("dpop-nonce")).toBeNull();
   });
 

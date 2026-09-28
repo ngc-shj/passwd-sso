@@ -31,7 +31,9 @@ final class RollbackFlagDrainTests: XCTestCase {
 
   private func makePayload(kind: CacheRejectionKind = .counterMismatch) -> RollbackFlagPayload {
     RollbackFlagPayload(
-      expectedCounter: 10,
+      // Realistic: cacheVersionCounter is seeded from 64 random bits, so it is
+      // almost always above 2^53 (JavaScript's exact-integer limit).
+      expectedCounter: 17_555_555_555_555_555_555,
       observedCounter: 99,
       headerIssuedAt: Date(timeIntervalSince1970: 1_700_000_000),
       lastSuccessfulRefreshAt: Date(timeIntervalSince1970: 1_700_000_100),
@@ -97,8 +99,8 @@ final class RollbackFlagDrainTests: XCTestCase {
 
     let body = try XCTUnwrap(capturedBody, "API POST body must be captured")
     XCTAssertEqual(body.deviceId, "device-abc")
-    XCTAssertEqual(body.expectedCounter, payload.expectedCounter)
-    XCTAssertEqual(body.observedCounter, 99)
+    XCTAssertEqual(body.expectedCounter, "17555555555555555555")
+    XCTAssertEqual(body.observedCounter, "99")
     // Wire format: server schema requires epoch-second integers.
     XCTAssertEqual(body.headerIssuedAt, 1_700_000_000)
     XCTAssertEqual(body.lastSuccessfulRefreshAt, 1_700_000_100)
@@ -142,7 +144,7 @@ final class RollbackFlagDrainTests: XCTestCase {
     await drain.drainPendingFlags(vaultKey: vaultKey)
 
     let json = try XCTUnwrap(capturedJSON, "API POST body must be captured")
-    XCTAssertEqual(json["observedCounter"] as? Int, 0)
+    XCTAssertEqual(json["observedCounter"] as? String, "0")
     XCTAssertEqual(json["headerIssuedAt"] as? Int, 0)
     XCTAssertEqual(json["lastSuccessfulRefreshAt"] as? Int, 0)
   }

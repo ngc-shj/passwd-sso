@@ -33,6 +33,7 @@ export const API_PATH = {
   VAULT_SETUP: "/api/vault/setup",
   VAULT_UNLOCK_DATA: "/api/vault/unlock/data",
   VAULT_UNLOCK: "/api/vault/unlock",
+  VAULT_UNLOCK_VERIFY: "/api/vault/unlock/verify",
   VAULT_CHANGE_PASSPHRASE: "/api/vault/change-passphrase",
   VAULT_ROTATE_KEY: "/api/vault/rotate-key",
   VAULT_ROTATE_KEY_DATA: "/api/vault/rotate-key/data",

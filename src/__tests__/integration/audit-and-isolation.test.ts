@@ -158,6 +158,8 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
       tenantId: "a0000000-0000-4000-8000-000000000001",
       scopes: [],
       clientKind: "BROWSER_EXTENSION",
+      tokenId: "tok1",
+      familyId: "fam1",
     };
     expect(resolveActorType(auth)).toBe("HUMAN");
   });

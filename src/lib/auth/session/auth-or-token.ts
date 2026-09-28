@@ -22,7 +22,17 @@ const KNOWN_PREFIXES = [API_KEY_PREFIX, SA_TOKEN_PREFIX, MCP_TOKEN_PREFIX, SCIM_
 
 export type AuthResult =
   | { type: "session"; userId: string }
-  | { type: "token"; userId: string; tenantId: string; scopes: ExtensionTokenScope[]; clientKind: ExtensionTokenClientKind }
+  | {
+      type: "token";
+      userId: string;
+      tenantId: string;
+      scopes: ExtensionTokenScope[];
+      clientKind: ExtensionTokenClientKind;
+      /** The presenting token row's own id — needed to write back to that exact row (e.g. presence). */
+      tokenId: string;
+      /** The token's refresh-family id — needed by per-family policy (e.g. the C2 rate limiter). */
+      familyId: string;
+    }
   | { type: "api_key"; userId: string; tenantId: string; apiKeyId: string; scopes: ApiKeyScope[] }
   | { type: "service_account"; serviceAccountId: string; tenantId: string; tokenId: string; scopes: SaTokenScope[] }
   | { type: "mcp_token"; userId: string | null; tenantId: string; tokenId: string; mcpClientId: string; scopes: McpScope[] };
@@ -149,5 +159,7 @@ export async function authOrToken(
     tenantId: result.data.tenantId,
     scopes: result.data.scopes,
     clientKind: result.data.clientKind,
+    tokenId: result.data.tokenId,
+    familyId: result.data.familyId,
   };
 }

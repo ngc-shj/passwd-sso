@@ -55,6 +55,8 @@ const MANIFEST = new Map([
   ["src/lib/auth/session/auth-adapter.ts", "throw"],
   ["src/lib/auth/tokens/extension-token.ts", "throw"],
   ["src/app/api/extension/token/refresh/route.ts", "throw"],
+  ["src/lib/auth/tokens/mobile-token.ts", "throw"],
+  ["src/app/api/mobile/token/route.ts", "throw"],
   ["src/app/api/webauthn/register/verify/route.ts", "throw"],
   ["src/lib/team/team-policy.ts", "throw"],
   ["src/auth.ts", "throw"],

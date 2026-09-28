@@ -28,6 +28,8 @@ const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
   unwrapSecretKey: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
   deriveEncryptionKey: vi.fn().mockResolvedValue("enc-key"),
+  deriveAuthKeyBytes: vi.fn().mockResolvedValue(new Uint8Array([4, 5, 6])),
+  computeAuthHash: vi.fn().mockResolvedValue("fake-auth-hash"),
   verifyKey: vi.fn().mockResolvedValue(true),
   decryptData: vi.fn().mockResolvedValue(
     JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" }),
@@ -56,6 +58,7 @@ function installChromeMock() {
       onStartup: { addListener: vi.fn() },
       sendMessage: vi.fn().mockResolvedValue({ ok: true }),
       getContexts: vi.fn().mockResolvedValue([]),
+      getURL: vi.fn((path: string) => `chrome-extension://test-extension-id/${path}`),
     },
     offscreen: {
       createDocument: vi.fn().mockResolvedValue(undefined),
@@ -111,6 +114,8 @@ function installChromeMock() {
 let bgModule: typeof import("../../background/index") | null = null;
 async function loadBackground() {
   bgModule = await import("../../background/index");
+  // Settle the module-load registration so it cannot land on the next test's chrome mock.
+  await bgModule.tokenBridgeRegistration;
 }
 function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
   if (!bgModule) throw new Error("loadBackground() must run first");
@@ -139,6 +144,9 @@ function mockEntries(
             scope: ["passwords:read", "vault:unlock-data"],
           }),
         };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
       }
       if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
         return {
@@ -384,6 +392,9 @@ function mockCcFillFetch(): void {
           }),
         };
       }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
+      }
       if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
         return {
           ok: true,
@@ -536,7 +547,12 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
     expect(res.ok).toBe(false);
     expect(res.error).toBe("INVALID_ID");
-    expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    // No entry data is fetched. (The token refresh a verified unlock triggers
+    // may land after the mockClear above; it is not part of this request.)
+    const dataCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([url]) => !String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+    );
+    expect(dataCalls).toHaveLength(0);
   });
 
   it("C9: rejects an entryId with illegal characters", async () => {

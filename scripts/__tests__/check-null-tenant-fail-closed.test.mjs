@@ -28,6 +28,8 @@ const THROW_PATHS = [
   "src/lib/auth/session/auth-adapter.ts",
   "src/lib/auth/tokens/extension-token.ts",
   "src/app/api/extension/token/refresh/route.ts",
+  "src/lib/auth/tokens/mobile-token.ts",
+  "src/app/api/mobile/token/route.ts",
   "src/app/api/webauthn/register/verify/route.ts",
   "src/lib/team/team-policy.ts",
   "src/auth.ts",

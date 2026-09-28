@@ -53,10 +53,11 @@ import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { verifyDpopProof } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
+import { issueIosToken } from "@/lib/auth/tokens/mobile-token";
 import {
-  issueIosToken,
-  IOS_TOKEN_IDLE_TIMEOUT_MS,
-} from "@/lib/auth/tokens/mobile-token";
+  EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
+} from "@/lib/validations/common";
 import { verifyPkceS256 } from "@/lib/mcp/oauth-server";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { errorLogFields } from "@/lib/logger/error-fields";
@@ -238,7 +239,32 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
 
-  // 8. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
+  // 8. Read tenant extension-token TTL policy (C8: iOS shares the browser
+  // extension's tenant-configurable idle/absolute fields). FAIL-CLOSED:
+  // tenantId is FK-backed (mirrors issueExtensionToken / extension refresh) —
+  // a vanished tenant row is data corruption, not "no policy"; refuse
+  // issuance rather than default to a potentially longer TTL.
+  const tenant = await withBypassRls(
+    prisma,
+    async (tx) =>
+      tx.tenant.findUnique({
+        where: { id: stored.tenantId },
+        select: {
+          extensionTokenIdleTimeoutMinutes: true,
+          extensionTokenAbsoluteTimeoutMinutes: true,
+        },
+      }),
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+  );
+  if (!tenant) {
+    throw new Error(`mobile token issuance: tenant ${stored.tenantId} not found`);
+  }
+  const idleMinutes =
+    tenant.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
+  const absoluteMinutes =
+    tenant.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT;
+
+  // 9. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
   // the proof's own JWK — same value as stored.deviceJkt post-verify.
   let issued: Awaited<ReturnType<typeof issueIosToken>>;
   try {
@@ -247,6 +273,12 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       tenantId: stored.tenantId,
       deviceJkt: stored.deviceJkt,
       cnfJkt: dpopResult.jkt,
+      idleMinutes,
+      absoluteMinutes,
+      // Brand-new family: the bridge-code exchange itself counts as presence
+      // (mirrors issueExtensionToken — the user just proved the passphrase
+      // via the web session that started the pairing).
+      presenceAt: now,
       ip: clientIp,
       userAgent: req.headers.get("user-agent"),
     });
@@ -282,7 +314,10 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     {
       access_token: issued.accessToken,
       refresh_token: issued.refreshToken,
-      expires_in: Math.floor(IOS_TOKEN_IDLE_TIMEOUT_MS / MS_PER_SECOND),
+      // C8: the access row's actual (tenant/presence-capped) expiry, not a
+      // fixed constant — it can be shorter than IOS_ACCESS_TOKEN_TTL_MS when
+      // the tenant's idle/absolute policy caps it first.
+      expires_in: Math.floor((issued.expiresAt.getTime() - now.getTime()) / MS_PER_SECOND),
       token_type: "DPoP",
     },
     {

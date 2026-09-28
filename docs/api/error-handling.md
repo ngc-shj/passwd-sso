@@ -142,7 +142,7 @@ the broad class; the `error` code is the specific reason.
 | 409 | Request conflicts with current resource state | `CONFLICT`, `VAULT_ALREADY_SETUP`, `*_ALREADY_EXISTS`, `*_ALREADY_REVOKED`, `ALREADY_A_MEMBER`, `SLUG_ALREADY_TAKEN` |
 | 410 | Endpoint deprecated and removed | (deprecated route stubs) |
 | 413 | Body exceeds size limit | `PAYLOAD_TOO_LARGE`, `FILE_TOO_LARGE`, `SEND_FILE_TOO_LARGE` |
-| 422 | Semantic validation of well-formed input failed (rare) | reserved; see below |
+| 422 | Semantic validation of well-formed input failed (rare), OR a deliberately distinct-from-401 failure signal (see below) | `AUTH_HASH_MISMATCH`, `MCP_CLIENT_LIMIT_EXCEEDED` |
 | 429 | Rate limit exceeded | `RATE_LIMIT_EXCEEDED` |
 | 500 | Server-side bug — unexpected failure | `INTERNAL_ERROR` |
 | 503 | Downstream dependency unavailable (Redis, WebAuthn, HIBP, etc.) | `SERVICE_UNAVAILABLE`, `UPSTREAM_ERROR` |
@@ -152,9 +152,34 @@ the broad class; the `error` code is the specific reason.
 Use **400 for all input-shape failures** (parse errors, Zod validation,
 missing fields, wrong types). Reserve **422** for cases where the body parses,
 Zod accepts it, but a multi-field semantic invariant fails (e.g.,
-`startDate > endDate` when both fields individually validate). In practice
-this codebase has no 422 sites after C6 — every prior 422 was a 400 in
-disguise.
+`startDate > endDate` when both fields individually validate), OR where a
+route deliberately needs a status distinct from its own 401/403 outcomes.
+Two live sites, unrelated to each other:
+
+- `MCP_CLIENT_LIMIT_EXCEEDED` — the original C6-era 422.
+- `AUTH_HASH_MISMATCH` (`POST /api/vault/unlock/verify`, plan §C2) — chosen so
+  a wrong `authHash` on this route is distinguishable **by status alone** from
+  a token/DPoP-layer failure (401) on the same route: 401 here always means
+  "no valid token", never "wrong passphrase". This is the opposite of
+  `/api/vault/unlock`, which keeps `401 { valid: false }` for a wrong hash —
+  the two entry points signal the same underlying fact (wrong passphrase)
+  with **different** HTTP statuses.
+
+**Monitoring implication:** 422 is not a single-meaning status code in this
+app — an alert or dashboard keyed on "422 rate" conflates unrelated failure
+domains (MCP client-limit vs. vault-unlock-verify mismatches) and must be
+**path-scoped**, not status-scoped. The reliable cross-route signal for a
+wrong `authHash` — whether it came through the web `401` path or the client-
+token `422` path — is the audit stream: both emit `VAULT_UNLOCK_FAILED`, and
+`metadata.source: "client_token"` (with `metadata.clientKind`) distinguishes
+the extension/iOS path from the web path. A wrong hash on
+`/api/vault/unlock/verify` never feeds account lockout (S1 — a token holder
+without the passphrase must not be able to lock the owner out); it is
+rate-limited per token family instead (5 / 5 min,
+`rl:vault_unlock_verify:<familyId>`). Because these rows never call
+`recordFailure`, the audit-log UI's `VAULT_UNLOCK_FAILED` detail line (which
+reads `metadata.attempts`) shows no attempt count for them — accepted, see
+`docs/archive/review/long-lived-client-login-plan.md` §C2/G3.
 
 #### 401 vs 403
 

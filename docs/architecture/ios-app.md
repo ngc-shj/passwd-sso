@@ -63,8 +63,8 @@ Key properties:
 | Property | Value |
 | --- | --- |
 | Token rows | Access + refresh pair, same `familyId` (`ExtensionToken`, `clientKind: IOS_APP`) |
-| Access TTL | 24 h idle (`IOS_TOKEN_IDLE_TIMEOUT_MS`) |
-| Family absolute TTL | 7 d (`IOS_TOKEN_ABSOLUTE_TIMEOUT_MS`) |
+| Access TTL | fixed 24 h (`IOS_ACCESS_TOKEN_TTL_MS`), further capped so it never outlives the refresh row's own expiry below |
+| Refresh-row / family expiry | `min(now+idle, presence+idle, familyCreatedAt+absolute)` — the same tenant-configurable fields the browser extension uses: `extensionTokenIdleTimeoutMinutes` (default 7 d, from the last server-verified unlock — see Vault Crypto below) and `extensionTokenAbsoluteTimeoutMinutes` (default 30 d, from family creation); computed by `computeClientTokenExpiry` (`src/lib/auth/tokens/client-token-expiry.ts`) |
 | Binding | DPoP (RFC 9449); each row stores `cnfJkt` = RFC 7638 thumbprint of the device key |
 | Device key | P-256 in the **Secure Enclave** (`SecureEnclaveKey.swift`), non-extractable |
 | Proof | ES256 JWS `{htm, htu, iat, jti, ath}`; `ath` = SHA-256 of the presented token |
@@ -74,8 +74,14 @@ Rotation (`POST /api/mobile/token/refresh`, `refreshIosToken()` in
 `src/lib/auth/tokens/mobile-token.ts`):
 
 - Happy path: old pair revoked atomically, new pair minted in the same family
-  (`familyCreatedAt` preserved, so the 7-day absolute deadline cannot be
-  extended by rotating).
+  (`familyCreatedAt` preserved, so the absolute deadline cannot be extended by
+  rotating; the family's `MAX(lastPresenceAt)` is carried forward so the new
+  row's idle clock does not reset without a real unlock).
+- Refresh rejects and revokes the family when the family is older than the
+  tenant absolute timeout (`EXTENSION_TOKEN_FAMILY_REVOKED`, reason
+  `family_expired`) or when presence is older than the tenant idle timeout
+  (same audit action, reason `presence_expired`) — refresh activity alone
+  never keeps a family alive.
 - Replay of a revoked refresh token revokes the **entire family**
   (`MOBILE_TOKEN_REPLAY_DETECTED`); an identical retry within a 5 s grace
   window (`REFRESH_REPLAY_GRACE_MS`) returns the cached new pair instead, so a
@@ -118,6 +124,17 @@ On passphrase unlock the app derives the vault key from the server's
 counter + install UUID, and persists only the wrapped form. Face ID unlock
 reverses the chain: biometric Keychain read → cache key → unwrap vault key →
 verify cache counter — fully offline.
+
+Passphrase unlock also derives `authHash` (`computeAuthHash(authKey:)`,
+`ios/Shared/Crypto/KDF.swift`, byte-identical to the web/extension formula)
+and wraps it under the same biometry-gated `bridge_key` (`WrappedKeyStore
+.saveAuthHash`). Face ID unlock unwraps it in the same `LAContext` evaluation
+(no extra prompt) and both paths call `MobileAPIClient.verifyUnlock(authHash:)`
+→ `POST /api/vault/unlock/verify`, which records **presence** for the token
+family — the mechanism the Token Model's idle timeout is measured from. A
+`422 AUTH_HASH_MISMATCH` response deletes the cached `authHash`; any other
+failure (network, 401-ladder exhaustion, `429`, `ACCOUNT_LOCKED`) leaves it
+untouched for the next retry. See `docs/architecture/client-reauth-timing.md`.
 
 ## Entry Cache & Rollback Protection
 
@@ -196,10 +213,14 @@ server-side counter.
 | Biometric re-enrollment | `biometryCurrentSet` ACL invalidates the bridge key → passphrase fallback |
 
 Tenant policy: `/api/vault/unlock/data` returns `vaultAutoLockMinutes`
-(nullable). A passphrase unlock persists it authoritatively; a biometric
-(offline) unlock keeps the persisted value. Effective timeout =
-`tenantAutoLockMinutes ?? userMinutes` — the tenant value overrides the user
-setting exactly.
+(nullable) and `requireVaultTimeoutLogout` (boolean). A passphrase unlock
+persists both authoritatively; a biometric (offline) unlock keeps the
+persisted values. Effective timeout = `tenantAutoLockMinutes ?? userMinutes`;
+effective timeout **action** = `.logout` when `requireVaultTimeoutLogout` is
+true, else the user's local `.lock`/`.logout` setting (`AutoLockService
+.timeoutAction`) — the tenant flag overrides the local action exactly like
+`vaultAutoLockMinutes` overrides the local duration, and is enforced
+client-side only (`docs/security/policy-enforcement.md`).
 
 ## Security Properties
 

@@ -57,8 +57,8 @@ public actor RollbackFlagDrain {
       let payload = verified.payload
       let body = CacheRollbackReportBody(
         deviceId: deviceId(),
-        expectedCounter: payload.expectedCounter,
-        observedCounter: payload.observedCounter ?? 0,
+        expectedCounter: String(payload.expectedCounter),
+        observedCounter: String(payload.observedCounter ?? 0),
         headerIssuedAt: epochSeconds(payload.headerIssuedAt),
         lastSuccessfulRefreshAt: epochSeconds(payload.lastSuccessfulRefreshAt),
         rejectionKind: payload.rejectionKind.rawValue
@@ -80,8 +80,8 @@ public actor RollbackFlagDrain {
          let partial = try? JSONDecoder().decode(PartialFlagPayload.self, from: payloadData) {
         return CacheRollbackReportBody(
           deviceId: deviceId(),
-          expectedCounter: partial.expectedCounter ?? 0,
-          observedCounter: partial.observedCounter ?? 0,
+          expectedCounter: String(partial.expectedCounter ?? 0),
+          observedCounter: String(partial.observedCounter ?? 0),
           headerIssuedAt: 0,
           lastSuccessfulRefreshAt: 0,
           rejectionKind: "flag_forged"
@@ -90,8 +90,8 @@ public actor RollbackFlagDrain {
     }
     return CacheRollbackReportBody(
       deviceId: deviceId(),
-      expectedCounter: 0,
-      observedCounter: 0,
+      expectedCounter: "0",
+      observedCounter: "0",
       headerIssuedAt: 0,
       lastSuccessfulRefreshAt: 0,
       rejectionKind: "flag_forged"
@@ -109,10 +109,13 @@ public actor RollbackFlagDrain {
 /// (route.ts ReportRequestSchema) is Zod `.strict()` with ALL fields required:
 /// `headerIssuedAt` / `lastSuccessfulRefreshAt` are nonnegative integers
 /// (epoch seconds; 0 = unknown), so optionals must not be omitted here.
+/// The counters are decimal strings: `cacheVersionCounter` is seeded from 64
+/// random bits, so it is almost always above 2^53 — a JSON number that size
+/// loses its low digits in JavaScript and fails the server's integer check.
 public struct CacheRollbackReportBody: Sendable, Codable {
   public let deviceId: String
-  public let expectedCounter: UInt64
-  public let observedCounter: UInt64
+  public let expectedCounter: String
+  public let observedCounter: String
   public let headerIssuedAt: Int
   public let lastSuccessfulRefreshAt: Int
   public let rejectionKind: String

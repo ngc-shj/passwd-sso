@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
@@ -80,6 +80,7 @@ function authOk() {
       expiresAt: new Date("2099-01-01"),
       familyId: "fam-1",
       familyCreatedAt: new Date(),
+      clientKind: "IOS_APP",
     },
   };
 }
@@ -145,6 +146,116 @@ describe("POST /api/mobile/cache-rollback-report", () => {
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
+  it("accepts a full-width 64-bit counter as a decimal string and records it exactly", async () => {
+    const res = await POST(
+      makeReq({
+        ...VALID_BODY,
+        expectedCounter: "17555555555555555555",
+        observedCounter: "18446744073709551615",
+      }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          expectedCounter: "17555555555555555555",
+          observedCounter: "18446744073709551615",
+        }),
+      }),
+    );
+  });
+
+  it('accepts the string "0" counters every flag_forged report sends', async () => {
+    const res = await POST(
+      makeReq({
+        ...VALID_BODY,
+        expectedCounter: "0",
+        observedCounter: "0",
+        rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "MOBILE_CACHE_FLAG_FORGED",
+        metadata: expect.objectContaining({ expectedCounter: "0", observedCounter: "0" }),
+      }),
+    );
+  });
+
+  it("normalises a safe-integer counter number to its decimal string", async () => {
+    const res = await POST(makeReq());
+    expect(res.status).toBe(200);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ expectedCounter: "42", observedCounter: "41" }),
+      }),
+    );
+  });
+
+  it("returns 400 for a counter sent as a JSON number beyond 2^53 (precision already lost)", async () => {
+    // createRequest JSON.stringifies its body, which cannot express this
+    // literal exactly — send the raw text the iOS app used to send.
+    const raw = JSON.stringify({ ...VALID_BODY, expectedCounter: 0 }).replace(
+      '"expectedCounter":0',
+      '"expectedCounter":17555555555555555555',
+    );
+    const req = new NextRequest("https://example.test/api/mobile/cache-rollback-report", {
+      method: "POST",
+      body: raw,
+      headers: {
+        "content-type": "application/json",
+        authorization: "DPoP access-token-here",
+        dpop: "fake.proof",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["above 2^64-1", "18446744073709551616"],
+    ["leading zero", "042"],
+    ["negative", "-1"],
+    ["non-digit", "12a"],
+  ])("returns 400 for a counter string that is %s", async (_label, value) => {
+    const res = await POST(makeReq({ ...VALID_BODY, expectedCounter: value }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it.each(["BROWSER_EXTENSION", "IOS_AUTOFILL"])(
+    "returns 403 for a %s token and records nothing",
+    async (clientKind) => {
+      mockValidateExtensionToken.mockResolvedValueOnce({
+        ok: true,
+        data: { ...authOk().data, clientKind },
+      });
+      const res = await POST(makeReq());
+      const { status, json } = await parseResponse(res);
+      expect(status).toBe(403);
+      expect(json.error).toBe("FORBIDDEN");
+      expect(mockCheck).not.toHaveBeenCalled();
+      expect(mockLogAuditAsync).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keys the rate limit on the token family, not the client-supplied deviceId", async () => {
+    await POST(makeReq({ ...VALID_BODY, deviceId: "d1" }));
+    await POST(makeReq({ ...VALID_BODY, deviceId: "d2" }));
+    const keys = mockCheck.mock.calls.map(([key]) => key);
+    expect(keys).toEqual([
+      `rl:mobile_cache_rollback:${TENANT_ID}:fam-1`,
+      `rl:mobile_cache_rollback:${TENANT_ID}:fam-1`,
+    ]);
+  });
+
   it("returns 400 on an unknown body field (Zod strict)", async () => {
     const res = await POST(makeReq({ ...VALID_BODY, extra: "shouldntbehere" }));
     const { status, json } = await parseResponse(res);
@@ -184,10 +295,4 @@ describe("POST /api/mobile/cache-rollback-report", () => {
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
-  it("uses (tenantId, deviceId) as the rate-limit key", async () => {
-    await POST(makeReq());
-    expect(mockCheck).toHaveBeenCalledWith(
-      `rl:mobile_cache_rollback:${TENANT_ID}:${VALID_BODY.deviceId}`,
-    );
-  });
 });

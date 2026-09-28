@@ -249,18 +249,22 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/team/team-member-display.ts", ["user", "tenantMember"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
   ["src/lib/auth/session/session-timeout.ts", ["user", "tenant"]],
-  // Extension token refresh: cross-tenant token lookup + family-absolute check
-  ["src/app/api/extension/token/refresh/route.ts", ["tenant"]],
+  // Extension token refresh: tenant policy read keyed by the validated token
+  // row's tenantId; family presence MAX + replay lookup of the presented token
+  // (by tokenHash) span revoked rows of the same family.
+  ["src/app/api/extension/token/refresh/route.ts", ["tenant", "extensionToken"]],
   // iOS auth: token row updates (lastUsedIp/UA, replay-detection family revoke)
   // happen across tenant boundary because the bearer token's tenantId is
   // resolved from the row, not the request session.
-  ["src/lib/auth/tokens/mobile-token.ts", ["extensionToken"]],
+  // Tenant idle/absolute policy read keyed by the refresh row's tenantId.
+  ["src/lib/auth/tokens/mobile-token.ts", ["extensionToken", "tenant"]],
   // iOS authorize: bridge-code creation atomically counts active bridge codes
   // per user across tenants (parity with extension/bridge-code/route.ts).
   ["src/app/api/mobile/authorize/route.ts", ["mobileBridgeCode"]],
   // iOS token exchange: bridge-code single-use consumption requires bypass
   // because the row predates the issued session (parity with extension exchange).
-  ["src/app/api/mobile/token/route.ts", ["mobileBridgeCode"]],
+  // Tenant idle/absolute policy read keyed by the consumed bridge code's tenantId.
+  ["src/app/api/mobile/token/route.ts", ["mobileBridgeCode", "tenant"]],
   // iOS token refresh: cross-tenant token row read for family-absolute check.
   // C13: deactivated-user rejection requires tenantMember lookup.
   ["src/app/api/mobile/token/refresh/route.ts", ["extensionToken", "tenantMember"]],
@@ -317,6 +321,9 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/access/delegation.ts", ["delegationSession"]],
   ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
   ["src/app/api/vault/delegation/check/route.ts", ["delegationSession"]],
+  // Unlock presence: lastPresenceAt write on the presenting token's own row,
+  // keyed by the id checkAuth resolved from the validated bearer.
+  ["src/app/api/vault/unlock/verify/route.ts", ["extensionToken"]],
   // SSH agent per-signature authorize: cross-tenant SSH_KEY lookup scoped by userId in WHERE
   ["src/app/api/vault/ssh/sign-authorize/route.ts", ["passwordEntry"]],
   // MCP Connections: user's own token listing + revocation (userId + tenantId in WHERE)

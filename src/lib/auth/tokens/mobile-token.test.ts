@@ -9,6 +9,8 @@ const {
   mockExtCreate,
   mockExtUpdate,
   mockExtUpdateMany,
+  mockExtAggregate,
+  mockTenantFindUnique,
   mockTransaction,
   mockTxExecuteRaw,
   mockWithBypassRls,
@@ -18,6 +20,8 @@ const {
   mockExtCreate: vi.fn(),
   mockExtUpdate: vi.fn(),
   mockExtUpdateMany: vi.fn(),
+  mockExtAggregate: vi.fn(),
+  mockTenantFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
   mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
@@ -50,6 +54,10 @@ vi.mock("@/lib/prisma", () => ({
       create: mockExtCreate,
       update: mockExtUpdate,
       updateMany: mockExtUpdateMany,
+      aggregate: mockExtAggregate,
+    },
+    tenant: {
+      findUnique: mockTenantFindUnique,
     },
     $transaction: mockTransaction,
   },
@@ -106,12 +114,16 @@ import {
   issueAutofillToken,
   validateIosTokenDpop,
   refreshIosToken,
-  IOS_TOKEN_IDLE_TIMEOUT_MS,
-  IOS_TOKEN_ABSOLUTE_TIMEOUT_MS,
+  IOS_ACCESS_TOKEN_TTL_MS,
   IOS_AUTOFILL_TOKEN_TTL_MS,
   REFRESH_REPLAY_GRACE_MS,
   _resetRotationCacheForTests,
 } from "./mobile-token";
+import {
+  EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
+} from "@/lib/validations/common";
+import { MS_PER_MINUTE, MS_PER_DAY } from "@/lib/constants/time";
 
 // ─── Shared test fixtures ────────────────────────────────────
 
@@ -123,6 +135,11 @@ const FAMILY_ID = "00000000-0000-4000-8000-000000000003";
 // device's public-key thumbprint.
 const DEVICE_JKT = "a".repeat(43);
 const CNF_JKT = DEVICE_JKT;
+// C8: tenant idle/absolute timeouts (minutes), parameterised in place of the
+// removed IOS_TOKEN_IDLE_TIMEOUT_MS / IOS_TOKEN_ABSOLUTE_TIMEOUT_MS constants
+// — iOS now shares the browser extension's tenant-configurable fields.
+const TENANT_IDLE_MINUTES = EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
+const TENANT_ABSOLUTE_MINUTES = EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT;
 
 function setupTransactionPassthrough() {
   mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
@@ -140,7 +157,7 @@ function setupTransactionPassthrough() {
 function happyAccessRowResponse(overrides: Partial<{ id: string }> = {}) {
   return {
     id: overrides.id ?? "row-access-1",
-    expiresAt: new Date(Date.now() + IOS_TOKEN_IDLE_TIMEOUT_MS),
+    expiresAt: new Date(Date.now() + IOS_ACCESS_TOKEN_TTL_MS),
     familyId: FAMILY_ID,
     familyCreatedAt: new Date(),
   };
@@ -153,6 +170,15 @@ beforeEach(() => {
   mockExtCreate.mockResolvedValue(happyAccessRowResponse());
   mockExtUpdate.mockResolvedValue({});
   mockExtUpdateMany.mockResolvedValue({ count: 0 });
+  // Default tenant policy: the same defaults issueExtensionToken falls back
+  // to (7d idle / 30d absolute).
+  mockTenantFindUnique.mockResolvedValue({
+    extensionTokenIdleTimeoutMinutes: TENANT_IDLE_MINUTES,
+    extensionTokenAbsoluteTimeoutMinutes: TENANT_ABSOLUTE_MINUTES,
+  });
+  // Default presence: no row in the family has ever recorded presence ⇒
+  // getFamilyPresenceAt falls back to familyCreatedAt (C4/C9).
+  mockExtAggregate.mockResolvedValue({ _max: { lastPresenceAt: null } });
   mockGetJtiCache.mockReturnValue({
     hasOrRecord: vi.fn().mockResolvedValue(false),
   });
@@ -176,6 +202,9 @@ describe("issueIosToken", () => {
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
+      idleMinutes: TENANT_IDLE_MINUTES,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt: new Date(),
       ip: "1.2.3.4",
       userAgent: "TestAgent/1.0",
     });
@@ -222,6 +251,9 @@ describe("issueIosToken", () => {
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
+      idleMinutes: TENANT_IDLE_MINUTES,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt: new Date(),
     });
     expect(result.familyId).toBeTruthy();
     expect(typeof result.familyId).toBe("string");
@@ -243,6 +275,9 @@ describe("issueIosToken", () => {
       cnfJkt: CNF_JKT,
       familyId: FAMILY_ID,
       familyCreatedAt: existingFamilyCreatedAt,
+      idleMinutes: TENANT_IDLE_MINUTES,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt: existingFamilyCreatedAt,
     });
 
     const accessCall = mockExtCreate.mock.calls[0][0];
@@ -260,6 +295,9 @@ describe("issueIosToken", () => {
       tenantId: TENANT_ID,
       deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
+      idleMinutes: TENANT_IDLE_MINUTES,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt: new Date(),
     });
 
     expect(mockExtUpdateMany).toHaveBeenCalledWith(
@@ -268,6 +306,79 @@ describe("issueIosToken", () => {
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );
+  });
+
+  // ─── C8/C3: access expiry = min(IOS_ACCESS_TOKEN_TTL_MS, C3-capped refresh expiry) ───
+
+  it("caps the access row at IOS_ACCESS_TOKEN_TTL_MS when the tenant policy is far looser", async () => {
+    const before = Date.now();
+    await issueIosToken({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+      idleMinutes: TENANT_IDLE_MINUTES, // 7d — much longer than the 24h access TTL
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES, // 30d
+      presenceAt: new Date(),
+    });
+
+    const accessCall = mockExtCreate.mock.calls[0][0];
+    const ttl = (accessCall.data.expiresAt as Date).getTime() - before;
+    expect(ttl).toBeGreaterThan(IOS_ACCESS_TOKEN_TTL_MS - 5_000);
+    expect(ttl).toBeLessThanOrEqual(IOS_ACCESS_TOKEN_TTL_MS + 5_000);
+  });
+
+  it("caps the access row at the tenant/presence bound when it is shorter than IOS_ACCESS_TOKEN_TTL_MS", async () => {
+    // Tenant idle tightened to 30 minutes — well under the 24h access TTL.
+    // mockExtCreate's default resolved value is a fixed fixture, unaware of
+    // this test's input — echo the real access row's expiresAt back so
+    // `result.expiresAt` (sourced from the row .create() returns) reflects
+    // the computed value under test, not the shared fixture's hardcoded TTL.
+    const tightIdleMinutes = 30;
+    const presenceAt = new Date();
+    mockExtCreate.mockImplementationOnce(
+      (args: { data: { expiresAt: Date; familyId: string; familyCreatedAt: Date } }) => ({
+        id: "row-tight-access",
+        expiresAt: args.data.expiresAt,
+        familyId: args.data.familyId,
+        familyCreatedAt: args.data.familyCreatedAt,
+      }),
+    );
+    const result = await issueIosToken({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+      idleMinutes: tightIdleMinutes,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt,
+    });
+
+    const accessCall = mockExtCreate.mock.calls[0][0];
+    const refreshCall = mockExtCreate.mock.calls[1][0];
+    // Refresh row's own C3 expiry: presenceAt + idle (the binding cap here).
+    const expectedExpiry = presenceAt.getTime() + tightIdleMinutes * MS_PER_MINUTE;
+    expect((accessCall.data.expiresAt as Date).getTime()).toBe(expectedExpiry);
+    expect((refreshCall.data.expiresAt as Date).getTime()).toBe(expectedExpiry);
+    expect(result.expiresAt.getTime()).toBe(expectedExpiry);
+  });
+
+  it("writes lastPresenceAt on both the access and refresh rows", async () => {
+    const presenceAt = new Date(Date.now() - 60_000);
+    await issueIosToken({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+      idleMinutes: TENANT_IDLE_MINUTES,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt,
+    });
+
+    const accessCall = mockExtCreate.mock.calls[0][0];
+    const refreshCall = mockExtCreate.mock.calls[1][0];
+    expect(accessCall.data.lastPresenceAt).toEqual(presenceAt);
+    expect(refreshCall.data.lastPresenceAt).toEqual(presenceAt);
   });
 });
 
@@ -638,8 +749,12 @@ describe("refreshIosToken", () => {
     expect(mockRevokeFamily).toHaveBeenCalled();
   });
 
-  it("family absolute expiry: returns REFRESH_TOKEN_FAMILY_EXPIRED + revokes family", async () => {
-    const ancient = new Date(Date.now() - IOS_TOKEN_ABSOLUTE_TIMEOUT_MS - 1_000);
+  // ─── C8: tenant-driven family absolute expiry ────────────────
+
+  it("family older than the tenant's absolute timeout: returns REFRESH_TOKEN_FAMILY_EXPIRED + revokes family", async () => {
+    const ancient = new Date(
+      Date.now() - TENANT_ABSOLUTE_MINUTES * MS_PER_MINUTE - 1_000,
+    );
     const result = await refreshIosToken({
       req: makeReq(),
       bodyBytes: new TextEncoder().encode("x"),
@@ -653,6 +768,65 @@ describe("refreshIosToken", () => {
       expect.objectContaining({ reason: "family_expired" }),
     );
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
+    expect(mockExtCreate).not.toHaveBeenCalled();
+  });
+
+  // ─── C4: tenant-driven presence gate ─────────────────────────
+
+  it("presence older than the tenant's idle timeout: returns REFRESH_TOKEN_FAMILY_EXPIRED, revokes family with reason presence_expired", async () => {
+    const staleIdleMinutes = 60;
+    mockTenantFindUnique.mockResolvedValueOnce({
+      extensionTokenIdleTimeoutMinutes: staleIdleMinutes,
+      extensionTokenAbsoluteTimeoutMinutes: TENANT_ABSOLUTE_MINUTES,
+    });
+    const stalePresence = new Date(
+      Date.now() - staleIdleMinutes * MS_PER_MINUTE - 5_000,
+    );
+    mockExtAggregate.mockResolvedValueOnce({
+      _max: { lastPresenceAt: stalePresence },
+    });
+
+    const result = await refreshIosToken({
+      req: makeReq(),
+      bodyBytes: new TextEncoder().encode("x"),
+      oldRow: baseRow,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+    });
+
+    expect(result).toEqual({ ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" });
+    expect(mockRevokeFamily).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "presence_expired" }),
+    );
+    expect(mockExtCreate).not.toHaveBeenCalled();
+  });
+
+  it("active use with periodic presence survives past the tenant's idle timeout (bounded only by the absolute cap)", async () => {
+    // Family created 10 days ago — older than the 7d default idle — but a
+    // presence write 1 minute ago keeps it alive; the 30d absolute cap is
+    // the only remaining bound (FR4/U1).
+    const familyCreatedAt = new Date(Date.now() - 10 * MS_PER_DAY);
+    const recentPresence = new Date(Date.now() - 60_000);
+    mockExtAggregate.mockResolvedValueOnce({
+      _max: { lastPresenceAt: recentPresence },
+    });
+    mockExtCreate.mockResolvedValueOnce(
+      happyAccessRowResponse({ id: "row-new-periodic" }),
+    );
+
+    const result = await refreshIosToken({
+      req: makeReq(),
+      bodyBytes: new TextEncoder().encode("x"),
+      oldRow: { ...baseRow, familyCreatedAt },
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockRevokeFamily).not.toHaveBeenCalled();
+    if (result.ok) {
+      expect(result.token.tokenId).toBe("row-new-periodic");
+    }
   });
 
   it("passkey-blocked user ⇒ PASSKEY_REQUIRED, issueIosToken NOT called", async () => {

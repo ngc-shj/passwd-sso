@@ -667,6 +667,22 @@ describe("issueExtensionToken", () => {
     );
   });
 
+  it("stamps lastPresenceAt = now on the new row (issuance itself counts as presence)", async () => {
+    const before = Date.now();
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "t1",
+      scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    const after = Date.now();
+
+    const callArg = mockCreate.mock.calls[0]?.[0] as { data: { lastPresenceAt: Date } };
+    const presenceMs = callArg.data.lastPresenceAt.getTime();
+    expect(presenceMs).toBeGreaterThanOrEqual(before);
+    expect(presenceMs).toBeLessThanOrEqual(after);
+  });
+
   it("revokes the oldest token when EXTENSION_TOKEN_MAX_ACTIVE is exceeded", async () => {
     mockFindMany.mockResolvedValue([{ id: "t1" }, { id: "t2" }, { id: "t3" }]);
     await issueExtensionToken({

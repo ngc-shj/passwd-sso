@@ -41,6 +41,8 @@ const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
   unwrapSecretKey: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
   deriveEncryptionKey: vi.fn().mockResolvedValue("enc-key"),
+  deriveAuthKeyBytes: vi.fn().mockResolvedValue(new Uint8Array([4, 5, 6])),
+  computeAuthHash: vi.fn().mockResolvedValue("fake-auth-hash"),
   verifyKey: vi.fn().mockResolvedValue(true),
   decryptData: vi.fn().mockResolvedValue(
     JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" })
@@ -108,6 +110,7 @@ function installChromeMock() {
       onStartup: { addListener: vi.fn() },
       sendMessage: vi.fn().mockResolvedValue({ ok: true }),
       getContexts: vi.fn().mockResolvedValue([]),
+      getURL: vi.fn((path: string) => `chrome-extension://test-extension-id/${path}`),
     },
     offscreen: {
       createDocument: vi.fn().mockResolvedValue(undefined),
@@ -205,10 +208,28 @@ function installChromeMock() {
 let bgModule: typeof import("../background/index") | null = null;
 async function loadBackground() {
   bgModule = await import("../background/index");
+  // Settle the module-load registration so it cannot land on the next test's chrome mock.
+  await bgModule.tokenBridgeRegistration;
 }
 function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
   if (!bgModule) throw new Error("loadBackground() must be called before applyToken()");
   bgModule.applyToken(token, expiresAt, cnfJkt);
+}
+
+// A fire-and-forget chain from an earlier test's (already replaced) module
+// instance can still call the current global fetch mock. Tests that count
+// calls scope them by the token their own module sends.
+function bearerOf(init: unknown): string {
+  return new Headers((init as RequestInit | undefined)?.headers).get("Authorization") ?? "";
+}
+function callsWith(
+  mock: { mock: { calls: unknown[][] } },
+  pathPart: string,
+  token: string,
+): number {
+  return mock.mock.calls.filter(
+    ([url, init]) => String(url).includes(pathPart) && bearerOf(init).includes(token),
+  ).length;
 }
 
 function sendMessage(message: unknown): Promise<unknown> {
@@ -254,6 +275,9 @@ describe("background message flow", () => {
               scope: ["passwords:read", "vault:unlock-data"],
             }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -553,7 +577,10 @@ describe("background message flow", () => {
   it("skips token bridge registration when permission is denied", async () => {
     vi.resetModules();
     chromeMock = installChromeMock();
-    chromeMock?.permissions.contains.mockResolvedValueOnce(false);
+    // Every call, not just the first: swFetch makes the same permissions.contains
+    // call, and a fire-and-forget chain left from an earlier test can reach this
+    // mock first and consume a one-shot value.
+    chromeMock?.permissions.contains.mockResolvedValue(false);
     await loadBackground();
     // WebAuthn interceptor is always registered, but token bridge should not be
     const calls = chromeMock?.scripting.registerContentScripts.mock.calls ?? [];
@@ -695,6 +722,9 @@ describe("background message flow", () => {
             scope: ["passwords:read", "vault:unlock-data"],
           }),
         };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
       }
       if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
         return {
@@ -921,6 +951,9 @@ describe("background message flow", () => {
           }),
         };
       }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
+      }
       if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
         return {
           ok: true,
@@ -1008,6 +1041,9 @@ describe("background message flow", () => {
               scope: ["passwords:read", "vault:unlock-data"],
             }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -1097,6 +1133,9 @@ describe("background message flow", () => {
               scope: ["passwords:read", "vault:unlock-data"],
             }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -1342,6 +1381,9 @@ describe("background message flow", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -1534,6 +1576,9 @@ describe("session persistence", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -1777,6 +1822,7 @@ describe("session hydration", () => {
       expiresAt,
       userId: "u-1",
       vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
       tenantAutoLockMinutes: 30,
     });
 
@@ -1817,6 +1863,338 @@ describe("session hydration", () => {
     expect(status).toEqual(
       expect.objectContaining({ hasToken: false })
     );
+  });
+
+  it("fetches the tenant policy from vault/status when a restored session has none", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+        return {
+          ok: true,
+          json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: false }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        hasToken: true,
+        vaultUnlocked: false,
+        tenantAutoLockMinutes: 1440,
+        requireVaultTimeoutLogout: false,
+      }),
+    );
+  });
+
+  it("discards a tenant-policy response that arrives after a disconnect", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    let releaseStatus!: () => void;
+    const statusGate = new Promise<void>((r) => { releaseStatus = r; });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+        await statusGate;
+        return {
+          ok: true,
+          json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: true }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await new Promise((r) => setTimeout(r, 20));
+    // Precondition: the status fetch is actually in flight before disconnecting.
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(EXT_API_PATH.VAULT_STATUS)),
+    ).toBe(true);
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    releaseStatus();
+    await new Promise((r) => setTimeout(r, 20));
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        hasToken: false,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: null,
+      }),
+    );
+  });
+
+  it("clears the in-memory token when the restored session's cnfJkt no longer matches", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: "some-other-jkt",
+      tenantAutoLockMinutes: 1440,
+      requireVaultTimeoutLogout: true,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+
+    await loadBackground();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        hasToken: false,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: null,
+      }),
+    );
+  });
+
+  it("does not refresh the token on a 401 while the token is far from expiry", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "tok-401-far",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "UNAUTHORIZED" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await vi.waitFor(() =>
+      expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "tok-401-far")).toBeGreaterThan(0),
+    );
+    await new Promise((r) => setTimeout(r, 20)); // let a (wrong) refresh, if any, be issued
+
+    // A generic 401 (e.g. a rejected proof) is not fixable by rotating the token.
+    expect(callsWith(fetchMock, EXT_API_PATH.EXTENSION_TOKEN_REFRESH, "tok-401-far")).toBe(0);
+  });
+
+  it("refreshes once and retries once on a 401 when the token is near expiry", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "tok-401-near",
+      expiresAt: Date.now() + 60_000, // inside the 2-minute refresh buffer
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+        return {
+          ok: true,
+          json: async () => ({
+            token: "tok-401-near-2",
+            expiresAt: new Date(Date.now() + 600_000).toISOString(),
+            scope: ["passwords:read"],
+            cnfJkt: STATIC_TEST_JKT,
+          }),
+        };
+      }
+      return { ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await vi.waitFor(() =>
+      expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "tok-401-near-2")).toBe(1), // the retry
+    );
+
+    expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "tok-401-near")).toBe(2); // original + retry ("-2" contains it)
+    expect(callsWith(fetchMock, EXT_API_PATH.EXTENSION_TOKEN_REFRESH, "tok-401-near")).toBe(1);
+  });
+
+  it("retries with the current token when a concurrent refresh rotated it mid-request", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "tok-rot-old",
+      expiresAt: Date.now() + 600_000, // far from expiry: only the rotation can justify a retry
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    let releaseFirstStatus!: () => void;
+    const firstStatusGate = new Promise<void>((r) => { releaseFirstStatus = r; });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const bearer = bearerOf(init);
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH) && bearer.includes("tok-rot-old")) {
+        return {
+          ok: true,
+          json: async () => ({
+            token: "tok-rot-new",
+            expiresAt: new Date(Date.now() + 900_000).toISOString(),
+            scope: ["passwords:read"],
+            cnfJkt: STATIC_TEST_JKT,
+          }),
+        };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_STATUS) && bearer.includes("tok-rot-old")) {
+        await firstStatusGate; // old-token request still in flight
+        return { ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_STATUS) && bearer.includes("tok-rot-new")) {
+        return { ok: true, json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: false }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await vi.waitFor(() => expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "tok-rot-old")).toBe(1));
+    // The alarm rotates the token while the status request is in flight.
+    alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+    await vi.waitFor(() =>
+      expect(callsWith(fetchMock, EXT_API_PATH.EXTENSION_TOKEN_REFRESH, "tok-rot-old")).toBe(1),
+    );
+    await new Promise((r) => setTimeout(r, 20)); // let the refresh response be applied
+    releaseFirstStatus();
+    await vi.waitFor(() => expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "tok-rot-new")).toBe(1));
+
+    // The 401 adopted the alarm's rotation instead of refreshing again.
+    expect(callsWith(fetchMock, EXT_API_PATH.EXTENSION_TOKEN_REFRESH, "tok-rot-new")).toBe(0);
+    expect(callsWith(fetchMock, EXT_API_PATH.EXTENSION_TOKEN_REFRESH, "tok-rot-old")).toBe(1);
+  });
+
+  it("does not resend a request under a different connection that replaced it mid-request", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "account-a-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "user-a",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    let releaseFirstStatus!: () => void;
+    const firstStatusGate = new Promise<void>((r) => { releaseFirstStatus = r; });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes(EXT_API_PATH.VAULT_STATUS) && bearerOf(init).includes("account-a-tok")) {
+        await firstStatusGate;
+        return { ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+        return { ok: true, json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: false }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    // Account A's request in flight (this also proves the header capture works).
+    await vi.waitFor(() => expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "account-a-tok")).toBe(1));
+    // Disconnect and connect as another account before the 401 comes back.
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    applyToken("account-b-tok", Date.now() + 600_000, STATIC_TEST_JKT);
+    releaseFirstStatus();
+    await new Promise((r) => setTimeout(r, 30));
+
+    // No retry of account A's request under account B's token (applyToken
+    // itself issues no status fetch).
+    expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "account-b-tok")).toBe(0);
+  });
+
+  it("refreshes again after a verified unlock even when an alarm refresh was already in flight", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    let releaseFirstRefresh!: () => void;
+    const firstRefreshGate = new Promise<void>((r) => { releaseFirstRefresh = r; });
+    let refreshCount = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH) && bearerOf(init).includes("tok-pres")) {
+        refreshCount += 1;
+        if (refreshCount === 1) await firstRefreshGate; // read presence before the verify
+        return {
+          ok: true,
+          json: async () => ({
+            token: `tok-pres-${refreshCount}`,
+            expiresAt: new Date(Date.now() + 600_000).toISOString(),
+            scope: ["passwords:read"],
+            cnfJkt: STATIC_TEST_JKT,
+          }),
+        };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+        return {
+          ok: true,
+          json: async () => ({
+            userId: "user-1",
+            accountSalt: "00",
+            encryptedSecretKey: "aa",
+            secretKeyIv: "bb",
+            secretKeyAuthTag: "cc",
+            verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await loadBackground();
+    applyToken("tok-pres", Date.now() + 60_000, STATIC_TEST_JKT);
+
+    alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH }); // in flight, gated
+    await vi.waitFor(() => expect(refreshCount).toBe(1));
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" }); // verify 200 while it is in flight
+    releaseFirstRefresh();
+
+    // A fresh refresh follows the in-flight one instead of adopting its result.
+    await vi.waitFor(() => expect(refreshCount).toBe(2));
+  });
+
+  it("does not refetch the tenant policy when the restored session already has it", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+      tenantAutoLockMinutes: 1440,
+      requireVaultTimeoutLogout: false,
+    });
+    const fetchMock = vi.fn(async () => ({ ok: false, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const statusCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes(EXT_API_PATH.VAULT_STATUS),
+    );
+    expect(statusCalls).toHaveLength(0);
   });
 
   it("waits for hydration before responding to GET_STATUS", async () => {
@@ -1878,6 +2256,9 @@ describe("token refresh alarm", () => {
             }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -1917,6 +2298,56 @@ describe("token refresh alarm", () => {
     );
   });
 
+  it("single-flight: alarm refresh and a concurrent lazy GET_TOKEN share one refresh request", async () => {
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((r) => { releaseRefresh = r; });
+    const newExpiresAt = new Date(Date.now() + 900_000).toISOString();
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+        await refreshGate;
+        return {
+          ok: true,
+          json: async () => ({
+            token: "refreshed-tok",
+            expiresAt: newExpiresAt,
+            scope: ["passwords:read"],
+            cnfJkt: STATIC_TEST_JKT,
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    // Only Date is faked: the refresh must start while the token is still
+    // valid, and the token must expire while that request is in flight.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let res: { token: string | null };
+    try {
+      const start = new Date("2026-01-01T00:00:00Z").getTime();
+      vi.setSystemTime(start);
+      applyToken("original-tok", start + 1_000, STATIC_TEST_JKT);
+
+      alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+      await new Promise((r) => setTimeout(r, 20));
+      vi.setSystemTime(start + 2_000); // expired mid-flight → lazy branch
+      const tokenPromise = sendMessage({ type: "GET_TOKEN" });
+      await new Promise((r) => setTimeout(r, 20));
+      releaseRefresh();
+      res = (await tokenPromise) as { token: string | null };
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const refreshCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+    );
+    expect(refreshCalls).toHaveLength(1);
+    // The lazy check must see the renewed token, not clear the one being renewed.
+    expect(res.token).toBe("refreshed-tok");
+  });
+
   it("clears token when server rejects refresh", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1927,6 +2358,9 @@ describe("token refresh alarm", () => {
             status: 401,
             json: async () => ({ error: "UNAUTHORIZED" }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -1973,6 +2407,9 @@ describe("token refresh alarm", () => {
             status: 500,
             json: async () => ({ error: "INTERNAL_SERVER_ERROR" }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -2027,6 +2464,9 @@ describe("token refresh alarm", () => {
             json: async () => ({ error: "TOO_MANY_REQUESTS" }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2071,6 +2511,9 @@ describe("token refresh alarm", () => {
       vi.fn(async (url: string) => {
         if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
           throw new Error("Failed to fetch");
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -2177,6 +2620,9 @@ describe("failsafe responses", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2395,6 +2841,9 @@ describe("CHECK_PENDING_SAVE host validation", () => {
             }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2563,6 +3012,9 @@ describe("LOGIN_DETECTED suppresses on own app", () => {
             }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2677,6 +3129,9 @@ describe("PASSKEY handlers suppress on own app", () => {
               scope: ["passwords:read", "vault:unlock-data"],
             }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -2803,6 +3258,9 @@ describe("tab event badge updates", () => {
             }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2886,6 +3344,459 @@ describe("tab event badge updates", () => {
     await vi.waitFor(() => {
       expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
     });
+  });
+});
+
+// ── C2 consumer: POST /api/vault/unlock/verify ──────────────────────────
+// UNLOCK_VAULT records server-side presence after local verification
+// succeeds. Every non-200 outcome is a non-blocking logged warning — the
+// local unlock (and hence vaultUnlocked) must never be affected.
+describe("C2 consumer: unlock presence verification", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+  });
+
+  function stubFetch(
+    verifyHandler: () => Promise<{ ok: boolean; status?: number; json: () => Promise<unknown> }>,
+  ) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return verifyHandler();
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+  }
+
+  async function unlockAndSettle(): Promise<unknown> {
+    await loadBackground();
+    applyToken("t", Date.now() + 60_000, "");
+    const res = await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    // recordUnlockPresence is fire-and-forget — let its microtask chain settle
+    // before asserting on console.warn / GET_STATUS.
+    await new Promise((r) => setTimeout(r, 50));
+    return res;
+  }
+
+  it("200 → unlocked, no warning logged", async () => {
+    stubFetch(async () => ({ ok: true, status: 200, json: async () => ({ verified: true }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const unlockRes = await unlockAndSettle();
+    expect(unlockRes).toEqual({ type: "UNLOCK_VAULT", ok: true });
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it("422 (AUTH_HASH_MISMATCH) → still unlocked, mismatch warning logged", async () => {
+    stubFetch(async () => ({ ok: false, status: 422, json: async () => ({ error: "AUTH_HASH_MISMATCH" }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-mismatch"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("401 (token/DPoP layer) → still unlocked, token-failure warning logged (not a mismatch)", async () => {
+    stubFetch(async () => ({ ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-token-failure"),
+    );
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-mismatch"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("403 ACCOUNT_LOCKED → still unlocked, account-locked warning logged", async () => {
+    stubFetch(async () => ({ ok: false, status: 403, json: async () => ({ error: "ACCOUNT_LOCKED" }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-account-locked"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("429 → still unlocked, rate-limited warning logged", async () => {
+    stubFetch(async () => ({ ok: false, status: 429, json: async () => ({ error: "RATE_LIMITED" }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-rate-limited"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("network error → still unlocked, network-error warning logged", async () => {
+    stubFetch(async () => {
+      throw new Error("network down");
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-network-error"),
+    );
+
+    warnSpy.mockRestore();
+  });
+});
+
+// ── C6: inactivity auto-lock ─────────────────────────────────────────────
+describe("C6 inactivity auto-lock", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    await loadBackground();
+    applyToken("t", Date.now() + 3_600_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    // A verified unlock triggers a token refresh; let it (and whatever alarm it
+    // schedules) settle so each test starts from a clean alarm log.
+    await vi.waitFor(() =>
+      expect(
+        (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some(([url]) =>
+          String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+        ),
+      ).toBe(true),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    chromeMock?.alarms.create.mockClear();
+  });
+
+  it("re-arms the vault-lock alarm when a message arrives from a trusted extension page (popup/options)", async () => {
+    const popupSender = { url: chrome.runtime.getURL("popup/index.html") };
+    await sendMessageWithSender({ type: "GET_STATUS" }, popupSender);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.objectContaining({ delayInMinutes: 15 }),
+    );
+  });
+
+  it("debounces repeated activity within 30s to a single re-arm", async () => {
+    const popupSender = { url: chrome.runtime.getURL("popup/index.html") };
+    await sendMessageWithSender({ type: "GET_STATUS" }, popupSender);
+    await sendMessageWithSender({ type: "GET_STATUS" }, popupSender);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const lockRearms = (chromeMock?.alarms.create.mock.calls ?? []).filter(
+      ([name]) => name === ALARM_VAULT_LOCK,
+    );
+    expect(lockRearms).toHaveLength(1);
+  });
+
+  it("does not extend the alarm for a KEEPALIVE_PING from the offscreen document", async () => {
+    // The offscreen document's own URL also starts with chrome.runtime.getURL(""),
+    // but it pings every 25s purely to keep the SW alive — counting it would
+    // mean the auto-lock alarm could never fire. KEEPALIVE_PING never calls
+    // sendResponse (see the handler's no-op case), so drive it directly
+    // through the raw listener instead of the response-awaiting helper.
+    const offscreenSender = { url: chrome.runtime.getURL("offscreen.html") };
+    messageHandlers[0]({ type: "KEEPALIVE_PING" }, offscreenSender, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.anything(),
+    );
+  });
+
+  it("does not extend the alarm for an untrusted content-script fill request (no userGesture)", async () => {
+    // A page cannot dispatch a trusted click through the dropdown's isTrusted
+    // gate, so a page-triggerable AUTOFILL_FROM_CONTENT never carries this field.
+    await sendMessageWithSender(
+      { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+      { tab: { id: 1 }, url: "https://example.com" },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.anything(),
+    );
+  });
+
+  it("extends the alarm for a trusted content-script fill request (userGesture: true)", async () => {
+    await sendMessageWithSender(
+      { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1", userGesture: true },
+      { tab: { id: 1 }, url: "https://example.com" },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.objectContaining({ delayInMinutes: 15 }),
+    );
+  });
+
+  it("activity at t=14min re-arms past the original 15min deadline (would not lock at t=16min)", async () => {
+    const start = Date.now();
+    // Initial arm from beforeEach's unlock fired delayInMinutes: 15 — a real
+    // browser would fire ALARM_VAULT_LOCK at start+15min if untouched.
+    expect(chromeMock?.alarms.create).not.toHaveBeenCalled(); // cleared in beforeEach
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(start + 14 * 60_000);
+      const popupSender = { url: chrome.runtime.getURL("popup/index.html") };
+      await sendMessageWithSender({ type: "GET_STATUS" }, popupSender);
+      // registerActivity's async chain uses real Promise microtasks; Date is
+      // faked but setTimeout is not (toFake: ["Date"]), so a real wait works.
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Re-armed for another 15 minutes FROM t=14min (i.e. fires at t=29min,
+      // not the original t=15min) — this is what stops a real browser from
+      // locking the vault at t=15min.
+      expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+        ALARM_VAULT_LOCK,
+        expect.objectContaining({ delayInMinutes: 15 }),
+      );
+
+      vi.setSystemTime(start + 16 * 60_000);
+      const status = await sendMessage({ type: "GET_STATUS" });
+      expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── C10: tenant requireVaultTimeoutLogout override ──────────────────────
+describe("C10 tenant requireVaultTimeoutLogout override", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+  });
+
+  it("logs out on ALARM_VAULT_LOCK when the tenant requires it, overriding local action = lock", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+              requireVaultTimeoutLogout: true,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    await loadBackground();
+
+    // Local vaultTimeoutAction stays at its default ("lock") — never toggled.
+    applyToken("t", Date.now() + 600_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const status1 = await sendMessage({ type: "GET_STATUS" });
+    expect(status1).toEqual(expect.objectContaining({ requireVaultTimeoutLogout: true }));
+
+    alarmHandlers[0]({ name: ALARM_VAULT_LOCK });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // LOGOUT path clears the token, not just the vault.
+    const status2 = await sendMessage({ type: "GET_STATUS" });
+    expect(status2).toEqual(expect.objectContaining({ hasToken: false }));
+  });
+
+  it("drops the tenant policy when a different token is applied (user/session switch)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+              vaultAutoLockMinutes: 1440,
+              requireVaultTimeoutLogout: true,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    await loadBackground();
+    applyToken("t-1", Date.now() + 600_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    applyToken("t-2", Date.now() + 600_000, "");
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        hasToken: true,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: null,
+      }),
+    );
+  });
+
+  it("fetches the tenant policy after a successful START_CONNECT", async () => {
+    vi.doMock("../background/token-handler", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../background/token-handler")>()),
+      startConnect: vi.fn(async ({ setToken }: { setToken: (t: string, e: number, j: string) => void }) => {
+        setToken("new-tok", Date.now() + 600_000, STATIC_TEST_JKT);
+        return { ok: true };
+      }),
+    }));
+    try {
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+          return {
+            ok: true,
+            json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: false }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      await loadBackground();
+
+      await sendMessage({ type: "START_CONNECT" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const status = await sendMessage({ type: "GET_STATUS" });
+      expect(status).toEqual(
+        expect.objectContaining({ hasToken: true, tenantAutoLockMinutes: 1440 }),
+      );
+    } finally {
+      vi.doUnmock("../background/token-handler");
+    }
+  });
+
+  it("keeps the tenant policy across a lock and drops it on disconnect", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+              vaultAutoLockMinutes: 1440,
+              requireVaultTimeoutLogout: true,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    await loadBackground();
+    applyToken("t", Date.now() + 600_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    await sendMessage({ type: "LOCK_VAULT" });
+    const locked = await sendMessage({ type: "GET_STATUS" });
+    expect(locked).toEqual(
+      expect.objectContaining({
+        hasToken: true,
+        vaultUnlocked: false,
+        tenantAutoLockMinutes: 1440,
+        requireVaultTimeoutLogout: true,
+      }),
+    );
+
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    const disconnected = await sendMessage({ type: "GET_STATUS" });
+    expect(disconnected).toEqual(
+      expect.objectContaining({
+        hasToken: false,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: null,
+      }),
+    );
   });
 });
 

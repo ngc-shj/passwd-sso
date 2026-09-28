@@ -537,6 +537,8 @@ describe("resolveActorType", () => {
       tenantId: "t1",
       scopes: [] as never[],
       clientKind: "BROWSER_EXTENSION" as const,
+      tokenId: "tok1",
+      familyId: "fam1",
     };
     expect(resolveActorType(auth)).toBe("HUMAN");
   });

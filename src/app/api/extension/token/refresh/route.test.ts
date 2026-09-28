@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { REFRESH_REPLAY_GRACE_MS } from "@/lib/auth/tokens/mobile-token";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -9,10 +10,11 @@ const {
   mockRevokeExtensionTokenFamily,
   mockCheck,
   mockCreateRateLimiter,
-  mockSessionFindFirst,
   mockTenantFindUnique,
   mockExtTokenUpdateMany,
   mockExtTokenCreate,
+  mockExtTokenAggregate,
+  mockExtTokenFindUnique,
   mockTransaction,
   mockWithUserTenantRls,
   mockWithBypassRls,
@@ -29,7 +31,6 @@ const {
   // T4: recording factory — assertRedisFailClosed's factory-attribution step
   // reads mockCreateRateLimiter.mock.{calls,results}.
   mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
-  mockSessionFindFirst: vi.fn(),
   // Returns null for idle timeout to exercise the production fallback to
   // EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT — keeps the fixture decoupled from any
   // future change to the constant. Existing tests only assert
@@ -40,6 +41,14 @@ const {
   }),
   mockExtTokenUpdateMany: vi.fn(),
   mockExtTokenCreate: vi.fn(),
+  // C4: getFamilyPresenceAt reads this. Default: no row has ever recorded
+  // presence, so the helper falls back to familyCreatedAt (fresh in
+  // validTokenResult() — never presence-expired unless a test overrides it).
+  mockExtTokenAggregate: vi.fn().mockResolvedValue({ _max: { lastPresenceAt: null } }),
+  // C5 replay detection reads the presented (revoked) row directly. Default:
+  // not found — the generic "token is revoked" tests don't model a row, so
+  // detectRefreshReplay is a no-op for them.
+  mockExtTokenFindUnique: vi.fn().mockResolvedValue(null),
   mockTransaction: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
@@ -61,6 +70,7 @@ vi.mock("@/lib/auth/tokens/extension-token", () => ({
   revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
   EXTENSION_TOKEN_REVOKE_REASON: {
     FAMILY_EXPIRED: "family_expired",
+    PRESENCE_EXPIRED: "presence_expired",
     REPLAY_DETECTED: "replay_detected",
     SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
     PASSKEY_REAUTH: "passkey_reauth",
@@ -74,11 +84,12 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    session: { findFirst: mockSessionFindFirst },
     tenant: { findUnique: mockTenantFindUnique },
     extensionToken: {
       updateMany: mockExtTokenUpdateMany,
       create: mockExtTokenCreate,
+      aggregate: mockExtTokenAggregate,
+      findUnique: mockExtTokenFindUnique,
     },
     $transaction: mockTransaction,
   },
@@ -178,6 +189,8 @@ describe("POST /api/extension/token/refresh", () => {
       scope: "passwords:read,vault:unlock-data",
       cnfJkt: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb",
     });
+    mockExtTokenAggregate.mockResolvedValue({ _max: { lastPresenceAt: null } });
+    mockExtTokenFindUnique.mockResolvedValue(null);
     // Interactive transaction: pass tx object with same mocks to the callback
     mockTransaction.mockImplementation(
       async (cb: (tx: unknown) => unknown) =>
@@ -277,23 +290,25 @@ describe("POST /api/extension/token/refresh", () => {
     });
   });
 
-  it("returns 401 when Auth.js session has expired", async () => {
+  // FR1 / C5: the extension token refresh path no longer depends on an
+  // Auth.js web session at all — the token row's own tenantId + family
+  // presence bound its lifetime. This replaces the old "returns 401 when
+  // Auth.js session has expired" test, which asserted the opposite.
+  it("refresh succeeds without a session", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue(null);
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },
     });
     const res = await POST(req);
-    const { status, json } = await parseResponse(res);
+    const { status } = await parseResponse(res);
 
-    expect(status).toBe(401);
-    expect(json.error).toBe("UNAUTHORIZED");
+    expect(status).toBe(200);
+    expect(mockExtTokenCreate).toHaveBeenCalled();
   });
 
   it("returns 403 when client IP is outside the tenant access restriction", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
     const denied = new Response(
       JSON.stringify({ error: "ACCESS_DENIED" }),
       { status: 403, headers: { "Content-Type": "application/json" } },
@@ -317,7 +332,6 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("refreshes token successfully", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },
@@ -332,15 +346,16 @@ describe("POST /api/extension/token/refresh", () => {
     expect(json.scope).toEqual(["passwords:read", "vault:unlock-data"]);
   });
 
-  // Regression (null-tenant fail-open class): activeSession.tenantId is
-  // FK-backed, so a null tenant ROW is data corruption. Defaulting the TTL to
-  // the ceiling could refresh a token to a longer TTL than a tenant that had
-  // tightened it. Must FAIL CLOSED (throw → no rotation).
+  // Regression (null-tenant fail-open class): tenantId is FK-backed, so a
+  // null tenant ROW is data corruption. Defaulting the TTL to the ceiling
+  // could refresh a token to a longer TTL than a tenant that had tightened
+  // it. Must FAIL CLOSED (throw → no rotation).
   // Mutation check: restore `tenant?.… ?? DEFAULT` (no null-row throw) and this
   // refresh succeeds instead of throwing — the test fails.
   it("fails closed (throws) when the tenant row is missing", async () => {
-    mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-gone" });
+    mockValidateExtensionToken.mockResolvedValue(
+      validTokenResult({ tenantId: "tenant-gone" }),
+    );
     mockTenantFindUnique.mockResolvedValueOnce(null);
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
@@ -352,7 +367,6 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("revokes old token and creates new in transaction", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },
@@ -372,7 +386,6 @@ describe("POST /api/extension/token/refresh", () => {
     mockValidateExtensionToken.mockResolvedValue(
       validTokenResult({ scopes: ["passwords:read"] }),
     );
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
     mockExtTokenCreate.mockResolvedValue({
       expiresAt: new Date("2030-01-01"),
       scope: "passwords:read",
@@ -390,7 +403,6 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("returns 401 on concurrent refresh (optimistic lock)", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
     // updateMany returns count: 0 — already revoked by concurrent request
     mockExtTokenUpdateMany.mockResolvedValue({ count: 0 });
 
@@ -406,6 +418,59 @@ describe("POST /api/extension/token/refresh", () => {
     expect(mockExtTokenCreate).not.toHaveBeenCalled();
   });
 
+  // ─── C4: presence gate ────────────────────────────────────────
+
+  describe("C4: presence gate", () => {
+    it("revokes the family and refuses refresh when presence + idle <= now", async () => {
+      const staleFamilyCreatedAt = new Date(Date.now() - 20 * 60_000); // 20 min ago
+      mockValidateExtensionToken.mockResolvedValue(
+        validTokenResult({ familyCreatedAt: staleFamilyCreatedAt }),
+      );
+      // Tight idle policy (10 min); no row has ever recorded presence, so
+      // getFamilyPresenceAt falls back to the (stale) familyCreatedAt.
+      mockTenantFindUnique.mockResolvedValueOnce({
+        extensionTokenIdleTimeoutMinutes: 10,
+        extensionTokenAbsoluteTimeoutMinutes: 43200,
+      });
+      mockExtTokenAggregate.mockResolvedValueOnce({ _max: { lastPresenceAt: null } });
+
+      const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
+        headers: { Authorization: "Bearer valid-token" },
+      });
+      const res = await POST(req);
+      const { status, json } = await parseResponse(res);
+
+      expect(status).toBe(401);
+      expect(json.error).toBe("EXTENSION_TOKEN_SESSION_EXPIRED");
+      expect(mockRevokeExtensionTokenFamily).toHaveBeenCalledWith(
+        expect.objectContaining({ familyId: "fam-1", reason: "presence_expired" }),
+      );
+      expect(mockExtTokenCreate).not.toHaveBeenCalled();
+    });
+
+    it("rotates when presence is within the idle window", async () => {
+      const recentPresence = new Date(Date.now() - 60_000); // 1 min ago
+      mockValidateExtensionToken.mockResolvedValue(validTokenResult());
+      mockTenantFindUnique.mockResolvedValueOnce({
+        extensionTokenIdleTimeoutMinutes: 10,
+        extensionTokenAbsoluteTimeoutMinutes: 43200,
+      });
+      mockExtTokenAggregate.mockResolvedValueOnce({ _max: { lastPresenceAt: recentPresence } });
+
+      const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
+        headers: { Authorization: "Bearer valid-token" },
+      });
+      const res = await POST(req);
+
+      expect(res.status).toBe(200);
+      expect(mockExtTokenCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ lastPresenceAt: recentPresence }),
+        }),
+      );
+    });
+  });
+
   // ─── Replay attack flow ──────────────────────────────────────
   // Simulates the full refresh-then-replay sequence: a legitimate refresh
   // rotates the token, the old plaintext leaks (e.g. via XSS or a sniffed
@@ -415,8 +480,6 @@ describe("POST /api/extension/token/refresh", () => {
 
   describe("replay of a rotated token", () => {
     it("first refresh succeeds, then replay of the original token is rejected with REVOKED", async () => {
-      mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
-
       // Step 1: legitimate refresh succeeds (token A1 → A2).
       mockValidateExtensionToken.mockResolvedValueOnce(validTokenResult());
       const firstReq = createRequest(
@@ -431,7 +494,11 @@ describe("POST /api/extension/token/refresh", () => {
       expect(mockExtTokenCreate).toHaveBeenCalledTimes(1);
 
       // Step 2: replay the old plaintext (A1). validateExtensionToken now
-      // observes revokedAt != null and short-circuits with REVOKED.
+      // observes revokedAt != null and short-circuits with REVOKED. No row
+      // is modeled for the C5 replay lookup (mockExtTokenFindUnique default
+      // null), so detectRefreshReplay is a no-op here — this test covers the
+      // validation-layer short-circuit, not the C5 replay-detection lookup
+      // itself (see the "C5: replay detection" describe block below).
       mockValidateExtensionToken.mockResolvedValueOnce({
         ok: false,
         error: "EXTENSION_TOKEN_REVOKED",
@@ -452,13 +519,12 @@ describe("POST /api/extension/token/refresh", () => {
     });
 
     it("replay does not extend the family absolute timer", async () => {
-      mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
-
       // Replay arriving AFTER the family's absolute timeout would normally
       // race with the family-expired branch. Even so, the replayed token is
       // already revoked and validateExtensionToken short-circuits before the
-      // family-expired check fires — verify that the family-expired audit
-      // path is NOT used to mask the replay-rejected response.
+      // family-expired check fires. No row is modeled for the C5 replay
+      // lookup here, so the family-expired audit path is NOT reachable via
+      // this short-circuit either.
       mockValidateExtensionToken.mockResolvedValue({
         ok: false,
         error: "EXTENSION_TOKEN_REVOKED",
@@ -474,9 +540,86 @@ describe("POST /api/extension/token/refresh", () => {
 
       expect(parsed.status).toBe(401);
       expect(parsed.json.error).toBe("EXTENSION_TOKEN_REVOKED");
-      // family revocation must not be triggered by a generic replay — that
-      // path is reserved for explicit family_expired and other policy
-      // signals, not for the validation layer's REVOKED short-circuit.
+      expect(mockRevokeExtensionTokenFamily).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── C5: replay detection (post-revocation lookup) ───────────
+  // validateExtensionToken returns early (no row data) for a revoked token,
+  // so the route re-hashes the presented bearer and looks the row up itself.
+
+  describe("C5: replay detection", () => {
+    beforeEach(() => {
+      mockValidateExtensionToken.mockResolvedValue({
+        ok: false,
+        error: "EXTENSION_TOKEN_REVOKED",
+      });
+    });
+
+    function makeRequest() {
+      return createRequest("POST", "http://localhost/api/extension/token/refresh", {
+        headers: { Authorization: "Bearer revoked-token" },
+      });
+    }
+
+    it("revokes the family when replayed well after the grace window", async () => {
+      mockExtTokenFindUnique.mockResolvedValueOnce({
+        revokedAt: new Date(Date.now() - REFRESH_REPLAY_GRACE_MS - 1_000),
+        familyId: "fam-1",
+        userId: "user-1",
+        tenantId: "tenant-1",
+      });
+
+      const res = await POST(makeRequest());
+      expect(res.status).toBe(401);
+      expect(mockRevokeExtensionTokenFamily).toHaveBeenCalledWith({
+        familyId: "fam-1",
+        userId: "user-1",
+        tenantId: "tenant-1",
+        reason: "replay_detected",
+      });
+    });
+
+    it("does not revoke the family when replayed within the grace window", async () => {
+      mockExtTokenFindUnique.mockResolvedValueOnce({
+        revokedAt: new Date(Date.now() - 1_000),
+        familyId: "fam-1",
+        userId: "user-1",
+        tenantId: "tenant-1",
+      });
+
+      const res = await POST(makeRequest());
+      expect(res.status).toBe(401);
+      expect(mockRevokeExtensionTokenFamily).not.toHaveBeenCalled();
+    });
+
+    it("boundary: replayed at exactly the grace window does not revoke the family", async () => {
+      // Freeze Date so the route's own Date.now() sees exactly the grace
+      // boundary; a real clock ticking between fixture and route would cross it.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const now = new Date("2026-01-01T00:00:00Z");
+        vi.setSystemTime(now);
+        mockExtTokenFindUnique.mockResolvedValueOnce({
+          revokedAt: new Date(now.getTime() - REFRESH_REPLAY_GRACE_MS),
+          familyId: "fam-1",
+          userId: "user-1",
+          tenantId: "tenant-1",
+        });
+
+        const res = await POST(makeRequest());
+        expect(res.status).toBe(401);
+        expect(mockRevokeExtensionTokenFamily).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does nothing when the presented token's row cannot be found", async () => {
+      mockExtTokenFindUnique.mockResolvedValueOnce(null);
+
+      const res = await POST(makeRequest());
+      expect(res.status).toBe(401);
       expect(mockRevokeExtensionTokenFamily).not.toHaveBeenCalled();
     });
   });
@@ -492,7 +635,6 @@ describe("POST /api/extension/token/refresh", () => {
 
     beforeEach(() => {
       mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-      mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
     });
 
     it("6a-off: requirePasskey=false → rotates (extensionToken.create called)", async () => {

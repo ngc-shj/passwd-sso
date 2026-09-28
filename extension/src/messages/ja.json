@@ -86,6 +86,7 @@
     "vaultTimeoutLock": "ロック",
     "vaultTimeoutLogout": "ログアウト",
     "vaultTimeoutLogoutHint": "ログアウトするとセッションが失効し、再認証が必要になります。",
+    "vaultTimeoutActionTenantEnforced": "組織のポリシーによりタイムアウト時のログアウトが必須になっています。この設定は無効です。",
     "resetConnection": "接続をリセット",
     "resetConnectionHint": "このブラウザの接続を切断し、サーバー側のアクセストークンも失効させます。リセット後は Web アプリから再接続してください。",
     "resetConnectionAction": "リセット",

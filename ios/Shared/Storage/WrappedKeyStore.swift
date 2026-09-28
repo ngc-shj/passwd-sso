@@ -70,6 +70,24 @@ public struct WrappedECDHPrivateKey: Sendable, Codable, Equatable {
   }
 }
 
+/// The server-presence auth hash (plan D3/C2/C7), wrapped under cacheKey with a
+/// `buildLocalWrapAAD(kind:"authHash", userId:)` binding — same cacheKey as the
+/// vault key, so the biometric path can re-present it without recomputing HKDF
+/// from the secretKey (which does not survive biometric unlock).
+public struct WrappedAuthHash: Sendable, Codable, Equatable {
+  public let ciphertext: Data
+  public let iv: Data
+  public let authTag: Data
+  public let issuedAt: Date
+
+  public init(ciphertext: Data, iv: Data, authTag: Data, issuedAt: Date) {
+    self.ciphertext = ciphertext
+    self.iv = iv
+    self.authTag = authTag
+    self.issuedAt = issuedAt
+  }
+}
+
 // MARK: - Protocol
 
 public protocol WrappedKeyStore: Sendable {
@@ -80,6 +98,9 @@ public protocol WrappedKeyStore: Sendable {
   func clearTeamKeys() throws
   func saveECDHPrivateKey(_ wrapped: WrappedECDHPrivateKey) throws
   func loadECDHPrivateKey() throws -> WrappedECDHPrivateKey?
+  func saveAuthHash(_ wrapped: WrappedAuthHash) throws
+  func loadAuthHash() throws -> WrappedAuthHash?
+  func deleteAuthHash() throws
   func clearAll() throws
 }
 
@@ -140,11 +161,35 @@ public struct AppGroupWrappedKeyStore: WrappedKeyStore, Sendable {
     return try JSONDecoder().decode(WrappedECDHPrivateKey.self, from: data)
   }
 
+  // MARK: - Auth hash
+
+  public func saveAuthHash(_ wrapped: WrappedAuthHash) throws {
+    let data = try JSONEncoder().encode(wrapped)
+    try atomicWrite(data: data, to: authHashURL())
+  }
+
+  public func loadAuthHash() throws -> WrappedAuthHash? {
+    let url = try authHashURL()
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let data = try Data(contentsOf: url)
+    return try JSONDecoder().decode(WrappedAuthHash.self, from: data)
+  }
+
+  public func deleteAuthHash() throws {
+    let path = try authHashURL().path
+    if FileManager.default.fileExists(atPath: path) {
+      try FileManager.default.removeItem(atPath: path)
+    }
+  }
+
   // MARK: - Clear
 
   public func clearAll() throws {
     let fm = FileManager.default
-    for path in [try vaultKeyURL().path, try teamKeysURL().path, try ecdhPrivateKeyURL().path] {
+    for path in [
+      try vaultKeyURL().path, try teamKeysURL().path, try ecdhPrivateKeyURL().path,
+      try authHashURL().path,
+    ] {
       if fm.fileExists(atPath: path) {
         try fm.removeItem(atPath: path)
       }
@@ -169,6 +214,12 @@ public struct AppGroupWrappedKeyStore: WrappedKeyStore, Sendable {
     try AppGroupContainer.url()
       .appending(path: "vault", directoryHint: .isDirectory)
       .appending(path: "wrapped-ecdh-private-key.json", directoryHint: .notDirectory)
+  }
+
+  private func authHashURL() throws -> URL {
+    try AppGroupContainer.url()
+      .appending(path: "vault", directoryHint: .isDirectory)
+      .appending(path: "wrapped-auth-hash.json", directoryHint: .notDirectory)
   }
 
   private func atomicWrite(data: Data, to url: URL) throws {

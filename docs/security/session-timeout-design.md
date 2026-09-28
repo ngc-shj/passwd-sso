@@ -84,12 +84,35 @@ Rationale: for personal bootstrap users, the normal browsing session is treated 
 
 ## Extension Token Policy
 
-The extension holds its own bearer token, distinct from the Auth.js cookie. This design treats the extension as a "Machine Identity" surface, parallel to MCP / SA / API keys.
+The extension (and, since the long-lived-client-login change, the iOS app)
+holds its own bearer token, distinct from the Auth.js cookie. This design
+treats both as a "Machine Identity" surface, parallel to MCP / SA / API keys.
 
-- **Access token TTL** derived from `extensionTokenIdleTimeoutMinutes` — short enough that server-side revocation propagates within ≤5 min.
-- **Refresh token** derived from `extensionTokenAbsoluteTimeoutMinutes` — rotated on every use, revoked as a family on replay (reusing `src/lib/mcp/oauth-server.ts` patterns).
-- **Stolen-laptop defense is NOT TTL.** The real defense is requiring local unlock (PRF / biometric) on extension wake after N minutes of inactivity. That control is orthogonal to the token TTL and lives in the extension side.
-- **"Sign out everywhere"** must enumerate and revoke the user's extension refresh-token families in addition to deleting web sessions.
+- **Idle timeout** (`extensionTokenIdleTimeoutMinutes`, default 7d) is no
+  longer reset by refresh activity. It is measured from **presence**: the
+  timestamp of the last successful `POST /api/vault/unlock/verify` call, which
+  resubmits the same `authHash` `/api/vault/unlock` verifies and proves the
+  client still knows the passphrase (or, on iOS, the biometric-cached
+  equivalent). A token that keeps refreshing itself on schedule, with no real
+  unlock in between, still goes stale after `idle` — this is what bounds the
+  **walk-up attacker** threat: an attacker who has the unlocked device but not
+  the passphrase can keep the connection alive by refreshing, but the family
+  dies `idle` after the owner's last genuine unlock regardless. See
+  `docs/archive/review/long-lived-client-login-plan.md` §C2–C4 and
+  `docs/architecture/client-reauth-timing.md`.
+- **Absolute timeout** (`extensionTokenAbsoluteTimeoutMinutes`, default 30d)
+  is unchanged in spirit: measured from family creation, never extended by
+  refresh or by presence.
+- Both fields are shared verbatim between the browser extension and the iOS
+  app (`docs/architecture/ios-app.md`) — there is no separate iOS field.
+- **Stolen-laptop / walk-up defense is NOT background refresh.** The real
+  defense is requiring a genuine local unlock (passphrase, or biometric on
+  iOS) to reset the idle clock; refresh alone cannot. That control is
+  orthogonal to the absolute cap and lives in the presence mechanism above.
+- **"Sign out everywhere"** must enumerate and revoke the user's extension and
+  iOS token families in addition to deleting web sessions. A single-session
+  web sign-out no longer affects either client's connection (extension refresh
+  no longer depends on a web session at all).
 
 ## Migration Obligations
 

@@ -5,6 +5,7 @@ const AES_KEY_LENGTH = 256;
 const IV_LENGTH = 12; // 96 bits, recommended for GCM
 export const GCM_TAG_LENGTH = 16; // AES-GCM auth tag length in bytes
 const HKDF_ENC_INFO = "passwd-sso-enc-v1";
+const HKDF_AUTH_INFO = "passwd-sso-auth-v1";
 const VERIFICATION_PLAINTEXT = "passwd-sso-vault-verification-v1";
 
 export interface EncryptedData {
@@ -103,6 +104,39 @@ export async function deriveEncryptionKey(
   );
 }
 
+/**
+ * Derive the auth-key BYTES from the secret key via HKDF. Domain-separated
+ * from the encryption key by the distinct `info` parameter — cannot be used
+ * to derive it. Byte-identical to the web app's deriveAuthKeyBytes
+ * (src/lib/crypto/crypto-client.ts) — parity pinned by a shared golden
+ * vector (crypto.test.ts).
+ */
+export async function deriveAuthKeyBytes(
+  secretKey: Uint8Array
+): Promise<Uint8Array> {
+  const hkdfKey = await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(secretKey),
+    "HKDF",
+    false,
+    ["deriveBits"]
+  );
+
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      // Risk-accepted zero salt — same rationale as deriveEncryptionKey above.
+      salt: new ArrayBuffer(32),
+      info: textEncode(HKDF_AUTH_INFO),
+    },
+    hkdfKey,
+    AES_KEY_LENGTH,
+  );
+
+  return new Uint8Array(bits);
+}
+
 // ─── Secret Key ─────────────────────────────────────────────
 
 export async function unwrapSecretKey(
@@ -138,6 +172,17 @@ export async function verifyKey(
   } catch {
     return false;
   }
+}
+
+/**
+ * Compute an auth hash from the derived auth-key bytes for server presence
+ * verification (POST /api/vault/unlock/verify). The server never sees the
+ * secret key or encryption key. Byte-identical to the web app's
+ * computeAuthHash — parity pinned by a shared golden vector (crypto.test.ts).
+ */
+export async function computeAuthHash(authKeyBytes: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", toArrayBuffer(authKeyBytes));
+  return hexEncode(hash);
 }
 
 // ─── Decryption ─────────────────────────────────────────────

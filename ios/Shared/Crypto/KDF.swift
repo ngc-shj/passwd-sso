@@ -74,6 +74,14 @@ public func deriveAuthKey(secretKey: Data) throws -> Data {
   return derived.withUnsafeBytes { Data($0) }
 }
 
+/// Compute the auth hash from the derived auth-key bytes for server-side
+/// presence verification (plan D3/C2/C7). SHA-256 of `deriveAuthKey` output —
+/// byte-identical to crypto-client.ts `computeAuthHash(authKeyBytes)` (frozen
+/// golden vector in KDFTests). Returns lowercase hex.
+public func computeAuthHash(authKey: Data) -> String {
+  hexEncode(Data(SHA256.hash(data: authKey)))
+}
+
 /// Derive the cache-encryption key from the bridge_key.
 /// HKDF-SHA256(IKM=bridge_key, salt=zero32, info="passwd-sso-cache-v1") → 32 bytes → AES-256 key.
 public func deriveCacheVaultKey(bridgeKey: Data) throws -> SymmetricKey {

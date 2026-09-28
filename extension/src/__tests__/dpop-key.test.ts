@@ -215,6 +215,20 @@ describe("dpop-key (C6)", () => {
     expect(payload.htu).toBe("https://example.com/passwd-sso/api/passwords");
   });
 
+  it("htu excludes the query string and fragment of the route (RFC 9449 §4.2)", async () => {
+    const { signDpopProof } = await importFresh();
+
+    const proof = await signDpopProof({
+      route: "/api/teams/t-1/member-key?keyVersion=2#frag",
+      method: "GET",
+      serverUrl: "https://example.com/passwd-sso",
+    });
+
+    const parts = proof.split(".");
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))) as Record<string, unknown>;
+    expect(payload.htu).toBe("https://example.com/passwd-sso/api/teams/t-1/member-key");
+  });
+
   it("private key is non-extractable", async () => {
     const { getOrGenerateDpopKeyPair } = await importFresh();
 

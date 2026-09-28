@@ -38,6 +38,7 @@ async function handleGET(request: NextRequest) {
         tenant: {
           select: {
             vaultAutoLockMinutes: true,
+            requireVaultTimeoutLogout: true,
             tenantMinPasswordLength: true,
             tenantRequireUppercase: true,
             tenantRequireLowercase: true,
@@ -67,6 +68,7 @@ async function handleGET(request: NextRequest) {
     // wording even though hasRecoveryKey is now false. See plan #433 / F21+S5.
     recoveryKeyInvalidated: !!user.recoveryKeyInvalidatedAt,
     vaultAutoLockMinutes: user.tenant?.vaultAutoLockMinutes ?? null,
+    requireVaultTimeoutLogout: user.tenant?.requireVaultTimeoutLogout ?? false,
     tenantMinPasswordLength: user.tenant?.tenantMinPasswordLength ?? 0,
     tenantRequireUppercase: user.tenant?.tenantRequireUppercase ?? false,
     tenantRequireLowercase: user.tenant?.tenantRequireLowercase ?? false,

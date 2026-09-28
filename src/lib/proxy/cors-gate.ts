@@ -72,9 +72,11 @@ const BEARER_RULES: readonly BearerRule[] = [
   { methods: M("GET"), match: re(/^\/api\/teams\/[^/]+\/passwords$/) },
   { methods: M("GET"), match: entryMatch(/^\/api\/teams\/[^/]+\/passwords\/([^/]+)$/) },
 
-  // Vault — status + unlock data (read); delegation check + SSH sign (CLI agent).
+  // Vault — status + unlock data (read); unlock verify (presence); delegation
+  // check + SSH sign (CLI agent).
   { methods: M("GET"), match: exact(API_PATH.VAULT_STATUS) },
   { methods: M("GET"), match: exact(API_PATH.VAULT_UNLOCK_DATA) },
+  { methods: M("POST"), match: exact(API_PATH.VAULT_UNLOCK_VERIFY) },
   { methods: M("GET"), match: exact(`${API_PATH.VAULT_DELEGATION}/check`) },
   { methods: M("POST"), match: exact(API_PATH.VAULT_SSH_SIGN_AUTHORIZE) },
 
@@ -119,6 +121,7 @@ export const BEARER_BYPASS_ROUTE_SUMMARY: readonly string[] = [
   API_PATH.PASSWORDS,
   API_PATH.VAULT_STATUS,
   API_PATH.VAULT_UNLOCK_DATA,
+  API_PATH.VAULT_UNLOCK_VERIFY,
   API_PATH.EXTENSION_TOKEN,
   API_PATH.EXTENSION_TOKEN_REFRESH,
   API_PATH.EXTENSION_KEY_RESET,

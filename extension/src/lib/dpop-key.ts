@@ -198,7 +198,11 @@ export async function signDpopProof(input: {
   // Construct htu inline (same algorithm as canonicalHtuClient).
   const parsedUrl = new URL(input.serverUrl);
   const basePath = parsedUrl.pathname.replace(/\/$/, "");
-  const htu = parsedUrl.origin + basePath + input.route;
+  // RFC 9449 §4.2: htu is the target URI without query and fragment. The
+  // server's htuMatches rejects either, so a route like
+  // `/api/teams/x/member-key?keyVersion=2` must sign only its path.
+  const routePath = input.route.split(/[?#]/)[0];
+  const htu = parsedUrl.origin + basePath + routePath;
 
   const header = {
     typ: "dpop+jwt",

@@ -2,9 +2,14 @@
  * Persist auth state to chrome.storage.session.
  * Survives service worker restarts but clears on browser close.
  *
- * Sensitive fields (token, vaultSecretKey) are encrypted with an ephemeral
- * wrapping key before storage. If the SW is terminated and restarted,
- * the ephemeral key is lost and decryption fails → user must re-authenticate.
+ * `token` is stored in plain text — it must survive SW termination, which the
+ * ephemeral wrapping key by design does not (C11). `vaultSecretKey` keeps the
+ * ephemeral-key wrapping: it must NOT survive SW death, only the loss of the
+ * unlocked vault, so an SW restart re-locks the vault while keeping the
+ * connection alive. The accepted exposure (any trusted extension context can
+ * read the plain token) and the compensating control (non-extractable DPoP
+ * key bound to the token, verified against IDB on hydrate) are documented in
+ * docs/archive/review/long-lived-client-login-plan.md C11.
  */
 
 import { SESSION_KEY, JKT_RE } from "./constants";
@@ -14,9 +19,9 @@ import {
   type EncryptedField,
 } from "./session-crypto";
 
-/** Shape stored in chrome.storage.session (encrypted form). */
+/** Shape stored in chrome.storage.session. */
 interface StoredSessionState {
-  encryptedToken: EncryptedField;
+  token: string;
   expiresAt: number;
   userId?: string;
   encryptedVaultSecretKey?: EncryptedField;
@@ -29,6 +34,12 @@ interface StoredSessionState {
    * Plain number; not sensitive.
    */
   tenantAutoLockMinutes?: number | null;
+  /**
+   * Tenant policy override forcing "logout" as the vault-timeout action
+   * (C10). Same persistence rationale as tenantAutoLockMinutes. Plain
+   * boolean; not sensitive.
+   */
+  requireVaultTimeoutLogout?: boolean | null;
   /** RFC 7638 JWK thumbprint of the DPoP key bound to the current token (43 base64url chars). */
   tokenCnfJkt?: string;
   /** Personal vault key version at the time of unlock. Used to stamp saved entries correctly. */
@@ -44,6 +55,7 @@ export interface SessionState {
   /** Encrypted ECDH private key (hex) for team key derivation — re-unwrapped on SW restart */
   ecdhEncrypted?: { ciphertext: string; iv: string; authTag: string };
   tenantAutoLockMinutes?: number | null;
+  requireVaultTimeoutLogout?: boolean | null;
   /** RFC 7638 JWK thumbprint of the DPoP key bound to the current token (43 base64url chars). */
   tokenCnfJkt: string;
   /** Personal vault key version at the time of unlock. Used to stamp saved entries correctly. */
@@ -61,19 +73,22 @@ function isEncryptedField(v: unknown): v is EncryptedField {
 }
 
 export async function persistSession(state: SessionState): Promise<void> {
-  const [encryptedToken, encryptedVaultSecretKey] = await Promise.all([
-    encryptField(state.token),
-    state.vaultSecretKey ? encryptField(state.vaultSecretKey) : Promise.resolve(undefined),
-  ]);
-  if (!encryptedToken) return; // Encryption failed — don't persist
-
+  const encryptedVaultSecretKey = state.vaultSecretKey
+    ? await encryptField(state.vaultSecretKey)
+    : undefined;
+  // vaultSecretKey encryption failed — persist the token/session anyway (S1:
+  // the vault simply won't survive an SW restart, same as if it were absent).
   const stored: StoredSessionState = {
-    encryptedToken,
+    token: state.token,
     expiresAt: state.expiresAt,
     userId: state.userId,
-    encryptedVaultSecretKey: encryptedVaultSecretKey ?? undefined,
+    encryptedVaultSecretKey:
+      state.vaultSecretKey && encryptedVaultSecretKey
+        ? encryptedVaultSecretKey
+        : undefined,
     ecdhEncrypted: state.ecdhEncrypted,
     tenantAutoLockMinutes: state.tenantAutoLockMinutes ?? undefined,
+    requireVaultTimeoutLogout: state.requireVaultTimeoutLogout ?? undefined,
     tokenCnfJkt: state.tokenCnfJkt,
     personalKeyVersion: state.personalKeyVersion,
   };
@@ -87,25 +102,19 @@ export async function loadSession(): Promise<SessionState | null> {
   const raw = result[SESSION_KEY] as Record<string, unknown> | undefined;
   if (!raw || typeof raw !== "object") return null;
 
-  // Backward compat: reject old plaintext format (token as string)
-  if (typeof raw.token === "string") return null;
-
-  // Validate encrypted format
-  if (!isEncryptedField(raw.encryptedToken) || typeof raw.expiresAt !== "number") {
+  // token is plain text (C11) — validate shape only.
+  if (typeof raw.token !== "string" || typeof raw.expiresAt !== "number") {
     return null;
   }
 
-  // Decrypt token
-  const token = await decryptField(raw.encryptedToken);
-  if (!token) return null; // Ephemeral key lost or corrupted
-
-  // Decrypt vaultSecretKey if present
+  // Decrypt vaultSecretKey if present. A decrypt failure (ephemeral key lost
+  // on SW restart, or corrupted blob) leaves vaultSecretKey undefined — the
+  // token is still restored and the vault simply stays locked (C11).
   let vaultSecretKey: string | undefined;
   if (raw.encryptedVaultSecretKey !== undefined) {
     if (!isEncryptedField(raw.encryptedVaultSecretKey)) return null;
     const decrypted = await decryptField(raw.encryptedVaultSecretKey);
     if (decrypted) vaultSecretKey = decrypted;
-    // If decryption fails, vaultSecretKey is simply undefined (vault locked)
   }
 
   // userId validation
@@ -126,6 +135,13 @@ export async function loadSession(): Promise<SessionState | null> {
     tenantAutoLockMinutes = null;
   }
 
+  // requireVaultTimeoutLogout validation — absent/non-boolean defaults to
+  // null ("unknown"; the effective action falls back to the local setting).
+  const requireVaultTimeoutLogout: boolean | null =
+    typeof raw.requireVaultTimeoutLogout === "boolean"
+      ? raw.requireVaultTimeoutLogout
+      : null;
+
   // tokenCnfJkt validation: must be a 43-char base64url string.
   // Absent means a pre-PR session — return null so the user reconnects cleanly.
   if (typeof raw.tokenCnfJkt !== "string" || !JKT_RE.test(raw.tokenCnfJkt)) {
@@ -139,12 +155,13 @@ export async function loadSession(): Promise<SessionState | null> {
   }
 
   return {
-    token,
+    token: raw.token,
     expiresAt: raw.expiresAt,
     userId: raw.userId,
     vaultSecretKey,
     ecdhEncrypted: raw.ecdhEncrypted,
     tenantAutoLockMinutes,
+    requireVaultTimeoutLogout,
     tokenCnfJkt: raw.tokenCnfJkt,
     personalKeyVersion,
   };

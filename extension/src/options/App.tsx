@@ -103,6 +103,10 @@ export function App() {
   // and the effective value is shown. Null means "no tenant override — local
   // setting applies."
   const [tenantAutoLockMinutes, setTenantAutoLockMinutes] = useState<number | null>(null);
+  // Tenant policy override (C10): forces "logout" as the vault-timeout action.
+  // Null means "no tenant override — local setting applies" (same semantics
+  // as tenantAutoLockMinutes).
+  const [requireVaultTimeoutLogout, setRequireVaultTimeoutLogout] = useState(false);
   const [showBadgeCount, setShowBadgeCount] = useState(true);
   const [enableInlineSuggestions, setEnableInlineSuggestions] = useState(true);
   const [enableContextMenu, setEnableContextMenu] = useState(true);
@@ -152,6 +156,10 @@ export function App() {
         if (res && typeof res === "object" && "tenantAutoLockMinutes" in res) {
           const v = (res as { tenantAutoLockMinutes?: number | null }).tenantAutoLockMinutes;
           setTenantAutoLockMinutes(typeof v === "number" && v > 0 ? v : null);
+        }
+        if (res && typeof res === "object" && "requireVaultTimeoutLogout" in res) {
+          const v = (res as { requireVaultTimeoutLogout?: boolean | null }).requireVaultTimeoutLogout;
+          setRequireVaultTimeoutLogout(v === true);
         }
       });
     } catch {
@@ -423,12 +431,22 @@ export function App() {
                 <option value={300}>{t("options.minutes", { n: "5" })}</option>
               </select>
             </SettingRow>
-            <SettingRow label={t("options.vaultTimeoutAction")} description={t("options.vaultTimeoutLogoutHint")} htmlFor="vault-timeout-action">
+            <SettingRow
+              label={t("options.vaultTimeoutAction")}
+              description={
+                requireVaultTimeoutLogout
+                  ? t("options.vaultTimeoutActionTenantEnforced")
+                  : t("options.vaultTimeoutLogoutHint")
+              }
+              htmlFor="vault-timeout-action"
+            >
               <select
                 id="vault-timeout-action"
-                value={vaultTimeoutAction}
+                value={requireVaultTimeoutLogout ? TimeoutAction.LOGOUT : vaultTimeoutAction}
                 onChange={(e) => setVaultTimeoutAction(e.target.value as TimeoutAction)}
                 className={selectClass}
+                disabled={requireVaultTimeoutLogout}
+                aria-describedby={requireVaultTimeoutLogout ? "vault-timeout-action-tenant-hint" : undefined}
               >
                 <option value={TimeoutAction.LOCK}>{t("options.vaultTimeoutLock")}</option>
                 <option value={TimeoutAction.LOGOUT}>{t("options.vaultTimeoutLogout")}</option>

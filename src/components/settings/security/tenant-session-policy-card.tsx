@@ -67,6 +67,9 @@ export function TenantSessionPolicyCard() {
   const [vaultAutoLockEnabled, setVaultAutoLockEnabled] = useState(false);
   const [vaultAutoLockMinutes, setVaultAutoLockMinutes] = useState<string>("");
 
+  // C10: force logout (rather than lock) on client-app vault timeout
+  const [requireVaultTimeoutLogout, setRequireVaultTimeoutLogout] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [initialPolicy, setInitialPolicy] = useState<Record<string, unknown> | null>(null);
 
@@ -79,7 +82,8 @@ export function TenantSessionPolicyCard() {
     extensionAbsoluteMinutes,
     vaultAutoLockEnabled,
     vaultAutoLockMinutes,
-  }), [unlimited, maxSessions, idleTimeoutMinutes, absoluteTimeoutMinutes, extensionIdleMinutes, extensionAbsoluteMinutes, vaultAutoLockEnabled, vaultAutoLockMinutes]);
+    requireVaultTimeoutLogout,
+  }), [unlimited, maxSessions, idleTimeoutMinutes, absoluteTimeoutMinutes, extensionIdleMinutes, extensionAbsoluteMinutes, vaultAutoLockEnabled, vaultAutoLockMinutes, requireVaultTimeoutLogout]);
 
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
@@ -111,6 +115,9 @@ export function TenantSessionPolicyCard() {
         setVaultAutoLockEnabled(autoLockEnabledVal);
         setVaultAutoLockMinutes(autoLockMinutesVal);
 
+        const requireLogoutVal = !!data.requireVaultTimeoutLogout;
+        setRequireVaultTimeoutLogout(requireLogoutVal);
+
         setInitialPolicy({
           unlimited: unlimitedVal,
           maxSessions: maxSessionsVal,
@@ -120,6 +127,7 @@ export function TenantSessionPolicyCard() {
           extensionAbsoluteMinutes: extAbsVal,
           vaultAutoLockEnabled: autoLockEnabledVal,
           vaultAutoLockMinutes: autoLockMinutesVal,
+          requireVaultTimeoutLogout: requireLogoutVal,
         });
       } else {
         toast.error(t("sessionPolicyLoadFailed"));
@@ -240,6 +248,7 @@ export function TenantSessionPolicyCard() {
         extensionTokenIdleTimeoutMinutes: Number(extensionIdleMinutes),
         extensionTokenAbsoluteTimeoutMinutes: Number(extensionAbsoluteMinutes),
         vaultAutoLockMinutes: vaultAutoLockEnabled ? Number(vaultAutoLockMinutes) : null,
+        requireVaultTimeoutLogout,
       };
       // @stepup id:tenant-policy-patch
       const res = await fetchApi(API_PATH.TENANT_POLICY, {
@@ -451,6 +460,24 @@ export function TenantSessionPolicyCard() {
             </p>
           </div>
         )}
+
+        {/* C10: force logout (rather than lock) on client-app vault timeout */}
+        <div className="flex items-center justify-between">
+          <Label htmlFor="require-vault-timeout-logout-toggle" className="flex-1 pr-4">
+            {t("requireVaultTimeoutLogout")}
+          </Label>
+          <Switch
+            id="require-vault-timeout-logout-toggle"
+            checked={requireVaultTimeoutLogout}
+            onCheckedChange={(checked) => {
+              setRequireVaultTimeoutLogout(checked);
+              setError(null);
+            }}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {t("requireVaultTimeoutLogoutHelp")}
+        </p>
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 

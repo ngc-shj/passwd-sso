@@ -84,6 +84,7 @@ describe("GET /api/vault/status", () => {
       recoveryKeyInvalidatedAt: null,
       tenant: {
         vaultAutoLockMinutes: null,
+        requireVaultTimeoutLogout: false,
         tenantMinPasswordLength: 0,
         tenantRequireUppercase: false,
         tenantRequireLowercase: false,
@@ -105,6 +106,7 @@ describe("GET /api/vault/status", () => {
       hasRecoveryKey: false,
       recoveryKeyInvalidated: false,
       vaultAutoLockMinutes: null,
+      requireVaultTimeoutLogout: false,
       tenantMinPasswordLength: 0,
       tenantRequireUppercase: false,
       tenantRequireLowercase: false,
@@ -198,6 +200,34 @@ describe("GET /api/vault/status", () => {
     // regenerate-flow wording instead of first-time setup.
     expect(json.hasRecoveryKey).toBe(false);
     expect(json.recoveryKeyInvalidated).toBe(true);
+  });
+
+  // ─── C10: requireVaultTimeoutLogout delivery ─────────────────
+
+  it("returns requireVaultTimeoutLogout: true when the tenant enforces it", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      accountSalt: "a".repeat(64),
+      keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
+      recoveryKeySetAt: null,
+      recoveryKeyInvalidatedAt: null,
+      tenant: {
+        vaultAutoLockMinutes: 15,
+        requireVaultTimeoutLogout: true,
+        tenantMinPasswordLength: 0,
+        tenantRequireUppercase: false,
+        tenantRequireLowercase: false,
+        tenantRequireNumbers: false,
+        tenantRequireSymbols: false,
+        passwordMaxAgeDays: null,
+        passwordExpiryWarningDays: 14,
+      },
+    });
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
+    const json = await res.json();
+    expect(json.requireVaultTimeoutLogout).toBe(true);
   });
 
   it("works with Bearer token auth", async () => {

@@ -30,6 +30,19 @@ import Shared
   /// logout (full sign-out). Applied from AppSettingsStore at each unlock.
   /// Internal (not public) because VaultTimeoutAction is an app-level type.
   var timeoutAction: VaultTimeoutAction = .lock
+
+  /// Tenant-enforced override (plan C10): when true, the idle timeout always
+  /// signs out regardless of `timeoutAction`. Applied from AppSettingsStore at
+  /// each unlock, mirroring how `autoLockMinutes` is set to the tenant-effective
+  /// value — `timeoutAction` itself is left untouched so the user's own
+  /// preference survives the policy being lifted later.
+  var requireLogoutOnTimeout: Bool = false
+
+  /// The action actually applied at the idle boundary: the tenant override when
+  /// enforced, else the user's local `timeoutAction`.
+  private var effectiveTimeoutAction: VaultTimeoutAction {
+    requireLogoutOnTimeout ? .logout : timeoutAction
+  }
   private var lastActivityAt: Date = Date()
   private var timer: Foundation.Timer?
   private let reducer: LockStateReducer
@@ -122,7 +135,7 @@ import Shared
     guard state == .unlocked else { return }
     let elapsed = clock.now.timeIntervalSince(lastActivityAt)
     if elapsed >= Double(_autoLockMinutes * 60) {
-      switch timeoutAction {
+      switch effectiveTimeoutAction {
       case .lock: lock()
       case .logout: signOut(reason: .idleTimeout)
       }

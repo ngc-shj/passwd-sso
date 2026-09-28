@@ -432,6 +432,10 @@ queue_step "Static: caught-error-logging" node scripts/checks/check-caught-error
 queue_step "Static: audit-metadata-narrative" node scripts/checks/check-audit-metadata-narrative.mjs
 queue_step "Static: sentinel-tenant-literal-parity" node scripts/checks/check-sentinel-tenant-literal-parity.mjs
 queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
+# long-lived-client-login plan §C3: every extension/iOS token expiry write
+# must go through computeClientTokenExpiry (presence/idle/absolute cap), not
+# an inlined now + idleMinutes * MS_PER_MINUTE that bypasses it.
+queue_step "Static: client-token-expiry" node scripts/checks/check-client-token-expiry.mjs
 queue_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
 queue_step "Static: runtime-image-assets" node scripts/checks/check-runtime-image-assets.mjs
 queue_step "Static: operator-echo-escaped" node scripts/checks/check-operator-echo-escaped.mjs

@@ -446,6 +446,83 @@ final class MobileAPIClientTests: XCTestCase {
     XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"), "DPoP proof header must still be set")
   }
 
+  // MARK: - verifyUnlock (plan C2/C7)
+
+  func testVerifyUnlock_200_returnsTrue() async throws {
+    seedAccessToken()
+    let verifyURL = serverURL.appending(path: "/api/vault/unlock/verify", directoryHint: .notDirectory)
+    var capturedRequest: URLRequest?
+    var callCount = 0
+    MockURLProtocol.requestHandler = { request in
+      callCount += 1
+      capturedRequest = request
+      return (Data(#"{"verified":true}"#.utf8), httpResponse(status: 200, url: verifyURL))
+    }
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+
+    let verified = try await client.verifyUnlock(authHash: "aabbcc")
+    XCTAssertTrue(verified)
+    XCTAssertEqual(callCount, 1, "a 200 must not retry")
+
+    let req = try XCTUnwrap(capturedRequest)
+    XCTAssertEqual(req.httpMethod, "POST")
+    XCTAssertTrue(req.url?.path.hasSuffix("/api/vault/unlock/verify") ?? false)
+    let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertTrue(auth.hasPrefix("Bearer "), "verifyUnlock must use Bearer scheme for the resource call")
+    let bodyData = try XCTUnwrap(req.httpBody ?? readStream(req.httpBodyStream))
+    let body = try JSONDecoder().decode([String: String].self, from: bodyData)
+    XCTAssertEqual(body["authHash"], "aabbcc")
+  }
+
+  /// C2 never 401s for a wrong hash — a mismatch is a 4xx that falls straight
+  /// to performAuthedPOST's default branch, so no nonce/refresh retry fires.
+  func testVerifyUnlock_422_returnsFalseWithExactlyOneRequest() async throws {
+    seedAccessToken()
+    let verifyURL = serverURL.appending(path: "/api/vault/unlock/verify", directoryHint: .notDirectory)
+    var callCount = 0
+    MockURLProtocol.requestHandler = { _ in
+      callCount += 1
+      return (Data(#"{"error":"AUTH_HASH_MISMATCH"}"#.utf8), httpResponse(status: 422, url: verifyURL))
+    }
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+
+    let verified = try await client.verifyUnlock(authHash: "aabbcc")
+    XCTAssertFalse(verified)
+    XCTAssertEqual(callCount, 1, "a 422 mismatch must not trigger a nonce or refresh retry")
+  }
+
+  /// A token/DPoP-layer 401 that survives the full retry ladder (refresh
+  /// succeeded, resource still 401s) must rethrow — the caller must NOT treat
+  /// this as "hash mismatch" and delete its cached authHash.
+  func testVerifyUnlock_401AfterRefresh_rethrowsServerError() async throws {
+    seedAccessToken()
+    let verifyURL = serverURL.appending(path: "/api/vault/unlock/verify", directoryHint: .notDirectory)
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        return (tokenResponseJSON(), httpResponse(status: 200, url: refreshURL))
+      }
+      return (Data(), httpResponse(status: 401, url: verifyURL))
+    }
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+
+    do {
+      _ = try await client.verifyUnlock(authHash: "aabbcc")
+      XCTFail("Expected serverError(401) to rethrow")
+    } catch MobileAPIError.serverError(let status) {
+      XCTAssertEqual(status, 401)
+    }
+  }
+
   func testUpdateEntry_athIsSHA256OfAccessToken() async throws {
     let accessToken = "acc_ath_test"
     try? tokenStore.saveTokens(access: accessToken, refresh: "ref_ath", expiresAt: Date().addingTimeInterval(3600))
@@ -854,8 +931,8 @@ final class MobileAPIClientTests: XCTestCase {
 
     let body = CacheRollbackReportBody(
       deviceId: "device-test-001",
-      expectedCounter: 42,
-      observedCounter: 99,
+      expectedCounter: "42",
+      observedCounter: "18446744073709551615",
       headerIssuedAt: 1_746_144_000,
       lastSuccessfulRefreshAt: 0,
       rejectionKind: "counter_mismatch"
@@ -877,8 +954,11 @@ final class MobileAPIClientTests: XCTestCase {
     let bodyData = try XCTUnwrap(req.httpBody ?? readStream(req.httpBodyStream))
     let decoded = try JSONDecoder().decode(CacheRollbackReportBody.self, from: bodyData)
     XCTAssertEqual(decoded.deviceId, "device-test-001")
-    XCTAssertEqual(decoded.expectedCounter, 42)
-    XCTAssertEqual(decoded.observedCounter, 99)
+    XCTAssertEqual(decoded.expectedCounter, "42")
+    // A full-width 64-bit counter must reach the wire as its exact decimal
+    // string, not as a JSON number JavaScript would round.
+    let rawJSON = try XCTUnwrap(String(data: bodyData, encoding: .utf8))
+    XCTAssertTrue(rawJSON.contains(#""observedCounter":"18446744073709551615""#))
     XCTAssertEqual(decoded.headerIssuedAt, 1_746_144_000)
     XCTAssertEqual(decoded.lastSuccessfulRefreshAt, 0)
     XCTAssertEqual(decoded.rejectionKind, "counter_mismatch")
@@ -1168,6 +1248,37 @@ final class TokenRefreshTests: XCTestCase {
     XCTAssertEqual(loaded.token, "acc_new")
     let loadedRefresh = try XCTUnwrap(try tokenStore.loadRefresh())
     XCTAssertEqual(loadedRefresh, "ref_new")
+  }
+
+  // MARK: - verifyUnlock: expired access token refreshes then succeeds (C7)
+
+  /// The most common real-world verifyUnlock shape: a day-old access token is
+  /// already expired by the time Face ID fires, so the proactive skew check in
+  /// validAccessToken() refreshes BEFORE the verify request goes out — not the
+  /// reactive 401 ladder. Exactly one refresh, one verify request.
+  func testVerifyUnlock_expiredAccessToken_refreshesThenSucceeds() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(-10)
+    try tokenStore.saveTokens(access: "acc_stale", refresh: "ref_stale", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let verifyURL = serverURL.appending(path: "/api/vault/unlock/verify", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: "acc_new", refreshToken: "ref_new", expiresIn: 3600),
+                httpResponse(status: 200, url: refreshURL))
+      }
+      self?.resourceCallCount += 1
+      return (Data(#"{"verified":true}"#.utf8), httpResponse(status: 200, url: verifyURL))
+    }
+
+    let client = makeClient()
+    let verified = try await client.verifyUnlock(authHash: "aabbcc")
+
+    XCTAssertTrue(verified)
+    XCTAssertEqual(refreshCallCount, 1, "expired token must trigger exactly one refresh")
+    XCTAssertEqual(resourceCallCount, 1, "verify endpoint must be hit exactly once after refresh")
   }
 
   // MARK: - validAccessToken: no token throws authenticationRequired

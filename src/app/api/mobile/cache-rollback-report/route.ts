@@ -15,7 +15,7 @@
  *   - `rejectionKind === ROLLBACK_REJECTION_KIND.FLAG_FORGED` → MOBILE_CACHE_FLAG_FORGED.
  *   - All other rejection kinds        → MOBILE_CACHE_ROLLBACK_REJECTED.
  *
- * Rate limit: per-(tenantId, deviceId) 5 req / 24 h (per S34) — the legitimate
+ * Rate limit: per-(tenantId, token family) 5 req / 24 h (per S34) — the legitimate
  * burst should be ≤ 1 per detection event; anything more is forensic noise.
  */
 
@@ -37,7 +37,7 @@ import { MS_PER_HOUR } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-// 5 req / 24 h per (tenantId, deviceId).
+// 5 req / 24 h per (tenantId, token family).
 const reportLimiter = createRateLimiter({
   windowMs: 24 * MS_PER_HOUR,
   max: 5,
@@ -71,11 +71,30 @@ const REJECTION_KIND_VALUES = Object.values(ROLLBACK_REJECTION_KIND) as [
   ...RollbackRejectionKind[],
 ];
 
+const U64_MAX = 18446744073709551615n;
+
+// Cache counters are seeded from 64 random bits on iOS, so they are almost
+// always beyond Number's exact-integer range: they travel as decimal strings.
+// A plain JSON number is accepted only as a safe integer (builds that predate
+// the string form, with small counters); a larger number already lost its low
+// digits in JSON.parse and cannot be recovered, so int() rejects it. Both forms
+// normalise to the decimal string the audit metadata records.
+const u64Counter = z
+  .union([
+    // One refine, not regex().refine(): Zod 4 still runs the refine after a
+    // failed regex, and BigInt("12a") throws instead of returning false.
+    z
+      .string()
+      .refine((v) => /^(0|[1-9][0-9]{0,19})$/.test(v) && BigInt(v) <= U64_MAX),
+    z.number().int().nonnegative(),
+  ])
+  .transform((v) => String(v));
+
 const ReportRequestSchema = z
   .object({
     deviceId: z.string().min(1).max(128),
-    expectedCounter: z.number().int().nonnegative(),
-    observedCounter: z.number().int().nonnegative(),
+    expectedCounter: u64Counter,
+    observedCounter: u64Counter,
     headerIssuedAt: z.number().int().nonnegative(),
     lastSuccessfulRefreshAt: z.number().int().nonnegative(),
     rejectionKind: z.enum(REJECTION_KIND_VALUES),
@@ -89,7 +108,12 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   if (!auth.ok) {
     return errorResponse(API_ERROR[auth.error], 401);
   }
-  const { userId, tenantId } = auth.data;
+  const { userId, tenantId, familyId } = auth.data;
+  // Only the iOS host app keeps the AutoFill cache these reports describe; an
+  // extension (or any future) token must not feed this tamper-detection signal.
+  if (auth.data.clientKind !== "IOS_APP") {
+    return errorResponse(API_ERROR.FORBIDDEN);
+  }
 
   // Tenant network-boundary enforcement — reject off-network reports from a
   // stolen bearer before parsing body or emitting audit.
@@ -101,10 +125,12 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   if (!bodyResult.ok) return bodyResult.response;
   const data = bodyResult.data;
 
-  // 3. Rate-limit per (tenantId, deviceId). After auth so we know the tenant
-  // bucket, before the audit emit so we don't burn an audit row on flood.
+  // 3. Rate-limit per token family (one per signed-in device). deviceId is
+  // client-chosen text, so keying on it let a token holder mint a fresh bucket
+  // per request; a new family needs a fresh sign-in. After auth so we know the
+  // family, before the audit emit so we don't burn an audit row on flood.
   const rl = await reportLimiter.check(
-    `rl:mobile_cache_rollback:${tenantId}:${data.deviceId}`,
+    `rl:mobile_cache_rollback:${tenantId}:${familyId}`,
   );
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);

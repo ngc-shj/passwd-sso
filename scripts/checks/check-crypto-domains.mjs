@@ -16,6 +16,12 @@
  *   declared primitive allowlist (Check B — C12)
  * - Any code AAD scope lacks a manifest entry, or any manifest entry's test
  *   files are missing (Check C — C16 bidirectional coverage)
+ * - A golden authHash vector in auth-hash-golden-vectors.json is missing from
+ *   any of the web/extension/iOS parity tests (Check F — long-lived-client-login
+ *   plan C1/C2, mirrors Check D for AAD)
+ * - `masterPasswordServerSalt` and `timingSafeEqual` appear together in a
+ *   file under src/ other than verify-auth-hash.ts (Check G — long-lived-
+ *   client-login plan C1: single authHash compare implementation)
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -423,6 +429,83 @@ export function checkScopeManifest(codeScopes, manifest, root) {
 }
 
 /**
+ * Check F — authHash golden-vector parity (long-lived-client-login plan C1/C2).
+ *
+ * For each entry in auth-hash-golden-vectors.json (skipping `_`-prefixed
+ * keys), asserts the `authHashHex` literal appears in EACH of the three
+ * cross-codebase parity tests: web (`src/lib/crypto/crypto-client.test.ts`),
+ * extension (`extension/src/__tests__/lib/crypto.test.ts`), and iOS
+ * (`ios/PasswdSSOTests/KDFTests.swift`). Mirrors Check D's app/iOS pairing,
+ * widened to three codebases since the vector is a plain hex string (no
+ * Swift byte-array conversion needed).
+ *
+ * @param {{ goldenJson: Object, parityContents: Record<string, string> }} opts
+ *   parityContents keyed by the same relative paths this module reads them at.
+ * @returns {string[]} error messages
+ */
+export const AUTH_HASH_PARITY_FILES = [
+  "src/lib/crypto/crypto-client.test.ts",
+  "extension/src/__tests__/lib/crypto.test.ts",
+  "ios/PasswdSSOTests/KDFTests.swift",
+];
+
+export function checkAuthHashGoldenParity({ goldenJson, parityContents }) {
+  const errors = [];
+  for (const [key, entry] of Object.entries(goldenJson)) {
+    if (key.startsWith("_")) continue;
+    const { authHashHex } = entry;
+    for (const rel of AUTH_HASH_PARITY_FILES) {
+      const content = parityContents[rel];
+      if (content === undefined) {
+        errors.push(`Check F: parity test file not found: ${rel}`);
+        continue;
+      }
+      if (!content.includes(authHashHex)) {
+        errors.push(
+          `Check F: golden vector "${key}" authHash "${authHashHex}" not found in parity test ${rel}`
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * Check G — server authHash compare containment (long-lived-client-login
+ * plan C1).
+ *
+ * `compareVaultAuthHash` in `src/lib/vault/verify-auth-hash.ts` is the single
+ * implementation allowed to compute SHA-256(authHash + masterPasswordServerSalt)
+ * and compare it with `timingSafeEqual`. Any other file under `src/` that
+ * references BOTH `masterPasswordServerSalt` AND `timingSafeEqual` has
+ * re-inlined the compare instead of calling the shared helper.
+ *
+ * Salt WRITERS (setup/route.ts, vault-reset.ts, rotate-key-server.ts) never
+ * call `timingSafeEqual`, so they do not match and are unaffected.
+ *
+ * @param {Array<{rel: string, content: string}>} files - {rel, content} pairs
+ *   (test files already excluded by the caller, mirrors Checks A/B/E)
+ * @returns {string[]} error messages
+ */
+const SERVER_HASH_COMPARE_ALLOWLIST = new Set([
+  "src/lib/vault/verify-auth-hash.ts",
+]);
+
+export function checkServerHashCompareContainment(files) {
+  const errors = [];
+  for (const { rel, content } of files) {
+    if (!rel.startsWith("src/")) continue;
+    if (SERVER_HASH_COMPARE_ALLOWLIST.has(rel)) continue;
+    if (content.includes("masterPasswordServerSalt") && content.includes("timingSafeEqual")) {
+      errors.push(
+        `Check G: masterPasswordServerSalt + timingSafeEqual found together outside verify-auth-hash.ts: ${rel}`
+      );
+    }
+  }
+  return errors;
+}
+
+/**
  * Discover crypto files under src/lib (and subdirectories after refactor).
  * Pass 1: files matching crypto-*.ts prefix or export-crypto.ts.
  * Pass 2: any .ts/.tsx file under src/ that contains HKDF info-string tokens
@@ -598,6 +681,10 @@ function main() {
   const checkEErrors = checkKeyVersionHardcode(structuralFiles);
   errors.push(...checkEErrors);
 
+  // ── Check G: server authHash compare containment ───────────────────────────
+  const checkGErrors = checkServerHashCompareContainment(structuralFiles);
+  errors.push(...checkGErrors);
+
   // ── Check C: per-scope manifest coverage ───────────────────────────────────
   const manifestPath = join(ROOT, "scripts/checks/aad-scope-manifest.json");
   let manifest;
@@ -646,6 +733,35 @@ function main() {
     errors.push(...checkDErrors);
   }
 
+  // ── Check F: authHash golden-vector parity (web + extension + iOS) ────────
+  const authHashGoldenPath = join(ROOT, "scripts/checks/auth-hash-golden-vectors.json");
+  let authHashGoldenJson;
+  let checkFSkipped = false;
+  try {
+    authHashGoldenJson = JSON.parse(readFileSync(authHashGoldenPath, "utf-8"));
+  } catch {
+    errors.push("Check F: auth-hash-golden-vectors.json not found or not valid JSON at " + authHashGoldenPath);
+    checkFSkipped = true;
+  }
+  const authHashParityContents = {};
+  if (!checkFSkipped) {
+    for (const rel of AUTH_HASH_PARITY_FILES) {
+      try {
+        authHashParityContents[rel] = readFileSync(join(ROOT, rel), "utf-8");
+      } catch {
+        errors.push(`Check F: parity test file not found: ${rel}`);
+        checkFSkipped = true;
+      }
+    }
+  }
+  if (!checkFSkipped) {
+    const checkFErrors = checkAuthHashGoldenParity({
+      goldenJson: authHashGoldenJson,
+      parityContents: authHashParityContents,
+    });
+    errors.push(...checkFErrors);
+  }
+
   if (errors.length > 0) {
     console.error("Crypto domain ledger verification FAILED:");
     for (const e of errors) {
@@ -663,6 +779,11 @@ function main() {
   console.log(`  Check C: scope manifest coverage OK (${manifest ? Object.keys(manifest).length : 0} scopes)`);
   console.log(`  Check D: iOS golden-vector parity OK (${goldenCount} vectors, app + iOS pinned)`);
   console.log(`  Check E: keyVersion hardcode guard OK`);
+  const authHashGoldenCount = authHashGoldenJson
+    ? Object.keys(authHashGoldenJson).filter((k) => !k.startsWith("_")).length
+    : 0;
+  console.log(`  Check F: authHash golden-vector parity OK (${authHashGoldenCount} vector(s), web + extension + iOS pinned)`);
+  console.log(`  Check G: server authHash compare containment OK`);
 }
 
 main();

@@ -319,6 +319,30 @@ final class AutoLockServiceTests: XCTestCase {
     )
   }
 
+  /// Plan C10: a tenant-enforced `requireVaultTimeoutLogout` must win over the
+  /// user's own local `.lock` choice — the idle boundary signs out, not merely locks.
+  func testTickWithRequireLogoutOnTimeout_signsOutEvenWhenLocalActionIsLock() throws {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    seedKeychain(keychain)
+
+    let clock = TestClock(start: Date(timeIntervalSinceReferenceDate: 1000))
+    let service = makeService(tmpDir: tmpDir, keychain: keychain, autoLockMinutes: 15, clock: clock)
+    service.timeoutAction = .lock
+    service.requireLogoutOnTimeout = true
+
+    service.startTimer()
+    service.stopTimer()
+    clock.advance(by: 15 * 60)
+    service.tick()
+
+    XCTAssertEqual(
+      service.state, .loggedOut(reason: .idleTimeout),
+      "tenant-enforced logout must override the user's local .lock setting"
+    )
+  }
+
   // MARK: - F2/S13 regression: signOut clears the team-directory blob
 
   /// Regression for F2/S13: before the fix, AutoLockService.signOut() did NOT call

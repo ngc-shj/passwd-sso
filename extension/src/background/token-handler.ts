@@ -10,7 +10,15 @@ import { BRIDGE_CODE_LENGTH } from "../lib/constants";
 import { getSettings } from "../lib/storage";
 import { signDpopProof } from "../lib/dpop-key";
 import { DpopSignError, swFetchAuthenticated } from "./dpop-fetch";
-import { MS_PER_MINUTE } from "../lib/time";
+import { MS_PER_SECOND } from "../lib/time";
+
+// A failed refresh retries while any meaningful lifetime remains. Near a
+// presence-capped expiry, the refresh a verified unlock triggers is the only
+// thing that can extend the session, so giving up with a minute left would
+// end a session whose presence was just renewed.
+// Also the floor scheduleRefreshAlarm applies to how soon a refresh may be
+// scheduled; sharing it keeps the retry cadence and the give-up point aligned.
+export const MIN_RETRY_HEADROOM_MS = 5 * MS_PER_SECOND;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -79,19 +87,26 @@ export async function attemptTokenRefreshWith(
         callbacks.setCnfJkt(data.cnfJkt);
       }
       callbacks.createTtlAlarm(newExpiresAt);
-      callbacks.scheduleRefreshAlarm(newExpiresAt);
+      // The server caps expiry at (last verified unlock + idle). When a
+      // refresh no longer extends it, refreshing again cannot either — it
+      // would only rotate the token at ever-shorter half-life intervals up to
+      // expiry. Let the TTL alarm end the session; a new verified unlock
+      // triggers the refresh that extends it.
+      if (newExpiresAt > tokenExpiresAt) {
+        callbacks.scheduleRefreshAlarm(newExpiresAt);
+      }
     } else if (res.status === 401 || res.status === 403 || res.status === 404) {
       callbacks.clearToken();
     } else {
       // Transient error (429, 5xx) — retry if enough TTL remains
-      if (tokenExpiresAt - Date.now() > MS_PER_MINUTE) {
+      if (tokenExpiresAt - Date.now() > MIN_RETRY_HEADROOM_MS) {
         callbacks.scheduleRefreshAlarm(tokenExpiresAt);
       }
     }
   } catch {
     // Network error — keep current token, retry next cycle.
     const tokenExpiresAt = callbacks.getTokenExpiresAt();
-    if (tokenExpiresAt && tokenExpiresAt - Date.now() > MS_PER_MINUTE) {
+    if (tokenExpiresAt && tokenExpiresAt - Date.now() > MIN_RETRY_HEADROOM_MS) {
       callbacks.scheduleRefreshAlarm(tokenExpiresAt);
     }
   }

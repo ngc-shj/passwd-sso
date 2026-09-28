@@ -9,6 +9,7 @@ public enum APIPath {
   public static let mobileFavicon = "/api/mobile/favicon"
   public static let mobileFaviconPref = "/api/mobile/favicon-pref"
   public static let vaultUnlockData = "/api/vault/unlock/data"
+  public static let vaultUnlockVerify = "/api/vault/unlock/verify"
   public static let passwords = "/api/passwords"
   public static let healthLive = "/api/health/live"
   public static let teams = "/api/teams"

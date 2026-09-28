@@ -45,6 +45,13 @@ regexes = [
 ]
 
 [[allowlists]]
+description = "Frozen authHash golden vector: SHA-256 of an HKDF output derived from the public sequential secretKey 0x00..0x1f, shared by the app, extension and iOS parity tests (scripts/checks/auth-hash-golden-vectors.json). Matched by exact value, not by path: a global-allowlist path skips the whole file at walk time even with condition = \"AND\" (gitleaks 8.30), so a path scope would stop scanning anything else added to the file."
+regexTarget = "match"
+regexes = [
+  '''34cc5ea2db6790bc1411b9325d0a12dd900ad751313cb9c52af8756e27b11efd''',
+]
+
+[[allowlists]]
 description = "CryptoKit type names in crypto source, not credentials (generic-api-key false positives on `P256.Signing.PrivateKey` in PasskeyRegistration.swift and `P256.KeyAgreement.PrivateKey` in the team-key ECDH code)."
 regexTarget = "match"
 regexes = [

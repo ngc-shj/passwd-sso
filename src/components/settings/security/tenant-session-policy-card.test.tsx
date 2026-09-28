@@ -46,6 +46,7 @@ const DEFAULT_DATA = {
   extensionTokenIdleTimeoutMinutes: 10080,
   extensionTokenAbsoluteTimeoutMinutes: 43200,
   vaultAutoLockMinutes: null,
+  requireVaultTimeoutLogout: false,
 };
 
 function setupGet(data: Record<string, unknown> = DEFAULT_DATA) {
@@ -129,6 +130,29 @@ describe("TenantSessionPolicyCard", () => {
       expect(patchCalls.length).toBe(1);
       const body = JSON.parse(String((patchCalls[0][1] as RequestInit).body));
       expect(body.sessionIdleTimeoutMinutes).toBe(120);
+    });
+  });
+
+  it("C10: posts requireVaultTimeoutLogout when the switch is toggled on", async () => {
+    setupGet();
+    render(<TenantSessionPolicyCard />);
+    const save = await screen.findByRole("button", {
+      name: "sessionPolicySave",
+    });
+
+    const toggle = document.getElementById(
+      "require-vault-timeout-logout-toggle",
+    ) as HTMLButtonElement;
+    fireEvent.click(toggle);
+    fireEvent.click(save);
+
+    await waitFor(() => {
+      const patchCalls = mockFetch.mock.calls.filter(
+        (c) => (c[1] as RequestInit | undefined)?.method === "PATCH",
+      );
+      expect(patchCalls.length).toBe(1);
+      const body = JSON.parse(String((patchCalls[0][1] as RequestInit).body));
+      expect(body.requireVaultTimeoutLogout).toBe(true);
     });
   });
 

@@ -158,6 +158,47 @@ final class AppSettingsStoreTests: XCTestCase {
     XCTAssertEqual(store.effectiveAutoLockMinutes, 30)
   }
 
+  // MARK: - Tenant requireVaultTimeoutLogout (C10)
+
+  func testRequireVaultTimeoutLogoutAbsentReturnsFalse() {
+    XCTAssertFalse(AppSettingsStore(defaults: defaults).requireVaultTimeoutLogout)
+  }
+
+  func testRequireVaultTimeoutLogoutRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.requireVaultTimeoutLogout = true
+    XCTAssertTrue(store.requireVaultTimeoutLogout)
+    store.requireVaultTimeoutLogout = false
+    XCTAssertFalse(store.requireVaultTimeoutLogout)
+  }
+
+  func testApplyRequireVaultTimeoutLogout_authoritativeTrue_writes() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.applyRequireVaultTimeoutLogout(true, policyAuthoritative: true)
+    XCTAssertTrue(store.requireVaultTimeoutLogout)
+  }
+
+  func testApplyRequireVaultTimeoutLogout_authoritativeNil_clearsToFalse() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.requireVaultTimeoutLogout = true
+    store.applyRequireVaultTimeoutLogout(nil, policyAuthoritative: true)  // server removed policy
+    XCTAssertFalse(store.requireVaultTimeoutLogout)
+  }
+
+  func testApplyRequireVaultTimeoutLogout_nonAuthoritative_isNoOp() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.requireVaultTimeoutLogout = true
+    store.applyRequireVaultTimeoutLogout(false, policyAuthoritative: false)  // biometric/offline path
+    XCTAssertTrue(store.requireVaultTimeoutLogout, "non-authoritative call must not touch the persisted value")
+  }
+
+  func testClearTenantPolicy_alsoClearsRequireVaultTimeoutLogout() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.requireVaultTimeoutLogout = true
+    store.clearTenantPolicy()
+    XCTAssertFalse(store.requireVaultTimeoutLogout)
+  }
+
   // MARK: - Auto-copy TOTP (default OFF / opt-in)
 
   func testAutoCopyTotpAbsentReturnsFalse() {

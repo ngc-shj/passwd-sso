@@ -8,7 +8,16 @@
 export type BackgroundWarnEvent =
   | "webauthn-interceptor-register-failed"
   | "copy-command-failed"
-  | "context-menu-create-failed";
+  | "context-menu-create-failed"
+  // C2 consumer (POST /api/vault/unlock/verify) — every non-200 outcome is
+  // logged as a distinct, non-blocking warning; none of them fail the local
+  // unlock.
+  | "vault-unlock-verify-mismatch"
+  | "vault-unlock-verify-token-failure"
+  | "vault-unlock-verify-account-locked"
+  | "vault-unlock-verify-rate-limited"
+  | "vault-unlock-verify-network-error"
+  | "vault-unlock-verify-failed";
 
 export type BackgroundErrorCode =
   | "dom-exception"
