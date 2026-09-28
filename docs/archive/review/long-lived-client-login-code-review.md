@@ -64,3 +64,23 @@ RT1 no issue · RT4 no issue on existing tests (T1 is an untested race path) · 
 
 ### F1/T3 [Minor] untracked probe migration
 - Action: must be deleted before merge; deletion from this session was denied by the permission layer, so it is left to the user. It is untracked and excluded from every commit.
+
+---
+
+# Review round 2 (2026-09-28)
+
+## Changes from Previous Round
+Commit "review(1)": S1 allowlist, T1 concurrency test, T2 manual-test checklist + accepted deferral. All three: resolved.
+
+## Findings
+- Functionality: No findings (manual-test labels, column names, grace window, revoke reasons and the iOS 422 eviction path verified against code).
+- Security: No findings. R43 check against round 1: no widening — the allowlist is extensionally identical for the three existing kinds and fails closed for any future kind.
+- Testing: No findings. T1 red-proof causal chain independently derived (`attemptTokenRefreshWith` entry guard); fake-timer restore in `finally`; `background.test.ts` 120/120, route test 10/10; `check-deny-only-guard.sh` 0 findings.
+
+## Recurring Issue Check
+- Functionality: R42 verified resolved; other rules no issue / not triggered.
+- Security: R42 resolved, R43 no widening, RT4/RT7/RT8 satisfied, RS4 clean; other rules no new surface.
+- Testing: RT4, RT7, RT8, R34, R42 satisfied; other rules not triggered.
+
+## Termination
+All three experts returned No findings in round 2. Open item outside the code: untracked `prisma/migrations/20260928061731_probe_noop/` awaits deletion by the user (session permission denied); manual checklist `long-lived-client-login-manual-test.md` awaits a human run before merge.
