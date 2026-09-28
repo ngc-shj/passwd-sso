@@ -168,6 +168,17 @@ describe("POST /api/vault/unlock/verify", () => {
     expect(mockPrismaExtensionTokenUpdate).not.toHaveBeenCalled();
   });
 
+  it("returns 403 for a client kind outside the presence allowlist", async () => {
+    mockCheckAuth.mockResolvedValue(authOk({ clientKind: "FUTURE_CLIENT_KIND" }));
+
+    const res = await POST(req(AUTH_HASH));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("FORBIDDEN");
+    expect(mockPrismaExtensionTokenUpdate).not.toHaveBeenCalled();
+  });
+
   it("accepts an IOS_APP token", async () => {
     mockCheckAuth.mockResolvedValue(authOk({ clientKind: "IOS_APP" }));
 

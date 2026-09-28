@@ -1944,6 +1944,56 @@ describe("token refresh alarm", () => {
     );
   });
 
+  it("single-flight: alarm refresh and a concurrent lazy GET_TOKEN share one refresh request", async () => {
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((r) => { releaseRefresh = r; });
+    const newExpiresAt = new Date(Date.now() + 900_000).toISOString();
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+        await refreshGate;
+        return {
+          ok: true,
+          json: async () => ({
+            token: "refreshed-tok",
+            expiresAt: newExpiresAt,
+            scope: ["passwords:read"],
+            cnfJkt: STATIC_TEST_JKT,
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    // Only Date is faked: the refresh must start while the token is still
+    // valid, and the token must expire while that request is in flight.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let res: { token: string | null };
+    try {
+      const start = new Date("2026-01-01T00:00:00Z").getTime();
+      vi.setSystemTime(start);
+      applyToken("original-tok", start + 1_000, STATIC_TEST_JKT);
+
+      alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+      await new Promise((r) => setTimeout(r, 20));
+      vi.setSystemTime(start + 2_000); // expired mid-flight → lazy branch
+      const tokenPromise = sendMessage({ type: "GET_TOKEN" });
+      await new Promise((r) => setTimeout(r, 20));
+      releaseRefresh();
+      res = (await tokenPromise) as { token: string | null };
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const refreshCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+    );
+    expect(refreshCalls).toHaveLength(1);
+    // The lazy check must see the renewed token, not clear the one being renewed.
+    expect(res.token).toBe("refreshed-tok");
+  });
+
   it("clears token when server rejects refresh", async () => {
     vi.stubGlobal(
       "fetch",

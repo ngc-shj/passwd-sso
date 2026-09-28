@@ -40,12 +40,18 @@ import { compareVaultAuthHash } from "@/lib/vault/verify-auth-hash";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import type { ExtensionTokenClientKind } from "@prisma/client";
 
 export const runtime = "nodejs";
 
 const verifySchema = z.object({
   authHash: hexHash,
 }).strict();
+
+const PRESENCE_CLIENT_KINDS: ReadonlySet<string> = new Set<ExtensionTokenClientKind>([
+  "BROWSER_EXTENSION",
+  "IOS_APP",
+]);
 
 const verifyLimiter = createRateLimiter({
   windowMs: 5 * MS_PER_MINUTE,
@@ -66,10 +72,12 @@ async function handlePOST(request: NextRequest) {
   // presence for. IOS_AUTOFILL (upload-only, no unlock UI) and any other
   // Bearer type that happens to carry this scope (e.g. an MCP token — the
   // scope string is shared with MCP_SCOPE.VAULT_UNLOCK_DATA) are refused.
+  // Allowlist, not denylist: a client kind added to the enum later must not
+  // gain presence recording (idle extension) without a decision here.
   if (authResult.auth.type !== "token") {
     return errorResponse(API_ERROR.FORBIDDEN);
   }
-  if (authResult.auth.clientKind === "IOS_AUTOFILL") {
+  if (!PRESENCE_CLIENT_KINDS.has(authResult.auth.clientKind)) {
     return errorResponse(API_ERROR.FORBIDDEN);
   }
   const { userId, tenantId, tokenId, familyId, clientKind } = authResult.auth;
