@@ -126,3 +126,46 @@ Browser testing showed the extension options page with the local 15-minute auto-
 Findings applied directly (no Round 7 review):
 - T6 [Minor] precondition assertion added (status fetch observed in flight before CLEAR_TOKEN) — `extension/src/__tests__/background.test.ts` — applied verbatim
 Justification: test-only, inside the Round 6 fix scope, no security-boundary change.
+
+---
+
+# Review rounds 7–11 (2026-09-28) — found during manual testing M1–M5
+
+## Round 7 — "sign DPoP htu without the query and stop refreshing on every 401"
+- Extension DPoP htu included the query string (pre-existing); the server rejects it (RFC 9449 §4.2), so `member-key?keyVersion=N` always 401'd, and this branch's refresh-on-401 turned each into a token rotation. Fixed: htu signs the path only; 401 refresh only near expiry.
+- Functionality F1 [Major]: the near-expiry gate dropped the concurrent-rotation race → Round 8.
+- Security, Testing: no findings (both sides of the htu contract pinned).
+
+## Round 8 — "retry a 401 with the current token when a concurrent refresh rotated it"
+- Security S1 [Major]: token-string inequality also matched a disconnect + reconnect as another account, resending A's request (e.g. a create with A-encrypted data) under B → Round 9.
+- Testing T7 [Major]: 401 tests flaked (~2/5) via a fire-and-forget chain from an earlier test's module reaching the global fetch mock → Round 10.
+
+## Round 9 — "never resend a 401'd request under a different connection"
+- `connectionGeneration` (bumped on connect/disconnect, not refresh) gates every retry. Security: no findings. Functionality F1 [Minor]: absolute-timeout help text used "token family" → fixed.
+
+## Round 10 — "stop refreshing once the expiry is capped, and refresh after a verified unlock"
+- From M5: six refreshes in the last two minutes before the presence-capped expiry. Fixed; T7 fixed by token-scoped call counting.
+- Functionality F1 [Major]: the post-unlock refresh could be lost (network error with <1 min left; adopting a stale in-flight refresh) → Round 11. Security: no findings.
+- Testing T8 [Major, pre-existing]: module-load bridge registration leaked into the next test (~1/20).
+
+## Round 11 — "make the post-unlock refresh reliable near a capped expiry" (+ shared 5 s floor)
+- Functionality, Security: no findings.
+- T8 fixed afterwards (test-only; loadBackground awaits the exported registration promise; 15 consecutive runs green) — tightening-only skip: test infrastructure, no security-boundary change.
+
+## Manual tests
+M1–M5 all pass on a live dev server / device (see long-lived-client-login-manual-test.md).
+
+## Deferred to follow-up work (with Anti-Deferral)
+
+### E2E: query-bearing extension request against a live server — Deferred
+- Anti-Deferral check: deferred to a follow-up, not skipped. Needs a Playwright team + key-rotation fixture driving the real extension bundle; the testing reviewer searched for a cheaper check with the same assurance and found none.
+- Worst case: a future client/server htu divergence ships undetected until manual use (as this one did).
+- Likelihood: low — client htu strip and server htuMatches rejection are each pinned by unit tests.
+- Cost to fix: ~1 day (new E2E fixture).
+
+### Passkey sign-in revokes every client login; active-token cap counts rows and AutoFill tokens — Deferred to a separate branch (user decision)
+- Found in user testing: passkey sign-in (`/api/auth/passkey/verify`) calls `invalidateUserSessions(allTenants)`, revoking extension and iOS logins, so the two cannot stay signed in together when either connect uses a passkey. Separately, `EXTENSION_TOKEN_MAX_ACTIVE = 3` counts token rows (iOS = 2) and short-lived `IOS_AUTOFILL` tokens, evicting a live login.
+- Anti-Deferral check: pre-existing (owasp-batch-3 C7), outside this branch's diff; changing C7 is a security-policy decision the user took to a separate branch.
+- Worst case: users re-connect a client after signing in elsewhere — the long-lived goal is not met across devices.
+- Likelihood: certain for passkey users with both clients.
+- Cost to fix: small code change plus a policy review of C7.
