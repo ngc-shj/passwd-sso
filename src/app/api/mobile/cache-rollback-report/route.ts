@@ -71,11 +71,30 @@ const REJECTION_KIND_VALUES = Object.values(ROLLBACK_REJECTION_KIND) as [
   ...RollbackRejectionKind[],
 ];
 
+const U64_MAX = 18446744073709551615n;
+
+// Cache counters are seeded from 64 random bits on iOS, so they are almost
+// always beyond Number's exact-integer range: they travel as decimal strings.
+// A plain JSON number is accepted only as a safe integer (builds that predate
+// the string form, with small counters); a larger number already lost its low
+// digits in JSON.parse and cannot be recovered, so int() rejects it. Both forms
+// normalise to the decimal string the audit metadata records.
+const u64Counter = z
+  .union([
+    // One refine, not regex().refine(): Zod 4 still runs the refine after a
+    // failed regex, and BigInt("12a") throws instead of returning false.
+    z
+      .string()
+      .refine((v) => /^(0|[1-9][0-9]{0,19})$/.test(v) && BigInt(v) <= U64_MAX),
+    z.number().int().nonnegative(),
+  ])
+  .transform((v) => String(v));
+
 const ReportRequestSchema = z
   .object({
     deviceId: z.string().min(1).max(128),
-    expectedCounter: z.number().int().nonnegative(),
-    observedCounter: z.number().int().nonnegative(),
+    expectedCounter: u64Counter,
+    observedCounter: u64Counter,
     headerIssuedAt: z.number().int().nonnegative(),
     lastSuccessfulRefreshAt: z.number().int().nonnegative(),
     rejectionKind: z.enum(REJECTION_KIND_VALUES),

@@ -931,8 +931,8 @@ final class MobileAPIClientTests: XCTestCase {
 
     let body = CacheRollbackReportBody(
       deviceId: "device-test-001",
-      expectedCounter: 42,
-      observedCounter: 99,
+      expectedCounter: "42",
+      observedCounter: "18446744073709551615",
       headerIssuedAt: 1_746_144_000,
       lastSuccessfulRefreshAt: 0,
       rejectionKind: "counter_mismatch"
@@ -954,8 +954,11 @@ final class MobileAPIClientTests: XCTestCase {
     let bodyData = try XCTUnwrap(req.httpBody ?? readStream(req.httpBodyStream))
     let decoded = try JSONDecoder().decode(CacheRollbackReportBody.self, from: bodyData)
     XCTAssertEqual(decoded.deviceId, "device-test-001")
-    XCTAssertEqual(decoded.expectedCounter, 42)
-    XCTAssertEqual(decoded.observedCounter, 99)
+    XCTAssertEqual(decoded.expectedCounter, "42")
+    // A full-width 64-bit counter must reach the wire as its exact decimal
+    // string, not as a JSON number JavaScript would round.
+    let rawJSON = try XCTUnwrap(String(data: bodyData, encoding: .utf8))
+    XCTAssertTrue(rawJSON.contains(#""observedCounter":"18446744073709551615""#))
     XCTAssertEqual(decoded.headerIssuedAt, 1_746_144_000)
     XCTAssertEqual(decoded.lastSuccessfulRefreshAt, 0)
     XCTAssertEqual(decoded.rejectionKind, "counter_mismatch")

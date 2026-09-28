@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
@@ -139,6 +139,72 @@ describe("POST /api/mobile/cache-rollback-report", () => {
 
   it("returns 400 on an unknown rejectionKind", async () => {
     const res = await POST(makeReq({ ...VALID_BODY, rejectionKind: "totally_made_up" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it("accepts a full-width 64-bit counter as a decimal string and records it exactly", async () => {
+    const res = await POST(
+      makeReq({
+        ...VALID_BODY,
+        expectedCounter: "17555555555555555555",
+        observedCounter: "18446744073709551615",
+      }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          expectedCounter: "17555555555555555555",
+          observedCounter: "18446744073709551615",
+        }),
+      }),
+    );
+  });
+
+  it("normalises a safe-integer counter number to its decimal string", async () => {
+    const res = await POST(makeReq());
+    expect(res.status).toBe(200);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ expectedCounter: "42", observedCounter: "41" }),
+      }),
+    );
+  });
+
+  it("returns 400 for a counter sent as a JSON number beyond 2^53 (precision already lost)", async () => {
+    // createRequest JSON.stringifies its body, which cannot express this
+    // literal exactly — send the raw text the iOS app used to send.
+    const raw = JSON.stringify({ ...VALID_BODY, expectedCounter: 0 }).replace(
+      '"expectedCounter":0',
+      '"expectedCounter":17555555555555555555',
+    );
+    const req = new NextRequest("https://example.test/api/mobile/cache-rollback-report", {
+      method: "POST",
+      body: raw,
+      headers: {
+        "content-type": "application/json",
+        authorization: "DPoP access-token-here",
+        dpop: "fake.proof",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["above 2^64-1", "18446744073709551616"],
+    ["leading zero", "042"],
+    ["negative", "-1"],
+    ["non-digit", "12a"],
+  ])("returns 400 for a counter string that is %s", async (_label, value) => {
+    const res = await POST(makeReq({ ...VALID_BODY, expectedCounter: value }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");

@@ -144,8 +144,9 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
 
     const body = {
       deviceId: "device-uuid-counter",
-      expectedCounter: 42,
-      observedCounter: 41,
+      // The iOS wire form: random 64-bit counters as decimal strings.
+      expectedCounter: "17555555555555555555",
+      observedCounter: "18446744073709551615",
       headerIssuedAt: 1_743_800_000,
       lastSuccessfulRefreshAt: 1_743_799_000,
       rejectionKind: ROLLBACK_REJECTION_KIND.COUNTER_MISMATCH,
@@ -165,8 +166,8 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
     expect(payload.metadata).toMatchObject({
       deviceId: "device-uuid-counter",
       rejectionKind: ROLLBACK_REJECTION_KIND.COUNTER_MISMATCH,
-      expectedCounter: 42,
-      observedCounter: 41,
+      expectedCounter: "17555555555555555555",
+      observedCounter: "18446744073709551615",
     });
   });
 
@@ -194,6 +195,9 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
     expect(rows[0].payload.metadata).toMatchObject({
       deviceId: "device-uuid-flag",
       rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED,
+      // Numeric form from older builds is normalised to the string form.
+      expectedCounter: "0",
+      observedCounter: "0",
     });
   });
 });
