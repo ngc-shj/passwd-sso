@@ -3310,5 +3310,56 @@ describe("C10 tenant requireVaultTimeoutLogout override", () => {
     const status2 = await sendMessage({ type: "GET_STATUS" });
     expect(status2).toEqual(expect.objectContaining({ hasToken: false }));
   });
+
+  it("keeps the tenant policy across a lock and drops it on disconnect", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+              vaultAutoLockMinutes: 1440,
+              requireVaultTimeoutLogout: true,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    await loadBackground();
+    applyToken("t", Date.now() + 600_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    await sendMessage({ type: "LOCK_VAULT" });
+    const locked = await sendMessage({ type: "GET_STATUS" });
+    expect(locked).toEqual(
+      expect.objectContaining({
+        hasToken: true,
+        vaultUnlocked: false,
+        tenantAutoLockMinutes: 1440,
+        requireVaultTimeoutLogout: true,
+      }),
+    );
+
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    const disconnected = await sendMessage({ type: "GET_STATUS" });
+    expect(disconnected).toEqual(
+      expect.objectContaining({
+        hasToken: false,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: null,
+      }),
+    );
+  });
 });
 

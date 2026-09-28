@@ -326,10 +326,19 @@ async function getCachedEntries(): Promise<DecryptedEntry[]> {
  * written to a separate storage key that survives clearSession(); a subsequent
  * successful connect clears it (see applyToken).
  */
+// Tenant policy belongs to the connection, not to the unlocked vault: a lock
+// keeps the token, so it must keep the policy too, or the options page falls
+// back to local settings while locked.
+function clearTenantPolicy(): void {
+  tenantAutoLockMinutes = null;
+  requireVaultTimeoutLogout = null;
+}
+
 function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
   currentToken = null;
   tokenExpiresAt = null;
   currentCnfJkt = null;
+  clearTenantPolicy();
   clearVault();
   chrome.alarms.clear(ALARM_TOKEN_REFRESH);
   clearSession().catch(() => {});
@@ -361,6 +370,7 @@ export function applyToken(
   if (tokenChanged) {
     // A new token may represent a different auth session/user.
     // Force vault relock to avoid carrying unlocked state across token rotation.
+    clearTenantPolicy();
     clearVault();
   }
 
@@ -388,8 +398,6 @@ function clearVault(): void {
   encryptionKey = null;
   currentUserId = null;
   currentVaultSecretKeyHex = null;
-  tenantAutoLockMinutes = null;
-  requireVaultTimeoutLogout = null;
   personalKeyVersion = null;
   // Zero-clear ECDH private key bytes (defense-in-depth)
   if (ecdhPrivateKeyBytes) {
