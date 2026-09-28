@@ -30,6 +30,8 @@ Result (2026-09-28): pass (user-confirmed).
 3. Disable the flag, reconnect, repeat.
 - Expected: after 5 idle minutes the extension shows the unlock screen (lock only).
 
+Result (2026-09-28, Chrome): with "Force sign-out on client app vault timeout" enabled and a 5-minute auto-lock, the extension signed out when the lock fired. Pass (user-confirmed).
+
 ## M4 — iOS Face ID records presence (VE2, device)
 1. Sign in on iOS, unlock with the passphrase, then lock.
 2. Unlock with Face ID.

@@ -1220,7 +1220,8 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     throw new Error("PERMISSION_DENIED");
   }
 
-  const res = await swFetchAuthenticated(path, init, serverUrl, currentToken);
+  const tokenUsed = currentToken;
+  const res = await swFetchAuthenticated(path, init, serverUrl, tokenUsed);
 
   // 401 retry (C5 extension technical approach): the token may have expired
   // between issuance and this call. Attempt a single-flight refresh and, on
@@ -1229,11 +1230,18 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
   // refresh cannot fix a rejected proof or a revoked token — it only rotates
   // the token. Never for the refresh endpoint itself — attemptTokenRefreshWith
   // already owns that call directly.
-  const nearExpiry = tokenExpiresAt !== null && Date.now() >= tokenExpiresAt - REFRESH_BUFFER_MS;
-  if (res.status === 401 && nearExpiry && path !== EXT_API_PATH.EXTENSION_TOKEN_REFRESH) {
-    const refreshed = await refreshTokenSingleFlight();
-    if (refreshed && currentToken) {
+  if (res.status === 401 && path !== EXT_API_PATH.EXTENSION_TOKEN_REFRESH) {
+    // Rotated by a concurrent refresh (e.g. the alarm) while this request was
+    // in flight: the 401 is for the old token, so retry with the current one.
+    if (currentToken !== null && currentToken !== tokenUsed) {
       return swFetchAuthenticated(path, init, serverUrl, currentToken);
+    }
+    const nearExpiry = tokenExpiresAt !== null && Date.now() >= tokenExpiresAt - REFRESH_BUFFER_MS;
+    if (nearExpiry) {
+      const refreshed = await refreshTokenSingleFlight();
+      if (refreshed && currentToken) {
+        return swFetchAuthenticated(path, init, serverUrl, currentToken);
+      }
     }
   }
 

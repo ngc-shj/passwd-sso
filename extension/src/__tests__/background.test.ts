@@ -1962,10 +1962,12 @@ describe("session hydration", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await loadBackground();
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes(EXT_API_PATH.VAULT_STATUS))).toBe(true),
+    );
+    await new Promise((r) => setTimeout(r, 20)); // let a (wrong) refresh, if any, be issued
 
     const urls = fetchMock.mock.calls.map(([url]) => String(url));
-    expect(urls.some((u) => u.includes(EXT_API_PATH.VAULT_STATUS))).toBe(true);
     // A generic 401 (e.g. a rejected proof) is not fixable by rotating the token.
     expect(urls.filter((u) => u.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH))).toHaveLength(0);
   });
@@ -1997,11 +1999,70 @@ describe("session hydration", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await loadBackground();
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes(EXT_API_PATH.VAULT_STATUS)),
+      ).toHaveLength(2),
+    );
 
     const urls = fetchMock.mock.calls.map(([url]) => String(url));
     expect(urls.filter((u) => u.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH))).toHaveLength(1);
-    expect(urls.filter((u) => u.includes(EXT_API_PATH.VAULT_STATUS))).toHaveLength(2);
+  });
+
+  it("retries with the current token when a concurrent refresh rotated it mid-request", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "old-tok",
+      expiresAt: Date.now() + 600_000, // far from expiry: only the rotation can justify a retry
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    let releaseFirstStatus!: () => void;
+    const firstStatusGate = new Promise<void>((r) => { releaseFirstStatus = r; });
+    let statusCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+        return {
+          ok: true,
+          json: async () => ({
+            token: "new-tok",
+            expiresAt: new Date(Date.now() + 900_000).toISOString(),
+            scope: ["passwords:read"],
+            cnfJkt: STATIC_TEST_JKT,
+          }),
+        };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          await firstStatusGate; // old-token request still in flight
+          return { ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) };
+        }
+        return { ok: true, json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: false }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await vi.waitFor(() => expect(statusCalls).toBe(1)); // old-token request in flight
+    // The alarm rotates the token while the status request is in flight.
+    alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+    await vi.waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)),
+      ).toHaveLength(1),
+    );
+    await new Promise((r) => setTimeout(r, 20)); // let the refresh response be applied
+    releaseFirstStatus();
+    await vi.waitFor(() => expect(statusCalls).toBe(2));
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    // One refresh (the alarm's) — the 401 adopted its result instead of rotating again.
+    expect(urls.filter((u) => u.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH))).toHaveLength(1);
+    expect(statusCalls).toBe(2);
   });
 
   it("does not refetch the tenant policy when the restored session already has it", async () => {
