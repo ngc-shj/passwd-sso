@@ -1891,22 +1891,24 @@ describe("session hydration", () => {
     });
     let releaseStatus!: () => void;
     const statusGate = new Promise<void>((r) => { releaseStatus = r; });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
-          await statusGate;
-          return {
-            ok: true,
-            json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: true }),
-          };
-        }
-        return { ok: false, json: async () => ({}) };
-      }),
-    );
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+        await statusGate;
+        return {
+          ok: true,
+          json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: true }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     await loadBackground();
-    await new Promise((r) => setTimeout(r, 20)); // status fetch now in flight
+    await new Promise((r) => setTimeout(r, 20));
+    // Precondition: the status fetch is actually in flight before disconnecting.
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(EXT_API_PATH.VAULT_STATUS)),
+    ).toBe(true);
     await sendMessage({ type: "CLEAR_TOKEN" });
     releaseStatus();
     await new Promise((r) => setTimeout(r, 20));

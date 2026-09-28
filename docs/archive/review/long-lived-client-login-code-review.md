@@ -105,3 +105,24 @@ During M4 on a real device, every `POST /api/mobile/cache-rollback-report` retur
 
 ## Verification
 Route tests 27/27, real-DB integration 2/2, iOS xcodebuild test 818 pass on the macOS host, full pre-PR pass.
+
+---
+
+# Review rounds 5–6 (2026-09-28) — extension tenant-policy display (from user testing)
+
+## Background
+Browser testing showed the extension options page with the local 15-minute auto-lock while the tenant sets 1440 (iOS showed 1440). The extension cleared the tenant policy on every lock (pre-existing, harmless while lock also dropped the token) and only learned it from unlock data.
+
+## Round 5 — commits "keep the tenant auto-lock policy across a vault lock", "load the tenant vault policy as soon as the extension connects"
+- Functionality F1 [Major] / Security S1 [Major] (converged): `refreshTenantPolicy()` had no supersession guard — a response landing after a disconnect/reconnect revived the old connection's policy, and a same-lifetime reconnect kept it. F2 [Minor] stale GET_STATUS comment. F3 [Minor] hydrate refetch gate used AND across two independently nullable fields.
+- Security adjacent: hydrate's cnfJkt-mismatch path cleared storage but left the in-memory token/policy.
+- Testing T5 [Major] no test for the START_CONNECT fetch; F1 [Major] no test that a token switch clears the policy.
+
+## Round 6 — commit "drop stale tenant-policy responses and discard unusable restored sessions"
+- Fixes: `tokenAtStart` identity check before applying the response; OR gate; comment; `discardRestoredSession()` on both hydrate failure paths; tests for token switch, START_CONNECT (vi.doMock, doUnmock in finally), late response after CLEAR_TOKEN, cnfJkt mismatch. An existing hydrate fixture lacked `tokenCnfJkt` and passed only because of the in-memory leak — corrected.
+- Functionality: No findings. Security: No findings (all interleavings of `discardRestoredSession` vs a concurrent connect traced; `hydrationSuperseded` check precedes the synchronous discard). Testing: T6 [Minor] the late-response test assumed, without asserting, that the status fetch was in flight.
+
+## Tightening-only skip — Round 6
+Findings applied directly (no Round 7 review):
+- T6 [Minor] precondition assertion added (status fetch observed in flight before CLEAR_TOKEN) — `extension/src/__tests__/background.test.ts` — applied verbatim
+Justification: test-only, inside the Round 6 fix scope, no security-boundary change.
