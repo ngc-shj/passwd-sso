@@ -66,7 +66,7 @@
   "absoluteTimeoutValidationMin": "{min}分以上で入力してください。",
   "absoluteTimeoutValidationMax": "{max}分以下で入力してください。",
   "extensionIdleMinutes": "クライアントアプリ アイドルタイムアウト（分）",
-  "extensionIdleHelp": "クライアントアプリのアクセストークンが、指定時間使用されなかった場合に失効します。{min}〜{max}分の範囲で指定してください。最小値付近はブラウザ拡張使用時に Chrome の service worker 休眠により不安定になることがあります。",
+  "extensionIdleHelp": "クライアントアプリのサインインは、保管庫のアンロック（パスフレーズ、iOS では Face ID も可）が確認されないまま指定時間が経つと失効します。バックグラウンドでのトークン更新では延長されません。{min}〜{max}分の範囲で指定してください。最小値付近はブラウザ拡張使用時に Chrome の service worker 休眠により不安定になることがあります。",
   "extensionIdleValidationMin": "{min}分以上で入力してください。",
   "extensionIdleValidationMax": "{max}分以下で入力してください。",
   "extensionAbsoluteMinutes": "クライアントアプリ 絶対タイムアウト（分）",

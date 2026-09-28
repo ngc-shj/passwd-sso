@@ -2065,6 +2065,45 @@ describe("session hydration", () => {
     expect(statusCalls).toBe(2);
   });
 
+  it("does not resend a request under a different connection that replaced it mid-request", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "account-a-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "user-a",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    let releaseFirstStatus!: () => void;
+    const firstStatusGate = new Promise<void>((r) => { releaseFirstStatus = r; });
+    const statusAuth: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+        statusAuth.push(new Headers(init?.headers).get("Authorization") ?? "");
+        if (statusAuth.length === 1) {
+          await firstStatusGate;
+          return { ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) };
+        }
+        return { ok: true, json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: false }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await vi.waitFor(() => expect(statusAuth).toHaveLength(1)); // account A's request in flight
+    expect(statusAuth[0]).toContain("account-a-tok"); // the header capture itself works
+    // Disconnect and connect as another account before the 401 comes back.
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    applyToken("account-b-tok", Date.now() + 600_000, STATIC_TEST_JKT);
+    releaseFirstStatus();
+    await new Promise((r) => setTimeout(r, 30));
+
+    // No retry of account A's request under account B's token.
+    expect(statusAuth.filter((a) => a.includes("account-b-tok"))).toHaveLength(0);
+  });
+
   it("does not refetch the tenant policy when the restored session already has it", async () => {
     vi.resetModules();
     vi.clearAllMocks();

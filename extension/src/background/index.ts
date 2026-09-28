@@ -110,6 +110,11 @@ let currentUserId: string | null = null;
 let currentVaultSecretKeyHex: string | null = null;
 // Tenant policy auto-lock override (null = use local setting)
 let tenantAutoLockMinutes: number | null = null;
+// Bumped whenever the connection itself changes (connect, disconnect) — not on
+// token refresh, which rotates the token within the same connection. Lets an
+// in-flight request tell "my token was rotated" from "a different connection
+// (possibly another account) replaced mine".
+let connectionGeneration = 0;
 // Tenant policy override forcing "logout" as the vault-timeout action (C10).
 // null = tenant has not stated a preference (or vault never unlocked yet) —
 // the local vaultTimeoutAction setting applies.
@@ -363,6 +368,7 @@ async function refreshTenantPolicy(): Promise<void> {
 }
 
 function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
+  connectionGeneration += 1;
   currentToken = null;
   tokenExpiresAt = null;
   currentCnfJkt = null;
@@ -394,6 +400,7 @@ export function applyToken(
   cnfJkt: string,
 ): void {
   hydrationSuperseded = true;
+  connectionGeneration += 1;
   const tokenChanged = currentToken !== null && currentToken !== token;
   if (tokenChanged) {
     // A new token may represent a different auth session/user.
@@ -1221,6 +1228,7 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
   }
 
   const tokenUsed = currentToken;
+  const generationUsed = connectionGeneration;
   const res = await swFetchAuthenticated(path, init, serverUrl, tokenUsed);
 
   // 401 retry (C5 extension technical approach): the token may have expired
@@ -1230,7 +1238,14 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
   // refresh cannot fix a rejected proof or a revoked token — it only rotates
   // the token. Never for the refresh endpoint itself — attemptTokenRefreshWith
   // already owns that call directly.
-  if (res.status === 401 && path !== EXT_API_PATH.EXTENSION_TOKEN_REFRESH) {
+  // Never resend under a different connection: the request (e.g. a create
+  // whose body is encrypted to the previous account) belongs to the one that
+  // built it.
+  if (
+    res.status === 401 &&
+    path !== EXT_API_PATH.EXTENSION_TOKEN_REFRESH &&
+    connectionGeneration === generationUsed
+  ) {
     // Rotated by a concurrent refresh (e.g. the alarm) while this request was
     // in flight: the 401 is for the old token, so retry with the current one.
     if (currentToken !== null && currentToken !== tokenUsed) {
@@ -1239,7 +1254,7 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     const nearExpiry = tokenExpiresAt !== null && Date.now() >= tokenExpiresAt - REFRESH_BUFFER_MS;
     if (nearExpiry) {
       const refreshed = await refreshTokenSingleFlight();
-      if (refreshed && currentToken) {
+      if (refreshed && currentToken && connectionGeneration === generationUsed) {
         return swFetchAuthenticated(path, init, serverUrl, currentToken);
       }
     }

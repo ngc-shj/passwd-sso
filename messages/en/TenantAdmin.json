@@ -66,7 +66,7 @@
   "absoluteTimeoutValidationMin": "Must be at least {min} minutes.",
   "absoluteTimeoutValidationMax": "Must be {max} minutes or less.",
   "extensionIdleMinutes": "Client app idle timeout (minutes)",
-  "extensionIdleHelp": "Client app access token is revoked after this many minutes without use. Range: {min}–{max} minutes. Values near the minimum may be unreliable for browser extensions due to Chrome service-worker dormancy.",
+  "extensionIdleHelp": "The client app's sign-in expires after this many minutes without a verified vault unlock (passphrase, or Face ID on iOS). Background token refresh does not extend it. Range: {min}–{max} minutes. Values near the minimum may be unreliable for browser extensions due to Chrome service-worker dormancy.",
   "extensionIdleValidationMin": "Must be at least {min} minutes.",
   "extensionIdleValidationMax": "Must be {max} minutes or less.",
   "extensionAbsoluteMinutes": "Client app absolute timeout (minutes)",
