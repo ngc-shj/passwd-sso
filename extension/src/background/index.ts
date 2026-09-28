@@ -339,10 +339,13 @@ function clearTenantPolicy(): void {
 // before the first unlock. Best-effort: a failure leaves the policy unknown
 // until that unlock, exactly as before.
 async function refreshTenantPolicy(): Promise<void> {
-  if (!currentToken) return;
+  const tokenAtStart = currentToken;
+  if (!tokenAtStart) return;
   try {
     const res = await swFetch(EXT_API_PATH.VAULT_STATUS);
-    if (!res.ok) return;
+    // A disconnect or reconnect during the round-trip cleared (or replaced)
+    // the policy; writing this response would revive the old connection's.
+    if (!res.ok || currentToken !== tokenAtStart) return;
     const data = (await res.json()) as {
       vaultAutoLockMinutes?: unknown;
       requireVaultTimeoutLogout?: unknown;
@@ -563,6 +566,17 @@ function persistState(): void {
   }
 }
 
+// The in-memory fields hydrate assigned before it found the stored session
+// unusable; clearing only storage would leave them for the SW's lifetime.
+function discardRestoredSession(): void {
+  currentToken = null;
+  tokenExpiresAt = null;
+  currentUserId = null;
+  currentVaultSecretKeyHex = null;
+  personalKeyVersion = null;
+  clearTenantPolicy();
+}
+
 /** Restore in-memory state from chrome.storage.session on SW startup */
 async function hydrateFromSession(): Promise<void> {
   const state = await loadSession();
@@ -599,18 +613,22 @@ async function hydrateFromSession(): Promise<void> {
     const idbJkt = await getDpopThumbprint();
     if (hydrationSuperseded) return;
     if (state.tokenCnfJkt !== idbJkt) {
+      discardRestoredSession();
       await clearSession();
       return;
     }
     currentCnfJkt = state.tokenCnfJkt;
   } catch {
     // If DPoP key retrieval fails, clear state to be safe.
+    discardRestoredSession();
     await clearSession();
     return;
   }
 
   // Only once the stored token is confirmed usable (cnfJkt matches the DPoP key).
-  if (tenantAutoLockMinutes === null && requireVaultTimeoutLogout === null) {
+  // Either field unknown (e.g. a session persisted before the logout policy
+  // existed) → refetch; the response rewrites both together.
+  if (tenantAutoLockMinutes === null || requireVaultTimeoutLogout === null) {
     void refreshTenantPolicy();
   }
 
@@ -2289,8 +2307,9 @@ async function handleMessage(
         vaultUnlocked: encryptionKey !== null,
         disconnectReason,
         // Tenant-policy override for auto-lock. Null when the tenant has
-        // not set a value (or the vault has never been unlocked yet, so
-        // we don't know). UI uses this to disable the local setting.
+        // not set a value, or while the connect/restore policy fetch has not
+        // completed (or failed) and no unlock has supplied it yet. UI uses
+        // this to disable the local setting.
         tenantAutoLockMinutes,
         // Tenant-policy override forcing "logout" as the vault-timeout
         // action (C10). Same null-until-known semantics as above.

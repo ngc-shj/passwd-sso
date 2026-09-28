@@ -1801,6 +1801,7 @@ describe("session hydration", () => {
       expiresAt,
       userId: "u-1",
       vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
       tenantAutoLockMinutes: 30,
     });
 
@@ -1874,6 +1875,73 @@ describe("session hydration", () => {
         vaultUnlocked: false,
         tenantAutoLockMinutes: 1440,
         requireVaultTimeoutLogout: false,
+      }),
+    );
+  });
+
+  it("discards a tenant-policy response that arrives after a disconnect", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    let releaseStatus!: () => void;
+    const statusGate = new Promise<void>((r) => { releaseStatus = r; });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+          await statusGate;
+          return {
+            ok: true,
+            json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: true }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+
+    await loadBackground();
+    await new Promise((r) => setTimeout(r, 20)); // status fetch now in flight
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    releaseStatus();
+    await new Promise((r) => setTimeout(r, 20));
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        hasToken: false,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: null,
+      }),
+    );
+  });
+
+  it("clears the in-memory token when the restored session's cnfJkt no longer matches", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: "some-other-jkt",
+      tenantAutoLockMinutes: 1440,
+      requireVaultTimeoutLogout: true,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+
+    await loadBackground();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        hasToken: false,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: null,
       }),
     );
   });
@@ -3368,6 +3436,79 @@ describe("C10 tenant requireVaultTimeoutLogout override", () => {
     // LOGOUT path clears the token, not just the vault.
     const status2 = await sendMessage({ type: "GET_STATUS" });
     expect(status2).toEqual(expect.objectContaining({ hasToken: false }));
+  });
+
+  it("drops the tenant policy when a different token is applied (user/session switch)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+              vaultAutoLockMinutes: 1440,
+              requireVaultTimeoutLogout: true,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    await loadBackground();
+    applyToken("t-1", Date.now() + 600_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    applyToken("t-2", Date.now() + 600_000, "");
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        hasToken: true,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: null,
+      }),
+    );
+  });
+
+  it("fetches the tenant policy after a successful START_CONNECT", async () => {
+    vi.doMock("../background/token-handler", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../background/token-handler")>()),
+      startConnect: vi.fn(async ({ setToken }: { setToken: (t: string, e: number, j: string) => void }) => {
+        setToken("new-tok", Date.now() + 600_000, STATIC_TEST_JKT);
+        return { ok: true };
+      }),
+    }));
+    try {
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+          return {
+            ok: true,
+            json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: false }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      await loadBackground();
+
+      await sendMessage({ type: "START_CONNECT" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const status = await sendMessage({ type: "GET_STATUS" });
+      expect(status).toEqual(
+        expect.objectContaining({ hasToken: true, tenantAutoLockMinutes: 1440 }),
+      );
+    } finally {
+      vi.doUnmock("../background/token-handler");
+    }
   });
 
   it("keeps the tenant policy across a lock and drops it on disconnect", async () => {
