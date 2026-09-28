@@ -41,6 +41,8 @@ const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
   unwrapSecretKey: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
   deriveEncryptionKey: vi.fn().mockResolvedValue("enc-key"),
+  deriveAuthKeyBytes: vi.fn().mockResolvedValue(new Uint8Array([4, 5, 6])),
+  computeAuthHash: vi.fn().mockResolvedValue("fake-auth-hash"),
   verifyKey: vi.fn().mockResolvedValue(true),
   decryptData: vi.fn().mockResolvedValue(
     JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" })
@@ -108,6 +110,7 @@ function installChromeMock() {
       onStartup: { addListener: vi.fn() },
       sendMessage: vi.fn().mockResolvedValue({ ok: true }),
       getContexts: vi.fn().mockResolvedValue([]),
+      getURL: vi.fn((path: string) => `chrome-extension://test-extension-id/${path}`),
     },
     offscreen: {
       createDocument: vi.fn().mockResolvedValue(undefined),
@@ -254,6 +257,9 @@ describe("background message flow", () => {
               scope: ["passwords:read", "vault:unlock-data"],
             }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -696,6 +702,9 @@ describe("background message flow", () => {
           }),
         };
       }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
+      }
       if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
         return {
           ok: true,
@@ -921,6 +930,9 @@ describe("background message flow", () => {
           }),
         };
       }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
+      }
       if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
         return {
           ok: true,
@@ -1008,6 +1020,9 @@ describe("background message flow", () => {
               scope: ["passwords:read", "vault:unlock-data"],
             }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -1097,6 +1112,9 @@ describe("background message flow", () => {
               scope: ["passwords:read", "vault:unlock-data"],
             }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -1342,6 +1360,9 @@ describe("background message flow", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -1534,6 +1555,9 @@ describe("session persistence", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -1878,6 +1902,9 @@ describe("token refresh alarm", () => {
             }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -1928,6 +1955,9 @@ describe("token refresh alarm", () => {
             json: async () => ({ error: "UNAUTHORIZED" }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -1973,6 +2003,9 @@ describe("token refresh alarm", () => {
             status: 500,
             json: async () => ({ error: "INTERNAL_SERVER_ERROR" }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -2027,6 +2060,9 @@ describe("token refresh alarm", () => {
             json: async () => ({ error: "TOO_MANY_REQUESTS" }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2071,6 +2107,9 @@ describe("token refresh alarm", () => {
       vi.fn(async (url: string) => {
         if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
           throw new Error("Failed to fetch");
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -2177,6 +2216,9 @@ describe("failsafe responses", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2395,6 +2437,9 @@ describe("CHECK_PENDING_SAVE host validation", () => {
             }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2563,6 +2608,9 @@ describe("LOGIN_DETECTED suppresses on own app", () => {
             }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2677,6 +2725,9 @@ describe("PASSKEY handlers suppress on own app", () => {
               scope: ["passwords:read", "vault:unlock-data"],
             }),
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
@@ -2803,6 +2854,9 @@ describe("tab event badge updates", () => {
             }),
           };
         }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {
             ok: true,
@@ -2886,6 +2940,325 @@ describe("tab event badge updates", () => {
     await vi.waitFor(() => {
       expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
     });
+  });
+});
+
+// ── C2 consumer: POST /api/vault/unlock/verify ──────────────────────────
+// UNLOCK_VAULT records server-side presence after local verification
+// succeeds. Every non-200 outcome is a non-blocking logged warning — the
+// local unlock (and hence vaultUnlocked) must never be affected.
+describe("C2 consumer: unlock presence verification", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+  });
+
+  function stubFetch(
+    verifyHandler: () => Promise<{ ok: boolean; status?: number; json: () => Promise<unknown> }>,
+  ) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return verifyHandler();
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+  }
+
+  async function unlockAndSettle(): Promise<unknown> {
+    await loadBackground();
+    applyToken("t", Date.now() + 60_000, "");
+    const res = await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    // recordUnlockPresence is fire-and-forget — let its microtask chain settle
+    // before asserting on console.warn / GET_STATUS.
+    await new Promise((r) => setTimeout(r, 50));
+    return res;
+  }
+
+  it("200 → unlocked, no warning logged", async () => {
+    stubFetch(async () => ({ ok: true, status: 200, json: async () => ({ verified: true }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const unlockRes = await unlockAndSettle();
+    expect(unlockRes).toEqual({ type: "UNLOCK_VAULT", ok: true });
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it("422 (AUTH_HASH_MISMATCH) → still unlocked, mismatch warning logged", async () => {
+    stubFetch(async () => ({ ok: false, status: 422, json: async () => ({ error: "AUTH_HASH_MISMATCH" }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-mismatch"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("401 (token/DPoP layer) → still unlocked, token-failure warning logged (not a mismatch)", async () => {
+    stubFetch(async () => ({ ok: false, status: 401, json: async () => ({ error: "UNAUTHORIZED" }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-token-failure"),
+    );
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-mismatch"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("403 ACCOUNT_LOCKED → still unlocked, account-locked warning logged", async () => {
+    stubFetch(async () => ({ ok: false, status: 403, json: async () => ({ error: "ACCOUNT_LOCKED" }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-account-locked"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("429 → still unlocked, rate-limited warning logged", async () => {
+    stubFetch(async () => ({ ok: false, status: 429, json: async () => ({ error: "RATE_LIMITED" }) }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-rate-limited"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("network error → still unlocked, network-error warning logged", async () => {
+    stubFetch(async () => {
+      throw new Error("network down");
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unlockAndSettle();
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vault-unlock-verify-network-error"),
+    );
+
+    warnSpy.mockRestore();
+  });
+});
+
+// ── C6: inactivity auto-lock ─────────────────────────────────────────────
+describe("C6 inactivity auto-lock", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    await loadBackground();
+    applyToken("t", Date.now() + 3_600_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    chromeMock?.alarms.create.mockClear();
+  });
+
+  it("re-arms the vault-lock alarm when a message arrives from a trusted extension page (popup/options)", async () => {
+    const popupSender = { url: chrome.runtime.getURL("popup/index.html") };
+    await sendMessageWithSender({ type: "GET_STATUS" }, popupSender);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.objectContaining({ delayInMinutes: 15 }),
+    );
+  });
+
+  it("debounces repeated activity within 30s to a single re-arm", async () => {
+    const popupSender = { url: chrome.runtime.getURL("popup/index.html") };
+    await sendMessageWithSender({ type: "GET_STATUS" }, popupSender);
+    await sendMessageWithSender({ type: "GET_STATUS" }, popupSender);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const lockRearms = (chromeMock?.alarms.create.mock.calls ?? []).filter(
+      ([name]) => name === ALARM_VAULT_LOCK,
+    );
+    expect(lockRearms).toHaveLength(1);
+  });
+
+  it("does not extend the alarm for a KEEPALIVE_PING from the offscreen document", async () => {
+    // The offscreen document's own URL also starts with chrome.runtime.getURL(""),
+    // but it pings every 25s purely to keep the SW alive — counting it would
+    // mean the auto-lock alarm could never fire. KEEPALIVE_PING never calls
+    // sendResponse (see the handler's no-op case), so drive it directly
+    // through the raw listener instead of the response-awaiting helper.
+    const offscreenSender = { url: chrome.runtime.getURL("offscreen.html") };
+    messageHandlers[0]({ type: "KEEPALIVE_PING" }, offscreenSender, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.anything(),
+    );
+  });
+
+  it("does not extend the alarm for an untrusted content-script fill request (no userGesture)", async () => {
+    // A page cannot dispatch a trusted click through the dropdown's isTrusted
+    // gate, so a page-triggerable AUTOFILL_FROM_CONTENT never carries this field.
+    await sendMessageWithSender(
+      { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+      { tab: { id: 1 }, url: "https://example.com" },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.anything(),
+    );
+  });
+
+  it("extends the alarm for a trusted content-script fill request (userGesture: true)", async () => {
+    await sendMessageWithSender(
+      { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1", userGesture: true },
+      { tab: { id: 1 }, url: "https://example.com" },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+      ALARM_VAULT_LOCK,
+      expect.objectContaining({ delayInMinutes: 15 }),
+    );
+  });
+
+  it("activity at t=14min re-arms past the original 15min deadline (would not lock at t=16min)", async () => {
+    const start = Date.now();
+    // Initial arm from beforeEach's unlock fired delayInMinutes: 15 — a real
+    // browser would fire ALARM_VAULT_LOCK at start+15min if untouched.
+    expect(chromeMock?.alarms.create).not.toHaveBeenCalled(); // cleared in beforeEach
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(start + 14 * 60_000);
+      const popupSender = { url: chrome.runtime.getURL("popup/index.html") };
+      await sendMessageWithSender({ type: "GET_STATUS" }, popupSender);
+      // registerActivity's async chain uses real Promise microtasks; Date is
+      // faked but setTimeout is not (toFake: ["Date"]), so a real wait works.
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Re-armed for another 15 minutes FROM t=14min (i.e. fires at t=29min,
+      // not the original t=15min) — this is what stops a real browser from
+      // locking the vault at t=15min.
+      expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
+        ALARM_VAULT_LOCK,
+        expect.objectContaining({ delayInMinutes: 15 }),
+      );
+
+      vi.setSystemTime(start + 16 * 60_000);
+      const status = await sendMessage({ type: "GET_STATUS" });
+      expect(status).toEqual(expect.objectContaining({ vaultUnlocked: true }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── C10: tenant requireVaultTimeoutLogout override ──────────────────────
+describe("C10 tenant requireVaultTimeoutLogout override", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+  });
+
+  it("logs out on ALARM_VAULT_LOCK when the tenant requires it, overriding local action = lock", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+              requireVaultTimeoutLogout: true,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    await loadBackground();
+
+    // Local vaultTimeoutAction stays at its default ("lock") — never toggled.
+    applyToken("t", Date.now() + 600_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const status1 = await sendMessage({ type: "GET_STATUS" });
+    expect(status1).toEqual(expect.objectContaining({ requireVaultTimeoutLogout: true }));
+
+    alarmHandlers[0]({ name: ALARM_VAULT_LOCK });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // LOGOUT path clears the token, not just the vault.
+    const status2 = await sendMessage({ type: "GET_STATUS" });
+    expect(status2).toEqual(expect.objectContaining({ hasToken: false }));
   });
 });
 

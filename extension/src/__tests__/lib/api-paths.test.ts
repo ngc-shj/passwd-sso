@@ -12,6 +12,7 @@ describe("api paths", () => {
     );
     expect(EXT_API_PATH.PASSWORDS).toBe("/api/passwords");
     expect(EXT_API_PATH.VAULT_UNLOCK_DATA).toBe("/api/vault/unlock/data");
+    expect(EXT_API_PATH.VAULT_UNLOCK_VERIFY).toBe("/api/vault/unlock/verify");
     expect(EXT_API_PATH.TEAMS).toBe("/api/teams");
   });
 

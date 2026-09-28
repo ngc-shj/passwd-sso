@@ -22,6 +22,13 @@ export type ExtensionMessage =
       entryId: string;
       targetHint?: AutofillTargetHint;
       teamId?: string;
+      // C6: set to `true` only when the content script's onSelect fired from
+      // a trusted user gesture (event.isTrusted) — see suggestion-dropdown.ts
+      // isSafeSelectClick / keydown gating, which reject a page's synthetic
+      // (untrusted) dispatchEvent before onSelect ever runs. Absent for any
+      // other path, so the background can safely treat its presence as proof
+      // of real user activity.
+      userGesture?: boolean;
     }
   | { type: typeof EXT_MSG.LOGIN_DETECTED; url: string; username: string; password: string }
   | { type: typeof EXT_MSG.SAVE_LOGIN; url: string; title: string; username: string; password: string }
@@ -107,7 +114,7 @@ export type ExtensionResponse =
   | { type: typeof EXT_MSG.START_CONNECT; ok: boolean; errorCode?: string }
   | { type: typeof EXT_MSG.GET_TOKEN; token: string | null }
   | { type: typeof EXT_MSG.CLEAR_TOKEN; ok: true }
-  | { type: typeof EXT_MSG.GET_STATUS; hasToken: boolean; expiresAt: number | null; vaultUnlocked: boolean; disconnectReason?: DisconnectReason | null; tenantAutoLockMinutes?: number | null }
+  | { type: typeof EXT_MSG.GET_STATUS; hasToken: boolean; expiresAt: number | null; vaultUnlocked: boolean; disconnectReason?: DisconnectReason | null; tenantAutoLockMinutes?: number | null; requireVaultTimeoutLogout?: boolean | null }
   | { type: typeof EXT_MSG.UNLOCK_VAULT; ok: boolean; error?: string }
   | { type: typeof EXT_MSG.LOCK_VAULT; ok: true }
   | { type: typeof EXT_MSG.FETCH_PASSWORDS; entries: DecryptedEntry[] | null; error?: string }

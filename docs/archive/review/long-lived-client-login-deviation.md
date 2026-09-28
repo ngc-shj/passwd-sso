@@ -24,3 +24,11 @@
 - D-B1b-2 `expires_in` assertions in the mobile token route tests became range checks because the value is now computed from the C3-capped expiry.
 - D-B1b-3 Web vault context untouched for `requireVaultTimeoutLogout` (SC3).
 - D-B1b-4 Orchestrator fix: B1a's "replay at exactly the grace window" test read the real clock twice and flaked when a millisecond elapsed; it now freezes `Date` with fake timers (RT: a timing-dependent test was reporting a race in the test, not the route).
+
+## B3 (extension)
+
+- D-B3-1 `swFetch` gained a 401 → single-flight refresh → retry-once path (the plan's single-flight bullet named a "401 retry" caller that did not exist yet). `/api/vault/unlock/verify` bypasses it so its 401 is observed as-is.
+- D-B3-2 Activity from extension pages counts for C6 except `KEEPALIVE_PING` (offscreen keepalive every 25 s would otherwise make auto-lock unreachable). Orchestrator checked the popup's storage-change status refresh: it runs only while the popup is open, so it cannot keep an unattended vault unlocked.
+- D-B3-3 Content scripts set `userGesture: true` at the three `onSelect` send sites; each is reachable only from `suggestion-dropdown.ts`'s `isTrusted`-gated handlers.
+- D-B3-4 Six new `BackgroundWarnEvent` members in `background/log.ts` (one per verify outcome, plus an unexpected-status fallback).
+- D-B3-5 Golden vector: extension uses secretKey `00…1f` (same as iOS); the existing web test pins a different vector (`0xaa`×32). Converged in B2 via the frozen JSON.

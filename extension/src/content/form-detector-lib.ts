@@ -390,7 +390,15 @@ function showForInput(
           autocomplete: input.autocomplete || undefined,
         };
         chrome.runtime.sendMessage(
-          { type: "AUTOFILL_FROM_CONTENT", entryId, targetHint, ...(teamId ? { teamId } : {}) },
+          {
+            type: "AUTOFILL_FROM_CONTENT",
+            entryId,
+            targetHint,
+            ...(teamId ? { teamId } : {}),
+            // C6: onSelect only fires from a trusted click/keydown (see
+            // suggestion-dropdown.ts isSafeSelectClick) — safe to mark as activity.
+            userGesture: true,
+          },
           (response?: { ok?: boolean; error?: string }) => {
             if (!isContextValid()) return;
             if (chrome.runtime.lastError) {

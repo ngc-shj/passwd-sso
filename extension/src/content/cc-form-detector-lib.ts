@@ -382,7 +382,14 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
         if (!isContextValid()) return;
         autofillSuppressUntil = Date.now() + 1500;
         chrome.runtime.sendMessage(
-          { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId, ...(teamId ? { teamId } : {}) },
+          {
+            type: EXT_MSG.AUTOFILL_FROM_CONTENT,
+            entryId,
+            ...(teamId ? { teamId } : {}),
+            // C6: onSelect only fires from a trusted click/keydown (see
+            // suggestion-dropdown.ts isSafeSelectClick) — safe to mark as activity.
+            userGesture: true,
+          },
           (resp?: { ok?: boolean; error?: string }) => {
             if (!isContextValid()) return;
             if (chrome.runtime.lastError) {

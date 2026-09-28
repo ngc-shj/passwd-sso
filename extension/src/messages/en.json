@@ -86,6 +86,7 @@
     "vaultTimeoutLock": "Lock",
     "vaultTimeoutLogout": "Log out",
     "vaultTimeoutLogoutHint": "Logging out revokes the session and requires re-authentication.",
+    "vaultTimeoutActionTenantEnforced": "Your organization requires logging out on vault timeout. This setting is disabled.",
     "resetConnection": "Reset connection",
     "resetConnectionHint": "Disconnect this browser from the server and revoke its access tokens. After resetting, re-connect from the web app to start a new session.",
     "resetConnectionAction": "Reset",

@@ -44,6 +44,9 @@ const allDefaults = {
   vaultTimeoutAction: "lock" as const,
 };
 
+// Mutable so individual tests can simulate the tenant policy override (C10).
+let mockRequireVaultTimeoutLogout: boolean | null = null;
+
 const existingChrome =
   typeof globalThis !== "undefined" && "chrome" in globalThis && typeof (globalThis as Record<string, unknown>).chrome === "object" && (globalThis as Record<string, unknown>).chrome !== null
     ? (globalThis as Record<string, unknown>).chrome as Record<string, unknown>
@@ -59,7 +62,14 @@ vi.stubGlobal("chrome", {
     openOptionsPage: vi.fn(),
     getManifest: vi.fn().mockReturnValue({ version: "0.5.0" }),
     sendMessage: vi.fn((_msg: unknown, cb?: (res: unknown) => void) => {
-      cb?.({ type: "GET_STATUS", hasToken: false, expiresAt: null, vaultUnlocked: false, tenantAutoLockMinutes: null });
+      cb?.({
+        type: "GET_STATUS",
+        hasToken: false,
+        expiresAt: null,
+        vaultUnlocked: false,
+        tenantAutoLockMinutes: null,
+        requireVaultTimeoutLogout: mockRequireVaultTimeoutLogout,
+      });
     }),
     lastError: undefined,
   },
@@ -107,9 +117,34 @@ describe("Options App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockThemeState = "system";
+    mockRequireVaultTimeoutLogout = null;
     mockGetSettings.mockResolvedValue({ ...allDefaults });
     mockEnsureHostPermission.mockResolvedValue(true);
     ((globalThis as Record<string, unknown>).chrome as Record<string, Record<string, unknown>>).permissions.contains = vi.fn().mockResolvedValue(false);
+  });
+
+  it("disables the vault-timeout-action select and explains why when the tenant enforces logout (C10)", async () => {
+    mockRequireVaultTimeoutLogout = true;
+    render(<App />);
+    await screen.findByText("General");
+    navigateTo("Security");
+
+    const select = await screen.findByLabelText(/on vault timeout/i);
+    expect(select).toBeDisabled();
+    expect(select).toHaveValue("logout");
+    expect(
+      screen.getByText(/organization requires logging out on vault timeout/i),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the vault-timeout-action select enabled when the tenant has no override", async () => {
+    mockRequireVaultTimeoutLogout = false;
+    render(<App />);
+    await screen.findByText("General");
+    navigateTo("Security");
+
+    const select = await screen.findByLabelText(/on vault timeout/i);
+    expect(select).not.toBeDisabled();
   });
 
   it("loads settings and shows General section by default", async () => {

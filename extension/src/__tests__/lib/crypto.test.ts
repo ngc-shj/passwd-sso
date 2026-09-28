@@ -4,6 +4,8 @@ import {
   hexDecode,
   deriveWrappingKey,
   deriveEncryptionKey,
+  deriveAuthKeyBytes,
+  computeAuthHash,
   unwrapSecretKey,
   verifyKey,
   decryptData,
@@ -90,6 +92,74 @@ describe("deriveEncryptionKey", () => {
     const key = await deriveEncryptionKey(secretKey);
     expect(key).toBeInstanceOf(CryptoKey);
     expect(key.algorithm).toMatchObject({ name: "AES-GCM", length: 256 });
+  });
+});
+
+// ─── Auth hash (C2 presence verification) ──────────────────
+
+describe("deriveAuthKeyBytes / computeAuthHash", () => {
+  it("is domain-separated from deriveEncryptionKey (different info string)", async () => {
+    const secretKey = crypto.getRandomValues(new Uint8Array(32));
+    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+    const encKey = await deriveEncryptionKey(secretKey);
+    // Encrypting with the auth-key bytes reinterpreted as a raw AES key must
+    // NOT be the same key material as the encryption key derived from the
+    // same secretKey — domain separation via the HKDF `info` parameter.
+    const authKeyAsAesKey = await crypto.subtle.importKey(
+      "raw",
+      authKeyBytes.buffer.slice(
+        authKeyBytes.byteOffset,
+        authKeyBytes.byteOffset + authKeyBytes.byteLength,
+      ) as ArrayBuffer,
+      { name: "AES-GCM" },
+      false,
+      ["encrypt"],
+    );
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const plaintext = new TextEncoder().encode("probe");
+    const encWithAuthKey = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, authKeyAsAesKey, plaintext);
+    await expect(
+      crypto.subtle.decrypt({ name: "AES-GCM", iv }, encKey, encWithAuthKey),
+    ).rejects.toThrow();
+  });
+
+  it("is deterministic for a fixed secretKey", async () => {
+    const secretKey = new Uint8Array(32).fill(7);
+    const a = await computeAuthHash(await deriveAuthKeyBytes(secretKey));
+    const b = await computeAuthHash(await deriveAuthKeyBytes(secretKey));
+    expect(a).toBe(b);
+  });
+
+  it("differs for different secretKeys", async () => {
+    const a = await computeAuthHash(await deriveAuthKeyBytes(new Uint8Array(32).fill(1)));
+    const b = await computeAuthHash(await deriveAuthKeyBytes(new Uint8Array(32).fill(2)));
+    expect(a).not.toBe(b);
+  });
+
+  // Cross-implementation parity (mirrors the AAD golden-vector test below):
+  // secretKey = 0x00..0x1f (32 sequential bytes) is the vector iOS's
+  // KDFTests.testComputeAuthHashKnownVector() already documents as "shared
+  // with web (crypto-client.ts) and the extension (crypto.ts)" — using the
+  // same one here means B2 can pin a single shared vector in
+  // scripts/checks/auth-hash-golden-vectors.json instead of reconciling
+  // fixtures after the fact. NOTE (deviation to flag for B2): the web app's
+  // own parity test (src/lib/crypto/crypto-client.test.ts) currently pins a
+  // DIFFERENT secretKey (0xaa × 32) — both algorithms are byte-identical
+  // (verified independently against this vector), so this is a fixture
+  // choice mismatch, not a crypto bug; B2 should converge all three tests on
+  // one vector.
+  it("matches the frozen golden vector (shared with iOS KDFTests)", async () => {
+    const secretKey = hexDecode(
+      "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    );
+    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+    expect(hexEncode(authKeyBytes)).toBe(
+      "2cc83a6ef3b5efd5eb65e83dde8c5ef9bd0c2c578781855bddff1ef9aa4cf869",
+    );
+    const authHash = await computeAuthHash(authKeyBytes);
+    expect(authHash).toBe(
+      "34cc5ea2db6790bc1411b9325d0a12dd900ad751313cb9c52af8756e27b11efd",
+    );
   });
 });
 

@@ -14,6 +14,8 @@ const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
   unwrapSecretKey: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
   deriveEncryptionKey: vi.fn().mockResolvedValue("enc-key"),
+  deriveAuthKeyBytes: vi.fn().mockResolvedValue(new Uint8Array([4, 5, 6])),
+  computeAuthHash: vi.fn().mockResolvedValue("fake-auth-hash"),
   verifyKey: vi.fn().mockResolvedValue(true),
   decryptData: vi.fn(),
   buildPersonalEntryAAD: vi.fn().mockReturnValue(new Uint8Array([1, 2])),
@@ -56,6 +58,7 @@ function installChromeMock() {
       onStartup: { addListener: vi.fn() },
       sendMessage: vi.fn().mockResolvedValue({ ok: true }),
       getContexts: vi.fn().mockResolvedValue([]),
+      getURL: vi.fn((path: string) => `chrome-extension://test-extension-id/${path}`),
     },
     offscreen: {
       createDocument: vi.fn().mockResolvedValue(undefined),
@@ -234,6 +237,9 @@ describe("X-4 keyboard shortcut commands", () => {
               },
             ],
           };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+          return { ok: true, status: 200, json: async () => ({ verified: true }) };
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {

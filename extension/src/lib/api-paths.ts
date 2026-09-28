@@ -6,6 +6,7 @@ export const EXT_API_PATH = {
   EXTENSION_KEY_RESET: "/api/extension/key/reset",
   PASSWORDS: "/api/passwords",
   VAULT_UNLOCK_DATA: "/api/vault/unlock/data",
+  VAULT_UNLOCK_VERIFY: "/api/vault/unlock/verify",
   TEAMS: "/api/teams",
 } as const;
 

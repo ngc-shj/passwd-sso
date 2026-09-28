@@ -8,6 +8,8 @@ import {
   buildPersonalEntryAAD,
   VAULT_TYPE,
   decryptData,
+  deriveAuthKeyBytes,
+  computeAuthHash,
   deriveEncryptionKey,
   deriveWrappingKey,
   hexDecode,
@@ -108,6 +110,10 @@ let currentUserId: string | null = null;
 let currentVaultSecretKeyHex: string | null = null;
 // Tenant policy auto-lock override (null = use local setting)
 let tenantAutoLockMinutes: number | null = null;
+// Tenant policy override forcing "logout" as the vault-timeout action (C10).
+// null = tenant has not stated a preference (or vault never unlocked yet) —
+// the local vaultTimeoutAction setting applies.
+let requireVaultTimeoutLogout: boolean | null = null;
 // Version of the personal vault key currently in memory. Must match the key
 // that encrypted each saved blob so the server can select the right key for
 // history-compare decryption. Set from server's data.keyVersion at unlock;
@@ -183,6 +189,35 @@ async function getEffectiveAutoLockMinutes(): Promise<number> {
   }
   const { autoLockMinutes } = await getSettings();
   return autoLockMinutes;
+}
+
+/** Resolve effective vault-timeout action: tenant policy (C10) > local setting */
+function getEffectiveVaultTimeoutAction(): TimeoutAction {
+  if (requireVaultTimeoutLogout) return TimeoutAction.LOGOUT;
+  return cachedVaultTimeoutAction;
+}
+
+// ── C6: inactivity auto-lock ──────────────────────────────────
+let lastActivityAt = 0;
+const ACTIVITY_DEBOUNCE_MS = 30 * MS_PER_SECOND;
+
+/**
+ * Re-arm the vault-lock alarm on user activity (C6). `chrome.alarms.create`
+ * with the same name replaces the pending alarm, so this postpones the real
+ * fire time without the SW tracking any deadline itself. Debounced to at
+ * most once per ACTIVITY_DEBOUNCE_MS so a burst of activity does not spam
+ * chrome.alarms.create. A no-op while the vault is locked (no lock timer to
+ * extend) or auto-lock is disabled (effectiveLock === 0).
+ */
+async function registerActivity(): Promise<void> {
+  if (!encryptionKey) return;
+  const now = Date.now();
+  if (now - lastActivityAt < ACTIVITY_DEBOUNCE_MS) return;
+  lastActivityAt = now;
+  const effectiveLock = await getEffectiveAutoLockMinutes();
+  if (effectiveLock > 0) {
+    chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: effectiveLock });
+  }
 }
 
 // ── Pending save prompts (login detection → post-navigation banner) ──
@@ -354,6 +389,7 @@ function clearVault(): void {
   currentUserId = null;
   currentVaultSecretKeyHex = null;
   tenantAutoLockMinutes = null;
+  requireVaultTimeoutLogout = null;
   personalKeyVersion = null;
   // Zero-clear ECDH private key bytes (defense-in-depth)
   if (ecdhPrivateKeyBytes) {
@@ -487,6 +523,7 @@ function persistState(): void {
       vaultSecretKey: currentVaultSecretKeyHex ?? undefined,
       ecdhEncrypted: ecdhEncryptedData ?? undefined,
       tenantAutoLockMinutes,
+      requireVaultTimeoutLogout,
       tokenCnfJkt: currentCnfJkt,
       personalKeyVersion: personalKeyVersion ?? undefined,
     }).catch(() => {});
@@ -519,6 +556,7 @@ async function hydrateFromSession(): Promise<void> {
   // Restore tenant-policy auto-lock so the options UI sees the override
   // even if the vault hasn't been re-unlocked in this SW lifetime.
   tenantAutoLockMinutes = state.tenantAutoLockMinutes ?? null;
+  requireVaultTimeoutLogout = state.requireVaultTimeoutLogout ?? null;
   // Restore personal key version so saves after SW restart are stamped correctly.
   personalKeyVersion = state.personalKeyVersion ?? null;
 
@@ -635,6 +673,31 @@ async function revokeCurrentTokenOnServer(): Promise<void> {
   await revokeTokenOnServerWith({
     getCurrentToken: () => currentToken,
   });
+}
+
+// ── Refresh single-flight (C5 extension technical approach) ──────────────
+// Every refresh caller (the ALARM_TOKEN_REFRESH alarm, the lazy expiry checks
+// in GET_TOKEN/GET_STATUS, and the 401-retry in swFetch) awaits the SAME
+// promise instead of racing independent refresh calls. A caller that arrives
+// while a refresh is already running adopts its result — e.g. the alarm's
+// refresh updates currentToken/tokenExpiresAt before a concurrent lazy-expiry
+// check re-reads them, instead of that check wrongly clearing a token that
+// was about to be renewed. SW termination drops this promise together with
+// whatever request was in flight; no cross-restart state is needed, since a
+// lost request either gets retried within C5's replay grace window or falls
+// back to the next scheduled refresh with the old (still-valid) token.
+let inflightRefresh: Promise<boolean> | null = null;
+
+async function refreshTokenSingleFlight(): Promise<boolean> {
+  if (!inflightRefresh) {
+    inflightRefresh = (async () => {
+      await attemptTokenRefresh();
+      return currentToken !== null;
+    })().finally(() => {
+      inflightRefresh = null;
+    });
+  }
+  return inflightRefresh;
 }
 
 async function isOwnAppPage(url: string): Promise<boolean> {
@@ -839,7 +902,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   pendingSavePrompts.delete(tabId);
 });
 
-chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  // C6: a context-menu click is user activity — re-arm the vault-lock alarm.
+  void registerActivity();
+  handleContextMenuClick(info, tab);
+});
 
 // ── Alarm: auto-clear on expiry ──────────────────────────────
 
@@ -855,7 +922,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       clearToken(DISCONNECT_REASON.EXPIRED);
     }
     if (alarm.name === ALARM_VAULT_LOCK) {
-      if (cachedVaultTimeoutAction === TimeoutAction.LOGOUT) {
+      if (getEffectiveVaultTimeoutAction() === TimeoutAction.LOGOUT) {
         await revokeCurrentTokenOnServer();
         clearToken(DISCONNECT_REASON.TIMEOUT_LOGOUT);
       } else {
@@ -863,7 +930,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       }
     }
     if (alarm.name === ALARM_TOKEN_REFRESH) {
-      await attemptTokenRefresh();
+      await refreshTokenSingleFlight();
     }
     if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
       if (Date.now() - lastClipboardCopyTime >= cachedClipboardClearSeconds * MS_PER_SECOND) {
@@ -971,6 +1038,9 @@ getSettings()
   .catch(() => {});
 
 chrome.commands.onCommand.addListener(async (command) => {
+  // C6: a keyboard shortcut is user activity — re-arm the vault-lock alarm.
+  void registerActivity();
+
   if (command === CMD_TRIGGER_AUTOFILL) {
     if (!currentToken || !encryptionKey || !currentUserId) return;
 
@@ -1094,7 +1164,57 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     throw new Error("PERMISSION_DENIED");
   }
 
-  return swFetchAuthenticated(path, init, serverUrl, currentToken);
+  const res = await swFetchAuthenticated(path, init, serverUrl, currentToken);
+
+  // 401 retry (C5 extension technical approach): the token may have expired
+  // between issuance and this call. Attempt a single-flight refresh and, on
+  // success, retry ONCE with the new token. Never for the refresh endpoint
+  // itself — attemptTokenRefreshWith already owns that call directly.
+  if (res.status === 401 && path !== EXT_API_PATH.EXTENSION_TOKEN_REFRESH) {
+    const refreshed = await refreshTokenSingleFlight();
+    if (refreshed && currentToken) {
+      return swFetchAuthenticated(path, init, serverUrl, currentToken);
+    }
+  }
+
+  return res;
+}
+
+/**
+ * C2 consumer: after a locally-verified unlock, tell the server so it can
+ * record presence for the token family (bounds the family's idle timeout —
+ * see docs/archive/review/long-lived-client-login-plan.md). Fire-and-forget
+ * and never blocks or fails the local unlock — the GCM/artifact check already
+ * proved the passphrase. Uses swFetchAuthenticated directly (not swFetch) so
+ * a 401 here is observed and logged as-is rather than silently retried: per
+ * C2 every outcome is distinguishable by status alone, and a 401 on THIS
+ * route always means a token/DPoP-layer failure, never a wrong passphrase.
+ */
+async function recordUnlockPresence(authHash: string): Promise<void> {
+  if (!currentToken) return;
+  try {
+    const { serverUrl } = await getSettings();
+    const res = await swFetchAuthenticated(
+      EXT_API_PATH.VAULT_UNLOCK_VERIFY,
+      { method: "POST", body: JSON.stringify({ authHash }) },
+      serverUrl,
+      currentToken,
+    );
+    if (res.ok) return;
+    if (res.status === 422) {
+      warnBackground("vault-unlock-verify-mismatch", "unknown");
+    } else if (res.status === 401) {
+      warnBackground("vault-unlock-verify-token-failure", "unknown");
+    } else if (res.status === 403) {
+      warnBackground("vault-unlock-verify-account-locked", "unknown");
+    } else if (res.status === 429) {
+      warnBackground("vault-unlock-verify-rate-limited", "unknown");
+    } else {
+      warnBackground("vault-unlock-verify-failed", "unknown");
+    }
+  } catch (err) {
+    warnBackground("vault-unlock-verify-network-error", classifyError(err));
+  }
 }
 
 type RawEntry = {
@@ -2022,6 +2142,26 @@ async function handleMessage(
   // wedged hydrate can't hang GET_STATUS and strand the popup spinner.
   await awaitHydrationBounded();
 
+  // C6: register activity so a live conversation with the extension keeps
+  // postponing the vault-lock alarm. Two sources:
+  //  - any message from a trusted extension page (popup, options) — sender.url
+  //    is browser-set, not attacker-controlled. KEEPALIVE_PING is excluded:
+  //    the offscreen document sends it every 25s purely to keep the SW alive
+  //    while the vault is unlocked, and counting it would mean the alarm
+  //    could never fire.
+  //  - a content-script fill/copy request the content script only sends from
+  //    a trusted user gesture (userGesture: true — see form-detector-lib.ts).
+  //    A page-triggerable message without that field must NOT extend it.
+  const isExtensionPageMessage =
+    message.type !== EXT_MSG.KEEPALIVE_PING &&
+    typeof _sender.url === "string" &&
+    _sender.url.startsWith(chrome.runtime.getURL(""));
+  const isTrustedContentActivity =
+    message.type === EXT_MSG.AUTOFILL_FROM_CONTENT && message.userGesture === true;
+  if (isExtensionPageMessage || isTrustedContentActivity) {
+    void registerActivity();
+  }
+
   switch (message.type) {
     case EXT_MSG.START_CONNECT: {
       // Web app asked the extension to initiate the bridge-code + exchange
@@ -2042,6 +2182,12 @@ async function handleMessage(
     }
 
     case EXT_MSG.GET_TOKEN: {
+      if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
+        // Lazy expiry check (C5): a concurrent alarm-triggered refresh may
+        // already be in flight — await the SAME promise so a refresh that
+        // was seconds from succeeding isn't clobbered by an eager clear.
+        await refreshTokenSingleFlight();
+      }
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken(DISCONNECT_REASON.EXPIRED);
       }
@@ -2081,6 +2227,11 @@ async function handleMessage(
       // carries it for the just-expired case, independent of the storage write.
       let lazyExpiredReason: DisconnectReason | null = null;
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
+        // Lazy expiry check (C5): share the in-flight refresh promise with
+        // the alarm/other callers rather than racing an independent clear.
+        await refreshTokenSingleFlight();
+      }
+      if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken(DISCONNECT_REASON.EXPIRED);
         lazyExpiredReason = DISCONNECT_REASON.EXPIRED;
       }
@@ -2102,6 +2253,9 @@ async function handleMessage(
         // not set a value (or the vault has never been unlocked yet, so
         // we don't know). UI uses this to disable the local setting.
         tenantAutoLockMinutes,
+        // Tenant-policy override forcing "logout" as the vault-timeout
+        // action (C10). Same null-until-known semantics as above.
+        requireVaultTimeoutLogout,
       });
       return;
     }
@@ -2157,7 +2311,17 @@ async function handleMessage(
         currentVaultSecretKeyHex = Array.from(secretKey)
           .map((b) => b.toString(16).padStart(2, "0"))
           .join("");
+
+        // C2: derive the presence-verification hash from the same secretKey
+        // before zeroing it. Cheap and local (HKDF + SHA-256); the actual POST
+        // to the server only happens after local verification succeeds below,
+        // so a wrong passphrase never reaches the network. Zeroed immediately
+        // after use — only the resulting one-way hash (already the wire
+        // format sent to the server) is held afterward.
+        const authKeyBytes = await deriveAuthKeyBytes(secretKey);
         secretKey.fill(0);
+        const authHash = await computeAuthHash(authKeyBytes);
+        authKeyBytes.fill(0);
 
         if (data.verificationArtifact) {
           const ok = await verifyKey(encKey, data.verificationArtifact);
@@ -2181,6 +2345,15 @@ async function handleMessage(
         tenantAutoLockMinutes = typeof data.vaultAutoLockMinutes === "number"
           ? data.vaultAutoLockMinutes
           : null;
+        // Store tenant policy vault-timeout-logout override from server (C10)
+        requireVaultTimeoutLogout = typeof data.requireVaultTimeoutLogout === "boolean"
+          ? data.requireVaultTimeoutLogout
+          : null;
+
+        // Local unlock is now authoritative (GCM/artifact check passed).
+        // Record presence server-side — fire-and-forget, never blocks or
+        // fails the local unlock (S1).
+        void recordUnlockPresence(authHash);
 
         // Unwrap ECDH private key for team key derivation (if available)
         if (data.encryptedEcdhPrivateKey && data.ecdhPrivateKeyIv && data.ecdhPrivateKeyAuthTag) {
