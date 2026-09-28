@@ -334,6 +334,31 @@ function clearTenantPolicy(): void {
   requireVaultTimeoutLogout = null;
 }
 
+// Tenant policy is otherwise learned at unlock (via unlock/data); fetch it as
+// soon as a connection exists so the options page shows the tenant's values
+// before the first unlock. Best-effort: a failure leaves the policy unknown
+// until that unlock, exactly as before.
+async function refreshTenantPolicy(): Promise<void> {
+  if (!currentToken) return;
+  try {
+    const res = await swFetch(EXT_API_PATH.VAULT_STATUS);
+    if (!res.ok) return;
+    const data = (await res.json()) as {
+      vaultAutoLockMinutes?: unknown;
+      requireVaultTimeoutLogout?: unknown;
+    };
+    tenantAutoLockMinutes = typeof data.vaultAutoLockMinutes === "number"
+      ? data.vaultAutoLockMinutes
+      : null;
+    requireVaultTimeoutLogout = typeof data.requireVaultTimeoutLogout === "boolean"
+      ? data.requireVaultTimeoutLogout
+      : null;
+    persistState();
+  } catch {
+    // Network or parse failure: keep the policy unknown until unlock.
+  }
+}
+
 function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
   currentToken = null;
   tokenExpiresAt = null;
@@ -582,6 +607,11 @@ async function hydrateFromSession(): Promise<void> {
     // If DPoP key retrieval fails, clear state to be safe.
     await clearSession();
     return;
+  }
+
+  // Only once the stored token is confirmed usable (cnfJkt matches the DPoP key).
+  if (tenantAutoLockMinutes === null && requireVaultTimeoutLogout === null) {
+    void refreshTenantPolicy();
   }
 
   if (currentVaultSecretKeyHex) {
@@ -2180,6 +2210,7 @@ async function handleMessage(
       const result = await startConnect({
         setToken: (token, expiresAt, cnfJkt) => applyToken(token, expiresAt, cnfJkt),
       });
+      if (result.ok) void refreshTenantPolicy();
       const response: ExtensionResponse = {
         type: EXT_MSG.START_CONNECT,
         ok: result.ok,

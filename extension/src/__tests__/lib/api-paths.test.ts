@@ -11,6 +11,7 @@ describe("api paths", () => {
       "/api/extension/token/exchange"
     );
     expect(EXT_API_PATH.PASSWORDS).toBe("/api/passwords");
+    expect(EXT_API_PATH.VAULT_STATUS).toBe("/api/vault/status");
     expect(EXT_API_PATH.VAULT_UNLOCK_DATA).toBe("/api/vault/unlock/data");
     expect(EXT_API_PATH.VAULT_UNLOCK_VERIFY).toBe("/api/vault/unlock/verify");
     expect(EXT_API_PATH.TEAMS).toBe("/api/teams");

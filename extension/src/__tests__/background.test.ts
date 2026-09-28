@@ -1843,6 +1843,65 @@ describe("session hydration", () => {
     );
   });
 
+  it("fetches the tenant policy from vault/status when a restored session has none", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
+        return {
+          ok: true,
+          json: async () => ({ vaultAutoLockMinutes: 1440, requireVaultTimeoutLogout: false }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        hasToken: true,
+        vaultUnlocked: false,
+        tenantAutoLockMinutes: 1440,
+        requireVaultTimeoutLogout: false,
+      }),
+    );
+  });
+
+  it("does not refetch the tenant policy when the restored session already has it", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt: Date.now() + 600_000,
+      userId: "u-1",
+      tokenCnfJkt: STATIC_TEST_JKT,
+      tenantAutoLockMinutes: 1440,
+      requireVaultTimeoutLogout: false,
+    });
+    const fetchMock = vi.fn(async () => ({ ok: false, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadBackground();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const statusCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes(EXT_API_PATH.VAULT_STATUS),
+    );
+    expect(statusCalls).toHaveLength(0);
+  });
+
   it("waits for hydration before responding to GET_STATUS", async () => {
     vi.resetModules();
     vi.clearAllMocks();
