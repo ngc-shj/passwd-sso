@@ -545,7 +545,12 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
     expect(res.ok).toBe(false);
     expect(res.error).toBe("INVALID_ID");
-    expect(globalThis.fetch as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    // No entry data is fetched. (The token refresh a verified unlock triggers
+    // may land after the mockClear above; it is not part of this request.)
+    const dataCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([url]) => !String(url).includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH),
+    );
+    expect(dataCalls).toHaveLength(0);
   });
 
   it("C9: rejects an entryId with illegal characters", async () => {

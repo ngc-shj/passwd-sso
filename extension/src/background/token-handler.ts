@@ -79,7 +79,14 @@ export async function attemptTokenRefreshWith(
         callbacks.setCnfJkt(data.cnfJkt);
       }
       callbacks.createTtlAlarm(newExpiresAt);
-      callbacks.scheduleRefreshAlarm(newExpiresAt);
+      // The server caps expiry at (last verified unlock + idle). When a
+      // refresh no longer extends it, refreshing again cannot either — it
+      // would only rotate the token at ever-shorter half-life intervals up to
+      // expiry. Let the TTL alarm end the session; a new verified unlock
+      // triggers the refresh that extends it.
+      if (newExpiresAt > tokenExpiresAt) {
+        callbacks.scheduleRefreshAlarm(newExpiresAt);
+      }
     } else if (res.status === 401 || res.status === 403 || res.status === 404) {
       callbacks.clearToken();
     } else {

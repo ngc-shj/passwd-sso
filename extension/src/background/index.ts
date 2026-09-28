@@ -1283,7 +1283,12 @@ async function recordUnlockPresence(authHash: string): Promise<void> {
       serverUrl,
       currentToken,
     );
-    if (res.ok) return;
+    if (res.ok) {
+      // Presence moved forward, so a refresh can now extend the token's
+      // expiry (refreshes stop scheduling themselves once it is capped).
+      void refreshTokenSingleFlight();
+      return;
+    }
     if (res.status === 422) {
       warnBackground("vault-unlock-verify-mismatch", "unknown");
     } else if (res.status === 401) {

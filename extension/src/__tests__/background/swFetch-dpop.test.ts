@@ -115,6 +115,54 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
     expect(setToken).toHaveBeenCalledWith("new-token", expect.any(Number));
   });
 
+  it("does not schedule another refresh when the refresh did not extend the expiry", async () => {
+    const cappedExpiry = Date.now() + 60_000;
+    mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ token: "new-token", expiresAt: new Date(cappedExpiry).toISOString(), scope: [] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+    const scheduleRefreshAlarm = vi.fn();
+    const createTtlAlarm = vi.fn();
+
+    await attemptTokenRefreshWith({
+      getCurrentToken: () => TOKEN,
+      getTokenExpiresAt: () => cappedExpiry, // presence-capped: same expiry comes back
+      setToken: vi.fn(),
+      clearToken: vi.fn(),
+      scheduleRefreshAlarm,
+      createTtlAlarm,
+    });
+
+    expect(createTtlAlarm).toHaveBeenCalledOnce();
+    expect(scheduleRefreshAlarm).not.toHaveBeenCalled();
+  });
+
+  it("schedules the next refresh when the refresh extended the expiry", async () => {
+    const newExpiry = Date.now() + 900_000;
+    mockFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ token: "new-token", expiresAt: new Date(newExpiry).toISOString(), scope: [] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+    const scheduleRefreshAlarm = vi.fn();
+
+    await attemptTokenRefreshWith({
+      getCurrentToken: () => TOKEN,
+      getTokenExpiresAt: () => Date.now() + 60_000,
+      setToken: vi.fn(),
+      clearToken: vi.fn(),
+      scheduleRefreshAlarm,
+      createTtlAlarm: vi.fn(),
+    });
+
+    expect(scheduleRefreshAlarm).toHaveBeenCalledOnce();
+  });
+
   it("does NOT call clearToken when DpopSignError is thrown (F6 / Round 2)", async () => {
     dpopKeyMocks.signDpopProof
       .mockRejectedValueOnce(new Error("fail 1"))

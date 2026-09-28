@@ -46,6 +46,8 @@ Result (2026-09-28, iPhone, dev server): passphrase unlock → `unlock/data` + `
 3. Repeat, but unlock with the passphrase every few minutes.
 - Expected: the extension stays connected past 5 minutes.
 
+Result (2026-09-28, Chrome, client-app idle = 5 min): last verified unlock 12:26:47.930Z; the server capped the token at 12:31:47.930Z (unlock + 5 min) and the extension showed "session timed out, reconnect" at that time. Pass. The run exposed a refresh storm near the capped expiry (six refreshes in the last two minutes, half-life rescheduling against an expiry that no longer moves) — fixed in the same branch.
+
 ## Adversarial scenarios
 - A web page dispatching synthetic (untrusted) events on the inline suggestion dropdown must not extend the auto-lock timer (vault locks on schedule).
 - A session-cookie-only `POST /api/vault/unlock/verify` (no Bearer) returns 401 and records nothing.
