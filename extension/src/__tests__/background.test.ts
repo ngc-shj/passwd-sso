@@ -2116,6 +2116,58 @@ describe("session hydration", () => {
     expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "account-b-tok")).toBe(0);
   });
 
+  it("refreshes again after a verified unlock even when an alarm refresh was already in flight", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+    let releaseFirstRefresh!: () => void;
+    const firstRefreshGate = new Promise<void>((r) => { releaseFirstRefresh = r; });
+    let refreshCount = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH) && bearerOf(init).includes("tok-pres")) {
+        refreshCount += 1;
+        if (refreshCount === 1) await firstRefreshGate; // read presence before the verify
+        return {
+          ok: true,
+          json: async () => ({
+            token: `tok-pres-${refreshCount}`,
+            expiresAt: new Date(Date.now() + 600_000).toISOString(),
+            scope: ["passwords:read"],
+            cnfJkt: STATIC_TEST_JKT,
+          }),
+        };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+        return {
+          ok: true,
+          json: async () => ({
+            userId: "user-1",
+            accountSalt: "00",
+            encryptedSecretKey: "aa",
+            secretKeyIv: "bb",
+            secretKeyAuthTag: "cc",
+            verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await loadBackground();
+    applyToken("tok-pres", Date.now() + 60_000, STATIC_TEST_JKT);
+
+    alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH }); // in flight, gated
+    await vi.waitFor(() => expect(refreshCount).toBe(1));
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" }); // verify 200 while it is in flight
+    releaseFirstRefresh();
+
+    // A fresh refresh follows the in-flight one instead of adopting its result.
+    await vi.waitFor(() => expect(refreshCount).toBe(2));
+  });
+
   it("does not refetch the tenant policy when the restored session already has it", async () => {
     vi.resetModules();
     vi.clearAllMocks();

@@ -163,6 +163,41 @@ describe("attemptTokenRefreshWith (C8 — DPoP header on refresh)", () => {
     expect(scheduleRefreshAlarm).toHaveBeenCalledOnce();
   });
 
+  it("retries after a network error while seconds of lifetime remain (near a capped expiry)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network down")));
+    const scheduleRefreshAlarm = vi.fn();
+    const clearToken = vi.fn();
+    const expiry = Date.now() + 30_000;
+
+    await attemptTokenRefreshWith({
+      getCurrentToken: () => TOKEN,
+      getTokenExpiresAt: () => expiry,
+      setToken: vi.fn(),
+      clearToken,
+      scheduleRefreshAlarm,
+      createTtlAlarm: vi.fn(),
+    });
+
+    expect(scheduleRefreshAlarm).toHaveBeenCalledWith(expiry);
+    expect(clearToken).not.toHaveBeenCalled();
+  });
+
+  it("stops retrying once almost no lifetime remains", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network down")));
+    const scheduleRefreshAlarm = vi.fn();
+
+    await attemptTokenRefreshWith({
+      getCurrentToken: () => TOKEN,
+      getTokenExpiresAt: () => Date.now() + 3_000,
+      setToken: vi.fn(),
+      clearToken: vi.fn(),
+      scheduleRefreshAlarm,
+      createTtlAlarm: vi.fn(),
+    });
+
+    expect(scheduleRefreshAlarm).not.toHaveBeenCalled();
+  });
+
   it("does NOT call clearToken when DpopSignError is thrown (F6 / Round 2)", async () => {
     dpopKeyMocks.signDpopProof
       .mockRejectedValueOnce(new Error("fail 1"))

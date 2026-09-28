@@ -1286,7 +1286,13 @@ async function recordUnlockPresence(authHash: string): Promise<void> {
     if (res.ok) {
       // Presence moved forward, so a refresh can now extend the token's
       // expiry (refreshes stop scheduling themselves once it is capped).
-      void refreshTokenSingleFlight();
+      // Wait out any refresh already in flight: it may have read presence
+      // before this verify committed, and adopting its result would miss the
+      // extension.
+      void (async () => {
+        if (inflightRefresh) await inflightRefresh.catch(() => false);
+        await refreshTokenSingleFlight();
+      })();
       return;
     }
     if (res.status === 422) {

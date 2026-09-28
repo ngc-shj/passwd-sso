@@ -10,7 +10,13 @@ import { BRIDGE_CODE_LENGTH } from "../lib/constants";
 import { getSettings } from "../lib/storage";
 import { signDpopProof } from "../lib/dpop-key";
 import { DpopSignError, swFetchAuthenticated } from "./dpop-fetch";
-import { MS_PER_MINUTE } from "../lib/time";
+import { MS_PER_SECOND } from "../lib/time";
+
+// A failed refresh retries while any meaningful lifetime remains. Near a
+// presence-capped expiry, the refresh a verified unlock triggers is the only
+// thing that can extend the session, so giving up with a minute left would
+// end a session whose presence was just renewed.
+const MIN_RETRY_HEADROOM_MS = 5 * MS_PER_SECOND;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -91,14 +97,14 @@ export async function attemptTokenRefreshWith(
       callbacks.clearToken();
     } else {
       // Transient error (429, 5xx) — retry if enough TTL remains
-      if (tokenExpiresAt - Date.now() > MS_PER_MINUTE) {
+      if (tokenExpiresAt - Date.now() > MIN_RETRY_HEADROOM_MS) {
         callbacks.scheduleRefreshAlarm(tokenExpiresAt);
       }
     }
   } catch {
     // Network error — keep current token, retry next cycle.
     const tokenExpiresAt = callbacks.getTokenExpiresAt();
-    if (tokenExpiresAt && tokenExpiresAt - Date.now() > MS_PER_MINUTE) {
+    if (tokenExpiresAt && tokenExpiresAt - Date.now() > MIN_RETRY_HEADROOM_MS) {
       callbacks.scheduleRefreshAlarm(tokenExpiresAt);
     }
   }
