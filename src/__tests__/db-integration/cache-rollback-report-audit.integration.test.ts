@@ -178,8 +178,9 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
 
     const body = {
       deviceId: "device-uuid-flag",
-      expectedCounter: 0,
-      observedCounter: 0,
+      // What RollbackFlagDrain sends for a forged flag.
+      expectedCounter: "0",
+      observedCounter: "0",
       headerIssuedAt: 1_743_800_000,
       lastSuccessfulRefreshAt: 1_743_800_000,
       rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED,
@@ -195,7 +196,6 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
     expect(rows[0].payload.metadata).toMatchObject({
       deviceId: "device-uuid-flag",
       rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED,
-      // Numeric form from older builds is normalised to the string form.
       expectedCounter: "0",
       observedCounter: "0",
     });
