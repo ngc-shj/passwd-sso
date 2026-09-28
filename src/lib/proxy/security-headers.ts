@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { API_PATH } from "@/lib/constants";
 import { PERMISSIONS_POLICY } from "@/lib/security/security-headers";
 import { isHttps } from "@/lib/url-helpers";
+import { CSP_NONCE_COOKIE } from "@/lib/security/csp-nonce-names";
 
 export type SecurityHeadersOptions = {
   cspHeader: string;
@@ -58,7 +59,7 @@ export function applySecurityHeaders(
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("Permissions-Policy", PERMISSIONS_POLICY);
 
-  response.cookies.set("csp-nonce", nonce, {
+  response.cookies.set(CSP_NONCE_COOKIE, nonce, {
     httpOnly: true,
     sameSite: "lax",
     secure: isHttps,

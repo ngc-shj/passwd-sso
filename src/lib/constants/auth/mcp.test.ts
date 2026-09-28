@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { MCP_SCOPE, MCP_SCOPES, MCP_SCOPE_RISK, MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS } from "./mcp";
+import {
+  MCP_SCOPE,
+  MCP_SCOPES,
+  MCP_SCOPE_RISK,
+  MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS,
+  isAcceptableRedirectUri,
+  REDIRECT_URI_ACCEPT_SET_MESSAGE,
+} from "./mcp";
 
 describe("MCP_SCOPE", () => {
   it("MCP_SCOPES contains all MCP_SCOPE values", () => {
@@ -75,5 +82,67 @@ describe("MCP token constants", () => {
   it("MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS is a positive number", () => {
     expect(MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS).toBeGreaterThan(0);
     expect(Number.isInteger(MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS)).toBe(true);
+  });
+});
+
+describe("isAcceptableRedirectUri", () => {
+  // The one predicate for "is this redirect URI one we will send a user to".
+  // Registration uses it to refuse a bad URI; authorize/consent use it again
+  // on the STORED value, which is what makes the narrowing reach rows written
+  // before it. Both arms are pinned here so neither can be removed quietly.
+  it.each([
+    ["https://client.example/callback"],
+    ["http://127.0.0.1:8765/callback"],
+    ["http://localhost:3000/callback"],
+  ])("accepts %s", (uri) => {
+    expect(isAcceptableRedirectUri(uri)).toBe(true);
+  });
+
+  // CSP3's host-source grammar has no IPv6-literal production, so
+  // `http://[::1]:*` in form-action is discarded by the browser. Registering
+  // one would let consent complete, write an authorization audit row, and
+  // never deliver the redirect. See the C9 note in mcp.ts.
+  it.each([
+    ["http://[::1]:8765/callback"],
+    ["http://[::1]/callback"],
+  ])("refuses the IPv6 literal loopback %s", (uri) => {
+    expect(isAcceptableRedirectUri(uri)).toBe(false);
+  });
+
+  it.each([
+    ["http://127.0.0.1/callback"], // no port
+    ["http://evil.example/callback"], // plain http, not loopback
+    ["http://127.0.0.1:8765"], // no trailing path
+    ["not-a-url"],
+    [""],
+  ])("refuses %s", (uri) => {
+    expect(isAcceptableRedirectUri(uri)).toBe(false);
+  });
+
+  it("does not throw on an unparseable input", () => {
+    expect(() => isAcceptableRedirectUri("http://[")).not.toThrow();
+  });
+});
+
+describe("REDIRECT_URI_ACCEPT_SET_MESSAGE", () => {
+  // The message is the only place a rejected client learns WHY, and the whole
+  // point of narrowing at registration rather than at consent is that the
+  // failure explains itself. Pin both halves.
+  it("names the IPv6 literal as the thing being refused", () => {
+    expect(REDIRECT_URI_ACCEPT_SET_MESSAGE).toContain("[::1]");
+  });
+
+  it("names the alternative the client should use instead", () => {
+    expect(REDIRECT_URI_ACCEPT_SET_MESSAGE).toContain("127.0.0.1");
+  });
+
+  // If the prose ever advertises a host the predicate refuses, the form tells
+  // the admin one thing and the validator does another — the exact defect the
+  // i18n hint had before this change.
+  it("advertises no host the predicate would refuse", () => {
+    for (const host of ["localhost", "127.0.0.1"]) {
+      expect(REDIRECT_URI_ACCEPT_SET_MESSAGE).toContain(host);
+      expect(isAcceptableRedirectUri(`http://${host}:3000/cb`)).toBe(true);
+    }
   });
 });

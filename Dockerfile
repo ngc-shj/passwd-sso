@@ -74,8 +74,63 @@ WORKDIR /app
 ARG DATABASE_URL=postgresql://build:build@localhost:5432/passwd_sso
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Apply the checked-in dependency patches. This has to happen HERE and not in
+# `deps`: `deps` only copies package.json / package-lock.json / .npmrc, so
+# `patches/` does not exist there and patch-package would apply nothing and
+# exit 0 — the shipped image would carry unpatched code while the build
+# reported success. This is also the last point before `next build` bundles
+# node_modules into .next/static, which is what the runner actually ships.
+#
+# `npm ci --ignore-scripts` above is deliberate (supply-chain: no dependency
+# install scripts run) and it suppresses the root project's own `postinstall`
+# too, which is why this explicit step exists instead of relying on the hook.
+# Do not drop --ignore-scripts to make the hook fire.
+#
+# Invoked from node_modules/.bin, not through `npx`: npx silently falls back to
+# a registry fetch when the binary is absent, which would turn the step that
+# authorises the shipped image into an unpinned network download. Every other
+# tool in this file is probed the same way.
+RUN test -d patches && [ -n "$(ls -A patches)" ] \
+      || { echo "SONNER_PATCHES_DIR_EMPTY: patches/ missing or empty in the builder stage"; exit 1; }
+RUN test -x node_modules/.bin/patch-package \
+      || { echo "SONNER_PATCH_TOOL_MISSING: node_modules/.bin/patch-package not executable"; exit 1; }
+RUN node_modules/.bin/patch-package --error-on-fail
+# Pin the resolved version beside the patch. `--error-on-fail` only fires when
+# a hunk fails to APPLY; a sonner release that leaves __insertCSS's context
+# untouched would apply cleanly and ship unnoticed.
+# Read the manifest by PATH, not by package specifier: sonner's `exports` map
+# lists only "." and "./dist/styles.css", so `require('sonner/package.json')`
+# throws ERR_PACKAGE_PATH_NOT_EXPORTED. A relative path bypasses the exports
+# field, which is why the specifier form passed a local check and failed here.
+RUN node -e "const v=JSON.parse(require('fs').readFileSync('node_modules/sonner/package.json','utf8')).version; if (v !== '2.0.8') { console.error('SONNER_VERSION_DRIFT: expected 2.0.8, got '+v); process.exit(1) }"
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 RUN npx next build
+# Verify the patch reached the artifact the runner ships. The subject is the
+# emitted client chunk, NOT node_modules/sonner: sonner is bundled rather than
+# traced, so `.next/standalone/node_modules` contains no copy of it and a grep
+# there would resolve to "subject missing" on every build.
+#
+# Two-step on purpose: prove sonner is in the bundle at all FIRST, so "sonner
+# was tree-shaken out" cannot be spelled the same as "the patch is absent".
+#
+# The marker is 'sonner-csp-nonce-patch', a string literal that ONLY the patch
+# emits. The obvious marker — the `meta[name="csp-nonce"]` selector — is not
+# unique: the app's own src/lib/ui/csp-nonce.ts compiles the identical text, so
+# a grep for it is green whether or not the patch applied. Measured on a real
+# build: 3 chunks carried that selector, 2 carried sonner. Scoping the grep per
+# sonner chunk shrank the window but did not close it, because which chunk a
+# module lands in is a bundler decision nothing here pins.
+#
+# Still per chunk, and still two steps: "sonner was tree-shaken out" must not be
+# spelled the same as "the patch is missing".
+RUN set -e; \
+    chunks=$(grep -rlF 'data-sonner-toaster' .next/static/chunks) || true; \
+    [ -n "$chunks" ] \
+      || { echo "SONNER_PATCH_UNVERIFIABLE: sonner not found in .next/static/chunks — bundle layout changed"; exit 1; }; \
+    for f in $chunks; do \
+      grep -qF 'sonner-csp-nonce-patch' "$f" \
+        || { echo "SONNER_PATCH_MARKER_ABSENT: $f carries sonner but not the CSP-nonce patch"; exit 1; }; \
+    done
 RUN npx esbuild scripts/audit-outbox-worker.ts \
       --bundle --platform=node --target=node24 \
       --outfile=dist/audit-outbox-worker.js \

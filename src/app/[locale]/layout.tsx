@@ -14,6 +14,7 @@ import { routing } from "@/i18n/routing";
 import { pickMessages } from "@/i18n/pick-messages";
 import { NS_GLOBAL } from "@/i18n/namespace-groups";
 import { BASE_PATH } from "@/lib/url-helpers";
+import { getCspNonce } from "@/lib/security/csp-nonce.server";
 
 type Props = {
   children: React.ReactNode;
@@ -51,10 +52,11 @@ export default async function LocaleLayout({ children, params }: Props) {
   setRequestLocale(locale);
 
   const messages = await getMessages();
+  const nonce = await getCspNonce();
 
   return (
     <NextIntlClientProvider messages={pickMessages(messages, NS_GLOBAL)}>
-      <ThemeProvider>
+      <ThemeProvider nonce={nonce}>
         <SessionProvider>
           <VaultProvider>
             {children}

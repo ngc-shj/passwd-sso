@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
+import { resolveWebServerCommand } from "./helpers/web-server-command";
 
 // E2E_BASE_URL allows pointing at an already-running dev server
 // (e.g. E2E_BASE_URL=https://localhost:3001).
@@ -86,9 +87,11 @@ export default defineConfig({
     ? {}
     : {
         webServer: {
-          command: process.env.CI
-            ? "npm run build && npm start"
-            : "npx next dev --turbopack",
+          // Additive, never a replacement — see helpers/web-server-command.ts,
+          // where the rule lives so it can be asserted. Local opt-in for a
+          // production build (what the CSP spec needs):
+          //   E2E_CSP_SERVER=prod npx playwright test --config e2e/playwright.config.ts
+          command: resolveWebServerCommand(),
           cwd: "..",
           url: baseURL,
           reuseExistingServer: !process.env.CI,

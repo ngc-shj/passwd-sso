@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
-import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
+import { MCP_SCOPES, isAcceptableRedirectUri } from "@/lib/constants/auth/mcp";
 import { getTranslations } from "next-intl/server";
 import { ConsentForm } from "./consent-form";
 
@@ -51,8 +51,15 @@ export default async function McpConsentPage({
     );
   }
 
-  // Validate redirect_uri
-  if (!client.redirectUris.includes(redirectUri)) {
+  // Validate redirect_uri — membership AND shape, the same pair the authorize
+  // GET and the consent POST apply. This page is the third adjudicator of
+  // "may we send a user here", and the only one that can leave the origin
+  // without a click (the invalid_scope arm below), so it must not be the one
+  // that decides by membership alone.
+  if (
+    !client.redirectUris.includes(redirectUri) ||
+    !isAcceptableRedirectUri(redirectUri)
+  ) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <p>{t("errors.invalidRedirectUri")}</p>
@@ -90,10 +97,32 @@ export default async function McpConsentPage({
   );
 
   if (grantedScopes.length === 0) {
-    const errorUrl = new URL(redirectUri);
-    errorUrl.searchParams.set("error", "invalid_scope");
-    if (state) errorUrl.searchParams.set("state", state);
-    redirect(errorUrl.toString());
+    // Redirecting the error back to the client is the OAuth-conformant
+    // behaviour, and a conforming client needs it (plus `state`) to surface a
+    // usable message. But it is the one arm on this page that leaves the
+    // origin with no user interaction, so it is restricted to a client the
+    // viewer's own tenant has claimed.
+    //
+    // An UNCLAIMED DCR client carries `tenantId === null`, which the tenant
+    // gate above passes by short-circuit — deliberately, because claiming
+    // happens on Allow. Registration is pre-auth, so without this restriction
+    // anyone could register a client pointing anywhere, request a scope the
+    // client does not hold, and use this page to bounce a signed-in user
+    // off-origin from the password manager's own domain. Nothing secret
+    // crosses (no code, no token, and Referrer-Policy is
+    // strict-origin-when-cross-origin), but the pretext is the product's own
+    // URL, which is the whole value of a phishing hop.
+    if (client.tenantId === userTenantId) {
+      const errorUrl = new URL(redirectUri);
+      errorUrl.searchParams.set("error", "invalid_scope");
+      if (state) errorUrl.searchParams.set("state", state);
+      redirect(errorUrl.toString());
+    }
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>{t("errors.invalidScope")}</p>
+      </div>
+    );
   }
 
   return (

@@ -74,7 +74,7 @@
   "mcpClientSecretWarning": "このシークレットは再表示できません。今すぐコピーしてください。",
   "mcpRedirectUris": "リダイレクトURI",
   "mcpRedirectUrisPlaceholder": "1行に1つのURIを入力\nhttps://example.com/callback",
-  "mcpRedirectUrisHint": "許可: https:// または http://localhost:3000/callback のような loopback URI（127.0.0.1 / [::1] も可）",
+  "mcpRedirectUrisHint": "許可: https:// または http://localhost:3000/callback のような loopback URI（127.0.0.1 も可）。IPv6 リテラルの loopback（[::1]）は受け付けません — 127.0.0.1 を使ってください。",
   "mcpAllowedScopes": "許可スコープ",
   "mcpIsActive": "有効",
   "mcpCreated": "MCP クライアントを登録しました",

@@ -25,6 +25,7 @@
     "tenantClientLimit": "Client limit reached for your tenant",
     "nameConflict": "A client with this name already exists in your tenant",
     "alreadyClaimedOtherTenant": "This client belongs to another tenant",
-    "tenantMismatch": "Tenant mismatch"
+    "tenantMismatch": "Tenant mismatch",
+    "invalidScope": "The requested scope is not available for this client"
   }
 }

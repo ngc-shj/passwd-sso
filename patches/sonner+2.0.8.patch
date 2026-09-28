@@ -1,0 +1,72 @@
+diff --git a/node_modules/sonner/dist/index.js b/node_modules/sonner/dist/index.js
+index 394dbc2..91a9ae2 100644
+--- a/node_modules/sonner/dist/index.js
++++ b/node_modules/sonner/dist/index.js
+@@ -4,8 +4,30 @@ function __insertCSS(code) {
+   let head = document.head || document.getElementsByTagName('head')[0]
+   let style = document.createElement('style')
+   style.type = 'text/css'
+-  head.appendChild(style)
++  // passwd-sso patch — see docs/archive/review/prod-csp-violation-zero-plan.md (C3).
++  // sonner exposes no nonce API and this runs at module evaluation, before any
++  // application code can prime get-nonce, so the nonce is read from the DOM.
++  // ORDER IS THE CONTRACT: CSP evaluates a <style> when it is inserted, so the
++  // nonce must be set BEFORE head.appendChild. Attaching the text first is
++  // secondary but kept: an element that is empty at insertion is evaluated
++  // against the empty string, which hides the real content from the violation
++  // report. Measured both ways against Chromium before choosing this order.
++  // The marker the Dockerfile greps for, and the only way to tell from the
++  // bundle that THIS patch applied: the selector strings below are not unique
++  // to it — the app's own src/lib/ui/csp-nonce.ts compiles the identical text.
++  // It must be a DOM side effect, not a literal the minifier can fold away.
++  // Measured: the first version bound it to `let patchMarker = '…'` and used it
++  // in a boolean position, and SWC constant-folded a provably-truthy literal
++  // out of the bundle entirely — the patch shipped, the marker did not, and the
++  // image build refused. An argument to setAttribute cannot be folded, and it
++  // also makes the patch observable at runtime, which a grep never is.
++  style.setAttribute('data-sonner-csp-nonce-patch', '')
++  let nonce =
++    (document.querySelector('script[nonce]') || {}).nonce ||
++    (document.querySelector('meta[name="csp-nonce"]') || {}).content
++  if (nonce) style.setAttribute('nonce', nonce)
+   ;style.styleSheet ? (style.styleSheet.cssText = code) : style.appendChild(document.createTextNode(code))
++  head.appendChild(style)
+ }
+ 
+ Object.defineProperty(exports, '__esModule', { value: true });
+diff --git a/node_modules/sonner/dist/index.mjs b/node_modules/sonner/dist/index.mjs
+index c124f82..f75fa1b 100644
+--- a/node_modules/sonner/dist/index.mjs
++++ b/node_modules/sonner/dist/index.mjs
+@@ -4,8 +4,30 @@ function __insertCSS(code) {
+   let head = document.head || document.getElementsByTagName('head')[0]
+   let style = document.createElement('style')
+   style.type = 'text/css'
+-  head.appendChild(style)
++  // passwd-sso patch — see docs/archive/review/prod-csp-violation-zero-plan.md (C3).
++  // sonner exposes no nonce API and this runs at module evaluation, before any
++  // application code can prime get-nonce, so the nonce is read from the DOM.
++  // ORDER IS THE CONTRACT: CSP evaluates a <style> when it is inserted, so the
++  // nonce must be set BEFORE head.appendChild. Attaching the text first is
++  // secondary but kept: an element that is empty at insertion is evaluated
++  // against the empty string, which hides the real content from the violation
++  // report. Measured both ways against Chromium before choosing this order.
++  // The marker the Dockerfile greps for, and the only way to tell from the
++  // bundle that THIS patch applied: the selector strings below are not unique
++  // to it — the app's own src/lib/ui/csp-nonce.ts compiles the identical text.
++  // It must be a DOM side effect, not a literal the minifier can fold away.
++  // Measured: the first version bound it to `let patchMarker = '…'` and used it
++  // in a boolean position, and SWC constant-folded a provably-truthy literal
++  // out of the bundle entirely — the patch shipped, the marker did not, and the
++  // image build refused. An argument to setAttribute cannot be folded, and it
++  // also makes the patch observable at runtime, which a grep never is.
++  style.setAttribute('data-sonner-csp-nonce-patch', '')
++  let nonce =
++    (document.querySelector('script[nonce]') || {}).nonce ||
++    (document.querySelector('meta[name="csp-nonce"]') || {}).content
++  if (nonce) style.setAttribute('nonce', nonce)
+   ;style.styleSheet ? (style.styleSheet.cssText = code) : style.appendChild(document.createTextNode(code))
++  head.appendChild(style)
+ }
+ 
+ import React from 'react';

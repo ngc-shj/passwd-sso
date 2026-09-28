@@ -35,7 +35,7 @@ import {
 import { Blocks, Loader2, Plus, Search, Trash2, Pencil, Users } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
-import { MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
+import { MCP_SCOPES, isAcceptableRedirectUri } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { readApiErrorBody, getApiErrorDetail } from "@/lib/http/read-api-error-body";
 import { formatDateTime } from "@/lib/format/format-datetime";
@@ -80,17 +80,10 @@ function isValidationProperties(
 }
 
 function validateRedirectUris(uris: string[]): boolean {
-  // Mirrors the server-side schema in `src/app/api/tenant/mcp-clients/route.ts`
-  // and DCR (`src/app/api/mcp/register/route.ts`). Keep in sync via the shared
-  // LOOPBACK_REDIRECT_RE constant.
-  return uris.every((u) => {
-    try {
-      const url = new URL(u);
-      return url.protocol === "https:" || LOOPBACK_REDIRECT_RE.test(u);
-    } catch {
-      return false;
-    }
-  });
+  // The same predicate the three server validators and both consent-path
+  // adjudicators use — not a mirror of them. A copy here would be the fifth
+  // place a future narrowing has to land, and the one nothing points at.
+  return uris.every(isAcceptableRedirectUri);
 }
 
 function hasValidationErrors(node: ValidationTreeNode | undefined): boolean {

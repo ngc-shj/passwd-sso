@@ -98,6 +98,7 @@
   },
   "excluded": {
     "ioredis": { "workspace": "root", "reason": "Session-cache transport, not a crypto/auth primitive." },
+    "get-nonce": { "workspace": "root", "reason": "Holds one module-scoped string (the document's CSP nonce) that react-style-singleton reads when injecting a stylesheet. Promoted from a transitive of react-remove-scroll to a declared dependency so a second hoisted copy cannot split the write from the read. No crypto, no auth decision." },
     "@sentry/nextjs": { "workspace": "root", "reason": "Error reporting, not a crypto/auth primitive." },
     "bowser": { "workspace": "root", "reason": "User-agent parsing for new-device detection, not a crypto/auth primitive." },
     "zod": { "workspace": "root", "reason": "Input validation, not a crypto/auth primitive." },

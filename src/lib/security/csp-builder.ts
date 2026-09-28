@@ -60,27 +60,52 @@ const _staticDirectives = [
   `connect-src 'self'${sentryConnectSrc()}`,
   "object-src 'none'",
   "base-uri 'self'",
-  // OAuth consent form-POSTs back to /api/mcp/authorize/consent which then
-  // returns a 302 redirect to the registered native-app callback URI. CSP
-  // form-action constrains BOTH the form target AND any subsequent 302 in
-  // the redirect chain, so every loopback host accepted by DCR's
-  // LOOPBACK_REDIRECT_RE (see src/lib/constants/auth/mcp.ts) MUST be listed
-  // here — otherwise the consent flow appears to succeed but the browser
-  // blocks the final redirect after the audit log has already been written.
-  //
-  // RFC 8252 §7.3 mandates the loopback IP literal forms (127.0.0.1, [::1])
-  // and "MUST allow any port"; §8.3 marks `localhost` as NOT RECOMMENDED but
-  // real OAuth clients (Claude Code, Claude Desktop) use it, so we keep it.
-  // Loopback is local-only — these wildcards do not widen the network attack
-  // surface.
-  "form-action 'self' http://localhost:* http://127.0.0.1:* http://[::1]:*",
   "frame-ancestors 'none'",
   "upgrade-insecure-requests",
   "report-to csp-endpoint",
   `report-uri ${_reportUri}`,
 ].join("; ");
 
-export function buildCspHeader(nonce: string): string {
+/**
+ * Loopback sources `form-action` always carries.
+ *
+ * OAuth consent form-POSTs to /api/mcp/authorize/consent, which returns a 302
+ * to the client's registered callback. `form-action` constrains BOTH the form
+ * target AND every redirect in the chain, so a callback host missing here is
+ * blocked *after* the authorization audit row has been written — a grant the
+ * client never receives and the audit trail says it did.
+ *
+ * RFC 8252 §7.3 mandates the loopback IP literals and "MUST allow any port";
+ * §8.3 marks `localhost` NOT RECOMMENDED but real clients (Claude Code,
+ * Claude Desktop) use it. Loopback is local-only, so the wildcards widen no
+ * network surface.
+ *
+ * `http://[::1]:*` IS INERT — CSP3's host-source grammar has no IPv6-literal
+ * production and Chromium discards it on every page load. It stays because
+ * removing it is a behaviour change nobody asked for; nothing may be built on
+ * the belief that it grants what RFC 8252 requires. That obligation is met
+ * from the other side instead: `LOOPBACK_REDIRECT_RE` refuses `[::1]` at
+ * registration, and authorize/consent re-check the stored value.
+ *
+ * NOT listed: `https:`. A hosted (non-loopback) client's callback is admitted
+ * per request instead — see `extraFormActionSources`. Listing `https:` here
+ * would let any page in the app submit a form to any https origin, which is
+ * the exfiltration this directive exists to stop.
+ */
+const _formActionBase = "'self' http://localhost:* http://127.0.0.1:* http://[::1]:*";
+
+/**
+ * @param extraFormActionSources additional `form-action` origins for THIS
+ *   response only. The consent page passes the registered callback origins of
+ *   the client being consented to, so a hosted client's 302 is admitted
+ *   without `https:` being open on every other page. Callers must supply
+ *   origins they have already validated against stored registration data —
+ *   never a value taken from the request.
+ */
+export function buildCspHeader(
+  nonce: string,
+  extraFormActionSources: readonly string[] = [],
+): string {
   // Dev mode: 'unsafe-inline' + 'unsafe-eval' (no nonce, no strict-dynamic).
   //   Necessary because Next.js HMR, Turbopack dev overlay, and React Fast Refresh
   //   inject inline scripts that cannot receive the per-request CSP nonce.
@@ -118,5 +143,10 @@ export function buildCspHeader(nonce: string): string {
   // explicitly to 'self' so a future change to default-src can't accidentally
   // widen where workers can load from — relevant because WASM compilation
   // can happen inside a Worker context and we want both paths constrained.
-  return `default-src 'self'; ${scriptSrc}; ${styleSrc}; worker-src 'self'; ${_staticDirectives}`;
+  const formAction = [
+    "form-action",
+    _formActionBase,
+    ...extraFormActionSources,
+  ].join(" ");
+  return `default-src 'self'; ${scriptSrc}; ${styleSrc}; worker-src 'self'; ${formAction}; ${_staticDirectives}`;
 }

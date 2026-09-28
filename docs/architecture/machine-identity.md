@@ -223,7 +223,7 @@ sequenceDiagram
 - PKCE S256 required (no plain)
 - `client_secret` hashed with SHA-256 (same as SA tokens); omitted for public clients
 - Code exchange wrapped in `prisma.$transaction` to prevent replay
-- Redirect URIs restricted to `https://` or the loopback forms `http://127.0.0.1` / `http://[::1]` / `http://localhost`. [RFC 8252 §7.3](https://www.rfc-editor.org/rfc/rfc8252#section-7.3) specifies the loopback IP literals; [§8.3](https://www.rfc-editor.org/rfc/rfc8252#section-8.3) marks `localhost` as NOT RECOMMENDED, but we accept it as a pragmatic deviation because real clients (Claude Code/Desktop) use it
+- Redirect URIs restricted to `https://` or the loopback forms `http://127.0.0.1` / `http://localhost`. The IPv6 literal `http://[::1]` is **not** accepted: CSP3's `host-source` grammar has no IPv6-literal production, so `http://[::1]:*` in the `form-action` directive is discarded by the browser — a client registering such a callback would complete consent, have an authorization audit row written, and never receive the redirect. The registry is narrowed to match what the directive can enforce, and `authorize`/`consent` re-check the stored URI so rows predating the narrowing are caught too. [RFC 8252 §7.3](https://www.rfc-editor.org/rfc/rfc8252#section-7.3) specifies the loopback IP literals; [§8.3](https://www.rfc-editor.org/rfc/rfc8252#section-8.3) marks `localhost` as NOT RECOMMENDED, but we accept it as a pragmatic deviation because real clients (Claude Code/Desktop) use it
 
 ### Tools
 

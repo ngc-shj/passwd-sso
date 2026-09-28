@@ -6,6 +6,8 @@ import { getLocaleFromPathname, stripLocalePrefix } from "../../i18n/locale-util
 import { API_PATH } from "../constants";
 import { AUDIT_ACTION } from "../constants/audit/audit";
 import { applySecurityHeaders } from "./security-headers";
+import { buildCspHeader } from "../security/csp-builder";
+import { consentFormActionSources } from "../security/consent-form-action";
 import { getSessionInfo } from "./auth-gate";
 import {
   ALL_KNOWN_SESSION_COOKIE_NAMES,
@@ -172,6 +174,25 @@ export async function handlePageRoute(
       }
       // Within grace period: allow through; client reads /api/user/passkey-status for banner
     }
+  }
+
+  // The MCP consent page is the one route whose form may legitimately redirect
+  // off-origin: its POST answers a 302 to the client's registered callback, and
+  // `form-action` constrains that chain. The base policy lists only `'self'`
+  // and loopback, so a hosted client's callback is admitted here, for this
+  // response, from the STORED registration — never from the request. See
+  // consent-form-action.ts for why the alternative (`https:` in the base
+  // policy) is not acceptable.
+  const extraFormAction = await consentFormActionSources(
+    pathWithoutLocale,
+    request.nextUrl.searchParams,
+  );
+  if (extraFormAction.length > 0) {
+    return applySecurityHeaders(
+      intlResponse,
+      { ...options, cspHeader: buildCspHeader(options.nonce, extraFormAction) },
+      basePath,
+    );
   }
 
   return applySecurityHeaders(intlResponse, options, basePath);

@@ -27,6 +27,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Every job gated on these outputs carries
+      #   always() && (needs.changes.result != 'success' || <outputs…>)
+      # rather than the outputs alone. When this job fails or is skipped its
+      # outputs are empty strings, so every `== 'true'` is false and the gated
+      # job is SKIPPED — which GitHub reports as non-blocking. A filter that
+      # cannot decide must run the work, not drop it.
       - id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -37,10 +43,22 @@ jobs:
               - "src/**"
               - "prisma/**"
               - "proxy.ts"
-              - "instrumentation.ts"
+              # Root-level client instrumentation entry. Next.js requires it
+              # synchronously before hydration, which is why the CSP nonce
+              # priming and the Zod jitless config live there — a change to it
+              # must run the app jobs. (The former "instrumentation.ts" entry
+              # here matched no file: paths-filter patterns are repo-root
+              # relative and the server hook is src/instrumentation.ts, already
+              # covered by src/**.)
+              - "instrumentation-client.ts"
               - "messages/**"
               - "package.json"
               - "package-lock.json"
+              # A patch-only PR must run the app and e2e jobs: patches/ is the
+              # most direct way to break the sonner CSP fix, and .npmrc governs
+              # how the patch gets applied.
+              - "patches/**"
+              - ".npmrc"
               - "tsconfig*.json"
               - "vitest.config.*"
               - "eslint.config.*"
@@ -90,7 +108,7 @@ jobs:
   env-drift-check:
     name: env drift check
     needs: changes
-    if: needs.changes.outputs.env == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.env == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -277,7 +295,7 @@ jobs:
     name: "App: Lint → Test → Build"
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
     # test:coverage + build + basePath build already land at ~13–14m on a
     # healthy runner; slower runners tipped several green dependency PRs over the
     # old 15m cap mid-`build with basePath` (e.g. #701, #706). 20m keeps the same
@@ -356,7 +374,7 @@ jobs:
     name: "Extension: Test → Build"
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true')
     timeout-minutes: 10
     defaults:
       run:
@@ -388,7 +406,7 @@ jobs:
     name: "iOS: xcodebuild test"
     runs-on: macos-latest
     needs: changes
-    if: needs.changes.outputs.ios == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.ios == 'true' || needs.changes.outputs.ci == 'true')
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -463,7 +481,7 @@ jobs:
     name: "CLI: Build → Test"
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true')
     timeout-minutes: 10
     defaults:
       run:
@@ -494,9 +512,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [changes, app-ci]
+    # `always()` defeats the skip-on-failed-dependency default; it does NOT
+    # supply outputs. When `changes` fails or is skipped its outputs are empty
+    # strings, every `== 'true'` comparison is false, and this job — which
+    # carries the CSP gate — is silently skipped and reported as non-blocking.
+    # The first clause makes an unresolved filter run the gate instead.
     if: |
       always() &&
-      (needs.changes.outputs.app == 'true' ||
+      (needs.changes.result != 'success' ||
+       needs.changes.outputs.app == 'true' ||
        needs.changes.outputs.e2e == 'true' ||
        needs.changes.outputs.ci == 'true') &&
       needs.app-ci.result != 'failure'
@@ -588,7 +612,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
     services:
       postgres:
         image: postgres:16-alpine
@@ -680,7 +704,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -702,7 +726,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: changes
-    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -717,8 +741,20 @@ jobs:
       # is side-effect-free.
       - run: npm ci --ignore-scripts
       - run: npm audit --omit=dev --audit-level=high
+      # Dev scope, separately, because the root `postinstall`
+      # (`patch-package --error-on-fail`) now EXECUTES part of the dev tree on
+      # every plain `npm ci` — including six CI jobs. A devDependency that only
+      # ever ran under a developer's own `npm test` was a different risk from
+      # one that runs during install; `--omit=dev` above cannot see either.
+      # Kept as its own step so the production-scope signal is not diluted:
+      # a high in a never-executed devDep and one in patch-package's own
+      # closure are different decisions, and the two lines say which fired.
+      # Measured clean (0 at every severity) when this was added.
+      - run: npm audit --audit-level=high
       # Verify registry signatures/attestations of installed deps (and our own
       # published versions). Fails closed on tamper; do not mask its exit.
+      # Measured on this branch: exit 0, 1378 verified signatures — the open
+      # question C3 recorded about patch-package is answered.
       - run: npm audit signatures
 
   # ─── Security Audit: Extension ────────────────────────────
@@ -727,7 +763,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: changes
-    if: needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true')
     defaults:
       run:
         working-directory: extension
@@ -754,7 +790,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: changes
-    if: needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true'
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true')
     defaults:
       run:
         working-directory: cli
@@ -782,10 +818,12 @@ jobs:
     timeout-minutes: 5
     needs: changes
     if: |
-      needs.changes.outputs.app == 'true' ||
-      needs.changes.outputs.extension == 'true' ||
-      needs.changes.outputs.cli == 'true' ||
-      needs.changes.outputs.ci == 'true'
+      always() &&
+      (needs.changes.result != 'success' ||
+       needs.changes.outputs.app == 'true' ||
+       needs.changes.outputs.extension == 'true' ||
+       needs.changes.outputs.cli == 'true' ||
+       needs.changes.outputs.ci == 'true')
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

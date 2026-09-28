@@ -12,7 +12,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
-import { MCP_CLIENT_ID_MAX_LENGTH } from "@/lib/constants/auth/mcp";
+import { MCP_CLIENT_ID_MAX_LENGTH, isAcceptableRedirectUri } from "@/lib/constants/auth/mcp";
 import { PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 import {
   derivePasskeyState,
@@ -42,7 +42,16 @@ async function validateOAuthRequest(clientId: string | null, redirectUri: string
     BYPASS_PURPOSE.AUTH_FLOW,
   );
   if (!client) return false;
-  return client.redirectUris.includes(redirectUri);
+  // Membership AND shape. A row stored before the accept set was narrowed
+  // still holds whatever was legal then — an IPv6-literal loopback callback,
+  // for instance, which CSP form-action discards, so the consent would
+  // complete, the audit row would be written, and the redirect would never
+  // land. Re-checking the shape here is what makes the narrowing reach
+  // pre-existing clients without a migration.
+  return (
+    client.redirectUris.includes(redirectUri) &&
+    isAcceptableRedirectUri(redirectUri)
+  );
 }
 
 // GET /api/mcp/authorize?client_id=...&redirect_uri=...&response_type=code&scope=...&code_challenge=...&code_challenge_method=S256&state=...

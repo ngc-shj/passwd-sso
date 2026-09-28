@@ -348,6 +348,49 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(json.error).toBe("invalid_request");
   });
 
+  // C9: the second adjudicator of a stored redirect URI. Narrowing the accept
+  // set at registration leaves rows written before it intact, and membership
+  // alone would still admit them — completing consent and writing an
+  // authorization audit row for a redirect the browser will discard.
+  it("C9: refuses a STORED [::1] redirect_uri even though it matches the client row", async () => {
+    mockFindFirst.mockResolvedValue({
+      ...VALID_CLIENT,
+      redirectUris: ["http://[::1]:8765/callback"],
+    });
+    mockTxFindFirst.mockResolvedValue({
+      ...VALID_CLIENT,
+      redirectUris: ["http://[::1]:8765/callback"],
+    });
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, redirect_uri: "http://[::1]:8765/callback" },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_request");
+  });
+
+  // Paired allow. The arm exercised here is https, because the rest of the
+  // consent flow (tenant resolution, scope grant, code issuance) is mocked for
+  // the suite's default client and a loopback URI diverges further down for
+  // reasons unrelated to this predicate — a 400 there would pin nothing about
+  // the re-check. The loopback ALLOW arm is covered where it is decidable:
+  // `isAcceptableRedirectUri` in src/lib/constants/auth/mcp.test.ts, and the
+  // authorize route's own C9 allow case.
+  //
+  // What this pins: adding the conjunct must not refuse what the flow accepted
+  // before. Deleting the predicate's https arm reds it.
+  it("C9: the re-check does not refuse the client's registered https redirect_uri", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).not.toBe(400);
+  });
+
   it("binds the token and the passkey gate to the active membership, not the stale User.tenantId", async () => {
     // This handler is the authoritative MCP issuance boundary — the GET in
     // ../route.ts only redirects here, and this POST depends on nothing it did.

@@ -385,6 +385,7 @@ queue_step "Static: override-key-disjointness" node scripts/checks/check-overrid
 queue_step "Static: compose-log-caps" node scripts/checks/check-compose-log-caps.mjs
 queue_step "Static: compose-image-pin" node scripts/checks/check-compose-image-pin.mjs
 queue_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
+queue_step "Static: dockerfile-ignore-scripts" bash scripts/checks/check-dockerfile-ignore-scripts.sh
 queue_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
 queue_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
 queue_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh

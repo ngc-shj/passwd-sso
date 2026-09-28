@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, vi } from "vitest";
 
-// Use resetModules to get a fresh module state per test group
-// (tagColorRules Set and cachedNonce are module-level singletons)
+// Use resetModules to get a fresh module state per test group. Two modules
+// hold singletons here: this one owns the tagColorRules Set, and the nonce memo
+// moved to ./csp-nonce (which also exports _resetCspNonceCacheForTests for
+// tests that would rather reset than re-import).
 
 describe("getTagColorClass", () => {
   beforeEach(() => {

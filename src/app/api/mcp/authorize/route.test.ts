@@ -220,6 +220,45 @@ describe("GET /api/mcp/authorize", () => {
     expect(json).toEqual({ error: "invalid_request" });
   });
 
+  // ── C9: the stored redirect_uri is re-checked, not just matched ──────────
+  //
+  // Narrowing the accept set at registration does nothing for rows that were
+  // written while the old set was in force. Those clients would still match on
+  // membership, complete consent, have an authorization audit row written, and
+  // then have the redirect discarded by the browser (CSP form-action cannot
+  // express an IPv6 literal). The fix is to re-apply the predicate here.
+
+  it("C9: refuses a STORED [::1] redirect_uri even though it matches the client row", async () => {
+    // A row exactly as DCR would have written it before the narrowing.
+    mockFindFirst.mockResolvedValue({
+      redirectUris: ["http://[::1]:8765/callback"],
+      isActive: true,
+    });
+    const req = createRequest(
+      `https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=http://[::1]:8765/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`,
+    );
+    const res = await GET(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_request" });
+  });
+
+  // Paired allow: the re-check must not refuse what the current accept set
+  // permits. Without this, deleting the predicate's loopback arm entirely
+  // would still satisfy the refusal above.
+  it("C9: still accepts a stored 127.0.0.1 redirect_uri", async () => {
+    mockFindFirst.mockResolvedValue({
+      redirectUris: ["http://127.0.0.1:8765/callback"],
+      isActive: true,
+    });
+    const req = createRequest(
+      `https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=http://127.0.0.1:8765/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`,
+    );
+    const res = await GET(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).not.toBe(400);
+  });
+
   // ── C4 (CF15): PKCE code_challenge validated at this ingress ─────────────
 
   it("rejects a present but malformed code_challenge (too short) via PKCE_CODE_CHALLENGE_SCHEMA, before any client lookup", async () => {

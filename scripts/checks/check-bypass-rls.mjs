@@ -302,6 +302,14 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
   ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],
   ["src/app/[locale]/mcp/authorize/page.tsx", ["mcpClient", "user"]],
+  // Per-request `form-action` for the consent page, computed in the proxy
+  // (`src/lib/proxy/page-route.ts`) — a layer that runs before any tenant
+  // context is established, so no RLS session variable exists to satisfy. Same
+  // lookup the consent page above performs, by the unique `clientId`, selecting
+  // `redirectUris` only: values the registrant supplied and which the consent
+  // page already shows them. Read-only, no identity, and every failure path
+  // returns no extra CSP sources.
+  ["src/lib/security/consent-form-action.ts", ["mcpClient"]],
   // JIT access requests: SA self-service path uses bypass for SA lookup; approve reads tenant policy
   ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],

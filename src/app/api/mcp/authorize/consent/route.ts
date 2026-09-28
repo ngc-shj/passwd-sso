@@ -9,6 +9,7 @@ import {
   MCP_CLIENT_ID_MAX_LENGTH,
   MCP_SCOPES,
   MAX_MCP_CLIENTS_PER_TENANT,
+  isAcceptableRedirectUri,
 } from "@/lib/constants/auth/mcp";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
@@ -139,7 +140,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Validate redirect_uri (must happen before redirect to prevent open redirect)
-  if (!foundClient.redirectUris.includes(redirectUri)) {
+  // Membership AND shape — see isAcceptableRedirectUri. A stored URI predating
+  // the accept-set narrowing must not reach a redirect the CSP will discard.
+  if (
+    !foundClient.redirectUris.includes(redirectUri) ||
+    !isAcceptableRedirectUri(redirectUri)
+  ) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
