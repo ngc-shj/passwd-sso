@@ -16,7 +16,6 @@
 # --- security invariant, test debt acceptable at this scope.
 scripts/checks/check-api-error-body-drift.sh  # reason: non-security scope, test debt
 scripts/checks/check-api-error-codes.sh  # reason: non-security scope, test debt
-scripts/checks/check-e2e-selectors.sh  # reason: non-security scope, test debt
 scripts/checks/check-security-doc-exists.sh  # reason: non-security scope, test debt
 scripts/checks/check-settings-card-layout.sh  # reason: non-security scope, test debt
 scripts/checks/check-test-hygiene.sh  # reason: non-security scope, test debt

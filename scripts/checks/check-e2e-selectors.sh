@@ -392,25 +392,51 @@ if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then
     | sed 's|^/||; s|/$||; s|/[gi]*$||')
   e2e_ja_raw=$(printf '%s\n' "$e2e_candidates" | grep_or_die "E2E Japanese-literal filter" -P "$ja_class")
 
-  e2e_ja_patterns=$(printf '%s\n' "$e2e_ja_raw" | sed 's/[\^$]//g' | sort -u)
+  # Keep the anchors: /^使用$/ must be compared as an exact label, not as a
+  # substring that any removed help text containing 使用 would "match".
+  e2e_ja_patterns=$(printf '%s\n' "$e2e_ja_raw" | sort -u)
+
+  # Every value currently in messages/ja — the E2E regex is only broken if it
+  # no longer matches ANY of them, whatever the diff removed.
+  # `set -f` is on, so list the files with find, and refuse to report success
+  # if there are none or the scan fails — an empty haystack would suppress
+  # every warning below.
+  ja_files=$(find messages/ja -name '*.json' -type f | sort)
+  if [ -z "$ja_files" ]; then
+    printf '  ERROR: no messages/ja/*.json found; this check did not run.\n' >&2
+    exit 1
+  fi
+  ja_pairs=""
+  while IFS= read -r ja_file; do
+    pairs=$(grep_or_die "ja value scan ($ja_file)" -hoE '"[^"]+"[[:space:]]*:[[:space:]]*"[^"]*"' "$ja_file")
+    ja_pairs+="$pairs"$'\n'
+  done <<<"$ja_files"
+  current_ja_values=$(printf '%s' "$ja_pairs" | sed -E 's/^"[^"]+"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')
+  if [ -z "$current_ja_values" ]; then
+    printf '  ERROR: no values extracted from messages/ja; this check did not run.\n' >&2
+    exit 1
+  fi
+
+  # ja_matches <core> <exact:0|1> <haystack>
+  ja_matches() {
+    if [ "$2" = 1 ]; then grep -qxF -- "$1" <<<"$3"; else grep -qF -- "$1" <<<"$3"; fi
+  }
 
   if [ -n "$e2e_ja_patterns" ]; then
-    for ja_pattern in $e2e_ja_patterns; do
+    while IFS= read -r raw_pattern; do
+      [ -n "$raw_pattern" ] || continue
+      exact=0
+      case "$raw_pattern" in ^*\$) exact=1 ;; esac
+      ja_pattern=$(printf '%s' "$raw_pattern" | sed 's/[\^$]//g')
       # Skip very short patterns (single character) — too noisy
       [ "$(echo -n "$ja_pattern" | wc -m)" -lt 2 ] && continue
 
-      # Check if this E2E Japanese pattern matches any removed i18n value
-      if grep -qF "$ja_pattern" <<<"$i18n_removed_ja"; then
-        # Verify it's NOT in the added side (i.e. the string was truly removed, not just moved)
-        i18n_added_ja=$(git diff "${BASE}...HEAD" -- 'messages/ja/*.json' \
-          | grep -E '^\+\s*"[^"]+"\s*:\s*"' \
-          | grep -v '^\+\+\+' || true)
-        if ! grep -qF "$ja_pattern" <<<"$i18n_added_ja"; then
-          ref_files=$(grep -rl "$ja_pattern" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
-          warn "i18n value '$ja_pattern' was changed in messages/ja/ but is still used in E2E regex: $ref_files"
-        fi
+      if ja_matches "$ja_pattern" "$exact" "$i18n_removed_ja" \
+        && ! ja_matches "$ja_pattern" "$exact" "$current_ja_values"; then
+        ref_files=$(grep -rlF -- "$ja_pattern" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+        warn "i18n value '$ja_pattern' was changed in messages/ja/ but is still used in E2E regex: $ref_files"
       fi
-    done
+    done <<<"$e2e_ja_patterns"
   fi
 fi
 
