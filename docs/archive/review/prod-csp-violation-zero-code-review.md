@@ -254,3 +254,62 @@ The entry was red-proved rather than trusted: changing its model list to
 never reaches under a bypass"*, and the correct list exits 0. So the entry grants
 exactly `mcpClient` and the gate can still tell the difference. The gate's own
 169 tests pass, and `pre-pr.sh` is then 81/81.
+
+## Post-push: the Docker guard refused its own Round-1 fix
+
+CI's `Trivy: Container image scan` failed — not on a CVE (Trivy itself is exit 0
+against the built image locally), but because `docker build` refused at the
+patch-verification step:
+
+```
+SONNER_PATCH_MARKER_ABSENT: .next/static/chunks/3ojkuyotcudmz.js
+  carries sonner but not the CSP-nonce patch
+```
+
+**The patch was applied; the marker was not in the bundle.** Round 1's fix
+(finding 4) introduced the marker as
+
+```js
+let patchMarker = 'sonner-csp-nonce-patch'
+let nonce = patchMarker && ((document.querySelector('script[nonce]') || {}).nonce || …)
+```
+
+A provably-truthy literal in a boolean position is exactly what a minifier folds
+away. The emitted chunk reads
+
+```js
+a.type="text/css";let r=(document.querySelector("script[nonce]")||{}).nonce||…;
+r&&a.setAttribute("nonce",r),…,e.appendChild(a)
+```
+
+— the patch's ordering contract is intact and `patchMarker` is gone. The
+comment in the patch had reasoned that a *comment* would not survive
+minification and concluded a string literal would; the missing step is that
+surviving minification requires being **observably used**, which this one was
+not.
+
+*Fixed* by making the marker a DOM side effect — `style.setAttribute('data-sonner-csp-nonce-patch', '')`
+— which no minifier can remove and which, unlike a bundle grep, is observable at
+runtime. Both sonner chunks now carry it, and exactly those two.
+
+Two things worth keeping from this:
+
+- **The guard worked.** This is the third form of the same check and the first
+  one that has now been seen to fail on a real state rather than a fixture. A
+  marker check that had stayed green here would have shipped a Round-1 "fix"
+  that verified nothing.
+- **A build-time grep is the weaker half.** The attribute made a runtime
+  assertion cheap, so the FR2 probe now also asserts that a style element
+  carries it — a live stylesheet alone only says sonner's CSS was admitted, not
+  that the patched insert is what admitted it. Red-proved by pointing the
+  selector at an absent attribute: 1 failed, correct message.
+
+One local-workflow note, not a defect: a plain `npx next build` picks up
+`NEXT_PUBLIC_BASE_PATH=/passwd-sso` from `.env`, so the chunks are emitted under
+a basePath the E2E server does not serve. The gate refused with
+`CSP_GATE_PRECONDITION_FAILED: … the Next runtime never booted` on 8 of 11 tests
+rather than reporting zero violations against a page that never hydrated — which
+is the behaviour finding 6 added. Rebuilding through the E2E env restores 11/11.
+
+Re-verified after the fix: `docker build` exit 0, Trivy `CRITICAL,HIGH
+--ignore-unfixed` exit 0, gate 11/11.

@@ -499,6 +499,18 @@ test("no CSP violations: authenticated dashboard, unlocked vault", async ({
     sonnerCssLive,
     "sonner's stylesheet is not in document.styleSheets — it was CSP-blocked, so every toast renders unstyled (FR2)",
   ).toBe(true);
+
+  // The runtime half of the build-time marker grep. A live stylesheet only says
+  // sonner's CSS was admitted; this says the PATCHED insert ran, which is what
+  // admits it. The attribute is also the marker's reason for existing as a DOM
+  // side effect: the literal it replaced was constant-folded out of the bundle.
+  const patchedInsertRan = await page.evaluate(
+    () => document.querySelectorAll("style[data-sonner-csp-nonce-patch]").length,
+  );
+  expect(
+    patchedInsertRan,
+    "no style element carries data-sonner-csp-nonce-patch — the sonner patch did not run, so FR2 passing above means something else admitted the CSS (C3)",
+  ).toBeGreaterThan(0);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

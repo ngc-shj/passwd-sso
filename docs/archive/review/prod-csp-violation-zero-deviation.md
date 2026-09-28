@@ -418,3 +418,23 @@ Three experts, 23 findings. Every Critical and Major is fixed in this round.
 | `csp-nonce.ts`'s comment said attribute selectors are hidden, contradicting the presence selector on the next line | **Fixed** |
 | `E2E_CSP_SERVER=prod` never exercised | **Partly.** Port 3000 is held by the developer's own dev server, so the `webServer` branch cannot be booted here. The selection logic was extracted to `e2e/helpers/web-server-command.ts` and pinned in five states, which is what the red proof asked for; the boot itself is still owed |
 | Stale comments, red-proof residue | **Fixed / removed**; `git status` clean |
+
+## D20 — a build marker must be observably used, not merely a literal
+
+Round 1 replaced the non-unique Docker patch marker with a string literal bound
+to an unused variable and read in a boolean position. SWC folded it out: the
+patch shipped, the marker did not, and `docker build` refused — correctly, and
+in CI rather than locally, because the local `next build` never ran the grep.
+
+The reasoning in the patch's own comment had got one step and stopped: it argued
+a comment cannot survive minification and concluded a string literal would.
+Surviving minification requires being **observably used**. The marker is now
+`style.setAttribute('data-sonner-csp-nonce-patch', '')` — an argument to a DOM
+call, which nothing can fold, and which is also readable at runtime, so the E2E
+gate asserts it alongside the stylesheet-is-live probe.
+
+Third form of this same guard. The first was directory-wide and green either
+way; the second was per-chunk but keyed on a selector the app's own source
+compiles; this one is keyed on a literal nothing else produces *and* is
+load-bearing in the emitted code. That progression is the record: each earlier
+form looked precise while resting on something it did not check.
