@@ -55,6 +55,7 @@ import { swFetchAuthenticated } from "./dpop-fetch";
 import { classifyError, warnBackground } from "./log";
 import {
   attemptTokenRefreshWith,
+  MIN_RETRY_HEADROOM_MS,
   revokeTokenOnServerWith,
   startConnect,
 } from "./token-handler";
@@ -704,8 +705,7 @@ function scheduleRefreshAlarm(expiresAt: number): void {
   // Floor the refresh time to at least a few seconds in the future so
   // we never schedule an alarm in the past (Chrome coerces that to "now"
   // and we'd loop anyway).
-  const MIN_DELAY_MS = 5 * MS_PER_SECOND;
-  const effectiveRefreshAt = Math.max(refreshAt, now + MIN_DELAY_MS);
+  const effectiveRefreshAt = Math.max(refreshAt, now + MIN_RETRY_HEADROOM_MS);
   chrome.alarms.create(ALARM_TOKEN_REFRESH, { when: effectiveRefreshAt });
 }
 

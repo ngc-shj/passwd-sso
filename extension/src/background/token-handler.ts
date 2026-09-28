@@ -16,7 +16,9 @@ import { MS_PER_SECOND } from "../lib/time";
 // presence-capped expiry, the refresh a verified unlock triggers is the only
 // thing that can extend the session, so giving up with a minute left would
 // end a session whose presence was just renewed.
-const MIN_RETRY_HEADROOM_MS = 5 * MS_PER_SECOND;
+// Also the floor scheduleRefreshAlarm applies to how soon a refresh may be
+// scheduled; sharing it keeps the retry cadence and the give-up point aligned.
+export const MIN_RETRY_HEADROOM_MS = 5 * MS_PER_SECOND;
 
 // ── Helpers ────────────────────────────────────────────────────
 
