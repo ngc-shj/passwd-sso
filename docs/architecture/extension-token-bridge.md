@@ -10,6 +10,11 @@ web application and maintains a secure session.
 The extension connects to the web app via a Bearer token whose lifetime is
 governed by tenant policy (`extensionTokenIdleTimeoutMinutes` /
 `extensionTokenAbsoluteTimeoutMinutes`; defaults: 7d idle / 30d absolute).
+Idle is measured from the last **server-verified vault unlock** (presence,
+`POST /api/vault/unlock/verify`), not from refresh activity — see
+`docs/architecture/client-reauth-timing.md` and
+`docs/security/session-timeout-design.md`. Refresh no longer requires an
+Auth.js web session (the tenant is resolved from the token row itself).
 Token delivery uses a **SW-initiated bridge code exchange** (rewritten in
 the extension JKT trust-path PR; see §Migration status):
 
@@ -111,11 +116,13 @@ sequenceDiagram
 | **Connect-request delivery** | `window.postMessage EXT_CONNECT_REQUEST` (page → content script) → `chrome.runtime.sendMessage START_CONNECT` (content script → SW). Payload is `{ reqId }` only — no code, no key material | instant |
 | **Code → token exchange** | `POST /api/extension/token/exchange` from SW with `credentials:"omit"` + DPoP — SELECT-then-CAS: findUnique → verifyDpopProof(expectedCnfJkt) → updateMany CAS → issueExtensionToken | issues token with tenant-policy TTL (default 7d idle / 30d absolute) |
 | **Connect-result delivery** | `EXT_CONNECT_READY {reqId, ok, errorCode?}` (SW → content script → page). Token is never in the payload | instant |
-| **Storage** | Encrypted with ephemeral AES-256-GCM key in `chrome.storage.session` | until browser close |
-| **Refresh** | `POST /api/extension/token/refresh` (Bearer + DPoP). Server carries `cnf_jkt` forward unchanged | tenant-policy TTL (new token) |
-| **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires before idle expiry | — |
-| **Revocation** | `DELETE /api/extension/token` (Bearer + DPoP) or token expiry | — |
-| **SW restart** | Ephemeral key lost → token unreadable → re-connect required | — |
+| **Storage** | Plain text in `chrome.storage.session` (must survive SW restart; DPoP sender-binding is the compensating control — see §Session Storage Encryption) | until browser close, extension reload, or extension update |
+| **Presence** | After each local unlock, the SW resubmits `authHash` to `POST /api/vault/unlock/verify`; success records presence on the token row and resets the idle clock. A wrong hash or verify failure never blocks the local unlock | fire-and-forget, non-blocking |
+| **Refresh** | `POST /api/extension/token/refresh` (Bearer + DPoP, no Auth.js session required). Server carries `cnf_jkt` forward unchanged; tenant resolved from the token row | tenant-policy TTL, capped by `min(now+idle, presence+idle, familyCreatedAt+absolute)` |
+| **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires before idle expiry (adaptive buffer for short TTLs) | — |
+| **Revocation** | `DELETE /api/extension/token` (Bearer + DPoP), token expiry (idle-from-presence or absolute), or replay detection on refresh | — |
+| **SW restart (idle termination)** | Token restored from `chrome.storage.session`; the vault key is NOT — it re-locks because its ephemeral wrapping key is regenerated per SW startup | — |
+| **Browser restart / extension reload or update** | `chrome.storage.session` is cleared entirely → token lost → re-connect required | — |
 | **Expired-session reauth** | When the connect page's passkey step-up returns `UNAUTHORIZED` (Auth.js session fully expired), the page routes to full sign-in instead of looping the passkey prompt. During reauth the UI shows a "verifying" label and a Cancel button that aborts the in-flight WebAuthn ceremony (`abortInFlightCeremony()`) | — |
 
 ### Server-side identity resolution
@@ -149,26 +156,40 @@ afterwards.
 
 ## Session Storage Encryption
 
-Sensitive fields (`token`, `vaultSecretKey`) are encrypted before
-persisting to `chrome.storage.session`. `tokenCnfJkt` is the public
+Only `vaultSecretKey` (and the ECDH private key blob) is encrypted before
+persisting to `chrome.storage.session`. `token` is stored **plain** — it must
+survive SW termination, which the ephemeral wrapping key by design does not
+(see the C11 rationale in `docs/archive/review/long-lived-client-login-plan.md`
+and `docs/architecture/client-reauth-timing.md`). `tokenCnfJkt` is the public
 RFC 7638 thumbprint of the DPoP key — not a secret on its own — and
 is stored in plaintext for the SW-restart sanity check below:
 
 ```mermaid
 flowchart TB
     InMem["<b>In-memory (service worker)</b><br/><br/>ephemeralKey (CryptoKey)<br/>AES-256-GCM, non-extractable<br/>generated on SW startup<br/>lost on SW termination"]
-    InMem -- "encrypt" --> Session
+    InMem -- "encrypt (vaultSecretKey only)" --> Session
 
-    Session["<b>chrome.storage.session</b><br/><br/>encryptedToken: {ct, iv, tag} ← hex<br/>encryptedVaultKey: {ct, iv, tag} ← hex<br/>expiresAt: number ← plaintext<br/>userId: string ← plaintext<br/>tokenCnfJkt: string ← plaintext (RFC 7638 thumbprint, not a secret)<br/>ecdhEncrypted: {ct, iv, tag} ← vault key encrypted"]
+    Session["<b>chrome.storage.session</b><br/><br/>token: string ← plain text (survives SW restart)<br/>encryptedVaultSecretKey: {ct, iv, tag} ← hex<br/>expiresAt: number ← plaintext<br/>userId: string ← plaintext<br/>tokenCnfJkt: string ← plaintext (RFC 7638 thumbprint, not a secret)<br/>ecdhEncrypted: {ct, iv, tag} ← vault key encrypted"]
 ```
 
-On service worker restart, `hydrateFromSession()` loads encrypted blobs,
-attempts decryption with the ephemeral key (which is gone) → returns
-`null` → token cleared, vault locked → user must reconnect and re-enter
-passphrase. The persisted `tokenCnfJkt` is also re-checked against the
-SW's IDB DPoP key thumbprint; mismatch (e.g., the key was reset via the
-Options page) clears the session so the next request triggers a fresh
-connect.
+On service worker restart, `hydrateFromSession()` restores the plain `token`
+(if `expiresAt` is still in the future and `tokenCnfJkt` matches the SW's IDB
+DPoP key thumbprint) — the connection survives. It then attempts to decrypt
+`encryptedVaultSecretKey` with the new SW instance's ephemeral key, which is
+never the same key that encrypted it → decryption fails → the vault stays
+locked → the user must re-enter their passphrase, but does **not** need to
+reconnect. A `tokenCnfJkt` mismatch (e.g., the DPoP key was reset via the
+Options page) or an expired `expiresAt` clears the whole session, so the next
+request triggers a fresh connect.
+
+**Accepted exposure:** any trusted extension context (popup, options page,
+offscreen document — everything `chrome.storage.session`'s `TRUSTED_CONTEXTS`
+access level admits) can read the plain `token`. This is an explicit trade
+against the requirement that the token survive SW death; DPoP sender-binding
+(the non-extractable IDB-resident key) is the compensating control — the
+token alone cannot be used to impersonate the user without a proof signed by
+that key, and an attacker already executing in a trusted extension context
+could use the live in-memory token today regardless of storage format.
 
 ### Hydration / unreachable-SW robustness
 
@@ -346,7 +367,7 @@ for the document lifetime and would defeat the gate).
 | `extension/src/lib/constants.ts` | Extension constants (mirrors web app; cross-repo sync test enforces equality) |
 | `extension/src/lib/api-paths.ts` | Extension paths: `EXTENSION_BRIDGE_CODE`, `EXTENSION_TOKEN_EXCHANGE`, etc. |
 | `extension/src/lib/session-crypto.ts` | Ephemeral AES-256-GCM key for session encryption |
-| `extension/src/lib/session-storage.ts` | Encrypted persist/load for `chrome.storage.session` (carries `tokenCnfJkt`) |
+| `extension/src/lib/session-storage.ts` | Persist/load for `chrome.storage.session` — plain `token`, encrypted `vaultSecretKey`, plain `tokenCnfJkt` |
 | `prisma/schema.prisma` | `ExtensionBridgeCode` model (with `cnf_jkt` column) + `EXTENSION_BRIDGE_CODE_ISSUE` / `EXTENSION_TOKEN_EXCHANGE_SUCCESS` / `EXTENSION_TOKEN_EXCHANGE_FAILURE` audit actions |
 
 ### Migration status

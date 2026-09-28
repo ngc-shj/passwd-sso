@@ -1,0 +1,8 @@
+{
+  "_doc": "Frozen golden authHash vector shared across app (TS), extension (TS), and iOS (Swift). Byte-equality is enforced by scripts/checks/check-crypto-domains.mjs (Check F) in main CI; each codebase's own parity test proves its builder produces this hash from the same secretKey. To change the vector, update this file AND all three codebases' parity tests in one commit.",
+  "auth-v1": {
+    "input": "secretKey=0x00..0x1f (32 sequential bytes) -> authKey (HKDF-SHA256, zero salt, info \"passwd-sso-auth-v1\") -> authHash (SHA-256 hex of authKey)",
+    "secretKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "authHashHex": "34cc5ea2db6790bc1411b9325d0a12dd900ad751313cb9c52af8756e27b11efd"
+  }
+}

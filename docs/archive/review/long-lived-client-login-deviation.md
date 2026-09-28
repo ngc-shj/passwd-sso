@@ -32,3 +32,10 @@
 - D-B3-3 Content scripts set `userGesture: true` at the three `onSelect` send sites; each is reachable only from `suggestion-dropdown.ts`'s `isTrusted`-gated handlers.
 - D-B3-4 Six new `BackgroundWarnEvent` members in `background/log.ts` (one per verify outcome, plus an unexpected-status fallback).
 - D-B3-5 Golden vector: extension uses secretKey `00…1f` (same as iOS); the existing web test pins a different vector (`0xaa`×32). Converged in B2 via the frozen JSON.
+
+## B2 / B5 and static-gate fixes
+
+- D-B2-1 The web parity test keeps its existing `0xaa`×32 vector and adds the frozen `00…1f` vector (Check F keys on the frozen one). CLI (`cli/src/__tests__/unit/crypto.test.ts`) and e2e (`e2e/helpers/crypto.test.ts`) keep their own unrelated vectors — outside the web/extension/iOS parity set C1 names.
+- D-B2-2 `check-client-token-expiry.mjs` needed no CI yaml edit: the static-checks job runs `PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh`, so the pre-pr queue entry is the CI wiring. No `package.json` script (sibling has none). Exemptions file is header-only (all three expiry writers import the helper).
+- D-B5-1 Docs also updated beyond the C12 list where they stated now-false facts: `docs/security/auth-surface-matrix.md` (iOS TTL source), `docs/api/error-handling.md` (422 sites + monitoring note), `docs/security/threat-model.md` (I3 and offline brute-force residual), `docs/security/considerations/ja.md` (mirror).
+- D-FIX-1 Four static gates were red after B1a/B1b and were fixed by the orchestrator: `check-bypass-rls.mjs` allowlist (+`tenant`/`extensionToken` for refresh route, mobile-token, mobile token route; new entry for unlock/verify — all keyed by ids from validated token rows); `check-null-tenant-fail-closed.mjs` manifest (`mobile-token.ts`, `mobile/token/route.ts` → `throw`, both throw on a missing tenant row); migration wrapped in `BEGIN; … COMMIT;` for `check-migration-transaction.mjs`, with the dev DB's `_prisma_migrations.checksum` row for this branch's own migration updated to the new file hash (a `--create-only` probe then produced only Prisma's recurring `prev_hash` no-op, i.e. no drift); `route-policy-matrix.md` regenerated.

@@ -198,6 +198,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/vault/setup` | POST | Initial master passphrase setup |
 | `/api/vault/unlock` | POST | Verify passphrase, return encrypted key |
 | `/api/vault/unlock/data` | POST | Return encrypted key data |
+| `/api/vault/unlock/verify` | POST | Record client unlock presence (extension/iOS bearer) |
 | `/api/vault/status` | GET | Check vault initialization status |
 | `/api/vault/change-passphrase` | POST | Change master passphrase |
 | `/api/vault/rotate-key` | POST | Rotate encryption key |

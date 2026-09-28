@@ -197,10 +197,22 @@ Client(on valid):
   - Key material lifetime is managed by the JavaScript garbage collector after reference clearing
   - There is no guaranteed immediate memory zeroization in browser environments (Web Crypto API limitation)
 - Browser extension:
-  - `token` and `vaultSecretKey` are AES-256-GCM encrypted with an ephemeral
-    non-extractable `CryptoKey` held only in SW memory before storage in `chrome.storage.session`.
-    If the SW is terminated, the in-memory key is lost → blobs unreadable → user must re-authenticate.
-  - `autoLockMinutes` controls extension vault lock timer (default 15 min)
+  - `token` is stored in `chrome.storage.session` in **plain text** — it must
+    survive service-worker termination within a browser session (a stolen
+    bearer requires the non-extractable, IDB-resident DPoP key to be usable).
+  - `vaultSecretKey` keeps the prior model: AES-256-GCM encrypted with an
+    ephemeral non-extractable `CryptoKey` held only in SW memory. If the SW is
+    terminated, the in-memory key is lost → the blob is unreadable → the vault
+    re-locks (the connection itself survives; see §14.2 and
+    `docs/architecture/client-reauth-timing.md`).
+  - `autoLockMinutes` controls extension vault lock timer (default 15 min); it
+    is now purely an activity-driven inactivity timer, not a fixed countdown.
+  - Accepted exposure: any trusted extension context (popup, options,
+    offscreen document) can read the plain `token` — Chrome's
+    `TRUSTED_CONTEXTS` access level keeps it out of web pages and content
+    scripts, not out of the extension's own surfaces. DPoP sender-binding is
+    the compensating control: exfiltrating the token alone does not let an
+    attacker present it without the non-extractable key.
 
 ## 2. Core Security Controls
 
@@ -376,15 +388,34 @@ so there is no immediate break scenario. Still, long-term migration planning is 
   - `serverUrl`, `autoLockMinutes`
   - Rationale: persistent settings; non-secret
 - `chrome.storage.session`:
-  - `token` (encrypted), `expiresAt`, `userId`, `vaultSecretKey` (encrypted, for re-derivation)
-  - Sensitive fields (`token`, `vaultSecretKey`) are AES-256-GCM encrypted with an ephemeral
-    non-extractable `CryptoKey` held only in SW memory before storage.
-    If the SW is terminated, the in-memory key is lost → blobs unreadable → user must re-authenticate.
+  - `token` (plain text), `expiresAt`, `userId`, `tokenCnfJkt` (plain — a public
+    RFC 7638 thumbprint, not a secret), `vaultSecretKey` (encrypted, for re-derivation)
+  - `token` is stored plain, split from `vaultSecretKey`'s encrypted treatment,
+    because it must survive SW termination while the vault key must not — the
+    split is the whole point of the persistence redesign (see
+    `docs/archive/review/long-lived-client-login-plan.md` C11). `vaultSecretKey`
+    is still AES-256-GCM encrypted with an ephemeral non-extractable `CryptoKey`
+    held only in SW memory; if the SW is terminated, the in-memory key is lost
+    → the blob is unreadable → the vault re-locks, but the token (and thus the
+    connection) survives.
+  - Accepted exposure: any trusted extension context (popup, options,
+    offscreen document — anything `chrome.storage.session`'s
+    `TRUSTED_CONTEXTS` access level admits) can read the plain `token`. This is
+    an explicit trade against the requirement that the token outlive SW death;
+    the compensating control is DPoP — the token alone is unusable without a
+    proof signed by the non-extractable IDB-resident key, so exfiltrating the
+    plain token does not by itself let an attacker impersonate the user to the
+    server.
   - Rationale:
-    - MV3 Service Worker restarts otherwise drop state too aggressively
-    - session scope is cleared on browser close
-    - token idle TTL governed by `extensionTokenIdleTimeoutMinutes` (default 7d) with refresh + revoke
-    - `vaultSecretKey` is an explicit UX/security tradeoff; now mitigated by at-rest encryption
+    - MV3 Service Worker restarts otherwise drop the connection too aggressively
+    - session scope is cleared on browser close and on extension reload/update
+    - token idle TTL governed by `extensionTokenIdleTimeoutMinutes` (default
+      7d), now measured from the last **server-verified vault unlock**
+      (presence), not from refresh activity — see
+      `docs/security/session-timeout-design.md`
+    - `vaultSecretKey` is an explicit UX/security tradeoff; mitigated by
+      at-rest encryption that is intentionally SW-lifetime-bound (not
+      browser-session-bound like the token)
 - `background memory`:
   - `encryptionKey`, `currentToken`, etc.
   - Rationale: required for runtime operations; cleared on lock/expiry
@@ -402,6 +433,14 @@ so there is no immediate break scenario. Still, long-term migration planning is 
   operationally unstable for real usage.
 - Therefore, `chrome.storage.session` is used with compensating controls:
   TTL, scoped tokens, revoke endpoints, and auto-lock.
+- The `token` / `vaultSecretKey` split (§14.2) follows the same reasoning at a
+  finer grain: the token is stored plain because it must survive SW
+  termination (the connection is not secret-derived), while the vault key
+  keeps the ephemeral-key wrapping because it must not survive SW termination
+  (losing it is the fail-secure behavior). Storing the token plain accepts
+  that any trusted extension context can read it; DPoP sender-binding is the
+  control that keeps that read from being enough to impersonate the user to
+  the server.
 - This remains a policy-sensitive area and should be periodically re-evaluated.
 - Web Crypto API does not provide explicit memory zeroization primitives.
   Browser-managed `CryptoKey` objects are opaque and non-extractable, which prevents

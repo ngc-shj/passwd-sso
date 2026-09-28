@@ -1,0 +1,14 @@
+# Client-token expiry exemption list — a production file under `src/` that
+# check-client-token-expiry.mjs flags as a client-token expiry site (an
+# `extensionToken.create(` call, or an `extensionToken.update(`/`updateMany(`
+# call whose own data argument writes `expiresAt`) but does NOT import
+# `computeClientTokenExpiry` may be listed here with a reviewed reason.
+#
+# Format: path # reason (reason must be >=10 chars, reviewer-facing).
+#
+# Empty by design: every current `expiresAt`-writing site (extension-token.ts,
+# extension/token/refresh/route.ts, mobile-token.ts) already imports and uses
+# computeClientTokenExpiry directly. mobile-token.ts's fixed 5-minute AutoFill
+# token create needs no entry of its own — the check is per-FILE, and the file
+# already imports the helper for its iOS issuance path (long-lived-client-login
+# plan §C3's declared residual).

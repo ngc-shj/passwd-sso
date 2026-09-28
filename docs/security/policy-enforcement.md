@@ -20,6 +20,7 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `extensionTokenIdleTimeoutMinutes` | Blocking | Server | `src/lib/auth/tokens/extension-token.ts` `issueExtensionToken()` + `token/refresh/route.ts` | Access token `expiresAt = now + value` at issuance and on every refresh |
 | `extensionTokenAbsoluteTimeoutMinutes` | Blocking | Server | `src/lib/auth/tokens/extension-token.ts` + `token/refresh/route.ts` | Family is revoked and refresh rejected with `EXTENSION_TOKEN_FAMILY_EXPIRED` when `now - familyCreatedAt > value` |
 | `vaultAutoLockMinutes` | Timer | Client | `auto-lock-context.tsx` | Browser inactivity timer; server cannot know vault lock state |
+| `requireVaultTimeoutLogout` | Timer | Client | extension `background/index.ts` `getEffectiveVaultTimeoutAction()`; iOS `AutoLockService.timeoutAction` | Forces the extension/iOS auto-lock action to full logout instead of a local lock; enforced client-side only, like `vaultAutoLockMinutes` — see the managed-fleet note below |
 | `allowedCidrs` | Blocking | Server | `proxy.ts` + `access-restriction.ts` | Session-cookie routes are blocked in proxy (`API_SESSION_REQUIRED`, including MCP/mobile authorization issuance). Bearer and other non-session flows enforce the same policy in route handlers. 60s cache |
 | `tailscaleEnabled` / `tailscaleTailnet` | Blocking | Server | `access-restriction.ts` | Two-stage: Edge (CGNAT heuristic) + Node.js (WhoIs verify). The Edge stage is NOT per-tenant tailnet isolation — see [Tailscale Edge-Path Boundary](#tailscale-edge-path-boundary) |
 | `requireMinPinLength` | Blocking | Server | `webauthn/register/verify/route.ts` | Platform authenticators (Touch ID, etc.) exempt — they don't report PIN length |
@@ -49,6 +50,27 @@ Operators enabling `tailscaleEnabled` must understand what the check does — an
 - **Edge/proxy path (browser session flows — dashboard pages and session-authenticated API routes):** access is granted when the client's source IP falls in the Tailscale CGNAT range `100.64.0.0/10`. This admits **any Tailscale peer whose traffic reaches the app with a CGNAT source IP** — it does NOT verify the peer belongs to the tenant's specific tailnet. A host on a *different* tailnet whose source IP is CGNAT would pass this stage. Exact-tailnet verification (`verifyTailscalePeer` WhoIs against the local `tailscaled` Unix socket) is only possible in the Node.js runtime and therefore only runs for Bearer/token route handlers (`enforceAccessRestriction`), not in the Edge proxy.
 - **Why this is an accepted boundary:** reaching the Edge branch at all requires a CGNAT source IP, which the fail-closed IP-extraction posture prevents an off-tailnet public-internet attacker from forging (`TRUST_PROXY_HEADERS` unset → spoofed `X-Forwarded-For` ignored → null IP → deny). Tailscale ACLs remain the operator's primary isolation control.
 - **If you need strict per-tenant isolation of browser flows:** additionally scope `allowedCidrs` to the tenant's own address ranges — the CIDR allowlist is evaluated per-tenant on every stage. Multi-tenant deployments that terminate multiple tailnets on one host should not rely on `tailscaleEnabled` alone for tenant separation.
+
+## Browser Extension: Managed-Fleet Recommendation
+
+`vaultAutoLockMinutes` and `requireVaultTimeoutLogout` are enforced by the
+extension's own background service worker — a client-side timer, not a
+server-verified boundary (see the Enforcement Levels table below). A walk-up
+attacker with a live, unlocked OS session cannot extend the extension's token
+idle timeout without the passphrase (that requires a server-verified unlock —
+`docs/security/session-timeout-design.md`), but they *can* inspect the
+extension's live service-worker state — including the in-memory bearer token —
+through Chrome DevTools (`chrome://extensions` → "Inspect views: service
+worker") for as long as the OS session stays unlocked, bypassing both timers
+entirely for that window.
+
+For managed fleets, operators should set the Chrome enterprise policy
+`DeveloperToolsAvailability` to `2` (disallowed for extensions) —
+[chrome enterprise policy list](https://chromeenterprise.google/policies/#DeveloperToolsAvailability) —
+which blocks exactly this path: a walk-up attacker can no longer open the
+extension's service-worker inspector to read or use the live token. This is a
+device/fleet-level control outside this application's own configuration
+surface; it is not enforced or checked by the app itself.
 
 ## Credential Issuance Hardening
 

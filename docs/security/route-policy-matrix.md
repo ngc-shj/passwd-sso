@@ -342,6 +342,7 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/vault/status/route.ts` | api-session-required | GET | session, extension-token | GET | - | - |
 | `src/app/api/vault/unlock/data/route.ts` | api-session-required | GET | session, extension-token | GET | - | - |
 | `src/app/api/vault/unlock/route.ts` | api-session-required | POST | session | - | - | - |
+| `src/app/api/vault/unlock/verify/route.ts` | api-session-required | POST | extension-token | POST | - | session-cookie callers have no token row to record presence against; only a BROWSER_EXTENSION/IOS_APP client token proceeds (C2) |
 
 ## watchtower
 

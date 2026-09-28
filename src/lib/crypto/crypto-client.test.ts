@@ -5,6 +5,7 @@ import {
   DEFAULT_KDF_PARAMS,
   ARGON2ID_KDF_PARAMS,
   hexEncode,
+  hexDecode,
   generateSecretKey,
   wrapSecretKey,
   unwrapSecretKey,
@@ -440,6 +441,23 @@ describe("deriveAuthKeyBytes / computeAuthHash", () => {
     const hash = await computeAuthHash(authKeyBytes);
 
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  // Cross-implementation parity vector, shared verbatim with the extension
+  // (extension/src/__tests__/lib/crypto.test.ts) and iOS
+  // (ios/PasswdSSOTests/KDFTests.swift testComputeAuthHashKnownVector), frozen
+  // in scripts/checks/auth-hash-golden-vectors.json and enforced by
+  // scripts/checks/check-crypto-domains.mjs (Check F).
+  it("matches the frozen golden vector (shared with extension/iOS)", async () => {
+    const secretKey = hexDecode(
+      "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    );
+    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+    const authHash = await computeAuthHash(authKeyBytes);
+
+    expect(authHash).toBe(
+      "34cc5ea2db6790bc1411b9325d0a12dd900ad751313cb9c52af8756e27b11efd",
+    );
   });
 });
 

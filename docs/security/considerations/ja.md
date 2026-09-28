@@ -197,10 +197,21 @@ Client(valid時):
   - 鍵素材のライフタイムは参照クリア後の JavaScript ガベージコレクターが管理する
   - ブラウザ環境では即時メモリゼロ化は保証されない（Web Crypto API の制限）
 - ブラウザ拡張:
-  - `token` および `vaultSecretKey` は SW メモリ内のみで保持する一時的な非抽出 `CryptoKey`
-    で AES-256-GCM 暗号化してから `chrome.storage.session` へ保存する。
-    SW プロセスが終了すると鍵が失われ、暗号化ブロブは読み取り不能となるため再認証が必要。
-  - `autoLockMinutes` により vault ロックタイマー制御（既定 15 分）
+  - `token` は `chrome.storage.session` に**平文**で保存する — ブラウザセッション内での
+    Service Worker 終了を跨いで生存する必要があるため（盗まれたベアラートークンを
+    使うには、IndexedDB に保持された非抽出の DPoP 鍵が別途必要）。
+  - `vaultSecretKey` は従来どおり、SW メモリ内のみで保持する一時的な非抽出 `CryptoKey`
+    で AES-256-GCM 暗号化してから保存する。SW プロセスが終了するとその鍵が失われ、
+    暗号化ブロブは読み取り不能となり保管庫は再ロックされる（接続自体は維持される。
+    §14.2 および `docs/architecture/client-reauth-timing.md` を参照）。
+  - `autoLockMinutes` により保管庫ロックタイマー制御（既定 15 分）。現在は固定カウント
+    ダウンではなく、操作を検知するたびに延長するアイドルタイマーとして動作する。
+  - 許容する露出: 信頼された拡張コンテキスト（ポップアップ、オプション画面、
+    オフスクリーンドキュメント）はいずれも平文の `token` を読み取れる。Chrome の
+    `TRUSTED_CONTEXTS` アクセスレベルが遮断するのは Web ページとコンテンツスクリプト
+    からのアクセスであり、拡張自身のコンテキストからは遮断しない。補完コントロールは
+    DPoP による送信者バインディングであり、トークン単体を窃取しても非抽出鍵による
+    署名なしには利用できない。
 
 ## 2. 基本コントロール
 
@@ -376,15 +387,30 @@ Client(valid時):
   - `serverUrl`, `autoLockMinutes`
   - 理由: 設定値の永続化が必要。秘密情報ではない
 - `chrome.storage.session`:
-  - `token`（暗号化済み）, `expiresAt`, `userId`, `vaultSecretKey`（暗号化済み、再導出用）
-  - 機密フィールド（`token`, `vaultSecretKey`）は保存前に SW メモリ内の非抽出
-    一時 `CryptoKey` で AES-256-GCM 暗号化する。SW 終了でその鍵は失われ、
-    暗号化ブロブは読み取り不能となるため再認証が必要。
+  - `token`（平文）, `expiresAt`, `userId`, `tokenCnfJkt`（平文 — RFC 7638 の
+    公開サムプリントであり秘密情報ではない）, `vaultSecretKey`（暗号化済み、再導出用）
+  - `token` を平文で保存し `vaultSecretKey` の暗号化方針と分離しているのは、
+    前者は SW 終了を跨いで生存する必要があり、後者は生存してはならないという
+    要件の違いが理由 — この分離自体が今回の永続化再設計の要点
+    （`docs/archive/review/long-lived-client-login-plan.md` C11）。`vaultSecretKey`
+    は引き続き SW メモリ内のみで保持する一時的な非抽出 `CryptoKey` で
+    AES-256-GCM 暗号化する。SW 終了でその鍵は失われ、暗号化ブロブは読み取り
+    不能となり保管庫は再ロックされるが、token（＝接続）は維持される。
+  - 許容する露出: `chrome.storage.session` の `TRUSTED_CONTEXTS` アクセスレベル
+    が許可する任意の信頼された拡張コンテキスト（ポップアップ、オプション画面、
+    オフスクリーンドキュメント）は平文の `token` を読み取れる。これは token が
+    SW 終了を跨いで生存すべきという要件との明示的なトレードオフであり、
+    補完コントロールは DPoP — 非抽出の IndexedDB 常駐鍵による署名なしには、
+    平文 token を窃取してもサーバーへのなりすましには使えない。
   - 理由:
-    - MV3 Service Worker 再起動で状態が消えるため、運用可能な UX を維持
-    - ブラウザ終了時にクリアされるスコープで限定
-    - token のアイドル TTL は `extensionTokenIdleTimeoutMinutes`（既定 7日）で制御。refresh + revoke により被害時間を抑制
-    - `vaultSecretKey` は利便性とセキュリティのトレードオフとして採用（保存時暗号化で緩和済み）
+    - MV3 Service Worker 再起動で接続が失われすぎるのを防ぐ
+    - ブラウザ終了時・拡張のリロード/更新時にクリアされるスコープで限定
+    - token のアイドル TTL は `extensionTokenIdleTimeoutMinutes`（既定 7日）で制御。
+      今回、起点は refresh 活動ではなく「サーバー側で検証済みの保管庫アンロック」
+      （presence）に変更された（`docs/security/session-timeout-design.md` 参照）
+    - `vaultSecretKey` は利便性とセキュリティのトレードオフとして採用。保存時
+      暗号化は意図的に SW のライフタイムに束縛されており（token のようにブラウザ
+      セッションには束縛されない）
 - `background memory`:
   - `encryptionKey`, `currentToken` など
   - 理由: 実処理時に必要。lock/expiry 時にクリア
@@ -401,16 +427,25 @@ Client(valid時):
   完全メモリのみだと再ログイン/再アンロック頻度が過大となる
 - そのため、拡張では `chrome.storage.session` を限定採用し、  
   TTL・scope・revoke・auto-lock でリスクを制御する
+- §14.2 の `token` / `vaultSecretKey` の分離も同じ考え方をより細かい粒度で
+  適用したもの: token は SW 終了を跨いで生存する必要があるため平文で保存し、
+  vaultSecretKey は SW 終了を跨いで生存してはならない（それが fail-secure な
+  挙動）ため一時鍵によるラップを維持する。token を平文にすることで、信頼された
+  拡張コンテキストからの読み取りを許容するが、DPoP による送信者バインディングが
+  その読み取りだけではサーバーへのなりすましに使えないようにするコントロール
+  となる。
 - ここは実装方針として将来再評価対象（ポリシー変更時は優先して見直す）
 - Web Crypto API はメモリの明示的ゼロ化プリミティブを提供しない。
   ブラウザ管理の `CryptoKey` オブジェクトは不透明かつ非抽出であり、
   意図しないエクスポートを防ぐ一方、鍵素材の解放タイミングはランタイムが制御する。
 - Web アプリでは、`secretKeyRef`（Uint8Array）をロック/アンロード時に明示クリアしており
   （`src/lib/vault/vault-context.tsx`）、これがブラウザ環境でのベストエフォート対応となる。
-- 拡張では `token` および `vaultSecretKey` を非抽出の一時 `CryptoKey` で AES-256-GCM 暗号化
-  してから `chrome.storage.session` に保存する。SW プロセスが終了すると鍵が失われ、
-  暗号化ブロブは永久に読み取り不能となり再認証が必要となる。ロック時は両フィールドを削除し、
-  ブラウザ終了時は Chrome が自動クリアする。`autoLockMinutes` vault 自動ロックタイマーが時間的な補完制御を提供する。
+- 拡張では `vaultSecretKey` のみを非抽出の一時 `CryptoKey` で AES-256-GCM 暗号化
+  してから `chrome.storage.session` に保存する（`token` は SW 終了を跨いで生存する
+  必要があるため平文保存 — §14.2）。SW プロセスが終了すると `vaultSecretKey` の鍵は
+  失われ、暗号化ブロブは読み取り不能となり保管庫が再ロックされる（接続は維持）。
+  ロック時は両フィールドを削除し、ブラウザ終了時は Chrome が自動クリアする。
+  `autoLockMinutes` は保管庫自動ロックのアイドルタイマーとして時間的な補完制御を提供する。
 - 詳細な技術評価は `security-review.md` セクション 4（Crypto Primitives）を参照。
 
 ## 15. 鍵の共有機能（Emergency Access）

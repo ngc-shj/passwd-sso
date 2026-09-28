@@ -11,6 +11,9 @@ import {
   checkScopeManifest,
   checkIosGoldenParity,
   checkKeyVersionHardcode,
+  checkAuthHashGoldenParity,
+  checkServerHashCompareContainment,
+  AUTH_HASH_PARITY_FILES,
 } from "../checks/check-crypto-domains.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -605,5 +608,133 @@ personalKeyVersion = typeof data.keyVersion === "number" ? data.keyVersion : 1;
     const errors = checkKeyVersionHardcode(files);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]).toMatch(/Check E/);
+  });
+});
+
+// ── Check F: authHash golden-vector parity ───────────────────────────────────
+
+describe("checkAuthHashGoldenParity", () => {
+  const goldenJson = {
+    _doc: "ignored",
+    "auth-v1": {
+      secretKeyHex: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      authHashHex: "34cc5ea2db6790bc1411b9325d0a12dd900ad751313cb9c52af8756e27b11efd",
+    },
+  };
+
+  function okContents() {
+    const content = `expect(authHash).toBe("34cc5ea2db6790bc1411b9325d0a12dd900ad751313cb9c52af8756e27b11efd");`;
+    return Object.fromEntries(AUTH_HASH_PARITY_FILES.map((rel) => [rel, content]));
+  }
+
+  it("passes when all three parity files contain the golden authHash", () => {
+    const errors = checkAuthHashGoldenParity({ goldenJson, parityContents: okContents() });
+    expect(errors).toHaveLength(0);
+  });
+
+  it("flags a vector missing from one parity file", () => {
+    const parityContents = okContents();
+    parityContents["ios/PasswdSSOTests/KDFTests.swift"] = `// no golden vector here`;
+    const errors = checkAuthHashGoldenParity({ goldenJson, parityContents });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(
+      errors.some((e) => e.includes("Check F") && e.includes("auth-v1") && e.includes("KDFTests.swift"))
+    ).toBe(true);
+  });
+
+  it("flags a parity file missing from parityContents entirely", () => {
+    const parityContents = okContents();
+    delete parityContents["extension/src/__tests__/lib/crypto.test.ts"];
+    const errors = checkAuthHashGoldenParity({ goldenJson, parityContents });
+    expect(
+      errors.some((e) => e.includes("Check F") && e.includes("parity test file not found") && e.includes("crypto.test.ts"))
+    ).toBe(true);
+  });
+
+  it("skips keys prefixed with _", () => {
+    const errors = checkAuthHashGoldenParity({
+      goldenJson: { _doc: "should be skipped" },
+      parityContents: okContents(),
+    });
+    expect(errors).toHaveLength(0);
+  });
+});
+
+// ── Check G: server authHash compare containment ─────────────────────────────
+
+describe("checkServerHashCompareContainment", () => {
+  it("does not flag the allowlisted verify-auth-hash.ts", () => {
+    const files = [
+      {
+        rel: "src/lib/vault/verify-auth-hash.ts",
+        content: `
+import { timingSafeEqual } from "crypto";
+export function compareVaultAuthHash(authHash, stored) {
+  return timingSafeEqual(a, Buffer.from(stored.masterPasswordServerSalt + stored.masterPasswordServerHash));
+}
+`,
+      },
+    ];
+    const errors = checkServerHashCompareContainment(files);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("does not flag a salt WRITER that never calls timingSafeEqual", () => {
+    const files = [
+      {
+        rel: "src/app/api/vault/setup/route.ts",
+        content: `await tx.user.update({ data: { masterPasswordServerSalt: salt } });`,
+      },
+    ];
+    const errors = checkServerHashCompareContainment(files);
+    expect(errors).toHaveLength(0);
+  });
+
+  // Red-proof (plan C1): a bypassing fixture shaped like unlock/route.ts with
+  // the compare re-inlined instead of calling compareVaultAuthHash must fail.
+  it("flags a re-inlined compare shaped like unlock/route.ts", () => {
+    const files = [
+      {
+        rel: "src/app/api/vault/unlock/route.ts",
+        content: `
+import { createHash, timingSafeEqual } from "crypto";
+const computedHash = createHash("sha256").update(authHash + user.masterPasswordServerSalt).digest("hex");
+const ok = timingSafeEqual(Buffer.from(computedHash, "hex"), Buffer.from(user.masterPasswordServerHash, "hex"));
+`,
+      },
+    ];
+    const errors = checkServerHashCompareContainment(files);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]).toMatch(/Check G/);
+    expect(errors[0]).toMatch(/unlock\/route\.ts/);
+  });
+
+  // Red-proof (plan C1): same shape re-inlined in rotate-key/route.ts.
+  it("flags a re-inlined compare shaped like rotate-key/route.ts", () => {
+    const files = [
+      {
+        rel: "src/app/api/vault/rotate-key/route.ts",
+        content: `
+import { createHash, timingSafeEqual } from "crypto";
+const computedHash = createHash("sha256").update(payload.currentAuthHash + user.masterPasswordServerSalt).digest("hex");
+const ok = timingSafeEqual(Buffer.from(computedHash, "hex"), Buffer.from(user.masterPasswordServerHash, "hex"));
+`,
+      },
+    ];
+    const errors = checkServerHashCompareContainment(files);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]).toMatch(/Check G/);
+    expect(errors[0]).toMatch(/rotate-key\/route\.ts/);
+  });
+
+  it("does not flag a file outside src/ (e.g. extension) even if both tokens appear", () => {
+    const files = [
+      {
+        rel: "extension/src/lib/some-module.ts",
+        content: `masterPasswordServerSalt timingSafeEqual`,
+      },
+    ];
+    const errors = checkServerHashCompareContainment(files);
+    expect(errors).toHaveLength(0);
   });
 });
