@@ -207,3 +207,47 @@ Manual test (dev server :3001, extension, and iPhone via VE1): scenarios 1, 2, 3
 | C1 | Shared capped Web-session creation (adapter + passkey) | locked |
 | C2 | Passkey sign-in without bearer/session cascade | locked |
 | C3 | Active client cap by device family, AutoFill excluded, same-install supersede | locked |
+
+## Implementation Checklist
+
+Files to modify:
+- C1:
+  - NEW `src/lib/auth/session/session-concurrency.ts`
+  - `src/lib/auth/session/auth-adapter.ts` (`createSession` delegates to the helper)
+- C2:
+  - `src/app/api/auth/passkey/verify/route.ts`
+  - `src/lib/auth/tokens/extension-token.ts` (remove `PASSKEY_REAUTH`)
+- C3:
+  - `src/lib/constants/auth/extension-token.ts` and `src/lib/constants/index.ts` (rename)
+  - `src/lib/auth/tokens/extension-token.ts` (reasons, `enforceActiveFamilyCap`, `issueExtensionToken`)
+  - `src/lib/auth/tokens/mobile-token.ts` (`issueIosToken` new-family branch, `issueAutofillToken` lock)
+
+Test trees, from `grep -rl` over `src` (co-located, `src/__tests__/`, integration) and `e2e`:
+- `EXTENSION_TOKEN_MAX_ACTIVE`: `src/lib/auth/tokens/extension-token.test.ts`, `mobile-token.test.ts`
+- `EXTENSION_TOKEN_REVOKE_REASON` mocks: `passkey/verify/route.test.ts`, `extension/token/refresh/route.test.ts`, `sessions/route.test.ts`
+- `issueExtensionToken` / `issueIosToken` / `issueAutofillToken`:
+  - `src/__tests__/api/extension/token-exchange-dpop.test.ts`
+  - `extension/token/exchange/route.test.ts`
+  - `mobile/token/route.test.ts`
+  - `mobile/autofill-token/route.test.ts`
+  - `db-integration/client-token-presence`
+  - `db-integration/extension-token-dpop-flow`
+  - `src/__tests__/integration/mobile-dpop-flow.integration.test.ts`
+- `createSession`: `src/lib/auth/session/auth-adapter.test.ts`, `src/auth.test.ts`, `db-integration/session-create-cold-timeout-cache.integration.test.ts`
+- `passkey_signin` / `invalidateUserSessions` (passkey): `passkey/verify/route.test.ts`
+- No e2e reference to any of these.
+
+Shared utilities to reuse (no reimplementation):
+- `advisoryXactLock` (`src/lib/tenant-rls.ts`); `withBypassRls` / `BYPASS_PURPOSE` (same module); `withUserTenantRls` (`src/lib/tenant-context.ts`)
+- `getFamilyPresenceAt` (`src/lib/auth/tokens/client-token-expiry.ts`)
+- `logAuditAsync` / `personalAuditBase` (`src/lib/audit/audit.ts`); `invalidateCachedSessions` (`session-cache-helpers.ts`); `createNotification`
+- `hashSessionToken`; `resolveOwningTenantIdFromClient`
+- Integration helpers: `createTestContext` / `setBypassRlsGucs` (`src/__tests__/db-integration/helpers.ts`)
+
+Static gates the diff joins:
+- `check-count-then-create-lock` (`LOCK_RE` accepts `advisoryXactLock(`): the new `session-concurrency.ts` must call it.
+- `check-session-token-hashed`: a `data.sessionToken` value must be named `*Digest`.
+- `check-bypass-rls`: model allowlists for the passkey route (`user`, `session`, `tenant`) and `auth-adapter.ts`. Re-check after the passkey route stops touching `session` directly.
+- `check-client-token-expiry`, `check-fail-closed-routes-have-test` (`fail-closed-manifest.txt` has a passkey/verify entry), `owning-tenant-adjudicator-manifest.json`.
+
+CI parity: `scripts/pre-pr.sh` mirrors the app-ci job, and 15 CI gates were extracted. Run `scripts/pre-pr.sh` via `check-pre-pr.sh run` at Step 2-4.
