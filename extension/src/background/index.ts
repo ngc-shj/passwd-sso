@@ -1096,7 +1096,9 @@ async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
   ]);
 }
 
-getSettings()
+// Exported so tests can wait for it: left pending across a module reset, it
+// would register on the next test's freshly installed chrome mock.
+export const tokenBridgeRegistration: Promise<void> = getSettings()
   .then(({ serverUrl }) => registerTokenBridgeScript(serverUrl))
   .catch(() => {});
 
