@@ -94,6 +94,7 @@
   "resetTargetEmailChanged": "リセット開始後に対象ユーザーのメールアドレスが変更されました。",
   "forbiddenInsufficientRole": "あなたの権限ではこのリセットを承認できません。対象ユーザーより上位の管理者による承認が必要です。",
   "invalidOrigin": "リクエスト元が許可されていません。",
+  "authHashMismatch": "パスフレーズが正しくありません。",
   "sendTextTooLarge": "テキストが大きすぎます。",
   "sendFileTooLarge": "ファイルが大きすぎます（最大 10 MB）。",
   "sendFileTypeNotAllowed": "許可されていないファイル形式です。",

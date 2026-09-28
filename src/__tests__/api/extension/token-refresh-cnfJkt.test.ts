@@ -7,8 +7,8 @@ const {
   mockValidateExtensionToken,
   mockWithUserTenantRls,
   mockWithBypassRls,
-  mockSessionFindFirst,
   mockTenantFindUnique,
+  mockExtTokenAggregate,
   mockTransaction,
   mockRateLimitCheck,
   mockEnforceAccessRestriction,
@@ -18,8 +18,9 @@ const {
   mockValidateExtensionToken: vi.fn(),
   mockWithUserTenantRls: vi.fn(),
   mockWithBypassRls: vi.fn(),
-  mockSessionFindFirst: vi.fn(),
   mockTenantFindUnique: vi.fn(),
+  // C4: getFamilyPresenceAt reads this via the same withBypassRls tx.
+  mockExtTokenAggregate: vi.fn().mockResolvedValue({ _max: { lastPresenceAt: null } }),
   mockTransaction: vi.fn(),
   mockRateLimitCheck: vi.fn(),
   mockEnforceAccessRestriction: vi.fn(),
@@ -43,8 +44,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    session: { findFirst: mockSessionFindFirst },
     tenant: { findUnique: mockTenantFindUnique },
+    extensionToken: { aggregate: mockExtTokenAggregate },
     $transaction: mockTransaction,
   },
 }));
@@ -94,10 +95,13 @@ describe("POST /api/extension/token/refresh — cnfJkt preservation (C10)", () =
     );
     mockWithBypassRls.mockImplementation(
       (_prisma: unknown, fn: (tx: unknown) => unknown) =>
-        fn({ tenant: { findUnique: mockTenantFindUnique } }),
+        fn({
+          tenant: { findUnique: mockTenantFindUnique },
+          extensionToken: { aggregate: mockExtTokenAggregate },
+        }),
     );
 
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
+    mockExtTokenAggregate.mockResolvedValue({ _max: { lastPresenceAt: null } });
     mockTenantFindUnique.mockResolvedValue({
       extensionTokenIdleTimeoutMinutes: 60,
       extensionTokenAbsoluteTimeoutMinutes: 1440,

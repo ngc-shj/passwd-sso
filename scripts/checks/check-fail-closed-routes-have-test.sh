@@ -819,7 +819,10 @@ fi
 #   targetLockoutClearLimiter, tenant/members/[userId]/clear-lockout) —
 #   mirrors the reset-vault dual-limiter shape (external-review-2026-07
 #   remediation plan, C5).
-EXPECTED_LIMITER_COUNT=71
+# 72 incl. the vault/unlock/verify per-family limiter (long-lived-client-login
+#   plan, C2) — a stolen client token guessing the passphrase must be bounded
+#   the same as every other passphrase-verification path.
+EXPECTED_LIMITER_COUNT=72
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"

@@ -231,6 +231,10 @@ model ExtensionToken {
   cnfJkt            String?                  @map("cnf_jkt") @db.VarChar(64)
   lastUsedIp        String?                  @map("last_used_ip") @db.VarChar(64)
   lastUsedUserAgent String?                  @map("last_used_user_agent") @db.Text
+  /// Last time a server-verified authHash presented by ANY row of this token's
+  /// family was recorded (POST /api/vault/unlock/verify). Presence — not
+  /// refresh activity — is what bounds the family's idle expiry (see C3/C4).
+  lastPresenceAt    DateTime?                @map("last_presence_at") @db.Timestamptz(3)
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -515,6 +519,10 @@ model Tenant {
   tailscaleEnabled                     Boolean  @default(false) @map("tailscale_enabled")
   tailscaleTailnet                     String?  @map("tailscale_tailnet") @db.VarChar(255)
   requireMinPinLength                  Int?     @map("require_min_pin_length")
+  /// When true, extension/iOS clients must treat the vault auto-lock timeout
+  /// as a full logout (token cleared) rather than a local lock. Overrides the
+  /// client's own timeout-action setting; enforced client-side (see C10).
+  requireVaultTimeoutLogout            Boolean  @default(false) @map("require_vault_timeout_logout")
   createdAt                            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt                            DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

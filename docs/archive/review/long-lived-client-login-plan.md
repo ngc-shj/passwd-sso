@@ -198,3 +198,36 @@ Non-functional:
 | C10 | Tenant requireVaultTimeoutLogout                 | locked  |
 | C11 | Extension token persistence split                | locked  |
 | C12 | Docs                                             | locked  |
+
+## Implementation Checklist
+
+Batches (sequential B1a → {B1b, B3, B4} in parallel → B2 → B5):
+
+**B1a — server core (C1, C2, C3, C4, C5, C9)**
+- `prisma/schema.prisma` + new migration: `ExtensionToken.lastPresenceAt` (`last_presence_at timestamptz NULL`), `Tenant.requireVaultTimeoutLogout` (`require_vault_timeout_logout boolean NOT NULL DEFAULT false`); `npm run db:migrate` on dev DB; `scripts/checks/db-grants-manifest.json` confirmed unchanged via `audit-db-grants.mjs`.
+- `src/lib/vault/verify-auth-hash.ts` (new, `compareVaultAuthHash`) + test; migrate `src/app/api/vault/unlock/route.ts`, `src/app/api/vault/rotate-key/route.ts`.
+- `src/lib/auth/tokens/client-token-expiry.ts` (new, `computeClientTokenExpiry`, `getFamilyPresenceAt`) + tests.
+- `src/lib/auth/tokens/extension-token.ts`: `PRESENCE_EXPIRED` reason; `issueExtensionToken` uses C3.
+- `src/app/api/extension/token/refresh/route.ts`: drop session lookup, token-row tenant, C4 gate, C3 expiry, carry presence, replay family revoke; tests in both trees (`route.test.ts`, `src/__tests__/api/extension/token-refresh-cnfJkt.test.ts`).
+- `src/app/api/vault/unlock/verify/route.ts` (new) + test; `API_PATH.VAULT_UNLOCK_VERIFY`; `src/lib/proxy/cors-gate.ts` `BEARER_RULES` + summary + proxy test.
+- `src/lib/http/api-error-codes.ts`: `AUTH_HASH_MISMATCH` (422) in `API_ERROR`, `API_ERROR_STATUS`, `API_ERROR_I18N`; `messages/{en,ja}/ApiErrors.json`; `api-error-codes.test.ts` count bump.
+- Integration tests (real DB): C4 deterministic sequence, refresh with no sessions row, C2 end to end.
+
+**B1b — server iOS + policy (C8, C10)**
+- `src/lib/auth/tokens/mobile-token.ts` (`IssueIosTokenParams` idle/absolute/presence, tenant read in refresh, C3/C4, rename `IOS_ACCESS_TOKEN_TTL_MS`, drop absolute constant); `src/app/api/mobile/token/route.ts`, `src/app/api/mobile/token/refresh/route.ts` (`expires_in`); `mobile-token.test.ts` rewrite.
+- `src/app/api/tenant/policy/route.ts`, `src/app/api/vault/unlock/data/route.ts`, `src/app/api/vault/status/route.ts`: `requireVaultTimeoutLogout`; fix the "cannot be used for brute-force" comment in unlock/data; `src/components/settings/security/tenant-session-policy-card.tsx` switch + `messages/{en,ja}`; tests.
+
+**B3 — extension (C6, C10 client, C11, extension side of C2)**
+- `extension/src/lib/crypto.ts` (`deriveAuthKeyBytes`, `computeAuthHash`); `extension/src/lib/session-storage.ts` (plain token, wrapped vaultSecretKey); `extension/src/background/index.ts` (verify call after unlock, single-flight refresh, activity-based auto-lock, tenant logout override, hydrate); `extension/src/lib/api-paths.ts`; content-script activity messages gated on `isTrusted`; options UI disables timeout-action selector when tenant enforces; tests incl. `session-storage.test.ts` rewrite, `background.test.ts`.
+
+**B4 — iOS (C7, C10 client)**
+- `ios/Shared/Crypto/KDF.swift` (`computeAuthHash`); `ios/Shared/Storage/WrappedKeyStore.swift` + test conformers `TempDirWrappedKeyStore`, `MockWrappedKeyStore`; `ios/PasswdSSOApp/Network/MobileAPIClient.swift` (`performAuthedPOST`, `verifyUnlock`); `ios/Shared/Network/APIPath.swift`; `VaultUnlocker.swift` / `RootView.swift` wiring; `AppSettingsStore.swift` + `AutoLockService.swift` (tenant logout); XCTests. Not compilable on this host (VE1) — CI verifies.
+
+**B2 — gates**
+- `scripts/checks/auth-hash-golden-vectors.json`; `check-crypto-domains.mjs` Check F + Check G; `scripts/__tests__/check-crypto-domains.test.mjs` describe blocks; `scripts/checks/check-client-token-expiry.mjs` + `client-token-expiry-exemptions.txt` + `scripts/__tests__/check-client-token-expiry.test.mjs`; wire into `scripts/pre-pr.sh` and `.github/workflows/ci.yml` static-checks; golden-vector parity tests in web/extension/iOS.
+
+**B5 — docs (C12)**
+
+Shared utilities to reuse: `checkAuth`/`authOrToken`, `validateExtensionToken`, `revokeExtensionTokenFamily`, `checkLockout`, `createRateLimiter`/`checkRateLimitOrFail`, `parseBody`, `hexHash`, `errorResponse`, `logAuditAsync`, `withBypassRls`/`withUserTenantRls` + `BYPASS_PURPOSE.TOKEN_LIFECYCLE`, `MS_PER_*` constants, `enforceAccessRestriction`, iOS `TokenRefreshCoordinator`, extension `swFetch`.
+
+CI parity gaps (pre-pr.sh lacks them): `bash scripts/check-state-mutation-centralization.sh` (emergency-access/access-request only — not touched; run once manually at 2-4); `npm run licenses:check*` (no dependency change — run once manually at 2-4).

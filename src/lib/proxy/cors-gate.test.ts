@@ -37,6 +37,7 @@ describe("isBearerBypassRoute — method + exact-path truth table", () => {
     { path: "/api/teams/t1/passwords/e1", method: "GET", expected: true, reason: "single team entry read" },
     { path: "/api/vault/status", method: "GET", expected: true, reason: "vault status" },
     { path: "/api/vault/unlock/data", method: "GET", expected: true, reason: "vault unlock data" },
+    { path: "/api/vault/unlock/verify", method: "POST", expected: true, reason: "C2 presence verify" },
     { path: "/api/vault/delegation/check", method: "GET", expected: true, reason: "CLI agent delegation check" },
     { path: "/api/vault/ssh/sign-authorize", method: "POST", expected: true, reason: "CLI SSH sign-authorize" },
     { path: "/api/extension/token", method: "DELETE", expected: true, reason: "extension token revoke" },
@@ -50,6 +51,7 @@ describe("isBearerBypassRoute — method + exact-path truth table", () => {
     { path: "/api/teams/t1/passwords", method: "POST", expected: false, reason: "team entry create is session-only (wrong method)" },
     { path: "/api/passwords/abc", method: "PATCH", expected: false, reason: "no PATCH on single entry" },
     { path: "/api/vault/unlock/data", method: "POST", expected: false, reason: "vault unlock data is GET-only" },
+    { path: "/api/vault/unlock/verify", method: "GET", expected: false, reason: "unlock verify is POST-only" },
     { path: "/api/tenant/access-requests", method: "GET", expected: false, reason: "access-requests GET is session-only" },
     { path: "/api/vault/ssh/sign-authorize", method: "GET", expected: false, reason: "sign-authorize is POST-only" },
 

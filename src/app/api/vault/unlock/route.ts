@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createHash, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
+import { compareVaultAuthHash } from "@/lib/vault/verify-auth-hash";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -86,15 +86,11 @@ async function handlePOST(request: NextRequest) {
   if (!user?.vaultSetupAt || !user.masterPasswordServerHash || !user.masterPasswordServerSalt) {
     return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
+  // Snapshot narrowed (non-null) values — TS does not retain the guard's
+  // narrowing through the whole `user` object passed to another function.
+  const { masterPasswordServerHash, masterPasswordServerSalt } = user;
 
-  // Verify: SHA-256(authHash + serverSalt) === stored serverHash
-  const computedHash = createHash("sha256")
-    .update(result.data.authHash + user.masterPasswordServerSalt)
-    .digest("hex");
-
-  const hashA = Buffer.from(computedHash, "hex");
-  const hashB = Buffer.from(user.masterPasswordServerHash, "hex");
-  if (hashA.length !== hashB.length || !timingSafeEqual(hashA, hashB)) {
+  if (!compareVaultAuthHash(result.data.authHash, { masterPasswordServerHash, masterPasswordServerSalt })) {
     const failResult = await recordFailure(session.user.id, request);
     if (failResult === null) {
       // lock_timeout: counter NOT incremented, temporary contention

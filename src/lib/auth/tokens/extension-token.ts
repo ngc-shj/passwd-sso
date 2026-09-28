@@ -8,8 +8,11 @@ import {
   EXTENSION_TOKEN_MAX_ACTIVE,
   type ExtensionTokenScope,
 } from "@/lib/constants";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
+import { computeClientTokenExpiry } from "@/lib/auth/tokens/client-token-expiry";
+import {
+  EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
+} from "@/lib/validations/common";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { validateExtensionTokenDpop } from "@/lib/auth/dpop/validate-token-dpop";
@@ -201,27 +204,40 @@ export async function issueExtensionToken(params: {
   const { userId, tenantId, scope, cnfJkt } = params;
   const now = new Date();
 
-  // Read tenant extension-token idle TTL.
+  // Read tenant extension-token idle/absolute TTLs.
   // FAIL-CLOSED: tenantId is a non-null FK RESTRICT source, so a null tenant row
-  // is data corruption, NOT "no policy". The column is non-nullable with a
-  // schema default, so `tenant?.… ?? DEFAULT` only ever fires on a vanished
-  // tenant — where defaulting to the 7-day ceiling could grant a longer-lived
+  // is data corruption, NOT "no policy". The columns are non-nullable with
+  // schema defaults, so `tenant?.… ?? DEFAULT` only ever fires on a vanished
+  // tenant — where defaulting to the ceiling could grant a longer-lived
   // token than a tenant that had tightened its TTL. Refuse issuance instead.
   const tenant = await withBypassRls(prisma, async (tx) =>
     tx.tenant.findUnique({
       where: { id: tenantId },
-      select: { extensionTokenIdleTimeoutMinutes: true },
+      select: {
+        extensionTokenIdleTimeoutMinutes: true,
+        extensionTokenAbsoluteTimeoutMinutes: true,
+      },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
   if (!tenant) {
     throw new Error(`issueExtensionToken: tenant ${tenantId} not found`);
   }
-  // The column is non-nullable with a schema default; the `?? DEFAULT` is a
+  // The columns are non-nullable with schema defaults; the `?? DEFAULT` is a
   // defensive floor for a field-null that cannot occur in practice (and is
   // fail-safe — a null would otherwise yield a 0-minute TTL).
   const idleMinutes =
     tenant.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
-  const expiresAt = new Date(now.getTime() + idleMinutes * MS_PER_MINUTE);
+  const absoluteMinutes =
+    tenant.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT;
+  // Issuance follows a web sign-in + step-up, which itself counts as presence
+  // (C3/C4) — presence and familyCreatedAt are both `now` for a brand-new family.
+  const expiresAt = computeClientTokenExpiry({
+    now,
+    presenceAt: now,
+    familyCreatedAt: now,
+    idleMinutes,
+    absoluteMinutes,
+  });
 
   const plaintext = generateShareToken();
   const tokenHash = hashToken(plaintext);
@@ -260,6 +276,8 @@ export async function issueExtensionToken(params: {
           // forward (see /api/extension/token/refresh).
           familyId,
           familyCreatedAt: now,
+          // Issuance itself counts as presence (see expiresAt comment above).
+          lastPresenceAt: now,
         },
         select: { expiresAt: true, scope: true, cnfJkt: true },
       });
@@ -285,6 +303,7 @@ export async function issueExtensionToken(params: {
 
 export const EXTENSION_TOKEN_REVOKE_REASON = {
   FAMILY_EXPIRED: "family_expired",
+  PRESENCE_EXPIRED: "presence_expired",
   REPLAY_DETECTED: "replay_detected",
   SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
   PASSKEY_REAUTH: "passkey_reauth",

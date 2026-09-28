@@ -96,6 +96,23 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("bypasses session check for Bearer POST /api/vault/unlock/verify (C2)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/vault/unlock/verify", { Authorization: "Bearer tok123" }, "POST"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT bypass without Bearer header on /api/vault/unlock/verify (C2)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/vault/unlock/verify", undefined, "POST"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("bypasses session check for Bearer DELETE /api/extension/token (revoke)", async () => {
     const res = await proxy(
       createApiRequest("/api/extension/token", { Authorization: "Bearer tok123" }, "DELETE"),

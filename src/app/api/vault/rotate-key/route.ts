@@ -1,8 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { advisoryXactLock } from "@/lib/tenant-rls";
+import { compareVaultAuthHash } from "@/lib/vault/verify-auth-hash";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -156,16 +157,10 @@ async function handlePOST(request: NextRequest) {
   }
   // Snapshot narrowed (non-null) values for use inside the transaction
   // closure below — TS does not retain the guard's narrowing through it.
-  const { vaultSetupAt, accountSalt } = user;
+  const { vaultSetupAt, accountSalt, masterPasswordServerHash, masterPasswordServerSalt } = user;
 
   // Verify current passphrase
-  const computedHash = createHash("sha256")
-    .update(payload.currentAuthHash + user.masterPasswordServerSalt)
-    .digest("hex");
-
-  const hashA = Buffer.from(computedHash, "hex");
-  const hashB = Buffer.from(user.masterPasswordServerHash, "hex");
-  if (hashA.length !== hashB.length || !timingSafeEqual(hashA, hashB)) {
+  if (!compareVaultAuthHash(payload.currentAuthHash, { masterPasswordServerHash, masterPasswordServerSalt })) {
     return errorResponse(API_ERROR.INVALID_PASSPHRASE);
   }
 

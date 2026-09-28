@@ -46,6 +46,7 @@ export const API_ERROR = {
   RESET_TARGET_EMAIL_CHANGED: "RESET_TARGET_EMAIL_CHANGED",
   FORBIDDEN_INSUFFICIENT_ROLE: "FORBIDDEN_INSUFFICIENT_ROLE",
   INVALID_ORIGIN: "INVALID_ORIGIN",
+  AUTH_HASH_MISMATCH: "AUTH_HASH_MISMATCH",
 
   // ── Tags ──────────────────────────────────────────────────
   TAG_ALREADY_EXISTS: "TAG_ALREADY_EXISTS",
@@ -331,6 +332,11 @@ export const API_ERROR_STATUS = {
   RESET_TARGET_EMAIL_CHANGED: 409,
   FORBIDDEN_INSUFFICIENT_ROLE: 403,
   INVALID_ORIGIN: 403,
+  // 422 chosen (not 401) so a wrong hash on this route stays distinguishable
+  // by status alone from every other outcome — see plan §C2. It happens to
+  // share the numeric status with MCP_CLIENT_LIMIT_EXCEEDED (unrelated
+  // domain); any 422-rate alert must stay path-scoped.
+  AUTH_HASH_MISMATCH: 422,
 
   // ── Tags / Folders ────────────────────────────────────────
   TAG_ALREADY_EXISTS: 409,
@@ -663,6 +669,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   RESET_TARGET_EMAIL_CHANGED: "resetTargetEmailChanged",
   FORBIDDEN_INSUFFICIENT_ROLE: "forbiddenInsufficientRole",
   INVALID_ORIGIN: "invalidOrigin",
+  AUTH_HASH_MISMATCH: "authHashMismatch",
   SCIM_TOKEN_INVALID: "scimTokenInvalid",
   SCIM_TOKEN_EXPIRED: "scimTokenExpired",
   SCIM_TOKEN_REVOKED: "scimTokenRevoked",

@@ -107,6 +107,7 @@ src/app/api/vault/setup/route.ts	1
 src/app/api/vault/ssh/sign-authorize/route.ts	1
 src/app/api/vault/unlock/data/route.ts	1
 src/app/api/vault/unlock/route.ts	1
+src/app/api/vault/unlock/verify/route.ts	1
 src/app/api/webauthn/authenticate/options/route.ts	1
 src/app/api/webauthn/authenticate/verify/route.ts	1
 src/app/api/webauthn/credentials/[id]/prf/options/route.ts	1
