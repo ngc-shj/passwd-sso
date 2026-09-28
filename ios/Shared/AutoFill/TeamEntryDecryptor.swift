@@ -30,6 +30,32 @@ public enum TeamEntryDecryptor {
       ciphertext: wrapped.ciphertext, iv: wrapped.iv, tag: wrapped.authTag, key: cacheKey, aad: aad)
   }
 
+  // MARK: - Auth hash wrap/unwrap (cacheKey, AAD kind:"authHash")
+
+  /// Wrap the hex authHash (plan D3/C2/C7) under cacheKey so the biometric path
+  /// can re-present server-side presence proof without recomputing HKDF from
+  /// the secretKey (which does not survive biometric unlock).
+  public static func wrapAuthHash(
+    _ authHash: String, cacheKey: SymmetricKey, userId: String, issuedAt: Date
+  ) throws -> WrappedAuthHash {
+    let aad = try buildLocalWrapAAD(kind: "authHash", userId: userId)
+    let (ct, iv, tag) = try encryptAESGCM(plaintext: Data(authHash.utf8), key: cacheKey, aad: aad)
+    return WrappedAuthHash(ciphertext: ct, iv: iv, authTag: tag, issuedAt: issuedAt)
+  }
+
+  /// Returns the hex authHash string, or nil on AEAD/decode failure (wrong
+  /// userId, corrupted blob, or never wrapped).
+  public static func unwrapAuthHash(
+    _ wrapped: WrappedAuthHash, cacheKey: SymmetricKey, userId: String
+  ) -> String? {
+    guard let aad = try? buildLocalWrapAAD(kind: "authHash", userId: userId),
+          let plain = try? decryptAESGCM(
+            ciphertext: wrapped.ciphertext, iv: wrapped.iv, tag: wrapped.authTag,
+            key: cacheKey, aad: aad)
+    else { return nil }
+    return String(data: plain, encoding: .utf8)
+  }
+
   // MARK: - Team key wrap/unwrap (cacheKey, AAD kind:"team")
 
   /// Host (sync) side: wrap the DERIVED team encryption key under cacheKey.

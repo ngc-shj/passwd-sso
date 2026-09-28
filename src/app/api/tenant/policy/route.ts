@@ -103,6 +103,7 @@ async function handleGET(_req: NextRequest) {
         extensionTokenIdleTimeoutMinutes: true,
         extensionTokenAbsoluteTimeoutMinutes: true,
         vaultAutoLockMinutes: true,
+        requireVaultTimeoutLogout: true,
         allowAppSideAutofill: true,
         allowedCidrs: true,
         tailscaleEnabled: true,
@@ -147,6 +148,7 @@ async function handleGET(_req: NextRequest) {
     extensionTokenIdleTimeoutMinutes: user?.tenant?.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
     extensionTokenAbsoluteTimeoutMinutes: user?.tenant?.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
     vaultAutoLockMinutes: user?.tenant?.vaultAutoLockMinutes ?? null,
+    requireVaultTimeoutLogout: user?.tenant?.requireVaultTimeoutLogout ?? false,
     allowAppSideAutofill: user?.tenant?.allowAppSideAutofill ?? false,
     allowedCidrs: user?.tenant?.allowedCidrs ?? [],
     tailscaleEnabled: user?.tenant?.tailscaleEnabled ?? false,
@@ -215,6 +217,7 @@ async function handlePATCH(req: NextRequest) {
     extensionTokenIdleTimeoutMinutes,
     extensionTokenAbsoluteTimeoutMinutes,
     vaultAutoLockMinutes,
+    requireVaultTimeoutLogout,
     allowAppSideAutofill,
     allowedCidrs,
     tailscaleEnabled,
@@ -271,6 +274,13 @@ async function handlePATCH(req: NextRequest) {
     ) {
       return validationError();
     }
+  }
+
+  // Validate requireVaultTimeoutLogout: boolean (C10). Client-enforced
+  // policy (extension/iOS): when true, the client's vault-timeout action is
+  // forced to "logout" instead of the user's local "lock" preference.
+  if (requireVaultTimeoutLogout !== undefined && typeof requireVaultTimeoutLogout !== "boolean") {
+    return validationError();
   }
 
   // Validate allowAppSideAutofill: boolean (default false). Per-tenant opt-in
@@ -854,6 +864,9 @@ async function handlePATCH(req: NextRequest) {
   if (vaultAutoLockMinutes !== undefined) {
     updateData.vaultAutoLockMinutes = vaultAutoLockMinutes ?? null;
   }
+  if (requireVaultTimeoutLogout !== undefined) {
+    updateData.requireVaultTimeoutLogout = requireVaultTimeoutLogout;
+  }
   if (allowAppSideAutofill !== undefined) {
     updateData.allowAppSideAutofill = allowAppSideAutofill;
   }
@@ -1023,6 +1036,7 @@ async function handlePATCH(req: NextRequest) {
         extensionTokenIdleTimeoutMinutes: true,
         extensionTokenAbsoluteTimeoutMinutes: true,
         vaultAutoLockMinutes: true,
+        requireVaultTimeoutLogout: true,
         allowAppSideAutofill: true,
         allowedCidrs: true,
         tailscaleEnabled: true,
@@ -1112,6 +1126,7 @@ async function handlePATCH(req: NextRequest) {
       extensionTokenIdleTimeoutMinutes: updated.extensionTokenIdleTimeoutMinutes,
       extensionTokenAbsoluteTimeoutMinutes: updated.extensionTokenAbsoluteTimeoutMinutes,
       vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
+      requireVaultTimeoutLogout: updated.requireVaultTimeoutLogout,
       allowAppSideAutofill: updated.allowAppSideAutofill,
       allowedCidrs: updated.allowedCidrs,
       tailscaleEnabled: updated.tailscaleEnabled,
@@ -1163,6 +1178,7 @@ async function handlePATCH(req: NextRequest) {
     extensionTokenIdleTimeoutMinutes: updated.extensionTokenIdleTimeoutMinutes,
     extensionTokenAbsoluteTimeoutMinutes: updated.extensionTokenAbsoluteTimeoutMinutes,
     vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
+    requireVaultTimeoutLogout: updated.requireVaultTimeoutLogout,
     allowAppSideAutofill: updated.allowAppSideAutofill,
     allowedCidrs: updated.allowedCidrs,
     tailscaleEnabled: updated.tailscaleEnabled,

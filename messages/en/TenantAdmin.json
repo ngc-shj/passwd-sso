@@ -79,6 +79,8 @@
   "vaultAutoLockValidationMin": "Must be at least {min} minutes.",
   "vaultAutoLockValidationMax": "Must be {max} minutes or less.",
   "vaultAutoLockExceedsIdleCap": "Vault auto-lock must be {n} minutes or less (same as the shorter of the web session / client app idle timeouts above).",
+  "requireVaultTimeoutLogout": "Force sign-out on client app vault timeout",
+  "requireVaultTimeoutLogoutHelp": "When enabled, the browser extension and iOS app sign out (instead of only locking) once the vault auto-lock timeout above is reached, ending the client app session. This overrides each user's own \"lock only\" preference.",
 "accessRestrictionTitle": "Access Restriction",
   "accessRestrictionDescription": "Restrict access to this tenant by IP address or Tailscale network. When configured, only matching connections are allowed (OR logic).",
   "allowedCidrsLabel": "Allowed IP Ranges (CIDR)",

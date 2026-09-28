@@ -64,6 +64,7 @@ public struct AppSettingsStore {
     static let vaultTimeoutAction = "vaultTimeoutAction"
     static let clipboardClearSeconds = "clipboardClearSeconds"
     static let tenantAutoLockMinutes = "tenantAutoLockMinutes"
+    static let requireVaultTimeoutLogout = "requireVaultTimeoutLogout"
     static let autoCopyTotp = "autoCopyTotp"
     static let appLanguage = "appLanguage"
     static let fetchFaviconsCached = "fetchFaviconsCached"
@@ -153,6 +154,26 @@ public struct AppSettingsStore {
   /// `tenantAutoLockMinutes` on disconnect.
   public nonmutating func clearTenantPolicy() {
     tenantAutoLockMinutes = nil
+    requireVaultTimeoutLogout = false
+  }
+
+  /// Tenant flag (plan C10): when true, the idle vault timeout must sign out
+  /// rather than merely lock — overrides the user's local `vaultTimeoutAction`.
+  /// Absent key → `false` (fail-closed to "not enforced": the user's own
+  /// setting governs, matching every other opt-in Bool in this store).
+  public var requireVaultTimeoutLogout: Bool {
+    get { defaults.bool(forKey: Key.requireVaultTimeoutLogout) }
+    nonmutating set { defaults.set(newValue, forKey: Key.requireVaultTimeoutLogout) }
+  }
+
+  /// Apply the tenant's `requireVaultTimeoutLogout` flag received at unlock.
+  /// Same authoritative gating as `applyTenantPolicy`: only the passphrase
+  /// unlock (which freshly fetched the policy) writes; the biometric/offline
+  /// path passes `policyAuthoritative: false` so it can't clear an enforced
+  /// value with a stale nil.
+  public nonmutating func applyRequireVaultTimeoutLogout(_ value: Bool?, policyAuthoritative: Bool) {
+    guard policyAuthoritative else { return }
+    requireVaultTimeoutLogout = value ?? false
   }
 
   /// Clipboard auto-clear delay in seconds, from the fixed option set. Absent or

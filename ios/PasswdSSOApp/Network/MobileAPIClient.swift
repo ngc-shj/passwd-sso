@@ -25,6 +25,11 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
   public let encryptedEcdhPrivateKey: String?
   public let ecdhPrivateKeyIv: String?
   public let ecdhPrivateKeyAuthTag: String?
+  /// Tenant flag (plan C10): when true, the idle vault timeout must sign out
+  /// rather than merely lock, overriding the user's local timeout-action
+  /// setting. Optional → absent/null (older server, or no tenant) → nil,
+  /// treated as "not enforced" by the caller.
+  public let requireVaultTimeoutLogout: Bool?
 
   enum CodingKeys: String, CodingKey {
     case accountSalt
@@ -40,6 +45,7 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
     case encryptedEcdhPrivateKey
     case ecdhPrivateKeyIv
     case ecdhPrivateKeyAuthTag
+    case requireVaultTimeoutLogout
   }
 
   // Explicit memberwise init with vaultAutoLockMinutes defaulted LAST so existing
@@ -58,7 +64,8 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
     ecdhPublicKey: String? = nil,
     encryptedEcdhPrivateKey: String? = nil,
     ecdhPrivateKeyIv: String? = nil,
-    ecdhPrivateKeyAuthTag: String? = nil
+    ecdhPrivateKeyAuthTag: String? = nil,
+    requireVaultTimeoutLogout: Bool? = nil
   ) {
     self.accountSalt = accountSalt
     self.encryptedSecretKey = encryptedSecretKey
@@ -73,6 +80,7 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
     self.encryptedEcdhPrivateKey = encryptedEcdhPrivateKey
     self.ecdhPrivateKeyIv = ecdhPrivateKeyIv
     self.ecdhPrivateKeyAuthTag = ecdhPrivateKeyAuthTag
+    self.requireVaultTimeoutLogout = requireVaultTimeoutLogout
   }
 }
 
@@ -330,6 +338,27 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let url = serverURL.appending(path: APIPath.vaultUnlockData, directoryHint: .notDirectory)
     let data = try await performAuthedGET(url: url)
     return try JSONDecoder().decode(VaultUnlockData.self, from: data)
+  }
+
+  /// POST /api/vault/unlock/verify with the client's authHash — server-side
+  /// presence proof (plan C2/C7). Best-effort by design: the caller unlocked the
+  /// vault locally already (passphrase check or cached authHash), so this only
+  /// records/denies presence, it never gates showing the vault.
+  ///   - 200 → `true` (presence recorded).
+  ///   - 422 (`AUTH_HASH_MISMATCH`, surfaced as `.serverError(status: 422)` by the
+  ///     ladder's default branch — C2 never 401s for a wrong hash) → `false`; the
+  ///     caller deletes its cached authHash.
+  ///   - Anything else (401-ladder exhaustion, network, 429, `ACCOUNT_LOCKED`)
+  ///     rethrows so the caller leaves its cached authHash untouched.
+  public func verifyUnlock(authHash: String) async throws -> Bool {
+    let url = serverURL.appending(path: APIPath.vaultUnlockVerify, directoryHint: .notDirectory)
+    let body = try JSONEncoder().encode(["authHash": authHash])
+    do {
+      _ = try await performAuthedPOST(url: url, body: body)
+      return true
+    } catch MobileAPIError.serverError(let status) where status == 422 {
+      return false
+    }
   }
 
   /// Fetch encrypted team entries (flat response format) for a given team.
@@ -843,6 +872,64 @@ public actor MobileAPIClient: VaultUnlockDataSource {
         // serverError so callers fall back to cached data, NOT authenticationRequired
         // (which would route to re-sign-in / wipe tokens). Only a failed refresh
         // (ensureRefreshed → authenticationRequired) means the session is dead.
+        throw MobileAPIError.serverError(status: 401)
+      default:
+        throw MobileAPIError.serverError(status: http.statusCode)
+      }
+    }
+  }
+
+  /// Performs an authenticated POST request with the full C3 retry ladder — a
+  /// straight mirror of `performAuthedGET` for a POST body:
+  ///   1. Initial request with a proactively-valid access token.
+  ///   2. On 401: nonce-retry (once, if a new nonce arrived).
+  ///   3. On still 401: token-refresh via single-flight gate, rebuild ath, retry once.
+  ///   4. Still 401 → throws `.serverError(status: 401)`.
+  /// Every other non-200 status falls to the same default branch as `performAuthedGET`.
+  /// Existing hand-rolled POST call sites are NOT migrated to this helper.
+  func performAuthedPOST(url: URL, body: Data) async throws -> Data {
+    let initial = try await validAccessToken()
+    let htu = canonicalHTU(url: url)
+    let localJWK = jwk
+    let localSigner = signer
+    var token = initial
+    var nonce = try? tokenStore.loadNonce()
+    var didNonceRetry = false, didRefreshRetry = false
+    while true {
+      let proof = try await buildDPoPProof(
+        htm: HTTPMethod.post, htu: htu, jwk: localJWK, ath: sha256Base64URL(token),
+        nonce: nonce, signer: localSigner
+      )
+      var request = URLRequest(url: url)
+      request.httpMethod = HTTPMethod.post
+      request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
+      request.setValue("\(HTTPAuthScheme.bearerPrefix)\(token)", forHTTPHeaderField: HTTPHeader.authorization)
+      request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
+      request.httpBody = body
+      let (data, response) = try await performHTTP(request)
+      let http = response as! HTTPURLResponse
+      // A nonce in THIS response is the actual challenge signal; a stale stored
+      // nonce must NOT trigger a nonce-retry (keeps the ladder bounded at ≤3).
+      let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
+      if let n = freshNonce {
+        try? tokenStore.saveNonce(n)
+        nonce = n
+      }
+      switch http.statusCode {
+      case 200:
+        return data
+      case 401:
+        if !didNonceRetry, freshNonce != nil {
+          didNonceRetry = true
+          continue
+        }
+        if !didRefreshRetry {
+          didRefreshRetry = true
+          token = try await ensureRefreshed(staleToken: token)
+          continue
+        }
+        // Refresh SUCCEEDED yet the resource still 401s — not a dead session (see
+        // performAuthedGET's identical rationale); surface as a transient serverError.
         throw MobileAPIError.serverError(status: 401)
       default:
         throw MobileAPIError.serverError(status: http.statusCode)

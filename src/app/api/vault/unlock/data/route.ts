@@ -14,8 +14,12 @@ import { checkLockout } from "@/lib/auth/policy/account-lockout";
 
 export const runtime = "nodejs";
 
-// Higher limit than vault/unlock — this endpoint only returns encrypted data
-// and cannot be used for brute-force (passphrase verification is separate).
+// Higher limit than vault/unlock — this endpoint does not verify a
+// passphrase itself, so it cannot be used to detect a correct guess online.
+// It does, however, hand any authenticated caller the encrypted secret key
+// and verification artifact, which lets a token holder verify passphrase
+// guesses OFFLINE without ever hitting the server again; resistance to that
+// comes from the PBKDF2 iteration cost, not from this data being secret.
 // 120 req/5min accounts for ~40 E2E unlock calls + CI retries (×2) + headroom.
 const vaultUnlockDataLimiter = createRateLimiter({
   windowMs: 5 * MS_PER_MINUTE,
@@ -71,7 +75,7 @@ async function handleGET(req: NextRequest) {
         kdfMemory: true,
         kdfParallelism: true,
         passphraseVerifierHmac: true,
-        tenant: { select: { vaultAutoLockMinutes: true } },
+        tenant: { select: { vaultAutoLockMinutes: true, requireVaultTimeoutLogout: true } },
         // ECDH fields for team E2E
         ecdhPublicKey: true,
         encryptedEcdhPrivateKey: true,
@@ -132,6 +136,7 @@ async function handleGET(req: NextRequest) {
       : null,
     ...ecdhFields,
     vaultAutoLockMinutes: user.tenant?.vaultAutoLockMinutes ?? null,
+    requireVaultTimeoutLogout: user.tenant?.requireVaultTimeoutLogout ?? false,
   });
 }
 

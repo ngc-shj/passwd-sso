@@ -173,7 +173,7 @@ describe("GET /api/vault/unlock/data", () => {
       encryptedEcdhPrivateKey: "ecdh-priv-enc",
       ecdhPrivateKeyIv: "ecdh-iv",
       ecdhPrivateKeyAuthTag: "ecdh-tag",
-      tenant: { vaultAutoLockMinutes: 10 },
+      tenant: { vaultAutoLockMinutes: 10, requireVaultTimeoutLogout: false },
     });
     mockPrismaVaultKey.findUnique.mockResolvedValue({
       verificationCiphertext: "v-cipher",
@@ -206,6 +206,7 @@ describe("GET /api/vault/unlock/data", () => {
       ecdhPrivateKeyIv: "ecdh-iv",
       ecdhPrivateKeyAuthTag: "ecdh-tag",
       vaultAutoLockMinutes: 10,
+      requireVaultTimeoutLogout: false,
     });
   });
 
@@ -281,5 +282,44 @@ describe("GET /api/vault/unlock/data", () => {
     const res = await GET(req());
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
+  });
+
+  // ─── C10: requireVaultTimeoutLogout delivery ─────────────────
+
+  it("returns requireVaultTimeoutLogout: true when the tenant enforces it", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      accountSalt: "salt",
+      encryptedSecretKey: "key",
+      secretKeyIv: "iv",
+      secretKeyAuthTag: "tag",
+      keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
+      tenant: { vaultAutoLockMinutes: 10, requireVaultTimeoutLogout: true },
+    });
+    mockPrismaVaultKey.findUnique.mockResolvedValue(null);
+
+    const res = await GET(req());
+    const json = await res.json();
+    expect(json.requireVaultTimeoutLogout).toBe(true);
+  });
+
+  it("returns requireVaultTimeoutLogout: false when the tenant relation is absent", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      accountSalt: "salt",
+      encryptedSecretKey: "key",
+      secretKeyIv: "iv",
+      secretKeyAuthTag: "tag",
+      keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
+    });
+    mockPrismaVaultKey.findUnique.mockResolvedValue(null);
+
+    const res = await GET(req());
+    const json = await res.json();
+    expect(json.requireVaultTimeoutLogout).toBe(false);
   });
 });

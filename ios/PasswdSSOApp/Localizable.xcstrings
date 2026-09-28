@@ -2905,6 +2905,22 @@
         }
       }
     },
+    "Your organization requires signing out when the vault times out." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your organization requires signing out when the vault times out."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保管庫がタイムアウトすると、組織の設定によりサインアウトされます。"
+          }
+        }
+      }
+    },
     "Your session expired. Lock and unlock to sign in again." : {
       "extractionState" : "manual",
       "localizations" : {

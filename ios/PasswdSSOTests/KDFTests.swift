@@ -103,6 +103,38 @@ final class KDFTests: XCTestCase {
     XCTAssertEqual(key1, key2)
   }
 
+  // MARK: - Auth Hash (plan D3/C2/C7)
+
+  /// Golden vector shared with web (crypto-client.ts) and the extension
+  /// (crypto.ts): secretKey = 0x00..0x1f (32 bytes) → authKey (HKDF-SHA256,
+  /// zero salt, info "passwd-sso-auth-v1") → authHash (SHA-256 hex of authKey).
+  /// Verified via Node:
+  ///   const { hkdfSync, createHash } = require('crypto');
+  ///   const secretKey = Buffer.from(Array.from({length:32}, (_,i)=>i));
+  ///   const authKey = Buffer.from(hkdfSync('sha256', secretKey, Buffer.alloc(32,0),
+  ///     Buffer.from('passwd-sso-auth-v1'), 32));
+  ///   createHash('sha256').update(authKey).digest('hex')
+  func testComputeAuthHashKnownVector() throws {
+    let secretKey = Data((0..<32).map { UInt8($0) })
+    let authKey = try deriveAuthKey(secretKey: secretKey)
+    let authHash = computeAuthHash(authKey: authKey)
+
+    XCTAssertEqual(
+      authHash,
+      "34cc5ea2db6790bc1411b9325d0a12dd900ad751313cb9c52af8756e27b11efd"
+    )
+  }
+
+  func testComputeAuthHashLength() throws {
+    let authKey = Data(repeating: 0x42, count: 32)
+    XCTAssertEqual(computeAuthHash(authKey: authKey).count, 64, "SHA-256 hex must be 64 chars")
+  }
+
+  func testComputeAuthHashDeterministic() throws {
+    let authKey = Data(repeating: 0x55, count: 32)
+    XCTAssertEqual(computeAuthHash(authKey: authKey), computeAuthHash(authKey: authKey))
+  }
+
   // MARK: - HKDF Cache Vault Key
 
   func testDeriveCacheVaultKeyLength() throws {

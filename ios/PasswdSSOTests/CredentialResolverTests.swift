@@ -39,10 +39,20 @@ final class MockWrappedKeyStore: WrappedKeyStore, @unchecked Sendable {
 
   func loadECDHPrivateKey() throws -> WrappedECDHPrivateKey? { storedECDHPrivateKey }
 
+  var storedAuthHash: WrappedAuthHash?
+
+  func saveAuthHash(_ wrapped: WrappedAuthHash) throws {
+    storedAuthHash = wrapped
+  }
+
+  func loadAuthHash() throws -> WrappedAuthHash? { storedAuthHash }
+  func deleteAuthHash() throws { storedAuthHash = nil }
+
   func clearAll() throws {
     storedVaultKey = nil
     teamKeys = []
     storedECDHPrivateKey = nil
+    storedAuthHash = nil
   }
 }
 

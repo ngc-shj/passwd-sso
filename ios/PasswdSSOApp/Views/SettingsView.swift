@@ -63,6 +63,10 @@ struct SettingsView: View {
   /// True when the tenant enforces an auto-lock interval (overrides the user's).
   private var isTenantEnforced: Bool { store.tenantAutoLockMinutes != nil }
 
+  /// True when the tenant enforces logout-on-timeout (plan C10) — overrides the
+  /// user's local "On Timeout" choice.
+  private var isTimeoutActionEnforced: Bool { store.requireVaultTimeoutLogout }
+
   /// Picker options: the standard set, plus the enforced value when it isn't one
   /// of them (so the disabled picker renders the enforced value instead of blank).
   private var autoLockOptions: [Int] {
@@ -85,7 +89,10 @@ struct SettingsView: View {
 
   private var timeoutActionSelection: Binding<VaultTimeoutAction> {
     Binding(
-      get: { autoLockService.timeoutAction },
+      // Enforced → always show "Log Out" (the effective behavior), disabled
+      // below; the user's own choice underneath is left untouched so it
+      // reappears once the tenant lifts the policy.
+      get: { isTimeoutActionEnforced ? .logout : autoLockService.timeoutAction },
       set: { newValue in
         autoLockService.timeoutAction = newValue
         store.vaultTimeoutAction = newValue
@@ -172,6 +179,7 @@ struct SettingsView: View {
             Text("Lock").tag(VaultTimeoutAction.lock)
             Text("Log Out").tag(VaultTimeoutAction.logout)
           }
+          .disabled(isTimeoutActionEnforced)
         } header: {
           Text("Security")
         } footer: {
@@ -181,6 +189,9 @@ struct SettingsView: View {
             Text("The vault locks after this much idle time (\"Log Out\" also clears the session). AutoFill needs the app unlocked within this window; each fill still requires Face ID.")
             if isTenantEnforced {
               Text("Set by your organization.")
+            }
+            if isTimeoutActionEnforced {
+              Text("Your organization requires signing out when the vault times out.")
             }
           }
         }

@@ -293,6 +293,41 @@ final class VaultUnlockerTests: XCTestCase {
     )
   }
 
+  /// Plan C7: passphrase unlock must derive + wrap the server-presence authHash
+  /// and return it so the caller can call verifyUnlock (best-effort, non-blocking).
+  func testUnlockHappyPathWritesWrappedAuthHash() async throws {
+    let passphrase = "correct-passphrase"
+    let (unlockData, secretKey) = try makeVaultUnlockData(passphrase: passphrase)
+
+    let keychain = MockKeychain()
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.bridge-key",
+      keychain: keychain
+    )
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+
+    let stubClient = StubVaultAPIClient(mode: .success(unlockData))
+    let unlocker = VaultUnlocker(
+      apiClient: stubClient,
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
+    )
+
+    let result = try await unlocker.unlock(passphrase: passphrase)
+
+    // Expected authHash = SHA-256(HKDF(secretKey, "passwd-sso-auth-v1")) — same
+    // chain as the golden vector in KDFTests, over this fixture's secretKey.
+    let expectedAuthHash = computeAuthHash(authKey: try deriveAuthKey(secretKey: secretKey))
+    XCTAssertEqual(result.authHash, expectedAuthHash, "unlock() must return the computed authHash")
+
+    let wrapped = try XCTUnwrap(wks.loadAuthHash(), "passphrase unlock must persist a wrapped authHash")
+    let unwrapped = TeamEntryDecryptor.unwrapAuthHash(
+      wrapped, cacheKey: result.cacheKey, userId: unlockData.userId)
+    XCTAssertEqual(unwrapped, expectedAuthHash, "wrapped authHash must unwrap to the same value")
+  }
+
   // MARK: - Wrong passphrase
 
   func testWrongPassphrasethrowsInvalidPassphrase() async throws {
@@ -688,6 +723,78 @@ final class VaultUnlockerTests: XCTestCase {
     XCTAssertEqual(result.userId, "persisted-user", "userId must come from persisted wrapped key")
     XCTAssertEqual(
       result.vaultKey.withUnsafeBytes { Data($0) }, vkBytes, "vault key still recovered")
+  }
+
+  /// Plan C7: a wrapped authHash saved by a prior passphrase unlock must be
+  /// unwrapped and returned by the biometric path — using the SAME cacheKey
+  /// derived from the same LAContext bridge_key read, no second biometric
+  /// prompt — so the caller can present it to verifyUnlock.
+  func testUnlockWithBiometrics_returnsCachedAuthHash() async throws {
+    let now = Date()
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(accessGroup: "test.jp.jpng.passwd-sso.shared.authhash", keychain: keychain)
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let vkBytes = vaultKey.withUnsafeBytes { Data($0) }
+    let (c, i, t) = try encryptAESGCM(plaintext: vkBytes, key: cacheKey)
+    try wks.saveVaultKey(
+      WrappedVaultKey(ciphertext: c, iv: i, authTag: t, issuedAt: Date(), userId: "cache-user"))
+
+    let expectedAuthHash = "deadbeefcafe"
+    let wrappedAuthHash = try TeamEntryDecryptor.wrapAuthHash(
+      expectedAuthHash, cacheKey: cacheKey, userId: "cache-user", issuedAt: Date())
+    try wks.saveAuthHash(wrappedAuthHash)
+
+    let cacheURL = tmpDir.appending(path: "authhash.cache", directoryHint: .notDirectory)
+    let entry = try makePersonalCacheEntryForBiometricTest(
+      vaultKey: vaultKey, userId: "cache-user", keyVersion: 1)
+    try buildCacheFileForBiometricTest(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "cache-user", now: now)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks, wrappedKeyStore: wks, cacheURL: cacheURL, now: { now })
+
+    let result = try await unlocker.unlockWithBiometrics(reason: "test")
+    XCTAssertEqual(
+      result.authHash, expectedAuthHash,
+      "biometric unlock must return the previously-wrapped authHash so the caller can send it"
+    )
+  }
+
+  /// No authHash was ever wrapped (e.g. first unlock predates this feature) —
+  /// the biometric path must degrade to nil, not throw.
+  func testUnlockWithBiometrics_noSavedAuthHash_returnsNil() async throws {
+    let now = Date()
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(accessGroup: "test.jp.jpng.passwd-sso.shared.noauthhash", keychain: keychain)
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let vkBytes = vaultKey.withUnsafeBytes { Data($0) }
+    let (c, i, t) = try encryptAESGCM(plaintext: vkBytes, key: cacheKey)
+    try wks.saveVaultKey(
+      WrappedVaultKey(ciphertext: c, iv: i, authTag: t, issuedAt: Date(), userId: "cache-user"))
+
+    let cacheURL = tmpDir.appending(path: "noauthhash.cache", directoryHint: .notDirectory)
+    let entry = try makePersonalCacheEntryForBiometricTest(
+      vaultKey: vaultKey, userId: "cache-user", keyVersion: 1)
+    try buildCacheFileForBiometricTest(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "cache-user", now: now)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks, wrappedKeyStore: wks, cacheURL: cacheURL, now: { now })
+
+    let result = try await unlocker.unlockWithBiometrics(reason: "test")
+    XCTAssertNil(result.authHash, "no wrapped authHash on disk must degrade to nil, not throw")
   }
 
   /// AC-C1.2: a FRESH cache returns cacheRecovered=true with userId/keyVersion from

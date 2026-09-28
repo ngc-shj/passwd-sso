@@ -148,6 +148,90 @@ final class WrappedKeyStoreTests: XCTestCase {
     XCTAssertEqual(loaded, second, "Second write should replace first")
   }
 
+  // MARK: - Auth hash round-trip
+
+  func testAuthHashRoundTrip() throws {
+    XCTAssertNil(try store.loadAuthHash(), "Should be nil before save")
+
+    let wrapped = WrappedAuthHash(
+      ciphertext: Data([0x01, 0x02]),
+      iv: Data(repeating: 0xCC, count: 12),
+      authTag: Data(repeating: 0xDD, count: 16),
+      issuedAt: Date(timeIntervalSince1970: 3_000_000)
+    )
+    try store.saveAuthHash(wrapped)
+
+    let loaded = try store.loadAuthHash()
+    XCTAssertNotNil(loaded)
+    XCTAssertEqual(loaded, wrapped)
+  }
+
+  func testAuthHashOverwrite() throws {
+    let first = WrappedAuthHash(
+      ciphertext: Data([0x01]),
+      iv: Data(repeating: 0x01, count: 12),
+      authTag: Data(repeating: 0x01, count: 16),
+      issuedAt: Date(timeIntervalSince1970: 1000)
+    )
+    let second = WrappedAuthHash(
+      ciphertext: Data([0x02]),
+      iv: Data(repeating: 0x02, count: 12),
+      authTag: Data(repeating: 0x02, count: 16),
+      issuedAt: Date(timeIntervalSince1970: 2000)
+    )
+    try store.saveAuthHash(first)
+    try store.saveAuthHash(second)
+
+    let loaded = try store.loadAuthHash()
+    XCTAssertEqual(loaded, second, "Second write should replace first")
+  }
+
+  func testDeleteAuthHashRemovesFile() throws {
+    let wrapped = WrappedAuthHash(
+      ciphertext: Data([0x01]),
+      iv: Data(repeating: 0x01, count: 12),
+      authTag: Data(repeating: 0x01, count: 16),
+      issuedAt: Date()
+    )
+    try store.saveAuthHash(wrapped)
+    XCTAssertNotNil(try store.loadAuthHash())
+
+    try store.deleteAuthHash()
+    XCTAssertNil(try store.loadAuthHash())
+  }
+
+  func testDeleteAuthHashWhenAbsentDoesNotThrow() throws {
+    XCTAssertNil(try store.loadAuthHash())
+    XCTAssertNoThrow(try store.deleteAuthHash())
+  }
+
+  // MARK: - clearAll removes the auth hash file too
+
+  func testClearAllDeletesAuthHashFile() throws {
+    let vk = WrappedVaultKey(
+      ciphertext: Data([0x01]),
+      iv: Data(repeating: 0x01, count: 12),
+      authTag: Data(repeating: 0x01, count: 16),
+      issuedAt: Date()
+    )
+    let authHash = WrappedAuthHash(
+      ciphertext: Data([0xAB]),
+      iv: Data(repeating: 0xAB, count: 12),
+      authTag: Data(repeating: 0xAB, count: 16),
+      issuedAt: Date()
+    )
+    try store.saveVaultKey(vk)
+    try store.saveAuthHash(authHash)
+
+    XCTAssertNotNil(try store.loadVaultKey())
+    XCTAssertNotNil(try store.loadAuthHash())
+
+    try store.clearAll()
+
+    XCTAssertNil(try store.loadVaultKey(), "vault key must be deleted by clearAll")
+    XCTAssertNil(try store.loadAuthHash(), "auth hash must be deleted by clearAll")
+  }
+
   // MARK: - clearAll
 
   func testClearAllDeletesBothFiles() throws {
@@ -278,6 +362,10 @@ final class TempDirWrappedKeyStore: WrappedKeyStore, @unchecked Sendable {
     baseDir.appending(path: "vault/wrapped-ecdh-private-key.json", directoryHint: .notDirectory)
   }
 
+  private var authHashURL: URL {
+    baseDir.appending(path: "vault/wrapped-auth-hash.json", directoryHint: .notDirectory)
+  }
+
   func saveVaultKey(_ wrapped: WrappedVaultKey) throws {
     try ensureVaultDir()
     let data = try JSONEncoder().encode(wrapped)
@@ -319,11 +407,29 @@ final class TempDirWrappedKeyStore: WrappedKeyStore, @unchecked Sendable {
     return try JSONDecoder().decode(WrappedECDHPrivateKey.self, from: data)
   }
 
+  func saveAuthHash(_ wrapped: WrappedAuthHash) throws {
+    try ensureVaultDir()
+    let data = try JSONEncoder().encode(wrapped)
+    try atomicWrite(data: data, to: authHashURL)
+  }
+
+  func loadAuthHash() throws -> WrappedAuthHash? {
+    guard FileManager.default.fileExists(atPath: authHashURL.path) else { return nil }
+    let data = try Data(contentsOf: authHashURL)
+    return try JSONDecoder().decode(WrappedAuthHash.self, from: data)
+  }
+
+  func deleteAuthHash() throws {
+    let fm = FileManager.default
+    if fm.fileExists(atPath: authHashURL.path) { try fm.removeItem(at: authHashURL) }
+  }
+
   func clearAll() throws {
     let fm = FileManager.default
     if fm.fileExists(atPath: vaultKeyURL.path) { try fm.removeItem(at: vaultKeyURL) }
     if fm.fileExists(atPath: teamKeysURL.path) { try fm.removeItem(at: teamKeysURL) }
     if fm.fileExists(atPath: ecdhKeyURL.path) { try fm.removeItem(at: ecdhKeyURL) }
+    if fm.fileExists(atPath: authHashURL.path) { try fm.removeItem(at: authHashURL) }
   }
 
   private func ensureVaultDir() throws {

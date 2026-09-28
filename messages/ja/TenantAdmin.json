@@ -79,6 +79,8 @@
   "vaultAutoLockValidationMin": "{min}分以上で入力してください。",
   "vaultAutoLockValidationMax": "{max}分以下で入力してください。",
   "vaultAutoLockExceedsIdleCap": "保管庫自動ロックは {n} 分以下にしてください（上の Web セッション／クライアントアプリ アイドルタイムアウトのうち短い方と同じ値が上限です）。",
+  "requireVaultTimeoutLogout": "保管庫タイムアウト時にクライアントアプリを強制サインアウトする",
+  "requireVaultTimeoutLogoutHelp": "有効にすると、上の保管庫自動ロックタイムアウトに達した際、ブラウザ拡張機能や iOS アプリはロックだけでなくサインアウトし、クライアントアプリのセッションを終了します。この設定は各ユーザーの「ロックのみ」設定より優先されます。",
 "accessRestrictionTitle": "アクセス制限",
   "accessRestrictionDescription": "IPアドレスまたはTailscaleネットワークでテナントへのアクセスを制限します。設定時は、いずれかの条件に一致する接続のみ許可されます（OR条件）。",
   "allowedCidrsLabel": "許可するIPアドレス範囲（CIDR）",

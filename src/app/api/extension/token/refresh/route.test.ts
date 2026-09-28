@@ -594,16 +594,25 @@ describe("POST /api/extension/token/refresh", () => {
     });
 
     it("boundary: replayed at exactly the grace window does not revoke the family", async () => {
-      mockExtTokenFindUnique.mockResolvedValueOnce({
-        revokedAt: new Date(Date.now() - REFRESH_REPLAY_GRACE_MS),
-        familyId: "fam-1",
-        userId: "user-1",
-        tenantId: "tenant-1",
-      });
+      // Freeze Date so the route's own Date.now() sees exactly the grace
+      // boundary; a real clock ticking between fixture and route would cross it.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const now = new Date("2026-01-01T00:00:00Z");
+        vi.setSystemTime(now);
+        mockExtTokenFindUnique.mockResolvedValueOnce({
+          revokedAt: new Date(now.getTime() - REFRESH_REPLAY_GRACE_MS),
+          familyId: "fam-1",
+          userId: "user-1",
+          tenantId: "tenant-1",
+        });
 
-      const res = await POST(makeRequest());
-      expect(res.status).toBe(401);
-      expect(mockRevokeExtensionTokenFamily).not.toHaveBeenCalled();
+        const res = await POST(makeRequest());
+        expect(res.status).toBe(401);
+        expect(mockRevokeExtensionTokenFamily).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("does nothing when the presented token's row cannot be found", async () => {

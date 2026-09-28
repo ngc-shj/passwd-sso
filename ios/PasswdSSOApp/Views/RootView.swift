@@ -379,7 +379,23 @@ struct RootView: View {
     AppSettingsStore().applyTenantPolicy(
       unlockResult.tenantAutoLockMinutes, policyAuthoritative: policyAuthoritative
     )
+    AppSettingsStore().applyRequireVaultTimeoutLogout(
+      unlockResult.requireVaultTimeoutLogout, policyAuthoritative: policyAuthoritative
+    )
     let vaultKey = unlockResult.vaultKey
+
+    // Best-effort server-side presence verification (plan C2/C7). Fired as a
+    // detached task so a slow/offline server never delays showing the vault;
+    // recordPresence owns the delete-on-mismatch / keep-on-error decision.
+    if let authHash = unlockResult.authHash {
+      Task {
+        await recordPresence(
+          authHash: authHash,
+          verify: { try await apiClient.verifyUnlock(authHash: $0) },
+          wrappedKeyStore: wrappedKeyStore
+        )
+      }
+    }
 
     let fetcher = EntryFetcher(apiClient: apiClient)
     let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
@@ -548,6 +564,7 @@ struct RootView: View {
     // Effective = tenant override (if any) else the user's setting.
     service.autoLockMinutes = store.effectiveAutoLockMinutes
     service.timeoutAction = store.vaultTimeoutAction
+    service.requireLogoutOnTimeout = store.requireVaultTimeoutLogout
   }
 
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {

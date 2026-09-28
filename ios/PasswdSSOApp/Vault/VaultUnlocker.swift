@@ -42,6 +42,17 @@ public struct UnlockResult: Sendable, Equatable {
   /// valid cache; `false` when the cache was stale / counter-mismatched / unreadable,
   /// signalling the caller MUST rely on a server resync (and fail closed if it fails).
   public let cacheRecovered: Bool
+  /// Server-presence auth hash (plan D3/C2/C7), ready to hand to
+  /// `MobileAPIClient.verifyUnlock(authHash:)`. Passphrase path: freshly
+  /// derived and wrapped (nil only if the HKDF/wrap step itself failed — a
+  /// non-fatal degrade, presence just isn't recorded this unlock). Biometric
+  /// path: unwrapped from the previously-wrapped blob, nil if none was ever
+  /// saved or the unwrap failed (wrong userId, corrupted, legacy).
+  public let authHash: String?
+  /// Tenant flag (plan C10) from the passphrase unlock's fresh policy fetch;
+  /// nil from the biometric/offline path (which reuses the persisted value) —
+  /// mirrors `tenantAutoLockMinutes`.
+  public let requireVaultTimeoutLogout: Bool?
 }
 
 /// Source of the encrypted vault-unlock material. `MobileAPIClient` is the
@@ -192,6 +203,24 @@ public actor VaultUnlocker {
     )
     try wrappedKeyStore.saveVaultKey(wrapped)
 
+    // Step 6a: derive + wrap the server-presence authHash (plan D3/C2/C7) so the
+    // biometric path can re-present it later without recomputing HKDF from the
+    // secretKey (which does not survive biometric unlock). Best-effort: a
+    // failure here must never block unlocking the vault — the caller simply
+    // gets nil and skips this unlock's presence verification.
+    var authHash: String?
+    do {
+      var authKeyBytes = try deriveAuthKey(secretKey: secretKey)
+      let hash = computeAuthHash(authKey: authKeyBytes)
+      authKeyBytes.resetBytes(in: 0..<authKeyBytes.count)
+      let wrappedAuthHash = try TeamEntryDecryptor.wrapAuthHash(
+        hash, cacheKey: cacheKey, userId: unlockData.userId, issuedAt: Date())
+      try wrappedKeyStore.saveAuthHash(wrappedAuthHash)
+      authHash = hash
+    } catch {
+      // Non-fatal: presence simply won't be recorded until the next unlock succeeds.
+    }
+
     // Step 6b: if the account has an ECDH keypair (team E2E), unwrap it with the
     // secretKey and re-persist it wrapped under cacheKey (bound to userId), so
     // sync (incl. background / post-biometric) can derive team keys without the
@@ -224,7 +253,9 @@ public actor VaultUnlocker {
       cacheKey: cacheKey,
       // Passphrase path did not read a cache during unlock, but a persisted cache
       // from a prior session may exist and remains a valid offline fallback.
-      cacheRecovered: true
+      cacheRecovered: true,
+      authHash: authHash,
+      requireVaultTimeoutLogout: unlockData.requireVaultTimeoutLogout
     )
   }
 
@@ -305,6 +336,14 @@ public actor VaultUnlocker {
       cacheRecovered = false
     }
 
+    // Best-effort unwrap of the previously-wrapped authHash (plan D3/C2/C7) —
+    // same cacheKey, NO second biometric prompt (the bridge_key read at Step 1
+    // already authenticated; unwrap is a plain AES-GCM decrypt). A miss (never
+    // wrapped, wrong userId, or corrupted) is not fatal — nil just means this
+    // unlock skips presence verification.
+    let authHash: String? = (try? wrappedKeyStore.loadAuthHash())
+      .flatMap { TeamEntryDecryptor.unwrapAuthHash($0, cacheKey: cacheKey, userId: recoveredUserId) }
+
     // Biometric/offline path: no fresh policy fetch — pass nil so the persisted
     // tenant value is reused (RootView applies it non-authoritatively).
     return UnlockResult(
@@ -313,7 +352,9 @@ public actor VaultUnlocker {
       keyVersion: keyVersion,
       tenantAutoLockMinutes: nil,
       cacheKey: cacheKey,
-      cacheRecovered: cacheRecovered
+      cacheRecovered: cacheRecovered,
+      authHash: authHash,
+      requireVaultTimeoutLogout: nil
     )
   }
 

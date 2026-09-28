@@ -8,6 +8,7 @@ import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail
 const {
   mockMobileBridgeCodeFindUnique,
   mockMobileBridgeCodeUpdateMany,
+  mockTenantFindUnique,
   mockWithBypassRls,
   mockCheck,
   mockCreateRateLimiter,
@@ -24,11 +25,15 @@ const {
   return {
   mockMobileBridgeCodeFindUnique: vi.fn(),
   mockMobileBridgeCodeUpdateMany: vi.fn(),
+  mockTenantFindUnique: vi.fn(),
   mockWithBypassRls: vi.fn(
     async (_p: unknown, fn: (tx: unknown) => unknown) => fn({
       mobileBridgeCode: {
         findUnique: mockMobileBridgeCodeFindUnique,
         updateMany: mockMobileBridgeCodeUpdateMany,
+      },
+      tenant: {
+        findUnique: mockTenantFindUnique,
       },
     }),
   ),
@@ -52,6 +57,9 @@ vi.mock("@/lib/prisma", () => ({
     mobileBridgeCode: {
       findUnique: mockMobileBridgeCodeFindUnique,
       updateMany: mockMobileBridgeCodeUpdateMany,
+    },
+    tenant: {
+      findUnique: mockTenantFindUnique,
     },
   },
 }));
@@ -195,10 +203,18 @@ describe("POST /api/mobile/token", () => {
         findUnique: mockMobileBridgeCodeFindUnique,
         updateMany: mockMobileBridgeCodeUpdateMany,
       },
+      tenant: {
+        findUnique: mockTenantFindUnique,
+      },
     }),
     );
     mockMobileBridgeCodeFindUnique.mockResolvedValue(freshBridgeRow());
     mockMobileBridgeCodeUpdateMany.mockResolvedValue({ count: 1 });
+    // C8: tenant extension-token idle/absolute policy, read before issuance.
+    mockTenantFindUnique.mockResolvedValue({
+      extensionTokenIdleTimeoutMinutes: 10_080,
+      extensionTokenAbsoluteTimeoutMinutes: 43_200,
+    });
     mockVerifyPkceS256.mockReturnValue(true);
     mockVerifyDpop.mockResolvedValue(happyDpop());
     mockIssueIosToken.mockResolvedValue({
@@ -218,9 +234,13 @@ describe("POST /api/mobile/token", () => {
     expect(json).toMatchObject({
       access_token: "acc-tok",
       refresh_token: "ref-tok",
-      expires_in: 86_400,
       token_type: "DPoP",
     });
+    // C8: expires_in is the access row's actual expiry minus "now" at issuance
+    // time — not a fixed constant — so allow for the few ms elapsed between
+    // the fixture's `Date.now()` capture and the route's own.
+    expect(json.expires_in).toBeGreaterThan(86_400 - 5);
+    expect(json.expires_in).toBeLessThanOrEqual(86_400);
     expect(res.headers.get("dpop-nonce")).toBeNull();
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(mockIssueIosToken).toHaveBeenCalledWith(
@@ -229,6 +249,9 @@ describe("POST /api/mobile/token", () => {
         tenantId: TENANT_ID,
         deviceJkt: VALID_DEVICE_JKT,
         cnfJkt: VALID_DEVICE_JKT,
+        idleMinutes: 10_080,
+        absoluteMinutes: 43_200,
+        presenceAt: expect.any(Date),
       }),
     );
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
@@ -378,5 +401,12 @@ describe("POST /api/mobile/token", () => {
     // C4 regression guard: access restriction runs BEFORE CAS-consume, so the
     // one-time bridge code must NOT be consumed on the denial path.
     expect(mockMobileBridgeCodeUpdateMany).not.toHaveBeenCalled();
+  });
+
+  // ─── C8: fail-closed tenant-policy read ──────────────────────────
+  it("C8: throws (fail-closed) when the tenant row is missing, without issuing a token", async () => {
+    mockTenantFindUnique.mockResolvedValueOnce(null);
+    await expect(POST(makeReq())).rejects.toThrow(/tenant .* not found/);
+    expect(mockIssueIosToken).not.toHaveBeenCalled();
   });
 });

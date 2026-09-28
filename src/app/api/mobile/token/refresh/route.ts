@@ -54,10 +54,7 @@ import {
   computeAth,
 } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
-import {
-  refreshIosToken,
-  IOS_TOKEN_IDLE_TIMEOUT_MS,
-} from "@/lib/auth/tokens/mobile-token";
+import { refreshIosToken } from "@/lib/auth/tokens/mobile-token";
 import { recordPasskeyAuditEmit } from "@/lib/auth/policy/passkey-enforcement";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
@@ -259,7 +256,10 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     {
       access_token: result.token.accessToken,
       refresh_token: result.token.refreshToken,
-      expires_in: Math.floor(IOS_TOKEN_IDLE_TIMEOUT_MS / MS_PER_SECOND),
+      // C8: the rotated access row's actual (tenant/presence-capped) expiry,
+      // not a fixed constant — it can be shorter than IOS_ACCESS_TOKEN_TTL_MS
+      // when the tenant's idle/absolute policy caps it first.
+      expires_in: Math.floor((result.token.expiresAt.getTime() - Date.now()) / MS_PER_SECOND),
       token_type: "DPoP",
     },
     {

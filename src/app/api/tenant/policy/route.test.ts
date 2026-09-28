@@ -239,6 +239,24 @@ describe("GET /api/tenant/policy", () => {
     expect(status).toBe(200);
     expect(json.requireMinPinLength).toBeNull();
   });
+
+  it("returns requireVaultTimeoutLogout: true from tenant policy", async () => {
+    seedGetPolicy({ ...BASE_POLICY, requireVaultTimeoutLogout: true });
+
+    const req = createRequest("GET", ROUTE_URL);
+    const { status, json } = await parseResponse(await GET(req));
+
+    expect(status).toBe(200);
+    expect(json.requireVaultTimeoutLogout).toBe(true);
+  });
+
+  it("returns requireVaultTimeoutLogout: false when policy not set", async () => {
+    const req = createRequest("GET", ROUTE_URL);
+    const { status, json } = await parseResponse(await GET(req));
+
+    expect(status).toBe(200);
+    expect(json.requireVaultTimeoutLogout).toBe(false);
+  });
 });
 
 describe("PATCH /api/tenant/policy", () => {
@@ -297,6 +315,39 @@ describe("PATCH /api/tenant/policy", () => {
         data: expect.objectContaining({ requireMinPinLength: 6 }),
       }),
     );
+  });
+
+  it("updates requireVaultTimeoutLogout to true", async () => {
+    mockPrismaTenantUpdate.mockResolvedValue({ ...BASE_POLICY, requireVaultTimeoutLogout: true });
+
+    const req = createRequest("PATCH", ROUTE_URL, {
+      body: { requireVaultTimeoutLogout: true },
+    });
+    const { status, json } = await parseResponse(await PATCH(req));
+
+    expect(status).toBe(200);
+    expect(json.requireVaultTimeoutLogout).toBe(true);
+    expect(mockPrismaTenantUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requireVaultTimeoutLogout: true }),
+      }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "POLICY_UPDATE",
+        metadata: expect.objectContaining({ requireVaultTimeoutLogout: true }),
+      }),
+    );
+  });
+
+  it("rejects a non-boolean requireVaultTimeoutLogout", async () => {
+    const req = createRequest("PATCH", ROUTE_URL, {
+      body: { requireVaultTimeoutLogout: "yes" },
+    });
+    const { status, json } = await parseResponse(await PATCH(req));
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("rejects requireMinPinLength below minimum (3)", async () => {

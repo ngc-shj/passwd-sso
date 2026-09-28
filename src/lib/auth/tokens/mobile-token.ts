@@ -34,16 +34,24 @@ import {
   parseScopes,
   type ValidatedExtensionToken,
 } from "./extension-token";
+import { computeClientTokenExpiry, getFamilyPresenceAt } from "./client-token-expiry";
+import {
+  EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
+} from "@/lib/validations/common";
 
-// ─── iOS-specific TTL constants (NOT tenant-configurable) ───────
+// ─── iOS-specific TTL constants ──────────────────────────────────
 //
-// Per plan §S13/S25: iOS TTLs are pinned at the code layer to avoid the
-// risk of an admin shortening them below what the AutoFill UX requires
-// (idle 24h covers a typical user's day; absolute 7d forces re-auth at
-// the host app weekly).
+// C8: idle/absolute are the same tenant-configurable
+// `extensionTokenIdleTimeoutMinutes` / `extensionTokenAbsoluteTimeoutMinutes`
+// fields the browser extension uses (D2) — the caller reads them from the
+// tenant row and passes them into `issueIosToken` / `refreshIosToken`'s
+// tenant-policy read. Only the access-token TTL stays a fixed code-layer
+// constant: it is a ceiling on how long a single access-token row lives
+// between rotations, not a security boundary on its own (the family's
+// presence/absolute caps — C3 — are the actual boundary).
 
-export const IOS_TOKEN_IDLE_TIMEOUT_MS = MS_PER_DAY;
-export const IOS_TOKEN_ABSOLUTE_TIMEOUT_MS = 7 * MS_PER_DAY;
+export const IOS_ACCESS_TOKEN_TTL_MS = MS_PER_DAY;
 
 /**
  * TTL for the single-purpose AutoFill upload token (passkey registration).
@@ -73,6 +81,21 @@ export interface IssueIosTokenParams {
   familyId?: string;
   /** Family-creation timestamp; preserved across refresh-rotation. */
   familyCreatedAt?: Date;
+  /**
+   * Tenant's `extensionTokenIdleTimeoutMinutes` / `extensionTokenAbsoluteTimeoutMinutes`
+   * (C8) — this helper does not read the tenant row itself; the caller
+   * (`/api/mobile/token` for initial issuance, `refreshIosToken` for
+   * rotation) does, so both share one fail-closed tenant lookup site each.
+   */
+  idleMinutes: number;
+  absoluteMinutes: number;
+  /**
+   * Presence timestamp powering C3/C4's caps: `now` for a brand-new family
+   * (the bridge-code exchange itself counts as presence, mirroring
+   * `issueExtensionToken`), or the family's MAX(lastPresenceAt) (C4) on
+   * refresh-rotation.
+   */
+  presenceAt: Date;
   ip?: string | null;
   userAgent?: string | null;
 }
@@ -82,7 +105,7 @@ export interface IssuedIosToken {
   accessToken: string;
   /** Plaintext refresh token; returned to the client, never persisted. */
   refreshToken: string;
-  /** Idle expiry (24h). */
+  /** Access-token expiry: min(now + IOS_ACCESS_TOKEN_TTL_MS, C3-capped refresh-row expiry). */
   expiresAt: Date;
   familyId: string;
   familyCreatedAt: Date;
@@ -115,6 +138,9 @@ export async function issueIosToken(
     cnfJkt,
     familyId: existingFamilyId,
     familyCreatedAt: existingFamilyCreatedAt,
+    idleMinutes,
+    absoluteMinutes,
+    presenceAt,
     ip,
     userAgent,
   } = params;
@@ -127,12 +153,19 @@ export async function issueIosToken(
   const now = new Date();
   const familyId = existingFamilyId ?? randomUUID();
   const familyCreatedAt = existingFamilyCreatedAt ?? now;
-  const expiresAt = new Date(now.getTime() + IOS_TOKEN_IDLE_TIMEOUT_MS);
-  const familyAbsoluteExpiry = new Date(
-    familyCreatedAt.getTime() + IOS_TOKEN_ABSOLUTE_TIMEOUT_MS,
+  // C3: the refresh row's own expiry IS the tenant idle/absolute/presence cap.
+  const refreshExpiresAt = computeClientTokenExpiry({
+    now,
+    presenceAt,
+    familyCreatedAt,
+    idleMinutes,
+    absoluteMinutes,
+  });
+  // The access token is additionally capped at IOS_ACCESS_TOKEN_TTL_MS (24h) —
+  // it must never outlive the refresh row that will eventually rotate it.
+  const expiresAt = new Date(
+    Math.min(now.getTime() + IOS_ACCESS_TOKEN_TTL_MS, refreshExpiresAt.getTime()),
   );
-  // Refresh token expires when the family does — there is no separate
-  // refresh-token TTL in the iOS flow.
   const scopeCsv = IOS_TOKEN_DEFAULT_SCOPES.join(",");
 
   const accessPlaintext = generateShareToken();
@@ -174,6 +207,7 @@ export async function issueIosToken(
           clientKind: "IOS_APP",
           // devicePubkey: omitted — cnfJkt is the device-binding SoT.
           cnfJkt,
+          lastPresenceAt: presenceAt,
           lastUsedIp: ip?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
           lastUsedUserAgent: userAgent ?? null,
         },
@@ -186,15 +220,17 @@ export async function issueIosToken(
           tenantId,
           tokenHash: refreshHash,
           scope: scopeCsv,
-          // Refresh token's row expiresAt mirrors family absolute expiry —
-          // refresh-rotation will revoke this row anyway, but if the family
-          // hits its absolute cap, the row will not validate either.
-          expiresAt: familyAbsoluteExpiry,
+          // Refresh token's row expiresAt IS the C3 cap (tenant
+          // idle/absolute + presence) — refresh-rotation will revoke this
+          // row anyway, but if the family hits its cap first, the row will
+          // not validate either.
+          expiresAt: refreshExpiresAt,
           familyId,
           familyCreatedAt,
           clientKind: "IOS_APP",
           // devicePubkey: omitted — cnfJkt is the device-binding SoT.
           cnfJkt,
+          lastPresenceAt: presenceAt,
           lastUsedIp: ip?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
           lastUsedUserAgent: userAgent ?? null,
         },
@@ -473,9 +509,13 @@ export type RefreshIosTokenResult =
  *     the cached new token (legitimate network-retry case).
  *  2. Any other reuse of a revoked token → revoke the entire family,
  *     emit `MOBILE_TOKEN_REPLAY_DETECTED` with rich metadata, return error.
- *  3. If the family is older than `IOS_TOKEN_ABSOLUTE_TIMEOUT_MS`,
+ *  3. If the family is older than the tenant's absolute timeout (C8),
  *     revoke and return `REFRESH_TOKEN_FAMILY_EXPIRED`.
- *  4. Happy path: revoke old pair, issue new pair, emit `MOBILE_TOKEN_REFRESHED`.
+ *  4. C4: if the family's presence (MAX(lastPresenceAt)) is older than the
+ *     tenant's idle timeout, revoke (reason `presence_expired`) and return
+ *     the same `REFRESH_TOKEN_FAMILY_EXPIRED` — refresh activity alone does
+ *     not keep a family alive; only a server-verified vault unlock does.
+ *  5. Happy path: revoke old pair, issue new pair, emit `MOBILE_TOKEN_REFRESHED`.
  */
 export async function refreshIosToken(
   params: RefreshIosTokenParams,
@@ -513,14 +553,53 @@ export async function refreshIosToken(
     return { ok: false, error: "REFRESH_REPLAY_DETECTED" };
   }
 
-  // ── 2. Family absolute-expiry check ───────────────────────────
+  // Read tenant extension-token TTL policy (C8: iOS shares the browser
+  // extension's tenant-configurable idle/absolute fields — D2). FAIL-CLOSED:
+  // tenantId is FK-backed, so a vanished tenant row is data corruption, not
+  // "no policy" (mirrors `issueExtensionToken` / the extension's own refresh
+  // route) — refuse rather than default to a potentially longer TTL.
+  const tenant = await withBypassRls(prisma, async (tx) =>
+    tx.tenant.findUnique({
+      where: { id: oldRow.tenantId },
+      select: {
+        extensionTokenIdleTimeoutMinutes: true,
+        extensionTokenAbsoluteTimeoutMinutes: true,
+      },
+    }),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  if (!tenant) {
+    throw new Error(`refreshIosToken: tenant ${oldRow.tenantId} not found`);
+  }
+  const idleMinutes =
+    tenant.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
+  const absoluteMinutes =
+    tenant.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT;
+
+  // ── 2. Family absolute-expiry check (tenant-driven, C8) ────────
   const familyAgeMs = now - oldRow.familyCreatedAt.getTime();
-  if (familyAgeMs > IOS_TOKEN_ABSOLUTE_TIMEOUT_MS) {
+  if (familyAgeMs > absoluteMinutes * MS_PER_MINUTE) {
     await revokeExtensionTokenFamily({
       familyId: oldRow.familyId,
       userId: oldRow.userId,
       tenantId: oldRow.tenantId,
       reason: EXTENSION_TOKEN_REVOKE_REASON.FAMILY_EXPIRED,
+    });
+    return { ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" };
+  }
+
+  // ── 2a. C4 presence gate: idle is "time since the last server-verified
+  // vault unlock", not refresh activity — a token that keeps refreshing
+  // itself without ever proving the passphrase again must still die `idle`
+  // after the last real unlock (mirrors the extension's own refresh route).
+  const presenceAt = await withBypassRls(prisma, async (tx) =>
+    getFamilyPresenceAt(tx, oldRow.familyId, oldRow.familyCreatedAt),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  if (presenceAt.getTime() + idleMinutes * MS_PER_MINUTE <= now) {
+    await revokeExtensionTokenFamily({
+      familyId: oldRow.familyId,
+      userId: oldRow.userId,
+      tenantId: oldRow.tenantId,
+      reason: EXTENSION_TOKEN_REVOKE_REASON.PRESENCE_EXPIRED,
     });
     return { ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" };
   }
@@ -552,6 +631,11 @@ export async function refreshIosToken(
     cnfJkt,
     familyId: oldRow.familyId,
     familyCreatedAt: oldRow.familyCreatedAt,
+    idleMinutes,
+    absoluteMinutes,
+    // Carry the family's presence max forward (C4) — the new row's own
+    // future presence writes only ever raise it.
+    presenceAt,
     ip: extractClientIp(req),
     userAgent: req.headers.get("user-agent"),
   });
