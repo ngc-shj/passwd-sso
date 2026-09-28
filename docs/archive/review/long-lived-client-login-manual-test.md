@@ -31,6 +31,8 @@ Human-run checks for paths automated tests cannot reach (plan VE2/VE3, testing s
 2. Unlock with Face ID.
 - Expected: vault opens without the passphrase; server `extension_tokens.last_presence_at` for the family advances. After a 422 (e.g. passphrase-derived secret changed server-side), the next Face ID unlock still opens the vault and no longer sends the cached hash.
 
+Result (2026-09-28, iPhone, dev server): passphrase unlock → `unlock/data` + `unlock/verify` 200; Face ID unlock → `unlock/verify` 200 without `unlock/data`; access-row `last_presence_at` advanced to the Face ID unlock time; no `VAULT_UNLOCK_FAILED`. Pass. (The first attempt only exercised Face ID with a pre-branch cache, so no hash was cached and nothing was sent — a passphrase unlock on this build is required once.)
+
 ## M5 — presence expiry
 1. As tenant admin, set the extension-token idle timeout to 5 minutes (vault auto-lock ≤ 5).
 2. Connect and unlock the extension, lock it, and do not unlock again for more than 5 minutes (browser left open).

@@ -84,3 +84,24 @@ Commit "review(1)": S1 allowlist, T1 concurrency test, T2 manual-test checklist 
 
 ## Termination
 All three experts returned No findings in round 2. Open item outside the code: untracked `prisma/migrations/20260928061731_probe_noop/` awaits deletion by the user (session permission denied); manual checklist `long-lived-client-login-manual-test.md` awaits a human run before merge.
+
+---
+
+# Review rounds 3–4 (2026-09-28) — cache-rollback report fix (added to this branch at the user's request)
+
+## Background
+During M4 on a real device, every `POST /api/mobile/cache-rollback-report` returned 400. Root cause (pre-existing, not from this branch): `cacheVersionCounter` is seeded from 64 random bits (`BridgeKeyStore`), so it exceeds 2^53 ~99.95% of the time; sent as a JSON number it fails Zod 4 `int()` (safe-integer bound) and is already rounded by `JSON.parse`. All cache-rollback / forged-flag detections were being dropped.
+
+## Round 3 — commit "fix(ios): send cache rollback counters as decimal strings"
+- Functionality: No findings (all body construction sites updated; no numeric consumer of the metadata; no other 64-bit iOS→server field; single-flag-file drain, no backlog flood; older builds with safe counters still accepted).
+- Security: S1 [Major, pre-existing in the changed file] rate limit keyed on client-chosen `deviceId` (unlimited buckets per token) and no `clientKind` restriction. Also verified: no ReDoS/BigInt DoS (regex bounds length before `BigInt`), union branches disjoint, number branch bounded by Zod's safe-integer check, R43 no widening.
+- Testing: T4 [Major] no server test for the string `"0"` counters every `flag_forged` report sends.
+- Found while writing tests: Zod 4 runs `.refine()` after a failed `.regex()`, so `BigInt("12a")` threw → 500; fixed by a single refine.
+
+## Round 4 — commit "fix(security): bind cache-rollback rate limit to the token family and restrict it to iOS"
+- S1 resolved: `clientKind !== "IOS_APP"` → 403 before access restriction, body parse, limiter and audit; limiter keyed on `${tenantId}:${familyId}` (tokenId rejected — rotates every refresh; a new family requires a full sign-in). Security R43: not a widening — the old key was effectively unbounded.
+- T4 resolved: route test with string `"0"` counters; integration `flag_forged` sends strings.
+- All three experts: No findings. Functionality confirmed only the iOS host app (IOS_APP token) sends the report; the AutoFill extension only writes the flag file.
+
+## Verification
+Route tests 27/27, real-DB integration 2/2, iOS xcodebuild test 818 pass on the macOS host, full pre-PR pass.
