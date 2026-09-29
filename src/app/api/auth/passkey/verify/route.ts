@@ -23,10 +23,7 @@ import {
   getSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "@/lib/auth/session/cookie-name";
-import {
-  createSessionUnderConcurrencyCap,
-  reportSessionEviction,
-} from "@/lib/auth/session/session-concurrency";
+import { createCappedSession } from "@/lib/auth/session/session-concurrency";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
@@ -148,30 +145,21 @@ async function handlePOST(req: NextRequest) {
   // {expires, lastActiveAt}; it MUST NOT refresh passkeyVerifiedAt (C2
   // invariant). Refresh happens via the dedicated reauth flow at
   // `src/app/api/auth/passkey/reauth/verify/route.ts`.
-  const { eviction } = await withBypassRls(prisma, async (tx) =>
-    createSessionUnderConcurrencyCap(tx, {
-      userId: user.id,
-      tenantId: existingUser.tenantId,
-      sessionToken,
-      expires,
-      ip: meta.ip,
-      userAgent: meta.userAgent,
-      provider: "webauthn",
-      passkeyVerifiedAt: verifiedAt,
-      authCredentialId: user.credentialRowId,
-    }),
-  BYPASS_PURPOSE.AUTH_FLOW);
-
-  // Fire audit + notification outside the RLS transaction context, only
-  // after the creating transaction has committed (same sequencing as the
-  // adapter's createSession).
-  if (eviction) {
-    await reportSessionEviction(eviction, {
-      userId: user.id,
-      ip: meta.ip,
-      userAgent: meta.userAgent,
-    });
-  }
+  // createCappedSession also runs the new-device check and reports any
+  // cap eviction once the session has committed — the same post-sign-in
+  // work the adapter's paths get.
+  await createCappedSession({
+    userId: user.id,
+    tenantId: existingUser.tenantId,
+    sessionToken,
+    expires,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+    acceptLanguage: meta.acceptLanguage,
+    provider: "webauthn",
+    passkeyVerifiedAt: verifiedAt,
+    authCredentialId: user.credentialRowId,
+  });
 
   await logAuditAsync({
     ...personalAuditBase(req, user.id),

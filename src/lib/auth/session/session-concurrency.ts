@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import { advisoryXactLock } from "@/lib/tenant-rls";
+import { prisma } from "@/lib/prisma";
+import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { logAuditAsync } from "@/lib/audit/audit";
@@ -187,4 +189,43 @@ export async function reportSessionEviction(
     body: `${evicted.length} session(s) terminated due to concurrent session limit (max: ${maxSessions}).`,
     metadata: { evictedCount: evicted.length, maxConcurrentSessions: maxSessions },
   });
+}
+
+/**
+ * The entry point both Web-session creators call: opens the bypass
+ * transaction, creates the session under the cap, then — once it has
+ * committed — fires the new-device check and reports any eviction.
+ *
+ * The transaction is opened HERE, not by the caller, so check-bypass-rls
+ * sees the models this path touches under the bypass (a tx handed to an
+ * imported callee is invisible to it). Keeping the post-commit work here too
+ * means the adapter and the passkey route cannot drift on what a sign-in
+ * notifies.
+ */
+export async function createCappedSession(
+  input: CappedSessionInput & { acceptLanguage: string | null },
+): Promise<{ userId: string; expires: Date }> {
+  const { session, eviction } = await withBypassRls(
+    prisma,
+    async (tx) => createSessionUnderConcurrencyCap(tx, input),
+    BYPASS_PURPOSE.AUTH_FLOW,
+  );
+
+  // Fire-and-forget: check for new device and notify user
+  void checkNewDeviceAndNotify(input.userId, {
+    ip: input.ip,
+    userAgent: input.userAgent,
+    acceptLanguage: input.acceptLanguage,
+    currentSessionToken: input.sessionToken,
+  });
+
+  if (eviction) {
+    await reportSessionEviction(eviction, {
+      userId: input.userId,
+      ip: input.ip,
+      userAgent: input.userAgent,
+    });
+  }
+
+  return session;
 }

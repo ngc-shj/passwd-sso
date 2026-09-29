@@ -10,7 +10,6 @@ import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-c
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
-import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
 import { BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { emitAuthLoginFailure } from "@/lib/audit/auth-failure";
@@ -26,10 +25,7 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
-import {
-  createSessionUnderConcurrencyCap,
-  reportSessionEviction,
-} from "@/lib/auth/session/session-concurrency";
+import { createCappedSession } from "@/lib/auth/session/session-concurrency";
 import {
   encryptAccountTokenTriple,
   decryptAccountTokenTriple,
@@ -114,14 +110,18 @@ export function createCustomAdapter(): Adapter {
    * before any tenant context exists — which is also why RLS cannot correct the
    * column here the way it does for the tenant-scoped call sites.
    */
-  async function resolveTenantIdForUser(userId: string): Promise<string> {
-    // The ambient client, deliberately — every caller already runs inside the
-    // adapter's own `withBypassRls`, so opening another is refused outright by
-    // the nesting guard (measured: the cold/warm session-timeout integration
-    // cells fail with INVALID_RLS_NESTING). Under an active context the Proxy
-    // delegates this to the enclosing transaction, which is the shape the raw
-    // read here always had.
-    const tenantId = await resolveOwningTenantIdFromClient(prisma, userId);
+  async function resolveTenantIdForUser(
+    userId: string,
+    db: Pick<typeof prisma, "user"> = prisma,
+  ): Promise<string> {
+    // Defaults to the ambient client, deliberately — callers already run
+    // inside the adapter's own `withBypassRls`, so opening another is refused
+    // outright by the nesting guard (measured: the cold/warm session-timeout
+    // integration cells fail with INVALID_RLS_NESTING). Under an active
+    // context the Proxy delegates this to the enclosing transaction, which is
+    // the shape the raw read here always had. A caller that opens the bypass
+    // just for this read passes its `tx`.
+    const tenantId = await resolveOwningTenantIdFromClient(db, userId);
     if (!tenantId) {
       throw new Error(API_ERROR.USER_NOT_FOUND);
     }
@@ -506,43 +506,24 @@ export function createCustomAdapter(): Adapter {
         meta?.provider ?? null,
       );
 
-      const { session: created, eviction } = await withBypassRls(prisma, async (tx) => {
-        const tenantId = await resolveTenantIdForUser(session.userId);
+      // Resolved in its own bypass transaction: createCappedSession opens the
+      // one that holds the cap lock, and a bypass inside a bypass is refused.
+      const tenantId = await withBypassRls(
+        prisma,
+        async (tx) => resolveTenantIdForUser(session.userId, tx),
+        BYPASS_PURPOSE.AUTH_FLOW,
+      );
 
-        const resolvedExpires = new Date(
-          Date.now() + resolved.idleMinutes * MS_PER_MINUTE,
-        );
-
-        return createSessionUnderConcurrencyCap(tx, {
-          userId: session.userId,
-          tenantId,
-          sessionToken: session.sessionToken,
-          expires: resolvedExpires,
-          ip: meta?.ip ?? null,
-          userAgent: meta?.userAgent ?? null,
-          provider: meta?.provider ?? null,
-        });
-      }, BYPASS_PURPOSE.AUTH_FLOW);
-
-      // Fire-and-forget: check for new device and notify user
-      void checkNewDeviceAndNotify(session.userId, {
+      const created = await createCappedSession({
+        userId: session.userId,
+        tenantId,
+        sessionToken: session.sessionToken,
+        expires: new Date(Date.now() + resolved.idleMinutes * MS_PER_MINUTE),
         ip: meta?.ip ?? null,
         userAgent: meta?.userAgent ?? null,
         acceptLanguage: meta?.acceptLanguage ?? null,
-        currentSessionToken: session.sessionToken,
+        provider: meta?.provider ?? null,
       });
-
-      // Fire audit + notification outside the RLS transaction context
-      // (reportSessionEviction's logAudit/createNotification use
-      // withBypassRls internally, which conflicts with the parent's
-      // AsyncLocalStorage-based RLS context if called inside it).
-      if (eviction) {
-        await reportSessionEviction(eviction, {
-          userId: session.userId,
-          ip: meta?.ip ?? null,
-          userAgent: meta?.userAgent ?? null,
-        });
-      }
 
       return {
         // Return the RAW token so Auth.js sets the cookie to the value whose

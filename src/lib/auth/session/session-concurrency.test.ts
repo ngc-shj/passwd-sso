@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockLogAudit, mockCreateNotification, mockInvalidateCachedSessions } = vi.hoisted(() => ({
+const {
+  mockLogAudit,
+  mockCreateNotification,
+  mockInvalidateCachedSessions,
+  mockWithBypassRls,
+  mockCheckNewDeviceAndNotify,
+} = vi.hoisted(() => ({
   mockLogAudit: vi.fn(),
   mockCreateNotification: vi.fn(),
   mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
+  mockWithBypassRls: vi.fn(),
+  mockCheckNewDeviceAndNotify: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -15,15 +23,25 @@ vi.mock("@/lib/notification", () => ({
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
+vi.mock("@/lib/prisma", () => ({ prisma: {} }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tenant-rls")>()),
+  withBypassRls: mockWithBypassRls,
+}));
+vi.mock("@/lib/auth/policy/new-device-detection", () => ({
+  checkNewDeviceAndNotify: mockCheckNewDeviceAndNotify,
+}));
 // H4: deterministic hashSessionToken so assertions can predict the stored digest.
 vi.mock("@/lib/auth/session/session-cache", () => ({
   hashSessionToken: (token: string) => `hashed:${token}`,
 }));
 
 import {
+  createCappedSession,
   createSessionUnderConcurrencyCap,
   reportSessionEviction,
 } from "./session-concurrency";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 function makeTx() {
   return {
@@ -218,6 +236,91 @@ describe("reportSessionEviction", () => {
     );
     expect(mockCreateNotification).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "u-1", tenantId: "tenant-1", type: "SESSION_EVICTED" }),
+    );
+  });
+});
+
+describe("createCappedSession", () => {
+  const expires = new Date("2025-06-01T00:00:00Z");
+  const input = {
+    userId: "u-1",
+    tenantId: "tenant-1",
+    sessionToken: "raw-token",
+    expires,
+    ip: "9.9.9.9",
+    userAgent: "new-device",
+    acceptLanguage: "ja",
+    provider: "webauthn",
+  };
+
+  // Runs the callback against `tx` and records whether the bypass
+  // transaction is still open when each post-commit side effect fires.
+  function openTxAround(tx: ReturnType<typeof makeTx>) {
+    const state = { open: false };
+    mockWithBypassRls.mockImplementation(async (_client: unknown, fn: (t: unknown) => unknown) => {
+      state.open = true;
+      try {
+        return await fn(tx);
+      } finally {
+        state.open = false;
+      }
+    });
+    return state;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("opens its own AUTH_FLOW bypass and checks the new device with the RAW token after commit", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+    const state = openTxAround(tx);
+    let checkedWhileOpen: boolean | null = null;
+    mockCheckNewDeviceAndNotify.mockImplementation(async () => {
+      checkedWhileOpen = state.open;
+    });
+
+    const session = await createCappedSession(input);
+
+    expect(session).toEqual({ userId: "u-1", expires });
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.AUTH_FLOW,
+    );
+    expect(mockCheckNewDeviceAndNotify).toHaveBeenCalledWith("u-1", {
+      ip: "9.9.9.9",
+      userAgent: "new-device",
+      acceptLanguage: "ja",
+      currentSessionToken: "raw-token",
+    });
+    expect(checkedWhileOpen).toBe(false);
+    // No eviction happened, so nothing is reported.
+    expect(mockInvalidateCachedSessions).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("reports a cap eviction only after the creating transaction has closed", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 1 });
+    tx.session.findMany.mockResolvedValue([
+      { id: "old-s1", sessionToken: "old-digest", ipAddress: null, userAgent: null },
+    ]);
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+    const state = openTxAround(tx);
+    let reportedWhileOpen: boolean | null = null;
+    mockInvalidateCachedSessions.mockImplementation(async () => {
+      reportedWhileOpen = state.open;
+    });
+
+    await createCappedSession(input);
+
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["old-digest"]);
+    expect(reportedWhileOpen).toBe(false);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SESSION_EVICTED", targetId: "old-s1", userId: "u-1" }),
     );
   });
 });

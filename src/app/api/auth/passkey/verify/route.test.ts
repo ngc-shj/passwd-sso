@@ -13,8 +13,7 @@ const {
   mockPrismaTenantFindUnique,
   mockWithBypassRls,
   mockResolveEffectiveSessionTimeouts,
-  mockCreateSessionUnderConcurrencyCap,
-  mockReportSessionEviction,
+  mockCreateCappedSession,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
   return {
@@ -29,8 +28,7 @@ const {
     mockPrismaTenantFindUnique: vi.fn(),
     mockWithBypassRls: vi.fn(),
     mockResolveEffectiveSessionTimeouts: vi.fn(),
-    mockCreateSessionUnderConcurrencyCap: vi.fn(),
-    mockReportSessionEviction: vi.fn().mockResolvedValue(undefined),
+    mockCreateCappedSession: vi.fn(),
   };
 });
 
@@ -82,13 +80,13 @@ vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 
-// C2: session creation is delegated to the C1 shared helper. Mocked here so
-// this file tests the ROUTE's wiring (what it passes in, when it reports an
-// eviction) — the helper's own cap/eviction/lock behavior is covered by
-// session-concurrency.test.ts and the db-integration suite.
+// C2: session creation is delegated to the C1 shared entry point. Mocked
+// here so this file tests the ROUTE's wiring (what it passes in); the
+// helper's cap/eviction/lock and post-commit behavior (new-device check,
+// eviction report) is covered by session-concurrency.test.ts and the
+// db-integration suite.
 vi.mock("@/lib/auth/session/session-concurrency", () => ({
-  createSessionUnderConcurrencyCap: mockCreateSessionUnderConcurrencyCap,
-  reportSessionEviction: mockReportSessionEviction,
+  createCappedSession: mockCreateCappedSession,
 }));
 
 import { POST } from "./route";
@@ -165,8 +163,7 @@ describe("POST /api/auth/passkey/verify", () => {
     });
 
     // withBypassRls: call the callback directly with the (mocked) prisma
-    // client standing in for `tx` — createSessionUnderConcurrencyCap is
-    // itself mocked, so nothing inspects the client's shape.
+    // client standing in for `tx` (only the SSO tenant guard read uses it).
     mockWithBypassRls.mockImplementation(
       (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
@@ -174,10 +171,7 @@ describe("POST /api/auth/passkey/verify", () => {
     // SSO tenant guard: user is in bootstrap tenant (allowed)
     seedUser();
 
-    mockCreateSessionUnderConcurrencyCap.mockResolvedValue({
-      session: { userId: "user-1", expires: new Date() },
-      eviction: null,
-    });
+    mockCreateCappedSession.mockResolvedValue({ userId: "user-1", expires: new Date() });
   });
 
   it("returns 200 with session cookie on success", async () => {
@@ -210,29 +204,31 @@ describe("POST /api/auth/passkey/verify", () => {
     });
   });
 
-  it("creates the session through createSessionUnderConcurrencyCap with the passkey fields (C1/C2)", async () => {
+  it("creates the session through createCappedSession with the passkey fields (C1/C2)", async () => {
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
     });
     await POST(req);
 
-    // Two bypass scopes: the SSO tenant guard read, and the session mutation.
-    expect(mockWithBypassRls).toHaveBeenCalledTimes(2);
-    expect(mockCreateSessionUnderConcurrencyCap).toHaveBeenCalledOnce();
+    // The route opens one bypass scope itself (the SSO tenant guard read);
+    // the session write's scope is opened inside createCappedSession.
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockCreateCappedSession).toHaveBeenCalledOnce();
 
-    const [, input] = mockCreateSessionUnderConcurrencyCap.mock.calls[0];
-    expect(input).toEqual(
-      expect.objectContaining({
-        userId: "user-1",
-        tenantId: "tenant-1",
-        sessionToken: expect.any(String),
-        expires: expect.any(Date),
-        provider: "webauthn",
-        passkeyVerifiedAt: expect.any(Date),
-        authCredentialId: "cred-uuid-1",
-      }),
-    );
+    const [input] = mockCreateCappedSession.mock.calls[0];
+    expect(input).toEqual({
+      userId: "user-1",
+      tenantId: "tenant-1",
+      sessionToken: expect.any(String),
+      expires: expect.any(Date),
+      ip: null,
+      userAgent: null,
+      acceptLanguage: null,
+      provider: "webauthn",
+      passkeyVerifiedAt: expect.any(Date),
+      authCredentialId: "cred-uuid-1",
+    });
   });
 
   it("gates on and stamps the active membership, not the stale User.tenantId", async () => {
@@ -264,7 +260,7 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(mockPrismaTenantFindUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
     );
-    const [, input] = mockCreateSessionUnderConcurrencyCap.mock.calls[0];
+    const [input] = mockCreateCappedSession.mock.calls[0];
     expect(input).toEqual(
       expect.objectContaining({
         userId: "user-1",
@@ -277,15 +273,6 @@ describe("POST /api/auth/passkey/verify", () => {
   // paths (supersedes owasp-batch-3 C7). Revocation belongs to secret-
   // changing ops and explicit sign-out, not to an ordinary sign-in.
   it("never emits a SESSION_REVOKE_ALL audit entry (no cascade)", async () => {
-    mockCreateSessionUnderConcurrencyCap.mockResolvedValue({
-      session: { userId: "user-1", expires: new Date() },
-      eviction: {
-        tenantId: "tenant-1",
-        maxSessions: 1,
-        evicted: [{ id: "old-s1", sessionToken: "old-digest", ipAddress: null, userAgent: null }],
-      },
-    });
-
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
@@ -296,56 +283,6 @@ describe("POST /api/auth/passkey/verify", () => {
       (args: unknown[]) => (args[0] as { action: string }).action === "SESSION_REVOKE_ALL",
     );
     expect(revokeAllCalls).toHaveLength(0);
-  });
-
-  it("calls reportSessionEviction only after createSessionUnderConcurrencyCap's transaction resolves, when an eviction occurred", async () => {
-    const eviction = {
-      tenantId: "tenant-1",
-      maxSessions: 1,
-      evicted: [{ id: "old-s1", sessionToken: "old-digest", ipAddress: null, userAgent: null }],
-    };
-    // Track whether the surrounding withBypassRls callback is still "open"
-    // (its promise unsettled) at the moment reportSessionEviction runs —
-    // mirrors auth-adapter.test.ts's txOpen pattern.
-    let txOpen = false;
-    let reportedWhileTxOpen: boolean | null = null;
-    mockWithBypassRls.mockImplementation(async (prisma: unknown, fn: (tx: unknown) => unknown) => {
-      txOpen = true;
-      try {
-        return await fn(prisma);
-      } finally {
-        txOpen = false;
-      }
-    });
-    mockCreateSessionUnderConcurrencyCap.mockResolvedValue({
-      session: { userId: "user-1", expires: new Date() },
-      eviction,
-    });
-    mockReportSessionEviction.mockImplementation(async () => {
-      reportedWhileTxOpen = txOpen;
-    });
-
-    const req = createRequest("POST", ROUTE_URL, {
-      body: validBody,
-      headers: { origin: "http://localhost:3000" },
-    });
-    await POST(req);
-
-    expect(mockReportSessionEviction).toHaveBeenCalledWith(
-      eviction,
-      expect.objectContaining({ userId: "user-1" }),
-    );
-    expect(reportedWhileTxOpen).toBe(false);
-  });
-
-  it("does not call reportSessionEviction when no eviction occurred", async () => {
-    const req = createRequest("POST", ROUTE_URL, {
-      body: validBody,
-      headers: { origin: "http://localhost:3000" },
-    });
-    await POST(req);
-
-    expect(mockReportSessionEviction).not.toHaveBeenCalled();
   });
 
   it("logs AUTH_LOGIN audit event on success", async () => {
@@ -407,7 +344,7 @@ describe("POST /api/auth/passkey/verify", () => {
       invoke: () => POST(req),
       limiter: rateLimiterInstance,
       expectation: { envelope: "canonical" },
-      assertNoMutation: [mockCreateSessionUnderConcurrencyCap],
+      assertNoMutation: [mockCreateCappedSession],
       limiterFactory: rateLimiterFactorySnapshot.replay(),
       failure: { allowed: false, redisErrored: true },
     });
@@ -540,8 +477,8 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(json.prf).toBeUndefined();
   });
 
-  it("propagates a throw from createSessionUnderConcurrencyCap without setting a session cookie", async () => {
-    mockCreateSessionUnderConcurrencyCap.mockRejectedValue(new Error("tx rolled back"));
+  it("propagates a throw from createCappedSession without setting a session cookie", async () => {
+    mockCreateCappedSession.mockRejectedValue(new Error("tx rolled back"));
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,

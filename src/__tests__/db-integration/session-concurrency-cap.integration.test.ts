@@ -1,7 +1,7 @@
 /**
  * passkey-signin-client-token-cascade (C1/C2) — real-DB integration tests.
  *
- * C1 — `createSessionUnderConcurrencyCap` (src/lib/auth/session/session-
+ * C1 — `createCappedSession` (src/lib/auth/session/session-
  * concurrency.ts), the shared Web-session creator the Auth.js adapter and the
  * passkey sign-in route both delegate to:
  *   - Concurrency: the count-then-evict-then-create sequence is serialized by
@@ -45,9 +45,7 @@ import {
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
-import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { createSessionUnderConcurrencyCap } from "@/lib/auth/session/session-concurrency";
+import { createCappedSession } from "@/lib/auth/session/session-concurrency";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
 
 // ── C2 mocks (route-level case only) ────────────────────────────
@@ -149,7 +147,7 @@ describe("session-concurrency-cap — real-DB integration (C1)", () => {
     await ctx.deleteTestData(tenantId);
   });
 
-  it("N concurrent createSessionUnderConcurrencyCap calls leave at most maxConcurrentSessions live rows", async () => {
+  it("N concurrent createCappedSession calls leave at most maxConcurrentSessions live rows", async () => {
     await setMaxConcurrentSessions(ctx, tenantId, 2);
 
     const N = 8;
@@ -157,20 +155,16 @@ describe("session-concurrency-cap — real-DB integration (C1)", () => {
 
     const results = await Promise.all(
       rawTokens.map((sessionToken) =>
-        withBypassRls(
-          prisma,
-          (tx) =>
-            createSessionUnderConcurrencyCap(tx, {
-              userId,
-              tenantId,
-              sessionToken,
-              expires: new Date(Date.now() + 3_600_000),
-              ip: null,
-              userAgent: null,
-              provider: "google",
-            }),
-          BYPASS_PURPOSE.AUTH_FLOW,
-        ),
+        createCappedSession({
+          userId,
+          tenantId,
+          sessionToken,
+          expires: new Date(Date.now() + 3_600_000),
+          ip: null,
+          userAgent: null,
+          acceptLanguage: null,
+          provider: "google",
+        }),
       ),
     );
 
@@ -223,24 +217,16 @@ describe("session-concurrency-cap — real-DB integration (C1)", () => {
     }
 
     const newRaw = `seed-new-${randomUUID()}`;
-    const { eviction } = await withBypassRls(
-      prisma,
-      (tx) =>
-        createSessionUnderConcurrencyCap(tx, {
-          userId,
-          tenantId,
-          sessionToken: newRaw,
-          expires: new Date(Date.now() + 3_600_000),
-          ip: null,
-          userAgent: null,
-          provider: "google",
-        }),
-      BYPASS_PURPOSE.AUTH_FLOW,
-    );
-
-    expect(eviction).not.toBeNull();
-    expect(eviction!.evicted).toHaveLength(1);
-    expect(eviction!.evicted[0]!.id).toBe(sessionC.id);
+    await createCappedSession({
+      userId,
+      tenantId,
+      sessionToken: newRaw,
+      expires: new Date(Date.now() + 3_600_000),
+      ip: null,
+      userAgent: null,
+      acceptLanguage: null,
+      provider: "google",
+    });
 
     // The genuinely oldest (C) is gone; the other two, and the new one, survive.
     expect(await sessionDigestExists(ctx, hashSessionToken(sessionC.raw))).toBe(false);
@@ -273,8 +259,21 @@ describe("POST /api/auth/passkey/verify — real-DB integration (C2, no cascade)
       await tx.$executeRawUnsafe(`UPDATE tenants SET is_bootstrap = true WHERE id = $1::uuid`, tenantId);
     });
     userId = await ctx.createUser(tenantId);
+    // Pin the precondition this block depends on: no session cap, so any
+    // session that disappears was revoked by the sign-in, not evicted.
+    await setMaxConcurrentSessions(ctx, tenantId, null);
   });
   afterEach(async () => {
+    // Extension tokens FK-Restrict their tenant; drop them before
+    // deleteTestData()'s tenant/user cleanup (mirrors client-token-presence
+    // and client-token-family-cap).
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `DELETE FROM extension_tokens WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+    });
     await ctx.deleteTestData(tenantId);
   });
 

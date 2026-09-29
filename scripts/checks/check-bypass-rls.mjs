@@ -154,6 +154,9 @@ const ALLOWED_USAGE = new Map([
   // through `realignOwningTenantColumn` and records both sides.
   ["src/lib/tenant/tenant-realignment.ts", ["tenantMember"]],
   ["src/lib/auth/session/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
+  // The Web-session cap (both sign-in creators route here): the tenant's
+  // maxConcurrentSessions, then evict + create sessions under the per-user lock.
+  ["src/lib/auth/session/session-concurrency.ts", ["session", "tenant"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit/audit.ts", ["team", "user", "auditLog"]],
   ["src/lib/audit/audit-outbox.ts", ["auditOutbox"]],
@@ -212,7 +215,7 @@ const ALLOWED_USAGE = new Map([
   // same row by traversing `user.tenant`, which follows the stale `User.tenantId`
   // column; the adjudicator resolves the active membership first, so the tenant
   // is now loaded by that id. Same row, same bypass scope, named model.
-  ["src/app/api/auth/passkey/verify/route.ts", ["user", "session", "tenant"]],
+  ["src/app/api/auth/passkey/verify/route.ts", ["user", "tenant"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential", "tenant"]],
   // The cross-tenant reactivation guard: resolves the SCIM id and reads the
   // user's ACTIVE membership set, both of which are invisible inside the tenant
