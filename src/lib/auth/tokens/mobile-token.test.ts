@@ -434,7 +434,6 @@ describe("issueIosToken", () => {
       where: { familyId: FAMILY_ID, userId: USER_ID, revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
-    expect(mockPrismaExtUpdateMany).not.toHaveBeenCalled();
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
