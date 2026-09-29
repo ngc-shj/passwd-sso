@@ -127,15 +127,15 @@ async function handlePOST(req: NextRequest) {
 
   const meta = extractRequestMeta(req);
 
-  // Create the session through the shared cap (C1) — same creator the
-  // adapter's OAuth/SAML/magic-link sign-ins use, so passkey sign-in behaves
-  // like every other sign-in path: it evicts only the tenant's oldest Web
-  // session when over the concurrent-session cap, and touches no bearer
-  // token. It no longer signs the user out of the browser extension or the
-  // iOS app, or revokes any other bearer credential — that cascade
-  // (C7/OWASP A07-3) is removed; revocation now belongs to secret-changing
-  // operations (invalidateUserSessions) and explicit sign-out
-  // (DELETE /api/sessions); see
+  // Create the session through the shared capped creator — the one the
+  // adapter's OAuth/SAML/magic-link sign-ins use — so passkey sign-in behaves
+  // like every other sign-in path: it evicts only the oldest Web session over
+  // the tenant's concurrent-session cap and touches no bearer token. A
+  // sign-in proves possession of the credential, not that anything else was
+  // compromised, so it does not sign the user out of the extension or the iOS
+  // app (this supersedes owasp-batch-3 C7). Revocation belongs to
+  // secret-changing operations (passphrase change, key rotation, resets) and
+  // explicit sign-out (DELETE /api/sessions); see
   // docs/archive/review/passkey-signin-client-token-cascade-plan.md.
   //
   // Note on passkeyVerifiedAt ownership (split with auth-adapter): the
