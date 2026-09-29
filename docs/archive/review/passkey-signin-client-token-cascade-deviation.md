@@ -26,3 +26,19 @@
 - It now asserts first that all N rows were created and N-1 were revoked, then that 1 is active.
 - Red proof: a throwaway copy with `advisoryXactLock` mocked to a no-op fails with "expected 2 to be 9". The copy was deleted.
 - Self-check result: the functionality check had no findings. Security and testing each had this one RT4 finding and nothing else fired. Minor note (not firing): the `sessions/route.test.ts` reason mock omits `PRESENCE_EXPIRED`, but that route reads only `SIGN_OUT_EVERYWHERE`.
+
+## D7 — Phase 3: the session helper opens its own bypass transaction (`createCappedSession`)
+- Code review F-sec-1: once C1 moved the cap into an imported helper that received the caller's `tx`, `check-bypass-rls` could no longer see which models the path touched under the bypass. The gate skips any `tx` handed to an out-of-file callee.
+- `createCappedSession(input)` now opens `withBypassRls(…, AUTH_FLOW)` in the same file, and `session-concurrency.ts` has its own `ALLOWED_USAGE` entry, `["session", "tenant"]`.
+- The passkey route's entry dropped `session`, because the route no longer touches it.
+- The adapter resolves the tenant in a separate bypass (`resolveTenantIdForUser` takes an optional client). That read was never under the cap lock, so its semantics are unchanged.
+- Red proof: on a scratchpad copy of `src`, adding `tx.user.findUnique` inside the helper makes the real gate fail ("session-concurrency.ts:74 prisma.user", exit 1).
+
+## D8 — Phase 3: new-device notification on passkey sign-in (SC1 brought into scope)
+- Code review F-sec-2, user decision "この PR で入れる".
+- `createCappedSession` runs `checkNewDeviceAndNotify` with the RAW token after commit, then `reportSessionEviction`. Both sign-in creators therefore run identical post-sign-in work, and the adapter's own copies were removed.
+- Pinned by unit tests in `session-concurrency.test.ts`: the raw token is passed, the side effects fire only after the transaction closes, and nothing is reported without an eviction.
+
+## D9 — Phase 3: iOS refresh revokes inside the issuing transaction (SC4 closed)
+- Code review F-func-2: `refreshIosToken` committed the family revoke before `issueIosToken` opened its locked transaction. A concurrent new-family issuance could run the cap in that gap, miss the refreshing family, and leave the user one family over the cap until the next issuance.
+- `issueIosToken`, when given `familyId`, now revokes that family's active rows inside its locked transaction, and the separate revoke was removed.

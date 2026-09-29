@@ -13,6 +13,9 @@ on:
       - 'src/lib/prisma/**'
       - 'src/lib/redis.ts'
       - 'src/lib/tenant-rls.ts'
+      # Constants the integration suite asserts against (e.g. the active
+      # client-family cap); a constants-only PR must still run the real-DB proof.
+      - 'src/lib/constants/**'
       # audit/** writes audit_outbox and is covered only by integration tests for
       # the invariant that the outbox openers use the un-proxied client — no
       # static gate can tell the two clients apart, so a PR touching only this

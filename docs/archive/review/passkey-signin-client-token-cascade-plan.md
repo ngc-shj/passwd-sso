@@ -195,10 +195,10 @@ Manual test (dev server :3001, extension, and iPhone via VE1): scenarios 1, 2, 3
 
 ### Scope contract
 
-- **SC1** — Passkey sign-in does not call `checkNewDeviceAndNotify`, while the adapter does. Aligning that is a new user-visible notification, not a revocation policy, so it goes to a follow-up and is reported to the user.
+- **SC1** — ~~Passkey sign-in does not call `checkNewDeviceAndNotify`~~ Brought into scope in Phase 3 (code review F-sec-2, user decision 2026-09-29). Removing the cascade also removed the loud signal a misused passkey produced, so the new-device notification ships in the same change. See deviation D8.
 - **SC2** — The E2E test for extension requests with a query string (deferred in the long-lived-client-login code review) goes to a separate branch.
 - **SC3** — The `.gitleaks.toml` `^docs/` allowlist (memory: project_gitleaks_docs_allowlist_narrowing) goes to a separate branch.
-- **SC4** — `refreshIosToken` revokes the old rows in a separate transaction before `issueIosToken` (pre-existing, non-atomic rotation). It is unchanged; C3 only makes sure refresh does not evict. Anti-Deferral: pre-existing and outside the cap concern. Worst case, a crash between the two leaves the family revoked and the device must reconnect (fail-closed). Cost to fix: moderate, because the refresh transaction would need restructuring.
+- **SC4** — ~~`refreshIosToken` revokes the old rows in a separate transaction~~ Fixed in Phase 3 (code review F-func-2): the rotation revoke moved into `issueIosToken`'s locked transaction. See deviation D9.
 
 ## Go/No-Go Gate
 
