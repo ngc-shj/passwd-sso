@@ -5,11 +5,16 @@
  * from Sentry EVENT objects (extra, contexts, breadcrumbs, request body,
  * spans). Also sanitizes URLs to remove query strings, fragments, and
  * capability path segments.
- * Used in Sentry's `beforeSend` and `beforeSendTransaction` hooks.
+ * Used in Sentry's `beforeSend` hook; `scrubSentrySpan` covers the streamed
+ * spans that replaced transaction events in SDK v11.
  *
  * Complementary to src/lib/sentry-sanitize.ts which scrubs Error.message
  * and Error.stack BEFORE passing to captureException().
  */
+
+import type * as Sentry from "@sentry/nextjs";
+
+type SentryInitOptions = NonNullable<Parameters<typeof Sentry.init>[0]>;
 
 /**
  * Token-carrying route patterns whose path segments must be redacted.
@@ -119,11 +124,38 @@ export function sanitizeUrl(value: string): string {
 }
 
 const URL_KEY_NAMES = new Set(["url", "http.url", "url.full", "http.target"]);
-// url.query and url.path values are bare path/query strings — wipe entirely like request.query_string
-const URL_WIPE_KEY_NAMES = new Set(["url.query", "url.path"]);
+// Bare path/query/fragment strings — wipe entirely like request.query_string
+const URL_WIPE_KEY_NAMES = new Set([
+  "url.query",
+  "url.path",
+  "url.fragment",
+  "http.query",
+  "http.fragment",
+]);
 
 /**
- * Sentry `beforeSend` / `beforeSendTransaction` hook that scrubs sensitive data from events.
+ * Scrub a span attribute map (`contexts.trace.data`, `spans[].data`, or a
+ * streamed span's `attributes`): sensitive keys redacted, URL keys sanitized,
+ * bare path/query keys wiped, everything else through scrubObject.
+ */
+function scrubSpanData(data: Record<string, unknown>): Record<string, unknown> {
+  const scrubbed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (isSensitiveKey(key)) {
+      scrubbed[key] = REDACTED;
+    } else if (URL_KEY_NAMES.has(key) && typeof value === "string") {
+      scrubbed[key] = sanitizeUrl(value);
+    } else if (URL_WIPE_KEY_NAMES.has(key)) {
+      scrubbed[key] = "";
+    } else {
+      scrubbed[key] = scrubObject(value);
+    }
+  }
+  return scrubbed;
+}
+
+/**
+ * Sentry `beforeSend` hook that scrubs sensitive data from events.
  * Exported for use in sentry.client.config.ts and sentry.server.config.ts.
  */
 export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T {
@@ -141,20 +173,7 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     if (contexts.trace && typeof contexts.trace === "object") {
       const trace = contexts.trace as Record<string, unknown>;
       if (trace.data && typeof trace.data === "object") {
-        const traceData = trace.data as Record<string, unknown>;
-        const scrubbed: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(traceData)) {
-          if (isSensitiveKey(key)) {
-            scrubbed[key] = REDACTED;
-          } else if (URL_KEY_NAMES.has(key) && typeof value === "string") {
-            scrubbed[key] = sanitizeUrl(value as string);
-          } else if (URL_WIPE_KEY_NAMES.has(key)) {
-            scrubbed[key] = "";
-          } else {
-            scrubbed[key] = scrubObject(value);
-          }
-        }
-        trace.data = scrubbed;
+        trace.data = scrubSpanData(trace.data as Record<string, unknown>);
       }
       // Redact capability paths from root-span description (free-text span name)
       if (typeof trace.description === "string") {
@@ -272,20 +291,7 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
   if (Array.isArray(e.spans)) {
     for (const span of e.spans as Array<Record<string, unknown>>) {
       if (span.data && typeof span.data === "object") {
-        const spanData = span.data as Record<string, unknown>;
-        const scrubbed: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(spanData)) {
-          if (isSensitiveKey(key)) {
-            scrubbed[key] = REDACTED;
-          } else if (URL_KEY_NAMES.has(key) && typeof value === "string") {
-            scrubbed[key] = sanitizeUrl(value);
-          } else if (URL_WIPE_KEY_NAMES.has(key)) {
-            scrubbed[key] = "";
-          } else {
-            scrubbed[key] = scrubObject(value);
-          }
-        }
-        span.data = scrubbed;
+        span.data = scrubSpanData(span.data as Record<string, unknown>);
       }
       // Redact capability paths from span description (free-text span name)
       if (typeof span.description === "string") {
@@ -312,3 +318,75 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
 
   return event;
 }
+
+// Header attributes carrying a full URL (streamed spans record headers as
+// `http.<lifecycle>.header.<name>` with string[] values).
+const URL_HEADER_KEY_NAMES = new Set([
+  "http.request.header.referer",
+  "http.response.header.location",
+  "vercel.proxy.referer",
+]);
+
+function mapStrings(value: unknown, fn: (s: string) => string): unknown {
+  if (typeof value === "string") return fn(value);
+  if (Array.isArray(value)) return value.map((v) => (typeof v === "string" ? fn(v) : v));
+  return value;
+}
+
+function scrubStreamedAttributes(attributes: Record<string, unknown>): Record<string, unknown> {
+  const scrubbed = scrubSpanData(attributes);
+  for (const [key, value] of Object.entries(scrubbed)) {
+    // Streamed spans have no event-level `transaction`/`tags`/`request` to scrub
+    // separately — the segment name, route and headers are all attributes here,
+    // so capability paths are redacted from every string value.
+    scrubbed[key] = mapStrings(
+      value,
+      URL_HEADER_KEY_NAMES.has(key) ? sanitizeUrl : redactCapabilityPaths,
+    );
+  }
+  return scrubbed;
+}
+
+interface StreamedSpanLike {
+  name: string;
+  attributes: Record<string, unknown>;
+  links?: Array<{ attributes?: Record<string, unknown> }>;
+}
+
+/**
+ * Sentry `beforeSendSpan` hook for the streamed span format (SDK v11 default).
+ * Streamed spans replace transaction events, and `beforeSendTransaction` no
+ * longer runs, so this is the only scrub point for span payloads.
+ */
+export function scrubSentrySpan<T extends StreamedSpanLike>(span: T): T {
+  span.name = redactCapabilityPaths(span.name);
+  span.attributes = scrubStreamedAttributes(span.attributes) as T["attributes"];
+  if (Array.isArray(span.links)) {
+    for (const link of span.links) {
+      if (link.attributes) link.attributes = scrubStreamedAttributes(link.attributes);
+    }
+  }
+  return span;
+}
+
+/**
+ * SDK v11 collects cookies, request/response bodies, user info and DB query
+ * text when `dataCollection` is unset. Pin the v10 `sendDefaultPii: false`
+ * baseline so none of that reaches Sentry.
+ */
+const PII_HEADER_DENY = ["forwarded", "-ip", "remote-", "via", "-user"];
+
+export const SENTRY_DATA_COLLECTION = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: {
+    request: { deny: PII_HEADER_DENY },
+    response: { deny: PII_HEADER_DENY },
+  },
+  httpBodies: [],
+  urlQueryParams: { deny: PII_HEADER_DENY },
+  genAI: { inputs: false, outputs: false },
+  databaseQueryData: false,
+  queues: false,
+  graphQL: { document: false, variables: false },
+} satisfies NonNullable<SentryInitOptions["dataCollection"]>;
