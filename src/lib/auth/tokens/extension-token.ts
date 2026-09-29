@@ -5,10 +5,11 @@ import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rl
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
 import {
-  EXTENSION_TOKEN_MAX_ACTIVE,
+  CLIENT_TOKEN_MAX_ACTIVE_FAMILIES,
   type ExtensionTokenScope,
 } from "@/lib/constants";
-import { computeClientTokenExpiry } from "@/lib/auth/tokens/client-token-expiry";
+import { computeClientTokenExpiry, getFamilyPresenceAt } from "@/lib/auth/tokens/client-token-expiry";
+import type { Prisma } from "@prisma/client";
 import {
   EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
@@ -177,6 +178,159 @@ export async function validateExtensionToken(
   return { ok: true, data: dpopResult.data };
 }
 
+// ─── Family revocation reasons + active-family cap ──────────
+
+export const EXTENSION_TOKEN_REVOKE_REASON = {
+  FAMILY_EXPIRED: "family_expired",
+  PRESENCE_EXPIRED: "presence_expired",
+  REPLAY_DETECTED: "replay_detected",
+  SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
+  SUPERSEDED_SAME_DEVICE: "superseded_same_device",
+  ACTIVE_FAMILY_CAP: "active_family_cap",
+  USER_DELETE: "user_delete",
+} as const;
+
+export type ExtensionTokenFamilyRevokeReason = (typeof EXTENSION_TOKEN_REVOKE_REASON)[keyof typeof EXTENSION_TOKEN_REVOKE_REASON];
+
+export interface RevokedFamily {
+  familyId: string;
+  reason: ExtensionTokenFamilyRevokeReason;
+  rowsRevoked: number;
+}
+
+/**
+ * Post-commit audit emission for revoked families. Shared by
+ * `revokeExtensionTokenFamily` (single family, its own transaction) and the
+ * three issuers below (families revoked inside their own issuance
+ * transaction, emitted once it has committed).
+ */
+export async function emitRevokedFamilyAudits(
+  revoked: RevokedFamily[],
+  ctx: { userId: string; tenantId: string },
+): Promise<void> {
+  for (const { familyId, reason, rowsRevoked } of revoked) {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.EXTENSION_TOKEN_FAMILY_REVOKED,
+      userId: ctx.userId,
+      tenantId: ctx.tenantId,
+      targetType: AUDIT_TARGET_TYPE.EXTENSION_TOKEN,
+      targetId: familyId,
+      metadata: {
+        reason,
+        familyId,
+        rowsRevoked,
+      },
+    });
+  }
+}
+
+/**
+ * Enforce the per-user active-device-family cap ahead of issuing a new
+ * BROWSER_EXTENSION or IOS_APP family. Two steps, both inside the caller's
+ * transaction:
+ *
+ *  1. Supersede: an active family with the same `userId` + `clientKind` +
+ *     `cnfJkt` is the same install reconnecting — revoke it instead of
+ *     letting it consume a cap slot. A family whose revoke touches 0 rows
+ *     (already fully revoked) is not returned, mirroring
+ *     `revokeExtensionTokenFamily`'s `count > 0` audit guard.
+ *  2. Cap: membership is the active (non-expired, non-revoked) rows with
+ *     `clientKind !== IOS_AUTOFILL`, grouped by family. Each family's
+ *     presence comes from `getFamilyPresenceAt`, which reads over ALL of the
+ *     family's rows (not just the active ones) — an iOS family's presence
+ *     write can sit on its already-expired 24h access row while the refresh
+ *     row is still live. Families are ordered by presence ascending, then
+ *     `familyId` ascending as a total-order tie-break, and the oldest is
+ *     evicted while `families + 1` (the new family about to be created)
+ *     exceeds the cap.
+ *
+ * Precondition: the caller has already taken `advisoryXactLock(tx, userId)`
+ * in this same transaction — this function does not re-acquire it.
+ */
+export async function enforceActiveFamilyCap(
+  tx: Prisma.TransactionClient,
+  params: {
+    userId: string;
+    clientKind: "BROWSER_EXTENSION" | "IOS_APP";
+    cnfJkt: string;
+    now: Date;
+  },
+): Promise<RevokedFamily[]> {
+  const { userId, clientKind, cnfJkt, now } = params;
+  const revoked: RevokedFamily[] = [];
+
+  // ── Step 1: supersede same-install reconnect ──────────────
+  const supersedeFamilies = await tx.extensionToken.findMany({
+    where: { userId, clientKind, cnfJkt, revokedAt: null },
+    select: { familyId: true },
+    distinct: ["familyId"],
+  });
+  for (const { familyId } of supersedeFamilies) {
+    const result = await tx.extensionToken.updateMany({
+      where: { familyId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    if (result.count > 0) {
+      revoked.push({
+        familyId,
+        reason: EXTENSION_TOKEN_REVOKE_REASON.SUPERSEDED_SAME_DEVICE,
+        rowsRevoked: result.count,
+      });
+    }
+  }
+
+  // ── Step 2: cap active non-AutoFill families ───────────────
+  const activeRows = await tx.extensionToken.findMany({
+    where: {
+      userId,
+      revokedAt: null,
+      expiresAt: { gt: now },
+      clientKind: { not: "IOS_AUTOFILL" },
+    },
+    select: { familyId: true, familyCreatedAt: true },
+  });
+  const families = new Map<string, Date>();
+  for (const row of activeRows) {
+    if (!families.has(row.familyId)) {
+      families.set(row.familyId, row.familyCreatedAt);
+    }
+  }
+
+  // Sequential: one interactive transaction is one connection, and the set is
+  // bounded by the cap (at most CLIENT_TOKEN_MAX_ACTIVE_FAMILIES + 1 reads).
+  const presences: { familyId: string; presenceAt: Date }[] = [];
+  for (const [familyId, familyCreatedAt] of families) {
+    presences.push({
+      familyId,
+      presenceAt: await getFamilyPresenceAt(tx, familyId, familyCreatedAt),
+    });
+  }
+  presences.sort((a, b) => {
+    const byPresence = a.presenceAt.getTime() - b.presenceAt.getTime();
+    if (byPresence !== 0) return byPresence;
+    return a.familyId < b.familyId ? -1 : a.familyId > b.familyId ? 1 : 0;
+  });
+
+  while (presences.length + 1 > CLIENT_TOKEN_MAX_ACTIVE_FAMILIES) {
+    const oldest = presences.shift();
+    if (!oldest) break;
+    const result = await tx.extensionToken.updateMany({
+      where: { familyId: oldest.familyId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    if (result.count > 0) {
+      revoked.push({
+        familyId: oldest.familyId,
+        reason: EXTENSION_TOKEN_REVOKE_REASON.ACTIVE_FAMILY_CAP,
+        rowsRevoked: result.count,
+      });
+    }
+  }
+
+  return revoked;
+}
+
 // ─── Issuance ────────────────────────────────────────────────
 
 /**
@@ -190,9 +344,10 @@ export async function validateExtensionToken(
  * a single transaction (see plan §Step 6).
  *
  * Atomicity: sets up its own `withUserTenantRls` + `prisma.$transaction`
- * internally and enforces `EXTENSION_TOKEN_MAX_ACTIVE` (revokes the oldest
- * unused tokens to make room) before creating the new token, all in a single
- * transaction. Callers do NOT need to establish an RLS context before calling.
+ * internally and enforces `CLIENT_TOKEN_MAX_ACTIVE_FAMILIES` (see
+ * `enforceActiveFamilyCap`) before creating the new token, all in a single
+ * transaction. Callers do NOT need to establish an RLS context before
+ * calling. Any evicted families are audited after the transaction commits.
  */
 export async function issueExtensionToken(params: {
   userId: string;
@@ -247,24 +402,14 @@ export async function issueExtensionToken(params: {
     prisma.$transaction(async (tx) => {
       // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race).
       await advisoryXactLock(tx, userId);
-      // Find active tokens (non-revoked, non-expired)
-      const active = await tx.extensionToken.findMany({
-        where: { userId, revokedAt: null, expiresAt: { gt: now } },
-        orderBy: { createdAt: "asc" },
-        select: { id: true },
+      const revokedFamilies = await enforceActiveFamilyCap(tx, {
+        userId,
+        clientKind: "BROWSER_EXTENSION",
+        cnfJkt,
+        now,
       });
 
-      // Revoke oldest if at max (need room for the new one)
-      const over = active.length + 1 - EXTENSION_TOKEN_MAX_ACTIVE;
-      if (over > 0) {
-        const toRevoke = active.slice(0, over).map((t) => t.id);
-        await tx.extensionToken.updateMany({
-          where: { id: { in: toRevoke } },
-          data: { revokedAt: now },
-        });
-      }
-
-      return tx.extensionToken.create({
+      const token = await tx.extensionToken.create({
         data: {
           userId,
           tenantId,
@@ -281,36 +426,31 @@ export async function issueExtensionToken(params: {
         },
         select: { expiresAt: true, scope: true, cnfJkt: true },
       });
+
+      return { token, revokedFamilies };
     }),
   );
+
+  // The evictions have committed; audit them before any post-commit check can
+  // throw.
+  await emitRevokedFamilyAudits(created.revokedFamilies, { userId, tenantId });
 
   // cnfJkt is always written in the create.data above — null here is a system
   // invariant violation (Prisma schema allows null for legacy rows, but newly
   // issued tokens always carry it).
-  if (!created.cnfJkt) {
+  if (!created.token.cnfJkt) {
     throw new Error("issueExtensionToken: cnfJkt missing from newly created row");
   }
 
   return {
     token: plaintext,
-    expiresAt: created.expiresAt,
-    scopeCsv: created.scope,
-    cnfJkt: created.cnfJkt,
+    expiresAt: created.token.expiresAt,
+    scopeCsv: created.token.scope,
+    cnfJkt: created.token.cnfJkt,
   };
 }
 
 // ─── Family revocation ───────────────────────────────────────
-
-export const EXTENSION_TOKEN_REVOKE_REASON = {
-  FAMILY_EXPIRED: "family_expired",
-  PRESENCE_EXPIRED: "presence_expired",
-  REPLAY_DETECTED: "replay_detected",
-  SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
-  PASSKEY_REAUTH: "passkey_reauth",
-  USER_DELETE: "user_delete",
-} as const;
-
-export type ExtensionTokenFamilyRevokeReason = (typeof EXTENSION_TOKEN_REVOKE_REASON)[keyof typeof EXTENSION_TOKEN_REVOKE_REASON];
 
 /**
  * Revoke every token row in the family and emit an audit event.
@@ -333,18 +473,9 @@ export async function revokeExtensionTokenFamily(params: {
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if (result.count > 0) {
-    await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.EXTENSION_TOKEN_FAMILY_REVOKED,
+    await emitRevokedFamilyAudits([{ familyId, reason, rowsRevoked: result.count }], {
       userId,
       tenantId,
-      targetType: AUDIT_TARGET_TYPE.EXTENSION_TOKEN,
-      targetId: familyId,
-      metadata: {
-        reason,
-        familyId,
-        rowsRevoked: result.count,
-      },
     });
   }
 
@@ -353,7 +484,7 @@ export async function revokeExtensionTokenFamily(params: {
 
 /**
  * Revoke every active extension token for a user, regardless of family.
- * Used by: "sign out everywhere" (sessions DELETE), passkey re-auth.
+ * Used by: "sign out everywhere" (sessions DELETE).
  * Emits one audit event per affected family.
  */
 export async function revokeAllExtensionTokensForUser(params: {

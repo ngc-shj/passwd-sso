@@ -77,7 +77,7 @@ export {
   EXTENSION_TOKEN_SCOPE,
   EXTENSION_TOKEN_SCOPE_VALUES,
   EXTENSION_TOKEN_DEFAULT_SCOPES,
-  EXTENSION_TOKEN_MAX_ACTIVE,
+  CLIENT_TOKEN_MAX_ACTIVE_FAMILIES,
 } from "./auth/extension-token";
 export type { ExtensionTokenScope } from "./auth/extension-token";
 

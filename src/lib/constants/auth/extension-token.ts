@@ -35,11 +35,14 @@ export const IOS_TOKEN_DEFAULT_SCOPES = [
 ] as const satisfies readonly ExtensionTokenScope[];
 
 /**
- * Maximum active (non-revoked, non-expired) tokens per user.
- * Independent throttle against token-issuance abuse; complements the
- * per-family absolute lifetime (tenant.extensionTokenAbsoluteTimeoutMinutes).
+ * Maximum active (non-revoked, non-expired) device families per user,
+ * counting BROWSER_EXTENSION and IOS_APP families only — IOS_AUTOFILL is
+ * excluded (it is a short-lived, single-purpose upload token, not a device
+ * connection). Independent throttle against token-issuance abuse;
+ * complements the per-family absolute lifetime
+ * (tenant.extensionTokenAbsoluteTimeoutMinutes).
  */
-export const EXTENSION_TOKEN_MAX_ACTIVE = 3;
+export const CLIENT_TOKEN_MAX_ACTIVE_FAMILIES = 3;
 
 // Idle-timeout default lives at src/lib/validations/common.ts as
 // EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT (alongside the session timeout

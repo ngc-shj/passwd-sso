@@ -9,7 +9,6 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { WEBAUTHN_RESPONSE_MAX } from "@/lib/validations/common";
-import { SESSION_IP_MAX_LENGTH, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn/webauthn-authorize";
 import { CHALLENGE_ID_RE } from "@/lib/auth/webauthn/webauthn-server";
@@ -17,7 +16,6 @@ import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audi
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { EXTENSION_TOKEN_REVOKE_REASON } from "@/lib/auth/tokens/extension-token";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
@@ -25,13 +23,9 @@ import {
   getSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "@/lib/auth/session/cookie-name";
-import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
-import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
-import { hashSessionToken } from "@/lib/auth/session/session-cache";
+import { createCappedSession } from "@/lib/auth/session/session-concurrency";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { getLogger } from "@/lib/logger";
-import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -130,100 +124,43 @@ async function handlePOST(req: NextRequest) {
 
   const meta = extractRequestMeta(req);
 
-  // Defense-in-depth: atomically delete all existing sessions and create
-  // new one. Passkey sign-in requires physical device possession, so this
-  // aggressive rotation is acceptable for a password manager.
-  let evictedTokens: string[] = [];
-  const evictedCount = await withBypassRls(prisma, async (tx) => {
-    // SELECT tokens to invalidate before deleteMany — same tx so the read
-    // sees only currently-live sessions (R3 / S-6 sequencing).
-    const existing = await tx.session.findMany({
-      where: { userId: user.id },
-      select: { sessionToken: true },
-    });
-    evictedTokens = existing.map((s) => s.sessionToken);
-
-    const deleted = await tx.session.deleteMany({
-      where: { userId: user.id },
-    });
-    // Note on passkeyVerifiedAt ownership (split with auth-adapter):
-    // Initial value is set HERE because the passkey sign-in route owns
-    // session creation for the WebAuthn provider (not the Auth.js
-    // adapter). The auth-adapter's createSession sets passkeyVerifiedAt
-    // to null implicitly for OAuth/email sessions, which is correct —
-    // those flows do not establish passkey freshness.
-    // Subsequent updates: ordinary session activity in
-    // `src/lib/auth/session/auth-adapter.ts:updateSession` writes only
-    // {expires, lastActiveAt}; it MUST NOT refresh passkeyVerifiedAt
-    // (C2 invariant). Refresh happens via the dedicated reauth flow at
-    // `src/app/api/auth/passkey/reauth/verify/route.ts`.
-    await tx.session.create({
-      data: {
-        // H4: store the digest; the raw `sessionToken` is set as the cookie below.
-        sessionToken: hashSessionToken(sessionToken),
-        userId: user.id,
-        tenantId: existingUser.tenantId,
-        expires,
-        ipAddress: meta.ip?.slice(0, SESSION_IP_MAX_LENGTH) ?? null,
-        userAgent: meta.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-        passkeyVerifiedAt: verifiedAt,
-        provider: "webauthn",
-        authCredentialId: user.credentialRowId,
-      },
-    });
-    return deleted.count;
-  }, BYPASS_PURPOSE.AUTH_FLOW);
-
-  // Invalidate cache AFTER $transaction resolves successfully (S-6).
-  if (evictedTokens.length > 0) {
-    await invalidateCachedSessions(evictedTokens);
-  }
-
-  // C7 (OWASP A07-3): passkey re-auth is an AAL3 credential freshness
-  // re-establish event. Cascade revokes ALL bearer credentials across
-  // all tenants — not just ExtensionToken, but also ApiKey,
-  // McpAccessToken, McpRefreshToken, DelegationSession, OperatorToken.
-  // Session deletion above already removed Session rows; this covers
-  // the remaining bearer-class models. Sessions/tokens are scoped to
-  // global User (not tenant), so allTenants=true matches.
-  // Exclude the just-created session token: invalidateUserSessions revokes
-  // ALL sessions across tenants, which would wipe the session we just
-  // committed above and leave the client with a cookie pointing at a
-  // non-existent Session row (next request → 401 → bounced to sign-in).
+  // Create the session through the shared capped creator — the one the
+  // adapter's OAuth/SAML/magic-link sign-ins use — so passkey sign-in behaves
+  // like every other sign-in path: it evicts only the oldest Web session over
+  // the tenant's concurrent-session cap and touches no bearer token. A
+  // sign-in proves possession of the credential, not that anything else was
+  // compromised, so it does not sign the user out of the extension or the iOS
+  // app (this supersedes owasp-batch-3 C7). Revocation belongs to
+  // secret-changing operations (passphrase change, key rotation, resets) and
+  // explicit sign-out (DELETE /api/sessions); see
+  // docs/archive/review/passkey-signin-client-token-cascade-plan.md.
   //
-  // Failure here returns 500 without setting the session cookie — matches
-  // the fail-closed pattern of change-passphrase / recovery-recover.
-  // The orphan Session row from line 139 is cleaned up by `tx.session.deleteMany`
-  // on the next sign-in attempt (line 125). Returning a specific error code
-  // gives the client a stable failure mode for retry logic.
-  try {
-    const result = await invalidateUserSessions(user.id, {
-      allTenants: true,
-      reason: EXTENSION_TOKEN_REVOKE_REASON.PASSKEY_REAUTH,
-      excludeSessionToken: sessionToken,
-    });
-    if (result.cacheTombstoneFailures > 0) {
-      getLogger().warn(
-        { userId: user.id, failures: result.cacheTombstoneFailures },
-        "auth.passkey.verify.tombstoneFailures",
-      );
-    }
-  } catch (err) {
-    getLogger().error(
-      { userId: user.id, error: errorLogFields(err) },
-      "auth.passkey.verify.invalidateFailed",
-    );
-    return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);
-  }
+  // Note on passkeyVerifiedAt ownership (split with auth-adapter): the
+  // initial value is set HERE because the passkey sign-in route owns session
+  // creation for the WebAuthn provider (not the Auth.js adapter). The
+  // auth-adapter's createSession leaves it null for OAuth/email sessions,
+  // which is correct — those flows do not establish passkey freshness.
+  // Subsequent updates: ordinary session activity in
+  // `src/lib/auth/session/auth-adapter.ts:updateSession` writes only
+  // {expires, lastActiveAt}; it MUST NOT refresh passkeyVerifiedAt (C2
+  // invariant). Refresh happens via the dedicated reauth flow at
+  // `src/app/api/auth/passkey/reauth/verify/route.ts`.
+  // createCappedSession also runs the new-device check and reports any
+  // cap eviction once the session has committed — the same post-sign-in
+  // work the adapter's paths get.
+  await createCappedSession({
+    userId: user.id,
+    tenantId: existingUser.tenantId,
+    sessionToken,
+    expires,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+    acceptLanguage: meta.acceptLanguage,
+    provider: "webauthn",
+    passkeyVerifiedAt: verifiedAt,
+    authCredentialId: user.credentialRowId,
+  });
 
-  // Audit log
-  if (evictedCount > 0) {
-    await logAuditAsync({
-      ...personalAuditBase(req, user.id),
-      action: AUDIT_ACTION.SESSION_REVOKE_ALL,
-      metadata: { trigger: "passkey_signin", evictedCount },
-    });
-  }
   await logAuditAsync({
     ...personalAuditBase(req, user.id),
     action: AUDIT_ACTION.AUTH_LOGIN,

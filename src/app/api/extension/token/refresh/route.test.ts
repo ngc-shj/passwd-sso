@@ -73,7 +73,8 @@ vi.mock("@/lib/auth/tokens/extension-token", () => ({
     PRESENCE_EXPIRED: "presence_expired",
     REPLAY_DETECTED: "replay_detected",
     SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
-    PASSKEY_REAUTH: "passkey_reauth",
+    SUPERSEDED_SAME_DEVICE: "superseded_same_device",
+    ACTIVE_FAMILY_CAP: "active_family_cap",
     USER_DELETE: "user_delete",
   },
 }));

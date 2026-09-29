@@ -25,7 +25,7 @@ const CHECKER = fileURLToPath(
 const THROW_PATHS = [
   "src/lib/auth/policy/access-restriction.ts",
   "src/lib/auth/policy/passkey-enforcement.ts",
-  "src/lib/auth/session/auth-adapter.ts",
+  "src/lib/auth/session/session-concurrency.ts",
   "src/lib/auth/tokens/extension-token.ts",
   "src/app/api/extension/token/refresh/route.ts",
   "src/lib/auth/tokens/mobile-token.ts",
@@ -292,7 +292,7 @@ describe("check-null-tenant-fail-closed (AST)", () => {
   it("accepts a Promise.all-destructured relation-join read guarded by if (!user?.tenant)", () => {
     // Mirrors the real src/auth.ts session-passkey-policy shape.
     writeFile(
-      "src/lib/auth/session/auth-adapter.ts",
+      "src/lib/auth/session/session-concurrency.ts",
       `import { prisma } from "@/lib/prisma";
        export async function read(id: string) {
          const [c, user] = await Promise.all([
