@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.77](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.76...passwd-sso-v0.4.77) (2026-09-29)
+
+
+### Bug Fixes
+
+* **ci:** wait out registry propagation before asserting CLI provenance ([#856](https://github.com/ngc-shj/passwd-sso/issues/856)) ([48e28f7](https://github.com/ngc-shj/passwd-sso/commit/48e28f7fd14a4bc2e10214f89ce415f80d9cd23b))
+
 ## [0.4.76](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.75...passwd-sso-v0.4.76) (2026-09-29)
 
 
