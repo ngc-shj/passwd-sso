@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { scrubObject, scrubSentryEvent, sanitizeUrl, redactCapabilityPaths, TOKEN_ROUTE_PATTERNS } from "./sentry-scrub";
+import {
+  scrubObject,
+  scrubSentryEvent,
+  scrubSentrySpan,
+  sanitizeUrl,
+  redactCapabilityPaths,
+  TOKEN_ROUTE_PATTERNS,
+} from "./sentry-scrub";
 
 describe("scrubObject", () => {
   it("redacts top-level sensitive keys", () => {
@@ -681,5 +688,65 @@ describe("S6 — capability URL redaction in free-text fields", () => {
     const event = { message: "Application started successfully" };
     const result = scrubSentryEvent(event);
     expect(result.message).toBe("Application started successfully");
+  });
+});
+
+describe("scrubSentrySpan (streamed span format)", () => {
+  function span(overrides: { name?: string; attributes?: Record<string, unknown>; links?: Array<{ attributes?: Record<string, unknown> }> }) {
+    return {
+      trace_id: "t",
+      span_id: "s",
+      start_timestamp: 0,
+      status: "ok" as const,
+      is_segment: true,
+      name: overrides.name ?? "GET /api/health",
+      attributes: overrides.attributes ?? {},
+      ...(overrides.links ? { links: overrides.links } : {}),
+    };
+  }
+
+  it("redacts sensitive attribute keys", () => {
+    const result = scrubSentrySpan(span({ attributes: { "app.token": "tok-value", "http.route": "/api/x" } }));
+    expect(result.attributes["app.token"]).toBe("[Redacted]");
+    expect(result.attributes["http.route"]).toBe("/api/x");
+  });
+
+  it("strips query and capability path from url.full", () => {
+    const result = scrubSentrySpan(
+      span({ attributes: { "url.full": "https://app.example.com/ja/s/shareTok123?k=v#frag" } }),
+    );
+    expect(result.attributes["url.full"]).toBe("https://app.example.com/ja/s/[redacted]");
+  });
+
+  it("wipes bare query and fragment attributes", () => {
+    const result = scrubSentrySpan(
+      span({ attributes: { "url.query": "code=abc", "http.query": "code=abc", "url.fragment": "key=1" } }),
+    );
+    expect(result.attributes["url.query"]).toBe("");
+    expect(result.attributes["http.query"]).toBe("");
+    expect(result.attributes["url.fragment"]).toBe("");
+  });
+
+  it("sanitizes the referer header attribute, which is a string array", () => {
+    const result = scrubSentrySpan(
+      span({ attributes: { "http.request.header.referer": ["https://app.example.com/s/refTok999?x=1"] } }),
+    );
+    expect(result.attributes["http.request.header.referer"]).toEqual(["https://app.example.com/s/[redacted]"]);
+  });
+
+  it("redacts capability paths from the span name and the segment name attribute", () => {
+    const result = scrubSentrySpan(
+      span({
+        name: "GET /dashboard/teams/invite/invTok777",
+        attributes: { "sentry.segment.name": "GET /dashboard/teams/invite/invTok777" },
+      }),
+    );
+    expect(result.name).toBe("GET /dashboard/teams/invite/[redacted]");
+    expect(result.attributes["sentry.segment.name"]).toBe("GET /dashboard/teams/invite/[redacted]");
+  });
+
+  it("scrubs link attributes", () => {
+    const result = scrubSentrySpan(span({ links: [{ attributes: { "url.full": "https://a.example/s/linkTok1?q=1" } }] }));
+    expect(result.links?.[0].attributes?.["url.full"]).toBe("https://a.example/s/[redacted]");
   });
 });
