@@ -59,3 +59,40 @@ R6: F-test-1. RT11: F-test-1. RT1–RT5, RT7, RT10: checked-ok. RT6: checked-ok.
 ### F-test-3 [Minor] unpinned precondition
 - Action: the C2 `beforeEach` sets `maxConcurrentSessions` to null explicitly.
 - Modified file: src/__tests__/db-integration/session-concurrency-cap.integration.test.ts
+
+---
+
+# Round 2
+Date: 2026-09-29
+
+## Changes from Previous Round
+Round-1 fixes (commits `5c1154c2b`, `9f5d352f4` and `2e714c46f`) reviewed incrementally.
+
+## Functionality Findings
+- **F-doc-1 [Minor, new]** — Row (d) of `client-reauth-timing.md` said "refresh 401/403/404". The refresh route returns 401 for every token-state rejection and 403 only for `PASSKEY_REQUIRED`; only the client treats 404 as revoked. **Resolved**: the row states exactly that.
+- **ADJ-1 [Minor, adjacent]** — `resolveTenantIdForUser(session.userId, tx)` hands the bypass `tx` to the imported adjudicator `resolveOwningTenantIdFromClient`, which is the gate's hand-off shape.
+- All other checkpoints verified: the error contract is unchanged, there is no double notify, `SESSION_EVICTED` is written before `AUTH_LOGIN`, and a rolled-back iOS refresh leaves the old row active.
+
+## Security Findings
+No findings. F-sec-1 was re-proven independently: the gate reddens on `tx.user` inside the helper. The hand-off sweep found nothing newly invisible. F-sec-2 was verified: the raw token is hashed inside the notifier, the call is post-commit and fire-and-forget inside try/catch, and the email carries only the browser, OS, IP and time. R43: the tenant-resolution split is not a widening (READ COMMITTED gave no cross-statement consistency before either), and the iOS move narrows the race.
+
+## Testing Findings
+- **F-test-r2-1 [Major, RT7, new]** — `mobile-token.test.ts` wired the same `vi.fn()` to the top-level `prisma.extensionToken.updateMany` and to the tx one, so the D9 assertions could not tell an in-transaction revoke from the pre-fix separate commit. **Resolved**: the top-level client now has its own mock, `mockPrismaExtUpdateMany`, and both refresh tests assert it is never called. Red proof: running the updated test file against the pre-D9 `mobile-token.ts` (throwaway copies, deleted afterwards) fails both tests.
+
+## Recurring Issue Check
+Functionality: R29 was F-doc-1; the rest stand. Security: H4, R46-shaped gate, R43, RLS nesting and fail-closed re-verified. Testing: RT7 was F-test-r2-1; RT1–RT6 and RT8–RT11 had no new firing.
+
+## Resolution Status
+### F-test-r2-1 [Major] shared prisma/tx updateMany mock
+- Action: split the mocks; both refresh tests assert no top-level revoke. Red-proven against the pre-D9 source.
+- Modified file: src/lib/auth/tokens/mobile-token.test.ts
+### F-doc-1 [Minor] 404 in the refresh status list
+- Action: the row now lists "401; 403 for `PASSKEY_REQUIRED`" and notes that the client also treats a 404 as revoked.
+- Modified file: docs/architecture/client-reauth-timing.md
+### ADJ-1 [Minor] tenant resolution hands the tx to an imported adjudicator — Accepted
+- **Anti-Deferral check**: acceptable risk.
+- **Justification**: `resolveOwningTenantIdFromClient` is the codebase's single owning-tenant adjudicator, and every caller hands it the client it should read through (for example the passkey route's SSO guard, which was already a hand-off site before this branch). It reads only `user`, which is on `auth-adapter.ts`'s allowlist, and `tenant-context.ts` carries its own `ALLOWED_USAGE` entry. The session-cap models the gate lost sight of in F-sec-1 are now scanned in `session-concurrency.ts`.
+  - Worst case: a future edit makes the adjudicator touch a new model under a caller's bypass without the gate noticing. That is the documented, repo-wide hand-off limitation of `check-bypass-rls`, not a new one.
+  - Likelihood: low. The function is small and has a single purpose.
+  - Cost to fix: moderate. It needs the gate to resolve imported callees (a Program-backed pass), which is a gate-wide change beyond this branch.
+- **Orchestrator sign-off**: accepted. A cross-file callee pass for `check-bypass-rls` is a repo-wide follow-up, not specific to this change.

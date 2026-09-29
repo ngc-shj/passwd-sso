@@ -9,6 +9,7 @@ const {
   mockExtCreate,
   mockExtUpdate,
   mockExtUpdateMany,
+  mockPrismaExtUpdateMany,
   mockExtAggregate,
   mockTenantFindUnique,
   mockTransaction,
@@ -20,6 +21,10 @@ const {
   mockExtCreate: vi.fn(),
   mockExtUpdate: vi.fn(),
   mockExtUpdateMany: vi.fn(),
+  // Top-level (outside any transaction) updateMany — kept apart from the tx
+  // one so a test can tell a revoke inside the issuing transaction from one
+  // committed on its own before it.
+  mockPrismaExtUpdateMany: vi.fn(),
   mockExtAggregate: vi.fn(),
   mockTenantFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
@@ -53,7 +58,7 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mockExtFindMany,
       create: mockExtCreate,
       update: mockExtUpdate,
-      updateMany: mockExtUpdateMany,
+      updateMany: mockPrismaExtUpdateMany,
       aggregate: mockExtAggregate,
     },
     tenant: {
@@ -172,6 +177,7 @@ beforeEach(() => {
   mockExtCreate.mockResolvedValue(happyAccessRowResponse());
   mockExtUpdate.mockResolvedValue({});
   mockExtUpdateMany.mockResolvedValue({ count: 0 });
+  mockPrismaExtUpdateMany.mockResolvedValue({ count: 0 });
   // Default tenant policy: the same defaults issueExtensionToken falls back
   // to (7d idle / 30d absolute).
   mockTenantFindUnique.mockResolvedValue({
@@ -428,6 +434,7 @@ describe("issueIosToken", () => {
       where: { familyId: FAMILY_ID, userId: USER_ID, revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
+    expect(mockPrismaExtUpdateMany).not.toHaveBeenCalled();
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
@@ -737,13 +744,16 @@ describe("refreshIosToken", () => {
       expect(result.token.tokenId).toBe("row-new-access");
     }
 
-    // Old family rows revoked.
+    // Old family rows revoked — inside the issuing transaction, never as a
+    // separate commit before it (a concurrent new-family cap scan would then
+    // miss this family).
     expect(mockExtUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { familyId: FAMILY_ID, userId: USER_ID, revokedAt: null },
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );
+    expect(mockPrismaExtUpdateMany).not.toHaveBeenCalled();
 
     // MOBILE_TOKEN_REFRESHED audit emitted with sameDeviceKey=true.
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
