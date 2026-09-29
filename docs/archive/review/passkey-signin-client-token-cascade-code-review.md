@@ -35,7 +35,7 @@ R6: F-test-1. RT11: F-test-1. RT1–RT5, RT7, RT10: checked-ok. RT6: checked-ok.
 
 ## Environment Verification Report
 - VE2 (integration suite versus live workers): verified-local. Workers were stopped. `npm run test:integration` passed 117/117 files earlier in Phase 2, and the affected files were re-run after the Round 1 fixes.
-- VE1 (iOS on a physical device): blocked-deferred to the user-run manual test (plan "Manual test"). This is the Phase 1 constraint VE1, and the plan records its Anti-Deferral note.
+- VE1 (iOS on a physical device): verified-local (2026-09-29, user-run on the dev server at :3001 with the existing extension and iOS builds; no client rebuild was needed because the branch changes no `extension/`, `ios/` or `cli/` file). With the extension and the iOS app both signed in, a Web passkey sign-in left both signed in — no forced sign-out.
 
 ## Resolution Status
 ### F-func-1 [Major] stale client-reauth-timing row
