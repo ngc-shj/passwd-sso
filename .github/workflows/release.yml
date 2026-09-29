@@ -204,26 +204,49 @@ jobs:
       # degraded attestation hard-fails here). The authenticity + our-bytes checks
       # are the verify-published job's `npm audit signatures` and tarball-digest
       # comparison below.
+      #
+      # The registry can take well over a minute to serve a just-published
+      # version, and until then `npm view pkg@<version>` exits non-zero with E404.
+      # 0.4.76 returned from `npm publish` at 12:43:11 but was stamped 12:44:28 by
+      # the registry — one second after the old 5 x 15s window gave up, failing a
+      # release whose attestation was fine. Hence the longer window, and E404 is
+      # reported as "not visible yet" rather than lumped in with other failures.
       - name: Assert published provenance
         env:
           VERSION: ${{ needs.build-cli.outputs.version }}
+          ATTEMPTS: "20" # x 15s = 5 min, inside the job's 10-minute timeout
         run: |
           set -euo pipefail
           echo "Asserting SLSA provenance for passwd-sso-cli@${VERSION}"
-          for attempt in 1 2 3 4 5; do
-            if VIEW=$(npm view "passwd-sso-cli@${VERSION}" --json 2>/dev/null); then
+          ERR_LOG=$(mktemp)
+          LAST="unknown"
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            if VIEW=$(npm view "passwd-sso-cli@${VERSION}" --json 2>"$ERR_LOG"); then
               PREDICATE=$(echo "$VIEW" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d);process.stdout.write(j?.dist?.attestations?.provenance?.predicateType||'')}catch{process.stdout.write('')}})")
               if [ "$PREDICATE" = "https://slsa.dev/provenance/v1" ]; then
                 echo "✓ SLSA provenance present"
                 exit 0
               fi
-              echo "attempt ${attempt}: attestation not yet visible (predicate='${PREDICATE}'); retrying for propagation lag"
+              LAST="unattested"
+              echo "attempt ${attempt}: version visible, attestation not yet (predicate='${PREDICATE}'); retrying"
+            elif grep -q "E404" "$ERR_LOG"; then
+              LAST="not-visible"
+              echo "attempt ${attempt}: passwd-sso-cli@${VERSION} not visible on the registry yet (E404); waiting for propagation"
             else
-              echo "attempt ${attempt}: npm view failed (registry/network); retrying"
+              LAST="lookup-failed"
+              echo "attempt ${attempt}: npm view failed:"
+              sed 's/^/    /' "$ERR_LOG"
             fi
-            sleep 15
+            if [ "$attempt" -lt "$ATTEMPTS" ]; then sleep 15; fi
           done
-          echo "::error::published passwd-sso-cli@${VERSION} carries no SLSA provenance attestation after retries — OIDC provenance emission may have silently failed"
+          case "$LAST" in
+            unattested)
+              echo "::error::published passwd-sso-cli@${VERSION} carries no SLSA provenance attestation — OIDC provenance emission may have silently failed" ;;
+            not-visible)
+              echo "::error::passwd-sso-cli@${VERSION} never became visible on the registry within the retry window — provenance could not be checked" ;;
+            *)
+              echo "::error::could not read passwd-sso-cli@${VERSION} from the registry — provenance could not be checked" ;;
+          esac
           exit 1
 
   # Cryptographic verification of the PUBLISHED package, in an UNPRIVILEGED job
@@ -265,6 +288,8 @@ jobs:
         env:
           VERSION: ${{ needs.build-cli.outputs.version }}
           EXPECTED_INTEGRITY: ${{ needs.build-cli.outputs.integrity }}
+          # Same propagation window as the publish job's provenance assertion.
+          ATTEMPTS: "20" # x 15s = 5 min, inside the job's 10-minute timeout
         run: |
           set -euo pipefail
           WORK=$(mktemp -d)
@@ -277,7 +302,8 @@ jobs:
           # `npm audit signatures` against an empty tree (which would "pass" and
           # report the published package as verified when it was never fetched).
           installed=false
-          for attempt in 1 2 3 4 5; do
+          INSTALL_ERR="$WORK/install.err"
+          for attempt in $(seq 1 "$ATTEMPTS"); do
             # NOT --no-save: `npm audit signatures` walks the dependency graph, and
             # an unsaved install leaves the package in neither the manifest nor the
             # lockfile's root deps, so it has no edge to reach. The audit then
@@ -290,17 +316,24 @@ jobs:
             # direct dependencies — the match is a coincidence. The audited set is
             # "signed packages in the tree", mostly transitive, so the count is not
             # a completeness signal and must not be used as one when checking this.
-            if npm install --ignore-scripts "passwd-sso-cli@${VERSION}" >/dev/null 2>&1; then
+            if npm install --ignore-scripts "passwd-sso-cli@${VERSION}" >/dev/null 2>"$INSTALL_ERR"; then
               installed=true
               break
             fi
-            echo "attempt ${attempt}: install of published version failed (propagation lag); retrying"
+            # `npm install` reports an unpublished version as ETARGET (no matching
+            # version in the packument), not the E404 that `npm view` gives.
+            if grep -qE "ETARGET|E404" "$INSTALL_ERR"; then
+              echo "attempt ${attempt}: passwd-sso-cli@${VERSION} not visible on the registry yet; waiting for propagation"
+            else
+              echo "attempt ${attempt}: install of published version failed:"
+              sed 's/^/    /' "$INSTALL_ERR"
+            fi
             # Explicit if (not `[ ] && sleep`) so the loop body's last command
             # never returns non-zero — keeps intent clear under `set -e`.
-            if [ "$attempt" -lt 5 ]; then sleep 15; fi
+            if [ "$attempt" -lt "$ATTEMPTS" ]; then sleep 15; fi
           done
           if [ "$installed" != true ]; then
-            echo "::error::failed to install passwd-sso-cli@${VERSION} after 5 attempts — cannot verify its signature"
+            echo "::error::failed to install passwd-sso-cli@${VERSION} after ${ATTEMPTS} attempts — cannot verify its signature"
             exit 1
           fi
           # Belt-and-suspenders: the package tree must actually exist and be the
