@@ -52,7 +52,7 @@ const SCAN_DIRS = ["src/app/api", "src/lib", "src/auth.ts"];
 const MANIFEST = new Map([
   ["src/lib/auth/policy/access-restriction.ts", "throw"],
   ["src/lib/auth/policy/passkey-enforcement.ts", "throw"],
-  ["src/lib/auth/session/auth-adapter.ts", "throw"],
+  ["src/lib/auth/session/session-concurrency.ts", "throw"],
   ["src/lib/auth/tokens/extension-token.ts", "throw"],
   ["src/app/api/extension/token/refresh/route.ts", "throw"],
   ["src/lib/auth/tokens/mobile-token.ts", "throw"],
