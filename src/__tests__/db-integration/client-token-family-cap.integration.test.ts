@@ -408,13 +408,19 @@ describe("passkey-signin-client-token-cascade C3 — active-family cap (real DB)
 
     const rows = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ cnt: bigint }[]>(
-        `SELECT COUNT(*) AS cnt FROM extension_tokens
-         WHERE user_id = $1::uuid AND client_kind = 'IOS_AUTOFILL'
-           AND revoked_at IS NULL AND expires_at > now()`,
+      return tx.$queryRawUnsafe<{ total: bigint; revoked: bigint; active: bigint }[]>(
+        `SELECT COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE revoked_at IS NOT NULL) AS revoked,
+                COUNT(*) FILTER (WHERE revoked_at IS NULL AND expires_at > now()) AS active
+         FROM extension_tokens
+         WHERE user_id = $1::uuid AND client_kind = 'IOS_AUTOFILL'`,
         userId,
       );
     });
-    expect(Number(rows[0]!.cnt)).toBe(1);
+    // RT4 lower bound: every mint ran and every one but the last was revoked
+    // by a later mint — the contested path executed, not zero operations.
+    expect(Number(rows[0]!.total)).toBe(N);
+    expect(Number(rows[0]!.revoked)).toBe(N - 1);
+    expect(Number(rows[0]!.active)).toBe(1);
   });
 });
