@@ -10,6 +10,7 @@ const {
   mockExtensionTokenCreate,
   mockExtensionTokenFindMany,
   mockExtensionTokenUpdateMany,
+  mockExtensionTokenAggregate,
   mockTransaction,
   mockCheck,
   mockCreateRateLimiter,
@@ -29,6 +30,7 @@ const {
   mockExtensionTokenCreate: vi.fn(),
   mockExtensionTokenFindMany: vi.fn(),
   mockExtensionTokenUpdateMany: vi.fn(),
+  mockExtensionTokenAggregate: vi.fn(),
   mockTransaction: vi.fn(),
   mockCheck,
   // T4: recording factory — assertRedisFailClosed's factory-attribution step
@@ -65,6 +67,7 @@ vi.mock("@/lib/prisma", () => ({
       create: mockExtensionTokenCreate,
       findMany: mockExtensionTokenFindMany,
       updateMany: mockExtensionTokenUpdateMany,
+      aggregate: mockExtensionTokenAggregate,
     },
     tenant: {
       findUnique: vi.fn().mockResolvedValue({ extensionTokenIdleTimeoutMinutes: 15 }),
@@ -153,10 +156,18 @@ describe("POST /api/extension/token/exchange", () => {
           findMany: mockExtensionTokenFindMany,
           create: mockExtensionTokenCreate,
           updateMany: mockExtensionTokenUpdateMany,
+          aggregate: mockExtensionTokenAggregate,
         },
       }),
     );
-    mockExtensionTokenFindMany.mockResolvedValue([]);
+    // enforceActiveFamilyCap's two findMany calls are distinguished by the
+    // `distinct` option (Step 1: supersede lookup; Step 2: active-family
+    // membership) — default to neither superseding nor capping.
+    mockExtensionTokenFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [] : []),
+    );
+    mockExtensionTokenUpdateMany.mockResolvedValue({ count: 1 });
+    mockExtensionTokenAggregate.mockResolvedValue({ _max: { lastPresenceAt: null } });
     mockExtensionTokenCreate.mockResolvedValue({
       expiresAt: new Date("2099-01-01T00:00:00.000Z"),
       scope: "passwords:read,vault:unlock-data",
@@ -333,8 +344,8 @@ describe("POST /api/extension/token/exchange", () => {
     expect(second.status).toBe(401);
   });
 
-  // ── MAX_ACTIVE rotation ──
-  it("revokes oldest token when MAX_ACTIVE (3) is exceeded via exchange flow", async () => {
+  // ── CLIENT_TOKEN_MAX_ACTIVE_FAMILIES cap ──
+  it("evicts the family with the oldest presence when the active-family cap is exceeded via exchange flow", async () => {
     mockBridgeCodeFindUnique.mockResolvedValueOnce({
       userId: "11111111-1111-1111-1111-111111111111",
       tenantId: "22222222-2222-2222-2222-222222222222",
@@ -342,17 +353,42 @@ describe("POST /api/extension/token/exchange", () => {
       cnfJkt: VALID_CNF_JKT,
     });
     mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
-    mockExtensionTokenFindMany.mockResolvedValueOnce([
-      { id: "t1" },
-      { id: "t2" },
-      { id: "t3" },
-    ]);
+    // 3 families already active (the cap); +1 for the new one exceeds it.
+    const activeRows = [
+      { familyId: "fam-0", familyCreatedAt: new Date(2020, 0, 1) },
+      { familyId: "fam-1", familyCreatedAt: new Date(2020, 0, 2) },
+      { familyId: "fam-2", familyCreatedAt: new Date(2020, 0, 3) },
+    ];
+    mockExtensionTokenFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [] : activeRows),
+    );
+    mockExtensionTokenAggregate.mockImplementation(
+      (args: { where: { familyId: string } }) => {
+        const presenceByFamily: Record<string, Date> = {
+          "fam-0": new Date("2025-06-01"),
+          "fam-1": new Date("2025-01-01"),
+          "fam-2": new Date("2025-06-02"),
+        };
+        return Promise.resolve({
+          _max: { lastPresenceAt: presenceByFamily[args.where.familyId] ?? null },
+        });
+      },
+    );
 
     await POST(makeRequest());
 
     expect(mockExtensionTokenUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: { in: ["t1"] } },
+        where: { familyId: "fam-1", revokedAt: null },
+      }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "EXTENSION_TOKEN_FAMILY_REVOKED",
+        metadata: expect.objectContaining({
+          reason: "active_family_cap",
+          familyId: "fam-1",
+        }),
       }),
     );
   });

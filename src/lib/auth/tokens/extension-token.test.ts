@@ -15,6 +15,7 @@ const {
   mockFindMany,
   mockCreate,
   mockUpdateMany,
+  mockAggregate,
   mockTransaction,
   mockTxExecuteRaw,
   mockWithUserTenantRls,
@@ -22,6 +23,7 @@ const {
   mockFindMany: vi.fn(),
   mockCreate: vi.fn(),
   mockUpdateMany: vi.fn(),
+  mockAggregate: vi.fn(),
   mockTransaction: vi.fn(),
   mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -48,6 +50,7 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mockFindMany,
       create: mockCreate,
       updateMany: mockUpdateMany,
+      aggregate: mockAggregate,
     },
     tenant: { findUnique: mockTenantFindUnique },
     // C13: tenantMember mock; active by default so existing tests pass.
@@ -81,6 +84,7 @@ import {
 } from "./extension-token";
 import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { CLIENT_TOKEN_MAX_ACTIVE_FAMILIES } from "@/lib/constants";
 
 const VALID_CNF_JKT = "A".repeat(43);
 const FAMILY_ID = "fam-00000000-0000-4000-8000-000000000001";
@@ -615,10 +619,19 @@ describe("issueExtensionToken", () => {
           findMany: mockFindMany,
           create: mockCreate,
           updateMany: mockUpdateMany,
+          aggregate: mockAggregate,
         },
       }),
     );
-    mockFindMany.mockResolvedValue([]);
+    // Default: no superseded family (Step 1) and no active families (Step 2)
+    // — enforceActiveFamilyCap's two findMany calls are distinguished by the
+    // `distinct` option, matching the production query shapes (Step 1 uses
+    // `distinct: ["familyId"]`, Step 2 does not).
+    mockFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [] : []),
+    );
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+    mockAggregate.mockResolvedValue({ _max: { lastPresenceAt: null } });
     mockCreate.mockResolvedValue({
       expiresAt: new Date("2099-01-01T00:00:00.000Z"),
       scope: "passwords:read,vault:unlock-data",
@@ -683,31 +696,137 @@ describe("issueExtensionToken", () => {
     expect(presenceMs).toBeLessThanOrEqual(after);
   });
 
-  it("revokes the oldest token when EXTENSION_TOKEN_MAX_ACTIVE is exceeded", async () => {
-    mockFindMany.mockResolvedValue([{ id: "t1" }, { id: "t2" }, { id: "t3" }]);
+  // ─── C3: active-family cap (enforceActiveFamilyCap) ─────────
+
+  it("supersedes an active family from the same device (same cnfJkt) instead of counting it toward the cap", async () => {
+    mockFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [{ familyId: "fam-same-device" }] : []),
+    );
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
     await issueExtensionToken({
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
       cnfJkt: VALID_CNF_JKT,
     });
+
     expect(mockUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: { in: ["t1"] } },
+        where: { familyId: "fam-same-device", revokedAt: null },
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+      }),
+    );
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "EXTENSION_TOKEN_FAMILY_REVOKED",
+        metadata: expect.objectContaining({
+          reason: "superseded_same_device",
+          familyId: "fam-same-device",
+          rowsRevoked: 2,
+        }),
       }),
     );
   });
 
-  it("does not revoke any tokens when count + 1 <= MAX", async () => {
-    mockFindMany.mockResolvedValue([{ id: "t1" }, { id: "t2" }]);
+  it("does not audit a superseded family whose updateMany touches zero rows (already fully revoked)", async () => {
+    mockFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [{ familyId: "fam-already-gone" }] : []),
+    );
+    mockUpdateMany.mockResolvedValue({ count: 0 });
+
     await issueExtensionToken({
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
       cnfJkt: VALID_CNF_JKT,
     });
+
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it("excludes IOS_AUTOFILL from the active-family membership query", async () => {
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "tenant-1",
+      scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
+    });
+
+    const membershipCall = mockFindMany.mock.calls.find(
+      (c) => !(c[0] as { distinct?: unknown }).distinct,
+    );
+    expect(membershipCall?.[0]).toMatchObject({
+      where: expect.objectContaining({ clientKind: { not: "IOS_AUTOFILL" } }),
+    });
+  });
+
+  it("does not evict when active families + 1 does not exceed the cap", async () => {
+    const activeRows = Array.from(
+      { length: CLIENT_TOKEN_MAX_ACTIVE_FAMILIES - 1 },
+      (_, i) => ({ familyId: `fam-${i}`, familyCreatedAt: new Date() }),
+    );
+    mockFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [] : activeRows),
+    );
+
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "tenant-1",
+      scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
+    });
+
     expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("evicts exactly the family with the oldest presence when the cap is exceeded", async () => {
+    // CLIENT_TOKEN_MAX_ACTIVE_FAMILIES active families already; +1 for the
+    // new one about to be created exceeds the cap by exactly one.
+    const activeRows = Array.from(
+      { length: CLIENT_TOKEN_MAX_ACTIVE_FAMILIES },
+      (_, i) => ({ familyId: `fam-${i}`, familyCreatedAt: new Date(2020, 0, i + 1) }),
+    );
+    mockFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [] : activeRows),
+    );
+    // fam-1 has the oldest presence; the others are more recent.
+    mockAggregate.mockImplementation((args: { where: { familyId: string } }) => {
+      const presenceByFamily: Record<string, Date> = {
+        "fam-0": new Date("2025-06-01"),
+        "fam-1": new Date("2025-01-01"),
+        "fam-2": new Date("2025-06-02"),
+      };
+      return Promise.resolve({
+        _max: { lastPresenceAt: presenceByFamily[args.where.familyId] ?? null },
+      });
+    });
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "tenant-1",
+      scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
+    });
+
+    expect(mockUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { familyId: "fam-1", revokedAt: null },
+        data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+      }),
+    );
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "EXTENSION_TOKEN_FAMILY_REVOKED",
+        metadata: expect.objectContaining({
+          reason: "active_family_cap",
+          familyId: "fam-1",
+          rowsRevoked: 2,
+        }),
+      }),
+    );
   });
 
   it("invokes prisma.$transaction exactly once per call", async () => {

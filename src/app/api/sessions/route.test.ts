@@ -41,7 +41,8 @@ vi.mock("@/lib/auth/tokens/extension-token", () => ({
   revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
   EXTENSION_TOKEN_REVOKE_REASON: {
     SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
-    PASSKEY_REAUTH: "passkey_reauth",
+    SUPERSEDED_SAME_DEVICE: "superseded_same_device",
+    ACTIVE_FAMILY_CAP: "active_family_cap",
     FAMILY_EXPIRED: "family_expired",
     REPLAY_DETECTED: "replay_detected",
     USER_DELETE: "user_delete",

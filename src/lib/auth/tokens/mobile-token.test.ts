@@ -124,6 +124,7 @@ import {
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
 } from "@/lib/validations/common";
 import { MS_PER_MINUTE, MS_PER_DAY } from "@/lib/constants/time";
+import { CLIENT_TOKEN_MAX_ACTIVE_FAMILIES } from "@/lib/constants";
 
 // ─── Shared test fixtures ────────────────────────────────────
 
@@ -149,6 +150,7 @@ function setupTransactionPassthrough() {
         findMany: mockExtFindMany,
         create: mockExtCreate,
         updateMany: mockExtUpdateMany,
+        aggregate: mockExtAggregate,
       },
     }),
   );
@@ -285,10 +287,64 @@ describe("issueIosToken", () => {
     expect(accessCall.data.familyCreatedAt).toEqual(existingFamilyCreatedAt);
   });
 
-  it("revokes oldest active rows when issuing would exceed EXTENSION_TOKEN_MAX_ACTIVE", async () => {
-    // EXTENSION_TOKEN_MAX_ACTIVE = 3, and an iOS issuance creates 2 rows.
-    // With 2 already active, +2 new = 4 > 3 → revoke 1 oldest.
-    mockExtFindMany.mockResolvedValue([{ id: "old-1" }, { id: "old-2" }]);
+  // ─── C3: active-family cap (enforceActiveFamilyCap), new-family path ──
+
+  it("evicts the family with the oldest presence when a new iOS family would exceed the cap", async () => {
+    // CLIENT_TOKEN_MAX_ACTIVE_FAMILIES families already active; +1 for the
+    // new family about to be created exceeds the cap by exactly one.
+    const activeRows = Array.from(
+      { length: CLIENT_TOKEN_MAX_ACTIVE_FAMILIES },
+      (_, i) => ({ familyId: `fam-${i}`, familyCreatedAt: new Date(2020, 0, i + 1) }),
+    );
+    mockExtFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [] : activeRows),
+    );
+    mockExtAggregate.mockImplementation((args: { where: { familyId: string } }) => {
+      const presenceByFamily: Record<string, Date> = {
+        "fam-0": new Date("2025-06-01"),
+        "fam-1": new Date("2025-01-01"),
+        "fam-2": new Date("2025-06-02"),
+      };
+      return Promise.resolve({
+        _max: { lastPresenceAt: presenceByFamily[args.where.familyId] ?? null },
+      });
+    });
+    mockExtUpdateMany.mockResolvedValue({ count: 2 });
+
+    await issueIosToken({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+      idleMinutes: TENANT_IDLE_MINUTES,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt: new Date(),
+    });
+
+    expect(mockExtUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mockExtUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { familyId: "fam-1", revokedAt: null },
+        data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+      }),
+    );
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "EXTENSION_TOKEN_FAMILY_REVOKED",
+        metadata: expect.objectContaining({
+          reason: "active_family_cap",
+          familyId: "fam-1",
+          rowsRevoked: 2,
+        }),
+      }),
+    );
+  });
+
+  it("supersedes an active family from the same device (same cnfJkt) instead of counting it toward the cap", async () => {
+    mockExtFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [{ familyId: "fam-same-device" }] : []),
+    );
+    mockExtUpdateMany.mockResolvedValue({ count: 2 });
 
     await issueIosToken({
       userId: USER_ID,
@@ -302,10 +358,70 @@ describe("issueIosToken", () => {
 
     expect(mockExtUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: { in: ["old-1"] } },
+        where: { familyId: "fam-same-device", revokedAt: null },
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "EXTENSION_TOKEN_FAMILY_REVOKED",
+        metadata: expect.objectContaining({
+          reason: "superseded_same_device",
+          familyId: "fam-same-device",
+          rowsRevoked: 2,
+        }),
+      }),
+    );
+  });
+
+  it("does not evict when active families + 1 does not exceed the cap", async () => {
+    const activeRows = Array.from(
+      { length: CLIENT_TOKEN_MAX_ACTIVE_FAMILIES - 1 },
+      (_, i) => ({ familyId: `fam-${i}`, familyCreatedAt: new Date() }),
+    );
+    mockExtFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [] : activeRows),
+    );
+
+    await issueIosToken({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+      idleMinutes: TENANT_IDLE_MINUTES,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt: new Date(),
+    });
+
+    expect(mockExtUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("refresh path (familyId supplied) never evicts, even with the cap already exceeded", async () => {
+    // If enforceActiveFamilyCap ran here it would find > cap active families
+    // and evict one — asserting it does NOT run is the point of this test.
+    const activeRows = Array.from(
+      { length: CLIENT_TOKEN_MAX_ACTIVE_FAMILIES + 2 },
+      (_, i) => ({ familyId: `fam-${i}`, familyCreatedAt: new Date() }),
+    );
+    mockExtFindMany.mockImplementation((args: { distinct?: unknown }) =>
+      Promise.resolve(args?.distinct ? [{ familyId: "fam-other-device" }] : activeRows),
+    );
+
+    await issueIosToken({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      idleMinutes: TENANT_IDLE_MINUTES,
+      absoluteMinutes: TENANT_ABSOLUTE_MINUTES,
+      presenceAt: new Date(),
+    });
+
+    expect(mockExtFindMany).not.toHaveBeenCalled();
+    expect(mockExtUpdateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
   // ─── C8/C3: access expiry = min(IOS_ACCESS_TOKEN_TTL_MS, C3-capped refresh expiry) ───
@@ -433,6 +549,17 @@ describe("issueAutofillToken", () => {
     const createData = mockExtCreate.mock.calls[0][0].data;
     expect(createData.familyId).toBeTruthy();
     expect(typeof createData.familyId).toBe("string");
+  });
+
+  it("serializes the revoke-priors-then-create race under a per-user advisory lock", async () => {
+    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT });
+    // Mutation-kill: removing the tx.$executeRaw lock line leaves $executeRaw
+    // uncalled with this SQL (TOCTOU cap race; memory: project_count_then_create_toctou_class).
+    expect(
+      mockTxExecuteRaw.mock.calls.some((c) =>
+        String(c[0]).includes("pg_advisory_xact_lock"),
+      ),
+    ).toBe(true);
   });
 });
 
