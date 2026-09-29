@@ -11,14 +11,10 @@ const {
   mockLogAudit,
   mockPrismaFindUnique,
   mockPrismaTenantFindUnique,
-  mockPrismaSessionDeleteMany,
-  mockPrismaSessionFindMany,
-  mockPrismaSessionCreate,
-  mockPrismaTransaction,
   mockWithBypassRls,
-  mockInvalidateCachedSessions,
   mockResolveEffectiveSessionTimeouts,
-  mockInvalidateUserSessions,
+  mockCreateSessionUnderConcurrencyCap,
+  mockReportSessionEviction,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
   return {
@@ -31,23 +27,10 @@ const {
     mockLogAudit: vi.fn(),
     mockPrismaFindUnique: vi.fn(),
     mockPrismaTenantFindUnique: vi.fn(),
-    mockPrismaSessionDeleteMany: vi.fn(),
-    mockPrismaSessionFindMany: vi.fn(),
-    mockPrismaSessionCreate: vi.fn(),
-    mockPrismaTransaction: vi.fn(),
     mockWithBypassRls: vi.fn(),
-    mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
     mockResolveEffectiveSessionTimeouts: vi.fn(),
-    mockInvalidateUserSessions: vi.fn().mockResolvedValue({
-      sessions: 0,
-      extensionTokens: 0,
-      apiKeys: 0,
-      mcpAccessTokens: 0,
-      mcpRefreshTokens: 0,
-      delegationSessions: 0,
-      operatorTokens: 0,
-      cacheTombstoneFailures: 0,
-    }),
+    mockCreateSessionUnderConcurrencyCap: vi.fn(),
+    mockReportSessionEviction: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -78,39 +61,12 @@ vi.mock("@/lib/audit/audit", () => ({
   }),
 }));
 
-vi.mock("@/lib/auth/tokens/extension-token", () => ({
-  revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
-  EXTENSION_TOKEN_REVOKE_REASON: {
-    FAMILY_EXPIRED: "family_expired",
-    REPLAY_DETECTED: "replay_detected",
-    SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
-    PASSKEY_REAUTH: "passkey_reauth",
-    USER_DELETE: "user_delete",
-  },
-}));
-
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mockPrismaFindUnique },
     // The tenant is loaded by id now, not traversed through `user.tenant`.
     tenant: { findUnique: mockPrismaTenantFindUnique },
-    $transaction: mockPrismaTransaction,
-    session: {
-      deleteMany: mockPrismaSessionDeleteMany,
-      findMany: mockPrismaSessionFindMany,
-      create: mockPrismaSessionCreate,
-    },
   },
-}));
-
-vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
-  invalidateCachedSessions: mockInvalidateCachedSessions,
-}));
-// H4: the route stores the digest but sets the raw token as the cookie and
-// passes the RAW token as excludeSessionToken (user-session-invalidation hashes
-// it internally). Deterministic hash so the test can relate the two.
-vi.mock("@/lib/auth/session/session-cache", () => ({
-  hashSessionToken: (token: string) => `hashed:${token}`,
 }));
 
 vi.mock("@/lib/auth/session/session-timeout", () => ({
@@ -126,15 +82,16 @@ vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 
-vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
-  invalidateUserSessions: mockInvalidateUserSessions,
+// C2: session creation is delegated to the C1 shared helper. Mocked here so
+// this file tests the ROUTE's wiring (what it passes in, when it reports an
+// eviction) — the helper's own cap/eviction/lock behavior is covered by
+// session-concurrency.test.ts and the db-integration suite.
+vi.mock("@/lib/auth/session/session-concurrency", () => ({
+  createSessionUnderConcurrencyCap: mockCreateSessionUnderConcurrencyCap,
+  reportSessionEviction: mockReportSessionEviction,
 }));
 
 import { POST } from "./route";
-import {
-  expectInvalidatedAfterCommit,
-  expectNotInvalidatedOnDbThrow,
-} from "@/__tests__/helpers/session-cache-assertions";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // The route constructs its rate limiter once at module load
@@ -207,7 +164,9 @@ describe("POST /api/auth/passkey/verify", () => {
       tenantId: "tenant-1",
     });
 
-    // withBypassRls: call the callback directly
+    // withBypassRls: call the callback directly with the (mocked) prisma
+    // client standing in for `tx` — createSessionUnderConcurrencyCap is
+    // itself mocked, so nothing inspects the client's shape.
     mockWithBypassRls.mockImplementation(
       (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
@@ -215,25 +174,9 @@ describe("POST /api/auth/passkey/verify", () => {
     // SSO tenant guard: user is in bootstrap tenant (allowed)
     seedUser();
 
-    // $transaction: execute callback with a mock tx that has session methods
-    mockPrismaTransaction.mockImplementation(
-      async (fn: (tx: unknown) => unknown) => {
-        const tx = {
-          session: {
-            deleteMany: mockPrismaSessionDeleteMany,
-            findMany: mockPrismaSessionFindMany,
-            create: mockPrismaSessionCreate,
-          },
-        };
-        return fn(tx);
-      },
-    );
-    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 0 });
-    mockPrismaSessionFindMany.mockResolvedValue([]);
-    mockPrismaSessionCreate.mockResolvedValue({
-      sessionToken: "tok",
-      userId: "user-1",
-      expires: new Date(),
+    mockCreateSessionUnderConcurrencyCap.mockResolvedValue({
+      session: { userId: "user-1", expires: new Date() },
+      eviction: null,
     });
   });
 
@@ -267,48 +210,29 @@ describe("POST /api/auth/passkey/verify", () => {
     });
   });
 
-  it("creates database session via atomic transaction", async () => {
+  it("creates the session through createSessionUnderConcurrencyCap with the passkey fields (C1/C2)", async () => {
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
     });
     await POST(req);
 
-    // Session eviction + creation now run directly on the withBypassRls
-    // callback's tx (the redundant inner $transaction was removed).
-    // Atomicity is preserved by the single bypass-RLS scope: the SSO tenant
-    // guard read plus the session mutation are the two bypass scopes.
+    // Two bypass scopes: the SSO tenant guard read, and the session mutation.
     expect(mockWithBypassRls).toHaveBeenCalledTimes(2);
-    expect(mockPrismaSessionDeleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
-    });
-    expect(mockPrismaSessionCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        sessionToken: expect.any(String),
+    expect(mockCreateSessionUnderConcurrencyCap).toHaveBeenCalledOnce();
+
+    const [, input] = mockCreateSessionUnderConcurrencyCap.mock.calls[0];
+    expect(input).toEqual(
+      expect.objectContaining({
         userId: "user-1",
         tenantId: "tenant-1",
+        sessionToken: expect.any(String),
         expires: expect.any(Date),
+        provider: "webauthn",
         passkeyVerifiedAt: expect.any(Date),
         authCredentialId: "cred-uuid-1",
       }),
-    });
-
-    // Regression (bug fix): invalidateUserSessions must EXCLUDE the
-    // session token we just created — otherwise the cascade wipes our
-    // freshly-issued session and the client is bounced to sign-in on
-    // the next request.
-    expect(mockPrismaSessionCreate).toHaveBeenCalledOnce();
-    // H4: the DB stores the DIGEST of the token; excludeSessionToken is the RAW
-    // token (user-session-invalidation hashes it back to the stored digest).
-    const storedDigest = mockPrismaSessionCreate.mock.calls[0][0].data.sessionToken;
-    const excludeArg = mockInvalidateUserSessions.mock.calls[0][1].excludeSessionToken;
-    expect(mockInvalidateUserSessions).toHaveBeenCalledWith(
-      "user-1",
-      expect.objectContaining({ allTenants: true }),
     );
-    // The stored digest must equal hash(excludeSessionToken) — proving the
-    // just-created session (stored by digest) is the one excluded from the wipe.
-    expect(storedDigest).toBe(`hashed:${excludeArg}`);
   });
 
   it("gates on and stamps the active membership, not the stale User.tenantId", async () => {
@@ -340,55 +264,27 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(mockPrismaTenantFindUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
     );
-    expect(mockPrismaSessionCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    const [, input] = mockCreateSessionUnderConcurrencyCap.mock.calls[0];
+    expect(input).toEqual(
+      expect.objectContaining({
         userId: "user-1",
         tenantId: "scim-provisioned-tenant",
-      }),
-    });
-  });
-
-  it("calls deleteMany before create", async () => {
-    const callOrder: string[] = [];
-    mockPrismaSessionDeleteMany.mockImplementation(async () => {
-      callOrder.push("deleteMany");
-      return { count: 2 };
-    });
-    mockPrismaSessionCreate.mockImplementation(async () => {
-      callOrder.push("create");
-      return { sessionToken: "tok", userId: "user-1", expires: new Date() };
-    });
-
-    const req = createRequest("POST", ROUTE_URL, {
-      body: validBody,
-      headers: { origin: "http://localhost:3000" },
-    });
-    await POST(req);
-
-    expect(callOrder).toEqual(["deleteMany", "create"]);
-  });
-
-  it("logs SESSION_REVOKE_ALL when existing sessions are evicted", async () => {
-    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 3 });
-
-    const req = createRequest("POST", ROUTE_URL, {
-      body: validBody,
-      headers: { origin: "http://localhost:3000" },
-    });
-    await POST(req);
-
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scope: "PERSONAL",
-        action: "SESSION_REVOKE_ALL",
-        userId: "user-1",
-        metadata: { trigger: "passkey_signin", evictedCount: 3 },
       }),
     );
   });
 
-  it("does not log SESSION_REVOKE_ALL when no sessions evicted", async () => {
-    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 0 });
+  // C2: passkey sign-in no longer cascades — it matches the other sign-in
+  // paths (supersedes owasp-batch-3 C7). Revocation belongs to secret-
+  // changing ops and explicit sign-out, not to an ordinary sign-in.
+  it("never emits a SESSION_REVOKE_ALL audit entry (no cascade)", async () => {
+    mockCreateSessionUnderConcurrencyCap.mockResolvedValue({
+      session: { userId: "user-1", expires: new Date() },
+      eviction: {
+        tenantId: "tenant-1",
+        maxSessions: 1,
+        evicted: [{ id: "old-s1", sessionToken: "old-digest", ipAddress: null, userAgent: null }],
+      },
+    });
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
@@ -402,7 +298,57 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(revokeAllCalls).toHaveLength(0);
   });
 
-  it("logs audit event on success", async () => {
+  it("calls reportSessionEviction only after createSessionUnderConcurrencyCap's transaction resolves, when an eviction occurred", async () => {
+    const eviction = {
+      tenantId: "tenant-1",
+      maxSessions: 1,
+      evicted: [{ id: "old-s1", sessionToken: "old-digest", ipAddress: null, userAgent: null }],
+    };
+    // Track whether the surrounding withBypassRls callback is still "open"
+    // (its promise unsettled) at the moment reportSessionEviction runs —
+    // mirrors auth-adapter.test.ts's txOpen pattern.
+    let txOpen = false;
+    let reportedWhileTxOpen: boolean | null = null;
+    mockWithBypassRls.mockImplementation(async (prisma: unknown, fn: (tx: unknown) => unknown) => {
+      txOpen = true;
+      try {
+        return await fn(prisma);
+      } finally {
+        txOpen = false;
+      }
+    });
+    mockCreateSessionUnderConcurrencyCap.mockResolvedValue({
+      session: { userId: "user-1", expires: new Date() },
+      eviction,
+    });
+    mockReportSessionEviction.mockImplementation(async () => {
+      reportedWhileTxOpen = txOpen;
+    });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    await POST(req);
+
+    expect(mockReportSessionEviction).toHaveBeenCalledWith(
+      eviction,
+      expect.objectContaining({ userId: "user-1" }),
+    );
+    expect(reportedWhileTxOpen).toBe(false);
+  });
+
+  it("does not call reportSessionEviction when no eviction occurred", async () => {
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    await POST(req);
+
+    expect(mockReportSessionEviction).not.toHaveBeenCalled();
+  });
+
+  it("logs AUTH_LOGIN audit event on success", async () => {
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
@@ -418,31 +364,6 @@ describe("POST /api/auth/passkey/verify", () => {
         userAgent: null,
       }),
     );
-  });
-
-  it("returns 500 SESSION_INVALIDATE_FAILED when the cascade throws and does NOT set a session cookie", async () => {
-    // F1: cascade failure is fail-closed — the new session row is committed
-    // by the inner tx but no cookie is sent, so the orphan row is cleaned
-    // up by the next sign-in's `tx.session.deleteMany`. Specific error code
-    // gives the client a stable failure mode (no leak of cascade internals).
-    mockInvalidateUserSessions.mockRejectedValueOnce(new Error("transient redis fail"));
-
-    const req = createRequest("POST", ROUTE_URL, {
-      body: validBody,
-      headers: { origin: "http://localhost:3000" },
-    });
-    const res = await POST(req);
-
-    expect(res.status).toBe(500);
-    const json = await res.json();
-    expect(json.error).toBe("SESSION_INVALIDATE_FAILED");
-    expect(res.headers.get("set-cookie")).toBeNull();
-
-    // AUTH_LOGIN audit must NOT fire — sign-in did not complete.
-    const authLoginCalls = mockLogAudit.mock.calls.filter(
-      (args: unknown[]) => (args[0] as { action: string }).action === "AUTH_LOGIN",
-    );
-    expect(authLoginCalls).toHaveLength(0);
   });
 
   it("returns 403 when origin is invalid", async () => {
@@ -486,7 +407,7 @@ describe("POST /api/auth/passkey/verify", () => {
       invoke: () => POST(req),
       limiter: rateLimiterInstance,
       expectation: { envelope: "canonical" },
-      assertNoMutation: [mockPrismaSessionCreate, mockPrismaSessionDeleteMany],
+      assertNoMutation: [mockCreateSessionUnderConcurrencyCap],
       limiterFactory: rateLimiterFactorySnapshot.replay(),
       failure: { allowed: false, redisErrored: true },
     });
@@ -619,54 +540,13 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(json.prf).toBeUndefined();
   });
 
-  it("invalidates cache for evicted session tokens after $transaction commits", async () => {
-    mockPrismaSessionFindMany.mockResolvedValue([
-      { sessionToken: "old-tok-1" },
-      { sessionToken: "old-tok-2" },
-    ]);
-    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 2 });
-
-    const req = createRequest("POST", ROUTE_URL, {
-      body: validBody,
-      headers: { origin: "http://localhost:3000" },
-    });
-    await POST(req);
-
-    expectInvalidatedAfterCommit(mockInvalidateCachedSessions, [
-      "old-tok-1",
-      "old-tok-2",
-    ]);
-  });
-
-  it("does not invalidate cache when no prior sessions existed", async () => {
-    mockPrismaSessionFindMany.mockResolvedValue([]);
-    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 0 });
-
-    const req = createRequest("POST", ROUTE_URL, {
-      body: validBody,
-      headers: { origin: "http://localhost:3000" },
-    });
-    await POST(req);
-
-    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
-  });
-
-  it("does not invalidate cache when $transaction rolls back (sequencing invariant)", async () => {
-    mockPrismaSessionFindMany.mockResolvedValue([
-      { sessionToken: "old-tok-1" },
-    ]);
-    // The session mutation now runs directly on the withBypassRls callback's
-    // tx (inner $transaction removed). A failing tx body is simulated by a
-    // rejecting model method; the invariant is unchanged: cache invalidation
-    // must NOT run when the bypass-RLS scope throws.
-    mockPrismaSessionCreate.mockRejectedValue(new Error("tx rolled back"));
+  it("propagates a throw from createSessionUnderConcurrencyCap without setting a session cookie", async () => {
+    mockCreateSessionUnderConcurrencyCap.mockRejectedValue(new Error("tx rolled back"));
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
     });
     await expect(POST(req)).rejects.toThrow("tx rolled back");
-
-    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
   });
 });

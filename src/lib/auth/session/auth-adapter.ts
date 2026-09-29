@@ -7,11 +7,11 @@ import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
-import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
-import { USER_AGENT_MAX_LENGTH, SESSION_IP_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
+import { BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { emitAuthLoginFailure } from "@/lib/audit/auth-failure";
 import {
@@ -19,14 +19,17 @@ import {
   toAuditProvider,
   type ClaimRefusalKind,
 } from "@/lib/audit/auth-failure-mapping";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { createNotification } from "@/lib/notification";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
+import {
+  createSessionUnderConcurrencyCap,
+  reportSessionEviction,
+} from "@/lib/auth/session/session-concurrency";
 import {
   encryptAccountTokenTriple,
   decryptAccountTokenTriple,
@@ -490,17 +493,8 @@ export function createCustomAdapter(): Adapter {
       session: { sessionToken: string; userId: string; expires: Date },
     ): Promise<AdapterSession> {
       const meta = sessionMetaStorage.getStore();
-      // Collect eviction info to fire audit/notification outside the transaction
-      // (logAudit/createNotification use withBypassRls internally, which conflicts
-      // with the parent's AsyncLocalStorage-based RLS context if called inside)
-      let evictionInfo: {
-        tenantId: string;
-        maxSessions: number;
-        evicted: { id: string; sessionToken: string; ipAddress: string | null; userAgent: string | null }[];
-      } | null = null;
 
-      // Hoisted above the opener for the same reason the comment above gives
-      // for logAudit/createNotification: on a cache miss this opens its own
+      // Hoisted above the opener: on a cache miss this opens its own
       // withBypassRls, and a bypass inside a bypass is a nesting the guard now
       // refuses. It reads nothing from the transaction below.
       // Override Auth.js's default expires with the per-user resolved idle
@@ -512,80 +506,21 @@ export function createCustomAdapter(): Adapter {
         meta?.provider ?? null,
       );
 
-      const created = await withBypassRls(prisma, async (tx) => {
+      const { session: created, eviction } = await withBypassRls(prisma, async (tx) => {
         const tenantId = await resolveTenantIdForUser(session.userId);
-
-        // Serialize concurrent session creation for this user so the
-        // count-then-evict-then-create sequence cannot race past the concurrent
-        // session cap (two concurrent sign-ins both reading count < max).
-        // Advisory lock is transaction-scoped; matches the codebase idiom
-        // (attachments, vault rotate-key).
-        await advisoryXactLock(tx, session.userId);
-
-        // Check tenant's concurrent session limit
-        const tenant = await tx.tenant.findUnique({
-          where: { id: tenantId },
-          select: { maxConcurrentSessions: true },
-        });
-
-        // FAIL-CLOSED: tenantId comes from the adjudicator — the active
-        // TenantMember, with User.tenantId as the fallback — and BOTH are
-        // non-null FKs into tenants (TenantMember.tenantId ON DELETE CASCADE,
-        // User.tenantId ON DELETE RESTRICT), so neither path can name a tenant
-        // that is not there. A null row here is data corruption, NOT "no limit
-        // configured" — an unconfigured limit is a real row with
-        // maxConcurrentSessions=null.
-        // Silently skipping the cap would let the corrupt-tenant user open
-        // unbounded concurrent sessions. Throw so session creation refuses.
-        // Matches the null-tenant fail-closed stance across the policy readers
-        // (getTenantAccessPolicy, derivePasskeyState — PR #685 class).
-        if (!tenant) {
-          throw new Error(`createSession: tenant ${tenantId} not found`);
-        }
-
-        const maxSessions = tenant.maxConcurrentSessions;
-        if (maxSessions != null && maxSessions > 0) {
-          // Count active sessions (ORDER BY id for consistent lock ordering)
-          const activeSessions = await tx.session.findMany({
-            where: {
-              userId: session.userId,
-              tenantId,
-              expires: { gt: new Date() },
-            },
-            select: { id: true, sessionToken: true, ipAddress: true, userAgent: true },
-            orderBy: { id: "asc" },
-          });
-
-          // Evict oldest sessions if at or over limit
-          if (activeSessions.length >= maxSessions) {
-            const toEvict = activeSessions.slice(0, activeSessions.length - maxSessions + 1);
-            await tx.session.deleteMany({
-              where: { id: { in: toEvict.map((s) => s.id) } },
-            });
-
-            evictionInfo = { tenantId, maxSessions, evicted: toEvict };
-          }
-        }
 
         const resolvedExpires = new Date(
           Date.now() + resolved.idleMinutes * MS_PER_MINUTE,
         );
 
-        return tx.session.create({
-          data: {
-            // H4: store the digest, never the raw cookie token.
-            sessionToken: hashSessionToken(session.sessionToken),
-            userId: session.userId,
-            tenantId,
-            expires: resolvedExpires,
-            ipAddress: meta?.ip?.slice(0, SESSION_IP_MAX_LENGTH) ?? null,
-            userAgent: meta?.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-            provider: meta?.provider ?? null,
-          },
-          select: {
-            userId: true,
-            expires: true,
-          },
+        return createSessionUnderConcurrencyCap(tx, {
+          userId: session.userId,
+          tenantId,
+          sessionToken: session.sessionToken,
+          expires: resolvedExpires,
+          ip: meta?.ip ?? null,
+          userAgent: meta?.userAgent ?? null,
+          provider: meta?.provider ?? null,
         });
       }, BYPASS_PURPOSE.AUTH_FLOW);
 
@@ -597,47 +532,15 @@ export function createCustomAdapter(): Adapter {
         currentSessionToken: session.sessionToken,
       });
 
-      // Fire audit + notification outside the RLS transaction context.
-      // F-4-A: invalidate the cache BEFORE the audit/notification loop so
-      // the evicted sessions stop being served from cache as quickly as
-      // possible (consistent with site 7's cache-promptness rationale).
-      // The cast here re-asserts the declared shape because TypeScript's
-      // control-flow analysis narrows `evictionInfo` to `never` after an
-      // `await`-bearing closure boundary, even though the declaration at
-      // line 245-249 is the load-bearing source of truth.
-      if (evictionInfo) {
-        const { tenantId, maxSessions, evicted } = evictionInfo as {
-          tenantId: string;
-          maxSessions: number;
-          evicted: { id: string; sessionToken: string; ipAddress: string | null; userAgent: string | null }[];
-        };
-        await invalidateCachedSessions(evicted.map((e) => e.sessionToken));
-        for (const ev of evicted) {
-          await logAuditAsync({
-            scope: AUDIT_SCOPE.PERSONAL,
-            action: AUDIT_ACTION.SESSION_EVICTED,
-            userId: session.userId,
-            tenantId,
-            targetType: AUDIT_TARGET_TYPE.SESSION,
-            targetId: ev.id,
-            metadata: {
-              reason: "concurrent_session_limit",
-              maxConcurrentSessions: maxSessions,
-              newSessionIp: meta?.ip ?? null,
-              newSessionUa: meta?.userAgent ?? null,
-            },
-            ip: meta?.ip ?? null,
-            userAgent: meta?.userAgent ?? null,
-          });
-        }
-
-        createNotification({
+      // Fire audit + notification outside the RLS transaction context
+      // (reportSessionEviction's logAudit/createNotification use
+      // withBypassRls internally, which conflicts with the parent's
+      // AsyncLocalStorage-based RLS context if called inside it).
+      if (eviction) {
+        await reportSessionEviction(eviction, {
           userId: session.userId,
-          tenantId,
-          type: "SESSION_EVICTED",
-          title: "Session terminated",
-          body: `${evicted.length} session(s) terminated due to concurrent session limit (max: ${maxSessions}).`,
-          metadata: { evictedCount: evicted.length, maxConcurrentSessions: maxSessions },
+          ip: meta?.ip ?? null,
+          userAgent: meta?.userAgent ?? null,
         });
       }
 
