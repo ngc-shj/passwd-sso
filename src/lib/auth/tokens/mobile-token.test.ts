@@ -420,7 +420,14 @@ describe("issueIosToken", () => {
     });
 
     expect(mockExtFindMany).not.toHaveBeenCalled();
-    expect(mockExtUpdateMany).not.toHaveBeenCalled();
+    // The only revoke is the rotation of this family's own rows — inside the
+    // issuing transaction, so a concurrent cap scan never sees the family
+    // without an active row. No other family is touched or audited.
+    expect(mockExtUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mockExtUpdateMany).toHaveBeenCalledWith({
+      where: { familyId: FAMILY_ID, userId: USER_ID, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 

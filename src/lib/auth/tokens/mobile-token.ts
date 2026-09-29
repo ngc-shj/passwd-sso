@@ -28,6 +28,7 @@ import {
   revokeExtensionTokenFamily,
   enforceActiveFamilyCap,
   emitRevokedFamilyAudits,
+  type RevokedFamily,
   EXTENSION_TOKEN_REVOKE_REASON,
   parseScopes,
   type ValidatedExtensionToken,
@@ -180,18 +181,31 @@ export async function issueIosToken(
 
   // Cap enforcement runs only for a brand-new family (bridge-code exchange,
   // no existingFamilyId). Refresh-rotation (existingFamilyId supplied) skips
-  // supersede + cap entirely — a refresh must never evict another family —
-  // but still takes the lock below, so it stays serialized against a
-  // concurrent new-family issuance for the same user.
+  // supersede + cap entirely — a refresh must never evict another family.
+  // Instead it revokes its own family's rows and creates the new pair in the
+  // same locked transaction: were the revoke committed separately, a
+  // concurrent new-family issuance could run the cap while this family has
+  // no active row, miss it, and leave the user one family over the cap.
   const isNewFamily = !existingFamilyId;
 
   const created = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
       // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race).
       await advisoryXactLock(tx, userId);
-      const revokedFamilies = isNewFamily
-        ? await enforceActiveFamilyCap(tx, { userId, clientKind: "IOS_APP", cnfJkt, now })
-        : [];
+      let revokedFamilies: RevokedFamily[] = [];
+      if (isNewFamily) {
+        revokedFamilies = await enforceActiveFamilyCap(tx, {
+          userId,
+          clientKind: "IOS_APP",
+          cnfJkt,
+          now,
+        });
+      } else {
+        await tx.extensionToken.updateMany({
+          where: { familyId, userId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+      }
 
       const access = await tx.extensionToken.create({
         data: {
@@ -619,16 +633,8 @@ export async function refreshIosToken(
   }
 
   // ── 3. Happy path: rotate ─────────────────────────────────────
-  // Atomically revoke ALL active rows in the family, then issue a new pair
-  // sharing the same familyId / familyCreatedAt.
-  const nowDate = new Date(now);
-  await withUserTenantRls(oldRow.userId, async () =>
-    prisma.extensionToken.updateMany({
-      where: { familyId: oldRow.familyId, userId: oldRow.userId, revokedAt: null },
-      data: { revokedAt: nowDate },
-    }),
-  );
-
+  // issueIosToken revokes ALL active rows in the family and issues a new pair
+  // sharing the same familyId / familyCreatedAt, in one locked transaction.
   const issued = await issueIosToken({
     userId: oldRow.userId,
     tenantId: oldRow.tenantId,
