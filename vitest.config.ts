@@ -29,6 +29,7 @@ export default defineConfig({
         "src/lib/generator/password-generator.ts",
         "src/lib/email/**/*.ts",
         "src/lib/auth/session/auth-adapter.ts",
+        "src/lib/auth/session/session-concurrency.ts",
         "src/lib/auth/tokens/scim-token.ts",
         "src/lib/scim/*.ts",
         "src/lib/auth/webauthn/webauthn-authorize.ts",
