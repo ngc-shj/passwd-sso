@@ -67,3 +67,33 @@ R1 N/A, R2 N/A, R3 Fail, R4 Pass, R5 Pass, R6 N/A, R7 N/A, R8 N/A, R9 N/A, R10 N
 
 ### Testing expert
 R1–R18 clean, R19 found, R20–R57 clean, RT1 clean, RT2 found, RT3–RT6 clean, RT7 found, RT8–RT11 clean
+
+---
+
+# Round 2
+Date: 2026-10-06
+
+## Changes from Previous Round
+Round-1 dispositions applied (C3 grep, C4 prose + worker-policy-manifest, C5 per-assertion boundary, C6 security-review.md, forbidden pattern #1 → tsc, R1 dev-DB measurement).
+
+## Functionality Findings
+- **F1 [Major, prose]** — `resolveTenantByClaim` / `findOrCreateTenantForClaim` JSDoc still narrates the release-1/2 (D1/SC10) split; no grep catches camelCase prose. **Resolved**: NF1a + residue sweep.
+- **F2 [Major, prose]** — C6's "rows" understated the README section; one sentence ("removed in a later release") becomes false. **Resolved**: NF1a names the blocks.
+- **F3 [Adjacent → Testing]** — see Test T1 (same test).
+
+## Security Findings
+- **Sec R2-1 [Major, design]** — forbidden pattern narrower than C3's derivation; `case "collision":` is not a tsc error. **Resolved**: pattern widened and scoped; confirmed non-vacuous on the current tree (10 files match).
+- **Sec R2-2 [Minor, prose]** — VE1 "Likelihood: nil" overstated for a self-hostable product. **Resolved**: restated with its basis.
+- Sec F1 Anti-Deferral entry re-verified sound against the code (orphan population is static: both create sites register the claim atomically).
+
+## Testing Findings
+- **T1 [Major, design]** — "--tenant resolution" test mixes the removed external_id resolution with the kept slug refusal; `cmdPreflight()` also sits in a shared fail-closed case. **Resolved**: per-assertion instruction + named surviving case.
+- **T2 [Minor, design]** — same as Sec R2-1. **Resolved**.
+
+## Recurring Issue Check
+### Functionality expert
+R3 Finding; R18 Checked; R42 Finding; R5, R12, R20, R24, R29, R31, R48 Checked; all other R1–R57 N/A.
+### Security expert
+R3 Fail, R29 Pass, R34 Pass, R42 Pass; all other R1–R57 N/A; RS1–RS6 N/A.
+### Testing expert
+R3 Finding T1, R19 Pass, R29 Pass, R42 Finding T2; all other R1–R57 N/A; RT1 Pass, RT2 Pass, RT5 Pass, RT7 Pass, RT10 Checked; other RT N/A.

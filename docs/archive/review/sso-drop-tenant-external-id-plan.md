@@ -13,7 +13,9 @@
     exercised; it is not needed because there is no production roll. `blocked-deferred`.
     **Anti-Deferral**: worst case is a self-hosted operator upgrading with old app
     containers running for the length of `migrate`; old code then errors on the
-    missing column until it is replaced. Likelihood: nil today (no production).
+    missing column until it is replaced. Likelihood: believed negligible — the
+    owner runs no production instance and knows of no external self-hosted one
+    (pre-1.0); not measured beyond that.
     Cost-to-fix: the expand-and-contract split, which the owner declined.
   - **VE2** — integration tests need a local Postgres with the audit workers stopped
     (CLAUDE.md). `verifiable-local` / `verifiable-CI`.
@@ -35,6 +37,17 @@ existed only to manage the gap between it and the registry are removed.
 - FR3 Operator CLI `--tenant` accepts a UUID or a registered claim only.
 - NF1 Every removal is complete: no dead arm, constant, doc row or test survives
   for a removed behaviour (CLAUDE.md "no cutting corners").
+- NF1a Removal includes prose (round-2 Func F1/F2): in every file this change
+  touches, and in `README.md`, `README.ja.md`, `CLAUDE.md`, `docs/operations/`,
+  `docs/security/`, any comment or doc that describes the external_id fallback,
+  the fold probe, `preflight`, the collision arm, or the release-1 / release-2
+  (D1 / SC10) split is rewritten to the end state, not left for later. This
+  includes the `resolveTenantByClaim` / `findOrCreateTenantForClaim` JSDoc and the
+  whole "IdP domain changed / tenant locked out" section of both READMEs (the
+  `<ref>` paragraph, the subcommand sentence, the preflight block — not only the
+  cause-table rows). Acceptance: the residue sweep below, every hit read and
+  either rewritten or confirmed unrelated (SCIM, CORS preflight, backup-db,
+  immutable migrations, `docs/archive/`).
 - NF2 Existing guards keep their strength: tenant-claim event coverage gate,
   `ClaimRefusalKind` exhaustiveness (`satisfies Record<ClaimRefusalKind, …>`).
 
@@ -144,7 +157,7 @@ line; it is a compile error once the field leaves `schema.prisma`, so `tsc` /
 `next build` is its enforcement — Test F2.)
 
 - pattern: `tenants.external_id|"tenants" .*external_id` outside migrations — reason: column is gone
-- pattern: `claim_collision|kind: "collision"` — reason: arm removed (C3)
+- pattern: `claim_collision|"collision"` over `src/lib/tenant src/lib/audit src/lib/auth src/auth.ts src/auth.test.ts scripts/lib scripts/tenant-domain.ts` — reason: arm removed (C3); the bare form catches `case "collision":`, which `tsc` does not reject (round-2 Sec 1 / Test T2)
 - pattern: `findFoldedExternalIdOwner|EXTERNAL_ID_FOLD_SQL|tenant-claim-backfill` — reason: removed (C5)
 - pattern: `preflight` in `scripts/tenant-domain.ts` and `scripts/checks/worker-policy-manifest.json` — reason: subcommand removed (C4)
 
@@ -167,7 +180,17 @@ line; it is a compile error once the field leaves `schema.prisma`, so `tsc` /
   `register` event in one transaction and keeps doing so. One new case asserts
   through `information_schema.columns` that `tenants.external_id` does not exist —
   the only claim of this change a passing sign-in does not already imply (Test F3).
-- RT7: each forbidden pattern grep run against the final tree returns nothing.
+- Integration, per assertion (round-2 Func F3 / Test T1):
+  `tenant-claim-cli.integration.test.ts`'s "resolves a tenant by external_id, and
+  refuses a slug (round-2 F-F)" — delete the external_id setup and assertions;
+  keep the slug refusal as its own case, "refuses a tenant's slug as a --tenant
+  ref (round-2 F-F)", on a plain `ctx.createTenant()` fixture. The shared
+  "every command fails closed…" case drops `cmdPreflight()` from its array and
+  keeps the rest. Acceptance: the slug-refusal case exists by name.
+- RT7: each forbidden pattern grep run against the final tree returns nothing;
+  each was confirmed to match the current (unfixed) tree before the change.
+- Residue sweep (NF1a), manual review of every hit:
+  `git grep -nE 'external_?[iI]d|preflight|collision|release-1|release 2|SC10|\bD1\b' -- src scripts README.md README.ja.md CLAUDE.md docs/operations docs/security ':!prisma/migrations'`
 - Mandatory: `npx vitest run`, `npm run test:integration`, `npx next build`,
   `scripts/pre-pr.sh`.
 
