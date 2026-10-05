@@ -33,6 +33,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/psql-safe.sh
+source "$SCRIPT_DIR/lib/psql-safe.sh"
+
 MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL:-}"
 DRY_RUN="${DRY_RUN:-}"
 PRINT_ARGS_FILE=""
@@ -57,6 +61,9 @@ if [[ -z "$MIGRATION_DATABASE_URL" ]]; then
   exit 1
 fi
 
+trap psql_safe_cleanup EXIT
+psql_safe_url DB_URL "$MIGRATION_DATABASE_URL"
+
 # Read password from stdin. Reject tty (interactive) or empty input.
 if [[ -t 0 ]]; then
   echo '{"level":"error","msg":"password expected on stdin (use < <(...) or pipe)"}' >&2
@@ -78,7 +85,7 @@ escaped="${new_password//${q}/${q}${q}}"
 
 if [[ "$DRY_RUN" == "1" ]]; then
   # Print sanitised representation (password redacted).
-  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -f - (stdin: ALTER ROLE passwd_retention_gc_worker WITH PASSWORD '<REDACTED>';)" >&2
+  echo "[DRY_RUN] would invoke: psql -X \"${DB_URL}\" -f - (stdin: ALTER ROLE passwd_retention_gc_worker WITH PASSWORD '<REDACTED>';)" >&2
 
   if [[ -n "$PRINT_ARGS_FILE" ]]; then
     # Write the generated stdin SQL (with quote-doubled password) to file for
@@ -91,7 +98,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-psql "$MIGRATION_DATABASE_URL" -f - <<EOF
+psql_safe "$DB_URL" -f - <<EOF
 ALTER ROLE passwd_retention_gc_worker WITH PASSWORD '$escaped';
 EOF
 

@@ -447,6 +447,7 @@ queue_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
 queue_step "Static: cli-shell-safety" node scripts/checks/check-cli-shell-safety.mjs
 queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
 queue_step "Static: no-pipe-into-grep-q" bash scripts/checks/check-no-pipe-into-grep-q.sh
+queue_step "Static: doc-paths" node scripts/checks/check-doc-paths.mjs
 queue_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
 run_batch
 
@@ -561,7 +562,13 @@ run_step "Static: prf-salt-migration-script-readonly" bash -c '
   fi
   # Extract just the SQL block(s) between `<<EOF` markers and the closing tag.
   # Any of UPDATE/INSERT/DELETE/TRUNCATE inside that block fails the check.
-  SQL_BODY=$(awk "/^psql /,/^SQL\$/" "$SCRIPT")
+  SQL_BODY=$(awk "/^psql(_safe)? /,/^SQL\$/" "$SCRIPT")
+  # An empty extraction means the invocation was respelled, not that the SQL
+  # is clean — the grep below would then pass over nothing.
+  if [ -z "$SQL_BODY" ]; then
+    echo "ERROR: no psql heredoc found in $SCRIPT — update this gate to the new invocation"
+    exit 1
+  fi
   if grep -iqE "\\b(UPDATE|INSERT|DELETE|TRUNCATE)\\b" <<<"$SQL_BODY"; then
     echo "ERROR: forbidden write verb inside SQL body of $SCRIPT (A02-8 C9 immutable)"
     exit 1

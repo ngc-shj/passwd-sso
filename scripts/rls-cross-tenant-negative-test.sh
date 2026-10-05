@@ -56,22 +56,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_FILE="$SCRIPT_DIR/rls-cross-tenant-tables.manifest"
 VERIFY_SQL="$SCRIPT_DIR/rls-cross-tenant-verify.sql"
+# shellcheck source=lib/psql-safe.sh
+source "$SCRIPT_DIR/lib/psql-safe.sh"
 
 # Trap-based cleanup: idempotent DROP. Fires on EXIT/ERR/INT/TERM (not SIGKILL).
 # Drops BOTH the negative-test policy target AND the colparity probe table
 # created by Case 7. Both DROPs are IF EXISTS so the trap is safe to fire
 # before/after either table has been created.
 cleanup() {
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
-    -c "DROP TABLE IF EXISTS rls_negative_test CASCADE; DROP TABLE IF EXISTS rls_colparity_probe CASCADE; DROP FUNCTION IF EXISTS rls_negative_secdef_probe();" >/dev/null 2>&1 || true
+  # Unset when a URL was refused before the first connection; nothing to drop.
+  if [[ -n "${MIG_URL:-}" ]]; then
+    psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q \
+      -c "DROP TABLE IF EXISTS rls_negative_test CASCADE; DROP TABLE IF EXISTS rls_colparity_probe CASCADE; DROP FUNCTION IF EXISTS rls_negative_secdef_probe();" >/dev/null 2>&1 || true
+  fi
+  # Last: the DROP above authenticates through the passfile.
+  psql_safe_cleanup
 }
 trap cleanup EXIT INT TERM
+psql_safe_url MIG_URL "$MIGRATION_DATABASE_URL"
+psql_safe_url APP_URL "$APP_DATABASE_URL"
 
 # Setup: create the ephemeral throwaway table and seed two tenant rows
 # as passwd_user (SUPERUSER, bypasses RLS regardless of policy state).
 # Inserting as SUPERUSER is ground truth — the test data exists no matter
 # what the throwaway policy's WITH CHECK clause is.
-psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q <<'SQL'
+psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q <<'SQL'
 DROP TABLE IF EXISTS rls_negative_test CASCADE;
 CREATE TABLE rls_negative_test (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -108,7 +117,7 @@ run_negative_case() {
 
   # Reset to a clean policy slate, then apply the case's policy (single -c
   # call so both run in one connection / transaction).
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q \
     -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $create_policy_sql;"
 
   local expected_tables
@@ -120,7 +129,7 @@ run_negative_case() {
 
   # Run verify; capture exit and combined output.
   local verify_output ec
-  verify_output=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  verify_output=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
     -v expected_tables="$expected_tables" \
     -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
 
@@ -200,11 +209,11 @@ run_negative_case 5 \
 # because we need to inject the phantom into expected_tables, not just toggle
 # the throwaway in/out.
 run_case_6_manifest_extra() {
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q \
     -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;"
   local expected_tables="${manifest_entries},rls_negative_test,rls_phantom_not_in_db"
   local out ec
-  out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
     -v expected_tables="$expected_tables" \
     -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
   if (( ec == 0 )); then
@@ -226,10 +235,10 @@ run_case_6_manifest_extra || total_failures=$((total_failures + 1))
 # drops it as a safety net.
 run_case_7_colparity() {
   # Reset to canonical policy so SYM/NULL pass.
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q \
     -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;"
   # Create the column-only probe.
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "
     DROP TABLE IF EXISTS rls_colparity_probe CASCADE;
     CREATE TABLE rls_colparity_probe (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL);
   "
@@ -238,11 +247,11 @@ run_case_7_colparity() {
   # 1 (probe) = 55. So COLPARITY: column count 55 != discovery count 54.
   local expected_tables="${manifest_entries},rls_negative_test"
   local out ec
-  out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
     -v expected_tables="$expected_tables" \
     -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
   # Drop probe regardless (trap also covers).
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q \
     -c "DROP TABLE IF EXISTS rls_colparity_probe CASCADE;" >/dev/null 2>&1 || true
   if (( ec == 0 )); then
     printf 'FAIL case 7: verify exited 0 with extra column-without-policy — gate is broken\n'
@@ -262,16 +271,16 @@ run_case_7_colparity || total_failures=$((total_failures + 1))
 # runs (or trap-clean re-creates) start from a known-good state.
 run_case_8_force_rls() {
   # Reset to canonical policy + drop FORCE.
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q \
     -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;
         ALTER TABLE rls_negative_test NO FORCE ROW LEVEL SECURITY;"
   local expected_tables="${manifest_entries},rls_negative_test"
   local out ec
-  out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
     -v expected_tables="$expected_tables" \
     -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
   # Restore FORCE before returning regardless of result.
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q \
     -c "ALTER TABLE rls_negative_test FORCE ROW LEVEL SECURITY;" >/dev/null 2>&1 || true
   if (( ec == 0 )); then
     printf 'FAIL case 8: verify exited 0 with FORCE RLS dropped — gate is broken\n'
@@ -291,21 +300,21 @@ run_case_8_force_rls || total_failures=$((total_failures + 1))
 # drops the function as a safety net.
 run_case_9_secdef() {
   # Reset to canonical policy so SYM/NULL/COUNT/COLPARITY all pass.
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q \
     -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;"
   # Create a minimal SECURITY DEFINER function in public.
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "
     CREATE OR REPLACE FUNCTION rls_negative_secdef_probe() RETURNS int AS \$\$
       SELECT 1;
     \$\$ LANGUAGE sql SECURITY DEFINER;
   "
   local expected_tables="${manifest_entries},rls_negative_test"
   local out ec
-  out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
     -v expected_tables="$expected_tables" \
     -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
   # Drop the probe function regardless (trap also covers).
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q \
     -c "DROP FUNCTION IF EXISTS rls_negative_secdef_probe();" >/dev/null 2>&1 || true
   if (( ec == 0 )); then
     printf 'FAIL case 9: verify exited 0 with SECURITY DEFINER function present — gate is broken\n'
