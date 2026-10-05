@@ -214,8 +214,8 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 RUN TAR_VER=7.5.21 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
-    BE_VER=5.0.9 && \
-    UNDICI_VER=6.28.0 && \
+    BE_VER=5.0.12 && \
+    UNDICI_VER=6.28.1 && \
     IPADDR_VER=10.4.0 && \
     PACOTE_VER=21.5.1 && \
     NPM_VER=11.16.0 && \
@@ -420,7 +420,7 @@ COPY --from=builder /app/node_modules/xtend ./node_modules/xtend
 # AWS rotates this bundle. When it does, the build fails on the checksum: fetch
 # the new one, diff the certificate list, and move the pin deliberately.
 ARG RDS_CA_BUNDLE_URL=https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-ARG RDS_CA_BUNDLE_SHA256=e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3
+ARG RDS_CA_BUNDLE_SHA256=fe45bbebf92ad3e27a583bbb2ddd1553c521ed4d49af5514dc0a40372ea5395c
 RUN mkdir -p /app/certs && \
     wget -qO /app/certs/rds-global-bundle.pem "${RDS_CA_BUNDLE_URL}" && \
     echo "${RDS_CA_BUNDLE_SHA256}  /app/certs/rds-global-bundle.pem" | sha256sum -c - && \
