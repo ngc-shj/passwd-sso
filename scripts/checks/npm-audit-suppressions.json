@@ -1,0 +1,11 @@
+{
+  "_comment": "Read by scripts/checks/check-npm-audit.mjs for CI's dev-scope audit only; the production audit (--omit=dev) cannot be suppressed. Only for advisories with no fixed version to move to. Policy: docs/security/vulnerability-triage.md.",
+  "suppressions": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "No patched version exists (<= 3.0.3, latest is 3.0.3). Dev scope only: reached through patch-package -> find-yarn-workspace-root -> micromatch, eslint-config-next and shadcn. The patterns it expands come from this repository's own package.json and config, never from external input, and nothing in the production tree depends on it.",
+      "expires": "2027-01-03"
+    }
+  ]
+}

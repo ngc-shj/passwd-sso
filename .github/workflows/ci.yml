@@ -750,7 +750,11 @@ jobs:
       # a high in a never-executed devDep and one in patch-package's own
       # closure are different decisions, and the two lines say which fired.
       # Measured clean (0 at every severity) when this was added.
-      - run: npm audit --audit-level=high
+      # Same threshold as `npm audit --audit-level=high`, plus expiring
+      # suppressions for advisories with no fixed version
+      # (scripts/checks/npm-audit-suppressions.json). The production step
+      # above has no such escape.
+      - run: node scripts/checks/check-npm-audit.mjs
       # Verify registry signatures/attestations of installed deps (and our own
       # published versions). Fails closed on tamper; do not mask its exit.
       # Measured on this branch: exit 0, 1378 verified signatures — the open
