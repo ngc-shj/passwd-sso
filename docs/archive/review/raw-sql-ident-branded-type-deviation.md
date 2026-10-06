@@ -74,3 +74,9 @@ The gate compares schema enum names with 21 non-enum export names of
 the query casts it (`catcode::text`). Red-proven on a scratch copy: dropping `with`
 from the embedded list fails "rejects every word the live catalog reports as catcode
 R or T".
+
+## D-11 — D-5 narrowed to a measured allowlist (code review round 1)
+
+Non-literal `import()` / `require()` is no longer a blanket residual: the seven
+measured sites are allowlisted by file and count (`NON_LITERAL_IMPORT_ALLOWLIST`);
+any other site, or a count change in an allowlisted file, denies.
