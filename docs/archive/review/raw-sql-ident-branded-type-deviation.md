@@ -67,3 +67,10 @@ relative-specifier variants.
 The gate compares schema enum names with 21 non-enum export names of
 `@prisma/client` and its runtime package (`raw`, `sql`, `join`, `Sql`, `empty`,
 `dmmf`, `DbNull`, …), embedded in the gate; it fails closed on a collision.
+
+## D-10 — Keyword integration test cast `catcode` to text
+
+`pg_get_keywords().catcode` is Postgres `"char"`, which Prisma cannot deserialize;
+the query casts it (`catcode::text`). Red-proven on a scratch copy: dropping `with`
+from the embedded list fails "rejects every word the live catalog reports as catcode
+R or T".

@@ -30,7 +30,7 @@ describe("sqlIdentifier reserved-keyword list vs pg_get_keywords() (C1)", () => 
 
     const rows = await ctx.su.prisma.$queryRawUnsafe<
       { word: string; catcode: string }[]
-    >("SELECT word, catcode FROM pg_get_keywords()");
+    >("SELECT word, catcode::text AS catcode FROM pg_get_keywords()");
 
     reservedWords = rows
       .filter((r) => r.catcode === "R" || r.catcode === "T")
