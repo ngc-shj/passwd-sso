@@ -75,3 +75,42 @@ R41 (F2), R49 (F1) flagged; R42/R47/R48 clear (re-derived).
 R3 (N2/N3), R42 (N2/N3), R46 (N4), R47 (N1/N2/N3/N7), R48 (N2), R49 (N1/N6/N9/N10), R55 (N5) flagged; R29 clear; RS3 (N6); RS6 clear.
 ### Testing expert
 RT2 (T9), RT10 (T11), R50 (T10), R19 adjacent (T8) flagged; RT7, RT8, R42 clear.
+
+---
+
+# Round 3
+Date: 2026-10-06
+
+## Changes from Previous Round
+Round-2 dispositions applied (tag-only `trustedSql`, scope-aware resolution, raw-method name class, sql-template-tag ban, keyword rejection, non-negative integers, export surface, residual, widened scope, Step 0 details).
+
+## Functionality Findings
+- F1 [Major] `JSON.stringify` bypasses the throwing conversions (logs, audit metadata). Resolved: `toJSON` throws too; acceptance pins it; logs keep the plain string.
+- F2 [Minor] CLI-guard pattern cited in audit-chain-verify-worker.ts, which uses a different one. Resolved: cite tenant-domain.ts only.
+- F3 [Minor] "~14" → exactly 12 `assertIdentifier(` sites in sweep.ts. Resolved.
+- F4 [Minor] precondition list omitted the migration script's column set. Resolved.
+- Verified: widened scope introduces no violation in the current tree (type-position hits only); no C2 identifier is a reserved keyword.
+
+## Security Findings (Opus)
+- S1 [Critical] scope resolution misses var-in-block, function/class expression names, `import x =`; specifier variants, `import()`, `require()`, `export *` bypass module recognition. Resolved by mechanism change: `RAW_SQL_NAMES` positional allowlist with no binding resolution; specifier resolution to the file; every other loading form denies.
+- S2 [Critical] Prisma producers reachable from top-level `@prisma/client`, `.prisma/client`, `/edge`, `/index-browser`, default/namespace/dynamic imports. Resolved: `PRISMA_IMPORT` allowlist (names and `Prisma.*` members).
+- S3 [Minor] match decoded literal values. Resolved.
+- S4 [Minor] SC3 omitted `scripts/audit-db-grants.mjs`; adapter `queryRaw` and `$extends` undeclared. Resolved: SC3 corrected; `PRISMA_EXTENDS` (0 uses); adapter in residual.
+- S5 [Minor] reject catcode `T` too. Resolved.
+- S6 [Minor] `sqlIdentifier` precondition unenforced. Resolved: declared residual, review-enforced.
+- S7 [Minor] `scripts/checks/**` exclusion too broad. Resolved: literal-content clause only.
+- N1–N10 status per this review: N3, N5, N7, N8 closed; N1/N4 superseded by S1; N2 by S2; N6, N9, N10 closed with S4–S6 refinements.
+
+## Testing Findings
+- T12 [Major] toString/valueOf only reached through Symbol.toPrimitive. Resolved: direct-call and JSON.stringify cases, each red-proven per override.
+- T13 [Major] one generic shadow fixture. Resolved: one per declaration kind (now under `RAW_SQL_NAMES`).
+- T14 [Major] "mechanical adaptation" after C2 unverifiable. Resolved: diff check against the Step 0 SHA; expected strings byte-identical.
+- T15 [Major] widened scope unproven per extension/root. Resolved: one fixture per extension and `prisma/`.
+
+## Recurring Issue Check
+### Functionality expert
+R29 (F2, F3), R42 (F4), R49 (F1) triggered; R1, R3, R41, R46–R48 clear.
+### Security expert
+R1, R29, R42, R46, R47, R48, R49 flagged (S1–S6); RS3 (S6); R3, R55, RS1, RS2, RS4–RS6 clear.
+### Testing expert
+R42 (T13, T15), R50 (T14), RT7 (T12) triggered; T8–T11 verified.
