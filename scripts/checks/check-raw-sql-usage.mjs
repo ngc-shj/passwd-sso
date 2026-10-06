@@ -35,9 +35,12 @@
  *     form of raw-sql.ts (namespace/default import, `export * from`,
  *     `require()`, `import()`, `import x = require()`) denies outright, as
  *     does a scanned file that itself SHADOWS raw-sql.ts's module resolution
- *     (a `raw-sql.js`/`.mjs`/`.cjs` sibling, a `raw-sql/index.*`); a `.js`
- *     specifier's TS/ESM extension-rewrite resolution never claims such a
- *     shadow file as raw-sql.ts.
+ *     (a `raw-sql.<ext>` sibling for every scanned extension OTHER than
+ *     `.ts` — including `.tsx`, since Next/esbuild resolve `.tsx` before
+ *     `.ts` — or a `raw-sql/index.<ext>` directory module for every scanned
+ *     extension, `.ts` included); a `.js` specifier's TS/ESM
+ *     extension-rewrite resolution never claims such a shadow file as
+ *     raw-sql.ts.
  *   - IMPORT_EQUALS_ENTITY: `import x = <entity name>` (`import r =
  *     Prisma.raw`, including `export import` inside a namespace) denies
  *     unconditionally — a QualifiedName entity name is not a type position,
@@ -57,11 +60,18 @@
  *     raw-sql match. This gate's own source is exempt (it spells the allowed
  *     specifiers as data).
  *   - UNSCANNED_IMPORT: a scanned file's import/export declaration, `import x
- *     = require()`, or a `require()`/`import()` call's literal argument,
- *     resolving into an excluded test path (`*.test.*`, `__tests__/`,
- *     `manual-tests/`, `e2e/`) denies — closes the laundering-through-an-
- *     unscanned-file gap for every module-loading form, not just static
- *     declarations.
+ *     = require()`, a `require()`/`import()` call's literal argument, OR any
+ *     OTHER string/no-substitution-template literal in expression position —
+ *     whatever its parent — resolving into an excluded test path (`*.test.*`,
+ *     `__tests__/`, `manual-tests/`, `e2e/`) denies. The last clause mirrors
+ *     SPECIFIER_LITERAL: it closes the laundering-through-an-unscanned-file
+ *     gap for a loader reached under another name (`createRequire(...)(...)`,
+ *     `module.require(...)`, `require.call(...)`, `new Worker(new
+ *     URL(...))`, …), not just the require()/import() call shape or a static
+ *     declaration. Exempt: this gate's own source, and a measured set of
+ *     `scripts/checks/**` files that hold such a literal as DATA, not as a
+ *     load target (`scripts/checks/classify-fail-closed-test.mjs`, which
+ *     names the test-helper module it classifies against).
  *   - RAW_METHOD: any spelling of `/^\$(query|execute)Raw\w*$/` — identifier,
  *     property-access name, or decoded literal value (string OR
  *     no-substitution template) — in expression position, denies UNLESS it is
@@ -89,8 +99,11 @@
  *     argument denies everywhere except a measured allowlist of the files that
  *     load a module by a computed specifier on purpose (a tsx loader over an
  *     absolute path, the i18n namespace loader, the crypto WASM loader); a
- *     count mismatch in one of those files denies too, so the audited set
- *     cannot drift silently.
+ *     count mismatch in one of those files denies too, as does an
+ *     allowlisted path that no longer exists among the scanned files
+ *     (checked once, after the per-file loop) — so the audited set cannot
+ *     drift silently in either direction: neither a quiet increase nor a
+ *     stale entry left behind by a deletion or rename.
  *   - SYMLINK_SCAN_TARGET: a symlink under a Layer 2 scan root denies — the
  *     gate judges syntax on disk and cannot verify what a symlink resolves to.
  *   - Fails closed on 0 files analysed and on a file that fails to parse.
@@ -104,13 +117,19 @@
  * precondition that its argument is a code constant / closed literal set; a
  * computed element access with a non-literal key; reflective enumeration that
  * never spells a name; Prisma internals reached through `any`; a loader under
- * another name invoked with a non-literal specifier (with a literal specifier
- * it is caught by SPECIFIER_LITERAL / UNSCANNED_IMPORT / NON_LITERAL_IMPORT);
- * a third-party dependency re-exporting a raw-SQL producer; `eval`/`Function`;
- * replacing a built-in before this module (or this gate's own ts-morph
- * dependency) loads. Threat model: this gate catches accidental and casual
- * misuse in code that goes through review; deliberately obfuscated code can
- * defeat any static gate — for that, review is the control.
+ * another name invoked with a NON-literal specifier (with a literal
+ * specifier, under ANY name or call shape, it is caught by SPECIFIER_LITERAL
+ * / UNSCANNED_IMPORT / NON_LITERAL_IMPORT); a third-party dependency
+ * re-exporting a raw-SQL producer; `eval`/`Function`; replacing a built-in
+ * before this module (or this gate's own ts-morph dependency) loads. The
+ * canonical-import requirement (F4-a) does not itself follow a re-export
+ * chain — it only checks for a direct, unaliased import of a name FROM
+ * raw-sql.ts — but this is not a gap: a barrel file re-exporting one of the
+ * four names is denied outright by RAW_SQL_NAMES's re-export clause, so
+ * there is no file through which such a chain could be built in the first
+ * place. Threat model: this gate catches accidental and casual misuse in
+ * code that goes through review; deliberately obfuscated code can defeat any
+ * static gate — for that, review is the control.
  *
  * See docs/archive/review/ for the "unforgeable SQL text for raw-SQL calls"
  * plan (C3) for the full contract, and its review log for why each clause
@@ -724,16 +743,19 @@ function checkRawSqlNameLiterals(sf, rel) {
 }
 
 // F4-c (part 1): a scanned file other than raw-sql.ts itself that sits at one
-// of raw-sql.ts's own module-resolution candidate paths (a `.js`/`.mjs`/`.cjs`
-// sibling, or a `raw-sql/index.*` directory module) is a SHADOW FILE — Node's
-// real resolver would load it instead of the TS source for any specifier that
-// reaches that path, regardless of what this gate's positional checks decide
-// about raw-sql.ts proper.
+// of raw-sql.ts's own module-resolution candidate paths (a `raw-sql.<ext>`
+// sibling for any OTHER scanned extension — N2: including `.tsx`, since
+// Next/esbuild resolve `.tsx` before `.ts` — or a `raw-sql/index.<ext>`
+// directory module for any scanned extension, `.ts` included) is a SHADOW
+// FILE — Node's real resolver would load it instead of the TS source for any
+// specifier that reaches that path, regardless of what this gate's
+// positional checks decide about raw-sql.ts proper.
 const RAW_SQL_BASE_REL = RAW_SQL_MODULE_REL.replace(/\.ts$/, "");
+const LAYER2_EXT_NAMES = [...LAYER2_EXTS].map((ext) => ext.slice(1)); // ".ts" -> "ts"
 const RAW_SQL_SHADOW_PATHS = new Set(
-  ["js", "mjs", "cjs"]
+  LAYER2_EXT_NAMES.filter((ext) => ext !== "ts")
     .map((ext) => `${RAW_SQL_BASE_REL}.${ext}`)
-    .concat(["ts", "tsx", "js"].map((ext) => `${RAW_SQL_BASE_REL}/index.${ext}`))
+    .concat(LAYER2_EXT_NAMES.map((ext) => `${RAW_SQL_BASE_REL}/index.${ext}`))
     .map((p) => p.toLowerCase()),
 );
 function checkRawSqlShadowFile(rel) {
@@ -904,13 +926,54 @@ function checkNodeModulesSpecifier(sf, rel) {
   }
 }
 
+// N1: a loader reached under another name (`createRequire(...)(...)`,
+// `module.require(...)`, `require.call(...)`, `new Worker(new URL(...))`,
+// …) still spells its load target as an ordinary string/no-substitution-
+// template literal — the require()/import() call scan above only inspects
+// that one callee shape. Mirrors SPECIFIER_LITERAL: scan every such literal
+// in expression position, WHATEVER its parent, and deny the ones that
+// resolve into an excluded test path. `resolvesToUnscannedPath` already
+// requires the value to look like a specifier (`@/`, `./`, `../`), so this
+// cannot fire on incidental text that doesn't start with one of those.
+// Measured exemption, same shape as GATE_SELF_REL: files that hold such a
+// literal as DATA, not as a load target.
+const UNSCANNED_TEST_PATH_LITERAL_DATA_FILES = new Set([
+  // names the shared fail-closed test helper it classifies OTHER files
+  // against — never itself loads it.
+  "scripts/checks/classify-fail-closed-test.mjs",
+]);
+
+function checkUnscannedLiteralAnywhere(sf, rel) {
+  if (rel === GATE_SELF_REL) return; // exempt: spells example specifiers as data
+  if (UNSCANNED_TEST_PATH_LITERAL_DATA_FILES.has(rel)) return;
+
+  const literals = [
+    ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
+    ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
+  ];
+  for (const lit of literals) {
+    if (isLiteralTypePosition(lit)) continue;
+    const value = literalValue(lit);
+    if (value !== undefined && resolvesToUnscannedPath(rel, value)) {
+      violate(
+        "UNSCANNED_IMPORT",
+        rel,
+        lineOf(lit),
+        `literal "${value}" resolves into an excluded test path`,
+      );
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // UNSCANNED_IMPORT — a scanned file's import/export specifier resolving into
 // an excluded test path; also (F3) a `require()`/`import()` call's literal
 // first argument and the `ExternalModuleReference` of `import x = require()`
 // — the original scan covered only static import/export declarations, so a
 // `*.test.ts` helper could be laundered through either of those two call-ish
-// forms without ever tripping this rule.
+// forms without ever tripping this rule; also (N1) any OTHER expression-
+// position literal resolving the same way, closing the gap for a loader
+// reached under another name (see checkUnscannedLiteralAnywhere above).
 // ---------------------------------------------------------------------------
 function checkUnscannedImport(sf, rel) {
   for (const imp of sf.getImportDeclarations()) {
@@ -1206,8 +1269,28 @@ function checkNonLiteralImportSpecifiers(sf, rel) {
       "NON_LITERAL_IMPORT",
       rel,
       1,
-      `${rel} has ${count} non-literal import()/require() call(s); the allowlist expects ${NON_LITERAL_IMPORT_ALLOWLIST.get(rel)} — the measured set drifted`,
+      `${rel} has ${count} non-literal import()/require() call(s); the allowlist expects ${NON_LITERAL_IMPORT_ALLOWLIST.get(rel)} — the measured set drifted; update NON_LITERAL_IMPORT_ALLOWLIST in scripts/checks/check-raw-sql-usage.mjs if intentional`,
     );
+  }
+}
+
+// F-R2-1: a count mismatch (above) only fires for a file that IS still
+// scanned. A deleted or renamed allowlisted file never reaches
+// checkNonLiteralImportSpecifiers at all — its key just silently stops
+// matching anything — so the drift it represents (an allowlist entry for a
+// file that no longer exists) was never detected. Checked once, after the
+// per-file loop, against the full scanned-file set.
+function checkNonLiteralImportAllowlistCoverage(scannedFiles) {
+  const scannedSet = new Set(scannedFiles);
+  for (const rel of NON_LITERAL_IMPORT_ALLOWLIST.keys()) {
+    if (!scannedSet.has(rel)) {
+      violate(
+        "NON_LITERAL_IMPORT",
+        rel,
+        1,
+        "allowlisted path no longer exists in the Layer 2 scan — remove or update this NON_LITERAL_IMPORT_ALLOWLIST entry",
+      );
+    }
   }
 }
 
@@ -1266,6 +1349,7 @@ if (layer2Files.length === 0) {
     checkSpecifierLiteral(sf, rel);
     checkNodeModulesSpecifier(sf, rel);
     checkUnscannedImport(sf, rel);
+    checkUnscannedLiteralAnywhere(sf, rel);
     checkRawMethod(sf, rel);
     checkPrismaImportDeclarations(sf, rel);
     checkPrismaExpressionMembers(sf, rel);
@@ -1273,6 +1357,8 @@ if (layer2Files.length === 0) {
     checkNonLiteralImportSpecifiers(sf, rel);
   }
 }
+
+checkNonLiteralImportAllowlistCoverage(layer2Files);
 
 if (violationsByReason.size > 0) {
   failed = true;

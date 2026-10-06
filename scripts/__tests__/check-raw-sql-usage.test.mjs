@@ -57,11 +57,44 @@ function writeFiles(root, files) {
   }
 }
 
-function run(files, { allowlist } = {}) {
+// F-R2-1: the gate's NON_LITERAL_IMPORT_ALLOWLIST (scripts/checks/check-raw-
+// sql-usage.mjs) now denies if any of its three entries is MISSING from the
+// Layer 2 scan — true on the real tree, but every isolated fixture tree
+// below is its own mini-tree that normally holds none of these three real
+// paths at all. Auto-inject a benign stand-in for each, with the right
+// non-literal import() COUNT, into every fixture by default — unless a row
+// supplies its own file at that path (to exercise the count-mismatch check)
+// or explicitly omits it via `omitNonLiteralImportFiles` (to exercise the
+// stale-key check). Keep the paths/counts here in sync with the real
+// NON_LITERAL_IMPORT_ALLOWLIST.
+const NON_LITERAL_IMPORT_ALLOWLIST_STUBS = {
+  "scripts/check-env-docs.ts": 4,
+  "src/i18n/messages.ts": 2,
+  "src/lib/crypto/crypto-client.ts": 1,
+};
+function stubWithNonLiteralImportCalls(n) {
+  const lines = [];
+  for (let i = 0; i < n; i++) {
+    lines.push(`export async function fn${i}(mod) {\n  return import(mod);\n}\n`);
+  }
+  return lines.join("");
+}
+function withNonLiteralImportStubs(files, omit = []) {
+  const merged = { ...files };
+  for (const [path, count] of Object.entries(NON_LITERAL_IMPORT_ALLOWLIST_STUBS)) {
+    if (path in merged) continue; // row supplies its own content for this path
+    if (omit.includes(path)) continue; // row proves the stale-key check
+    merged[path] = stubWithNonLiteralImportCalls(count);
+  }
+  return merged;
+}
+
+function run(files, { allowlist, omitNonLiteralImportFiles, skipAllowlistStubs } = {}) {
   const root = mkRoot();
-  writeFiles(root, files);
+  const merged = skipAllowlistStubs ? files : withNonLiteralImportStubs(files, omitNonLiteralImportFiles);
+  writeFiles(root, merged);
   const allowlistFile = join(root, "fixture-allowlist.txt");
-  writeFileSync(allowlistFile, (allowlist ?? autoAllowlist(files)) + "\n", "utf8");
+  writeFileSync(allowlistFile, (allowlist ?? autoAllowlist(merged)) + "\n", "utf8");
   try {
     const stdout = execFileSync("node", [CHECKER], {
       env: { ...process.env, RAW_SQL_CHECK_ROOT: root, RAW_SQL_CHECK_ALLOWLIST: allowlistFile },
@@ -193,6 +226,37 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       path: "src/lib/prisma/raw-sql/index.ts",
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
+    },
+    // N2: the shadow set must cover every scanned extension other than
+    // `.ts` for the direct sibling (Next/esbuild resolve `.tsx` before
+    // `.ts`), and every scanned extension (`.ts` included) for the
+    // directory-index form.
+    {
+      name: "deny: a shadow src/lib/prisma/raw-sql.tsx sibling file (N2 — Next/esbuild resolve .tsx before .ts)",
+      src: `export const placeholder = 1;\n`,
+      path: "src/lib/prisma/raw-sql.tsx",
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: a shadow src/lib/prisma/raw-sql/index.tsx directory module (N2)",
+      src: `export const placeholder = 1;\n`,
+      path: "src/lib/prisma/raw-sql/index.tsx",
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: a shadow src/lib/prisma/raw-sql/index.js directory module (N2)",
+      src: `export const placeholder = 1;\n`,
+      path: "src/lib/prisma/raw-sql/index.js",
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "allow: a src/lib/prisma/raw-sql.test.ts sibling (excluded from the Layer 2 scan entirely by *.test.* — not a shadow path either)",
+      src: `export const placeholder = 1;\n`,
+      path: "src/lib/prisma/raw-sql.test.ts",
+      expectCode: 0,
     },
     {
       name: "allow: relative specifier without extension",
@@ -442,6 +506,62 @@ describe("check-raw-sql-usage Layer 2 — NON_LITERAL_IMPORT (D-5 refinement)", 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("NON_LITERAL_IMPORT");
   });
+
+  // Testing: allow + count-mismatch deny rows for the other two allowlisted
+  // files, mirroring the messages.ts rows above.
+  it("allow: the exact allowlisted shape (scripts/check-env-docs.ts, 4 non-literal import() calls)", () => {
+    const result = run({
+      "scripts/check-env-docs.ts": `export async function a(mod) {\n  return import(mod);\n}\nexport async function b(mod) {\n  return import(mod);\n}\nexport async function c(mod) {\n  return import(mod);\n}\nexport async function d(mod) {\n  return import(mod);\n}\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  it("deny: a count mismatch in scripts/check-env-docs.ts (measured set drifted)", () => {
+    const result = run({
+      "scripts/check-env-docs.ts": `export async function a(mod) {\n  return import(mod);\n}\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("NON_LITERAL_IMPORT");
+    expect(result.stderr).toContain("measured set drifted");
+  });
+
+  it("allow: the exact allowlisted shape (src/lib/crypto/crypto-client.ts, 1 non-literal import() call)", () => {
+    const result = run({
+      "src/lib/crypto/crypto-client.ts": `export async function a(mod) {\n  return import(mod);\n}\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  it("deny: a count mismatch in src/lib/crypto/crypto-client.ts (measured set drifted)", () => {
+    const result = run({
+      "src/lib/crypto/crypto-client.ts": `export const x = 1;\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("NON_LITERAL_IMPORT");
+    expect(result.stderr).toContain("measured set drifted");
+  });
+
+  // F-R2-1: a deleted/renamed allowlisted file was never detected — the
+  // per-file count-mismatch check only runs for files that ARE still
+  // scanned. Omit one allowlisted path entirely (the other two stay present
+  // via the default stub injection) and expect the stale-key deny, named by
+  // path; the adjacent allow row proves normal operation (all three
+  // present) stays clean.
+  it("deny: a stale NON_LITERAL_IMPORT_ALLOWLIST entry (allowlisted file deleted/renamed)", () => {
+    const result = run({}, { omitNonLiteralImportFiles: ["src/i18n/messages.ts"] });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("NON_LITERAL_IMPORT");
+    expect(result.stderr).toContain("src/i18n/messages.ts");
+    expect(result.stderr).toContain("allowlisted path no longer exists in the Layer 2 scan");
+  });
+
+  it("allow: all three NON_LITERAL_IMPORT_ALLOWLIST files present with the right counts", () => {
+    const result = run({});
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
 });
 
 describe("check-raw-sql-usage Layer 2 — SPECIFIER_LITERAL", () => {
@@ -498,6 +618,23 @@ describe("check-raw-sql-usage Layer 2 — SPECIFIER_LITERAL", () => {
     {
       name: "allow: \"prisma/config\" (no @, no leading dot — a real, unrelated package)",
       src: `import { defineConfig } from "prisma/config";\nexport const c = defineConfig;\n`,
+      expectCode: 0,
+    },
+    // Testing [Major]: checkNodeModulesSpecifier is scoped to MODULE-SPECIFIER
+    // POSITION literals only (isModuleSpecifierPositionLiteral) — a
+    // "node_modules" substring anywhere else in a string must not deny.
+    {
+      name: "allow: \"node_modules\" text in a non-specifier-position string literal",
+      src: `export const msg = "scanning node_modules/foo for a stale cache";\n`,
+      expectCode: 0,
+    },
+    // Decided and pinned: isModuleSpecifierPositionLiteral checks ONLY
+    // arguments()[0] of a require()/import() call — a second argument is
+    // inert at runtime (real Node.js require() ignores extra arguments), so
+    // leaving it unchecked is not a laundering vector and stays allowed.
+    {
+      name: "allow: require(\"x\", \"node_modules/y\") — second argument is not position-0, and is inert at runtime",
+      src: `const pkg = require("x", "node_modules/y");\nexport { pkg };\n`,
       expectCode: 0,
     },
   ];
@@ -574,6 +711,89 @@ describe("check-raw-sql-usage Layer 2 — UNSCANNED_IMPORT", () => {
     const result = run({
       "scripts/fixture.ts": `export async function run() {\n  return import("./latest-util");\n}\n`,
       "scripts/latest-util.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  // N1: a loader reached under another name still spells its target as an
+  // ordinary literal — none of these four call shapes is a direct
+  // `require(...)`/`import(...)` call, so only the blanket
+  // checkUnscannedLiteralAnywhere scan (not the call-shape-specific checks
+  // above) catches them. Each deny sits next to an allow using the SAME
+  // loader shape over a benign path.
+  it("deny: createRequire(...)(...) loader with a literal *.test specifier", () => {
+    const result = run({
+      "scripts/fixture.ts": `import { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nexport const h = req("./h.test");\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("allow: createRequire(...)(...) loader with a benign specifier", () => {
+    const result = run({
+      "scripts/fixture.ts": `import { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nexport const h = req("./h");\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  it("deny: module.require(...) with a literal *.test specifier", () => {
+    const result = run({
+      "scripts/fixture.ts": `export const h = module.require("./h.test");\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("allow: module.require(...) with a benign specifier (near-miss, not *.test.*)", () => {
+    const result = run({
+      "scripts/fixture.ts": `export const h = module.require("./latest-util");\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  it("deny: require.call(...) with a literal *.test specifier", () => {
+    const result = run({
+      "scripts/fixture.ts": `export const h = require.call(null, "./h.test");\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("allow: require.call(...) with a benign specifier (near-miss, not under manual-tests/)", () => {
+    const result = run({
+      "scripts/fixture.ts": `export const h = require.call(null, "./manual-tests-helper");\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  it("deny: new Worker(new URL(...)) with a literal *.test.ts specifier", () => {
+    const result = run({
+      "scripts/fixture.ts": `export const w = new Worker(new URL("./h.test.ts", import.meta.url));\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("allow: new Worker(new URL(...)) with a benign specifier", () => {
+    const result = run({
+      "scripts/fixture.ts": `export const w = new Worker(new URL("./latest-util.ts", import.meta.url));\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  // N1 measured exemption: scripts/checks/classify-fail-closed-test.mjs
+  // names the shared test helper module it classifies OTHER files against —
+  // that is DATA, not a load target, so it must stay exempt from the
+  // blanket literal scan even though the literal resolves into
+  // __tests__/.
+  it("allow: scripts/checks/classify-fail-closed-test.mjs naming the fail-closed test helper as data", () => {
+    const result = run({
+      "scripts/checks/classify-fail-closed-test.mjs": `export const HELPER_MODULE = "@/__tests__/helpers/fail-closed";\n`,
     });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("check-raw-sql-usage: OK");
@@ -920,6 +1140,17 @@ describe("check-raw-sql-usage Layer 2 — scope (per-extension, root, prisma/)",
     });
   }
 
+  // Testing [Minor]: a benign allow row per scanned extension, adjacent to
+  // the deny loop above — proves the scan picks these extensions up for a
+  // CLEAN file too, not only a violating one.
+  for (const ext of ["mts", "cts", "js", "jsx", "mjs", "cjs"]) {
+    it(`passes on a clean .${ext} sibling`, () => {
+      const result = run({ [`scripts/fixture-clean.${ext}`]: "export const x = 1;\n" });
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("check-raw-sql-usage: OK");
+    });
+  }
+
   it("scans a violating file directly at the repository root", () => {
     const result = run({ "fixture-root.ts": unsafeArgViolation });
     expect(result.code).toBe(1);
@@ -935,7 +1166,9 @@ describe("check-raw-sql-usage Layer 2 — scope (per-extension, root, prisma/)",
 
 describe("check-raw-sql-usage Layer 2 — fail-closed structural checks", () => {
   it("fails closed on an empty scan root (0 files)", () => {
-    const result = run({});
+    // skipAllowlistStubs: a truly empty tree — the default NON_LITERAL_IMPORT
+    // allowlist stand-ins would otherwise make this tree non-empty.
+    const result = run({}, { skipAllowlistStubs: true });
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("ZERO_FILES_SCANNED");
   });
