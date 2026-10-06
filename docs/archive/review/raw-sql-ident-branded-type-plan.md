@@ -349,7 +349,27 @@ describes the marker mechanism today.
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | `raw-sql.ts` runtime-checked opaque values | pending |
-| C2 | Call-site and producer migration | pending |
-| C3 | AST gate — see C3's fail-closed reasons | pending |
-| C4 | Docs | pending |
+| C1 | `raw-sql.ts` runtime-checked opaque values | locked |
+| C2 | Call-site and producer migration | locked |
+| C3 | AST gate — see C3's fail-closed reasons | locked |
+| C4 | Docs | locked |
+
+## Implementation Checklist
+
+Batches (Step 2-2). A is committed alone before C starts (NF1); B and D run alongside A.
+
+- **A — Step 0 characterization** (test-only plus two behaviour-preserving production touches):
+  `src/workers/retention-gc-worker/__tests__/sweep-sql.test.ts`, `sweep-per-tenant-age.test.ts` (exact `.toBe`);
+  `src/workers/audit-outbox-worker.ts` (export `onWebhookDeliveryFailure`) + its test;
+  `scripts/migrate-account-tokens-to-encrypted.ts` (CLI guard, extract two SQL builders) + new test;
+  `src/workers/retention-gc-worker/__tests__/predicate.test.ts` (confirm exact pins).
+- **B — C1**: `src/lib/prisma/raw-sql.ts`, `src/lib/prisma/raw-sql.test.ts`, keyword-list integration case under `src/__tests__/db-integration/`.
+- **C — C2** (after A and B): `sweep.ts`, `predicate.ts`, `index.ts` (`validateRegistry`), `audit-outbox-worker.ts`, `scripts/migrate-account-tokens-to-encrypted.ts`; the Step 0 tests adapted only by wrapping in `renderSql(...)`; `predicate.test.ts` reject list moved to `sqlIdentifier`.
+- **D — C3/C4**: `scripts/checks/check-raw-sql-usage.mjs`, `scripts/__tests__/check-raw-sql-usage.test.mjs` (table-driven), `scripts/checks/raw-sql-usage.txt` (header rewrite, `ident-markers` removed).
+
+Shared utilities to reuse: ts-morph no-Program setup as in `scripts/checks/check-destructive-wrapper-derivation.mjs`; CLI guard pattern from `scripts/tenant-domain.ts`; existing gate env seams `RAW_SQL_CHECK_ROOT` / `RAW_SQL_CHECK_ALLOWLIST`.
+
+Member-set derivation (C2), re-runnable:
+`node -e` ts-morph scan — `CallExpression` with property-access callee named `$queryRawUnsafe`/`$executeRawUnsafe` over non-test `src/**/*.{ts,tsx}` + `scripts/**/*.ts`, first-argument kind ≠ string/no-substitution literal → 7 sites (listed in C2).
+
+CI parity: the gate runs in pre-pr's static batch (`Static: raw-sql-usage`) and therefore in CI's static-checks job; its self-test runs in the App job via vitest. No gap.
