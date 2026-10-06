@@ -319,6 +319,12 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       expectCode: 0,
     },
     {
+      name: "deny: aliased import { renderSql as r }",
+      src: `import { renderSql as r } from "@/lib/prisma/raw-sql";\nexport function run(tx, f) {\n  return tx.$queryRawUnsafe(r(f));\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
       name: "deny: string-named import { \"trustedSql\" as t }",
       src: `import { "trustedSql" as t } from "@/lib/prisma/raw-sql";\nexport function run(a) {\n  return t\`SELECT \${a}\`;\n}\n`,
       expectCode: 1,
