@@ -152,3 +152,41 @@ R29, R42 (F1, F2) triggered; others clear.
 R42 (S8, S10, S14), R47 (S9, S12, S16), R48 (S9), R49 (S8, S11, S15), R29 (S14), R3 (S9, S12) flagged; R46 clear (binding resolution removed); R1, R55, RS1–RS6 clear.
 ### Testing expert
 RT7 (T16), RT10 (T16, T17) triggered; T12–T15 verified.
+
+---
+
+# Round 5
+Date: 2026-10-06
+
+## Changes from Previous Round
+Round-4 dispositions applied (inverted `@prisma/*` specifier set, `SPECIFIER_LITERAL`, `UNSCANNED_IMPORT`, root scope, null-prototype values, captured built-ins, threat-model statement, fixtures).
+
+## Functionality Findings
+- F1 [Major, prose] residual bullet read as contradicting `SPECIFIER_LITERAL`. Resolved: scoped to computed specifiers.
+- F2 [Minor, prose] Go/No-Go row incomplete. Resolved: points at C3's list.
+- Verified: none of the 12 root code files, the 20 schema enums, value imports, `Prisma.*` expression members, specifier literals or test-path imports reds the current tree.
+
+## Security Findings (Opus, incremental)
+- F-a [Major, prose] `SPECIFIER_LITERAL` omitted no-substitution templates. Resolved.
+- F-b [Minor, design] capture still looked up `Function.prototype.call` / array iterator at call time (probe: forged accepted); "no constructor reachable" literally false. Resolved: bind at load, index loops, post-load tamper test; S11 sentence reworded.
+- F-c [Minor, design] gate source self-denies under `SPECIFIER_LITERAL`. Resolved: only `check-raw-sql-usage.mjs` exempt.
+- F-d [Minor, prose] Prisma pattern case-sensitive. Resolved: `i` flag, fixture.
+- No Critical. S8, S10, S12–S14, S16 verified closed.
+
+## Testing Findings
+- RT5-1..6 [Major] fixtures missing for: raw-sql path under a renamed loader; root scope; `UNSCANNED_IMPORT` near-miss allow; removed `Prisma.*` members; enum disjointness fail-closed; post-load built-in replacement. Resolved: completeness rule plus each named case.
+- RT5-7/8 [Minor] red-proof annotation for null prototype; bare `"$extends"` literal. Resolved.
+
+## Recurring Issue Check
+### Functionality expert
+R29 (F1, F2) triggered; R42, R46–R49 clear.
+### Security expert
+R3, R47 (F-a), R48 (F-d), R49 (F-b), R52 (F-c) flagged; R29, R42, R46 clear; RS3, RS4, RS6 clear.
+### Testing expert
+RT7 (RT5-1, 2, 5, 6), RT10 (RT5-3, 4) triggered; R42 adjacent.
+
+## Saturation call (round 5)
+- Rounds completed: 5. Open Critical/Major after this round's edits: none.
+- Round-5 labels as filed: Functionality F1 design/prose, F2 prose; Security F-a prose, F-b design (Minor), F-c design (Minor, Phase-2-reachable), F-d prose (Phase-2-reachable); Testing RT5-1..8 acceptance-criteria additions (unlabelled; adequacy of acceptance criteria → design under condition 3).
+- Condition 3 is therefore not strictly met: round 5 still produced acceptance-adequacy findings, all against enforcement text added in round 4, none against the contracts or control classes. Character: every round-5 finding is a missing fixture row or a wording fix for a rule round 4 introduced.
+- Decision surfaced to the user: proceed to Phase 2 with the completeness rule as the acceptance contract, or run round 6.

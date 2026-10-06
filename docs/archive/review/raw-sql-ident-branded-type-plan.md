@@ -85,12 +85,14 @@ export function renderSql(fragment: SqlFragment): string;
   hook, no re-export, no `Symbol.for` state. No node-only imports (VE1).
 - Genuine objects are `Object.create(null)` objects, frozen, holding no text in any
   own property, whose only members are throwing `toString`, `valueOf`,
-  `Symbol.toPrimitive` and `toJSON`. No class or constructor is reachable from a
-  genuine value (round 4, Sec S11). The WeakMap is written only inside the four
-  exported functions.
-- The built-ins the module calls (`WeakMap.prototype.get` / `set`, `Object.freeze`,
-  `Object.create`, `Number.isSafeInteger`, `Array.prototype.join`) are captured once
-  at module load and called through the captured references.
+  `Symbol.toPrimitive` and `toJSON` (themselves frozen). No function that registers a
+  value in the WeakMap is reachable from a genuine value (round 4, Sec S11);
+  `Function` is reachable through the members' `constructor`, which is the `eval`
+  residual. The WeakMap is written only inside the four exported functions.
+- Built-ins are bound at module load so nothing is looked up at call time (round 5,
+  Sec F-b): `WeakMap.prototype.get` / `set` bound to the registry,
+  `Number.isSafeInteger`, `Object.freeze`, `Object.create` captured; loops are index
+  loops (no `for…of`, no `Array.prototype` method lookups on caller arrays).
 - `trustedSql` cannot tell a real template object from a forged array at runtime;
   tag-only use is enforced by C3.
 - Control class: `enforceable boundary` against callers holding strings, `any`
@@ -106,9 +108,12 @@ export function renderSql(fragment: SqlFragment): string;
   - a genuine value throws in a template literal, with `+`, under `String()`, on a
     direct `.toString()`, on a direct `.valueOf()`, and under `JSON.stringify` — each
     red-proven by removing that one override;
-  - `Object.getPrototypeOf(v) === null` for every genuine value, and no value
-    reachable from a genuine value through `constructor` / prototype walks yields an
-    object `renderSql` accepts;
+  - `Object.getPrototypeOf(v) === null` for every genuine value (red-proven with an
+    `Object.prototype` object), and no value reachable from a genuine value through
+    `constructor` / prototype walks yields an object `renderSql` accepts;
+  - after import, replacing `WeakMap.prototype.get`, `Function.prototype.call`,
+    `Array.prototype[Symbol.iterator]` and `Object.freeze` does not make `renderSql`
+    accept a forged object;
   - the module's export names equal the four functions.
 
 ### C2 — Call-site and producer migration
@@ -167,10 +172,12 @@ Fail-closed reasons:
   namespace or default import, `export * from`, `require()`, `import()`,
   `import x = require()` — denies; a non-literal `import()` / `require()` argument in
   a scanned file denies.
-- `SPECIFIER_LITERAL` (round 4, Sec S9) — any expression-position string literal
-  (decoded value) that matches the Prisma pattern below, or that resolves to
-  `raw-sql.ts` under a case-insensitive comparison, denies unless it is the specifier
-  of an allowed import declaration. This catches loaders under another name
+- `SPECIFIER_LITERAL` (round 4, Sec S9) — any expression-position string or
+  no-substitution template literal (decoded value) that matches the Prisma pattern
+  below, or that resolves to `raw-sql.ts` under a case-insensitive comparison, denies
+  unless it is the specifier of an allowed import declaration.
+  `scripts/checks/check-raw-sql-usage.mjs` alone is exempt (it spells the allowed
+  specifiers as data; round 5, Sec F-c). This catches loaders under another name
   (`createRequire(…)("@prisma/client")`, `requireModule("…/raw-sql")`). Measured: no
   such literal outside import declarations today.
 - `UNSCANNED_IMPORT` (round 4, Sec S10) — a scanned file's import specifier that
@@ -183,7 +190,8 @@ Fail-closed reasons:
   `$executeRawUnsafe` as the name of a property access that is directly (optional
   chaining allowed, no parentheses) the callee of a call. Everything else denies,
   including any use of `…Internal` / `…Typed`.
-- `PRISMA_IMPORT` — every specifier matching `^(@prisma|\.prisma)(/|$)` (round 4,
+- `PRISMA_IMPORT` — every specifier matching `^(@prisma|\.prisma)(/|$)`,
+  case-insensitively, as is the Prisma half of `SPECIFIER_LITERAL` (round 5, Sec F-d) (round 4,
   Sec S8: `@prisma/client-runtime-utils` exports the same `raw` / `sql` / `join` /
   `empty` / `Sql`). Only two are allowed:
   - `@prisma/client`: type-only imports (declaration or specifier level) are
@@ -212,8 +220,9 @@ Residual (declared; enforced by review, not by this gate):
 - reflective enumeration that never spells a name (`Object.getOwnPropertyNames(…)`, `for…in`);
 - Prisma internals through `any` (`_request`, `_executeRequest`) and the pg adapter's
   `queryRaw` / `executeRaw` methods;
-- a loader under another name called with a computed specifier; `module.require`,
-  `require.cache`, `__webpack_require__`;
+- a loader under another name called with a computed (non-literal) specifier —
+  `module.require`, `require.cache`, `__webpack_require__` and the like (with a
+  literal specifier they are caught by `SPECIFIER_LITERAL`);
 - adding a third-party dependency that re-exports a raw-SQL producer
   (`sql-template-tag` and the like) — reviewed as a dependency change;
 - imports into files outside the scan (today: `scripts/generate-team-key-fixture.ts`
@@ -252,6 +261,16 @@ allowlist grammar (a leftover suffix is a parse error) and from `raw-sql-usage.t
     `{ $executeRaw: … }` type literal), each allowlisted `Prisma.*` member, an enum
     import, `import type { AuditLog }`, a raw-method name as a string inside
     `scripts/checks/`;
+  - completeness rule (round 5, Test): every rule and every clause of a rule above
+    has at least one deny row and its nearest allow row, and every C1 claim has a
+    test red-proven by removing that one mechanism. In particular:
+    `requireModule("./raw-sql")` outside an import (deny); a violating file at the
+    repository root (deny); `src/lib/latest-util.ts` / `scripts/manual-tests-helper.ts`
+    importable without `UNSCANNED_IMPORT` (allow) next to a `*.test.ts` import (deny);
+    `Prisma.dmmf`, `Prisma.DbNull`, `Prisma.JsonNull`, `Prisma.AnyNull` (deny); a
+    fixture `prisma/schema.prisma` declaring `enum raw` → the gate fails closed; a bare
+    `"$extends"` literal (deny); a backtick `createRequire(…)(\`@prisma/client\`)`
+    (deny); `@PRISMA/client-runtime-utils` (deny);
   - structure: a table of `{ name, files, expectCode, expectReason }` rows driven by
     `it.each`, deny and allow rows adjacent per rule.
   - scope: one violating fixture per extension (`.mts .cts .js .mjs .cjs`) and one
@@ -332,5 +351,5 @@ describes the marker mechanism today.
 |----|---------|--------|
 | C1 | `raw-sql.ts` runtime-checked opaque values | pending |
 | C2 | Call-site and producer migration | pending |
-| C3 | AST gate (positional allowlists: Unsafe args, raw-sql names, specifier literals, raw methods, Prisma imports) | pending |
+| C3 | AST gate — see C3's fail-closed reasons | pending |
 | C4 | Docs | pending |
