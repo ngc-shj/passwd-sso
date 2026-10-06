@@ -97,3 +97,32 @@ R3 Finding; R18 Checked; R42 Finding; R5, R12, R20, R24, R29, R31, R48 Checked; 
 R3 Fail, R29 Pass, R34 Pass, R42 Pass; all other R1–R57 N/A; RS1–RS6 N/A.
 ### Testing expert
 R3 Finding T1, R19 Pass, R29 Pass, R42 Finding T2; all other R1–R57 N/A; RT1 Pass, RT2 Pass, RT5 Pass, RT7 Pass, RT10 Checked; other RT N/A.
+
+---
+
+# Round 3
+Date: 2026-10-06
+
+## Changes from Previous Round
+Round-2 dispositions applied (NF1a + residue sweep, widened collision pattern, per-assertion CLI integration instruction, VE1 wording).
+
+## Functionality Findings
+- **F1 [Major, design]** — residue sweep missed `pre-flight`, `release 1`, and Japanese prose. **Resolved**: pattern widened (hyphen/space variants, Japanese terms) and declared a tripwire; the README sections and the JSDoc of every touched or kept symbol are read in full regardless of hits.
+
+## Security Findings
+No findings. Round-2 fixes verified; VE1 wording accurate.
+
+## Testing Findings
+- **QA3-1 [Major, design]** — collision forbidden pattern did not reach `scripts/__tests__/tenant-domain-buckets.test.ts` (5 hits today). **Resolved**: path added.
+- **QA3-2 [Minor, prose]** — inert `:!prisma/migrations` exclusion. **Resolved**: removed; `prisma/` stated out of scope.
+
+## Exit decision
+All findings from rounds 1–3 are resolved in the plan; none is open, so no Carried-Forward entries. Round 3's findings were all against enforcement text added in round 2, not against the contracts — the plan-growth pattern the saturation rule describes. Proceeding to Phase 2 rather than a round 4. Go/No-Go: C1–C6 locked.
+
+## Recurring Issue Check
+### Functionality expert
+R3 Finding; R42 Finding; R5, R12, R18, R20, R24, R29, R31, R48 Checked; all other R1–R57 N/A.
+### Security expert
+R3 Pass, R29 Pass, R34 Pass, R42 Pass; all other R1–R57 N/A; RS1–RS6 N/A.
+### Testing expert
+R42 Finding; all other R1–R57 N/A; RT2 Pass, RT7 Finding; other RT N/A.

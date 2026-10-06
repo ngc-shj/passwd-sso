@@ -157,7 +157,7 @@ line; it is a compile error once the field leaves `schema.prisma`, so `tsc` /
 `next build` is its enforcement — Test F2.)
 
 - pattern: `tenants.external_id|"tenants" .*external_id` outside migrations — reason: column is gone
-- pattern: `claim_collision|"collision"` over `src/lib/tenant src/lib/audit src/lib/auth src/auth.ts src/auth.test.ts scripts/lib scripts/tenant-domain.ts` — reason: arm removed (C3); the bare form catches `case "collision":`, which `tsc` does not reject (round-2 Sec 1 / Test T2)
+- pattern: `claim_collision|"collision"` over `src/lib/tenant src/lib/audit src/lib/auth src/auth.ts src/auth.test.ts scripts/lib scripts/tenant-domain.ts scripts/__tests__/tenant-domain-buckets.test.ts` — reason: arm removed (C3); the bare form catches `case "collision":`, which `tsc` does not reject (round-2 Sec 1 / Test T2)
 - pattern: `findFoldedExternalIdOwner|EXTERNAL_ID_FOLD_SQL|tenant-claim-backfill` — reason: removed (C5)
 - pattern: `preflight` in `scripts/tenant-domain.ts` and `scripts/checks/worker-policy-manifest.json` — reason: subcommand removed (C4)
 
@@ -190,7 +190,12 @@ line; it is a compile error once the field leaves `schema.prisma`, so `tsc` /
 - RT7: each forbidden pattern grep run against the final tree returns nothing;
   each was confirmed to match the current (unfixed) tree before the change.
 - Residue sweep (NF1a), manual review of every hit:
-  `git grep -nE 'external_?[iI]d|preflight|collision|release-1|release 2|SC10|\bD1\b' -- src scripts README.md README.ja.md CLAUDE.md docs/operations docs/security ':!prisma/migrations'`
+  `git grep -nE '[eE]xternal_?[iI]d|[pP]re-?flight|[cC]ollision|[rR]elease[- ]?[12]\b|SC10|\bD1\b|プリフライト|衝突|リリース ?[12]' -- src scripts README.md README.ja.md CLAUDE.md docs/operations docs/security` (`prisma/` is never in scope — SC2).
+  The pattern cannot be complete over prose (round-3 Func F1), so it is a
+  tripwire, not the acceptance: the "IdP domain changed / tenant locked out"
+  sections of `README.md` and `README.ja.md`, and the JSDoc of every symbol C2/C5
+  touch or keep in `tenant-management.ts` and `tenant-claim-registry.ts`, are
+  read in full regardless of hits.
 - Mandatory: `npx vitest run`, `npm run test:integration`, `npx next build`,
   `scripts/pre-pr.sh`.
 
@@ -227,9 +232,9 @@ line; it is a compile error once the field leaves `schema.prisma`, so `tsc` /
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Drop column + index migration, baseline entry | pending |
-| C2 | Resolver / creator without external_id | pending |
-| C3 | `claim_collision` removed from the refusal member set | pending |
-| C4 | CLI: ref resolution, preflight removed | pending |
-| C5 | Backfill SQL, fold constant, stale comments removed | pending |
-| C6 | Docs | pending |
+| C1 | Drop column + index migration, baseline entry | locked |
+| C2 | Resolver / creator without external_id | locked |
+| C3 | `claim_collision` removed from the refusal member set | locked |
+| C4 | CLI: ref resolution, preflight removed | locked |
+| C5 | Backfill SQL, fold constant, stale comments removed | locked |
+| C6 | Docs | locked |
