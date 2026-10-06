@@ -1162,7 +1162,7 @@ async function onWebhookDeliverySuccess(
   });
 }
 
-async function onWebhookDeliveryFailure(
+export async function onWebhookDeliveryFailure(
   workerPrisma: PrismaClient,
   item: WebhookDeliveryRow,
   webhookId: string,

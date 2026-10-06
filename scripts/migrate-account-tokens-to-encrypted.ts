@@ -16,11 +16,17 @@
 // this script bypasses tenant isolation by reading from a privileged
 // connection. Confirm before running in production.
 
+// Module-scope loadEnv() side effect at import time is deliberate and
+// harmless — same pattern as scripts/tenant-domain.ts (see its header
+// comment): it only populates process.env from .env/.env.local, never
+// connects to a database, so importing this file's extracted pure functions
+// from a test does not reach for MIGRATION_DATABASE_URL.
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
 
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { pathToFileURL } from "node:url";
 import {
   encryptAccountToken,
   isEncryptedAccountToken,
@@ -45,6 +51,38 @@ const BATCH_SIZE = 500;
 // left at Prisma's 5s interactive default.
 const TX_TIMEOUT_MS = 5 * MS_PER_MINUTE;
 const DRY_RUN = process.argv.includes("--dry-run");
+
+/**
+ * Build the batched `accounts` SELECT: cursor-paginated (keyset on `id`),
+ * ordered ascending, capped at `batchSize`. Exported so Step 0 characterization
+ * tests can pin the exact SQL text before it is migrated off string
+ * interpolation (raw-sql-ident-branded-type plan, C2) — the eventual change
+ * must leave this string byte-identical (NF1).
+ */
+export function buildAccountsSelectSql(hasCursor: boolean, batchSize: number): string {
+  // The Prisma schema maps Account.providerAccountId to the
+  // provider_account_id column (snake_case in DB), so the raw query
+  // must reference the column name and alias it back to the camelCase
+  // shape the rest of the script reads as.
+  return `SELECT id, user_id AS "userId", provider,
+                provider_account_id AS "providerAccountId",
+                refresh_token, access_token, id_token
+         FROM accounts
+         ${hasCursor ? "WHERE id > $1::uuid" : ""}
+         ORDER BY id ASC
+         LIMIT ${batchSize}`;
+}
+
+/**
+ * Build the single-row `accounts` UPDATE from a closed list of column names
+ * (drawn only from "refresh_token"/"access_token"/"id_token" — never a
+ * user-controlled value, see the call site). Exported for the same Step 0
+ * characterization reason as {@link buildAccountsSelectSql}.
+ */
+export function buildAccountUpdateSql(cols: string[]): string {
+  const setClauses = cols.map((col, i) => `"${col}" = $${i + 1}`).join(", ");
+  return `UPDATE accounts SET ${setClauses} WHERE id = $${cols.length + 1}::uuid`;
+}
 
 async function main(): Promise<void> {
   // No DATABASE_URL fallback. That fallback is what made running this against
@@ -88,19 +126,9 @@ async function main(): Promise<void> {
             "migrate-account-tokens-to-encrypted",
           );
 
-          // The Prisma schema maps Account.providerAccountId to the
-          // provider_account_id column (snake_case in DB), so the raw query
-          // must reference the column name and alias it back to the camelCase
-          // shape the rest of the script reads as.
           // raw-sql-ident: cursorId branch interpolates a fixed literal clause string (never the cursorId value itself, which is bound as $1); BATCH_SIZE is a compile-time constant
           const batch: RawAccount[] = await tx.$queryRawUnsafe<RawAccount[]>(
-            `SELECT id, user_id AS "userId", provider,
-                provider_account_id AS "providerAccountId",
-                refresh_token, access_token, id_token
-         FROM accounts
-         ${cursorId ? "WHERE id > $1::uuid" : ""}
-         ORDER BY id ASC
-         LIMIT ${BATCH_SIZE}`,
+            buildAccountsSelectSql(cursorId !== null, BATCH_SIZE),
             ...(cursorId ? [cursorId] : []),
           );
           if (batch.length === 0) return true;
@@ -180,14 +208,11 @@ async function main(): Promise<void> {
 
             // Single-row UPDATE, parameterized. Build the SET clause from the
             // fields that actually need rewriting.
-            const setClauses = updates
-              .map((u, i) => `"${u.col}" = $${i + 1}`)
-              .join(", ");
             const params = [...updates.map((u) => u.value), row.id];
             try {
               // raw-sql-ident: u.col is drawn only from the closed 3-literal set ("refresh_token"/"access_token"/"id_token") hardcoded above in this function, never from row/user input
               await tx.$executeRawUnsafe(
-                `UPDATE accounts SET ${setClauses} WHERE id = $${updates.length + 1}::uuid`,
+                buildAccountUpdateSql(updates.map((u) => u.col)),
                 ...params,
               );
               rewritten += 1;
@@ -226,7 +251,12 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run only when invoked as a CLI, so a test can import buildAccountsSelectSql /
+// buildAccountUpdateSql without the module connecting to a DB on import
+// (same pattern as scripts/tenant-domain.ts).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
