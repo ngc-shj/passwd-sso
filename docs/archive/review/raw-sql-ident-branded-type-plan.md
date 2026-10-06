@@ -83,8 +83,14 @@ export function renderSql(fragment: SqlFragment): string;
 
 - Exports are exactly these four functions and two types: no registry, no test
   hook, no re-export, no `Symbol.for` state. No node-only imports (VE1).
-- Genuine objects are frozen; `toString`, `valueOf`, `Symbol.toPrimitive` and
-  `toJSON` throw.
+- Genuine objects are `Object.create(null)` objects, frozen, holding no text in any
+  own property, whose only members are throwing `toString`, `valueOf`,
+  `Symbol.toPrimitive` and `toJSON`. No class or constructor is reachable from a
+  genuine value (round 4, Sec S11). The WeakMap is written only inside the four
+  exported functions.
+- The built-ins the module calls (`WeakMap.prototype.get` / `set`, `Object.freeze`,
+  `Object.create`, `Number.isSafeInteger`, `Array.prototype.join`) are captured once
+  at module load and called through the captured references.
 - `trustedSql` cannot tell a real template object from a forged array at runtime;
   tag-only use is enforced by C3.
 - Control class: `enforceable boundary` against callers holding strings, `any`
@@ -100,6 +106,9 @@ export function renderSql(fragment: SqlFragment): string;
   - a genuine value throws in a template literal, with `+`, under `String()`, on a
     direct `.toString()`, on a direct `.valueOf()`, and under `JSON.stringify` — each
     red-proven by removing that one override;
+  - `Object.getPrototypeOf(v) === null` for every genuine value, and no value
+    reachable from a genuine value through `constructor` / prototype walks yields an
+    object `renderSql` accepts;
   - the module's export names equal the four functions.
 
 ### C2 — Call-site and producer migration
@@ -130,7 +139,7 @@ Member set (re-derived in plan review rounds 1–3, ts-morph over non-test `src`
 ### C3 — Gate rewrite (`scripts/checks/check-raw-sql-usage.mjs`, Layer 2)
 
 Scope: every non-test `.ts .tsx .mts .cts .js .mjs .cjs` under `src/`, `scripts/`,
-`prisma/`. `scripts/checks/**` (gate sources that spell the names as data) is exempt
+`prisma/` and at the repository root (`proxy.ts`, `sentry.*.config.ts`, …). `scripts/checks/**` (gate sources that spell the names as data) is exempt
 from `RAW_METHOD`'s literal-content clause only; every other rule applies there.
 `src/lib/prisma/raw-sql.ts` is exempt from `RAW_SQL_NAMES`. Independent of Layer 1.
 
@@ -158,6 +167,15 @@ Fail-closed reasons:
   namespace or default import, `export * from`, `require()`, `import()`,
   `import x = require()` — denies; a non-literal `import()` / `require()` argument in
   a scanned file denies.
+- `SPECIFIER_LITERAL` (round 4, Sec S9) — any expression-position string literal
+  (decoded value) that matches the Prisma pattern below, or that resolves to
+  `raw-sql.ts` under a case-insensitive comparison, denies unless it is the specifier
+  of an allowed import declaration. This catches loaders under another name
+  (`createRequire(…)("@prisma/client")`, `requireModule("…/raw-sql")`). Measured: no
+  such literal outside import declarations today.
+- `UNSCANNED_IMPORT` (round 4, Sec S10) — a scanned file's import specifier that
+  resolves into an excluded test path (`*.test.*`, `__tests__`, `manual-tests`,
+  `e2e`) denies. Measured: 0 today.
 - `RAW_METHOD` — names matching `/^\$(query|execute)Raw\w*$/`, found as an identifier,
   property name, or the decoded value of a string / no-substitution template literal,
   in expression position. Allowed only: `$queryRaw` / `$executeRaw` as the name of a
@@ -165,17 +183,26 @@ Fail-closed reasons:
   `$executeRawUnsafe` as the name of a property access that is directly (optional
   chaining allowed, no parentheses) the callee of a call. Everything else denies,
   including any use of `…Internal` / `…Typed`.
-- `PRISMA_IMPORT` — for specifiers matching `^(@prisma/client|\.prisma/client)(/|$)`:
-  only named imports of `PrismaClient`, `Prisma` and the generated enums, unaliased;
-  no default or namespace import, no `require()` / `import()`, no `export … from`.
-  In expression position `Prisma` appears only as `Prisma.<member>` with member in
-  {`PrismaClientKnownRequestError`, `PrismaClientInitializationError`, `dmmf`,
-  `DbNull`, `JsonNull`, `AnyNull`} (the members in use today, re-derived at
-  implementation); anything else — `Prisma.raw` / `sql` / `join` / `Sql` / `empty`,
-  element access, destructuring, aliasing `Prisma` — denies.
-  `@prisma/adapter-pg` is imported only where it is today (the client constructors).
-- `PRISMA_EXTENDS` — `$extends` in expression position denies (0 uses today; a client
-  extension's `query.$allOperations` can rewrite SQL without spelling a raw method).
+- `PRISMA_IMPORT` — every specifier matching `^(@prisma|\.prisma)(/|$)` (round 4,
+  Sec S8: `@prisma/client-runtime-utils` exports the same `raw` / `sql` / `join` /
+  `empty` / `Sql`). Only two are allowed:
+  - `@prisma/client`: type-only imports (declaration or specifier level) are
+    unrestricted (round 4, Func F1 — `import type { AuditLog }`); value imports are
+    named, unaliased, and limited to `PrismaClient`, `Prisma`, and the enum names
+    declared in `prisma/schema.prisma` (the gate reads them; it fails closed if an
+    enum name equals a non-enum top-level export of `@prisma/client` such as `raw`,
+    `sql`, `join`, `empty`, `Decimal`);
+  - `@prisma/adapter-pg`: only in the files that construct a client today
+    (re-derived at implementation).
+  Every other `@prisma/*` / `.prisma/*` specifier, default or namespace import,
+  `require()` / `import()`, and `export … from` denies. In expression position
+  `Prisma` appears only as `Prisma.<member>` with member in
+  {`PrismaClientKnownRequestError`, `PrismaClientInitializationError`} — the two
+  measured in use (round 4, Sec S14 / Func F2); anything else — `Prisma.raw`, element
+  access, destructuring, `Prisma` as an argument or alias — denies.
+- `PRISMA_EXTENDS` — `$extends` as an identifier, property name, or decoded literal
+  value, in expression position, denies (0 uses today; a client extension's
+  `query.$allOperations` can rewrite SQL without spelling a raw method).
 - Fail closed on 0 files analysed and on a file that fails to parse.
 
 Residual (declared; enforced by review, not by this gate):
@@ -185,8 +212,18 @@ Residual (declared; enforced by review, not by this gate):
 - reflective enumeration that never spells a name (`Object.getOwnPropertyNames(…)`, `for…in`);
 - Prisma internals through `any` (`_request`, `_executeRequest`) and the pg adapter's
   `queryRaw` / `executeRaw` methods;
-- `eval` / `Function`; code that replaces `WeakMap.prototype.get` or
-  `Number.isSafeInteger` before the module loads.
+- a loader under another name called with a computed specifier; `module.require`,
+  `require.cache`, `__webpack_require__`;
+- adding a third-party dependency that re-exports a raw-SQL producer
+  (`sql-template-tag` and the like) — reviewed as a dependency change;
+- imports into files outside the scan (today: `scripts/generate-team-key-fixture.ts`
+  imports two files under `extension/src/lib/`, which hold no SQL);
+- `eval` / `Function`; replacing a built-in the module calls before it loads (after
+  load, the captured references are used).
+
+Threat model: the gate is aimed at accidental and casual misuse in code that goes
+through review. Deliberately obfuscated code can defeat any static gate (the
+residual above); for that, review is the control.
 
 Layer 1 keeps its behaviour. The `ident-markers=N` suffix is removed from the
 allowlist grammar (a leftover suffix is a parse error) and from `raw-sql-usage.txt`.
@@ -199,12 +236,24 @@ allowlist grammar (a leftover suffix is a parse error) and from `raw-sql-usage.t
     per local-declaration kind and one per specifier variant / loading form, an
     escaped literal (`tx["\x24queryRaw"]`, and in a no-substitution template),
     `import { raw } from "@prisma/client"` in a `.mjs` file, `import { raw as r }`,
-    `tx["$queryRaw"]({ sql: x, values: [] })`;
-  - allow: literal, no-substitution template, `renderSql(…)`, tagged `trustedSql`,
+    `import { raw } from "@prisma/client-runtime-utils"`, `tx["$queryRaw"]({ sql: x,
+    values: [] })`, `Prisma.raw(x)` / `Prisma.sql` / `Prisma["raw"]` /
+    `const { raw } = Prisma` / `const P = Prisma` after a legitimate
+    `import { Prisma }`, `prisma.$extends(…)` / `prisma["$extends"]`,
+    `createRequire(…)("@prisma/client")`, a case-variant raw-sql specifier,
+    an import of a `*.test.ts` file, string-named `import { "trustedSql" as t }` and
+    `export { x as "trustedSql" }`;
+  - allow: each accepted specifier spelling of the raw-sql import (alias, relative
+    without extension, relative `.js`, relative `.ts`, `/index`) used in
+    `UNSAFE_ARG`'s form (round 4, Test T17); literal, no-substitution template,
+    `renderSql(…)`, tagged `trustedSql`,
     `sqlIdentifier(…)`, tagged `$queryRaw`, direct and `?.` Unsafe calls, type
     positions (`TxProbe`'s method signature, `Pick<…, "$executeRaw">`, a
-    `{ $executeRaw: … }` type literal), each allowlisted `Prisma.*` member and enum
-    import, a raw-method name as a string inside `scripts/checks/`;
+    `{ $executeRaw: … }` type literal), each allowlisted `Prisma.*` member, an enum
+    import, `import type { AuditLog }`, a raw-method name as a string inside
+    `scripts/checks/`;
+  - structure: a table of `{ name, files, expectCode, expectReason }` rows driven by
+    `it.each`, deny and allow rows adjacent per rule.
   - scope: one violating fixture per extension (`.mts .cts .js .mjs .cjs`) and one
     under `prisma/`, failing for the same reason as a `.ts` sibling;
   - empty scan root → fail; unparsable file → fail.
@@ -283,5 +332,5 @@ describes the marker mechanism today.
 |----|---------|--------|
 | C1 | `raw-sql.ts` runtime-checked opaque values | pending |
 | C2 | Call-site and producer migration | pending |
-| C3 | AST gate (positional allowlists: Unsafe args, raw-sql names, raw methods, Prisma imports) | pending |
+| C3 | AST gate (positional allowlists: Unsafe args, raw-sql names, specifier literals, raw methods, Prisma imports) | pending |
 | C4 | Docs | pending |

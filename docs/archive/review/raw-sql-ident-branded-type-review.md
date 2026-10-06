@@ -114,3 +114,41 @@ R29 (F2, F3), R42 (F4), R49 (F1) triggered; R1, R3, R41, R46–R48 clear.
 R1, R29, R42, R46, R47, R48, R49 flagged (S1–S6); RS3 (S6); R3, R55, RS1, RS2, RS4–RS6 clear.
 ### Testing expert
 R42 (T13, T15), R50 (T14), RT7 (T12) triggered; T8–T11 verified.
+
+---
+
+# Round 4
+Date: 2026-10-06
+
+## Changes from Previous Round
+Round-3 dispositions applied (positional allowlists replacing scope resolution; `PRISMA_IMPORT`; throwing `toJSON`; per-kind and per-extension fixtures; Step 0 diff check).
+
+## Functionality Findings
+- F1 [Critical, feasibility] `PRISMA_IMPORT` reds `import type { AuditLog }` (a model). Resolved: type-only imports unrestricted.
+- F2 [Major] `Prisma.*` member list larger than measured. Resolved: the two measured members.
+- Verified: 0 occurrences of the four raw-sql names anywhere; RAW_METHOD hits are type positions only; `@prisma/adapter-pg` only in client constructors; 0 `$extends`; no throwing `toJSON` on any C2 logging path.
+
+## Security Findings (Opus)
+- S8 [Critical, escalate] `@prisma/client-runtime-utils` exports the same producers. Resolved: `PRISMA_IMPORT` covers every `@prisma/*` / `.prisma/*` specifier, allowing only `@prisma/client` and `@prisma/adapter-pg`. The escalation (already Opus) is answered by inverting the specifier set rather than adding a member; Opus judged an incremental check of S8–S11 text sufficient after this round.
+- S9 [Major] aliased loader / case-variant specifier. Resolved: `SPECIFIER_LITERAL` (positional, case-insensitive); computed specifier → residual.
+- S10 [Major] laundering through unscanned files. Resolved: `UNSCANNED_IMPORT`; root files in scope; remaining extension/ import declared.
+- S11 [Major] constructor reachable from a genuine value. Resolved: null-prototype frozen objects; acceptance tests.
+- S12 [Minor] `$extends` literal forms. Resolved.
+- S13 [Minor] enum source / type-only imports. Resolved: names read from `prisma/schema.prisma` with a disjointness check; type-only exempt.
+- S14 [Minor] member list. Resolved (same as Func F2).
+- S15 [Minor] built-in replacement after load. Resolved: built-ins captured at load; residual reworded.
+- S16 [Minor] string-named import/export. Resolved: fixtures.
+- Added an explicit threat-model sentence to C3's residual.
+
+## Testing Findings
+- T16 [Critical] no fixture for `Prisma.raw` member access / `$extends`. Resolved: fixtures.
+- T17 [Major] accepted specifier spellings unproven. Resolved: one allow fixture per spelling.
+- Adjacent: table-driven self-test structure. Adopted in C3 acceptance.
+
+## Recurring Issue Check
+### Functionality expert
+R29, R42 (F1, F2) triggered; others clear.
+### Security expert
+R42 (S8, S10, S14), R47 (S9, S12, S16), R48 (S9), R49 (S8, S11, S15), R29 (S14), R3 (S9, S12) flagged; R46 clear (binding resolution removed); R1, R55, RS1–RS6 clear.
+### Testing expert
+RT7 (T16), RT10 (T16, T17) triggered; T12–T15 verified.
