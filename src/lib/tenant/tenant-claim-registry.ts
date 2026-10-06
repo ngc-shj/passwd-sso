@@ -16,38 +16,14 @@ export function normalizeTenantClaim(input: string): string {
 
 /**
  * The POSIX character class for "not printable ASCII", in the exact spelling
- * the SQL side uses. It is the SINGLE source for that predicate outside the
- * committed `.sql` files: `scripts/tenant-domain.ts`'s pre-flight queries bind
- * it as a query PARAMETER rather than spelling it again.
- *
- * Why it is a constant and not another literal: the pre-flight report exists to
- * tell an operator which rows the C1 CHECK constraint will reject *before* they
- * run the migration. A second, independently-maintained copy of the predicate
- * is a report that goes quietly wrong at exactly the moment it is relied on.
- * The two `.sql` copies (the CHECK and the backfill) cannot import this, so
- * `tenant-claim-registry.test.ts` pins them against it by reading the files.
+ * the `tenant_claims_claim_normalized` CHECK uses. The CHECK lives in a
+ * committed `.sql` file and cannot import it, so
+ * `tenant-claim-registry.test.ts` pins the two together by reading the
+ * migration, and pins this to `storableClaimSchema` below — which is what keeps
+ * the database's refusal and the application's refusal the same predicate.
  */
 export const NON_PRINTABLE_ASCII_SQL_CLASS = "[^\\x20-\\x7E]";
 
-/**
- * The Postgres-side fold that turns a raw `tenants.external_id` into the form
- * `tenant_claims.claim` stores — the SQL twin of `normalizeTenantClaim`.
- *
- * `COLLATE "C"` is load-bearing and is round-5 D3's remedy: `lower()` is
- * LC_CTYPE-dependent, so without it the same column folds differently on two
- * deployments and a claim that resolves on one silently does not on the other.
- *
- * FIVE places spell this: the migration's backfill, its extracted `.sql` twin,
- * two `tenant-domain preflight` queries, and `findFoldedExternalIdOwner` —
- * which decides whether a sign-in creating a tenant collides with an existing
- * one. Round-3 F11 found the fifth had no guard at all, so a divergence there
- * would silently disagree with the report an operator runs to predict it. The
- * `.sql` files cannot import this constant, and the two `.ts` copies sit
- * inside tagged-template SQL where interpolating it would mean `Prisma.raw`;
- * `tenant-claim-registry.test.ts` therefore pins all five by reading the files,
- * the same shape D-18 used for the ASCII class above.
- */
-export const EXTERNAL_ID_FOLD_SQL = 'lower(btrim(external_id) COLLATE "C")';
 
 // The JS mirror of the same predicate. `asciiPrintable` is the repo's existing
 // shared constant for this character class (used by the generator-prefs

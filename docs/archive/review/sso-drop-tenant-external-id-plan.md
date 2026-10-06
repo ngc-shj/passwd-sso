@@ -238,3 +238,35 @@ line; it is a compile error once the field leaves `schema.prisma`, so `tsc` /
 | C4 | CLI: ref resolution, preflight removed | locked |
 | C5 | Backfill SQL, fold constant, stale comments removed | locked |
 | C6 | Docs | locked |
+
+## Implementation Checklist
+
+Derived 2026-10-06 (Step 2-1) by mechanism, not by the plan's list:
+`git grep -lnE 'tenants.*external_id|externalId: (tenantClaim|ref)|where: \{ externalId|EXTERNAL_ID_FOLD|findFoldedExternalIdOwner|external_id' -- src scripts e2e infra prisma/schema.prisma`,
+`git grep -lnE 'claim_collision|"collision"' -- src scripts`,
+`git grep -lnE 'cmdPreflight|preflight' -- <tenant paths>`, `git grep -lnE 'tenant-claim-backfill' -- src scripts`.
+
+Production (C1–C5):
+- [ ] `prisma/schema.prisma` — drop `Tenant.externalId`
+- [ ] `prisma/migrations/<ts>_drop_tenant_external_id/migration.sql` — new
+- [ ] `scripts/checks/destructive-migration-baseline.txt` — one entry
+- [ ] `src/lib/tenant/tenant-management.ts` — C2 + JSDoc (NF1a)
+- [ ] `src/lib/audit/auth-failure-mapping.ts` — `claim_collision` out of type + `CLAIM_REFUSAL_REASON` + comments
+- [ ] `src/lib/auth/session/auth-adapter.ts` — comments
+- [ ] `scripts/lib/tenant-domain-buckets.ts` — `REFUSAL_BUCKET` + comment
+- [ ] `src/lib/tenant/tenant-claim-registry.ts` — `EXTERNAL_ID_FOLD_SQL` + pre-flight prose
+- [ ] `src/lib/tenant/tenant-claim.ts` — external_id / preflight comment
+- [ ] `scripts/tenant-domain.ts` — `resolveTenantRef`, `cmdPreflight`, usage, dispatch, prose
+- [ ] `scripts/lib/tenant-claim-backfill.sql` — delete
+- [ ] `scripts/checks/worker-policy-manifest.json` — drop `preflight`
+
+Tests (R19 — all trees searched: co-located `src/**/*.test.ts`, `src/__tests__/`, `scripts/__tests__/`, `e2e/` (no hits)):
+- [ ] `src/lib/tenant/tenant-management.test.ts`, `resolve-tenant-by-claim.test.ts`, `tenant-claim-registry.test.ts` (C5 boundary), `tenant-claim.test.ts`
+- [ ] `src/auth.test.ts`, `src/lib/auth/session/auth-adapter.test.ts`, `src/lib/audit/auth-failure-mapping.test.ts`, `scripts/__tests__/tenant-domain-buckets.test.ts`
+- [ ] `src/__tests__/db-integration/tenant-claim.integration.test.ts`, `tenant-claim-cli.integration.test.ts` (per-assertion instructions)
+
+Docs (C6, NF1a): `README.md`, `README.ja.md`, `CLAUDE.md`, `docs/operations/sentinel-tenant-membership.md`, `docs/security/security-review.md`.
+
+Confirmed unrelated (not touched): `scripts/rls-cross-tenant-seed.sql`, `scripts/tenant-team-phase2-validate.sql`, `directory-sync-*` (SCIM `external_id`); `scripts/checks/migration-transaction-baseline.txt` (migration directory name); `src/__tests__/db-integration/helpers.test.ts` (synthetic error-string fixture, never executed as SQL).
+
+CI parity: 15 CI gate commands extracted; all already run through `scripts/pre-pr.sh` or the mandatory checks. No gap.

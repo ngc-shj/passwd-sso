@@ -107,7 +107,6 @@ export function bucketOf(row: BucketInput): UnmappedBucket {
  */
 export const REFUSAL_BUCKET = {
   claim_taken: UNMAPPED_BUCKET.UNREGISTERED,
-  claim_collision: UNMAPPED_BUCKET.UNREGISTERED,
   claim_invalid: UNMAPPED_BUCKET.REFUSED,
   claim_malformed: UNMAPPED_BUCKET.REFUSED,
   store_unavailable: null,
@@ -132,9 +131,8 @@ export const RESOLVED_ELSEWHERE_BUCKET: UnmappedBucket = UNMAPPED_BUCKET.OTHER_T
 /**
  * `reason → bucket`, derived from `REFUSAL_BUCKET` through `CLAIM_REFUSAL_REASON`.
  *
- * The map is MANY-TO-ONE by design — `claim_taken` and `claim_collision` share
- * `tenant_claim_unmapped`, `claim_invalid` and `claim_malformed` share
- * `tenant_mismatch` — and `bucketOf` reads the row's `reason`, not its arm,
+ * The map is MANY-TO-ONE by design — `claim_invalid` and `claim_malformed`
+ * share `tenant_mismatch` — and `bucketOf` reads the row's `reason`, not its arm,
  * because that is all an audit row carries. So the derivation is only sound
  * while every arm sharing a reason also shares a bucket, and nothing in the type
  * system says so. This throws at module load if that ever stops holding, which

@@ -35,7 +35,6 @@
 // Usage:
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list [--tenant <ref>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped [--days <n>]
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove  --tenant <ref> --domain <domain> --by <label> [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid> [--after <seq>]
@@ -51,12 +50,9 @@
 // `resolveOwningTenantIdFromClient` uses to answer reads, so this closes the WRITE
 // side of the same class rather than introducing a second rule (C4/#838).
 //
-// `--tenant <ref>` accepts the tenant's UUID, one of its already-registered
-// claims (normalised the same way `add`/`remove` normalise `--domain`), or its
-// `tenants.external_id`. The last matters at incident time: a tenant whose
-// backfill row `preflight` reports as skipped has NO claim row, and would
-// otherwise be nameable only by UUID. `tenants.slug` is NOT accepted — see
-// resolveTenantRef for why (round-2 F-F).
+// `--tenant <ref>` accepts the tenant's UUID or one of its already-registered
+// claims (normalised the same way `add`/`remove` normalise `--domain`).
+// `tenants.slug` is NOT accepted — see resolveTenantRef for why (round-2 F-F).
 //
 // `--by` is a self-asserted operator label (NOT authenticated attribution —
 // there is no application user identity on this connection, see SC8). It is
@@ -96,7 +92,6 @@ import {
   normalizeTenantClaim,
   storableClaimSchema,
   operatorDomainSchema,
-  NON_PRINTABLE_ASCII_SQL_CLASS,
 } from "@/lib/tenant/tenant-claim-registry";
 import { UUID_RE, SYSTEM_TENANT_ID, SYSTEM_ACTOR_ID, NIL_UUID } from "@/lib/constants/app";
 import {
@@ -245,17 +240,7 @@ function confirmationTimeoutResult(error: unknown): CmdResult | null {
 
 // `--tenant` resolution, in priority order:
 //   1. a literal UUID names the tenant directly;
-//   2. an already-registered claim (normalised the same way `--domain` is) —
-//      the registry is authoritative, so it wins over 3;
-//   3. `tenants.external_id` (@unique), exact match on the raw ref.
-//
-// 3 exists because a tenant that `preflight` reports as SKIPPED by the backfill
-// (normalisation collision, or non-ASCII external_id) has no claim row at all,
-// and would otherwise be nameable only by UUID at exactly the moment an
-// operator is trying to repair it. It matches the raw ref rather than the
-// normalised one because the column is stored, and matched elsewhere, verbatim
-// (D-3's release-1 externalId fallback is an exact match too); normalising here
-// would resolve refs that no other code path resolves.
+//   2. an already-registered claim (normalised the same way `--domain` is).
 //
 // `tenants.slug` is deliberately NOT a resolution path (round-2 F-F). A
 // sign-in-created tenant gets `slug = slugifyTenant(rawClaim)`, which collapses
@@ -265,13 +250,9 @@ function confirmationTimeoutResult(error: unknown): CmdResult | null {
 // comment names — can pre-empt the slug an operator would later type (assert
 // `"acme com"` to own `acme-com`). `--tenant` names the GAINING side of a
 // reassignment, so a wrong resolution hands the claim to the attacker's tenant,
-// and `--yes` removes the visual check. `external_id` carries no such hazard:
-// it is @unique and matched verbatim, so the ref the operator types names at
-// most one tenant, and owning it requires having asserted that exact string
-// before the legitimate tenant existed. Dropping slug costs no reachability
-// either — every tenant `preflight` reports has a non-null `external_id` by
-// construction (all three of its queries require it), which is the need 3 was
-// added for.
+// and `--yes` removes the visual check. A registered claim carries no such
+// hazard: `UNIQUE(claim)` makes the ref name at most one tenant, and the
+// registration itself is recorded in `tenant_claim_events`.
 //
 // Revoked claims still resolve a tenant reference here — the row still
 // occupies its slot in UNIQUE(claim) and identifying "which tenant used to
@@ -292,11 +273,8 @@ async function resolveTenantRef(
     where: { claim },
     select: { tenantId: true },
   });
-  if (row) {
-    return tx.tenant.findUnique({ where: { id: row.tenantId }, select });
-  }
-
-  return tx.tenant.findUnique({ where: { externalId: ref }, select });
+  if (!row) return null;
+  return tx.tenant.findUnique({ where: { id: row.tenantId }, select });
 }
 
 async function activeMemberCount(tx: TxClient, tenantId: string): Promise<number> {
@@ -679,145 +657,6 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
   }
 }
 
-// ─── preflight ───────────────────────────────────────────────────
-
-type CollisionRow = { normalized_claim: string; tenant_ids: string[]; collision_count: bigint | number };
-type NonAsciiRow = { id: string; external_id: string };
-type RawExternalIdRow = { id: string; external_id: string; pg_fold: string };
-
-// Bound on the one pre-flight query that materialises rows instead of an
-// aggregate. Chosen well above any plausible tenant count for this
-// deployment shape (264 today) so it is a backstop, not a paging scheme.
-const PREFLIGHT_FOLD_SCAN_LIMIT = 50_000;
-
-export async function cmdPreflight(): Promise<CmdResult> {
-  const url = process.env.MIGRATION_DATABASE_URL;
-  if (!url) return missingUrlResult();
-
-  const prisma = migrationClientFactory.create(url);
-  try {
-    return await withBypassRls(
-      prisma,
-      async (tx) => {
-        // Query 1 — normalisation collisions: tenants whose RAW external_id
-        // folds (lower(btrim(x) COLLATE "C"), matching the CHECK/backfill —
-        // round-5 D3) to the same claim as another tenant's. The backfill
-        // excludes EVERY side of a collision (round-1 M3, via its
-        // `NOT IN (… GROUP BY 1 HAVING count(*) > 1)` clause — not via
-        // ON CONFLICT, which now only covers a claim row that already exists),
-        // so none of the tenants listed here gets a claim row at all. They keep
-        // resolving through the release-1 exact-match external_id fallback
-        // until an operator decides who owns the claim; a third spelling that
-        // neither stores verbatim is refused rather than allowed to squat the
-        // free slot (round-2 F-A, findOrCreateTenantForClaim's
-        // claim_collision arm).
-        const collisions = await tx.$queryRawUnsafe<CollisionRow[]>(
-          `SELECT lower(btrim(external_id) COLLATE "C") AS normalized_claim,
-                  array_agg(id ORDER BY id) AS tenant_ids,
-                  count(*)::int AS collision_count
-             FROM tenants
-            WHERE external_id IS NOT NULL
-              AND btrim(external_id) <> ''
-              AND external_id !~ $1
-            GROUP BY 1
-           HAVING count(*) > 1
-            ORDER BY 1`,
-          NON_PRINTABLE_ASCII_SQL_CLASS,
-        );
-
-        // Query 2 — non-ASCII RAW external_id values the backfill excludes
-        // entirely (SC9's narrowing made visible before the upgrade runs).
-        const nonAscii = await tx.$queryRawUnsafe<NonAsciiRow[]>(
-          `SELECT id, external_id
-             FROM tenants
-            WHERE external_id IS NOT NULL
-              AND btrim(external_id) <> ''
-              AND external_id ~ $1
-            ORDER BY id`,
-          NON_PRINTABLE_ASCII_SQL_CLASS,
-        );
-
-        // Query 3 (round-5 D3) — rows where the Postgres fold and the JS
-        // fold of the SAME raw external_id disagree. Only Postgres's half
-        // can run in SQL; the JS half runs here against the real
-        // normalizeTenantClaim (never reimplemented) and the two are
-        // compared in application code.
-        //
-        // This is the one query that pulls whole rows into memory rather
-        // than an aggregate, so it carries an explicit bound. Fetching
-        // LIMIT+1 makes truncation detectable, and a truncated scan says so
-        // loudly — a silently short scan here would be the "confidently
-        // wrong all-clear" pre-flight exists to prevent.
-        const scanned = await tx.$queryRawUnsafe<RawExternalIdRow[]>(
-          `SELECT id, external_id, lower(btrim(external_id) COLLATE "C") AS pg_fold
-             FROM tenants
-            WHERE external_id IS NOT NULL
-              AND btrim(external_id) <> ''
-            ORDER BY id
-            LIMIT $1::int`,
-          PREFLIGHT_FOLD_SCAN_LIMIT + 1,
-        );
-        const foldScanTruncated = scanned.length > PREFLIGHT_FOLD_SCAN_LIMIT;
-        const allExternalIds = foldScanTruncated
-          ? scanned.slice(0, PREFLIGHT_FOLD_SCAN_LIMIT)
-          : scanned;
-        const foldMismatches = allExternalIds
-          .filter((r) => r.pg_fold !== normalizeTenantClaim(r.external_id))
-          .map((r) => ({
-            id: r.id,
-            externalId: r.external_id,
-            pgFold: r.pg_fold,
-            jsFold: normalizeTenantClaim(r.external_id),
-          }));
-
-        // Every value below is escaped for display (round-3 A3). This command
-        // is the one place in the tool whose PURPOSE is to report values that
-        // are not printable ASCII — `tenants.external_id` carries no CHECK,
-        // and the non-ASCII query exists precisely to surface the rows the
-        // backfill excluded. Printing those verbatim would put a bidi override
-        // on the operator's terminal in the report that exists to warn them
-        // about it.
-        console.log("Pre-upgrade checks (C12):");
-        console.log(`  normalisation collisions: ${collisions.length}`);
-        for (const c of collisions) {
-          console.log(
-            `    claim="${escapeUnsafeDisplayChars(c.normalized_claim)}" tenants=${c.tenant_ids.join(",")} count=${Number(c.collision_count)}`,
-          );
-        }
-        console.log(`  non-ASCII external_id (excluded by backfill): ${nonAscii.length}`);
-        for (const n of nonAscii) {
-          console.log(`    tenant=${n.id} external_id="${escapeUnsafeDisplayChars(n.external_id)}"`);
-        }
-        console.log(
-          `  Postgres/JS fold mismatches: ${foldMismatches.length} (over ${allExternalIds.length} tenant(s) scanned)`,
-        );
-        for (const m of foldMismatches) {
-          console.log(
-            `    tenant=${m.id} external_id="${escapeUnsafeDisplayChars(m.externalId)}" ` +
-              `pgFold="${escapeUnsafeDisplayChars(m.pgFold)}" jsFold="${escapeUnsafeDisplayChars(m.jsFold)}"`,
-          );
-        }
-        if (foldScanTruncated) {
-          console.log(
-            `    WARNING: more than ${PREFLIGHT_FOLD_SCAN_LIMIT} tenants carry an external_id; ` +
-              "the fold-mismatch scan covered only the first page (ordered by id). " +
-              "Treat this result as INCOMPLETE.",
-          );
-        }
-
-        const message =
-          `${collisions.length} collision(s), ${nonAscii.length} non-ASCII, ` +
-          `${foldMismatches.length} fold mismatch(es)` +
-          (foldScanTruncated ? ` (fold scan TRUNCATED at ${PREFLIGHT_FOLD_SCAN_LIMIT} tenants).` : ".");
-        return { ok: true, code: 0, rows: [...collisions, ...nonAscii, ...foldMismatches], message };
-      },
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
-    );
-  } finally {
-    await prisma.$disconnect();
-  }
-}
-
 // ─── shared: --by validation ────────────────────────────────────
 
 // Sized to `tenant_claim_events.actor_label VARCHAR(255)`
@@ -993,17 +832,16 @@ export async function cmdAdd(args: {
         // already happened.
         //
         // Keyed on the RESOLVED id, not on the ref string. resolveTenantRef
-        // takes UUID → existing claim → external_id, so the sentinel has TWO
+        // takes UUID → existing claim, so the sentinel has TWO
         // spellings that reach here: its UUID, and any claim already pointing
         // at it — which is the spelling an operator uses during exactly the
         // incident this refusal is about. A check on the ref string would pass
         // for the second. (Its slug is not a third: slug is deliberately not a
-        // resolution path, and the sentinel carries no external_id.)
+        // resolution path.)
         //
         // `add` is the only creator of a sentinel claim. The sign-in JIT path
         // builds its claim as a nested write inside tenant.create, so it always
-        // targets a NEW tenant, and the backfill filters on external_id, which
-        // the sentinel row does not have.
+        // targets a NEW tenant.
         if (tenant.id === SYSTEM_TENANT_ID) {
           return {
             ok: false,
@@ -1959,7 +1797,7 @@ export async function cmdMeasure(): Promise<CmdResult> {
  */
 const BACKFILL_CANDIDATE_PAGE_SIZE = 200;
 
-/** `--limit`'s default and ceiling, named rather than inline (round pattern, see PREFLIGHT_FOLD_SCAN_LIMIT / HISTORY_ROW_CAP above). */
+/** `--limit`'s default and ceiling, named rather than inline (round pattern, see HISTORY_ROW_CAP above). */
 const DEFAULT_BACKFILL_LIMIT = 100;
 const MAX_BACKFILL_LIMIT = 10_000;
 
@@ -2245,7 +2083,6 @@ function printUsage(): void {
       "Usage:",
       "  tenant-domain list    [--tenant <ref>]",
       `  tenant-domain unmapped [--days <n>]           (default ${DEFAULT_UNMAPPED_WINDOW_DAYS})`,
-      "  tenant-domain preflight",
       "  tenant-domain add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
       "  tenant-domain remove  --tenant <ref> --domain <domain> --by <label> [--yes]",
       "  tenant-domain history --domain <claim> | --tenant <uuid> [--after <seq>]",
@@ -2316,9 +2153,6 @@ async function main(): Promise<void> {
       result = await cmdUnmapped(rawDays === undefined ? {} : { days: Number(rawDays) });
       break;
     }
-    case "preflight":
-      result = await cmdPreflight();
-      break;
     case "add": {
       const tenant = getStringFlag(flags, "tenant");
       const domain = getStringFlag(flags, "domain");

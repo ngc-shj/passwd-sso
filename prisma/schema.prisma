@@ -502,7 +502,6 @@ model Team {
 
 model Tenant {
   id                                   String   @id @default(uuid(4)) @db.Uuid
-  externalId                           String?  @unique @map("external_id") @db.VarChar(255)
   isBootstrap                          Boolean  @default(false) @map("is_bootstrap")
   name                                 String
   slug                                 String   @unique
