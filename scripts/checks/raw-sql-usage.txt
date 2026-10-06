@@ -3,53 +3,53 @@
 # be listed here with a purpose (>=10 chars). Enforced by
 # scripts/checks/check-raw-sql-usage.mjs, registered in scripts/pre-pr.sh.
 #
-# Format: path # purpose [# ident-markers=N]
+# Format: path # purpose
 #   - path: repo-relative, exactly as reported by the seeding grep below.
 #   - purpose: what the raw SQL in this file is for (>=10 chars), reviewer-facing.
-#   - ident-markers=N (optional, Unsafe-interpolating files only): the exact
-#     count of `// raw-sql-ident: <reason>` markers this file's Unsafe call
-#     spans carry (see check-raw-sql-usage.mjs Layer 2). Omitting this suffix
-#     is equivalent to N=0 — a marked span in a file with no suffix fails as a
-#     count mismatch (fail-closed default; must-declare, not may-declare).
+#   A leftover third `#`-segment (the former optional per-file marker-count
+#   suffix) is a parse error — that grammar was removed along with the marker
+#   mechanism; see below.
 #
-# --- Two-layer design (see plan docs/archive/review/route-policy-sql-security-plan.md, C2) ---
+# --- Two-layer design (see the "unforgeable SQL text for raw-SQL calls" plan
+#     and review log under docs/archive/review/, C3) ---
 # Layer 1 (this file): every matching file must be allowlisted with a purpose;
 #   a listed file that no longer matches the regex fails as STALE_EXEMPT.
-# Layer 2 (check-raw-sql-usage.mjs, unconditional, fires on allowlisted files
-#   too): tracks the backtick-delimited template-literal span of every
-#   `$executeRawUnsafe(`/`$queryRawUnsafe(` call argument and flags any `${`
-#   interpolation inside that span. This is the compensating control for
-#   Layer 1's file-level granularity — a new injection-shaped call cannot hide
-#   inside an already-allowlisted high-density file (audit-outbox-worker.ts has
-#   ~19 raw call sites, sweep.ts has 4 Unsafe sites across ~530 lines).
+# Layer 2 (check-raw-sql-usage.mjs, ts-morph AST pass, independent of Layer 1,
+#   unconditional — fires on allowlisted files too): the runtime guarantee that
+#   SQL text reaching an Unsafe call is either a literal or produced by
+#   `renderSql()` from a genuine, runtime-verified value lives in
+#   src/lib/prisma/raw-sql.ts (a module-private WeakMap adjudicates which
+#   values are real). This gate enforces only the SYNTAX the runtime cannot
+#   see: every occurrence of a sensitive name (`renderSql`, `trustedSql`,
+#   `sqlIdentifier`, `joinSql`, the `$queryRaw`/`$executeRaw` family, any
+#   `@prisma/*` import, `$extends`) is judged by its syntactic POSITION alone —
+#   never by what it is bound to. An Unsafe call's first argument must be a
+#   string literal, a no-substitution template, or a direct `renderSql(...)`
+#   call; nothing wrapped around or appended to it. The former inline-comment
+#   marker mechanism (a lexical span tracker that trusted a comment naming a
+#   validator, without checking the validator ran) is removed entirely —
+#   superseded by the runtime-checked opaque values.
 #
 # --- Baseline (re-verified at implementation time, 2026-07-04) ---
 # Zero call sites in this inventory interpolate user- or tenant-derived input
 # into a raw SQL string. Unsafe variants use EITHER (a) static SQL + `$N` bound
 # parameters (the overwhelming majority — maintenance audit-chain-verify,
 # audit-outbox-worker, audit-chain-verify-worker.ts), OR (b) interpolate only
-# `assertIdentifier`-validated identifiers from the closed retention-gc
-# registry (sweep.ts — table/cutoffColumn/keyColumns names validated at worker
-# boot by `validateRegistry()` in retention-gc-worker/index.ts, never derived
-# from a request). scripts/migrate-account-tokens-to-encrypted.ts interpolates
-# a fixed compile-time literal (`BATCH_SIZE`, a hardcoded conditional `WHERE`
-# clause string) and column names from a closed 3-element literal set defined
-# in the same function — never user/tenant input either, but not routed
-# through `assertIdentifier`, so it carries its own named markers below.
+# identifiers from the closed retention-gc registry (sweep.ts —
+# table/cutoffColumn/keyColumns names validated at worker boot by
+# `validateRegistry()` in retention-gc-worker/index.ts, never derived from a
+# request; migrated to `sqlIdentifier()` under the plan above).
+# scripts/migrate-account-tokens-to-encrypted.ts interpolates a fixed
+# compile-time literal (`BATCH_SIZE`, a hardcoded conditional `WHERE` clause
+# string) and column names from a closed 3-element literal set defined in the
+# same function — never user/tenant input either, migrated to `trustedSql`.
 # Non-Unsafe `$executeRaw`/`$queryRaw` tagged-template calls are Prisma-
 # parameterized by construction (interpolated expressions become bound
-# parameters, not string-concatenated SQL) and are out of Layer 2's scope by
-# design — the injection-shaped risk Layer 2 targets is specific to the
-# *Unsafe variants, which take a plain string/argument list.
-#
-# --- ident-markers pairing rule ---
-# An interpolated span inside an Unsafe call is exempt ONLY if it carries a
-# `// raw-sql-ident: <reason, >=10 chars>` marker (on the call line or inside
-# the span) AND this file's ident-markers=N matches the marked-span count
-# EXACTLY. Orphaned markers (marker present, N not bumped) fail. New
-# interpolation without a marker fails. The marker reason must NAME the
-# validation mechanism (never just "safe" or "validated") so review can verify
-# the named mechanism actually runs before the marked span.
+# parameters, not string-concatenated SQL); Layer 2's PRISMA_IMPORT/RAW_METHOD
+# rules still constrain how the tag itself and Prisma's other exports may be
+# used (FR4) — the injection-shaped risk the former Layer 2 targeted narrowly
+# (the Unsafe variants' plain string/argument list) is now closed at the value
+# level by `src/lib/prisma/raw-sql.ts`, not by a per-file marker count.
 #
 # Seeded via (R42 refresh, re-run at implementation start, 2026-07-04):
 #   grep -rlE '\$(queryRaw|executeRaw)(Unsafe)?\b' src scripts --include='*.ts' --include='*.tsx' \
@@ -62,7 +62,7 @@
 
 scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
 scripts/lib/assert-bypass-rls-active.ts # reads current_setting('app.bypass_rls') on the caller's transaction so a migration cannot proceed with RLS silently emptying its reads; static SQL, no interpolation, no parameters
-scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table # ident-markers=2
+scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table
 scripts/tenant-domain.ts # operator CLI: unmapped-claim report unions audit_logs + audit_outbox by static SQL + $N params, no interpolation
 src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verify endpoint; static SQL + $N params reading audit_logs/audit_chain_anchors
 src/app/api/maintenance/audit-outbox-metrics/route.ts # operator-gated outbox depth/age metrics query, tagged-template $queryRaw
@@ -83,6 +83,7 @@ src/lib/auth/webauthn/webauthn-authorize.ts # CAS counter update on WebAuthn cre
 src/lib/auth/webauthn/webauthn-server.ts # CAS counter update on WebAuthn credential within caller's tx
 src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding concurrent directory sync runs
 src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/age metrics
+src/lib/prisma/raw-sql.ts # names $queryRawUnsafe/$executeRawUnsafe in its header comment describing the values Unsafe call sites elsewhere must use; mints/renders SqlIdentifier/SqlFragment but issues no raw-SQL call itself
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
 src/lib/tenant-rls.ts # defines the RLS GUC helpers (set_config for app.tenant_id / app.bypass_rls / app.bypass_purpose)
 src/lib/tenant/tenant-claim-event.ts # append-only routing-history INSERT with no RETURNING (passwd_app holds INSERT but not SELECT)
@@ -91,5 +92,5 @@ src/lib/vault/key-version-guard.ts # row lock (FOR SHARE) reading users.key_vers
 src/lib/vault/rotate-key-server.ts # row lock (FOR UPDATE) on users for the pre-write rotation tuple-CAS (key_version/vault_setup_at/account_salt)
 src/lib/vault/vault-reset.ts # row lock (FOR UPDATE) on users, acquired first for lock-order consistency with rotation before entry deletes
 src/workers/audit-anchor-publisher.ts # bypass_rls GUC set + anchor row lock/read for chain anchor publishing
-src/workers/audit-outbox-worker.ts # outbox claim/deliver/reap/purge queries; static SQL + $N params, one code-controlled table-name ident (webhook health atomic increment) # ident-markers=1
-src/workers/retention-gc-worker/sweep.ts # batch-bounded DELETE/SELECT sweeps over registry-declared tables/columns # ident-markers=4
+src/workers/audit-outbox-worker.ts # outbox claim/deliver/reap/purge queries; static SQL + $N params, one code-controlled table-name ident (webhook health atomic increment)
+src/workers/retention-gc-worker/sweep.ts # batch-bounded DELETE/SELECT sweeps over registry-declared tables/columns

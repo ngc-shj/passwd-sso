@@ -166,7 +166,7 @@ export async function sweepExpiryEntry(
   // Defensive identifier validation at sweep time (boot validation is primary).
   const tableIdent = sqlIdentifier(entry.table);
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
-  const keyIdents = entry.keyColumns.map(sqlIdentifier);
+  const keyIdents = entry.keyColumns.map((c) => sqlIdentifier(c));
 
   if (entry.globalDelete) {
     // Set bypass_rls GUC to span all tenants under the existing RLS policies.
@@ -212,7 +212,7 @@ export async function sweepGuardedExpiryEntry(
 ): Promise<number> {
   const tableIdent = sqlIdentifier(entry.table);
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
-  const keyIdents = entry.keyColumns.map(sqlIdentifier);
+  const keyIdents = entry.keyColumns.map((c) => sqlIdentifier(c));
 
   if (entry.globalDelete) {
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
@@ -268,7 +268,7 @@ export async function sweepAuditProvenanceEntry(
 ): Promise<number> {
   const tableIdent = sqlIdentifier(entry.table);
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
-  const provenanceIdents = entry.provenanceColumns.map(sqlIdentifier);
+  const provenanceIdents = entry.provenanceColumns.map((c) => sqlIdentifier(c));
 
   if (entry.globalDelete) {
     // bypass_purpose/tenant_id GUCs are intentionally not set here (unlike
