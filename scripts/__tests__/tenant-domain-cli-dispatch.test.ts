@@ -18,13 +18,17 @@ const ROOT = resolve(__dirname, "../..");
 const SCRIPT = resolve(ROOT, "scripts/tenant-domain.ts");
 const TSX = resolve(ROOT, "node_modules/.bin/tsx");
 const MISSING_URL = "MIGRATION_DATABASE_URL is required";
+// Above vitest's global 10s testTimeout: each case cold-starts tsx, which a
+// contended CI runner can take several seconds over. The child is killed a
+// little earlier so a hang reports as a failed spawn, not a vitest timeout.
+const CASE_TIMEOUT_MS = 30_000;
 
 function runCli(...args: string[]) {
   return spawnSync(TSX, [SCRIPT, ...args], {
     cwd: ROOT,
     env: { PATH: process.env.PATH, HOME: process.env.HOME, MIGRATION_DATABASE_URL: "" },
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: CASE_TIMEOUT_MS - 5_000,
   });
 }
 
@@ -35,12 +39,12 @@ describe("tenant-domain CLI dispatch", () => {
     expect(r.stderr).toContain("Usage:");
     expect(r.stderr).not.toContain("tenant-domain preflight");
     expect(r.stderr).not.toContain(MISSING_URL);
-  });
+  }, CASE_TIMEOUT_MS);
 
   it("dispatches a real subcommand through the same path to its handler", () => {
     const r = runCli("list");
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(MISSING_URL);
     expect(r.stderr).not.toContain("Usage:");
-  });
+  }, CASE_TIMEOUT_MS);
 });

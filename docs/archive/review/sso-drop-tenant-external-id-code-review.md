@@ -42,3 +42,38 @@ R3 Finding (T1), R19 Pass, R29 Pass, R42 Pass; other R1–R57 N/A. RT1 Pass, RT2
 ### T1 [Major] Removed subcommand dispatch untested
 - Action: added `scripts/__tests__/tenant-domain-cli-dispatch.test.ts`, which runs the CLI as a process: `preflight` → usage, exit 1, no handler reached; `list` on the same path → reaches its handler (`MIGRATION_DATABASE_URL is required`). No DB needed. Red-proven on a scratch copy by restoring a `case "preflight"` arm — the first case fails.
 - Modified file: scripts/__tests__/tenant-domain-cli-dispatch.test.ts — 3280ecbdc
+
+---
+
+# Round 2
+Date: 2026-10-06
+
+## Changes from Previous Round
+S1 resolved (982746ecd), T1 resolved (3280ecbdc).
+
+## Functionality Findings
+No findings. S1/T1 verified; cross-cutting sweep clean.
+
+## Security Findings
+No findings. S1 rewrite verified against the current unions; R43 — the dispatch test replaces the child environment and `MIGRATION_DATABASE_URL=""` is not overridden by load-env (dotenv skips keys that are present), so it cannot reach a database; the `--from` / `--tenant` wording matches the UUID-only / UUID-or-claim validation.
+
+## Testing Findings
+- **T2 [Minor]** — the dispatch test's `spawnSync` 60s timeout was dead under vitest's global 10s `testTimeout`.
+
+## Recurring Issue Check
+### Functionality expert
+R3, R29, R34, R42 Clean; all other R1–R57 N/A.
+### Security expert
+R2, R3, R5, R12, R14, R18, R19, R24, R29, R31, R34, R37, R42, R43, R48, R49 Pass; other R1–R57 N/A; RS3, RS4 Pass; other RS N/A.
+### Testing expert
+R29 Pass; other R1–R57 N/A. RT5, RT7, RT8, RT10, RT11 Pass; other RT N/A.
+
+## Resolution Status
+### T2 [Minor] Dead spawnSync timeout
+- Action: one `CASE_TIMEOUT_MS` (30s) passed to both cases, child killed 5s earlier so a hang reports as a failed spawn.
+- Modified file: scripts/__tests__/tenant-domain-cli-dispatch.test.ts
+
+## Tightening-only skip — Round 2
+Findings applied directly (no Round 3 review):
+- [T2] [Minor] dead spawnSync timeout — scripts/__tests__/tenant-domain-cli-dispatch.test.ts — applied verbatim
+Justification: within Round 1's fix scope (the file 3280ecbdc added), inline minor (test timeout value), no security-boundary touch.
