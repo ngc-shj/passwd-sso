@@ -263,7 +263,6 @@ describe("createCustomAdapter", () => {
     // arms must now fail closed.
     it.each([
       ["claim_taken", "a revoked tenant_claims row owns the claim (D2)"],
-      ["claim_collision", "an existing tenant's external_id folds onto the claim (F-A)"],
       ["claim_invalid", "the claim fails storableClaimSchema (SC9)"],
     ])("throws TENANT_CLAIM_UNUSABLE without a bootstrap tenant when %s — %s", async (kind) => {
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
@@ -297,17 +296,16 @@ describe("createCustomAdapter", () => {
     // round-1 M2: claim_taken is the operator-reachable one and is the only
     // reason `unmapped` can see.
     //
-    // Round-6 F1 adds the diagnosis column. `claim_invalid` carries one and the
-    // other two do not, and the difference is load-bearing: `tenant-domain
+    // Round-6 F1 adds the diagnosis column. `claim_invalid` carries one and
+    // `claim_taken` does not, and the difference is load-bearing: `tenant-domain
     // unmapped` buckets on whether `claimRefusal` is set, so dropping it on
     // this path would file a first-ever sign-in's unstorable-claim denial under
     // "registered to a DIFFERENT tenant — move it with `add --from`" while the
     // identical denial on the existing-user path (src/auth.ts) was filed
-    // correctly. Asserting the field on all three arms is what makes the
+    // correctly. Asserting the field on both arms is what makes the
     // asymmetry visible rather than incidental.
     it.each([
       ["claim_taken", "tenant_claim_unmapped", "tenant-owner", null],
-      ["claim_collision", "tenant_claim_unmapped", "tenant-folded-owner", null],
       ["claim_invalid", "tenant_mismatch", null, claimRefusal("claim must be printable ASCII")],
     ] as const)("emits AUTH_LOGIN_FAILURE with the arm's own reason when %s", async (kind, reason, tenantId, refusal) => {
       // R9: emitAuthLoginFailure -> logAuditAsync resolves a tenant through
@@ -363,11 +361,10 @@ describe("createCustomAdapter", () => {
       expect(emittedInsideTx).toBe(false);
     });
 
-    // The two operator-reachable arms must carry a BINDABLE tenant, not just
-    // any tenantId field: a null here is the `__system__` filing above.
+    // The operator-reachable arm must carry a BINDABLE tenant, not just any
+    // tenantId field: a null here is the `__system__` filing above.
     it.each([
       ["claim_taken", "tenant-owner"],
-      ["claim_collision", "tenant-folded-owner"],
     ])("binds the audit row to the owning tenant for %s", async (kind, owner) => {
       mockSessionMetaGetStore.mockReturnValue({ provider: "google" });
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });

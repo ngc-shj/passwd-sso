@@ -69,7 +69,7 @@ export type ClaimRefusalKind =
 
 /**
  * Deny reason per refusal arm of `findOrCreateTenantForClaim` (round-1 M2).
- * The two arms have different triggers and different operator remedies, and
+ * The arms have different triggers and different operator remedies, and
  * collapsing them — as the single `null` used to — hid the one that matters
  * most:
  *   claim_taken   — a revoked tenant_claims row owns the claim (D2). Emitted
@@ -77,11 +77,6 @@ export type ClaimRefusalKind =
  *                   `tenant-domain unmapped` filters on; without it a
  *                   revoked-claim lockout is invisible to the tool this PR
  *                   ships for exactly that diagnosis.
- *   claim_collision — an existing tenant's external_id folds onto the claim
- *                   (round-2 F-A). Also tenant_claim_unmapped: the remedy is
- *                   an explicit `tenant-domain add` naming the tenant that
- *                   should own the free UNIQUE(claim) slot, which is the
- *                   remedy `unmapped` exists to point at.
  *   claim_invalid — the claim fails storableClaimSchema (SC9). Nothing is
  *                   registrable, so "register the claim" is not the remedy;
  *                   tenant_mismatch, as row 8b always specified.
@@ -116,14 +111,12 @@ export type ClaimRefusalKind =
  *                   CHECK's.
  *
  * The `satisfies` below is what forces a new arm to be classified here rather
- * than defaulting to whatever an index lookup happens to return — it is how
- * claim_collision was caught the day it was added, and it is what makes
+ * than defaulting to whatever an index lookup happens to return, and it is what makes
  * `store_unavailable`'s third reason an explicit classification rather than a
  * literal spelled at two sites.
  */
 export const CLAIM_REFUSAL_REASON = {
   claim_taken: "tenant_claim_unmapped",
-  claim_collision: "tenant_claim_unmapped",
   claim_invalid: "tenant_mismatch",
   claim_malformed: "tenant_mismatch",
   store_unavailable: "provider_error",

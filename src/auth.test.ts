@@ -318,11 +318,10 @@ describe("ensureTenantMembershipForSignIn", () => {
   //                       (eligible for one-time migration).
   //   TENANT_OTHER      — an existing membership that is NOT the bootstrap
   //                       tenant (a genuine cross-tenant conflict).
-  //   TENANT_CLAIM_OWNER — the tenant a REFUSED claim already belongs to
-  //                       (the revoked row's owner, or the folded external_id
-  //                       owner): the tenant an operator's `tenant-domain add`
-  //                       has to name, and therefore the one the denial is
-  //                       filed under (round-3 F7).
+  //   TENANT_CLAIM_OWNER — the tenant a REFUSED claim already belongs to (the
+  //                       revoked row's owner): the tenant an operator's
+  //                       `tenant-domain add` has to name, and therefore the
+  //                       one the denial is filed under (round-3 F7).
   const TENANT_CLAIMED = "00000000-0000-4000-a000-000000000001";
   const TENANT_BOOTSTRAP = "00000000-0000-4000-a000-000000000002";
   const TENANT_OTHER = "00000000-0000-4000-a000-000000000003";
@@ -517,11 +516,8 @@ describe("ensureTenantMembershipForSignIn", () => {
   // OWNS the contested claim, not the user's" — had NO test at the site it
   // fixed: nulling `claimOwnerId` left 207 tests green, because every row-9b
   // fixture used an `unregistered` lookup where the owner is null anyway.
-  // Round 5 then found the same fix was missing a member (`collision`), which
-  // an untested attribution rule is exactly how you get.
   it.each([
     ["revoked", { kind: "revoked", tenantId: TENANT_CLAIM_OWNER }, "tenant_claim_unmapped"],
-    ["collision", { kind: "collision", tenantId: TENANT_CLAIM_OWNER }, "tenant_claim_unmapped"],
   ] as const)(
     "row 9b: files a %s claim's denial under the CLAIM's owner, not the user's tenant",
     async (_label, lookupArm, reason) => {
@@ -915,28 +911,6 @@ describe("ensureTenantMembershipForSignIn", () => {
     // tenant-less emit resolves to SYSTEM_TENANT_ID, so `null` here would put
     // the denial under `__system__` — recorded, but in the one group that
     // names no tenant to go fix.
-    expect(result).toEqual({
-      ok: false,
-      reason: "tenant_claim_unmapped",
-      tenantId: TENANT_CLAIM_OWNER,
-      claim: "tenant-acme",
-      claimRefusal: null,
-    });
-    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
-  });
-
-  // Round-2 F-A's arm, which had no dispatch test of its own: an existing
-  // tenant's external_id FOLDS onto the claim, so the free UNIQUE(claim) slot
-  // belongs to whichever colliding tenant the operator names — not to whoever
-  // asks first with a third spelling.
-  it("row 8b: denies with tenant_claim_unmapped when an existing external_id folds onto the claim (F-A)", async () => {
-    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
-    mockFindOrCreateTenantForClaim.mockResolvedValue(
-      refusal({ kind: "claim_collision", tenantId: TENANT_CLAIM_OWNER }),
-    );
-
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
-
     expect(result).toEqual({
       ok: false,
       reason: "tenant_claim_unmapped",

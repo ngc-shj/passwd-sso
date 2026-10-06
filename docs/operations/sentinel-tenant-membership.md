@@ -132,8 +132,7 @@ re-run the migration.
 id rather than the spelling.
 
 There are exactly **two** spellings that reach that refusal, because
-`resolveTenantRef` resolves a `--tenant` ref by UUID, then by an existing claim,
-then by `external_id`:
+`resolveTenantRef` resolves a `--tenant` ref by UUID, then by an existing claim:
 
 - the sentinel's **UUID**, and
 - **any claim already pointing at it** — which is the spelling you will actually
@@ -141,10 +140,10 @@ then by `external_id`:
   remove.
 
 Its **slug is not a third**: slug is deliberately not a resolution path (a
-squatted sign-in could otherwise pre-empt the slug an operator types), and the
-sentinel row carries no `external_id`. So `--tenant __system__` is refused, but
-with `Tenant not found: __system__` — the ref resolved to nothing and the
-sentinel check was never reached. Do not read that message as the guard firing.
+squatted sign-in could otherwise pre-empt the slug an operator types). So
+`--tenant __system__` is refused, but with `Tenant not found: __system__` — the
+ref resolved to nothing and the sentinel check was never reached. Do not read
+that message as the guard firing.
 
 `remove`, `list` and `history` all still work against the sentinel, and that is
 deliberate: they are the diagnosis and the audited undo this page depends on.

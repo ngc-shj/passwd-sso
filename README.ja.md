@@ -319,7 +319,7 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 | `tenant_claim_unmapped` | クレーム値 | どのテナントにも未登録 | `tenant-domain add` |
 | `tenant_mismatch` | クレーム値 | 別のテナントに登録済み | ユーザーを調査、または `add --from` でクレームを移動 |
 | `tenant_mismatch` | `claimRefusal` あり（`claim` は無し） | IdP が送った値が**取り込み時点で拒否**された — 対になっていないサロゲート、制御文字・双方向制御文字・ゼロ幅文字、255 文字超、またはストレージ層が往復できない空白 | **IdP 側を修正してください。** その値は `add` で登録できないため、この CLI では復旧できません。`claimRefusal` が違反したルールを示します |
-| `tenant_mismatch` | `claimRefusal` あり、かつ `claim` あり | 値は取り込みを通ったが**保存できない** — 印字可能 ASCII ではなく、レジストリの `CHECK` 制約が拒否する（後述の `preflight` を参照） | **IdP 側を修正**するか、そのテナントに ASCII のクレームを登録してください。`add` は同じ述語でこの値を拒否します |
+| `tenant_mismatch` | `claimRefusal` あり、かつ `claim` あり | 値は取り込みを通ったが**保存できない** — 印字可能 ASCII ではなく、レジストリの `CHECK` 制約が拒否する | **IdP 側を修正**するか、そのテナントに ASCII のクレームを登録してください。`add` は同じ述語でこの値を拒否します |
 | `tenant_claim_system_tenant` | クレーム値 | クレームは**登録済み**だが、登録先が sentinel テナント（`__system__`）— 「所有テナント無し」を表す予約テナントで、アカウントを持ってはいけないため、サインイン時の書き込みを `CHECK` が拒否する。この状態を作る運用コマンドは存在しない（`add` は sentinel を登録先として拒否するので、帯域外で書き込まれた行） | クレームを実在テナントに付け替える。`unmapped` では *Unregistered claims* の見出しに出るので、そこが示す `tenant-domain add --tenant <ref> --domain <claim> --by <label>` を実行すると、`add` が拒否したうえで付け直すべき `--from <現在の所有者>` 付きコマンドをそのまま提示します |
 
 `claimRefusal` を持つ 2 つは文言ではなく**フィールドの有無**で判別してください。`claimRefusal` はこのデプロイ自身の拒否判定だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 5 つの原因を 3 つの見出しで報告します — `claimRefusal` を持つ 2 つは対処が同じなので同じ見出しにまとめており、sentinel の行も対処が `tenant-domain` である点で未登録の見出しに入ります。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
@@ -333,17 +333,17 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped --days 180
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label>
 ```
 
-`<ref>` にはテナントの UUID、登録済みクレームのいずれか、`external_id` を指定できます。最後の 1 つは、後述のプリフライトチェックがバックフィルのスキップを報告したテナント — つまり指定できるクレームを持たないテナント — を扱うときに必要になります。`slug` は意図的に**受け付けません**。サインインで作成されたテナントの slug は IdP クレームから `[^a-z0-9]+` を潰して生成されるため多対一であり、そのslugを最初に取得したテナントを作らせた者に先取りされうるからです。
+`<ref>` にはテナントの UUID、または登録済みクレームのいずれかを指定できます。`slug` は意図的に**受け付けません**。サインインで作成されたテナントの slug は IdP クレームから `[^a-z0-9]+` を潰して生成されるため多対一であり、そのslugを最初に取得したテナントを作らせた者に先取りされうるからです。
 
 `unmapped` が対象とするのは「問い合わせた期間」であり、このデプロイの保持期間ではありません。既定値は設定可能な保持期間の下限（30 日）で、出力にもその期間が明記されます。「何も拒否されていない」と判断する前に `--days <n>` で期間を広げてください。
 
-`list`・`preflight`・`remove`・`history` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。**破壊的変更:** `remove` にも `--by <operator-label>` が必須になりました（`... remove --tenant <ref> --domain <claim> --by <operator-label>`）。登録と同様、revoke も後述の履歴に帰属情報付きの行を書き込むようになったためで、帰属のない revoke はその記録に実行者を残しません。
+`list`・`remove`・`history` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。**破壊的変更:** `remove` にも `--by <operator-label>` が必須になりました（`... remove --tenant <ref> --domain <claim> --by <operator-label>`）。登録と同様、revoke も後述の履歴に帰属情報付きの行を書き込むようになったためで、帰属のない revoke はその記録に実行者を残しません。
 
 **`tenant_mismatch`: クレームが誤ったテナントに登録されている場合**。この状態はオペレーターが何もしなくても発生します — 打ち間違えた、あるいは他者に先取りされたクレームを提示するサインインが 1 回あるだけで、そのサインインが作成したテナントに対してクレームが登録されます（`created_by = 'signin'`）。`remove` ではクレームは解放されません — 行を論理削除して `revoked_at` を設定するだけで所有テナントは変わらないため、続けて `add` を実行しても再び拒否されます。現在の所有テナントを明示する `add --from` でクレームを移動してください:
 
 ```bash
 # --from には現在の所有テナントの UUID を、`list` が出力するとおりに指定します。
-# slug・クレーム・external_id からは解決しません: 再割り当ては 1 つのテナントの
+# slug・クレームからは解決しません: 再割り当ては 1 つのテナントの
 # メンバー全員を拒否しうる操作であり、打ち間違いで到達できてはならないためです。
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --tenant <claim>
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
@@ -360,23 +360,6 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --tenant <uuid>
 `add --from` は書き込みの前に、両テナントの id・name・slug・**アクティブメンバー数**と、移動によって失う側が被る影響を表示し、確認を求めます（非対話実行では `--yes`）。`--from` が実際の所有テナントと一致しない場合は拒否されます。また、対象行が事前に revoke されている必要は**ありません** — revoke してから再割り当てする手順では、クレームがどのテナントにも解決しない期間が生じ、両方のテナントのメンバーが拒否されてしまうためです。移動しても行の `created_by` は書き換えません — この値は「誰が最初にそのクレームを登録したか」というインシデント調査に必要な証跡です。移動は `tenant_claims.tenant_id` を上書きし、revoke 済みクレームの再登録は `revoked_at` を消すため、実行後の `tenant_claims` 行自体からは以前の所有テナント・revoke されていた事実・変更の実行者のいずれも読み取れません。ただしそれはもう唯一の記録ではありません — `add` と `remove` はどちらも `tenant_claim_events` テーブルに帰属情報付きの行を追記し、`tenant-domain history` でその内容を読み戻せます。
 
 **`GOOGLE_WORKSPACE_DOMAINS` を設定している場合**（[SECURITY.md](SECURITY.md) で推奨）、クレームを登録するだけでは復旧しません。`src/auth.config.ts` の `signIn` コールバックは、`hd` が `GOOGLE_WORKSPACE_DOMAINS` に含まれない Google サインインを、テナントクレームの解決より**前**に `reason: "provider_error"` として拒否します — この拒否はテナントクレームのチェックまで到達しないため、`tenant-domain unmapped` には何も表示されません。新しいドメインを `GOOGLE_WORKSPACE_DOMAINS` にも追加し、どのテナントのために追加したかを記録してください。この変数はデプロイ全体に効くグローバル設定である一方、クレームレジストリはテナント単位のスコープなので、記録がないと過去にどのテナントかがリネームしたすべてのドメインが静かに積み上がっていきます。そのテナントが不要になった時点で、追加したエントリを削除してください。**ロックアウト回避のために `GOOGLE_WORKSPACE_DOMAINS` を未設定に戻さないでください** — `allowDangerousEmailAccountLinking` は `allowedGoogleDomains.length > 0` から導出されるため、未設定に戻すとこのフラグは `false` になり（緩くなるのではなく**厳しくなり**）、元の拒否に加えて `OAuthAccountNotLinked` という別の失敗が発生します。
-
-**既存デプロイで `prisma migrate deploy` を実行する前に**、プリフライトチェックを実行してください — バックフィルがレジストリから除外する 2 種類の行を、事前の運用判断のために可視化します:
-
-```bash
-MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
-```
-
-報告される内容は 3 つです。**正規化の衝突**（複数のテナントの `external_id` が 1 つのクレームに畳み込まれるケース）、**非 ASCII の `external_id`**、そして **Postgres 側とアプリケーション側の正規化のずれ**です。3 つともレジストリから除外されます。
-
-**衝突は「敗者だけ」ではなく、衝突したすべての側が除外されます。** バックフィルは衝突したテナントの**どれにも**クレーム行を登録しません — 報告された衝突を「片方は既にクレームを保持しているので、残りだけ登録すればよい」と読まないでください。1 件だけを残すと、他のテナントの**新規**メンバーが勝者のテナントに黙って作成されてしまいます。これらのテナントは現時点では別個のものであり（アップグレード前のリゾルバは `external_id` を完全一致で照合していました）、しかもどこにもエラーが出ません。したがってプリフライトが返した行は、すべて明示的な判断と明示的な登録を必要とします:
-
-- 衝突であれば、どのテナントが共通のクレーム文字列を取得し、他のテナントには代わりに何を割り当てるかを決めたうえで、それぞれに `tenant-domain add` を実行する。
-- 非 ASCII の `external_id` であれば、そのテナントに別途 ASCII のクレームを登録すべきかを決めたうえで、`tenant-domain add` を実行する。
-
-バックフィルを再実行しても、これらの行は登録されません。除外は「既にあればスキップ」ではなく無条件なので、2 回目の実行はこの母集団に対して構造上**何もしません**。登録できるのは `tenant-domain add` だけです。それまでの間、これらのテナントはリリース 1 の `external_id` 完全一致フォールバックによって現在とまったく同じように解決され続けます — アップグレードそのものでロックアウトされることはありません。ただしこのフォールバックは後続リリースで削除され、その時点でクレーム未登録のテナントはロックアウトになります。判断はその前に行ってください。
-
-手書き SQL ではなく CLI を実行してください。このチェックが依存する「印字可能 ASCII」の述語は `src/lib/tenant/tenant-claim-registry.ts` の `NON_PRINTABLE_ASCII_SQL_CLASS` を唯一の出所とし、ドリフト検知テストがマイグレーションの CHECK・バックフィル・その `.sql` 版をこの定数に固定しています。ドキュメントから書き写した述語はこの保護の外側にあり、CHECK からずれたプリフライトは、最も重要な場面で自信を持って「問題なし」と報告します。どうしても CLI を実行できない環境では、述語と正規化式を `scripts/tenant-domain.ts` の `cmdPreflight` からコピーしてください — 書き写さないでください。
 
 **バックフィルが引き継ぐ内容**。`20260228010000_tenant_external_id_and_bootstrap` マイグレーションを既に実行済みのデプロイでは、`tenant_claims` は既存テナントの `external_id` を 1 行ずつ引き継ぎます — そのマイグレーションより前から存在するテナントでは、これはテナント自身の UUID です（`bootstrap-` / `u-` を除くすべてのテナントに対する `UPDATE tenants SET external_id = id ...`）。`tenant_id` は `AUTH_TENANT_CLAIM_KEYS` が未設定時にフォールバックする先頭のキーであるため、生の UUID がそのままクレームとしてテナントメンバーシップを解決できてしまいます。バックフィルが引き継いだ内容を確認するには:
 

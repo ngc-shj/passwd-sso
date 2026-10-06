@@ -276,12 +276,12 @@ Evidence:
 - Non-string types rejected.
 - Reserved slug prefixes (`bootstrap-`, `u-`) get `t-` prepended.
 
-4. Tenant lookup uses `externalId` (not user-controlled `id`)
+4. Tenant lookup resolves only through the claim registry (not user-controlled `id`)
 Status: `PASS`
 Evidence:
-- `src/auth.ts` uses `where: { externalId: tenantClaim }` for tenant lookup/creation.
-- `externalId` is `@unique @db.VarChar(255)` with dedicated index.
-- P2002 (unique constraint) collision handled with retry + random suffix fallback.
+- `src/lib/tenant/tenant-management.ts`'s `resolveTenantByClaim` / `findOrCreateTenantForClaim` are the only readers/writers of tenant-claim resolution; both key on the normalised claim (`normalizeTenantClaim`), never the raw IdP-asserted value.
+- `findOrCreateTenantForClaim` serialises concurrent creation for the same claim with `advisoryXactLock` (`pg_advisory_xact_lock`) keyed on the normalised claim, taken before the row is read — a second concurrent caller observes the first's committed row instead of racing into a unique-constraint abort.
+- `TenantClaim.claim` is `@unique @db.VarChar(255)` on the normalised form, so at most one tenant can ever own a given claim.
 
 5. Bootstrap tenant migration is complete and uses `isBootstrap` flag
 Status: `PASS`

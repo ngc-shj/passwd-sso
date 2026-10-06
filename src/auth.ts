@@ -159,8 +159,8 @@ function refusalTenantId(
  * the corresponding `findOrCreateTenantForClaim` arm, and everything below reads
  * that one mapping. D-42 claimed round 4's closure worked because "the compiler
  * enumerated every consumer", and round 5 answered that the compiler enumerates
- * consumers, not attribution SOURCES. Three sources is how `collision` came to
- * be missing from one of them; one source is the fix.
+ * consumers, not attribution SOURCES. Three sources is how an owner-carrying arm
+ * came to be missing from one of them; one source is the fix.
  */
 function lookupOwnerId(lookup: ClaimLookup): string | null {
   if (lookup.kind === "tenant" || lookup.kind === "unregistered") return null;
@@ -364,11 +364,10 @@ async function claimedTenantMembership(
     // cross-tenant fail-open.
     const lookup = await resolveTenantByClaim(tenantClaim, tx);
     const existingTenantId = await resolveUserTenantIdFromClient(prisma, userId);
-    // The claim's owner where the lookup knows one — derived from the arms,
-    // not from the one arm a finding happened to name (round-5 F2). `revoked`
-    // and `collision` both know an owner; round 4 read only the first, so a
-    // fold collision was still filed under the claim's owner on one path and
-    // the user's tenant on the other.
+    // The claim's owner where the lookup knows one (`revoked`) — derived from
+    // the arms through refusalFromLookup, not from whichever arm a finding
+    // happened to name (round-5 F2), so a denial is filed under the same
+    // tenant on every path.
     const claimOwnerId = lookupOwnerId(lookup);
 
     if (existingTenantId === null) {
@@ -380,8 +379,7 @@ async function claimedTenantMembership(
         // reason distinguishes the refusals (see CLAIM_REFUSAL_REASON) —
         // the storableClaimSchema arm is reachable from sign-in only through
         // SC9's ASCII narrowing (the ingest boundary already rejects the
-        // other unstorable shapes), the revoked-row and fold-collision arms
-        // are operator- and data-reachable.
+        // other unstorable shapes), the revoked-row arm is operator-reachable.
         return {
           ok: false,
           reason: CLAIM_REFUSAL_REASON[target.kind],

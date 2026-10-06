@@ -46,7 +46,7 @@ describe("toAuditProvider", () => {
 
 describe("CLAIM_REFUSAL_REASON", () => {
   // Every arm that can deny a sign-in over a claim, from ALL THREE
-  // adjudicators: the three refusals findOrCreateTenantForClaim can return, the
+  // adjudicators: the two refusals findOrCreateTenantForClaim can return, the
   // ingest boundary's refusal of the asserted value (round-3 M1), and the
   // deployment's failure to propagate a claim between the two Auth.js callbacks
   // (round-6 F3/SEC-R6-1). The `satisfies` in the source makes a missing arm a
@@ -55,9 +55,8 @@ describe("CLAIM_REFUSAL_REASON", () => {
   it("maps every refusal arm to the reason its remedy matches", () => {
     expect(CLAIM_REFUSAL_REASON).toEqual({
       // Registering the claim IS the remedy, and tenant_claim_unmapped is what
-      // `tenant-domain unmapped` filters on — so these two must be visible there.
+      // `tenant-domain unmapped` filters on — so this must be visible there.
       claim_taken: "tenant_claim_unmapped",
-      claim_collision: "tenant_claim_unmapped",
       // Nothing is registrable, so pointing the operator at `add` would point
       // them at a command that must refuse.
       claim_invalid: "tenant_mismatch",

@@ -6,7 +6,6 @@ import {
   storableClaimSchema,
   operatorDomainSchema,
   NON_PRINTABLE_ASCII_SQL_CLASS,
-  EXTERNAL_ID_FOLD_SQL,
 } from "./tenant-claim-registry";
 
 // No module mocking (RT5) — every assertion below exercises the real
@@ -101,57 +100,18 @@ describe("operatorDomainSchema", () => {
 
 describe("NON_PRINTABLE_ASCII_SQL_CLASS drift guard", () => {
   // The C1 CHECK constraint is the authority for what a storable claim looks
-  // like. Three other places restate that predicate: the backfill's WHERE
-  // clause, its extracted copy, and (via a bound parameter) the operator
-  // pre-flight report. The pre-flight one is the dangerous one — it exists to
-  // tell an operator which rows the CHECK will reject BEFORE they migrate, so
-  // a stale copy produces a confidently wrong "all clear". These assertions
-  // fail the moment the SQL and the constant diverge.
+  // like, and it lives in a committed `.sql` file that cannot import this
+  // constant. These assertions pin the two together by reading the migration,
+  // and cross-check the constant against `storableClaimSchema` below — which
+  // is what keeps the database's refusal and the application's refusal the
+  // same predicate.
   const repoRoot = resolve(__dirname, "../../..");
   const read = (rel: string) => readFileSync(resolve(repoRoot, rel), "utf8");
 
   const MIGRATION = "prisma/migrations/20260729110000_add_tenant_claims/migration.sql";
-  const BACKFILL = "scripts/lib/tenant-claim-backfill.sql";
 
   it("is the predicate the CHECK constraint enforces", () => {
     expect(read(MIGRATION)).toContain(`claim !~ '${NON_PRINTABLE_ASCII_SQL_CLASS}'`);
-  });
-
-  it("is the predicate the backfill filters the raw external_id on", () => {
-    // Raw column, not the folded output — round-5 D3.
-    expect(read(BACKFILL)).toContain(`external_id !~ '${NON_PRINTABLE_ASCII_SQL_CLASS}'`);
-    expect(read(MIGRATION)).toContain(`external_id !~ '${NON_PRINTABLE_ASCII_SQL_CLASS}'`);
-  });
-
-  /**
-   * Round-3 F11. The ASCII predicate above was enumerated and pinned; the FOLD
-   * expression next to it in the same statements was not, and it had five
-   * copies. The unguarded one — `findFoldedExternalIdOwner` — is the one that
-   * decides whether a sign-in may create a tenant, so a divergence there would
-   * disagree with `preflight`, the report an operator runs to predict exactly
-   * that decision, while both looked correct in isolation.
-   */
-  const FOLD_COPIES: ReadonlyArray<{ file: string; occurrences: number; why: string }> = [
-    { file: MIGRATION, occurrences: 3, why: "the backfill's SELECT and its two-sided collision exclusion" },
-    { file: BACKFILL, occurrences: 3, why: "the extracted twin of the same statement" },
-    { file: "scripts/tenant-domain.ts", occurrences: 2, why: "preflight's collision and fold-mismatch queries" },
-    { file: "src/lib/tenant/tenant-management.ts", occurrences: 1, why: "findFoldedExternalIdOwner (the copy F11 found unguarded)" },
-  ];
-
-  it.each(FOLD_COPIES)("$file spells the fold exactly, $occurrences time(s) — $why", ({ file, occurrences }) => {
-    const text = read(file);
-    const spelled = text.split(EXTERNAL_ID_FOLD_SQL).length - 1;
-    expect(spelled).toBe(occurrences);
-  });
-
-  it("no copy folds external_id without the C collation", () => {
-    // The failure this catches is invisible on an en_US database and appears
-    // only where LC_CTYPE differs, i.e. on someone else's deployment. Matches
-    // any `lower(...external_id...)` that is not the canonical spelling.
-    const UNCOLLATED = /lower\s*\(\s*btrim\s*\(\s*external_id\s*\)\s*\)/;
-    for (const { file } of FOLD_COPIES) {
-      expect(UNCOLLATED.test(read(file)), `${file} folds external_id without COLLATE "C"`).toBe(false);
-    }
   });
 
   it("agrees with the JS predicate storableClaimSchema applies", () => {

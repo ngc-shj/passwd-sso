@@ -227,12 +227,12 @@ function sanitizeTenantClaimValue(value: unknown): ClaimKeyRead {
   // REJECT, do not strip (round-2 F-D). This function's usable return value is
   // not a display copy: it becomes `tenantClaim`, which is the key
   // resolveTenantByClaim / findOrCreateTenantForClaim match on and the value
-  // stored verbatim as Tenant.externalId and Tenant.name. Stripping is what
+  // stored verbatim as Tenant.name. Stripping is what
   // would let `ac<U+00AD>me.example` — a value an operator reads as distinct
   // from `acme.example` — pass C1's printable-ASCII CHECK and select the
   // existing `acme.example` tenant, with nothing recorded anywhere: the
-  // character is gone before storage, so `preflight`'s non-ASCII report can
-  // never see it. The delegation metadata boundary
+  // character is gone before storage, so nothing downstream can ever see it.
+  // The delegation metadata boundary
   // (src/lib/auth/access/delegation.ts's isSafeMetadataString) already takes
   // this policy for the same class; this is the same rule at the other end of
   // the shared definition. Note the direction of the dependency the old

@@ -390,7 +390,7 @@ describe("tenant-claim", () => {
   });
 
   // Round-2 F-D: this function's usable output IS the matching key and the
-  // stored externalId/name, so a member of the unsafe class must DENY the
+  // stored Tenant.name, so a member of the unsafe class must DENY the
   // claim, not canonicalise it into a NEIGHBOURING one. One case per member,
   // because the hazard is per-character: a class that quietly lost one member
   // would still pass a single combined fixture through the remaining ones.
@@ -420,8 +420,8 @@ describe("tenant-claim", () => {
     });
     // The stripping implementation returned "alias.example" for every row —
     // selecting the existing alias.example tenant with nothing recorded, and
-    // invisible to `preflight`'s non-ASCII report because the character was
-    // gone before storage.
+    // the character gone before storage, so nothing downstream could ever
+    // see it.
     expect(v).toEqual({ kind: "malformed", diagnosis: `refused: contains ${label}` });
   });
 
