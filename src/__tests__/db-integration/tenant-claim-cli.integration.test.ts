@@ -511,7 +511,7 @@ describe("tenant-domain CLI (C7)", () => {
       // The owner-mismatch check further down would also refuse this, so the
       // exit code alone cannot distinguish the two. What the UUID guard adds
       // is that the refusal happens before any client is built — i.e. that
-      // --from is never resolved through slugs, claims or external ids the
+      // --from is never resolved through slugs or claims the
       // way --tenant is, which is what keeps a near-miss name from selecting
       // a losing tenant.
       const createSpy = vi.spyOn(migrationClientFactory, "create");

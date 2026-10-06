@@ -42,3 +42,14 @@ row finished) but never exited in this non-interactive shell; it was stopped.
 
 `scripts/lib/tenant-domain-flags.ts` needed no change (no `preflight` flags), as
 round-1 Func noted.
+
+## D-7 — The residue sweep missed "external id" with a space (found by Phase 3 pre-screening)
+
+The sweep's `[eE]xternal_?[iI]d` matches `externalId` / `external_id` but not the
+prose spelling "external id". Four strings survived: the `--tenant` flag
+description in `scripts/lib/tenant-domain-flags.ts` (round-1 Func noted this file
+needed no change — wrong for this string), the `<ref>` line of `printUsage`, the
+`--from` refusal message in `cmdAdd`, and a comment in
+`tenant-claim-cli.integration.test.ts`. All four rewritten; re-swept with
+`external[ -]ids?` — remaining hits are SCIM, the baseline reason (D-1), and a
+"now-dropped" historical comment.

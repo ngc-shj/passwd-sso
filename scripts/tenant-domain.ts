@@ -793,8 +793,8 @@ export async function cmdAdd(args: {
       code: 1,
       message:
         `Invalid --from "${escapeUnsafeDisplayChars(args.from)}": expected the current owner's tenant UUID, ` +
-        'exactly as "list" prints it. --from is not resolved through slugs, claims ' +
-        "or external ids — a claim reassignment must not be reachable by a typo.",
+        'exactly as "list" prints it. --from is not resolved through slugs or claims ' +
+        "— a claim reassignment must not be reachable by a typo.",
     };
   }
 
@@ -2090,7 +2090,7 @@ function printUsage(): void {
       "  tenant-domain measure",
       `  tenant-domain backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]  (default ${DEFAULT_BACKFILL_LIMIT}, max ${MAX_BACKFILL_LIMIT})`,
       "",
-      "<ref> is a tenant UUID, one of its registered claims, or its external id (not its slug).",
+      "<ref> is a tenant UUID or one of its registered claims (not its slug).",
       "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
       "UUID only, and `add` refuses if it does not match the row's actual owner.",
       "realign moves a user active in no tenant onto a tenant where they hold a",

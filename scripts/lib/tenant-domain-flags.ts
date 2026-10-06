@@ -33,7 +33,7 @@ import { escapeUnsafeDisplayChars } from "@/lib/security/unsafe-display-chars";
  * (round-2 F-E).
  */
 export const VALUE_FLAG_HINTS = {
-  tenant: "a tenant UUID, one of its registered claims, or its external id",
+  tenant: "a tenant UUID or one of its registered claims",
   domain: "the domain to register or remove",
   by: "a self-asserted operator label",
   from: "the current owner's tenant UUID, exactly as `list` prints it",
