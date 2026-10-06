@@ -26,7 +26,7 @@ const CASE_TIMEOUT_MS = 30_000;
 function runCli(...args: string[]) {
   return spawnSync(TSX, [SCRIPT, ...args], {
     cwd: ROOT,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, MIGRATION_DATABASE_URL: "" },
+    env: { NODE_ENV: "test", PATH: process.env.PATH, HOME: process.env.HOME, MIGRATION_DATABASE_URL: "" },
     encoding: "utf8",
     timeout: CASE_TIMEOUT_MS - 5_000,
   });
