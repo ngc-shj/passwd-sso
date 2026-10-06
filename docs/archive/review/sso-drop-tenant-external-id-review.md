@@ -45,7 +45,7 @@ Initial review. Local LLM pre-screening: no issues.
 
 - **Test F1 [Major, design]** — `tenant-claim-registry.test.ts` missing from the unit list; its top-level
   `EXTERNAL_ID_FOLD_SQL` import breaks the whole file. **Resolved** (merged with Func F1).
-- **Test F2 [Major, design]** — forbidden pattern #1 is not a single-line grep and already returns nothing on
+- **Test F2 [Major, design]** — forbidden pattern 1 is not a single-line grep and already returns nothing on
   the unfixed tree (vacuous). **Resolved**: removed; `tsc` / `next build` is the enforcement.
 - **Test F3 [Major, design]** — the proposed integration case was vacuous and duplicated the existing
   register-event case. **Resolved**: replaced with an `information_schema.columns` assertion.
@@ -74,7 +74,7 @@ R1–R18 clean, R19 found, R20–R57 clean, RT1 clean, RT2 found, RT3–RT6 clea
 Date: 2026-10-06
 
 ## Changes from Previous Round
-Round-1 dispositions applied (C3 grep, C4 prose + worker-policy-manifest, C5 per-assertion boundary, C6 security-review.md, forbidden pattern #1 → tsc, R1 dev-DB measurement).
+Round-1 dispositions applied (C3 grep, C4 prose + worker-policy-manifest, C5 per-assertion boundary, C6 security-review.md, forbidden pattern 1 → tsc, R1 dev-DB measurement).
 
 ## Functionality Findings
 - **F1 [Major, prose]** — `resolveTenantByClaim` / `findOrCreateTenantForClaim` JSDoc still narrates the release-1/2 (D1/SC10) split; no grep catches camelCase prose. **Resolved**: NF1a + residue sweep.
