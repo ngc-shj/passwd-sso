@@ -34,3 +34,44 @@ R29 Flagged (F3), R42 Flagged (F1); all others Clear.
 R42/R47 (S4), R48 (S3), R49 (S1, S2, S3) flagged; RS1–RS6 Clear.
 ### Testing expert
 RT7 triggered (T2, T3, T5), RT10 triggered (T4), R19 clean.
+
+---
+
+# Round 2
+Date: 2026-10-06
+
+## Changes from Previous Round
+Redesign to runtime-verified opaque values (WeakMap) with `renderSql` at the Unsafe boundary; FR4 tagged-only raw API; Step 0 characterization tests.
+
+## Functionality Findings
+- F1 [Critical, design] genuine fragments composed through ordinary templates stringify to `[object Object]`. Resolved: FR2 throwing `toString`/`valueOf`/`Symbol.toPrimitive`; C2 composition invariant.
+- F2 [Critical, feasibility] migrate script runs `main()` on import. Resolved: Step 0 adds the CLI guard used by tenant-domain.ts / audit-chain-verify-worker.ts.
+- F3 [Major, scope] `assertIdentifier` → `sqlIdentifier` is a capture-and-thread rewrite (~14 sites, 5 functions). Resolved: stated in C2.
+- Verified: 53 Unsafe calls, 7 non-literal; 74 `$queryRaw`/`$executeRaw`, all tagged; 0 `Prisma.raw`; type-position references are the three listed.
+
+## Security Findings (Opus, escalated)
+- N1 [Critical] `trustedSql` callable as a function mints a fragment from arbitrary text. Resolved: `RAW_SQL_MODULE_USE` (tag-only, unaliased, no namespace/re-export).
+- N2 [Critical] `Prisma.join`/`sql`/`Sql` inject raw text into tagged `$queryRaw`; `PRISMA_RAW` spellings incomplete. Resolved: `PRISMA_SQL_TAG` over {raw, sql, join, Sql, empty, sqltag} and every access spelling; measured 0 uses.
+- N3 [Critical] string-keyed `$queryRaw({sql})`, `$…RawInternal`, `$queryRawTyped`. Resolved: single `RAW_METHOD` rule over `/^\$(query|execute)Raw\w*$/` incl. literal contents.
+- N4 [Critical] file-wide binding check. Resolved: scope-aware resolution; shadow fixtures.
+- N5 [Major] negative integer renders `--`. Resolved: non-negative only.
+- N6 [Major] `sqlIdentifier` accepts keywords; lexical guarantee. Resolved: reserved-keyword rejection (list pinned to `pg_get_keywords()`), stated precondition.
+- N7 [Major] direct-call not pinned to callee. Resolved: `getExpression()` is the Identifier; deny fixtures.
+- N8 [Minor] export surface. Resolved: C1 acceptance.
+- N9 [Minor] residual incomplete. Resolved: listed.
+- N10 [Minor, Adjacent] direct `pg` / non-.ts out of scope undeclared. Resolved: scan widened to .js/.mjs/.cjs/.mts/.cts and `prisma/`; SC3 names direct `pg`.
+- Round-1 S1/S2 confirmed closed; S3 completed by N2/N3.
+
+## Testing Findings
+- T8 [Major] `predicate.test.ts` unaddressed. Resolved: pinned in Step 0, reject list re-expressed after.
+- T9 [Major] `onWebhookDeliveryFailure` not exported. Resolved: Step 0 exports it.
+- T10 [Major] Step 0 ordering unverifiable. Resolved: SHA in deviation log; reviewer check + standalone run.
+- T11 [Major] aliased `raw` import fixture and allow neighbour. Resolved: C3 fixtures.
+
+## Recurring Issue Check
+### Functionality expert
+R41 (F2), R49 (F1) flagged; R42/R47/R48 clear (re-derived).
+### Security expert
+R3 (N2/N3), R42 (N2/N3), R46 (N4), R47 (N1/N2/N3/N7), R48 (N2), R49 (N1/N6/N9/N10), R55 (N5) flagged; R29 clear; RS3 (N6); RS6 clear.
+### Testing expert
+RT2 (T9), RT10 (T11), R50 (T10), R19 adjacent (T8) flagged; RT7, RT8, R42 clear.
