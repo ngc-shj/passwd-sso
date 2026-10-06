@@ -68,10 +68,10 @@ jobs:
               - "scripts/**"
               # Operator documentation is asserted BY the suite: the C8 block in
               # scripts/__tests__/backup-db.test.mjs covers all five documents
-              # below, two of them under backup-recovery/. SC5's
-              # reason for not wiring check-doc-paths.mjs is that those assertions
-              # cover it. Without these two entries a docs-only PR runs neither
-              # gate, which is exactly the change they exist to catch.
+              # below, two of them under backup-recovery/, beyond the path
+              # resolution check-doc-paths.mjs does in static-checks. Without
+              # these two entries a docs-only PR skips those assertions, which is
+              # exactly the change they exist to catch.
               - "docs/operations/**"
               - "CLAUDE.md"
             extension:
@@ -318,6 +318,12 @@ jobs:
       AUTH_URL: "http://localhost:3000"
       VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       REDIS_URL: "redis://localhost:6379"
+      # backup-db.test.mjs Group B validates archives with whichever pg_restore
+      # it finds first: the host client, else the compose db service. This job
+      # has always resolved the host one (the runner image ships
+      # postgresql-client); pinning it makes any change of reader a red rather
+      # than a different suite reporting the same green.
+      BACKUP_DB_EXPECT_READER: "host"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

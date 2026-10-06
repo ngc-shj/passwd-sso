@@ -1258,10 +1258,9 @@ exit 0`);
 // ─── C8: documentation ──────────────────────────────────────
 
 describe("C8 documentation", () => {
-  // No gate enforces these edits on an ordinary PR: check-doc-paths.mjs is
-  // invoked only by refactor-phase-verify.mjs, whose workflow triggers on
-  // refactor/** and merge_group. Asserting the references here is what moves
-  // them from author obligation to a red build.
+  // check-doc-paths.mjs (pre-pr.sh's static batch) only proves a referenced
+  // path exists. What these documents SAY about the script is asserted here,
+  // which is what moves those edits from author obligation to a red build.
   const DOCS = [
     "CLAUDE.md",
     "docs/operations/backup-recovery/en.md",
@@ -1276,8 +1275,7 @@ describe("C8 documentation", () => {
     // `pre-pr.sh`'s `app_paths` (kept in lockstep, R33) both gate the Web steps,
     // and neither listed `docs/`, so a docs-only PR ran neither gate — the
     // assertions above reported nothing on exactly the change they exist to
-    // catch, and SC5's justification for not wiring check-doc-paths.mjs rests on
-    // them. Pinned in both files because the lockstep is a comment, not a check.
+    // catch. Pinned in both files because the lockstep is a comment, not a check.
     const ci = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
     // Scoped to the `filters:` literal and split on the NEXT key inside it. A
     // whole-file split cuts at the `extension:` in the job's `outputs:` block,
@@ -2807,6 +2805,35 @@ fi`);
     // no user_id at all is a table that cannot be asked, not a mount that
     // passed.
     mountinfoFixture("rw", "fuse.gocryptfs");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/was not made by this uid/);
+  });
+
+  // The cases above prove the reader against hand-written lines, which place
+  // user_id= in the PER-MOUNT options. The kernel does not: this line is copied
+  // from /proc/self/mountinfo on the Linux verification host (aarch64, Linux
+  // 6.17, gocryptfs v2.6.1 / go-fuse v2.8.0) with the operator's own mount, and
+  // user_id= arrives in the SUPER options after the source. Only the mount
+  // point, the source and the uid are substituted; every other byte is the
+  // kernel's.
+  const kernelGocryptfsLine = (uid) =>
+    `5678 34 0:97 / ${realBackupDir.replace(/ /g, "\\040")} rw,nosuid,nodev,relatime shared:624 - fuse.gocryptfs ${join(tmpDir, "cipher")} rw,user_id=${uid},group_id=1000,max_read=1048576`;
+  const kernelTable = (line) => {
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, ["34 1 0:20 / / rw - ext4 /dev/root rw", line].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+  };
+
+  it("accepts the operator's own gocryptfs mount as the kernel reports it", () => {
+    kernelTable(kernelGocryptfsLine(process.getuid()));
+    const r = run();
+    expect(r.status, `the medium both operator documents prescribe was refused: ${r.stderr}`).toBe(0);
+    readTheFixture(r);
+  });
+
+  it("refuses the same kernel-shaped gocryptfs line when another uid made it", () => {
+    kernelTable(kernelGocryptfsLine(9999));
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
     expect(r.stderr).toMatch(/was not made by this uid/);

@@ -14,10 +14,16 @@
 set -euo pipefail
 : "${MIGRATION_DATABASE_URL:?MIGRATION_DATABASE_URL is required}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/psql-safe.sh
+source "$SCRIPT_DIR/lib/psql-safe.sh"
+trap psql_safe_cleanup EXIT
+psql_safe_url DB_URL "$MIGRATION_DATABASE_URL"
+
 # Use a HEREDOC so the SQL is grep-auditable from this file alone.
 # Forbidden verbs (UPDATE/INSERT/DELETE/TRUNCATE) MUST NOT appear here:
 # the pre-pr.sh static check enforces this.
-psql "$MIGRATION_DATABASE_URL" -At <<'SQL'
+psql_safe "$DB_URL" -At <<'SQL'
 SELECT
   'v1_count'           AS metric, COUNT(*) FILTER (WHERE prf_supported AND prf_salt IS NULL)     AS value FROM webauthn_credentials
 UNION ALL
