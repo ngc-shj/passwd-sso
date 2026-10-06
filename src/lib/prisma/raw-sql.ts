@@ -99,6 +99,17 @@ const RESERVED_SQL_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 const IDENTIFIER_RE = /^[a-z_]+$/;
+// Captured at load, same reasoning as the WeakMap bindings above: calling
+// through these bound references means a later `RegExp.prototype.exec = …` /
+// `RegExp.prototype.test = …` / `Set.prototype.has = …` cannot change what
+// sqlIdentifier decides. IDENTIFIER_RE carries no `g`/`y` flag, so `.exec()`
+// has no `lastIndex` state to manage across calls.
+const regExec = RegExp.prototype.exec.bind(IDENTIFIER_RE) as (
+  input: string,
+) => RegExpExecArray | null;
+const reservedHas = Set.prototype.has.bind(RESERVED_SQL_WORDS) as (
+  value: string,
+) => boolean;
 
 /**
  * Mint a genuine `SqlIdentifier` from a lowercase/underscore name that is not
@@ -111,10 +122,10 @@ export function sqlIdentifier(name: string): SqlIdentifier {
   if (typeof name !== "string") {
     throw new TypeError("sqlIdentifier: name must be a string");
   }
-  if (!IDENTIFIER_RE.test(name)) {
+  if (regExec(name) === null) {
     throw new Error(`sqlIdentifier: "${name}" must match ^[a-z_]+$`);
   }
-  if (RESERVED_SQL_WORDS.has(name)) {
+  if (reservedHas(name)) {
     throw new Error(`sqlIdentifier: "${name}" is a reserved PostgreSQL keyword`);
   }
   const obj = createGenuineObject();

@@ -24,59 +24,93 @@
  *   - RAW_SQL_NAMES: every occurrence of `renderSql` / `trustedSql` /
  *     `sqlIdentifier` / `joinSql` must sit in one of a small set of allowed
  *     positions (the single canonical unaliased import from raw-sql.ts;
- *     `renderSql`/`sqlIdentifier`/`joinSql` as an ordinary call's callee;
- *     `trustedSql` as a tagged-template tag; a type position). Any other
- *     module-loading form of raw-sql.ts (namespace/default import, `export *
- *     from`, `require()`, `import()`, `import x = require()`) denies
- *     outright.
+ *     `renderSql`/`sqlIdentifier`/`joinSql` as an ordinary call's callee AND
+ *     `trustedSql` as a tagged-template tag, each ONLY when that name also has
+ *     a canonical import in the same file — a positionally-shaped call alone
+ *     proves nothing about what the name is bound to; a type position). A
+ *     decoded string/no-substitution-template literal equal to one of the four
+ *     names, in expression position, denies too (a literal-keyed forge —
+ *     `globalThis["renderSql"] = …` — never produces an Identifier occurrence;
+ *     exempt: raw-sql.ts, this gate's own source). Any other module-loading
+ *     form of raw-sql.ts (namespace/default import, `export * from`,
+ *     `require()`, `import()`, `import x = require()`) denies outright, as
+ *     does a scanned file that itself SHADOWS raw-sql.ts's module resolution
+ *     (a `raw-sql.js`/`.mjs`/`.cjs` sibling, a `raw-sql/index.*`); a `.js`
+ *     specifier's TS/ESM extension-rewrite resolution never claims such a
+ *     shadow file as raw-sql.ts.
+ *   - IMPORT_EQUALS_ENTITY: `import x = <entity name>` (`import r =
+ *     Prisma.raw`, including `export import` inside a namespace) denies
+ *     unconditionally — a QualifiedName entity name is not a type position,
+ *     and this binding form aliases whatever it denotes past every other
+ *     expression-position check. `import x = require(...)` is unaffected
+ *     (different AST shape; handled by RAW_SQL_NAMES / UNSCANNED_IMPORT).
  *   - SPECIFIER_LITERAL: a string/no-substitution-template literal, in
- *     expression position, whose decoded value matches the Prisma specifier
- *     pattern or resolves to raw-sql.ts, denies unless it IS the specifier of
- *     a static import/export declaration (every other sighting — a computed
- *     `require()`/`import()` argument, a reassigned loader — is unaccounted
- *     for by construction and must fail closed). This gate's own source is
- *     exempt (it spells the allowed specifiers as data).
- *   - UNSCANNED_IMPORT: a scanned file importing from a path that resolves
- *     into an excluded test path (`*.test.*`, `__tests__/`, `manual-tests/`,
- *     `e2e/`) denies — closes the laundering-through-an-unscanned-file gap.
+ *     expression position, whose decoded value HAS A PATH SEGMENT (split on
+ *     `/` and `\`) equal to `@prisma`/`.prisma` (not merely start-anchored —
+ *     a relative or `node_modules`-reaching path counts too) or resolves to
+ *     raw-sql.ts, denies unless it IS the specifier of a static import/export
+ *     declaration (every other sighting — a computed `require()`/`import()`
+ *     argument, a reassigned loader — is unaccounted for by construction and
+ *     must fail closed). A `node_modules` path segment in any MODULE-SPECIFIER
+ *     position (import/export declaration, `import x = require()`, a literal
+ *     `require()`/`import()` argument) denies independently of the Prisma/
+ *     raw-sql match. This gate's own source is exempt (it spells the allowed
+ *     specifiers as data).
+ *   - UNSCANNED_IMPORT: a scanned file's import/export declaration, `import x
+ *     = require()`, or a `require()`/`import()` call's literal argument,
+ *     resolving into an excluded test path (`*.test.*`, `__tests__/`,
+ *     `manual-tests/`, `e2e/`) denies — closes the laundering-through-an-
+ *     unscanned-file gap for every module-loading form, not just static
+ *     declarations.
  *   - RAW_METHOD: any spelling of `/^\$(query|execute)Raw\w*$/` — identifier,
- *     property-access name, or decoded literal value — in expression
- *     position, denies UNLESS it is `$queryRaw`/`$executeRaw` as the tag of a
- *     tagged template, or `$queryRawUnsafe`/`$executeRawUnsafe` as the direct
- *     callee of a call (optional chaining allowed, no wrapping parens).
- *     `scripts/checks/**` is exempt from the literal-VALUE clause only (this
- *     directory's gates spell the names as data); every other clause still
- *     applies there.
- *   - PRISMA_IMPORT: every `@prisma/*` / `.prisma/*` specifier (case
- *     insensitive) is denied except `@prisma/client` (type-only imports
+ *     property-access name, or decoded literal value (string OR
+ *     no-substitution template) — in expression position, denies UNLESS it is
+ *     `$queryRaw`/`$executeRaw` as the tag of a tagged template, or
+ *     `$queryRawUnsafe`/`$executeRawUnsafe` as the direct callee of a call
+ *     (optional chaining allowed, no wrapping parens). `scripts/checks/**` is
+ *     exempt from the literal-VALUE clause only (this directory's gates spell
+ *     the names as data); every other clause still applies there.
+ *   - PRISMA_IMPORT: every specifier with a `@prisma`/`.prisma` PATH SEGMENT
+ *     (case insensitive, same segment match as SPECIFIER_LITERAL) is denied
+ *     except the EXACT bare specifiers `@prisma/client` (type-only imports
  *     unrestricted; value imports limited to `PrismaClient`, `Prisma`, and
  *     enum names read from `prisma/schema.prisma`) and `@prisma/adapter-pg`
  *     (only in the files that construct a client with it today). In
  *     expression position, `Prisma.<member>` is allowed only for
  *     `PrismaClientKnownRequestError` / `PrismaClientInitializationError`;
- *     every other member access, element access, or bare reference denies.
- *     Fails closed, unconditionally, if a `prisma/schema.prisma` enum name
- *     collides with a known non-enum top-level `@prisma/client` export.
+ *     every other member access, element access, or bare reference denies —
+ *     including one reached through an `import x = Prisma.…` entity name
+ *     (IMPORT_EQUALS_ENTITY denies that form outright too). Fails closed,
+ *     unconditionally, if a `prisma/schema.prisma` enum name collides with a
+ *     known non-enum top-level `@prisma/client` export.
  *   - PRISMA_EXTENDS: `$extends` — identifier, property name, or decoded
  *     literal — denies in expression position; there is no allowed form.
+ *   - NON_LITERAL_IMPORT (D-5 refinement): a non-literal `import()`/`require()`
+ *     argument denies everywhere except a measured allowlist of the files that
+ *     load a module by a computed specifier on purpose (a tsx loader over an
+ *     absolute path, the i18n namespace loader, the crypto WASM loader); a
+ *     count mismatch in one of those files denies too, so the audited set
+ *     cannot drift silently.
+ *   - SYMLINK_SCAN_TARGET: a symlink under a Layer 2 scan root denies — the
+ *     gate judges syntax on disk and cannot verify what a symlink resolves to.
  *   - Fails closed on 0 files analysed and on a file that fails to parse.
  *
  * Scope (Layer 2, independent of Layer 1): every non-test `.ts .tsx .mts .cts
- * .js .mjs .cjs` under `src/`, `scripts/`, `prisma/`, and the repository root.
- * `src/lib/prisma/raw-sql.ts` is exempt from RAW_SQL_NAMES only (it is where
- * these names are declared); every other rule still applies to it.
+ * .js .jsx .mjs .cjs` under `src/`, `scripts/`, `prisma/`, and the repository
+ * root. `src/lib/prisma/raw-sql.ts` is exempt from RAW_SQL_NAMES only (it is
+ * where these names are declared); every other rule still applies to it.
  *
  * Residual (declared, enforced by review, not this gate): `sqlIdentifier`'s
  * precondition that its argument is a code constant / closed literal set; a
  * computed element access with a non-literal key; reflective enumeration that
  * never spells a name; Prisma internals reached through `any`; a loader under
- * another name, or `import()`/`require()`, invoked with a non-literal specifier
- * (i18n and WASM loaders use computed specifiers legitimately); a third-party dependency
- * re-exporting a raw-SQL producer; `eval`/`Function`; replacing a built-in
- * before this module (or this gate's own ts-morph dependency) loads. Threat
- * model: this gate catches accidental and casual misuse in code that goes
- * through review; deliberately obfuscated code can defeat any static gate —
- * for that, review is the control.
+ * another name invoked with a non-literal specifier (with a literal specifier
+ * it is caught by SPECIFIER_LITERAL / UNSCANNED_IMPORT / NON_LITERAL_IMPORT);
+ * a third-party dependency re-exporting a raw-SQL producer; `eval`/`Function`;
+ * replacing a built-in before this module (or this gate's own ts-morph
+ * dependency) loads. Threat model: this gate catches accidental and casual
+ * misuse in code that goes through review; deliberately obfuscated code can
+ * defeat any static gate — for that, review is the control.
  *
  * See docs/archive/review/ for the "unforgeable SQL text for raw-SQL calls"
  * plan (C3) for the full contract, and its review log for why each clause
@@ -225,8 +259,39 @@ const RAW_SQL_NAMES = ["renderSql", "trustedSql", "sqlIdentifier", "joinSql"];
 const RAW_SQL_MODULE_REL = "src/lib/prisma/raw-sql.ts";
 const GATE_SELF_REL = "scripts/checks/check-raw-sql-usage.mjs";
 const RAW_METHOD_RE = /^\$(query|execute)Raw\w*$/;
-const PRISMA_SPECIFIER_RE = /^(@prisma|\.prisma)(\/|$)/i;
 const SCRIPTS_CHECKS_PREFIX = "scripts/checks/";
+
+// F2: matched by PATH SEGMENT (split on `/` and `\`), not by a start-anchored
+// prefix — a start-anchored `^@prisma` regex misses a Prisma package reached
+// through a relative path (`../../node_modules/@prisma/client/...`) or a
+// node_modules path handed to a loader as a plain string. "prisma/config" (no
+// `@`, no leading dot) is a real, unrelated package specifier and must NOT match.
+const PRISMA_PATH_SEGMENT_RE = /^(@prisma|\.prisma)$/i;
+function hasPrismaPathSegment(value) {
+  return value.split(/[\\/]/).some((seg) => PRISMA_PATH_SEGMENT_RE.test(seg));
+}
+
+// F2: a `node_modules` segment in a MODULE-SPECIFIER position (not just any
+// string anywhere) denies regardless of what package it reaches — reaching
+// into node_modules by relative path is itself a laundering vector.
+const NODE_MODULES_SEGMENT_RE = /^node_modules$/i;
+function hasNodeModulesSegment(value) {
+  return value.split(/[\\/]/).some((seg) => NODE_MODULES_SEGMENT_RE.test(seg));
+}
+
+function isModuleSpecifierPositionLiteral(lit) {
+  const parent = lit.getParent();
+  if (parent === undefined) return false;
+  if (Node.isImportDeclaration(parent) || Node.isExportDeclaration(parent)) return true;
+  if (Node.isExternalModuleReference(parent)) return true; // import x = require("...")
+  if (Node.isCallExpression(parent) && parent.getArguments()[0] === lit) {
+    const callee = parent.getExpression();
+    const isRequire = Node.isIdentifier(callee) && callee.getText() === "require";
+    const isDynamicImport = callee.getKind() === SyntaxKind.ImportKeyword;
+    return isRequire || isDynamicImport;
+  }
+  return false;
+}
 
 // Derived at implementation time (grep -rln '@prisma/adapter-pg' src scripts
 // prisma <root files> | grep -vE '\.test\.|__tests__|manual-tests|/e2e/'):
@@ -300,13 +365,50 @@ const TYPE_POSITION_PARENT_KINDS = new Set([
   SyntaxKind.ConstructSignature,
 ]);
 
+// F1: a QualifiedName (`A.B`) is TypeScript's AST shape both for a dotted name
+// used as a TYPE (`Prisma.TransactionClient`) and for the ENTITY NAME of an
+// `import x = A.B` declaration (`import r = Prisma.raw`) — the latter is NOT a
+// type position: it creates a runtime alias to whatever `A.B` denotes, which
+// is exactly how `Prisma.raw` (or a raw-sql.ts export) could be laundered past
+// every expression-position check below. Walk to the outermost QualifiedName
+// and classify by ITS parent, not by "is this a QualifiedName at all".
+function isQualifiedNameInTypePosition(qn) {
+  let node = qn;
+  let parent = node.getParent();
+  while (parent !== undefined && Node.isQualifiedName(parent)) {
+    node = parent;
+    parent = node.getParent();
+  }
+  return parent !== undefined && !Node.isImportEqualsDeclaration(parent);
+}
+
 function isTypePositionIdentifier(id) {
   const parent = id.getParent();
   if (parent === undefined) return false;
   if (TYPE_POSITION_PARENT_KINDS.has(parent.getKind())) return true;
-  if (Node.isQualifiedName(parent)) return true; // `Prisma.TransactionClient` as a TYPE
+  if (Node.isQualifiedName(parent)) return isQualifiedNameInTypePosition(parent);
   if (Node.isTypeQuery(parent)) return true; // `typeof renderSql` as a TYPE
   return false;
+}
+
+// F1: `import x = <entity name>` (optionally `export import x = …` inside a
+// namespace) denies unconditionally — it aliases whatever the entity name
+// denotes (`Prisma.raw`, a raw-sql.ts export reached some other way, …)
+// through a binding form none of the other positional checks inspect.
+// `import x = require(...)` is a DIFFERENT moduleReference shape
+// (ExternalModuleReference) and is handled by the existing RAW_SQL_NAMES /
+// UNSCANNED_IMPORT checks on its string-literal argument.
+function checkImportEqualsEntityName(sf, rel) {
+  for (const ieq of sf.getDescendantsOfKind(SyntaxKind.ImportEqualsDeclaration)) {
+    const ref = ieq.getModuleReference();
+    if (Node.isExternalModuleReference(ref)) continue;
+    violate(
+      "IMPORT_EQUALS_ENTITY",
+      rel,
+      lineOf(ieq),
+      "import x = <entity name> aliases a value through a binding form no other rule inspects",
+    );
+  }
 }
 
 // A string/no-substitution-template literal inside a `LiteralType` (e.g.
@@ -330,8 +432,16 @@ function literalValue(lit) {
 // named "manual-tests-helper.ts" is a real production script, not something
 // under a manual-tests/ directory — it must stay in scope).
 // ---------------------------------------------------------------------------
-const LAYER2_EXTS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"]);
+const LAYER2_EXTS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
 const TEST_PATH_RE = /(^|\/)(__tests__|manual-tests|e2e)(\/|$)|\.test(\.[^/]+)?$/;
+
+// F6: a symlink entry under a scan root has `Dirent.isFile()` === false (its
+// own lstat-based type is "symlink", regardless of what it points at), so the
+// original `if (!entry.isFile()) continue;` guard silently DROPPED it from
+// the scan — a symlink pointing at a forged file would never be analysed.
+// Collected here and reported as a fail-closed reason in Main, rather than
+// skipped.
+let layer2SymlinksFound = [];
 
 function listFilesRecursive(root, pathRoot) {
   const out = [];
@@ -343,6 +453,11 @@ function listFilesRecursive(root, pathRoot) {
     throw err;
   }
   for (const entry of dirEntries) {
+    if (entry.isSymbolicLink()) {
+      const abs = join(entry.parentPath ?? entry.path, entry.name);
+      layer2SymlinksFound.push(abs.slice(pathRoot.length).replace(/^\/+/, ""));
+      continue;
+    }
     if (!entry.isFile()) continue;
     if (!LAYER2_EXTS.has(extname(entry.name))) continue;
     const abs = join(entry.parentPath ?? entry.path, entry.name);
@@ -363,6 +478,10 @@ function listRootFiles(root) {
     throw err;
   }
   for (const entry of dirEntries) {
+    if (entry.isSymbolicLink()) {
+      layer2SymlinksFound.push(entry.name);
+      continue;
+    }
     if (!entry.isFile()) continue;
     if (!LAYER2_EXTS.has(extname(entry.name))) continue;
     if (TEST_PATH_RE.test(entry.name)) continue;
@@ -436,10 +555,29 @@ function candidatesForBase(base) {
   ];
 }
 
+// F4-c (part 2): populated from the real Layer 2 scan list before any file is
+// checked (see Main below). A `.js`/`.mjs`/`.cjs` specifier resolves to its TS
+// source sibling under the TS/Node ESM extension-rewrite convention ONLY when
+// no real file sits at the literal path — if a real sibling exists (a shadow
+// `raw-sql.js`, caught separately by checkRawSqlShadowFile), Node's resolver
+// loads THAT file, never raw-sql.ts, so the convention must not override it.
+let scannedFilesLower = new Set();
+
 /** Case-insensitive: does `spec` (imported from `fromRel`) resolve to raw-sql.ts? */
 function resolvesToRawSqlModule(fromRel, spec) {
   const base = resolveRepoSpecifierBase(fromRel, spec);
   if (base === undefined) return false;
+  const m = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/i.exec(base);
+  if (m) {
+    const ext = m[1].toLowerCase();
+    const sibling = TS_SIBLING_EXT[ext];
+    if (sibling === undefined) return base.toLowerCase() === RAW_SQL_MODULE_TARGET;
+    if (scannedFilesLower.has(base.toLowerCase())) {
+      return base.toLowerCase() === RAW_SQL_MODULE_TARGET;
+    }
+    const stem = base.slice(0, base.length - m[0].length);
+    return `${stem}.${sibling}`.toLowerCase() === RAW_SQL_MODULE_TARGET;
+  }
   return candidatesForBase(base).some((c) => c.toLowerCase() === RAW_SQL_MODULE_TARGET);
 }
 
@@ -499,22 +637,29 @@ function checkUnsafeArg(sf, rel) {
 // raw-sql.ts exports, plus the module-loading-form and non-literal
 // import()/require() checks that need no name occurrence at all.
 // ---------------------------------------------------------------------------
-function isAllowedRawSqlNameOccurrence(id, name) {
+function isAllowedRawSqlNameOccurrence(id, name, canonicallyImported) {
   const parent = id.getParent();
   if (parent === undefined) return false;
 
   if (TYPE_POSITION_PARENT_KINDS.has(parent.getKind())) return true; // type position
-  if (Node.isQualifiedName(parent)) return true; // type position
+  if (Node.isQualifiedName(parent)) return isQualifiedNameInTypePosition(parent);
 
   if (Node.isCallExpression(parent) && parent.getExpression() === id) {
     // Ordinary-call callee: allowed for renderSql / sqlIdentifier / joinSql,
-    // NOT for trustedSql (tag-only).
-    return name !== "trustedSql";
+    // NOT for trustedSql (tag-only) — AND (F4-a) only when THIS file also
+    // holds a canonical import of that name from raw-sql.ts. Without this, a
+    // call positionally shaped like `renderSql(f)` passes even when `renderSql`
+    // is a global injected by `globalThis.renderSql = …` or a same-named
+    // local forged some other way — the position alone proves nothing about
+    // what the name is bound to.
+    if (name === "trustedSql") return false;
+    return canonicallyImported.has(name);
   }
 
   if (Node.isTaggedTemplateExpression(parent) && parent.getTag() === id) {
-    // Tagged-template tag: allowed ONLY for trustedSql.
-    return name === "trustedSql";
+    // Tagged-template tag: allowed ONLY for trustedSql, and only with a
+    // canonical import present (F4-a, same reasoning as the call case above).
+    return name === "trustedSql" && canonicallyImported.has(name);
   }
 
   if (Node.isImportSpecifier(parent) && parent.getNameNode() === id) {
@@ -535,15 +680,86 @@ function isAllowedRawSqlNameOccurrence(id, name) {
 // every ts-morph callback signature.
 let currentRel = "";
 
+// F4-a: the set of RAW_SQL_NAMES this file canonically imports from
+// raw-sql.ts (unaliased, not type-only, not string-named) — a call/tag
+// occurrence is allowed only when its name is a member of this set, so a
+// same-named global or local can never satisfy the positional check alone.
+function collectCanonicallyImportedRawSqlNames(sf, rel) {
+  const names = new Set();
+  for (const imp of sf.getImportDeclarations()) {
+    if (imp.isTypeOnly()) continue;
+    if (!resolvesToRawSqlModule(rel, imp.getModuleSpecifierValue())) continue;
+    for (const ni of imp.getNamedImports()) {
+      if (ni.isTypeOnly()) continue;
+      if (ni.getAliasNode() !== undefined) continue;
+      if (ni.getNameNode().getKind() === SyntaxKind.StringLiteral) continue;
+      const name = ni.getName();
+      if (RAW_SQL_NAMES.includes(name)) names.add(name);
+    }
+  }
+  return names;
+}
+
+// F4-b: a decoded string / no-substitution-template literal equal to one of
+// the four raw-sql.ts export names, in expression position, denies — this is
+// how a literal-keyed forge (`globalThis["renderSql"] = …`,
+// `Object.assign(globalThis, {"renderSql": …})`,
+// `Object.defineProperty(globalThis, 'trustedSql', …)`) spells the name
+// without ever producing an Identifier occurrence the scan above would see.
+// raw-sql.ts itself and this gate's own source (which spells the four names
+// as RAW_SQL_NAMES array data) are exempt.
+function checkRawSqlNameLiterals(sf, rel) {
+  if (rel === RAW_SQL_MODULE_REL || rel === GATE_SELF_REL) return;
+  const literals = [
+    ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
+    ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
+  ];
+  for (const lit of literals) {
+    if (isLiteralTypePosition(lit)) continue;
+    const value = literalValue(lit);
+    if (value !== undefined && RAW_SQL_NAMES.includes(value)) {
+      violate("RAW_SQL_NAMES", rel, lineOf(lit), `literal value "${value}"`);
+    }
+  }
+}
+
+// F4-c (part 1): a scanned file other than raw-sql.ts itself that sits at one
+// of raw-sql.ts's own module-resolution candidate paths (a `.js`/`.mjs`/`.cjs`
+// sibling, or a `raw-sql/index.*` directory module) is a SHADOW FILE — Node's
+// real resolver would load it instead of the TS source for any specifier that
+// reaches that path, regardless of what this gate's positional checks decide
+// about raw-sql.ts proper.
+const RAW_SQL_BASE_REL = RAW_SQL_MODULE_REL.replace(/\.ts$/, "");
+const RAW_SQL_SHADOW_PATHS = new Set(
+  ["js", "mjs", "cjs"]
+    .map((ext) => `${RAW_SQL_BASE_REL}.${ext}`)
+    .concat(["ts", "tsx", "js"].map((ext) => `${RAW_SQL_BASE_REL}/index.${ext}`))
+    .map((p) => p.toLowerCase()),
+);
+function checkRawSqlShadowFile(rel) {
+  if (rel === RAW_SQL_MODULE_REL) return;
+  if (RAW_SQL_SHADOW_PATHS.has(rel.toLowerCase())) {
+    violate(
+      "RAW_SQL_NAMES",
+      rel,
+      1,
+      "shadows src/lib/prisma/raw-sql.ts's module resolution — a specifier resolving here would load THIS file at runtime, not raw-sql.ts",
+    );
+  }
+}
+
 function checkRawSqlNames(sf, rel) {
+  checkRawSqlShadowFile(rel);
   if (rel === RAW_SQL_MODULE_REL) return; // exempt: this is where the names are declared
 
   currentRel = rel;
+  checkRawSqlNameLiterals(sf, rel);
+  const canonicallyImported = collectCanonicallyImportedRawSqlNames(sf, rel);
   for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
     const name = id.getText();
     if (!RAW_SQL_NAMES.includes(name)) continue;
     if (isTypePositionIdentifier(id)) continue;
-    if (!isAllowedRawSqlNameOccurrence(id, name)) {
+    if (!isAllowedRawSqlNameOccurrence(id, name, canonicallyImported)) {
       violate("RAW_SQL_NAMES", rel, lineOf(id), `"${name}" occurs outside an allowed position`);
     }
   }
@@ -642,7 +858,7 @@ function checkSpecifierLiteral(sf, rel) {
     const value = literalValue(lit);
     if (value === undefined) continue;
 
-    const matchesPrisma = PRISMA_SPECIFIER_RE.test(value);
+    const matchesPrisma = hasPrismaPathSegment(value);
     const matchesRawSql = resolvesToRawSqlModule(rel, value);
     if (!matchesPrisma && !matchesRawSql) continue;
 
@@ -661,9 +877,40 @@ function checkSpecifierLiteral(sf, rel) {
   }
 }
 
+// F2: a `node_modules` path segment in a MODULE-SPECIFIER position denies —
+// independent of the Prisma/raw-sql checks above, which only fire for a
+// specifier that names one of THOSE targets. Scoped to specifier positions
+// only (not any string anywhere) so an unrelated log message or error string
+// mentioning "node_modules" is not denied.
+function checkNodeModulesSpecifier(sf, rel) {
+  if (rel === GATE_SELF_REL) return; // exempt: spells example specifiers as data
+
+  const literals = [
+    ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
+    ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
+  ];
+  for (const lit of literals) {
+    if (isLiteralTypePosition(lit)) continue;
+    if (!isModuleSpecifierPositionLiteral(lit)) continue;
+    const value = literalValue(lit);
+    if (value !== undefined && hasNodeModulesSegment(value)) {
+      violate(
+        "SPECIFIER_LITERAL",
+        rel,
+        lineOf(lit),
+        `module specifier "${value}" reaches into node_modules by path`,
+      );
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // UNSCANNED_IMPORT — a scanned file's import/export specifier resolving into
-// an excluded test path.
+// an excluded test path; also (F3) a `require()`/`import()` call's literal
+// first argument and the `ExternalModuleReference` of `import x = require()`
+// — the original scan covered only static import/export declarations, so a
+// `*.test.ts` helper could be laundered through either of those two call-ish
+// forms without ever tripping this rule.
 // ---------------------------------------------------------------------------
 function checkUnscannedImport(sf, rel) {
   for (const imp of sf.getImportDeclarations()) {
@@ -676,6 +923,34 @@ function checkUnscannedImport(sf, rel) {
     const spec = exp.getModuleSpecifierValue();
     if (spec !== undefined && resolvesToUnscannedPath(rel, spec)) {
       violate("UNSCANNED_IMPORT", rel, lineOf(exp), `export specifier "${spec}" resolves into an excluded test path`);
+    }
+  }
+  for (const ieq of sf.getDescendantsOfKind(SyntaxKind.ImportEqualsDeclaration)) {
+    const ref = ieq.getModuleReference();
+    if (!Node.isExternalModuleReference(ref)) continue;
+    const expr = ref.getExpression();
+    const value = Node.isStringLiteral(expr) || Node.isNoSubstitutionTemplateLiteral(expr)
+      ? literalValue(expr)
+      : undefined;
+    if (value !== undefined && resolvesToUnscannedPath(rel, value)) {
+      violate("UNSCANNED_IMPORT", rel, lineOf(ieq), `import x = require("${value}") resolves into an excluded test path`);
+    }
+  }
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const isRequire = Node.isIdentifier(expr) && expr.getText() === "require";
+    const isDynamicImport = expr.getKind() === SyntaxKind.ImportKeyword;
+    if (!isRequire && !isDynamicImport) continue;
+    const arg0 = call.getArguments()[0];
+    if (arg0 === undefined) continue;
+    const value = literalValue(arg0);
+    if (value !== undefined && resolvesToUnscannedPath(rel, value)) {
+      violate(
+        "UNSCANNED_IMPORT",
+        rel,
+        lineOf(call),
+        `${isRequire ? "require()" : "import()"} of "${value}" resolves into an excluded test path`,
+      );
     }
   }
 }
@@ -739,7 +1014,7 @@ function checkRawMethod(sf, rel) {
 function checkPrismaImportDeclarations(sf, rel) {
   for (const imp of sf.getImportDeclarations()) {
     const spec = imp.getModuleSpecifierValue();
-    if (!PRISMA_SPECIFIER_RE.test(spec)) continue;
+    if (!hasPrismaPathSegment(spec)) continue;
 
     const isClient = /^@prisma\/client$/i.test(spec);
     const isAdapterPg = /^@prisma\/adapter-pg$/i.test(spec);
@@ -787,7 +1062,7 @@ function checkPrismaImportDeclarations(sf, rel) {
 
   for (const exp of sf.getExportDeclarations()) {
     const spec = exp.getModuleSpecifierValue();
-    if (spec !== undefined && PRISMA_SPECIFIER_RE.test(spec)) {
+    if (spec !== undefined && hasPrismaPathSegment(spec)) {
       violate("PRISMA_IMPORT", rel, lineOf(exp), `export ... from "${spec}"`);
     }
   }
@@ -813,10 +1088,14 @@ function checkPrismaExpressionMembers(sf, rel) {
   // one of the two forms above.
   for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
     if (id.getText() !== "Prisma") continue;
-    if (isTypePositionIdentifier(id)) continue;
+    if (isTypePositionIdentifier(id)) continue; // filters genuine `Prisma.<Type>` QualifiedNames (F1)
     const parent = id.getParent();
     if (parent === undefined) continue;
-    if (Node.isQualifiedName(parent)) continue; // type position
+    // No separate `Node.isQualifiedName(parent)` shortcut here (F1): a
+    // QualifiedName that reaches this point is an `import x = Prisma.…`
+    // entity name, which isTypePositionIdentifier above has already
+    // classified as NOT a type position — it must fall through to the
+    // violate() below, not be waved through as "type position".
     if (Node.isImportSpecifier(parent) && parent.getNameNode() === id) continue; // the import itself
     if (Node.isPropertyAccessExpression(parent) && parent.getExpression() === id) continue; // handled above
     if (Node.isElementAccessExpression(parent) && parent.getExpression() === id) continue; // handled above
@@ -887,6 +1166,52 @@ function checkPrismaExtends(sf, rel) {
 }
 
 // ---------------------------------------------------------------------------
+// NON_LITERAL_IMPORT (D-5 refinement) — a non-literal `import()`/`require()`
+// argument is a tripwire everywhere EXCEPT a measured allowlist of the three
+// files that load a module by a computed specifier on purpose today (a tsx
+// loader over an absolute path, the i18n namespace loader, the crypto WASM
+// loader). Re-measure with `grep -c "await import("` on a count change; a
+// MISMATCH in an allowlisted file's count denies too, so the audited set
+// cannot drift silently in either direction.
+// ---------------------------------------------------------------------------
+const NON_LITERAL_IMPORT_ALLOWLIST = new Map([
+  ["scripts/check-env-docs.ts", 4],
+  ["src/i18n/messages.ts", 2],
+  ["src/lib/crypto/crypto-client.ts", 1],
+]);
+
+function checkNonLiteralImportSpecifiers(sf, rel) {
+  let count = 0;
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const isRequire = Node.isIdentifier(expr) && expr.getText() === "require";
+    const isDynamicImport = expr.getKind() === SyntaxKind.ImportKeyword;
+    if (!isRequire && !isDynamicImport) continue;
+    const arg0 = call.getArguments()[0];
+    if (arg0 === undefined) continue;
+    const isLiteralArg = Node.isStringLiteral(arg0) || Node.isNoSubstitutionTemplateLiteral(arg0);
+    if (isLiteralArg) continue;
+    count++;
+    if (!NON_LITERAL_IMPORT_ALLOWLIST.has(rel)) {
+      violate(
+        "NON_LITERAL_IMPORT",
+        rel,
+        lineOf(call),
+        `${isRequire ? "require()" : "import()"} with a non-literal argument outside the measured allowlist`,
+      );
+    }
+  }
+  if (NON_LITERAL_IMPORT_ALLOWLIST.has(rel) && count !== NON_LITERAL_IMPORT_ALLOWLIST.get(rel)) {
+    violate(
+      "NON_LITERAL_IMPORT",
+      rel,
+      1,
+      `${rel} has ${count} non-literal import()/require() call(s); the allowlist expects ${NON_LITERAL_IMPORT_ALLOWLIST.get(rel)} — the measured set drifted`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main — parse every scanned file once (fail closed on parse error), run
 // every rule, fail closed on 0 files scanned.
 // ---------------------------------------------------------------------------
@@ -894,6 +1219,16 @@ checkPrismaEnumDisjointness();
 
 const project = new Project({ useInMemoryFileSystem: true, skipFileDependencyResolution: true });
 const layer2Files = getLayer2ScanFiles();
+scannedFilesLower = new Set(layer2Files.map((f) => f.toLowerCase()));
+
+if (layer2SymlinksFound.length > 0) {
+  failed = true;
+  console.error(
+    "SYMLINK_SCAN_TARGET: a symlink exists under a Layer 2 scan root (src/, scripts/, prisma/, repo root); the gate judges syntax on disk and cannot verify what a symlink resolves to — remove it or replace it with a real file:",
+  );
+  for (const s of [...new Set(layer2SymlinksFound)].sort()) console.error(`  ${s}`);
+  console.error("");
+}
 
 if (layer2Files.length === 0) {
   failed = true;
@@ -927,12 +1262,15 @@ if (layer2Files.length === 0) {
 
     checkUnsafeArg(sf, rel);
     checkRawSqlNames(sf, rel);
+    checkImportEqualsEntityName(sf, rel);
     checkSpecifierLiteral(sf, rel);
+    checkNodeModulesSpecifier(sf, rel);
     checkUnscannedImport(sf, rel);
     checkRawMethod(sf, rel);
     checkPrismaImportDeclarations(sf, rel);
     checkPrismaExpressionMembers(sf, rel);
     checkPrismaExtends(sf, rel);
+    checkNonLiteralImportSpecifiers(sf, rel);
   }
 }
 

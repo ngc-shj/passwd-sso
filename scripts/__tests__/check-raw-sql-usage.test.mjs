@@ -9,7 +9,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,6 +141,58 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       name: "allow: canonical alias-specifier import, renderSql as ordinary call",
       src: `${RAW_SQL_IMPORT}export function run(f) {\n  return renderSql(f);\n}\n`,
       expectCode: 0,
+    },
+    // F4-a: a callee/tag positionally shaped like renderSql(f) / trustedSql`…`
+    // is allowed only when THIS file also canonically imports that name from
+    // raw-sql.ts — position alone proves nothing about the binding.
+    {
+      name: "deny: renderSql(f) called without any import of renderSql from raw-sql.ts",
+      src: `export function run(f) {\n  return renderSql(f);\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: trustedSql`…` tagged without any import of trustedSql from raw-sql.ts",
+      src: `export function run(a) {\n  return trustedSql\`SELECT \${a}\`;\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    // F4-b: a literal-keyed global forge never produces an Identifier
+    // occurrence the scan above would see.
+    {
+      name: "deny: globalThis[\"renderSql\"] = fn (literal-keyed global forge)",
+      src: `export function forge(fn) {\n  globalThis["renderSql"] = fn;\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: Object.assign(globalThis, {\"trustedSql\": fn}) (literal-keyed global forge)",
+      src: `export function forge(fn) {\n  Object.assign(globalThis, { "trustedSql": fn });\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: Object.defineProperty(globalThis, 'sqlIdentifier', ...) (literal-keyed global forge)",
+      src: `export function forge(fn) {\n  Object.defineProperty(globalThis, "sqlIdentifier", { value: fn });\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    // F4-c: a scanned file that SHADOWS raw-sql.ts's own module-resolution
+    // candidate paths denies unconditionally — Node's real resolver would
+    // load the shadow, not the TS source, for any specifier reaching it.
+    {
+      name: "deny: a shadow src/lib/prisma/raw-sql.js sibling file (innocuous content — isolates the shadow-path check from the name-occurrence check)",
+      src: `export const placeholder = 1;\n`,
+      path: "src/lib/prisma/raw-sql.js",
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: a shadow src/lib/prisma/raw-sql/index.ts directory module (innocuous content)",
+      src: `export const placeholder = 1;\n`,
+      path: "src/lib/prisma/raw-sql/index.ts",
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
     },
     {
       name: "allow: relative specifier without extension",
@@ -306,17 +358,21 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
     },
-    // A computed specifier is the declared residual (i18n / WASM loaders use
-    // one legitimately); next to the literal-specifier deny rows above.
+    // D-5 refinement: a non-literal import()/require() argument is no longer
+    // a blanket residual — only a measured allowlist of specific files may do
+    // this (see the NON_LITERAL_IMPORT describe block below). Outside that
+    // allowlist it now denies.
     {
-      name: "allow: non-literal import() argument (declared residual)",
+      name: "deny: non-literal import() argument outside the NON_LITERAL_IMPORT allowlist",
       src: `export async function run(moduleName) {\n  return import(moduleName);\n}\n`,
-      expectCode: 0,
+      expectCode: 1,
+      expectReason: "NON_LITERAL_IMPORT",
     },
     {
-      name: "allow: non-literal require() argument (declared residual)",
+      name: "deny: non-literal require() argument outside the NON_LITERAL_IMPORT allowlist",
       src: `export function run(moduleName) {\n  return require(moduleName);\n}\n`,
-      expectCode: 0,
+      expectCode: 1,
+      expectReason: "NON_LITERAL_IMPORT",
     },
     {
       name: "deny: aliased import { renderSql as r }",
@@ -346,6 +402,46 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       if (r.expectCode === 0) expect(result.stdout).toContain("check-raw-sql-usage: OK");
     });
   }
+
+  // F4-c (part 2): contrast case for "allow: relative specifier with .js"
+  // above — when a REAL `raw-sql.js` sibling exists in the scanned tree, a
+  // `.js` specifier must resolve to THAT file, never fall back to the TS/ESM
+  // extension-rewrite guess that it's raw-sql.ts.
+  it("deny: .js specifier does not resolve to raw-sql.ts when a real .js sibling shadow exists", () => {
+    const result = run({
+      "src/lib/prisma/raw-sql.js": `export function renderSql() {\n  return "forged";\n}\n`,
+      "src/workers/fixture2.ts": `import { renderSql } from "../lib/prisma/raw-sql.js";\nexport function run(f) {\n  return renderSql(f);\n}\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("RAW_SQL_NAMES");
+  });
+});
+
+describe("check-raw-sql-usage Layer 2 — NON_LITERAL_IMPORT (D-5 refinement)", () => {
+  it("allow: the exact allowlisted shape (src/i18n/messages.ts, 2 non-literal import() calls)", () => {
+    const result = run({
+      "src/i18n/messages.ts": `export async function a(ns) {\n  return import(\`../../messages/en/\${ns}.json\`);\n}\nexport async function b(ns) {\n  return import(\`../../messages/ja/\${ns}.json\`);\n}\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  it("deny: a count mismatch in an allowlisted file (measured set drifted)", () => {
+    const result = run({
+      "src/i18n/messages.ts": `export async function a(ns) {\n  return import(\`../../messages/en/\${ns}.json\`);\n}\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("NON_LITERAL_IMPORT");
+    expect(result.stderr).toContain("measured set drifted");
+  });
+
+  it("deny: a new computed import in a different, non-allowlisted file", () => {
+    const result = run({
+      "src/lib/other-loader.ts": `export async function run(moduleName) {\n  return import(moduleName);\n}\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("NON_LITERAL_IMPORT");
+  });
 });
 
 describe("check-raw-sql-usage Layer 2 — SPECIFIER_LITERAL", () => {
@@ -374,9 +470,34 @@ describe("check-raw-sql-usage Layer 2 — SPECIFIER_LITERAL", () => {
       expectCode: 1,
       expectReason: "SPECIFIER_LITERAL",
     },
+    // F2: segment-based (not start-anchored) matching — a relative path
+    // reaching @prisma through node_modules still denies.
+    {
+      name: "deny: relative path reaching @prisma through node_modules (F2 segment match)",
+      src: `import { raw } from "../../node_modules/@prisma/client/runtime/client.js";\nexport const r = raw;\n`,
+      expectCode: 1,
+      expectReason: "PRISMA_IMPORT",
+    },
+    {
+      name: "deny: node_modules path segment in a require() specifier, no @prisma involved",
+      src: `const pkg = require("../../node_modules/some-other-pkg");\nexport { pkg };\n`,
+      expectCode: 1,
+      expectReason: "SPECIFIER_LITERAL",
+    },
+    {
+      name: "deny: a Prisma path segment nested inside a resolve() argument to import()",
+      src: `import { resolve } from "node:path";\nexport async function run(root) {\n  return import(resolve(root, "node_modules/@prisma/client/runtime/client.js"));\n}\n`,
+      expectCode: 1,
+      expectReason: "SPECIFIER_LITERAL",
+    },
     {
       name: "allow: the same literal AS the specifier of a static import",
       src: `import { PrismaClient } from "@prisma/client";\nexport const C = PrismaClient;\n`,
+      expectCode: 0,
+    },
+    {
+      name: "allow: \"prisma/config\" (no @, no leading dot — a real, unrelated package)",
+      src: `import { defineConfig } from "prisma/config";\nexport const c = defineConfig;\n`,
       expectCode: 0,
     },
   ];
@@ -418,6 +539,45 @@ describe("check-raw-sql-usage Layer 2 — UNSCANNED_IMPORT", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("check-raw-sql-usage: OK");
   });
+
+  // F3: the original scan covered only static import/export declarations —
+  // require()/import() calls and `import x = require()` are other
+  // module-loading forms that can launder a *.test.ts/*__tests__* helper.
+  it("deny: require() of ./evil.test", () => {
+    const result = run({
+      "scripts/fixture.ts": `const helper = require("./evil.test");\nexport { helper };\n`,
+      "scripts/evil.test.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("deny: dynamic import() of ./__tests__/helper", () => {
+    const result = run({
+      "scripts/fixture.ts": `export async function run() {\n  return import("./__tests__/helper");\n}\n`,
+      "scripts/__tests__/helper.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("deny: import x = require(./evil.test)", () => {
+    const result = run({
+      "scripts/fixture.ts": `import helper = require("./evil.test");\nexport { helper };\n`,
+      "scripts/evil.test.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("allow: dynamic import(\"./latest-util\") (near-miss, not *.test.*)", () => {
+    const result = run({
+      "scripts/fixture.ts": `export async function run() {\n  return import("./latest-util");\n}\n`,
+      "scripts/latest-util.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
 });
 
 describe("check-raw-sql-usage Layer 2 — RAW_METHOD", () => {
@@ -455,6 +615,16 @@ describe("check-raw-sql-usage Layer 2 — RAW_METHOD", () => {
     {
       name: "deny: literal value \"$queryRaw\" outside scripts/checks",
       src: `export const name = "$queryRaw";\n`,
+      expectCode: 1,
+      expectReason: "RAW_METHOD",
+    },
+    // T-F3: the literal-VALUE clause scans string AND no-substitution
+    // template literals (checkRawMethod already includes both kinds) — this
+    // row proves the backtick path specifically, next to the string-literal
+    // deny row above.
+    {
+      name: "deny: backtick literal value `$queryRaw` (no-substitution template, not a tag)",
+      src: "export const name = `$queryRaw`;\n",
       expectCode: 1,
       expectReason: "RAW_METHOD",
     },
@@ -510,6 +680,37 @@ describe("check-raw-sql-usage Layer 2 — RAW_METHOD", () => {
   for (const r of rows) {
     it(r.name, () => {
       const result = run({ [r.path ?? "scripts/fixture.ts"]: r.src });
+      expect(result.code).toBe(r.expectCode);
+      if (r.expectReason) expect(result.stderr).toContain(r.expectReason);
+      if (r.expectCode === 0) expect(result.stdout).toContain("check-raw-sql-usage: OK");
+    });
+  }
+});
+
+describe("check-raw-sql-usage Layer 2 — IMPORT_EQUALS_ENTITY (F1)", () => {
+  const rows = [
+    {
+      name: "deny: import r = Prisma.raw",
+      src: `import { Prisma } from "@prisma/client";\nimport r = Prisma.raw;\nexport { r };\n`,
+      expectCode: 1,
+      expectReason: "IMPORT_EQUALS_ENTITY",
+    },
+    {
+      name: "deny: export import r = Prisma.raw inside a namespace",
+      src: `import { Prisma } from "@prisma/client";\nexport namespace N {\n  export import r = Prisma.raw;\n}\n`,
+      expectCode: 1,
+      expectReason: "IMPORT_EQUALS_ENTITY",
+    },
+    {
+      name: "allow: let t: Prisma.TransactionClient (a genuine TYPE position)",
+      src: `import type { Prisma } from "@prisma/client";\nexport let t: Prisma.TransactionClient;\n`,
+      expectCode: 0,
+    },
+  ];
+
+  for (const r of rows) {
+    it(r.name, () => {
+      const result = run({ "scripts/fixture.ts": r.src });
       expect(result.code).toBe(r.expectCode);
       if (r.expectReason) expect(result.stderr).toContain(r.expectReason);
       if (r.expectCode === 0) expect(result.stdout).toContain("check-raw-sql-usage: OK");
@@ -711,7 +912,7 @@ describe("check-raw-sql-usage Layer 2 — PRISMA_EXTENDS", () => {
 describe("check-raw-sql-usage Layer 2 — scope (per-extension, root, prisma/)", () => {
   const unsafeArgViolation = `export function run(tx, x) {\n  return tx.$executeRawUnsafe(\`SELECT \${x}\`);\n}\n`;
 
-  for (const ext of ["mts", "cts", "js", "mjs", "cjs"]) {
+  for (const ext of ["mts", "cts", "js", "jsx", "mjs", "cjs"]) {
     it(`fails for the same reason (UNSAFE_ARG) on a .${ext} sibling`, () => {
       const result = run({ [`scripts/fixture.${ext}`]: unsafeArgViolation });
       expect(result.code).toBe(1);
@@ -743,6 +944,30 @@ describe("check-raw-sql-usage Layer 2 — fail-closed structural checks", () => 
     const result = run({ "scripts/broken.ts": "export function run( {\n  return\n" });
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("PARSE_ERROR");
+  });
+
+  // F6: a symlink entry under a scan root has Dirent.isFile() === false (its
+  // own lstat type is "symlink"), so the original scan silently DROPPED it —
+  // it must fail closed with a named reason instead.
+  it("fails closed on a symlink under a Layer 2 scan root (SYMLINK_SCAN_TARGET)", () => {
+    const root = mkRoot();
+    writeFiles(root, { "scripts/real.ts": `export const x = 1;\n` });
+    symlinkSync(join(root, "scripts/real.ts"), join(root, "scripts/linked.ts"));
+    const allowlistFile = join(root, "fixture-allowlist.txt");
+    writeFileSync(allowlistFile, "\n", "utf8");
+    let result;
+    try {
+      const stdout = execFileSync("node", [CHECKER], {
+        env: { ...process.env, RAW_SQL_CHECK_ROOT: root, RAW_SQL_CHECK_ALLOWLIST: allowlistFile },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      result = { code: 0, stdout, stderr: "" };
+    } catch (e) {
+      result = { code: e.status, stdout: e.stdout?.toString() ?? "", stderr: e.stderr?.toString() ?? "" };
+    }
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("SYMLINK_SCAN_TARGET");
   });
 });
 
@@ -777,6 +1002,39 @@ describe("check-raw-sql-usage Layer 1 — unchanged allowlist behaviour (FR5 reg
   it("passes on a clean, fully allowlisted, non-violating file", () => {
     const result = run({
       "scripts/fixture.ts": `export function run(tx) {\n  return tx.$executeRawUnsafe("SELECT 1");\n}\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+});
+
+describe("check-raw-sql-usage Layer 2 — exemption self-tests (T-F1, T-F2)", () => {
+  // T-F1: a realistic raw-sql.ts fixture, at the exact exempt path, holding
+  // all four declarations — proves the RAW_SQL_NAMES / shadow-file / literal
+  // exemption for rel === RAW_SQL_MODULE_REL on content shaped like the real
+  // module, not just an empty or unrelated file at that path.
+  it("allow: a fixture at src/lib/prisma/raw-sql.ts declaring the four names (exemption proven on realistic content)", () => {
+    const result = run({
+      "src/lib/prisma/raw-sql.ts": [
+        'export function sqlIdentifier(name) { return name; }',
+        'export function trustedSql(strings, ...parts) { return strings.join(""); }',
+        'export function joinSql(parts, sep) { return parts.join(sep); }',
+        "export function renderSql(fragment) { return fragment; }",
+        "",
+      ].join("\n"),
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  // T-F2: a fixture AT the gate's own path (within the fixture root — not the
+  // real tracked file) holding a bare raw-sql specifier literal — proves the
+  // GATE_SELF_REL exemption (checkSpecifierLiteral / checkNodeModulesSpecifier
+  // / checkRawSqlNameLiterals) fires on the file's PATH, not on some
+  // assumption about its actual content.
+  it("allow: a fixture at scripts/checks/check-raw-sql-usage.mjs holding a bare raw-sql path literal", () => {
+    const result = run({
+      "scripts/checks/check-raw-sql-usage.mjs": 'export const spec = "@/lib/prisma/raw-sql";\n',
     });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("check-raw-sql-usage: OK");

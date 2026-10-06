@@ -277,6 +277,50 @@ describe("tamper resistance of captured built-ins", () => {
   });
 });
 
+describe("tamper resistance of captured validation built-ins (F5)", () => {
+  it("ignores a post-import replacement of RegExp.prototype.exec/test and Set.prototype.has", () => {
+    const originalExec = RegExp.prototype.exec;
+    const originalTest = RegExp.prototype.test;
+    const originalHas = Set.prototype.has;
+    let rejectedBadSyntax: unknown;
+    let rejectedReserved: unknown;
+    let accepted: SqlIdentifier | undefined;
+    try {
+      // A tampered .exec/.test would make ANY name look like it matches
+      // ^[a-z_]+$, and a tampered Set.has would make ANY name look
+      // not-reserved — sqlIdentifier must still reject through the bound
+      // references it captured at module load.
+      RegExp.prototype.exec = function () {
+        return ["forged"] as unknown as RegExpExecArray;
+      };
+      RegExp.prototype.test = function () {
+        return true;
+      };
+      Set.prototype.has = function () {
+        return false;
+      };
+      try {
+        sqlIdentifier("Users';--");
+      } catch (e) {
+        rejectedBadSyntax = e;
+      }
+      try {
+        sqlIdentifier("select");
+      } catch (e) {
+        rejectedReserved = e;
+      }
+      accepted = sqlIdentifier("tenant_id");
+    } finally {
+      RegExp.prototype.exec = originalExec;
+      RegExp.prototype.test = originalTest;
+      Set.prototype.has = originalHas;
+    }
+    expect(rejectedBadSyntax).toBeInstanceOf(Error);
+    expect(rejectedReserved).toBeInstanceOf(Error);
+    expect(accepted).toBeDefined();
+  });
+});
+
 describe("export surface", () => {
   it("exports exactly sqlIdentifier, trustedSql, joinSql, renderSql", () => {
     expect(Object.keys(RawSql).sort()).toEqual([
