@@ -27,7 +27,6 @@ import {
 import {
   cmdList,
   cmdUnmapped,
-  cmdPreflight,
   cmdAdd,
   cmdRemove,
   cmdHistory,
@@ -781,24 +780,11 @@ describe("tenant-domain CLI (C7)", () => {
     );
   });
 
-  // Func F8 — the tenant whose backfill row `preflight` reports as skipped
-  // has no claim row, so a claim-only resolver leaves it nameable by UUID
-  // alone at incident time.
   describe("--tenant resolution", () => {
-    it.skipIf(SKIP)("resolves a tenant by external_id, and refuses a slug (round-2 F-F)", async () => {
+    it.skipIf(SKIP)("refuses a tenant's slug as a --tenant ref (round-2 F-F)", async () => {
       const tenantId = await ctx.createTenant();
-      const externalId = `${runToken()}-ext.${ALIAS_CLAIM}`;
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
-          `UPDATE tenants SET external_id = $2 WHERE id = $1::uuid`,
-          tenantId,
-          externalId,
-        );
-      });
       const tenant = await ctx.su.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
 
-      // finally, as in the preflight test: external_id is globally visible.
       try {
         // `tenants.slug` is NOT a resolution path: slugifyTenant collapses
         // [^a-z0-9]+, so the claim → slug mapping is many-to-one and one
@@ -818,12 +804,6 @@ describe("tenant-domain CLI (C7)", () => {
         expect(slugResult.message).toBe(`Tenant not found: ${tenant.slug}`);
         const slugRow = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim: bySlug } });
         expect(slugRow).toBeNull();
-
-        const byExternal = `${runToken()}.${ALIAS_CLAIM}`;
-        const externalResult = await cmdAdd({ tenant: externalId, domain: byExternal, by: "test-op", yes: true });
-        expect(externalResult.ok).toBe(true);
-        const externalRow = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim: byExternal } });
-        expect(externalRow?.tenantId).toBe(tenantId);
       } finally {
         await ctx.deleteTestData(tenantId);
       }
@@ -2591,86 +2571,6 @@ describe("tenant-domain CLI (C7)", () => {
     });
   });
 
-  describe("preflight", () => {
-    // M8 / D-18: pre-flight is the dangerous command — it tells an operator
-    // which rows the CHECK will reject BEFORE the migration runs, so a stale
-    // or drifted query produces a confidently wrong "all clear". Asserting
-    // only ok/code/typeof message let an inverted operator, a folded-instead
-    // -of-raw column (the round-5 D3 error) or a dropped WHERE stay green,
-    // because no row that must be reported was ever seeded. These rows are.
-    it.skipIf(SKIP)("reports seeded collision and non-ASCII tenants by id", async () => {
-      const token = runToken();
-      const foldedClaim = `pf-${token}.${ALIAS_CLAIM}`;
-      // Two RAW spellings that are distinct (UNIQUE(external_id) holds) but
-      // fold to one claim. The whitespace on the second is deliberate: drop
-      // `btrim` from the fold and these stop grouping, so the assertion
-      // below reds.
-      const collisionA = `PF-${token}.${ALIAS_CLAIM}`;
-      const collisionB = `  pf-${token}.${ALIAS_CLAIM}  `;
-      const nonAsciiExternalId = `pf-${token}-テスト.${ALIAS_CLAIM}`;
-
-      const tenantA = await ctx.createTenant();
-      const tenantB = await ctx.createTenant();
-      const tenantC = await ctx.createTenant();
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        for (const [id, externalId] of [
-          [tenantA, collisionA],
-          [tenantB, collisionB],
-          [tenantC, nonAsciiExternalId],
-        ] as const) {
-          await tx.$executeRawUnsafe(
-            `UPDATE tenants SET external_id = $2 WHERE id = $1::uuid`,
-            id,
-            externalId,
-          );
-        }
-      });
-
-      // finally, not trailing cleanup: these rows are the only ones this
-      // file writes that are visible to `preflight` GLOBALLY, so leaking
-      // them on a failed assertion would leave every other working copy on
-      // the shared dev DB reading a permanent collision report.
-      try {
-        const result = await cmdPreflight();
-
-        expect(result.ok).toBe(true);
-        expect(result.code).toBe(0);
-        const rows = (result.rows ?? []) as Record<string, unknown>[];
-
-        // `some`/`find` rather than length or index: the dev DB is shared and
-        // globally may hold other collisions.
-        const collision = rows.find((r) => r.normalized_claim === foldedClaim) as
-          | { tenant_ids: string[] }
-          | undefined;
-        expect(collision).toBeDefined();
-        expect(collision?.tenant_ids).toEqual(expect.arrayContaining([tenantA, tenantB]));
-
-        expect(rows.some((r) => r.id === tenantC && r.external_id === nonAsciiExternalId)).toBe(true);
-        // The printable-ASCII tenants must NOT appear in the non-ASCII list —
-        // this is what pins query 2's WHERE clause rather than only its sign.
-        expect(rows.some((r) => r.id === tenantA && typeof r.external_id === "string")).toBe(false);
-        expect(rows.some((r) => r.id === tenantB && typeof r.external_id === "string")).toBe(false);
-
-        // Round-3 T10: `typeof message === "string"` was the assertion here,
-        // and it holds for every possible message including "0 collision(s),
-        // 0 non-ASCII" — the exact output that would follow from the query
-        // this test seeds rows for silently returning nothing. The summary
-        // line is what an operator reads before deciding to migrate, so it
-        // has to be pinned to a count that reflects the seeded rows.
-        const summary = result.message ?? "";
-        const collisionCount = Number(/^(\d+) collision\(s\)/.exec(summary)?.[1] ?? -1);
-        const nonAsciiCount = Number(/(\d+) non-ASCII/.exec(summary)?.[1] ?? -1);
-        expect(collisionCount).toBeGreaterThanOrEqual(1);
-        expect(nonAsciiCount).toBeGreaterThanOrEqual(1);
-      } finally {
-        await ctx.deleteTestData(tenantA);
-        await ctx.deleteTestData(tenantB);
-        await ctx.deleteTestData(tenantC);
-      }
-    });
-  });
-
   describe("realign (round 7 F-R7-2)", () => {
     /**
      * A user who left `former` for `owning` and was suspended there: active in no
@@ -3118,7 +3018,6 @@ describe("tenant-domain CLI (C7)", () => {
         const results = await Promise.all([
           cmdList({}),
           cmdUnmapped(),
-          cmdPreflight(),
           cmdAdd({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
           cmdRemove({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
           cmdRealign({ user: randomUUID(), tenant: "acmecorp", by: "test-op", yes: true }),
@@ -3315,10 +3214,10 @@ describe("tenant-domain CLI (C7)", () => {
 
     it.skipIf(SKIP)("the sentinel's slug reaches no tenant at all, so it never reaches the refusal", async () => {
       // Recorded because the obvious third spelling is not a road:
-      // resolveTenantRef takes UUID → claim → external_id, and deliberately not
-      // slug (see "--tenant resolution" above for why). The sentinel carries no
-      // external_id either, so UUID and an existing claim are the only two ways
-      // to name it — which is the member set the two cases above cover.
+      // resolveTenantRef takes UUID → registered claim, and deliberately not
+      // slug (see "--tenant resolution" above for why). So UUID and an
+      // existing claim are the only two ways to name it — which is the
+      // member set the two cases above cover.
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
       try {

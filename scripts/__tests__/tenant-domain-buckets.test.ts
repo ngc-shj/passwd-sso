@@ -37,7 +37,6 @@ const UNSTORABLE_REFUSAL = claimRefusal("claim must be printable ASCII");
 /** The `ClaimLookup` refusal arms, each with the audit reason it produces. */
 const LOOKUP_ARMS: ReadonlyArray<Exclude<ClaimLookup, { kind: "tenant" } | { kind: "unregistered" }>> = [
   { kind: "revoked", tenantId: "00000000-0000-4000-a000-000000000001" },
-  { kind: "collision", tenantId: "00000000-0000-4000-a000-000000000002" },
   { kind: "unstorable", refusal: UNSTORABLE_REFUSAL },
 ];
 
@@ -48,7 +47,6 @@ describe("tenant-domain unmapped buckets", () => {
     // being added here.
     expect(REFUSAL_BUCKET).toEqual({
       claim_taken: UNMAPPED_BUCKET.UNREGISTERED,
-      claim_collision: UNMAPPED_BUCKET.UNREGISTERED,
       claim_invalid: UNMAPPED_BUCKET.REFUSED,
       claim_malformed: UNMAPPED_BUCKET.REFUSED,
       // Not reported: `provider_error` is a deployment fault, outside both the
@@ -171,12 +169,12 @@ describe("tenant-domain unmapped buckets", () => {
     // and two arms legitimately share one — so the derivation is sound only
     // while arms sharing a reason share a bucket, which no type states. Proved
     // against a colliding table rather than by mutating the real one: the real
-    // pair (claim_taken / claim_collision) both declare UNREGISTERED today, and
+    // pair (claim_invalid / claim_malformed) both declare REFUSED today, and
     // flipping either is what this refuses.
     expect(() =>
       buildReasonBucketMap(
-        { claim_taken: UNMAPPED_BUCKET.UNREGISTERED, claim_collision: UNMAPPED_BUCKET.REFUSED },
-        { claim_taken: "tenant_claim_unmapped", claim_collision: "tenant_claim_unmapped" },
+        { claim_invalid: UNMAPPED_BUCKET.REFUSED, claim_malformed: UNMAPPED_BUCKET.UNREGISTERED },
+        { claim_invalid: "tenant_mismatch", claim_malformed: "tenant_mismatch" },
       ),
     ).toThrow(/resolves to two buckets/);
   });

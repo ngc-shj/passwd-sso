@@ -4,14 +4,12 @@ import type { TxOrPrisma } from "@/lib/prisma";
 const { mockPrisma, mockSlugifyTenant, mockAdvisoryXactLock } = vi.hoisted(() => {
   const mockPrisma = {
     tenant: {
-      findUnique: vi.fn(),
       create: vi.fn(),
     },
     tenantClaim: {
       findUnique: vi.fn(),
     },
     $executeRaw: vi.fn(),
-    $queryRaw: vi.fn(),
   };
   return {
     mockPrisma,
@@ -32,10 +30,7 @@ vi.mock("@/lib/tenant-rls", () => ({
   advisoryXactLock: mockAdvisoryXactLock,
 }));
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { findOrCreateTenantForClaim } from "./tenant-management";
-import { EXTERNAL_ID_FOLD_SQL } from "./tenant-claim-registry";
 
 // findOrCreateTenantForClaim's `db` parameter is REQUIRED (no `= prisma`
 // default — see the doc comment: a default would let the advisory lock run
@@ -50,9 +45,6 @@ describe("findOrCreateTenantForClaim", () => {
     mockSlugifyTenant.mockReturnValue("acme-com");
     mockAdvisoryXactLock.mockResolvedValue(undefined);
     mockPrisma.$executeRaw.mockResolvedValue(1);
-    // No tenant's external_id folds onto the claim — the default for every
-    // case below except the F-A collision ones, which override it.
-    mockPrisma.$queryRaw.mockResolvedValue([]);
   });
 
   it("resolves an already-registered claim via the claim registry, without creating", async () => {
@@ -73,7 +65,6 @@ describe("findOrCreateTenantForClaim", () => {
 
   it("creates a new tenant with its claim row in one nested create when not found", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue(null); // externalId fallback miss
     mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-new" });
 
     const result = await findOrCreateTenantForClaim("acme.com", db);
@@ -81,7 +72,6 @@ describe("findOrCreateTenantForClaim", () => {
     expect(result).toEqual({ kind: "tenant", id: "tenant-new" });
     expect(mockPrisma.tenant.create).toHaveBeenCalledWith({
       data: {
-        externalId: "acme.com", // D1: release 1 still writes it
         name: "acme.com",
         slug: "acme-com",
         claims: { create: { claim: "acme.com", createdBy: "signin" } },
@@ -100,7 +90,6 @@ describe("findOrCreateTenantForClaim", () => {
   it("retries with a fallback slug on slug collision (SAVEPOINT arm)", async () => {
     const { Prisma } = await import("@prisma/client");
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue(null);
     mockPrisma.tenant.create
       .mockRejectedValueOnce(
         new Prisma.PrismaClientKnownRequestError("unique", {
@@ -116,7 +105,6 @@ describe("findOrCreateTenantForClaim", () => {
     expect(mockPrisma.tenant.create).toHaveBeenCalledTimes(2);
     const secondCreate = mockPrisma.tenant.create.mock.calls[1][0];
     expect(secondCreate.data.slug).toMatch(/^acme-com-[0-9a-f]{8}$/);
-    expect(secondCreate.data.externalId).toBe("acme.com");
     expect(secondCreate.data.claims).toEqual({
       create: { claim: "acme.com", createdBy: "signin" },
     });
@@ -153,7 +141,6 @@ describe("findOrCreateTenantForClaim", () => {
 
   it("returns claim_invalid when the normalised claim fails storableClaimSchema, with no create (I5)", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue(null);
 
     // Truthy-but-invalid fixture (round-3 M27): src/auth.ts:53 is
     // `if (!tenantClaim)`, so an empty string never reaches this function.
@@ -180,15 +167,14 @@ describe("findOrCreateTenantForClaim", () => {
 
   // Round-3's ":111 returns null on double P2002 collision" is deleted, not
   // restated: it modeled the OLD externalId-race retry path (two racing
-  // creators both getting P2002 on tenants_external_id_key). That path is
-  // gone — the advisory lock serialises same-claim creation, and a second
+  // creators both getting P2002 on the now-dropped external-id unique index).
+  // That path is gone — the advisory lock serialises same-claim creation, and a second
   // P2002 from the SAVEPOINT retry (different-claim slug collision, twice)
   // is no longer specially handled; it propagates like any other error,
   // already covered by the "throws non-P2002 errors" shape below.
 
   it("throws non-P2002 errors", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue(null);
     mockPrisma.tenant.create.mockRejectedValueOnce(new Error("DB down"));
 
     await expect(findOrCreateTenantForClaim("acme.com", db)).rejects.toThrow(
@@ -198,7 +184,6 @@ describe("findOrCreateTenantForClaim", () => {
 
   it("creates a tenant for a non-domain claim like acmecorp (NF2)", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue(null);
     mockSlugifyTenant.mockReturnValue("acmecorp");
     mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-nf2" });
 
@@ -207,7 +192,6 @@ describe("findOrCreateTenantForClaim", () => {
     expect(result).toEqual({ kind: "tenant", id: "tenant-nf2" });
     expect(mockPrisma.tenant.create).toHaveBeenCalledWith({
       data: {
-        externalId: "acmecorp",
         name: "acmecorp",
         slug: "acmecorp",
         claims: { create: { claim: "acmecorp", createdBy: "signin" } },
@@ -247,121 +231,7 @@ describe("findOrCreateTenantForClaim", () => {
     // — which groups by tenant_id, so it shows under `__system__` instead of
     // under the tenant that owns the contested claim.
     expect(result).toEqual({ kind: "claim_taken", tenantId: "tenant-owner" });
-    // No fallback either — a revoked row is taken, not "not found".
-    expect(mockPrisma.tenant.findUnique).not.toHaveBeenCalled();
+    // A revoked row is taken, not "not found" — no create either.
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
-  });
-
-  it("resolves through the externalId fallback without creating (D1 release-1 case)", async () => {
-    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "tenant-legacy" });
-
-    const result = await findOrCreateTenantForClaim("alias.example", db);
-
-    expect(result).toEqual({ kind: "tenant", id: "tenant-legacy" });
-    expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith({
-      where: { externalId: "alias.example" },
-      select: { id: true },
-    });
-    expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
-  });
-
-  // Round-1 M12: the case above cannot distinguish raw from normalised —
-  // "alias.example" is its own normal form. D-3 makes the RAW spelling
-  // load-bearing: the fallback exists to keep NF2 true in release 1 for a
-  // deployment whose tenants.external_id was stored un-normalised, and
-  // folding the key before the lookup would miss exactly those rows.
-  it("queries the externalId fallback with the RAW claim while the registry gets the normalised one (D-3)", async () => {
-    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "tenant-legacy-mixed" });
-
-    const result = await findOrCreateTenantForClaim("Alias.Example", db);
-
-    expect(result).toEqual({ kind: "tenant", id: "tenant-legacy-mixed" });
-    expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith({
-      where: { externalId: "Alias.Example" },
-      select: { id: true },
-    });
-    expect(mockPrisma.tenantClaim.findUnique).toHaveBeenCalledWith({
-      where: { claim: "alias.example" },
-      select: { tenantId: true, revokedAt: true },
-    });
-    expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
-  });
-
-  // ── Round-2 F-A: the free UNIQUE(claim) slot left by M3's collision-aware
-  // backfill must not be squattable by a third spelling.
-
-  it("returns claim_collision instead of creating when an existing tenant's external_id folds onto the claim", async () => {
-    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null); // no claim row (M3 excluded both sides)
-    mockPrisma.tenant.findUnique.mockResolvedValue(null); // "Acme.com" matches neither raw external_id
-    mockPrisma.$queryRaw.mockResolvedValue([{ id: "tenant-a" }]); // but "acme.com" folds onto tenant A
-
-    const result = await findOrCreateTenantForClaim("Acme.com", db);
-
-    // claim_collision, NOT claim_taken: there is no row to un-revoke, and the
-    // operator's entry point is `preflight`, not `list`.
-    // Same binding requirement as claim_taken — here the folded owner.
-    expect(result).toEqual({ kind: "claim_collision", tenantId: "tenant-a" });
-    // The whole point: tenant C is never created, so the claim row that would
-    // outrank A's and B's externalId fallback is never written.
-    expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
-    expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
-  });
-
-  it("binds the folded-external_id probe as a query parameter, never interpolated", async () => {
-    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue(null);
-    mockPrisma.$queryRaw.mockResolvedValue([]);
-    mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-new" });
-
-    await findOrCreateTenantForClaim("Acme.com'; DROP TABLE tenants; --", db);
-
-    // $queryRaw is a tagged template: [0] is the TemplateStringsArray, the
-    // rest are the bound values. The claim must appear ONLY among the values.
-    const [strings, ...values] = mockPrisma.$queryRaw.mock.calls[0];
-    expect(values).toEqual(["acme.com'; drop table tenants; --"]);
-    expect(strings.join("?")).not.toContain("acme.com");
-    // Round-3 T8: the fold used to be a hand-copied string literal here, so
-    // this assertion pinned the test's own copy against the source's — two
-    // copies agreeing with each other and with nothing else. It now imports
-    // the shared constant, which the registry's drift guard pins against all
-    // five spellings (the migration, the backfill, both preflight queries and
-    // this probe).
-    expect(strings.join("?")).toContain(EXTERNAL_ID_FOLD_SQL);
-  });
-
-  it("orders the folded-external_id probe so a multi-way collision names one tenant deterministically", () => {
-    // Round-3 M2. `LIMIT 1` with no `ORDER BY` lets Postgres return any side
-    // of the collision, and the id it returns binds the AUTH_LOGIN_FAILURE
-    // row — so one lockout would be filed under a different tenant on
-    // different runs and `tenant-domain unmapped`, which groups by tenant_id,
-    // would split it into two groups. The behavioural proof is in
-    // tenant-claim.integration.test.ts against real Postgres; this pins the
-    // clause itself, which a mock cannot exercise.
-    // Scoped to the function body (round-4 T11): unscoped, this passed if any
-    // other query in the file grew the same clause pair, and reddened on a
-    // reformat of an unrelated one.
-    const source = readFileSync(resolve(__dirname, "tenant-management.ts"), "utf8");
-    const start = source.indexOf("async function findFoldedExternalIdOwner");
-    expect(start).toBeGreaterThan(-1);
-    const body = source.slice(start, source.indexOf("\n}", start));
-    expect(body).toMatch(/ORDER BY created_at ASC, id ASC/);
-    expect(body).toMatch(/LIMIT 1/);
-    // The pair, in order: `LIMIT 1` before the `ORDER BY` would be a syntax
-    // error, but an ORDER BY that lost its LIMIT (or vice versa) would not.
-    expect(body.indexOf("ORDER BY")).toBeLessThan(body.indexOf("LIMIT 1"));
-  });
-
-  it("does not probe for a fold collision when the exact-match externalId fallback already resolved", async () => {
-    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "tenant-legacy" });
-
-    const result = await findOrCreateTenantForClaim("acme.com", db);
-
-    expect(result).toEqual({ kind: "tenant", id: "tenant-legacy" });
-    // A tenant that owns the raw spelling resolves to itself; the probe would
-    // find that same tenant and turn a working sign-in into a refusal.
-    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
   });
 });
