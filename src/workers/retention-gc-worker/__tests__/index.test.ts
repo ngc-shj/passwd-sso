@@ -60,7 +60,7 @@ describe("validateRegistry — bad identifier throws (INV-C2a/INV-C1c)", () => {
       keyColumns: ["id"],
       globalDelete: true,
     } as unknown as RetentionEntry;
-    expect(() => validateRegistry([badEntry])).toThrow(/unsafe identifier/);
+    expect(() => validateRegistry([badEntry])).toThrow(/must match/);
   });
 
   it("throws when a predicate column is unsafe", () => {
@@ -72,7 +72,7 @@ describe("validateRegistry — bad identifier throws (INV-C2a/INV-C1c)", () => {
       predicate: [{ column: "is_dcr; --", op: "IS NULL" }],
       globalDelete: true,
     } as unknown as RetentionEntry;
-    expect(() => validateRegistry([badEntry])).toThrow(/unsafe identifier/);
+    expect(() => validateRegistry([badEntry])).toThrow(/must match/);
   });
 });
 

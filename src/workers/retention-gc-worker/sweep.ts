@@ -26,7 +26,15 @@ import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
-import { assertIdentifier, renderPredicate } from "./predicate";
+import { renderPredicate } from "./predicate";
+import {
+  sqlIdentifier,
+  trustedSql,
+  joinSql,
+  renderSql,
+  type SqlIdentifier,
+  type SqlFragment,
+} from "@/lib/prisma/raw-sql";
 import {
   RETENTION_REGISTRY,
   type ExpiryEntry,
@@ -53,13 +61,13 @@ import {
  * guarded delete's WHERE clause; `<parent>` is the placeholder for the parent
  * table name (allowlist-validated) so the correlation predicate binds correctly.
  */
-const GUARD_SQL: Record<GuardName, (parent: string) => string> = {
+const GUARD_SQL: Record<GuardName, (parent: SqlIdentifier) => SqlFragment> = {
   // mcp_access_tokens: hold the delete until no live refresh token or delegation
   // session references this access token. The FK CASCADE then removes the dead
   // children. revoked tokens/sessions do NOT count as live (a fully-rotated-away
   // or revoked family GCs correctly).
   MCP_TOKEN_FAMILY_DEAD: (parent) =>
-    `AND NOT EXISTS (
+    trustedSql`AND NOT EXISTS (
        SELECT 1 FROM mcp_refresh_tokens r
        WHERE r.access_token_id = ${parent}.id
          AND r.revoked_at IS NULL AND r.expires_at > now()
@@ -75,7 +83,7 @@ const GUARD_SQL: Record<GuardName, (parent: string) => string> = {
   // invite (PENDING + token_expires_at past). STALE/IDLE are recoverable, NOT
   // included. Status literals are compile-time constants here (S1-safe).
   EMERGENCY_GRANT_DEAD: (parent) =>
-    `AND (
+    trustedSql`AND (
        ${parent}.status IN ('REVOKED', 'REJECTED')
        OR (${parent}.status = 'PENDING' AND ${parent}.token_expires_at < now())
      )`,
@@ -142,7 +150,7 @@ export async function enqueueAuditInWorkerTx(
  *
  * Security:
  * - Identifiers (table, cutoffColumn, keyColumns) are validated at worker boot
- *   via assertIdentifier in createWorker; called here defensively too.
+ *   via sqlIdentifier in createWorker; called here defensively too.
  * - bypass_rls GUC is set in-tx for every globalDelete entry (INV-C2b).
  * - DELETE is batch-bounded via (keys) IN (SELECT keys ... LIMIT $1) — the
  *   ONLY parameter bound is batchSize; all other tokens come from the registry
@@ -156,11 +164,9 @@ export async function sweepExpiryEntry(
   batchSize: number,
 ): Promise<number> {
   // Defensive identifier validation at sweep time (boot validation is primary).
-  assertIdentifier(entry.table);
-  assertIdentifier(entry.cutoffColumn);
-  for (const col of entry.keyColumns) {
-    assertIdentifier(col);
-  }
+  const tableIdent = sqlIdentifier(entry.table);
+  const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
+  const keyIdents = entry.keyColumns.map(sqlIdentifier);
 
   if (entry.globalDelete) {
     // Set bypass_rls GUC to span all tenants under the existing RLS policies.
@@ -168,24 +174,25 @@ export async function sweepExpiryEntry(
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
   }
 
-  // Build the predicate fragment (may be empty string if no predicate).
+  // Build the predicate fragment (may be empty if no predicate).
   const predicateSql =
     entry.predicate && entry.predicate.length > 0
-      ? ` AND ${renderPredicate(entry.predicate)}`
-      : "";
+      ? trustedSql` AND ${renderPredicate(entry.predicate)}`
+      : trustedSql``;
 
   // Row-value (keys) IN (SELECT keys ...) form works for both single-column
   // ("id") and composite ("identifier", "token") key sets.
-  const keyList = entry.keyColumns.join(", ");
-  // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
-  const sql = `DELETE FROM ${entry.table}
-    WHERE (${keyList}) IN (
-      SELECT ${keyList} FROM ${entry.table}
-      WHERE ${entry.cutoffColumn} < now()${predicateSql}
-      LIMIT $1
-    )`;
+  const keyList = joinSql(keyIdents, trustedSql`, `);
 
-  return tx.$executeRawUnsafe<number>(sql, batchSize);
+  return tx.$executeRawUnsafe<number>(
+    renderSql(trustedSql`DELETE FROM ${tableIdent}
+    WHERE (${keyList}) IN (
+      SELECT ${keyList} FROM ${tableIdent}
+      WHERE ${cutoffIdent} < now()${predicateSql}
+      LIMIT $1
+    )`),
+    batchSize,
+  );
 }
 
 /**
@@ -203,28 +210,27 @@ export async function sweepGuardedExpiryEntry(
   entry: GuardedExpiryEntry,
   batchSize: number,
 ): Promise<number> {
-  assertIdentifier(entry.table);
-  assertIdentifier(entry.cutoffColumn);
-  for (const col of entry.keyColumns) {
-    assertIdentifier(col);
-  }
+  const tableIdent = sqlIdentifier(entry.table);
+  const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
+  const keyIdents = entry.keyColumns.map(sqlIdentifier);
 
   if (entry.globalDelete) {
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
   }
 
-  const guardSql = GUARD_SQL[entry.guard](entry.table);
-  const keyList = entry.keyColumns.join(", ");
-  // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
-  const sql = `DELETE FROM ${entry.table}
+  const guardSql = GUARD_SQL[entry.guard](tableIdent);
+  const keyList = joinSql(keyIdents, trustedSql`, `);
+
+  return tx.$executeRawUnsafe<number>(
+    renderSql(trustedSql`DELETE FROM ${tableIdent}
     WHERE (${keyList}) IN (
-      SELECT ${keyList} FROM ${entry.table}
-      WHERE ${entry.cutoffColumn} < now()
+      SELECT ${keyList} FROM ${tableIdent}
+      WHERE ${cutoffIdent} < now()
       ${guardSql}
       LIMIT $1
-    )`;
-
-  return tx.$executeRawUnsafe<number>(sql, batchSize);
+    )`),
+    batchSize,
+  );
 }
 
 /**
@@ -260,11 +266,9 @@ export async function sweepAuditProvenanceEntry(
   entry: AuditProvenanceEntry,
   batchSize: number,
 ): Promise<number> {
-  assertIdentifier(entry.table);
-  assertIdentifier(entry.cutoffColumn);
-  for (const col of entry.provenanceColumns) {
-    assertIdentifier(col);
-  }
+  const tableIdent = sqlIdentifier(entry.table);
+  const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
+  const provenanceIdents = entry.provenanceColumns.map(sqlIdentifier);
 
   if (entry.globalDelete) {
     // bypass_purpose/tenant_id GUCs are intentionally not set here (unlike
@@ -277,16 +281,16 @@ export async function sweepAuditProvenanceEntry(
   // Optional "this row is dead" guard (SC6b) — a compile-time-literal SQL fragment
   // from GUARD_SQL, appended to the WHERE. Used when cutoffColumn alone cannot
   // express GC-eligibility (e.g. emergency_access_grants).
-  const guardSql = entry.guard ? ` ${GUARD_SQL[entry.guard](entry.table)}` : "";
-  const projection = ["id", ...entry.provenanceColumns].join(", ");
+  const guardSql = entry.guard ? trustedSql` ${GUARD_SQL[entry.guard](tableIdent)}` : trustedSql``;
+  const projection = joinSql([sqlIdentifier("id"), ...provenanceIdents], trustedSql`, `);
   // Optional grace window (M2): when retentionDays is set, push the cutoff
   // back by that many days so a status-flip interim (e.g. access_requests'
   // PENDING -> EXPIRED sweep, sharing this cutoff column) stays visible before
   // this hard-delete purges it. The integer is bound as $2 — never
   // interpolated — so it stays a value, not part of the SQL text.
   const cutoffSql = entry.retentionDays
-    ? `${entry.cutoffColumn} < now() - ($2 || ' days')::interval`
-    : `${entry.cutoffColumn} < now()`;
+    ? trustedSql`${cutoffIdent} < now() - ($2 || ' days')::interval`
+    : trustedSql`${cutoffIdent} < now()`;
   const params: unknown[] = entry.retentionDays
     ? [batchSize, entry.retentionDays]
     : [batchSize];
@@ -294,14 +298,13 @@ export async function sweepAuditProvenanceEntry(
   // provenance projection so the audit can be emitted from what was actually
   // deleted — mirrors sweepExpiryEntry's shape, extended with RETURNING.
   const rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(
-    // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
-    `DELETE FROM ${entry.table}
+    renderSql(trustedSql`DELETE FROM ${tableIdent}
        WHERE (id) IN (
-         SELECT id FROM ${entry.table}
+         SELECT id FROM ${tableIdent}
          WHERE ${cutoffSql}${guardSql}
          LIMIT $1
        )
-       RETURNING ${projection}`,
+       RETURNING ${projection}`),
     ...params,
   );
 
@@ -406,8 +409,8 @@ export async function sweepPerTenantAge(
   entry: PerTenantAgeEntry,
   batchSize: number,
 ): Promise<number> {
-  assertIdentifier(entry.table);
-  assertIdentifier(entry.cutoffColumn);
+  const tableIdent = sqlIdentifier(entry.table);
+  const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
 
   await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
 
@@ -429,15 +432,14 @@ export async function sweepPerTenantAge(
 
     // Batch-bounded (id) IN (SELECT id ... LIMIT) — table/cutoffColumn are
     // allowlist-validated; tenant id, cutoff, batchSize are bound params.
-    // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
     const deleted = await tx.$executeRawUnsafe<number>(
-      `DELETE FROM ${entry.table}
+      renderSql(trustedSql`DELETE FROM ${tableIdent}
          WHERE (id) IN (
-           SELECT id FROM ${entry.table}
+           SELECT id FROM ${tableIdent}
            WHERE tenant_id = $1::uuid
-             AND ${entry.cutoffColumn} < $2::timestamptz
+             AND ${cutoffIdent} < $2::timestamptz
            LIMIT $3
-         )`,
+         )`),
       tenant.id,
       cutoff,
       batchSize,
@@ -500,7 +502,7 @@ export async function sweepTrashEntry(
   entry: PerTenantTrashEntry,
   batchSize: number,
 ): Promise<number> {
-  assertIdentifier(entry.table);
+  sqlIdentifier(entry.table);
 
   // Enumerate only tenants with explicit trash retention configured (NULL → skip).
   const tenants = await workerPrisma.tenant.findMany({

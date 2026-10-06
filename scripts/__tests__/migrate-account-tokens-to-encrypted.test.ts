@@ -15,6 +15,7 @@ import {
   buildAccountsSelectSql,
   buildAccountUpdateSql,
 } from "../migrate-account-tokens-to-encrypted";
+import { renderSql } from "@/lib/prisma/raw-sql";
 
 // Built from parts (rather than a literal multi-line template) because the
 // no-cursor case's blank line is NOT empty — it carries the 9-space indent
@@ -36,36 +37,36 @@ function expectedSelectSql(whereClause: string, limit: number): string {
 
 describe("buildAccountsSelectSql", () => {
   it("omits the WHERE clause on the first page (no cursor)", () => {
-    expect(buildAccountsSelectSql(false, 500)).toBe(expectedSelectSql("", 500));
+    expect(renderSql(buildAccountsSelectSql(false, 500))).toBe(expectedSelectSql("", 500));
   });
 
   it("adds the keyset WHERE clause once a cursor is set", () => {
-    expect(buildAccountsSelectSql(true, 500)).toBe(
+    expect(renderSql(buildAccountsSelectSql(true, 500))).toBe(
       expectedSelectSql("WHERE id > $1::uuid", 500),
     );
   });
 
   it("interpolates batchSize into LIMIT", () => {
-    expect(buildAccountsSelectSql(false, 42)).toContain("LIMIT 42");
+    expect(renderSql(buildAccountsSelectSql(false, 42))).toContain("LIMIT 42");
   });
 });
 
 describe("buildAccountUpdateSql", () => {
   it("builds the SET clause for a single column", () => {
-    expect(buildAccountUpdateSql(["refresh_token"])).toBe(
+    expect(renderSql(buildAccountUpdateSql(["refresh_token"]))).toBe(
       `UPDATE accounts SET "refresh_token" = $1 WHERE id = $2::uuid`,
     );
   });
 
   it("builds the SET clause for two columns", () => {
-    expect(buildAccountUpdateSql(["refresh_token", "access_token"])).toBe(
+    expect(renderSql(buildAccountUpdateSql(["refresh_token", "access_token"]))).toBe(
       `UPDATE accounts SET "refresh_token" = $1, "access_token" = $2 WHERE id = $3::uuid`,
     );
   });
 
   it("builds the SET clause for all three columns", () => {
     expect(
-      buildAccountUpdateSql(["refresh_token", "access_token", "id_token"]),
+      renderSql(buildAccountUpdateSql(["refresh_token", "access_token", "id_token"])),
     ).toBe(
       `UPDATE accounts SET "refresh_token" = $1, "access_token" = $2, "id_token" = $3 WHERE id = $4::uuid`,
     );

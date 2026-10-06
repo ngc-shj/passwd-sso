@@ -25,6 +25,7 @@ import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/a
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
 import { sanitizeErrorForStorage, sanitizeForExternalDelivery } from "@/lib/http/external-http";
 import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit/audit-chain";
+import { sqlIdentifier, trustedSql, renderSql } from "@/lib/prisma/raw-sql";
 // NOTE: @/lib/webhook-dispatcher is imported LAZILY inside processOneWebhookDelivery
 // (not at module scope) — it transitively pulls in the @/lib/prisma singleton,
 // which throws at import time when DATABASE_URL is unset. Eager-importing it here
@@ -1189,15 +1190,15 @@ export async function onWebhookDeliveryFailure(
   // change outranks audit atomicity — terminal/dead-letter events stay co-committed.
   const updated = await workerPrisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
-    const rows = await tx.$queryRawUnsafe<{ fail_count: number }[]>( // raw-sql-ident: `table` is a code-controlled literal ("team_webhooks" | "tenant_webhooks") chosen by isTeam, never user input — no injection risk
-      `UPDATE "${table}"
+    const rows = await tx.$queryRawUnsafe<{ fail_count: number }[]>(
+      renderSql(trustedSql`UPDATE "${sqlIdentifier(table)}"
        SET fail_count = fail_count + 1,
            last_failed_at = now(),
            last_error = $1,
            is_active = CASE WHEN fail_count + 1 >= $2 THEN false ELSE is_active END,
            updated_at = now()
        WHERE id = $3::uuid
-       RETURNING fail_count`,
+       RETURNING fail_count`),
       `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
       WEBHOOK_AUTO_DISABLE_THRESHOLD,
       webhookId,

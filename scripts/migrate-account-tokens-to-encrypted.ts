@@ -34,6 +34,13 @@ import {
 import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import {
+  sqlIdentifier,
+  trustedSql,
+  joinSql,
+  renderSql,
+  type SqlFragment,
+} from "@/lib/prisma/raw-sql";
 
 type RawAccount = {
   id: string;
@@ -54,21 +61,20 @@ const DRY_RUN = process.argv.includes("--dry-run");
 
 /**
  * Build the batched `accounts` SELECT: cursor-paginated (keyset on `id`),
- * ordered ascending, capped at `batchSize`. Exported so Step 0 characterization
- * tests can pin the exact SQL text before it is migrated off string
- * interpolation (raw-sql-ident-branded-type plan, C2) — the eventual change
- * must leave this string byte-identical (NF1).
+ * ordered ascending, capped at `batchSize`. Exported so characterization
+ * tests can pin the exact SQL text `renderSql()` produces.
  */
-export function buildAccountsSelectSql(hasCursor: boolean, batchSize: number): string {
+export function buildAccountsSelectSql(hasCursor: boolean, batchSize: number): SqlFragment {
   // The Prisma schema maps Account.providerAccountId to the
   // provider_account_id column (snake_case in DB), so the raw query
   // must reference the column name and alias it back to the camelCase
   // shape the rest of the script reads as.
-  return `SELECT id, user_id AS "userId", provider,
+  const whereClause = hasCursor ? trustedSql`WHERE id > $1::uuid` : trustedSql``;
+  return trustedSql`SELECT id, user_id AS "userId", provider,
                 provider_account_id AS "providerAccountId",
                 refresh_token, access_token, id_token
          FROM accounts
-         ${hasCursor ? "WHERE id > $1::uuid" : ""}
+         ${whereClause}
          ORDER BY id ASC
          LIMIT ${batchSize}`;
 }
@@ -79,9 +85,12 @@ export function buildAccountsSelectSql(hasCursor: boolean, batchSize: number): s
  * user-controlled value, see the call site). Exported for the same Step 0
  * characterization reason as {@link buildAccountsSelectSql}.
  */
-export function buildAccountUpdateSql(cols: string[]): string {
-  const setClauses = cols.map((col, i) => `"${col}" = $${i + 1}`).join(", ");
-  return `UPDATE accounts SET ${setClauses} WHERE id = $${cols.length + 1}::uuid`;
+export function buildAccountUpdateSql(cols: string[]): SqlFragment {
+  const setClauses = joinSql(
+    cols.map((col, i) => trustedSql`"${sqlIdentifier(col)}" = $${i + 1}`),
+    trustedSql`, `,
+  );
+  return trustedSql`UPDATE accounts SET ${setClauses} WHERE id = $${cols.length + 1}::uuid`;
 }
 
 async function main(): Promise<void> {
@@ -126,9 +135,8 @@ async function main(): Promise<void> {
             "migrate-account-tokens-to-encrypted",
           );
 
-          // raw-sql-ident: cursorId branch interpolates a fixed literal clause string (never the cursorId value itself, which is bound as $1); BATCH_SIZE is a compile-time constant
           const batch: RawAccount[] = await tx.$queryRawUnsafe<RawAccount[]>(
-            buildAccountsSelectSql(cursorId !== null, BATCH_SIZE),
+            renderSql(buildAccountsSelectSql(cursorId !== null, BATCH_SIZE)),
             ...(cursorId ? [cursorId] : []),
           );
           if (batch.length === 0) return true;
@@ -210,9 +218,8 @@ async function main(): Promise<void> {
             // fields that actually need rewriting.
             const params = [...updates.map((u) => u.value), row.id];
             try {
-              // raw-sql-ident: u.col is drawn only from the closed 3-literal set ("refresh_token"/"access_token"/"id_token") hardcoded above in this function, never from row/user input
               await tx.$executeRawUnsafe(
-                buildAccountUpdateSql(updates.map((u) => u.col)),
+                renderSql(buildAccountUpdateSql(updates.map((u) => u.col))),
                 ...params,
               );
               rewritten += 1;
