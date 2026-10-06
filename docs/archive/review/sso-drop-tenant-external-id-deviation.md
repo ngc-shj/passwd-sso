@@ -40,8 +40,8 @@ row finished) but never exited in this non-interactive shell; it was stopped.
 
 ## D-6 — Plan-review artefact paths
 
-`scripts/lib/tenant-domain-flags.ts` needed no change (no `preflight` flags), as
-round-1 Func noted.
+`scripts/lib/tenant-domain-flags.ts` has no `preflight` flags, as round-1 Func
+noted — but it did carry an external-id flag description; see D-7.
 
 ## D-7 — The residue sweep missed "external id" with a space (found by Phase 3 pre-screening)
 
