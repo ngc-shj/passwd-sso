@@ -1,4 +1,4 @@
-# Plan: unforgeable SQL text for raw-SQL calls (#635, guard 3)
+# Plan: unforgeable SQL text for raw-SQL calls (`#635`, guard 3)
 
 ## Project context
 
