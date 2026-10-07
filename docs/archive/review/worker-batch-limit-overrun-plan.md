@@ -1,6 +1,6 @@
 # Plan: worker batch writes exceed their LIMIT (`#870`)
 
-Revision 6 (after plan review rounds 1-5, see `worker-batch-limit-overrun-review.md`).
+Revision 7 (after plan review rounds 1-6, see `worker-batch-limit-overrun-review.md`).
 
 ## Project context
 
@@ -126,6 +126,9 @@ Rule: in a literal holding a write statement, every `LIMIT` and every `FETCH FIR
 - **Wiring:** registered where `check-raw-sql-usage.mjs` is registered in `scripts/pre-pr.sh`. CI's static-checks job runs pre-pr in `PRE_PR_STATIC_ONLY` mode.
 - **Self-test:** `scripts/__tests__/check-limited-subquery-write.test.mjs`, table-driven, in the layout of `check-raw-sql-usage.test.mjs`.
   - Deny: each M1–M15 shape exactly as before the fix, including the M11 template shape and M9's `WITH deleted AS`; every overrunning form listed under Probe; `FROM (…)` / `USING (…)` with a LIMIT; a non-materialized CTE; `AS NOT MATERIALIZED`; `LIMIT` nested one level inside a materialized body; a materialized CTE nested inside `IN (…)` or `ARRAY(…)`, uncorrelated and correlated.
+  - Deny: the pre-fix M1 shape in one file per scanned extension (`.ts .tsx .mts .cts .js .mjs .cjs`).
+  - Skipped: the same shape in a file under `__tests__/`, and in a `.test.` / `.spec.` file of each extension.
+  - Error: a symlink under a scan root fails the gate, matching `ast-project.mjs`'s refusal.
   - Allow: each C1 shape; a standalone `SELECT … LIMIT`; a `SELECT … FOR UPDATE … LIMIT` with no write statement; `IN (SELECT …)` without `LIMIT`; a SQL comment or string holding the old shape; one row per declared bypass.
   - Red proof: disable each rule clause on a scratch copy, and its rows flip.
 
@@ -218,7 +221,7 @@ Also, in `scripts/checks/worker-policy-manifest.json`, replace every line-range 
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Materialized key set for M1–M15 | pending |
-| C2 | Tripwire: LIMIT only in a materialized key-set CTE | pending |
-| C3 | InTx seams and forced-plan tests for M1–M6; SQL-shape tests for M7–M15 | pending |
-| C4 | sweepBounds recognises the C1 shape (tripwire) | pending |
+| C1 | Materialized key set for M1–M15 | locked |
+| C2 | Tripwire: LIMIT only in a materialized key-set CTE | locked |
+| C3 | InTx seams and forced-plan tests for M1–M6; SQL-shape tests for M7–M15 | locked |
+| C4 | sweepBounds recognises the C1 shape (tripwire) | locked |

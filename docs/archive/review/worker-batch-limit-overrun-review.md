@@ -240,3 +240,25 @@ Verified: every round-4 resolution except Test-3 is correct. The guard-test and 
 - F-R5-1: C2 walks files through `ast-project.mjs`, which gains an optional extension set (default unchanged) and a matching `.test`/`.spec` suffix set. Self-test rows are added for each extension, for `__tests__`, and for a symlink.
 - F-R5-2: write detection is defined as statement position: the literal start, after `;`, or a CTE body start.
 - S-R5-1, S-R5-2 and T-R5-1: reworded or declared as above.
+
+---
+
+# Round 6
+Date: 2026-10-08
+
+## Findings
+- **RV6-1 [Minor] prose** (RT7/RT10-adjacent). The per-extension, `__tests__` and symlink self-test rows appear in C2's prose but not in its Self-test list. Resolved in revision 7: the rows are added to the list.
+
+Verified:
+- F-R5-1: `walkSourceFiles` / `collectSourceFiles` exist. No caller passes a second argument, so an optional extension set is backward-compatible.
+- F-R5-2: M9 and M10 start with `WITH deleted AS (`.
+- S-R5-1: holds for all three tables. Each has one never-superseded policy, `COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid`.
+- S-R5-2 and T-R5-1: declared.
+
+## Saturation call (round 6)
+1. Six rounds have completed.
+2. No Critical or Major is open, and none carries an Anti-Deferral disposition.
+3. No finding targets the design. RV6-1 was labelled prose by the reviewer.
+4. The only remaining Minor, RV6-1, is prose and has been fixed.
+
+The plan exits review and proceeds to Phase 2. Nothing is carried forward. Open residuals are stated in the plan itself: the C2 declared bypasses; the C4 residuals (nested `picked` scope, a second unbounded write in one literal, `${…}` keys and table); SC1–SC3; and the accepted dev-DB ambient-row residuals for M1–M8.
