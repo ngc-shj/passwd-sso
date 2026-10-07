@@ -225,3 +225,38 @@ Also, in `scripts/checks/worker-policy-manifest.json`, replace every line-range 
 | C2 | Tripwire: LIMIT only in a materialized key-set CTE | locked |
 | C3 | InTx seams and forced-plan tests for M1–M6; SQL-shape tests for M7–M15 | locked |
 | C4 | sweepBounds recognises the C1 shape (tripwire) | locked |
+
+## Implementation Checklist
+
+Files to modify:
+- `src/workers/audit-outbox-worker.ts`:
+  - C1 for M1–M10;
+  - new seams `claimOutboxBatchInTx`, `claimDeliveriesInTx`, `claimWebhookDeliveriesInTx`, `reapStuckWebhookDeliveriesInTx`, `purgeDeliveryRetentionInTx`, `purgeWebhookDeliveryRetentionInTx`;
+  - one shared assert helper;
+  - the `setBypassRlsGucs` call moves out of `reapStuckRowsInTx`, `reapStuckDeliveriesInTx`, `purgeSentAgedInTx` and `purgeFailedAgedInTx` into their wrappers (`reapStuckRows`, `reapStuckDeliveries`, `purgeRetention`).
+- `src/workers/retention-gc-worker/sweep.ts`: C1 for M11–M15, and the M15 contiguity comment.
+- `scripts/checks/lib/ast-project.mjs`: optional extension set (default `.ts`/`.tsx`), with the `.test`/`.spec` suffix widened to match.
+- New `scripts/checks/lib/sql-scan.mjs` (the shared scanner, C2/C4) and its unit tests.
+- New `scripts/checks/check-limited-subquery-write.mjs` (C2) and `scripts/__tests__/check-limited-subquery-write.test.mjs`. Registered in `scripts/pre-pr.sh` next to `Static: raw-sql-usage`, which CI runs through `PRE_PR_STATIC_ONLY`.
+- `src/__tests__/workers/worker-policy-manifest.test.ts`: C4 (`isKeySetLimited`; table and statement extraction via the scanner) and its pairs.
+- `scripts/checks/worker-policy-manifest.json`: replace line-range citations with subject citations in the audit-outbox-worker and retention-gc-worker entries.
+
+Test trees touched (R19, derived with `grep -rlE "\b<symbol>\b" src scripts e2e` filtered to tests):
+- Unit:
+  - `src/workers/audit-outbox-worker.test.ts` (GUC-state mocks, wrapper tests, SQL pins);
+  - `src/workers/retention-gc-worker/__tests__/{sweep-sql,sweep-per-tenant-age,sweep-access-request-expiry,sweep-isolation}.test.ts`;
+  - `scripts/__tests__/ast-project.test.mjs`;
+  - `scripts/__tests__/check-rls-read-context.test.mjs` (references `reapStuckRowsInTx` / `processDeliveryBatch` by name; must stay green).
+- Integration:
+  - `audit-outbox-sweep-caps.integration.test.ts` (forced-plan, guard and M7/M8 cap tests);
+  - the callers of the changed wrappers and seams: `audit-outbox-dedup`, `audit-outbox-depth-check`, `webhook-delivery-durable`, `audit-outbox-dead-letter-unchained`, `audit-outbox-retention-purge`, `audit-outbox-retention-purge-audit-atomicity`, `tenant-claim-cli`, and the `retention-gc-*` files.
+
+Reuse:
+- `setBypassRlsGucs` (worker) and `helpers.setBypassRlsGucs` (tests);
+- `runInRolledBackTx` (`audit-outbox-sweep-caps`);
+- `BYPASS_PURPOSE.AUDIT_WRITE`;
+- `walkSourceFiles` / `collectSourceFiles`;
+- the table-driven fixture layout of `check-raw-sql-usage.test.mjs`;
+- `renderSql` / `trustedSql` / `joinSql` for M11–M15.
+
+CI parity: the new gate reaches CI through pre-pr's static mode. No other CI job is affected.
