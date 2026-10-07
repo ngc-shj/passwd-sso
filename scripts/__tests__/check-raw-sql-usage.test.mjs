@@ -213,6 +213,11 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
     // F4-c: a scanned file that SHADOWS raw-sql.ts's own module-resolution
     // candidate paths denies unconditionally — Node's real resolver would
     // load the shadow, not the TS source, for any specifier reaching it.
+    // Split in two mechanisms: a `raw-sql.<ext>` SIBLING FILE (checked via
+    // RAW_SQL_SHADOW_PATHS, any scanned extension other than `.ts`), and the
+    // `src/lib/prisma/raw-sql/` DIRECTORY itself (checked directly against
+    // the filesystem by checkRawSqlDirectoryShadow, S-R3-1b — extension-
+    // agnostic, since a directory's package.json "main" can point anywhere).
     {
       name: "deny: a shadow src/lib/prisma/raw-sql.js sibling file (innocuous content — isolates the shadow-path check from the name-occurrence check)",
       src: `export const placeholder = 1;\n`,
@@ -221,16 +226,14 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       expectReason: "RAW_SQL_NAMES",
     },
     {
-      name: "deny: a shadow src/lib/prisma/raw-sql/index.ts directory module (innocuous content)",
+      name: "deny: src/lib/prisma/raw-sql/ exists as a directory (S-R3-1b; innocuous index.ts content)",
       src: `export const placeholder = 1;\n`,
       path: "src/lib/prisma/raw-sql/index.ts",
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
     },
-    // N2: the shadow set must cover every scanned extension other than
-    // `.ts` for the direct sibling (Next/esbuild resolve `.tsx` before
-    // `.ts`), and every scanned extension (`.ts` included) for the
-    // directory-index form.
+    // N2 (SIBLING-FILE set only): must cover every scanned extension other
+    // than `.ts` — Next/esbuild resolve `.tsx` before `.ts`.
     {
       name: "deny: a shadow src/lib/prisma/raw-sql.tsx sibling file (N2 — Next/esbuild resolve .tsx before .ts)",
       src: `export const placeholder = 1;\n`,
@@ -238,15 +241,20 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
     },
+    // Round-3 Testing [Minor]: these two used to carry an "(N2)" label, but
+    // they are a directory (not a sibling-extension file) — the "(N2)"
+    // per-extension claim never applied to them; they are now denied by the
+    // extension-agnostic directory check (S-R3-1b), which would fire the
+    // same way for ANY content, including a `.ts` index file.
     {
-      name: "deny: a shadow src/lib/prisma/raw-sql/index.tsx directory module (N2)",
+      name: "deny: src/lib/prisma/raw-sql/ exists as a directory, .tsx index content (S-R3-1b — extension-agnostic, not an N2 per-extension case)",
       src: `export const placeholder = 1;\n`,
       path: "src/lib/prisma/raw-sql/index.tsx",
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
     },
     {
-      name: "deny: a shadow src/lib/prisma/raw-sql/index.js directory module (N2)",
+      name: "deny: src/lib/prisma/raw-sql/ exists as a directory, .js index content (S-R3-1b — extension-agnostic, not an N2 per-extension case)",
       src: `export const placeholder = 1;\n`,
       path: "src/lib/prisma/raw-sql/index.js",
       expectCode: 1,
@@ -275,6 +283,24 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       src: `import { renderSql } from "../lib/prisma/raw-sql.ts";\nexport function run(f) {\n  return renderSql(f);\n}\n`,
       path: "src/workers/fixture.ts",
       expectCode: 0,
+    },
+    // S-R3-1(a): a specifier whose last raw segment is empty or "." forces
+    // directory resolution — Node never tries the raw-sql.ts FILE candidate
+    // for this shape, so it must never be credited as a canonical import.
+    // Red-proof: drop the `specifierEndsAsDirectory` check in
+    // resolvesToRawSqlModule — both rows flip to allow.
+    {
+      name: "deny: import from \"@/lib/prisma/raw-sql/\" (trailing slash forces directory resolution, never credited as canonical) (S-R3-1a)",
+      src: `import { renderSql } from "@/lib/prisma/raw-sql/";\nexport function run(tx, f) {\n  return tx.$queryRawUnsafe(renderSql(f));\n}\n`,
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: import from \"./raw-sql/.\" inside src/lib/prisma (trailing dot segment forces directory resolution) (S-R3-1a)",
+      src: `import { renderSql } from "./raw-sql/.";\nexport function run(f) {\n  return renderSql(f);\n}\n`,
+      path: "src/lib/prisma/fixture.ts",
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
     },
     {
       name: "allow: trustedSql as tagged-template tag",
@@ -479,6 +505,21 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("RAW_SQL_NAMES");
   });
+
+  // S-R3-1(b): a directory denies on its mere EXISTENCE, regardless of what
+  // is (or is not) inside it — a package.json "main" could point at an
+  // unscanned file (e.g. a *.test.ts forging renderSql) that never reaches
+  // any other check in this gate, since package.json is not in LAYER2_EXTS
+  // and the directory holds no scanned index file at all here.
+  it("deny: src/lib/prisma/raw-sql/ exists as a directory holding only package.json (no scanned index file) (S-R3-1b)", () => {
+    const result = run({
+      "src/lib/prisma/raw-sql/package.json": JSON.stringify({
+        main: "../../../__tests__/forged-render-sql.test.ts",
+      }),
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("RAW_SQL_NAMES");
+  });
 });
 
 describe("check-raw-sql-usage Layer 2 — NON_LITERAL_IMPORT (D-5 refinement)", () => {
@@ -620,12 +661,18 @@ describe("check-raw-sql-usage Layer 2 — SPECIFIER_LITERAL", () => {
       src: `import { defineConfig } from "prisma/config";\nexport const c = defineConfig;\n`,
       expectCode: 0,
     },
-    // Testing [Major]: checkNodeModulesSpecifier is scoped to MODULE-SPECIFIER
-    // POSITION literals only (isModuleSpecifierPositionLiteral) — a
-    // "node_modules" substring anywhere else in a string must not deny.
+    // Round-3 Testing [Major]: checkNodeModulesSpecifier is scoped to
+    // MODULE-SPECIFIER POSITION literals only (isModuleSpecifierPositionLiteral)
+    // — an EXACT "node_modules" path segment outside that position must not
+    // deny. (The previous version of this row — `"scanning node_modules/foo
+    // for a stale cache"` — had no exact "node_modules" segment at all:
+    // hasNodeModulesSegment would return false regardless of the position
+    // guard, so the row proved nothing about position-scoping specifically.
+    // Red-proof: delete the `isModuleSpecifierPositionLiteral` guard in
+    // checkNodeModulesSpecifier — THIS row then flips to deny.)
     {
-      name: "allow: \"node_modules\" text in a non-specifier-position string literal",
-      src: `export const msg = "scanning node_modules/foo for a stale cache";\n`,
+      name: "allow: an exact \"node_modules\" path segment in a non-specifier-position string literal (position-scoping proof)",
+      src: `export const p = "foo/node_modules/bar";\n`,
       expectCode: 0,
     },
     // Decided and pinned: isModuleSpecifierPositionLiteral checks ONLY
@@ -786,6 +833,64 @@ describe("check-raw-sql-usage Layer 2 — UNSCANNED_IMPORT", () => {
     expect(result.stdout).toContain("check-raw-sql-usage: OK");
   });
 
+  // S-R3-2(i): a trailing bundler-style `?query`/`#fragment` suffix does not
+  // change which file on disk the specifier reaches — stripped before
+  // resolution.
+  it("deny: import specifier with a bundler ?raw query suffix (S-R3-2)", () => {
+    const result = run({
+      "scripts/fixture.ts": `import helperRaw from "./helper.test?raw";\nexport const h = helperRaw;\n`,
+      "scripts/helper.test.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("allow: import specifier with a bundler ?raw query suffix over a benign path (S-R3-2)", () => {
+    const result = run({
+      "scripts/fixture.ts": `import helperRaw from "./latest-util?raw";\nexport const h = helperRaw;\n`,
+      "scripts/latest-util.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  // S-R3-2(i): on a case-insensitive filesystem (the Node/macOS/Windows
+  // default), a specifier spelled with different casing than the real
+  // excluded file still resolves to the SAME physical file — the match must
+  // be case-insensitive or this is a laundering path.
+  it("deny: case-variant .TEST specifier resolves to the same file as the real, lowercase *.test.ts (S-R3-2)", () => {
+    const result = run({
+      "scripts/fixture.ts": `import { helper } from "./h.TEST";\nexport const h = helper;\n`,
+      "scripts/h.test.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  it("deny: case-variant __TESTS__ directory segment resolves to the same real __tests__/ directory (S-R3-2)", () => {
+    const result = run({
+      "scripts/fixture.ts": `import { helper } from "./__TESTS__/helper";\nexport const h = helper;\n`,
+      "scripts/__tests__/helper.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  // Functionality [Minor]: checkUnscannedLiteralAnywhere must not re-report a
+  // literal already inspected by checkUnscannedImport's require()/import()
+  // call scan — each real violation prints exactly once.
+  it("reports require(\"./evil.test\") exactly once (no double-report between checkUnscannedImport and checkUnscannedLiteralAnywhere)", () => {
+    const result = run({
+      "scripts/fixture.ts": `const helper = require("./evil.test");\nexport { helper };\n`,
+      "scripts/evil.test.ts": `export const helper = 1;\n`,
+    });
+    expect(result.code).toBe(1);
+    const matchingLines = result.stderr
+      .split("\n")
+      .filter((line) => line.includes("scripts/fixture.ts:1") && line.includes("evil.test"));
+    expect(matchingLines).toHaveLength(1);
+  });
+
   // N1 measured exemption: scripts/checks/classify-fail-closed-test.mjs
   // names the shared test helper module it classifies OTHER files against —
   // that is DATA, not a load target, so it must stay exempt from the
@@ -797,6 +902,47 @@ describe("check-raw-sql-usage Layer 2 — UNSCANNED_IMPORT", () => {
     });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  // S-R3-3: the exemption is PER LITERAL VALUE, not per file — a second,
+  // DIFFERENT test-path literal in the SAME exempt file still denies.
+  it("deny: a second, different test-path literal in the exempt file (per-literal, not per-file, exemption) (S-R3-3)", () => {
+    const result = run({
+      "scripts/checks/classify-fail-closed-test.mjs": [
+        'export const HELPER_MODULE = "@/__tests__/helpers/fail-closed";',
+        'import { createRequire } from "node:module";',
+        "const req = createRequire(import.meta.url);",
+        'export const x = req("../__tests__/x.test.mjs");',
+        "",
+      ].join("\n"),
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  // S-R3-3: the exempt literal VALUE does not widen to every file under
+  // scripts/checks/ — only the one named key is exempt.
+  it("deny: the exempt literal value appearing in a different scripts/checks file (no directory widening) (S-R3-3)", () => {
+    const result = run({
+      "scripts/checks/other.mjs": 'export const HELPER_MODULE = "@/__tests__/helpers/fail-closed";\n',
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+  });
+
+  // S-R3-3: the exemption also pins the COUNT — the same literal appearing
+  // MORE times than measured drifts the exempted set and must deny too.
+  it("deny: the exempt literal appearing twice in the exempt file (count drift) (S-R3-3)", () => {
+    const result = run({
+      "scripts/checks/classify-fail-closed-test.mjs": [
+        'export const HELPER_MODULE = "@/__tests__/helpers/fail-closed";',
+        'export const HELPER_MODULE_2 = "@/__tests__/helpers/fail-closed";',
+        "",
+      ].join("\n"),
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("UNSCANNED_IMPORT");
+    expect(result.stderr).toContain("the measured exemption expects");
   });
 });
 

@@ -35,12 +35,19 @@
  *     form of raw-sql.ts (namespace/default import, `export * from`,
  *     `require()`, `import()`, `import x = require()`) denies outright, as
  *     does a scanned file that itself SHADOWS raw-sql.ts's module resolution
- *     (a `raw-sql.<ext>` sibling for every scanned extension OTHER than
- *     `.ts` — including `.tsx`, since Next/esbuild resolve `.tsx` before
- *     `.ts` — or a `raw-sql/index.<ext>` directory module for every scanned
- *     extension, `.ts` included); a `.js` specifier's TS/ESM
- *     extension-rewrite resolution never claims such a shadow file as
- *     raw-sql.ts.
+ *     — a `raw-sql.<ext>` sibling for every scanned extension OTHER than
+ *     `.ts` (including `.tsx`, since Next/esbuild resolve `.tsx` before
+ *     `.ts`), OR a `src/lib/prisma/raw-sql/` DIRECTORY, checked directly
+ *     against the filesystem (S-R3-1b: its mere existence denies, whatever
+ *     extension or absence of a scanned file sits inside it — a
+ *     package.json "main" there could point outside LAYER2_EXTS entirely,
+ *     e.g. at an unscanned `*.test.ts`). A `.js`/`.mjs`/`.cjs` specifier's
+ *     TS/ESM extension-rewrite resolution never claims such a shadow file as
+ *     raw-sql.ts; nor does a specifier whose last path segment is empty,
+ *     `.`, or `..` (S-R3-1a: that shape forces directory resolution, so only
+ *     a `raw-sql/index.<ext>` candidate — never the `raw-sql.ts` FILE
+ *     candidate — could ever match, and raw-sql.ts has no such directory
+ *     form of its own).
  *   - IMPORT_EQUALS_ENTITY: `import x = <entity name>` (`import r =
  *     Prisma.raw`, including `export import` inside a namespace) denies
  *     unconditionally — a QualifiedName entity name is not a type position,
@@ -62,16 +69,27 @@
  *   - UNSCANNED_IMPORT: a scanned file's import/export declaration, `import x
  *     = require()`, a `require()`/`import()` call's literal argument, OR any
  *     OTHER string/no-substitution-template literal in expression position —
- *     whatever its parent — resolving into an excluded test path (`*.test.*`,
- *     `__tests__/`, `manual-tests/`, `e2e/`) denies. The last clause mirrors
+ *     whatever its parent, EXCLUDING a literal already inspected by one of
+ *     the first three clauses above (so the same literal is never reported
+ *     twice) — resolving into an excluded test path (`*.test.*`,
+ *     `__tests__/`, `manual-tests/`, `e2e/`) denies, matched
+ *     case-insensitively and after stripping a trailing `?query`/`#fragment`
+ *     suffix (S-R3-2: a case-insensitive filesystem — the Node/macOS/Windows
+ *     default — resolves `./h.TEST` and the real `./h.test.ts` to the same
+ *     file, and a bundler-style `?raw` suffix does not change which file a
+ *     specifier reaches). The last ("any OTHER literal") clause mirrors
  *     SPECIFIER_LITERAL: it closes the laundering-through-an-unscanned-file
  *     gap for a loader reached under another name (`createRequire(...)(...)`,
  *     `module.require(...)`, `require.call(...)`, `new Worker(new
  *     URL(...))`, …), not just the require()/import() call shape or a static
- *     declaration. Exempt: this gate's own source, and a measured set of
- *     `scripts/checks/**` files that hold such a literal as DATA, not as a
- *     load target (`scripts/checks/classify-fail-closed-test.mjs`, which
- *     names the test-helper module it classifies against).
+ *     declaration — but only for a literal SHAPED as a relative or `@/`
+ *     specifier (`./`, `../`, `@/`); see the Residual for the literal shapes
+ *     it does not reach. Exempt: this gate's own source, and a measured
+ *     PER-LITERAL-VALUE allowlist of files that hold such a literal as DATA,
+ *     not as a load target (`scripts/checks/classify-fail-closed-test.mjs`
+ *     names the test-helper module it classifies against, exactly once); any
+ *     OTHER test-path literal in such a file, or a count drift on the named
+ *     one, still denies.
  *   - RAW_METHOD: any spelling of `/^\$(query|execute)Raw\w*$/` — identifier,
  *     property-access name, or decoded literal value (string OR
  *     no-substitution template) — in expression position, denies UNLESS it is
@@ -117,9 +135,13 @@
  * precondition that its argument is a code constant / closed literal set; a
  * computed element access with a non-literal key; reflective enumeration that
  * never spells a name; Prisma internals reached through `any`; a loader under
- * another name invoked with a NON-literal specifier (with a literal
- * specifier, under ANY name or call shape, it is caught by SPECIFIER_LITERAL
- * / UNSCANNED_IMPORT / NON_LITERAL_IMPORT); a third-party dependency
+ * another name invoked with a NON-literal specifier (a literal specifier
+ * SHAPED as a relative or `@/` path — `./`, `../`, `@/` — is caught by
+ * SPECIFIER_LITERAL / UNSCANNED_IMPORT / NON_LITERAL_IMPORT regardless of
+ * call shape; a literal that is NOT shaped that way is itself a residual
+ * here: a non-prefixed URL-relative specifier, e.g. `new URL("h.test.ts",
+ * import.meta.url)` with no leading `./`; a specifier built by `path.join(…)`
+ * or string concatenation; an absolute path); a third-party dependency
  * re-exporting a raw-SQL producer; `eval`/`Function`; replacing a built-in
  * before this module (or this gate's own ts-morph dependency) loads. The
  * canonical-import requirement (F4-a) does not itself follow a re-export
@@ -545,6 +567,21 @@ function resolveRepoSpecifierBase(fromRel, spec) {
 
 const RAW_SQL_MODULE_TARGET = RAW_SQL_MODULE_REL.toLowerCase();
 
+// S-R3-1(a): a specifier whose last RAW path segment (before
+// resolveRepoSpecifierBase drops it) is empty ("…/"), "." or ".." forces
+// Node/TS directory resolution — the FILE candidate (`${base}.ts`) is never
+// tried for this shape, only a directory's own index file (or its
+// package.json "main", which no candidate list here can see — see
+// checkRawSqlDirectoryShadow below). Dropping these segments during
+// normalization (as resolveRepoSpecifierBase already must, to compute the
+// right base path at all) loses this distinction, so it is recovered here
+// from the ORIGINAL spec text before normalization.
+function specifierEndsAsDirectory(spec) {
+  const segs = spec.split("/");
+  const last = segs[segs.length - 1];
+  return last === "" || last === "." || last === "..";
+}
+
 // TS/Node ESM "rewrite relative import extensions" convention: a relative
 // specifier may spell the COMPILED extension (`.js`/`.mjs`/`.cjs`) while
 // resolving to the TS SOURCE file of the same base name (`.ts`/`.mts`/`.cts`)
@@ -586,6 +623,17 @@ let scannedFilesLower = new Set();
 function resolvesToRawSqlModule(fromRel, spec) {
   const base = resolveRepoSpecifierBase(fromRel, spec);
   if (base === undefined) return false;
+  if (specifierEndsAsDirectory(spec)) {
+    // Directory-only shape: only an index-file candidate can satisfy it — a
+    // real resolver never tries `${base}.ts` here. None of these equal
+    // raw-sql.ts's OWN path (that would require a raw-sql/index.ts directory
+    // module under raw-sql.ts's own name, which is a shadow, not raw-sql.ts
+    // itself), so a specifier like "@/lib/prisma/raw-sql/" or "./raw-sql/."
+    // is never credited as a canonical raw-sql.ts import.
+    return [`${base}/index.ts`, `${base}/index.tsx`, `${base}/index.js`].some(
+      (c) => c.toLowerCase() === RAW_SQL_MODULE_TARGET,
+    );
+  }
   const m = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/i.exec(base);
   if (m) {
     const ext = m[1].toLowerCase();
@@ -602,9 +650,19 @@ function resolvesToRawSqlModule(fromRel, spec) {
 
 /** Does `spec` (imported from `fromRel`) resolve into an excluded test path? */
 function resolvesToUnscannedPath(fromRel, spec) {
-  const base = resolveRepoSpecifierBase(fromRel, spec);
+  // S-R3-2(i): strip a trailing bundler-style `?query` / `#fragment` suffix
+  // (e.g. `./h.test?raw`) before resolving — neither affects which file on
+  // disk the specifier actually reaches — and match the test-path pattern
+  // CASE-INSENSITIVELY: on a case-insensitive filesystem (the Node/macOS/
+  // Windows default), a specifier spelled with different casing than the
+  // real excluded file (`./h.TEST` vs. the on-disk `h.test.ts`, `__TESTS__`
+  // vs. `__tests__`) still resolves to the SAME physical file, so matching
+  // on the specifier's own casing would let that case variant launder past
+  // this check even though Node would load the excluded file.
+  const stripped = spec.replace(/[?#].*$/, "");
+  const base = resolveRepoSpecifierBase(fromRel, stripped);
   if (base === undefined) return false;
-  return TEST_PATH_RE.test(base);
+  return TEST_PATH_RE.test(base.toLowerCase());
 }
 
 // ---------------------------------------------------------------------------
@@ -742,20 +800,22 @@ function checkRawSqlNameLiterals(sf, rel) {
   }
 }
 
-// F4-c (part 1): a scanned file other than raw-sql.ts itself that sits at one
-// of raw-sql.ts's own module-resolution candidate paths (a `raw-sql.<ext>`
-// sibling for any OTHER scanned extension — N2: including `.tsx`, since
-// Next/esbuild resolve `.tsx` before `.ts` — or a `raw-sql/index.<ext>`
-// directory module for any scanned extension, `.ts` included) is a SHADOW
-// FILE — Node's real resolver would load it instead of the TS source for any
-// specifier that reaches that path, regardless of what this gate's
-// positional checks decide about raw-sql.ts proper.
+// F4-c (part 1): a scanned file other than raw-sql.ts itself that sits at a
+// `raw-sql.<ext>` SIBLING of raw-sql.ts, for any OTHER scanned extension — N2:
+// including `.tsx`, since Next/esbuild resolve `.tsx` before `.ts` — is a
+// SHADOW FILE: Node's real resolver would load it instead of the TS source
+// for any specifier that reaches that path, regardless of what this gate's
+// positional checks decide about raw-sql.ts proper. The `raw-sql/index.<ext>`
+// DIRECTORY-module form (any extension, `.ts` included) is handled
+// separately by checkRawSqlDirectoryShadow (S-R3-1b) below, which denies on
+// the directory's mere EXISTENCE on disk — a package.json "main" inside it
+// could point anywhere, including a file outside LAYER2_EXTS entirely, so no
+// per-extension candidate list here could ever be complete.
 const RAW_SQL_BASE_REL = RAW_SQL_MODULE_REL.replace(/\.ts$/, "");
 const LAYER2_EXT_NAMES = [...LAYER2_EXTS].map((ext) => ext.slice(1)); // ".ts" -> "ts"
 const RAW_SQL_SHADOW_PATHS = new Set(
   LAYER2_EXT_NAMES.filter((ext) => ext !== "ts")
     .map((ext) => `${RAW_SQL_BASE_REL}.${ext}`)
-    .concat(LAYER2_EXT_NAMES.map((ext) => `${RAW_SQL_BASE_REL}/index.${ext}`))
     .map((p) => p.toLowerCase()),
 );
 function checkRawSqlShadowFile(rel) {
@@ -766,6 +826,39 @@ function checkRawSqlShadowFile(rel) {
       rel,
       1,
       "shadows src/lib/prisma/raw-sql.ts's module resolution — a specifier resolving here would load THIS file at runtime, not raw-sql.ts",
+    );
+  }
+}
+
+// S-R3-1(b): a `src/lib/prisma/raw-sql/` DIRECTORY denies unconditionally,
+// regardless of what sits inside it — including a package.json "main" field
+// pointing at a file this gate never scans (e.g. an unscanned *.test.ts
+// forging renderSql), since package.json is not in LAYER2_EXTS and never
+// reaches checkRawSqlShadowFile above. Node/TS prefer a directory over the
+// `.ts` sibling for ANY specifier that reaches "…/raw-sql" without an
+// explicit file extension, so the directory's mere existence is itself the
+// shadow — checked directly against the on-disk entries of its parent
+// directory (case-insensitive), never against the Layer 2 scan list, since
+// a package.json inside it would never appear there. This subsumes the old
+// raw-sql/index.<ext> candidates (every extension, unconditionally).
+function checkRawSqlDirectoryShadow() {
+  const parentDir = join(ROOT, dirname(RAW_SQL_MODULE_REL)); // src/lib/prisma
+  const targetName = RAW_SQL_BASE_REL.split("/").pop().toLowerCase(); // "raw-sql"
+  let entries;
+  try {
+    entries = readdirSync(parentDir, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === "ENOENT") return;
+    throw err;
+  }
+  for (const entry of entries) {
+    if (entry.name.toLowerCase() !== targetName) continue;
+    if (!entry.isDirectory()) continue; // a same-named FILE is RAW_SQL_MODULE_REL itself or a sibling, handled elsewhere
+    violate(
+      "RAW_SQL_NAMES",
+      `${RAW_SQL_BASE_REL}/`,
+      1,
+      `src/lib/prisma/raw-sql/ exists as a directory — Node's resolver would load it (including an unscanned package.json "main") instead of raw-sql.ts for any specifier reaching "…/raw-sql" without an explicit extension`,
     );
   }
 }
@@ -935,17 +1028,36 @@ function checkNodeModulesSpecifier(sf, rel) {
 // resolve into an excluded test path. `resolvesToUnscannedPath` already
 // requires the value to look like a specifier (`@/`, `./`, `../`), so this
 // cannot fire on incidental text that doesn't start with one of those.
-// Measured exemption, same shape as GATE_SELF_REL: files that hold such a
-// literal as DATA, not as a load target.
-const UNSCANNED_TEST_PATH_LITERAL_DATA_FILES = new Set([
-  // names the shared fail-closed test helper it classifies OTHER files
-  // against — never itself loads it.
-  "scripts/checks/classify-fail-closed-test.mjs",
+//
+// Functionality fix: a literal that IS a declaration specifier, or the
+// literal first argument of a `require()`/`import()` call, or the
+// ExternalModuleReference of `import x = require()`, is ALREADY inspected by
+// checkUnscannedImport above — scanning it again here double-reported the
+// exact same violation under the same reason. `isModuleSpecifierPositionLiteral`
+// recognizes precisely those three shapes (it was already written for
+// checkNodeModulesSpecifier), so excluding them here makes this scan cover
+// only the "OTHER" literals the header promises, not a superset of them.
+//
+// S-R3-3: the measured exemption below is now PER LITERAL VALUE, not per
+// file — a file key maps to the literal values it is allowed to hold as DATA
+// and the exact count each must appear. Any OTHER test-path literal in an
+// exempted file (a different value, or the same value past its measured
+// count) still denies; a file not in this map gets no exemption at all, so
+// the exemption cannot be widened by merely adding a same-directory sibling.
+const UNSCANNED_TEST_PATH_LITERAL_DATA_FILES = new Map([
+  [
+    "scripts/checks/classify-fail-closed-test.mjs",
+    // names the shared fail-closed test helper it classifies OTHER files
+    // against — never itself loads it. Measured: appears exactly once.
+    new Map([["@/__tests__/helpers/fail-closed", 1]]),
+  ],
 ]);
 
 function checkUnscannedLiteralAnywhere(sf, rel) {
   if (rel === GATE_SELF_REL) return; // exempt: spells example specifiers as data
-  if (UNSCANNED_TEST_PATH_LITERAL_DATA_FILES.has(rel)) return;
+
+  const exemptLiterals = UNSCANNED_TEST_PATH_LITERAL_DATA_FILES.get(rel);
+  const seenCounts = exemptLiterals === undefined ? undefined : new Map();
 
   const literals = [
     ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
@@ -953,14 +1065,34 @@ function checkUnscannedLiteralAnywhere(sf, rel) {
   ];
   for (const lit of literals) {
     if (isLiteralTypePosition(lit)) continue;
+    if (isModuleSpecifierPositionLiteral(lit)) continue; // already inspected by checkUnscannedImport
     const value = literalValue(lit);
-    if (value !== undefined && resolvesToUnscannedPath(rel, value)) {
-      violate(
-        "UNSCANNED_IMPORT",
-        rel,
-        lineOf(lit),
-        `literal "${value}" resolves into an excluded test path`,
-      );
+    if (value === undefined || !resolvesToUnscannedPath(rel, value)) continue;
+
+    if (exemptLiterals !== undefined && exemptLiterals.has(value)) {
+      seenCounts.set(value, (seenCounts.get(value) ?? 0) + 1);
+      continue;
+    }
+
+    violate(
+      "UNSCANNED_IMPORT",
+      rel,
+      lineOf(lit),
+      `literal "${value}" resolves into an excluded test path`,
+    );
+  }
+
+  if (exemptLiterals !== undefined) {
+    for (const [value, expectedCount] of exemptLiterals) {
+      const actualCount = seenCounts.get(value) ?? 0;
+      if (actualCount !== expectedCount) {
+        violate(
+          "UNSCANNED_IMPORT",
+          rel,
+          1,
+          `"${value}" appears ${actualCount} time(s) in ${rel}; the measured exemption expects ${expectedCount} — the exempted set drifted; update UNSCANNED_TEST_PATH_LITERAL_DATA_FILES in scripts/checks/check-raw-sql-usage.mjs if intentional`,
+        );
+      }
     }
   }
 }
@@ -1299,6 +1431,7 @@ function checkNonLiteralImportAllowlistCoverage(scannedFiles) {
 // every rule, fail closed on 0 files scanned.
 // ---------------------------------------------------------------------------
 checkPrismaEnumDisjointness();
+checkRawSqlDirectoryShadow();
 
 const project = new Project({ useInMemoryFileSystem: true, skipFileDependencyResolution: true });
 const layer2Files = getLayer2ScanFiles();
