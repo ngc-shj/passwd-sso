@@ -108,3 +108,27 @@ Fixed in review(3), each red-proven on a scratch copy:
 - Functionality: module-specifier-position literals skipped in the N1 scan (same three shapes checkUnscannedImport inspects); single-report test.
 - Testing: position-scoping row uses `"foo/node_modules/bar"`; labels corrected; non-exempt-file deny row added.
 Verification: 225/225 targeted tests, gate OK on the tree (~13s), eslint clean.
+
+---
+
+# Round 4
+Date: 2026-10-07
+
+## Changes from Previous Round
+Security-only round (Opus) on review(3) (24dad1613), asked to treat S-R3-1 as a class: every way the gate's model of specifier resolution can diverge from tsx / Node / TypeScript / esbuild.
+
+## Security Findings (Opus)
+- S-R4-1 [Major, verified] UNSCANNED_IMPORT treated only test paths as unscanned: `../../docs/forge`, `@/../cli/src/forge`, `./h.TS` loaded raw SQL past both layers.
+- S-R4-2 [Major, verified] canonical-import credit compared lowercased paths: `@/lib/Prisma/raw-sql` (directory with package.json main) and `@/lib/prisma/raw-sql.TS` executed a forged renderSql on case-sensitive Linux.
+- S-R4-3 [Minor, verified] `./h%2Etest.mjs` — Node ESM percent-decodes, the gate did not.
+- S-R4-4 [Minor] `..` above the repo root silently clamped.
+- Clean: the round-3 exclusion, `specifierEndsAsDirectory`, `checkRawSqlDirectoryShadow`, `?#` stripping, per-literal exemption counting; no tsconfig `baseUrl`, single `paths` target, no package.json `imports`/`exports`/`main`.
+
+## Resolution Status
+Mechanism change (deviation D-12) in review(4) (0a1e23f49) instead of a fifth shape patch:
+- One `resolveOnDisk` walks Node/TS candidates in order against exact-case readdir listings; returns FILE / PACKAGE_DIR / CASE_MISMATCH / ESCAPES_ROOT / SUSPICIOUS (`%`) / NOT_FOUND.
+- Grant: canonical only when FILE is exactly `src/lib/prisma/raw-sql.ts`. Deny-side raw-sql matching stays case-insensitive.
+- UNSCANNED_IMPORT: any target other than a scanned file or `.json` denies; NOT_FOUND falls back to the test-path shape. Measured per-literal exemptions: classify-fail-closed-test.mjs (1), generate-team-key-fixture.ts (2, extension crypto for a cross-codebase golden fixture), next-env.d.ts (2, counted by occurrence since `.next/` is absent on CI), layout.tsx `./globals.css` (1).
+- A `.`/`..`-only literal outside a module-specifier position is judged by what that ancestor directory can load (package.json main/exports denies; index file judged as a target; above the root allowed), replacing 19 per-file exemptions for the scripts/ repo-root idiom.
+- All round-4 probes are deny rows; each resolver branch and the ancestor-literal rule red-proven on a scratch copy.
+Verification: 254/254 targeted tests, gate OK on the tree (~13.5s), eslint clean.
