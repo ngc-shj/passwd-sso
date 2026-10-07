@@ -157,3 +157,30 @@ Fixed in review(5):
 - M2: message names UNSCANNED_LITERAL_EXEMPTIONS and the `.json`-only data rule.
 - M3: Residual line added.
 Each branch red-proven on a scratch copy (10 mutations). Verification: 272/272 targeted tests, gate OK (~13.5s), eslint clean.
+
+---
+
+# Round 6
+Date: 2026-10-07
+
+## Changes from Previous Round
+Security + correctness (Opus) on review(5) (23cee79bd).
+
+## Security Findings (Opus)
+- S-R6-1 [Major, same class, pre-existing] the gate hard-codes `@/` → `src/` without checking the config: a tsconfig `paths` retarget forged canonical credit (A7), a new alias (A5) and package.json `imports` (A4) reached unscanned code.
+- S-R6-2 [Major, same class, pre-existing] `new Worker("./x")` / `fork("./x")` resolve from process.cwd(), not the file.
+- S-R6-3 [Minor] nested `new URL()` bases; `@/` read file-relative by `new URL("@/x", import.meta.url)`.
+- F-R6-1 [Minor, round-5 regression] the charset refused App Router `[id]` / `(group)` specifiers.
+- Clean: in-charset specifiers read identically by the gate and loaders; next-env.d.ts exclusion opens nothing.
+
+## Resolution Status
+User decision: fix F-R6-1, S-R6-1, S-R6-2; Residual for S-R6-3; light final check, then PR. Fixed in review(6), each branch red-proven (10 mutations):
+- F-R6-1: charset admits `[]()` only (verified identical under node ESM, tsx, createRequire, new URL); SUSPICIOUS message names the allowed set and why the rest is refused.
+- S-R6-1: RESOLUTION_CONFIG fails closed unless tsconfig.json `paths` deep-equals `{"@/*":["./src/*"]}` with no `baseUrl` / `extends`, and package.json has no `imports` / `exports` / `main`. Vitest alias and nested configs documented in the Residual.
+- S-R6-2: a fifth reading resolves `./` / `../` literals from the repo root (0 new hits on the tree).
+- S-R6-3: Residual.
+Verification: 290/290 targeted tests, gate OK (~13.4s), eslint clean.
+
+# Round 7 (light final check)
+Date: 2026-10-07
+Reviewed the review(6) diff directly. Every change tightens except the `[]()` charset widening, which round 6 verified loader-identical. No findings; review closed per the user's decision.
