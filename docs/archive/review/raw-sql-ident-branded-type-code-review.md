@@ -78,3 +78,33 @@ Fixed in review(2) (961e3e05c), each red-proven on a scratch copy:
 - Testing: all rows added. `require("x", "node_modules/y")` pinned as allow (only `arguments[0]` is a specifier; red-proof: forcing the position check to true flips it).
 - F-R2-2: Skipped — performance only; gate runtime 12.6–12.9s vs 12.5s baseline, runs in pre-pr's parallel batch. Anti-Deferral: cost-to-fix is a rule-loop restructure across ~15 rules touching a security gate for no detection change; worst case is seconds of CI time.
 Verification: 214/214 targeted tests (gate + raw-sql), gate OK on the tree, eslint clean.
+
+---
+
+# Round 3
+Date: 2026-10-07
+
+## Changes from Previous Round
+Reviewed review(2) (961e3e05c). Security (Opus) + functionality/testing (combined).
+
+## Security Findings (Opus)
+- S-R3-1 [Major, verified bypass] `"@/lib/prisma/raw-sql/"` / `"./raw-sql/."` normalized to raw-sql and were credited as a canonical raw-sql.ts import, while tsx/Node resolve the directory (`raw-sql/package.json` "main" → an unscanned `*.test.ts` forging renderSql). Pre-existing resolver defect, not introduced by round 2.
+- S-R3-2 [Minor] N1 header overclaimed "any name or call shape" (fires only for `./`, `../`, `@/` literals); `?raw` suffixes and case variants slipped the test-path match.
+- S-R3-3 [Minor] whole-file exemption of classify-fail-closed-test.mjs wider than its one measured literal.
+- F-R2-1: no findings.
+
+## Functionality Findings
+- [Minor] N1 scan double-reported literals already inspected by checkUnscannedImport.
+
+## Testing Findings
+- [Major] the node_modules position-scoping allow row had no exact `node_modules` segment, so it passed with the position guard deleted.
+- [Minor] "(N2)" label on index.tsx/index.js rows overclaimed; missing deny row for the exempt literal in a non-exempt file.
+
+## Resolution Status
+Fixed in review(3), each red-proven on a scratch copy:
+- S-R3-1: (a) a specifier whose last raw segment is empty/`.`/`..` resolves only to directory candidates, never `raw-sql.ts`; (b) an on-disk `src/lib/prisma/raw-sql/` directory (case-insensitive) denies, subsuming the `raw-sql/index.<ext>` shadow entries.
+- S-R3-2: `?`/`#` suffix stripped and test paths matched case-insensitively in resolvesToUnscannedPath; header narrowed; non-prefixed `new URL()`, path-join and absolute specifiers listed in the Residual.
+- S-R3-3: exemption is per literal with a measured count (`"@/__tests__/helpers/fail-closed"` ×1).
+- Functionality: module-specifier-position literals skipped in the N1 scan (same three shapes checkUnscannedImport inspects); single-report test.
+- Testing: position-scoping row uses `"foo/node_modules/bar"`; labels corrected; non-exempt-file deny row added.
+Verification: 225/225 targeted tests, gate OK on the tree (~13s), eslint clean.
