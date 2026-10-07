@@ -20,7 +20,8 @@ import {
   WORKER_POOL_IDLE_TIMEOUT_MS,
   WORKER_POOL_STATEMENT_TIMEOUT_MS,
 } from "@/workers/worker-pool-config";
-import { assertIdentifier, renderPredicate } from "./predicate";
+import { renderPredicate } from "./predicate";
+import { sqlIdentifier } from "@/lib/prisma/raw-sql";
 import {
   RETENTION_REGISTRY,
   RLS_FREE_EXPIRY_TABLES,
@@ -63,13 +64,13 @@ export function validateRegistry(
 ): void {
   for (const entry of registry) {
     if (entry.kind === "EXPIRY") {
-      assertIdentifier(entry.table);
-      assertIdentifier(entry.cutoffColumn);
+      sqlIdentifier(entry.table);
+      sqlIdentifier(entry.cutoffColumn);
       for (const col of entry.keyColumns) {
-        assertIdentifier(col);
+        sqlIdentifier(col);
       }
       if (entry.predicate && entry.predicate.length > 0) {
-        // renderPredicate validates every column via assertIdentifier internally.
+        // renderPredicate validates every column via sqlIdentifier internally.
         renderPredicate(entry.predicate);
       }
       // Enforce that every RLS-enabled EXPIRY table declares globalDelete.
@@ -81,10 +82,10 @@ export function validateRegistry(
         );
       }
     } else if (entry.kind === "EXPIRY_GUARDED") {
-      assertIdentifier(entry.table);
-      assertIdentifier(entry.cutoffColumn);
+      sqlIdentifier(entry.table);
+      sqlIdentifier(entry.cutoffColumn);
       for (const col of entry.keyColumns) {
-        assertIdentifier(col);
+        sqlIdentifier(col);
       }
       // `guard` is a closed GuardName enum (compile-time checked) → no runtime
       // SQL validation needed. Same globalDelete enforcement as EXPIRY.
@@ -95,12 +96,12 @@ export function validateRegistry(
         );
       }
     } else if (entry.kind === "EXPIRY_AUDIT_PROVENANCE") {
-      assertIdentifier(entry.table);
-      assertIdentifier(entry.cutoffColumn);
+      sqlIdentifier(entry.table);
+      sqlIdentifier(entry.cutoffColumn);
       // provenanceColumns are interpolated into the SELECT projection — validate
       // every one (defense-in-depth before any SQL is built; S1/S3).
       for (const col of entry.provenanceColumns) {
-        assertIdentifier(col);
+        sqlIdentifier(col);
       }
       // tenant_id is required for the per-row audit emit.
       if (!entry.provenanceColumns.includes("tenant_id")) {
@@ -118,13 +119,13 @@ export function validateRegistry(
       // `table` is the only free identifier; scopeKind and tenantRetentionColumn
       // are literal-union types. The sweeper sets bypass_rls explicitly (like
       // sweepAuditLogs), so there is no globalDelete flag to enforce.
-      assertIdentifier(entry.table);
+      sqlIdentifier(entry.table);
     } else if (entry.kind === "PER_TENANT_AGE") {
       // table + cutoffColumn are interpolated into the DELETE SQL → allowlist
       // both at boot (S1). tenantRetentionColumn is a literal-union type. The
       // sweeper sets bypass_rls explicitly, so no globalDelete flag to enforce.
-      assertIdentifier(entry.table);
-      assertIdentifier(entry.cutoffColumn);
+      sqlIdentifier(entry.table);
+      sqlIdentifier(entry.cutoffColumn);
     }
     // PER_TENANT_FN entries have no free identifiers to validate — the table,
     // fn, and tenantRetentionColumn fields are literal union types.

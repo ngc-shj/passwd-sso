@@ -5,6 +5,8 @@ import {
   WEBHOOK_DELIVERY_CONCURRENCY,
   AUDIT_IP_MAX_LENGTH,
   USER_AGENT_MAX_LENGTH,
+  WEBHOOK_MAX_RETRIES,
+  WEBHOOK_AUTO_DISABLE_THRESHOLD,
 } from "@/lib/validations/common.server";
 
 // ─── Shared mock handles ──────────────────────────────────────────────────────
@@ -175,7 +177,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
   deliverToWebhookRecords: mockDeliverToWebhookRecords,
 }));
 
-import { createWorker, purgeRetention } from "./audit-outbox-worker";
+import { createWorker, purgeRetention, onWebhookDeliveryFailure } from "./audit-outbox-worker";
 // PrismaClient is mocked to MockPrismaClient by vi.mock("@prisma/client") above;
 // importing it here gives `new PrismaClient(...)` a real construct signature at
 // type-check time while resolving to the mock at runtime.
@@ -1843,5 +1845,84 @@ describe("outbox.depth.check_failed observability contract", () => {
       expect.anything(),
       "outbox.depth.alert",
     );
+  });
+});
+
+/**
+ * Step 0 characterization (raw-sql-ident-branded-type plan, Testing strategy):
+ * pins onWebhookDeliveryFailure's exact UPDATE text and bound params BEFORE
+ * `table` is migrated off string interpolation (C2). The expected strings
+ * must not change when that migration lands — only the production call site
+ * (`renderSql(...)`) may change (NF1).
+ */
+describe("onWebhookDeliveryFailure (Step 0 characterization)", () => {
+  beforeEach(() => {
+    resetMocks();
+  });
+
+  type FailureItem = Parameters<typeof onWebhookDeliveryFailure>[1];
+
+  function makeItem(overrides: Partial<FailureItem> = {}): FailureItem {
+    return {
+      id: ROW_ID,
+      outbox_id: "00000000-0000-4000-8000-000000000005",
+      tenant_id: TENANT_ID,
+      scope: "TENANT",
+      team_id: null,
+      action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
+      attempt_count: 0,
+      max_attempts: 8,
+      ...overrides,
+    };
+  }
+
+  it("UPDATEs team_webhooks by table name when the work item scope is TEAM", async () => {
+    const prisma = new PrismaClient();
+    const item = makeItem({ scope: "TEAM", team_id: TEAM_ID });
+    const webhookId = "00000000-0000-4000-8000-000000000006";
+
+    await onWebhookDeliveryFailure(prisma, item, webhookId, 1, "https://example.com/hook");
+
+    const [sql, ...params] = mockQueryRawUnsafe.mock.calls[0];
+    expect(sql).toBe(
+      `UPDATE "team_webhooks"
+       SET fail_count = fail_count + 1,
+           last_failed_at = now(),
+           last_error = $1,
+           is_active = CASE WHEN fail_count + 1 >= $2 THEN false ELSE is_active END,
+           updated_at = now()
+       WHERE id = $3::uuid
+       RETURNING fail_count`,
+    );
+    expect(params).toEqual([
+      `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
+      WEBHOOK_AUTO_DISABLE_THRESHOLD,
+      webhookId,
+    ]);
+  });
+
+  it("UPDATEs tenant_webhooks by table name when the work item scope is TENANT", async () => {
+    const prisma = new PrismaClient();
+    const item = makeItem({ scope: "TENANT", team_id: null });
+    const webhookId = "00000000-0000-4000-8000-000000000007";
+
+    await onWebhookDeliveryFailure(prisma, item, webhookId, 1, "https://example.com/hook");
+
+    const [sql, ...params] = mockQueryRawUnsafe.mock.calls[0];
+    expect(sql).toBe(
+      `UPDATE "tenant_webhooks"
+       SET fail_count = fail_count + 1,
+           last_failed_at = now(),
+           last_error = $1,
+           is_active = CASE WHEN fail_count + 1 >= $2 THEN false ELSE is_active END,
+           updated_at = now()
+       WHERE id = $3::uuid
+       RETURNING fail_count`,
+    );
+    expect(params).toEqual([
+      `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
+      WEBHOOK_AUTO_DISABLE_THRESHOLD,
+      webhookId,
+    ]);
   });
 });

@@ -71,8 +71,15 @@ describe("sweepPerTenantAge (SC3)", () => {
 
     expect(total).toBe(5);
     const [sql, ...params] = executeRawUnsafe.mock.calls[0];
-    expect(sql).toMatch(
-      /DELETE FROM password_entry_histories\s+WHERE \(id\) IN \(\s*SELECT id FROM password_entry_histories\s+WHERE tenant_id = \$1::uuid\s+AND changed_at < \$2::timestamptz\s+LIMIT \$3\s*\)/,
+    // Exact text (Step 0 characterization, raw-sql-ident-branded-type plan NF1).
+    expect(sql).toBe(
+      `DELETE FROM password_entry_histories
+         WHERE (id) IN (
+           SELECT id FROM password_entry_histories
+           WHERE tenant_id = $1::uuid
+             AND changed_at < $2::timestamptz
+           LIMIT $3
+         )`,
     );
     expect(sql).not.toContain("${");
     // params: [tenantId, cutoffDate, batchSize]

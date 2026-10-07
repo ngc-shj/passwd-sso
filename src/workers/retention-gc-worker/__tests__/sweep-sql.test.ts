@@ -48,9 +48,15 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
     // Batch param bound positionally as exactly [batchSize] — no extra params.
     expect(params).toEqual([100]);
 
-    // Batch-bounded (keys) IN (SELECT keys ... LIMIT $1) shape.
-    expect(sql).toMatch(
-      /DELETE FROM sessions\s+WHERE \(id\) IN \(\s*SELECT id FROM sessions\s+WHERE expires < now\(\)\s+LIMIT \$1\s*\)/,
+    // Batch-bounded (keys) IN (SELECT keys ... LIMIT $1) shape — exact text (Step 0
+    // characterization, raw-sql-ident-branded-type plan NF1).
+    expect(sql).toBe(
+      `DELETE FROM sessions
+    WHERE (id) IN (
+      SELECT id FROM sessions
+      WHERE expires < now()
+      LIMIT $1
+    )`,
     );
     // No template-interpolated non-literal token leaked into the SQL.
     expect(sql).not.toContain("${");
@@ -71,8 +77,13 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
 
     const [sql, ...params] = executeRawUnsafe.mock.calls[0];
     expect(params).toEqual([500]);
-    expect(sql).toMatch(
-      /DELETE FROM verification_tokens\s+WHERE \(identifier, token\) IN \(\s*SELECT identifier, token FROM verification_tokens\s+WHERE expires < now\(\)\s+LIMIT \$1\s*\)/,
+    expect(sql).toBe(
+      `DELETE FROM verification_tokens
+    WHERE (identifier, token) IN (
+      SELECT identifier, token FROM verification_tokens
+      WHERE expires < now()
+      LIMIT $1
+    )`,
     );
   });
 
@@ -94,9 +105,14 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
 
     const [sql] = executeRawUnsafe.mock.calls[0];
     // Predicate is rendered from the structured clauses — boolean as a literal,
-    // never an interpolated arbitrary value (S1).
-    expect(sql).toContain(
-      "WHERE dcr_expires_at < now() AND is_dcr = true AND tenant_id IS NULL",
+    // never an interpolated arbitrary value (S1). Exact text (Step 0).
+    expect(sql).toBe(
+      `DELETE FROM mcp_clients
+    WHERE (id) IN (
+      SELECT id FROM mcp_clients
+      WHERE dcr_expires_at < now() AND is_dcr = true AND tenant_id IS NULL
+      LIMIT $1
+    )`,
     );
     expect(sql).not.toContain("${");
   });
@@ -142,18 +158,25 @@ describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
     expect(sql).not.toContain("250");
     expect(sql).not.toContain("${");
 
-    // Batch-bounded (id) IN (SELECT id ... LIMIT $1) shape with the cutoff.
-    expect(sql).toMatch(
-      /DELETE FROM mcp_access_tokens\s+WHERE \(id\) IN \(\s*SELECT id FROM mcp_access_tokens\s+WHERE expires_at < now\(\)/,
-    );
-    expect(sql).toMatch(/LIMIT \$1/);
-
-    // Both family-guard NOT EXISTS clauses present (the SC5 protection).
-    expect(sql).toMatch(
-      /NOT EXISTS \(\s*SELECT 1 FROM mcp_refresh_tokens r\s+WHERE r\.access_token_id = mcp_access_tokens\.id\s+AND r\.revoked_at IS NULL AND r\.expires_at > now\(\)/,
-    );
-    expect(sql).toMatch(
-      /NOT EXISTS \(\s*SELECT 1 FROM delegation_sessions d\s+WHERE d\.mcp_token_id = mcp_access_tokens\.id\s+AND d\.revoked_at IS NULL AND d\.expires_at > now\(\)/,
+    // Batch-bounded (id) IN (SELECT ... LIMIT $1) shape with both family-guard
+    // NOT EXISTS clauses (the SC5 protection) — exact text (Step 0).
+    expect(sql).toBe(
+      `DELETE FROM mcp_access_tokens
+    WHERE (id) IN (
+      SELECT id FROM mcp_access_tokens
+      WHERE expires_at < now()
+      AND NOT EXISTS (
+       SELECT 1 FROM mcp_refresh_tokens r
+       WHERE r.access_token_id = mcp_access_tokens.id
+         AND r.revoked_at IS NULL AND r.expires_at > now()
+     )
+     AND NOT EXISTS (
+       SELECT 1 FROM delegation_sessions d
+       WHERE d.mcp_token_id = mcp_access_tokens.id
+         AND d.revoked_at IS NULL AND d.expires_at > now()
+     )
+      LIMIT $1
+    )`,
     );
   });
 });
@@ -206,13 +229,17 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
 
     // DELETE: batch-bounded (id) IN (SELECT id ... LIMIT $1), RETURNING id + all
     // provenance cols, no FOR UPDATE (the DELETE itself takes the row lock).
+    // Exact text (Step 0).
     const [deleteSql, ...deleteParams] = queryRawUnsafe.mock.calls[0];
     expect(deleteParams).toEqual([100]);
-    expect(deleteSql).toMatch(
-      /DELETE FROM extension_tokens\s+WHERE \(id\) IN \(\s*SELECT id FROM extension_tokens\s+WHERE expires_at < now\(\)\s+LIMIT \$1\s*\)/,
-    );
-    expect(deleteSql).toMatch(
-      /RETURNING id, tenant_id, user_id, last_used_at, last_used_ip, last_used_user_agent/,
+    expect(deleteSql).toBe(
+      `DELETE FROM extension_tokens
+       WHERE (id) IN (
+         SELECT id FROM extension_tokens
+         WHERE expires_at < now()
+         LIMIT $1
+       )
+       RETURNING id, tenant_id, user_id, last_used_at, last_used_ip, last_used_user_agent`,
     );
     expect(deleteSql).not.toContain("FOR UPDATE");
 
@@ -291,13 +318,19 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     // The guard restricts to DEAD grants only — both OR-branches present so a
     // live ACCEPTED/ACTIVATED grant (past its invite window) is never selected.
     // The guard lives in the DELETE's inner SELECT (the batch-bound id list).
-    expect(deleteSql).toContain("status IN ('REVOKED', 'REJECTED')");
-    expect(deleteSql).toMatch(
-      /status = 'PENDING' AND emergency_access_grants\.token_expires_at < now\(\)/,
+    // Exact text (Step 0).
+    expect(deleteSql).toBe(
+      `DELETE FROM emergency_access_grants
+       WHERE (id) IN (
+         SELECT id FROM emergency_access_grants
+         WHERE created_at < now() AND (
+       emergency_access_grants.status IN ('REVOKED', 'REJECTED')
+       OR (emergency_access_grants.status = 'PENDING' AND emergency_access_grants.token_expires_at < now())
+     )
+         LIMIT $1
+       )
+       RETURNING id, tenant_id, owner_id, status, token_expires_at`,
     );
-    // Guard is appended after the cutoff, still batch-bounded.
-    expect(deleteSql).toMatch(/WHERE created_at < now\(\)\s+AND \(/);
-    expect(deleteSql).toMatch(/LIMIT \$1/);
   });
 
   it("entries WITHOUT a guard append no guard SQL (SC4/SC6 unguarded path unchanged)", async () => {
@@ -313,7 +346,16 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     await sweepAuditProvenanceEntry(tx, entry, 100);
     const [deleteSql] = queryRawUnsafe.mock.calls[0];
     expect(deleteSql).not.toContain("status IN");
-    expect(deleteSql).toMatch(/WHERE expires_at < now\(\)\s+LIMIT \$1/);
+    // Exact text (Step 0).
+    expect(deleteSql).toBe(
+      `DELETE FROM api_keys
+       WHERE (id) IN (
+         SELECT id FROM api_keys
+         WHERE expires_at < now()
+         LIMIT $1
+       )
+       RETURNING id, tenant_id, user_id`,
+    );
   });
 
   it("entries WITH retentionDays push the cutoff back and bind the days as $2 (M2 grace window)", async () => {
@@ -329,8 +371,15 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     const { tx, queryRawUnsafe } = makeProvenanceTx([]);
     await sweepAuditProvenanceEntry(tx, entry, 100);
     const [deleteSql, ...deleteParams] = queryRawUnsafe.mock.calls[0];
-    expect(deleteSql).toMatch(
-      /WHERE expires_at < now\(\) - \(\$2 \|\| ' days'\)::interval\s+LIMIT \$1/,
+    // Exact text (Step 0).
+    expect(deleteSql).toBe(
+      `DELETE FROM access_requests
+       WHERE (id) IN (
+         SELECT id FROM access_requests
+         WHERE expires_at < now() - ($2 || ' days')::interval
+         LIMIT $1
+       )
+       RETURNING id, tenant_id, status`,
     );
     // retentionDays is bound as $2 (a value), never interpolated into the SQL text.
     expect(deleteParams).toEqual([100, 30]);
