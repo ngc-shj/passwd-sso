@@ -89,9 +89,27 @@ function withNonLiteralImportStubs(files, omit = []) {
   return merged;
 }
 
-function run(files, { allowlist, omitNonLiteralImportFiles, skipAllowlistStubs } = {}) {
+// Round 4: a canonical raw-sql.ts import is credited only when the on-disk
+// resolver lands exactly on src/lib/prisma/raw-sql.ts, so every fixture tree
+// holds a stand-in at that path unless the row supplies its own (or opts out
+// with `omitRawSqlModule` to prove that a missing target earns no credit).
+const RAW_SQL_MODULE_STUB = [
+  "export function sqlIdentifier(name) { return name; }",
+  'export function trustedSql(strings, ...parts) { return strings.join(""); }',
+  "export function joinSql(parts, sep) { return parts.join(sep); }",
+  "export function renderSql(fragment) { return fragment; }",
+  "",
+].join("\n");
+function withRawSqlModuleStub(files, omit) {
+  if (omit || "src/lib/prisma/raw-sql.ts" in files) return files;
+  return { ...files, "src/lib/prisma/raw-sql.ts": RAW_SQL_MODULE_STUB };
+}
+
+function run(files, { allowlist, omitNonLiteralImportFiles, skipAllowlistStubs, omitRawSqlModule } = {}) {
   const root = mkRoot();
-  const merged = skipAllowlistStubs ? files : withNonLiteralImportStubs(files, omitNonLiteralImportFiles);
+  const merged = skipAllowlistStubs
+    ? files
+    : withRawSqlModuleStub(withNonLiteralImportStubs(files, omitNonLiteralImportFiles), omitRawSqlModule);
   writeFiles(root, merged);
   const allowlistFile = join(root, "fixture-allowlist.txt");
   writeFileSync(allowlistFile, (allowlist ?? autoAllowlist(merged)) + "\n", "utf8");
@@ -944,6 +962,223 @@ describe("check-raw-sql-usage Layer 2 — UNSCANNED_IMPORT", () => {
     expect(result.stderr).toContain("UNSCANNED_IMPORT");
     expect(result.stderr).toContain("the measured exemption expects");
   });
+});
+
+// Round 4: one on-disk resolver (resolveOnDisk) answers both the GRANT
+// question (is this a canonical raw-sql.ts import? — exact, case-sensitive)
+// and the UNSCANNED_IMPORT question (does this reach code the gate does not
+// parse?). P1-P6 are the round-4 review probes, each of which the previous
+// path-math resolver let through while the real loader executed the forgery.
+// `details` pins WHICH branch denied, so disabling one branch flips its row
+// even where another rule would still deny the same fixture.
+describe("check-raw-sql-usage Layer 2 — on-disk specifier resolver (round 4)", () => {
+  const FORGE = `export const renderSql = (s) => String(s);\nexport function run(tx, x) { return tx.$queryRawUnsafe(x); }\n`;
+  const USE_RUN = (spec) => `import { run } from "${spec}";\nexport const go = (tx, x) => run(tx, x);\n`;
+  const USE_RENDER = (spec) =>
+    `import { renderSql } from "${spec}";\nexport const go = (tx, x) => tx.$queryRawUnsafe(renderSql(x));\n`;
+
+  const rows = [
+    {
+      name: "deny: P1 — import of a file under an unscanned root (../../docs/forge), not a test path",
+      files: { "docs/forge.ts": FORGE, "src/app/a.ts": USE_RUN("../../docs/forge") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['resolves to "docs/forge.ts", a file outside the Layer 2 scan'],
+    },
+    {
+      name: "deny: P1b — @/../cli/src/forge leaves src/ through the alias",
+      files: { "cli/src/forge.ts": FORGE, "src/app/a.ts": USE_RUN("@/../cli/src/forge") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['resolves to "cli/src/forge.ts", a file outside the Layer 2 scan'],
+    },
+    {
+      name: "deny: P2 — @/lib/Prisma/raw-sql (case-variant parent; directory with package.json main) is neither credited nor followed",
+      files: {
+        "src/lib/Prisma/raw-sql/package.json": JSON.stringify({ main: "forge.test.ts" }),
+        "src/lib/Prisma/raw-sql/forge.test.ts": FORGE,
+        "src/app/a.ts": USE_RENDER("@/lib/Prisma/raw-sql"),
+      },
+      reasons: ["UNSCANNED_IMPORT", "RAW_SQL_NAMES"],
+      details: ['resolves to "src/lib/Prisma/raw-sql/", a directory carrying package.json'],
+    },
+    {
+      name: "deny: P3 — @/lib/prisma/raw-sql.TS (forged sibling) is not credited as raw-sql.ts and is unscanned",
+      files: { "src/lib/prisma/raw-sql.TS": FORGE, "src/app/a.ts": USE_RENDER("@/lib/prisma/raw-sql.TS") },
+      reasons: ["UNSCANNED_IMPORT", "RAW_SQL_NAMES"],
+      details: [
+        'resolves to "src/lib/prisma/raw-sql.TS", a file outside the Layer 2 scan',
+        '"renderSql" occurs outside an allowed position',
+      ],
+    },
+    {
+      name: "deny: P4 — ./h%2Etest.ts (Node ESM percent-decodes; the gate does not)",
+      files: { "src/app/h.test.ts": FORGE, "src/app/a.ts": USE_RUN("./h%2Etest.ts") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ["contains '%'"],
+    },
+    {
+      name: "deny: P4 (.mjs, executed by plain node) — ./h%2Etest.mjs",
+      files: { "scripts/h.test.mjs": FORGE, "scripts/a.mjs": USE_RUN("./h%2Etest.mjs") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ["contains '%'"],
+    },
+    {
+      name: "deny: P5 — ../../../src/lib/prisma/raw-sql walks above the root (no longer clamped into a credited raw-sql.ts)",
+      files: { "src/app/a.ts": USE_RENDER("../../../src/lib/prisma/raw-sql") },
+      reasons: ["UNSCANNED_IMPORT", "RAW_SQL_NAMES"],
+      details: ["walks above the repository root", '"renderSql" occurs outside an allowed position'],
+    },
+    {
+      name: "deny: P6 — ./h.TS (an unscanned extension tsx loads as CJS JavaScript)",
+      files: { "src/app/h.TS": FORGE, "src/app/a.ts": USE_RUN("./h.TS") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['resolves to "src/app/h.TS", a file outside the Layer 2 scan'],
+    },
+    {
+      name: "deny: a specifier matching an existing file only case-insensitively (./Helper vs helper.ts)",
+      files: { "scripts/helper.ts": "export const run = 1;\n", "scripts/a.ts": USE_RUN("./Helper") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['matches "scripts/helper.ts" only case-insensitively'],
+    },
+    {
+      name: "deny: a directory resolved through its index file outside the scan (../../docs → docs/index.ts)",
+      files: { "docs/index.ts": FORGE, "src/app/a.ts": USE_RUN("../../docs") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['resolves to "docs/index.ts", a file outside the Layer 2 scan'],
+    },
+    {
+      name: "deny: an existing .JSON file (Node's CJS loader picks by exact extension — loads it as JavaScript)",
+      files: { "scripts/d.JSON": FORGE, "scripts/a.ts": `export const d = require("./d.JSON");\n` },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['resolves to "scripts/d.JSON", a file outside the Layer 2 scan'],
+    },
+    {
+      name: "deny: the same unscanned target reached by a loader under another name (createRequire)",
+      files: {
+        "docs/forge.ts": FORGE,
+        "src/app/a.ts": `import { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nexport const m = req("../../docs/forge");\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['literal "../../docs/forge" resolves to "docs/forge.ts"'],
+    },
+    {
+      name: "deny: a canonical-looking import when raw-sql.ts does not exist on disk earns no credit",
+      files: { "scripts/a.ts": USE_RENDER("@/lib/prisma/raw-sql") },
+      opts: { omitRawSqlModule: true },
+      reasons: ["RAW_SQL_NAMES"],
+      details: ['"renderSql" occurs outside an allowed position'],
+    },
+    // Deny-side raw-sql matching stays case-INsensitive (only the grant is exact).
+    {
+      name: "deny: a case-variant raw-sql specifier held as a literal (deny-side match is case-insensitive)",
+      files: { "scripts/a.ts": `export const spec = "@/lib/Prisma/RAW-SQL";\n` },
+      reasons: ["SPECIFIER_LITERAL"],
+      details: ['literal "@/lib/Prisma/RAW-SQL" matches a restricted specifier pattern'],
+    },
+    {
+      name: "deny: a namespace import of a case-variant raw-sql specifier",
+      files: { "scripts/a.ts": `import * as r from "@/lib/prisma/RAW-SQL";\nexport const x = r;\n` },
+      reasons: ["RAW_SQL_NAMES"],
+      details: ["namespace or default import of raw-sql.ts"],
+    },
+    {
+      name: "allow: canonical @/lib/prisma/raw-sql",
+      files: { "src/app/a.ts": USE_RENDER("@/lib/prisma/raw-sql") },
+    },
+    {
+      name: "allow: ./raw-sql from src/lib/prisma",
+      files: { "src/lib/prisma/a.ts": USE_RENDER("./raw-sql") },
+    },
+    {
+      name: "allow: ./raw-sql.js from src/lib/prisma (TS/ESM extension rewrite)",
+      files: { "src/lib/prisma/a.ts": USE_RENDER("./raw-sql.js") },
+    },
+    {
+      name: "allow: a .json import",
+      files: { "scripts/data.json": "{}\n", "scripts/a.ts": `import data from "./data.json";\nexport const d = data;\n` },
+    },
+    {
+      name: "allow: a sibling scanned module",
+      files: { "scripts/sibling.ts": "export const run = 1;\n", "scripts/a.ts": USE_RUN("./sibling") },
+    },
+    {
+      name: "allow: a measured exemption literal (src/app/layout.tsx importing ./globals.css, once)",
+      files: { "src/app/globals.css": "body {}\n", "src/app/layout.tsx": `import "./globals.css";\nexport const x = 1;\n` },
+    },
+    {
+      name: "deny: the same exempt literal in a different file",
+      files: { "src/app/globals.css": "body {}\n", "src/app/other.tsx": `import "./globals.css";\nexport const x = 1;\n` },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['resolves to "src/app/globals.css", a file outside the Layer 2 scan'],
+    },
+    {
+      name: "deny: the exempt literal past its measured count (count drift)",
+      files: {
+        "src/app/globals.css": "body {}\n",
+        "src/app/layout.tsx": `import "./globals.css";\nexport const again = "./globals.css";\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['"./globals.css" appears 2 time(s) in src/app/layout.tsx; the measured exemption expects 1'],
+    },
+    {
+      name: "allow: an exemption is counted by occurrence, not by what exists on disk (next-env.d.ts with no generated .next/)",
+      files: {
+        "next-env.d.ts": `import "./.next/types/routes.d.ts";\nimport "./.next/types/root-params.d.ts";\n`,
+      },
+    },
+    // A `.`/`..`-only literal outside a module-specifier position is a
+    // directory path (the scripts/ repo-root idiom), judged by what that
+    // ancestor directory can load, not by a per-file exemption.
+    {
+      name: "allow: new URL(\"../..\", import.meta.url) — the repo root, whose package.json has no main/exports",
+      files: {
+        "package.json": JSON.stringify({ name: "fixture" }),
+        "scripts/checks/x.mjs": `export const ROOT = new URL("../..", import.meta.url);\n`,
+      },
+    },
+    {
+      name: "allow: a \"../..\" literal walking above the repo root (nothing a PR can place there)",
+      files: { "scripts/x.ts": `import { resolve } from "node:path";\nexport const ROOT = resolve(__dirname, "../..");\n` },
+    },
+    {
+      name: "deny: a \"../..\" literal reaching a root package.json that has \"main\"",
+      files: {
+        "package.json": JSON.stringify({ name: "fixture", main: "docs/forge.js" }),
+        "docs/forge.js": FORGE,
+        "scripts/checks/x.mjs": `export const ROOT = "../..";\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['package.json "main"/"exports" this gate cannot follow'],
+    },
+    {
+      name: "deny: a \"..\" literal whose directory's index matches only case-insensitively",
+      files: {
+        "scripts/Index.ts": "export const run = 1;\n",
+        "scripts/checks/x.mjs": `export const UP = "..";\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['matches "scripts/Index.ts" only case-insensitively'],
+    },
+    {
+      name: "deny: the same \"../..\" in a module-specifier position (require) stays strict",
+      files: {
+        "package.json": JSON.stringify({ name: "fixture" }),
+        "scripts/checks/x.cjs": `module.exports = require("../..");\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ["a directory carrying package.json"],
+    },
+  ];
+
+  for (const r of rows) {
+    it(r.name, () => {
+      const result = run(r.files, r.opts);
+      const reasons = r.reasons ?? [];
+      expect(result.code).toBe(reasons.length > 0 ? 1 : 0);
+      for (const reason of reasons) expect(result.stderr).toContain(`${reason}:`);
+      for (const detail of r.details ?? []) expect(result.stderr).toContain(detail);
+      if (reasons.length === 0) expect(result.stdout).toContain("check-raw-sql-usage: OK");
+    });
+  }
 });
 
 describe("check-raw-sql-usage Layer 2 — RAW_METHOD", () => {

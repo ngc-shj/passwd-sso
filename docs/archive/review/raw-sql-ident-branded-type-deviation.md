@@ -80,3 +80,17 @@ R or T".
 Non-literal `import()` / `require()` is no longer a blanket residual: the seven
 measured sites are allowlisted by file and count (`NON_LITERAL_IMPORT_ALLOWLIST`);
 any other site, or a count change in an allowlisted file, denies.
+
+## D-12 — Specifier resolution moved onto the filesystem (code review round 4)
+
+The plan's gate resolved specifiers by path math and treated only test-path
+shapes as unscanned. Rounds 3 and 4 found five divergences from the real
+loaders (directory-shaped specifiers, case-folded credit, code outside the scan
+roots, percent-encoding, `..` above the root), so the resolver was replaced
+rather than patched again: one `resolveOnDisk` walks Node/TS candidates in
+order against exact-case directory listings. A canonical raw-sql.ts import is
+credited only when it lands exactly on `src/lib/prisma/raw-sql.ts`;
+UNSCANNED_IMPORT denies any target outside the scanned set except `.json` and
+four measured per-literal exemptions. A `.`/`..`-only literal outside a
+module-specifier position (the scripts/ repo-root idiom) is judged by what that
+ancestor directory can load instead of per-file exemptions.
