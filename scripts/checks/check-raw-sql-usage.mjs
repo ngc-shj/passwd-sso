@@ -88,10 +88,11 @@
  *       * MODULE-SPECIFIER position — a scanned file's import/export
  *         declaration, `import x = require()`, a `require()`/`import()`
  *         call's literal argument — and the GRANT side: a repo-shaped
- *         specifier holding any character outside `[A-Za-z0-9@._/-]`
+ *         specifier holding any character outside `[A-Za-z0-9@._/()[\]-]`
  *         denies outright (measured: every one of the 6436 such specifiers
- *         in the real tree fits that set) and is never credited as
- *         raw-sql.ts; anything else is walked exactly as written.
+ *         in the real tree fits that set; `( ) [ ]` are in it for App Router
+ *         paths, and read identically under every loader) and is never
+ *         credited as raw-sql.ts; anything else is walked exactly as written.
  *       * every OTHER string/no-substitution-template literal in expression
  *         position (N1), whatever its parent — closing laundering through a
  *         loader reached under another name (`createRequire(...)(...)`,
@@ -100,7 +101,11 @@
  *         `@/` hold spaces), but every READING a loader can make of the
  *         literal — as written, `?`/`#` suffix stripped, WHATWG-URL-
  *         normalized, and both — is walked, and the literal denies if ANY
- *         reading is repo-shaped and holds `%` or meets (a)-(e). A reading
+ *         reading is repo-shaped and holds `%` or meets (a)-(e). A `./`/`../`
+ *         reading is walked a second time from the repository root, since
+ *         `new Worker(path)`, `fork()`, `spawn("node", [path])` and `fs`
+ *         resolve against process.cwd(), the root for every npm script (a
+ *         root walk above the root is ignored). A reading
  *         made only of `.`/`..` segments (the scripts/ repo-root idiom) is
  *         judged by what that ancestor directory loads instead: above the
  *         root allowed; package.json with "main"/"exports", or unreadable as
@@ -146,6 +151,13 @@
  *     stale entry left behind by a deletion or rename.
  *   - SYMLINK_SCAN_TARGET: a symlink under a Layer 2 scan root denies — the
  *     gate judges syntax on disk and cannot verify what a symlink resolves to.
+ *   - RESOLUTION_CONFIG: the resolver's `@/` → `src/` mapping and its
+ *     "anything else non-relative is a package" assumption are checked
+ *     against the config the loaders read, once at start-up: root
+ *     tsconfig.json (strict JSON) must have no `extends`, no
+ *     `compilerOptions.baseUrl`, and `compilerOptions.paths` exactly
+ *     `{"@/*": ["./src/*"]}`; root package.json (optional) must have none of
+ *     "imports", "exports", "main". Any departure fails closed.
  *   - Fails closed on 0 files analysed and on a file that fails to parse.
  *
  * Scope (Layer 2, independent of Layer 1): every non-test `.ts .tsx .mts .cts
@@ -167,10 +179,25 @@
  * whose readings is shaped that way is itself a residual here: a
  * non-prefixed URL-relative specifier, e.g. `new URL("h.test.ts",
  * import.meta.url)` with no leading `./`; a specifier built by
- * `path.join(…)` or string concatenation; an absolute path or `file:` URL);
+ * `path.join(…)` or string concatenation; an absolute path or `file:` URL;
+ * a `new URL()` whose base is anything other than the file itself — a nested
+ * URL base such as `new URL("./x", new URL("../docs/", import.meta.url))`
+ * resolves against a directory the gate never pairs with the literal; and
+ * `@/` inside `new URL("@/x", import.meta.url)`, which a URL reads
+ * file-relative (a directory literally named `@`), not as the src/ alias);
+ * module-resolution config other than the root tsconfig.json / package.json
+ * that RESOLUTION_CONFIG checks — `resolve.alias` in vitest.config.ts /
+ * vitest.integration.config.ts (today `"@": path.resolve(__dirname, "src")`;
+ * its value is a computed expression, so a check could only match one
+ * spelling of it, and it applies only under the test runner), bundler aliases
+ * in next.config.ts (none today), a tsconfig selected at run time
+ * (`tsx --tsconfig`, TSX_TSCONFIG_PATH), a nested tsconfig.json esbuild picks
+ * up per file, and a nested package.json "imports" (Node scopes `#x` to the
+ * nearest package.json) — none exists under src/, scripts/ or prisma/ today;
  * what a package.json "main"/"exports" points at (a directory
  * carrying one is denied, never followed); a reading of an OTHER literal by
- * a loader whose transformation is not one of the four modelled readings
+ * a loader whose transformation is not one of the modelled readings (four
+ * text forms, each `./`/`../` one also from the repository root)
  * (the module-specifier positions are charset-strict and need no model); a
  * target that comes into existence only at runtime (the resolver sees the
  * checkout as it is); what an UNSCANNED_LITERAL_EXEMPTIONS target itself
@@ -618,9 +645,11 @@ const RESOLVE_KIND = Object.freeze({
 // trims leading/trailing C0 controls and space, and maps `\` to `/`. Rather
 // than model every loader, a repo-shaped specifier in a module-specifier
 // position (and on the grant side) is refused outright when it holds any
-// character outside this set. Measured on the real tree: all 6436 repo-shaped
-// module-specifier literals fit it, so it needed no widening.
-const SPECIFIER_CHARSET_RE = /^[A-Za-z0-9@._/-]*$/;
+// character outside this set. Round 6 (F-R6-1): `[ ] ( )` admitted for App
+// Router paths (`@/app/api/passwords/[id]/route`, `../(shared)/s`) — each was
+// verified to read identically under Node ESM, tsx, createRequire and
+// `new URL()`; nothing else is added.
+const SPECIFIER_CHARSET_RE = /^[A-Za-z0-9@._/()[\]-]*$/;
 function charsOutsideSpecifierCharset(spec) {
   return [...new Set([...spec].filter((ch) => !SPECIFIER_CHARSET_RE.test(ch)))];
 }
@@ -782,6 +811,80 @@ function resolvePathOnDisk(fromRel, spec) {
   return { kind: RESOLVE_KIND.NOT_FOUND, base };
 }
 
+// Round 6 (S-R6-1): the resolver above hard-codes `@/` → `src/` and treats
+// every other non-relative specifier as a package. That holds only while the
+// configuration the loaders read says so: a tsconfig `paths` retarget or new
+// alias (tsx, Next and esbuild all honour `paths`), a `baseUrl` (bare
+// specifiers resolved against the repo), or a root package.json "imports"
+// (`#x`), "exports" (self-reference by package name) or "main" would make the
+// gate judge a different file from the one that runs. Checked once at start-up;
+// any departure fails closed rather than being modelled. tsconfig.json is read
+// as strict JSON — measured: the real file holds no comments or trailing
+// commas — so one that gains them fails closed here too. `extends` is refused
+// because it can carry a `baseUrl` or `paths` in from another file.
+const EXPECTED_TSCONFIG_PATHS = { "@/*": ["./src/*"] };
+const FORBIDDEN_ROOT_PACKAGE_FIELDS = ["imports", "exports", "main"];
+
+function isDeepEqualJson(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function readJsonObject(rel, { optional }) {
+  let text;
+  try {
+    text = readFileSync(join(ROOT, rel), "utf8");
+  } catch (err) {
+    if (optional && err.code === "ENOENT") return { value: undefined };
+    return { problem: `${rel} cannot be read (${err.message})` };
+  }
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (err) {
+    return { problem: `${rel} is not strict JSON (${err.message})` };
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { problem: `${rel} is not a JSON object` };
+  }
+  return { value };
+}
+
+function checkResolutionConfig() {
+  const problems = [];
+  const tsconfig = readJsonObject("tsconfig.json", { optional: false });
+  if (tsconfig.problem !== undefined) {
+    problems.push(tsconfig.problem);
+  } else {
+    const opts = tsconfig.value.compilerOptions ?? {};
+    if (tsconfig.value.extends !== undefined) {
+      problems.push(`tsconfig.json has "extends", which can carry a "baseUrl" or "paths" in from another file`);
+    }
+    if (opts.baseUrl !== undefined) {
+      problems.push(`tsconfig.json compilerOptions has "baseUrl" (bare specifiers would resolve against the repository)`);
+    }
+    if (!isDeepEqualJson(opts.paths, EXPECTED_TSCONFIG_PATHS)) {
+      problems.push(
+        `tsconfig.json compilerOptions.paths is ${JSON.stringify(opts.paths)}, not exactly ${JSON.stringify(EXPECTED_TSCONFIG_PATHS)}`,
+      );
+    }
+  }
+  const pkg = readJsonObject("package.json", { optional: true });
+  if (pkg.problem !== undefined) {
+    problems.push(pkg.problem);
+  } else if (pkg.value !== undefined) {
+    for (const field of FORBIDDEN_ROOT_PACKAGE_FIELDS) {
+      if (pkg.value[field] !== undefined) problems.push(`package.json has "${field}"`);
+    }
+  }
+  if (problems.length === 0) return;
+  failed = true;
+  console.error(
+    "RESOLUTION_CONFIG: this gate resolves `@/` to src/ and every other non-relative specifier as a package; the module-resolution config no longer guarantees that, so the gate would judge a different file from the one that runs — revert the change, or change EXPECTED_TSCONFIG_PATHS together with specifierParts in scripts/checks/check-raw-sql-usage.mjs:",
+  );
+  for (const p of problems) console.error(`  ${p}`);
+  console.error("");
+}
+
 // GRANT side (case-sensitive, on-disk): a specifier is a canonical raw-sql.ts
 // import iff the resolver lands EXACTLY on RAW_SQL_MODULE_REL. Nothing else —
 // a case variant, a directory, a clamped `..`, a missing file — earns credit.
@@ -847,7 +950,7 @@ function resolutionReason(r) {
     case RESOLVE_KIND.ESCAPES_ROOT:
       return "walks above the repository root";
     case RESOLVE_KIND.SUSPICIOUS:
-      return `contains ${r.chars.map((ch) => `'${printable(ch)}'`).join(", ")}, outside the module-specifier charset [A-Za-z0-9@._/-] (loaders disagree on what '?', '#', '%', '\\', whitespace and control characters mean; this gate refuses them rather than model each loader)`;
+      return `contains ${r.chars.map((ch) => `'${printable(ch)}'`).join(", ")}, outside the module-specifier charset A-Z a-z 0-9 @ . _ / - ( ) [ ] — rename the target or rewrite the specifier using only those characters ('?', '#', '%', '\\', whitespace and control characters are refused because Node ESM, Node CJS, tsx and new URL() each read them differently)`;
     case RESOLVE_KIND.CASE_MISMATCH:
       return `matches "${r.rel}" only case-insensitively (case-sensitive and case-insensitive filesystems would load different files)`;
     case RESOLVE_KIND.PACKAGE_DIR:
@@ -914,6 +1017,13 @@ function ancestorDirReason(r) {
 // loader can make of the literal (literalReadings) is resolved on disk, and
 // the literal denies if ANY reading reaches an unscanned target or test path,
 // or holds `%` (Node ESM percent-decodes; this gate does not).
+//
+// Round 6 (S-R6-2): a path handed to `new Worker(…)`, `fork(…)`,
+// `spawn("node", […])` or `fs` resolves against process.cwd() — the repository
+// root for every npm script — not against the file holding it. So each
+// `./`/`../` reading is also resolved from the root; a root reading that
+// walks above the root is ignored (nothing a PR can place there).
+const CWD_FROM_REL = "<repository root>"; // a pseudo file AT the root: specifierParts drops it
 function unscannedLiteralReason(fromRel, value) {
   for (const reading of literalReadings(value)) {
     if (!isRepoShapedSpecifier(reading)) continue;
@@ -921,9 +1031,17 @@ function unscannedLiteralReason(fromRel, value) {
     if (reading.includes("%")) {
       return `${readAs}contains '%' (Node ESM percent-decodes a specifier; this gate does not)`;
     }
+    const isAncestorDir = ANCESTOR_DIR_LITERAL_RE.test(reading);
     const r = resolvePathOnDisk(fromRel, reading);
-    const reason = ANCESTOR_DIR_LITERAL_RE.test(reading) ? ancestorDirReason(r) : resolutionReason(r);
+    const reason = isAncestorDir ? ancestorDirReason(r) : resolutionReason(r);
     if (reason !== undefined) return `${readAs}${reason}`;
+    if (!reading.startsWith("./") && !reading.startsWith("../")) continue;
+    const fromRoot = resolvePathOnDisk(CWD_FROM_REL, reading);
+    if (fromRoot.kind === RESOLVE_KIND.ESCAPES_ROOT) continue;
+    const rootReason = isAncestorDir ? ancestorDirReason(fromRoot) : resolutionReason(fromRoot);
+    if (rootReason !== undefined) {
+      return `${readAs}read from the repository root (process.cwd(), as new Worker / fork / spawn / fs do), ${rootReason}`;
+    }
   }
   return undefined;
 }
@@ -1681,6 +1799,7 @@ function checkNonLiteralImportAllowlistCoverage(scannedFiles) {
 // Main — parse every scanned file once (fail closed on parse error), run
 // every rule, fail closed on 0 files scanned.
 // ---------------------------------------------------------------------------
+checkResolutionConfig();
 checkPrismaEnumDisjointness();
 checkRawSqlDirectoryShadow();
 

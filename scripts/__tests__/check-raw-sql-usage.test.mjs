@@ -105,11 +105,31 @@ function withRawSqlModuleStub(files, omit) {
   return { ...files, "src/lib/prisma/raw-sql.ts": RAW_SQL_MODULE_STUB };
 }
 
-function run(files, { allowlist, omitNonLiteralImportFiles, skipAllowlistStubs, omitRawSqlModule } = {}) {
+// Round 6 (S-R6-1): the gate fails closed (RESOLUTION_CONFIG) unless the
+// root tsconfig.json maps exactly `@/*` → `./src/*` with no baseUrl and the
+// root package.json has no imports/exports/main, so every fixture tree holds
+// stand-ins matching the real files unless the row supplies its own (or opts
+// out with `omitResolutionConfig`).
+const RESOLUTION_CONFIG_STUBS = {
+  "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, paths: { "@/*": ["./src/*"] } } }),
+  "package.json": JSON.stringify({ name: "fixture", private: true }),
+};
+function withResolutionConfigStubs(files, omit) {
+  if (omit) return files;
+  return { ...RESOLUTION_CONFIG_STUBS, ...files };
+}
+
+function run(
+  files,
+  { allowlist, omitNonLiteralImportFiles, skipAllowlistStubs, omitRawSqlModule, omitResolutionConfig } = {},
+) {
   const root = mkRoot();
   const merged = skipAllowlistStubs
     ? files
-    : withRawSqlModuleStub(withNonLiteralImportStubs(files, omitNonLiteralImportFiles), omitRawSqlModule);
+    : withResolutionConfigStubs(
+        withRawSqlModuleStub(withNonLiteralImportStubs(files, omitNonLiteralImportFiles), omitRawSqlModule),
+        omitResolutionConfig,
+      );
   writeFiles(root, merged);
   const allowlistFile = join(root, "fixture-allowlist.txt");
   writeFileSync(allowlistFile, (allowlist ?? autoAllowlist(merged)) + "\n", "utf8");
@@ -1140,11 +1160,11 @@ describe("check-raw-sql-usage Layer 2 — on-disk specifier resolver (round 4)",
       files: { "scripts/x.ts": `import { resolve } from "node:path";\nexport const ROOT = resolve(__dirname, "../..");\n` },
     },
     {
-      name: "deny: a \"../..\" literal reaching a root package.json that has \"main\"",
+      name: "deny: a \"../..\" literal reaching an ancestor package.json that has \"main\"",
       files: {
-        "package.json": JSON.stringify({ name: "fixture", main: "docs/forge.js" }),
+        "scripts/sub/package.json": JSON.stringify({ name: "fixture", main: "../../docs/forge.js" }),
         "docs/forge.js": FORGE,
-        "scripts/checks/x.mjs": `export const ROOT = "../..";\n`,
+        "scripts/sub/a/b/x.mjs": `export const UP = "../..";\n`,
       },
       reasons: ["UNSCANNED_IMPORT"],
       details: ['package.json "main"/"exports" this gate cannot follow'],
@@ -1336,6 +1356,169 @@ describe("check-raw-sql-usage Layer 2 — specifier characters and loader readin
       },
       reasons: ["UNSCANNED_IMPORT"],
       details: ['import specifier "../next-env.d.ts" resolves to "next-env.d.ts", a file outside the Layer 2 scan'],
+    },
+  ];
+
+  for (const r of rows) {
+    it(r.name, () => {
+      const result = run(r.files, r.opts);
+      const reasons = r.reasons ?? [];
+      expect(result.code).toBe(reasons.length > 0 ? 1 : 0);
+      for (const reason of reasons) expect(result.stderr).toContain(`${reason}:`);
+      for (const detail of r.details ?? []) expect(result.stderr).toContain(detail);
+      if (reasons.length === 0) expect(result.stdout).toContain("check-raw-sql-usage: OK");
+    });
+  }
+});
+
+// Round 6. F-R6-1: App Router path characters `[ ] ( )` are admitted in
+// module-specifier positions (D1/D2 are the probes). S-R6-1: the resolver's
+// `@/` → src/ mapping is checked against the root tsconfig.json /
+// package.json (A4/A5/A7 are the probes). S-R6-2: a `./`/`../` other literal
+// is also read from the repository root, as `new Worker(path)` / `fork()` do
+// (B1/B2 are the probes).
+describe("check-raw-sql-usage Layer 2 — specifier charset, resolution config, cwd reading (round 6)", () => {
+  const FORGE = `export const renderSql = (s) => String(s);\nexport function run(tx, x) { return tx.$queryRawUnsafe(x); }\n`;
+  const FORGE_CJS = `console.log("FORGE-RAN");\nexports.v = 1;\n`;
+  const USE_RENDER = (spec) =>
+    `import { renderSql } from "${spec}";\nexport const go = (tx, x) => tx.$queryRawUnsafe(renderSql(x));\n`;
+  const TSCONFIG = (compilerOptions, extra = {}) => JSON.stringify({ ...extra, compilerOptions });
+  const CANONICAL_PATHS = { "@/*": ["./src/*"] };
+
+  const rows = [
+    // F-R6-1
+    {
+      name: "allow: D1 — @/app/api/passwords/[id]/route (dynamic-segment brackets)",
+      files: {
+        "src/app/api/passwords/[id]/route.ts": "export async function GET() { return 1; }\n",
+        "src/lib/x.ts": `import { GET } from "@/app/api/passwords/[id]/route";\nexport const g = GET;\n`,
+      },
+    },
+    {
+      name: "allow: D2 — ./layout and ../(shared)/s inside route groups (parentheses)",
+      files: {
+        "src/app/(auth)/layout.tsx": "export default function L() { return null; }\n",
+        "src/app/(shared)/s.ts": "export const s = 1;\n",
+        "src/app/(auth)/page.tsx": `import L from "./layout";\nimport { s } from "../(shared)/s";\nexport default function P() { return [L, s]; }\n`,
+      },
+    },
+    {
+      name: "deny: a specifier outside the charset names the allowed set and why the rest is refused",
+      files: { "scripts/h.ts": "export const run = 1;\n", "scripts/a.ts": `import { run } from "./h?x";\nexport const r = run;\n` },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [
+        "outside the module-specifier charset A-Z a-z 0-9 @ . _ / - ( ) [ ]",
+        "'?', '#', '%', '\\', whitespace and control characters are refused because Node ESM, Node CJS, tsx and new URL() each read them differently",
+      ],
+    },
+    // S-R6-1
+    {
+      name: "deny: A4 — root package.json \"imports\" (#f → docs/forge.cjs)",
+      files: {
+        "package.json": JSON.stringify({ name: "fixture", imports: { "#f": "./docs/forge.cjs" } }),
+        "docs/forge.cjs": FORGE_CJS,
+        "scripts/x.ts": `const m = require("#f");\nexport const v = m.v;\n`,
+      },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ['package.json has "imports"'],
+    },
+    {
+      name: "deny: A5 — a new tsconfig paths alias (~/* → ./docs/*)",
+      files: {
+        "tsconfig.json": TSCONFIG({ paths: { ...CANONICAL_PATHS, "~/*": ["./docs/*"] } }),
+        "docs/forge.cjs": FORGE_CJS,
+        "scripts/x.ts": `import { v } from "~/forge.cjs";\nexport const w = v;\n`,
+      },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ['tsconfig.json compilerOptions.paths is {"@/*":["./src/*"],"~/*":["./docs/*"]}, not exactly {"@/*":["./src/*"]}'],
+    },
+    {
+      name: "deny: A7 — tsconfig paths retargets @/* to ./docs/*, so the canonical-looking import runs a forged raw-sql",
+      files: {
+        "tsconfig.json": TSCONFIG({ paths: { "@/*": ["./docs/*"] } }),
+        "docs/lib/prisma/raw-sql.ts": FORGE,
+        "scripts/x.ts": USE_RENDER("@/lib/prisma/raw-sql"),
+      },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ['compilerOptions.paths is {"@/*":["./docs/*"]}'],
+    },
+    {
+      name: "deny: tsconfig compilerOptions.baseUrl present (with the canonical paths)",
+      files: { "tsconfig.json": TSCONFIG({ baseUrl: ".", paths: CANONICAL_PATHS }) },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ['tsconfig.json compilerOptions has "baseUrl"'],
+    },
+    {
+      name: "deny: tsconfig \"extends\" (can carry baseUrl/paths in from another file)",
+      files: { "tsconfig.json": TSCONFIG({ paths: CANONICAL_PATHS }, { extends: "./tsconfig.base.json" }) },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ['tsconfig.json has "extends"'],
+    },
+    {
+      name: "deny: tsconfig.json holding a comment (read as strict JSON)",
+      files: { "tsconfig.json": `// c\n${TSCONFIG({ paths: CANONICAL_PATHS })}` },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ["tsconfig.json is not strict JSON"],
+    },
+    {
+      name: "deny: no root tsconfig.json at all",
+      files: { "scripts/a.ts": "export const a = 1;\n" },
+      opts: { omitResolutionConfig: true },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ["tsconfig.json cannot be read"],
+    },
+    {
+      name: "deny: root package.json \"exports\"",
+      files: { "package.json": JSON.stringify({ name: "fixture", exports: "./docs/forge.cjs" }) },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ['package.json has "exports"'],
+    },
+    {
+      name: "deny: root package.json \"main\"",
+      files: { "package.json": JSON.stringify({ name: "fixture", main: "./docs/forge.cjs" }) },
+      reasons: ["RESOLUTION_CONFIG"],
+      details: ['package.json has "main"'],
+    },
+    {
+      name: "allow: the default config (canonical paths, no baseUrl; package.json without imports/exports/main) with a canonical import",
+      files: { "scripts/x.ts": USE_RENDER("@/lib/prisma/raw-sql") },
+    },
+    {
+      name: "allow: no root package.json (only tsconfig.json is required)",
+      files: { "tsconfig.json": TSCONFIG({ paths: CANONICAL_PATHS }), "scripts/a.ts": "export const a = 1;\n" },
+      opts: { omitResolutionConfig: true },
+    },
+    // S-R6-2
+    {
+      name: "deny: B1 — new Worker(\"./docs/forge.cjs\") resolves from process.cwd() (the repo root), not the file",
+      files: {
+        "docs/forge.cjs": FORGE_CJS,
+        "scripts/x.ts": `import { Worker } from "node:worker_threads";\nnew Worker("./docs/forge.cjs");\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [
+        'literal "./docs/forge.cjs" read from the repository root (process.cwd(), as new Worker / fork / spawn / fs do), resolves to "docs/forge.cjs", a file outside the Layer 2 scan',
+      ],
+    },
+    {
+      name: "deny: B2 — fork(\"./docs/forge.cjs\") from scripts/",
+      files: {
+        "docs/forge.cjs": FORGE_CJS,
+        "scripts/x.ts": `import { fork } from "node:child_process";\nfork("./docs/forge.cjs");\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['literal "./docs/forge.cjs" read from the repository root'],
+    },
+    {
+      name: "allow: a cwd-relative literal reaching a scanned file (fork(\"./scripts/worker.ts\"))",
+      files: {
+        "scripts/worker.ts": "export const w = 1;\n",
+        "scripts/x.ts": `import { fork } from "node:child_process";\nfork("./scripts/worker.ts");\n`,
+      },
+    },
+    {
+      name: "allow: a ../ literal whose root reading walks above the root (ignored) and whose file reading reaches nothing",
+      files: { "scripts/x.ts": `export const label = "../not-a-file";\n` },
     },
   ];
 
