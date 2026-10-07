@@ -132,3 +132,28 @@ Mechanism change (deviation D-12) in review(4) (0a1e23f49) instead of a fifth sh
 - A `.`/`..`-only literal outside a module-specifier position is judged by what that ancestor directory can load (package.json main/exports denies; index file judged as a target; above the root allowed), replacing 19 per-file exemptions for the scripts/ repo-root idiom.
 - All round-4 probes are deny rows; each resolver branch and the ancestor-literal rule red-proven on a scratch copy.
 Verification: 254/254 targeted tests, gate OK on the tree (~13.5s), eslint clean.
+
+---
+
+# Round 5
+Date: 2026-10-07
+
+## Changes from Previous Round
+Security + correctness (Opus) on review(4) (0a1e23f49), the on-disk resolver.
+
+## Security Findings (Opus)
+- S-R5-1 [Major, same class, verified] pre-resolution divergence: the gate always stripped `?`/`#` and never URL-normalized, while tsx CJS keeps `#` in a file name (`../src/lib/prisma/raw-sql#x` credited as raw-sql.ts, tsx ran an unscanned forgery), plain Node CJS keeps `?`/`#`, and Node ESM `new URL()` strips tab/LF, trims spaces, maps `\` to `/`.
+- F-R5-1 [Major, tangential] `npm run dev` regenerates the gitignored `next-env.d.ts` with `./.next/dev/types/...`, failing the local gate (pre-pr) after any dev session.
+- M1 [Minor] malformed package.json crashed the ancestor rule with a raw stack.
+- M2 [Minor] "outside the Layer 2 scan" message gave no next step.
+- M3 [Minor] exemptions key on (file, literal, count), not on what the target loads — not in the Residual.
+- Clean: candidate order vs tsx/Node/TS/esbuild, file-over-directory, `@/..`, symlinked targets, `.d.ts`, grant side otherwise.
+
+## Resolution Status
+Fixed in review(5):
+- S-R5-1: refuse the undecidable class. Module-specifier positions and the grant: a repo-shaped specifier outside `[A-Za-z0-9@._/-]` is SUSPICIOUS (deny, never credited); `?#` stripping removed from resolution. Measured: 6436 such specifiers on the tree, all inside the charset. Other literals (171 repo-shaped, 1 with spaces — a message string): judged under four readings (raw, `?#`-stripped, URL-normalized, both); any reading reaching an unscanned target or test path, or containing `%`, denies.
+- F-R5-1: `next-env.d.ts` excluded from the scan as a named generated, gitignored file; its exemption removed.
+- M1: malformed / non-object package.json reported as an UNSCANNED_IMPORT violation naming the file.
+- M2: message names UNSCANNED_LITERAL_EXEMPTIONS and the `.json`-only data rule.
+- M3: Residual line added.
+Each branch red-proven on a scratch copy (10 mutations). Verification: 272/272 targeted tests, gate OK (~13.5s), eslint clean.
