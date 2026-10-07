@@ -63,37 +63,55 @@
  *     raw-sql match. This gate's own source is exempt (it spells the allowed
  *     specifiers as data).
  *   - UNSCANNED_IMPORT: a relative (`./`, `../`, bare `.`/`..`) or `@/`
- *     specifier that reaches code this gate does not parse denies. Resolution is ONE on-disk resolver
- *     (resolveOnDisk): `?`/`#` suffix stripped; candidates tried in Node/TS
- *     order (the exact path; `.js/.jsx/.mjs/.cjs` → TS source rewrite; each
- *     code extension appended, plus `.json`/`.node`; then a directory's
- *     package.json, then its `index.<ext>`), each matched against readdir
- *     names with EXACT case, so the answer is identical on case-sensitive
- *     (Linux CI/Docker) and case-insensitive (macOS/Windows) hosts. Denies
- *     when the specifier (a) walks `..` above the repository root, (b)
- *     contains `%` (Node ESM percent-decodes; this gate does not), (c) first
- *     matches an existing candidate only case-INsensitively, (d) resolves to
- *     a directory carrying package.json (its "main"/"exports" is not
- *     followed), (e) resolves to an existing file outside the Layer 2 scan
- *     set — a test file, a file under an unscanned root (`docs/`, `cli/`,
- *     `extension/`, …), or an unscanned extension (`.TS`, `.css`, …) —
- *     unless its extension is exactly `.json`, or (f) resolves to nothing on
- *     disk but its normalized path matches the excluded-test-path shape
+ *     specifier that reaches code this gate does not parse denies. Resolution
+ *     is ONE on-disk candidate walk (resolvePathOnDisk): candidates tried in
+ *     Node/TS order (the exact path; `.js/.jsx/.mjs/.cjs` → TS source
+ *     rewrite; each code extension appended, plus `.json`/`.node`; then a
+ *     directory's package.json, then its `index.<ext>`), each matched against
+ *     readdir names with EXACT case, so the answer is identical on
+ *     case-sensitive (Linux CI/Docker) and case-insensitive (macOS/Windows)
+ *     hosts. Denies when the specifier (a) walks `..` above the repository
+ *     root, (b) first matches an existing candidate only case-INsensitively,
+ *     (c) resolves to a directory carrying package.json (its "main"/"exports"
+ *     is not followed), (d) resolves to an existing file outside the Layer 2
+ *     scan set — a test file, a file under an unscanned root (`docs/`,
+ *     `cli/`, `extension/`, …), or an unscanned extension (`.TS`, `.css`, …)
+ *     — unless its extension is exactly `.json`, or (e) resolves to nothing
+ *     on disk but its normalized path matches the excluded-test-path shape
  *     (`*.test.*`, `__tests__/`, `manual-tests/`, `e2e/`, case-insensitive),
- *     so a not-yet-created test path still denies. Inspected positions: a
- *     scanned file's import/export declaration, `import x = require()`, a
- *     `require()`/`import()` call's literal argument, AND (N1) every OTHER
- *     string/no-substitution-template literal in expression position,
- *     whatever its parent — closing laundering through a loader reached
- *     under another name (`createRequire(...)(...)`, `module.require(...)`,
- *     `require.call(...)`, `new Worker(new URL(...))`, …); each literal is
- *     reported once. Exempt: this gate's own source (from the N1 scan), and
- *     a measured PER-(file, literal value) table with exact occurrence
- *     counts (UNSCANNED_LITERAL_EXEMPTIONS: repo-root path literals such as
- *     `new URL("../..", import.meta.url)`, a CSS import, Next's generated
- *     type references, the extension crypto golden-fixture generator, a
- *     test-helper module name held as data); any other such literal in an
- *     exempted file, or a count drift, still denies.
+ *     so a not-yet-created test path still denies. The loaders disagree on
+ *     what a specifier's characters mean (tsx CJS keeps `#` in the file name;
+ *     plain Node CJS keeps `?` and `#`; Node ESM strips `?…`/`#…` and
+ *     percent-decodes; `new URL()` drops tab/LF/CR, trims C0 controls and
+ *     space, reads `\` as `/`), so the gate refuses that class instead of
+ *     modelling each loader, in two ways by position:
+ *       * MODULE-SPECIFIER position — a scanned file's import/export
+ *         declaration, `import x = require()`, a `require()`/`import()`
+ *         call's literal argument — and the GRANT side: a repo-shaped
+ *         specifier holding any character outside `[A-Za-z0-9@._/-]`
+ *         denies outright (measured: every one of the 6436 such specifiers
+ *         in the real tree fits that set) and is never credited as
+ *         raw-sql.ts; anything else is walked exactly as written.
+ *       * every OTHER string/no-substitution-template literal in expression
+ *         position (N1), whatever its parent — closing laundering through a
+ *         loader reached under another name (`createRequire(...)(...)`,
+ *         `module.require(...)`, `require.call(...)`, `new Worker(new
+ *         URL(...))`, …): no charset refusal (message strings starting with
+ *         `@/` hold spaces), but every READING a loader can make of the
+ *         literal — as written, `?`/`#` suffix stripped, WHATWG-URL-
+ *         normalized, and both — is walked, and the literal denies if ANY
+ *         reading is repo-shaped and holds `%` or meets (a)-(e). A reading
+ *         made only of `.`/`..` segments (the scripts/ repo-root idiom) is
+ *         judged by what that ancestor directory loads instead: above the
+ *         root allowed; package.json with "main"/"exports", or unreadable as
+ *         a JSON object, denies; otherwise its index file is judged as a
+ *         target.
+ *     Each literal is reported once. Exempt: this gate's own source (from
+ *     the N1 scan), and a measured PER-(file, literal value) table with
+ *     exact occurrence counts (UNSCANNED_LITERAL_EXEMPTIONS: a CSS import,
+ *     the extension crypto golden-fixture generator, a test-helper module
+ *     name held as data); any other such literal in an exempted file, or a
+ *     count drift, still denies.
  *   - RAW_METHOD: any spelling of `/^\$(query|execute)Raw\w*$/` — identifier,
  *     property-access name, or decoded literal value (string OR
  *     no-substitution template) — in expression position, denies UNLESS it is
@@ -132,8 +150,11 @@
  *
  * Scope (Layer 2, independent of Layer 1): every non-test `.ts .tsx .mts .cts
  * .js .jsx .mjs .cjs` under `src/`, `scripts/`, `prisma/`, and the repository
- * root. `src/lib/prisma/raw-sql.ts` is exempt from RAW_SQL_NAMES only (it is
- * where these names are declared); every other rule still applies to it.
+ * root — except `next-env.d.ts`, a Next-generated, gitignored root file
+ * (LAYER2_GENERATED_ROOT_FILES; a specifier reaching it is judged as an
+ * unscanned target). `src/lib/prisma/raw-sql.ts` is exempt from
+ * RAW_SQL_NAMES only (it is where these names are declared); every other
+ * rule still applies to it.
  *
  * Residual (declared, enforced by review, not this gate): `sqlIdentifier`'s
  * precondition that its argument is a code constant / closed literal set; a
@@ -141,15 +162,22 @@
  * never spells a name; Prisma internals reached through `any`; a loader under
  * another name invoked with a NON-literal specifier (a literal specifier
  * SHAPED as a relative or `@/` path — `./`, `../`, `.`, `..`, `@/` — is
- * resolved and judged by UNSCANNED_IMPORT regardless of call shape; a
- * literal that is NOT shaped that way is itself a residual here: a
+ * resolved and judged by UNSCANNED_IMPORT regardless of call shape, as is
+ * one that becomes so shaped under a modelled reading; a literal none of
+ * whose readings is shaped that way is itself a residual here: a
  * non-prefixed URL-relative specifier, e.g. `new URL("h.test.ts",
  * import.meta.url)` with no leading `./`; a specifier built by
  * `path.join(…)` or string concatenation; an absolute path or `file:` URL);
  * what a package.json "main"/"exports" points at (a directory
- * carrying one is denied, never followed); a target that comes into
- * existence only at runtime (the resolver sees the checkout as it is); a
- * third-party dependency
+ * carrying one is denied, never followed); a reading of an OTHER literal by
+ * a loader whose transformation is not one of the four modelled readings
+ * (the module-specifier positions are charset-strict and need no model); a
+ * target that comes into existence only at runtime (the resolver sees the
+ * checkout as it is); what an UNSCANNED_LITERAL_EXEMPTIONS target itself
+ * loads — an exemption is keyed on (file, literal, count), not on the
+ * target's contents, so an import later added to extension/src/lib/crypto.ts
+ * or crypto-team.ts (outside both layers) runs unseen whenever
+ * scripts/generate-team-key-fixture.ts runs; a third-party dependency
  * re-exporting a raw-SQL producer; `eval`/`Function`; replacing a built-in
  * before this module (or this gate's own ts-morph dependency) loads. The
  * canonical-import requirement (F4-a) does not itself follow a re-export
@@ -517,6 +545,15 @@ function listFilesRecursive(root, pathRoot) {
   return out;
 }
 
+// Generated, gitignored repo-root files left out of the Layer 2 scan by name.
+// `next-env.d.ts` is written by Next itself (.gitignore lists it) and is
+// rewritten by `npm run dev` to reference `./.next/dev/types/…` instead of
+// `./.next/types/…`, so judging it made the local gate fail after any dev
+// session. Leaving it out of the scan does not hide it: as an unscanned file,
+// a specifier from a scanned file that reaches it still denies under
+// UNSCANNED_IMPORT.
+const LAYER2_GENERATED_ROOT_FILES = new Set(["next-env.d.ts"]);
+
 function listRootFiles(root) {
   const out = [];
   let dirEntries;
@@ -534,6 +571,7 @@ function listRootFiles(root) {
     if (!entry.isFile()) continue;
     if (!LAYER2_EXTS.has(extname(entry.name))) continue;
     if (TEST_PATH_RE.test(entry.name)) continue;
+    if (LAYER2_GENERATED_ROOT_FILES.has(entry.name)) continue;
     out.push(entry.name);
   }
   return out;
@@ -571,8 +609,21 @@ const RESOLVE_KIND = Object.freeze({
   CASE_MISMATCH: "case-mismatch", // the first existing candidate matches only case-insensitively
   NOT_FOUND: "not-found", // nothing exists; `base` is the normalized path
   ESCAPES_ROOT: "escapes-root", // `..` walks above the repository root
-  SUSPICIOUS: "suspicious", // contains `%` — Node ESM percent-decodes, this resolver does not
+  SUSPICIOUS: "suspicious", // a character outside SPECIFIER_CHARSET_RE; `chars` lists them
 });
+
+// Round 5 (S-R5-1): the loaders disagree on what a specifier's characters
+// mean — tsx's CJS path keeps `#` in the file name, plain Node CJS keeps both
+// `?` and `#`, Node ESM percent-decodes `%`, and `new URL()` strips tab/LF/CR,
+// trims leading/trailing C0 controls and space, and maps `\` to `/`. Rather
+// than model every loader, a repo-shaped specifier in a module-specifier
+// position (and on the grant side) is refused outright when it holds any
+// character outside this set. Measured on the real tree: all 6436 repo-shaped
+// module-specifier literals fit it, so it needed no widening.
+const SPECIFIER_CHARSET_RE = /^[A-Za-z0-9@._/-]*$/;
+function charsOutsideSpecifierCharset(spec) {
+  return [...new Set([...spec].filter((ch) => !SPECIFIER_CHARSET_RE.test(ch)))];
+}
 
 // Appended in resolver order when the specifier names no existing file
 // exactly (TS's .ts/.tsx first, then the JS family Node/bundlers try, then the
@@ -586,8 +637,31 @@ const RESOLVE_APPEND_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs
 // wins over the rewrite exactly as it does for the real resolver.
 const TS_REWRITE_EXTS = { ".js": [".ts", ".tsx"], ".jsx": [".tsx"], ".mjs": [".mts"], ".cjs": [".cts"] };
 
+// Used only where a match DENIES (namesRawSqlModule, the other-literal
+// variants below) — never by the resolver for a module-specifier position,
+// where `?`/`#` are refused by SPECIFIER_CHARSET_RE instead.
 function stripSpecifierSuffix(spec) {
   return spec.replace(/[?#].*$/, "");
+}
+
+// What WHATWG `new URL(spec, base)` does to the input before resolving it:
+// remove every tab/LF/CR, trim leading/trailing C0 controls and space, and
+// (for a special scheme such as `file:`) read `\` as `/`.
+function isC0OrSpace(ch) {
+  return ch.charCodeAt(0) <= 0x20;
+}
+function whatwgUrlNormalize(spec) {
+  let chars = [...spec].filter((ch) => ch !== "\t" && ch !== "\n" && ch !== "\r");
+  while (chars.length > 0 && isC0OrSpace(chars[0])) chars = chars.slice(1);
+  while (chars.length > 0 && isC0OrSpace(chars[chars.length - 1])) chars = chars.slice(0, -1);
+  return chars.join("").replace(/\\/g, "/");
+}
+
+// The readings of a literal some loader can produce: as written, `?`/`#`
+// suffix stripped (ESM / bundlers), URL-normalized (`new URL()`), and both.
+function literalReadings(value) {
+  const normalized = whatwgUrlNormalize(value);
+  return [...new Set([value, stripSpecifierSuffix(value), normalized, stripSpecifierSuffix(normalized)])];
 }
 
 function isRepoShapedSpecifier(spec) {
@@ -641,11 +715,22 @@ function lookupPath(relPath) {
   return { exact, rel: dir, isDirectory: entry.isDirectory() };
 }
 
+// The resolver for a module-specifier position and for the grant: a
+// repo-shaped specifier with any character outside SPECIFIER_CHARSET_RE is
+// SUSPICIOUS (refused, never credited); otherwise it is walked as written.
 function resolveOnDisk(fromRel, spec) {
   if (!isRepoShapedSpecifier(spec)) return undefined;
-  if (spec.includes("%")) return { kind: RESOLVE_KIND.SUSPICIOUS };
-  const stripped = stripSpecifierSuffix(spec);
-  const rawParts = specifierParts(fromRel, stripped);
+  const chars = charsOutsideSpecifierCharset(spec);
+  if (chars.length > 0) return { kind: RESOLVE_KIND.SUSPICIOUS, chars };
+  return resolvePathOnDisk(fromRel, spec);
+}
+
+// The candidate walk itself, over the specifier exactly as given (no charset
+// check, no suffix stripping) — the other-literal scan calls it once per
+// reading of the literal (literalReadings).
+function resolvePathOnDisk(fromRel, spec) {
+  if (!isRepoShapedSpecifier(spec)) return undefined;
+  const rawParts = specifierParts(fromRel, spec);
   const stack = [];
   for (const part of rawParts) {
     if (part === "" || part === ".") continue;
@@ -659,7 +744,7 @@ function resolveOnDisk(fromRel, spec) {
   const base = stack.join("/");
   // A last raw segment of "", "." or ".." forces directory resolution — the
   // file candidates are never tried for that shape (S-R3-1a).
-  const lastRaw = stripped.split("/").pop();
+  const lastRaw = spec.split("/").pop();
   const directoryOnly = lastRaw === "" || lastRaw === "." || lastRaw === "..";
 
   if (!directoryOnly && base !== "") {
@@ -707,25 +792,29 @@ function resolvesToRawSqlModule(fromRel, spec) {
 
 // DENY side (deliberately over-broad, case-insensitive path math): does this
 // specifier NAME raw-sql.ts in any spelling — any case, a code extension, an
-// `/index` suffix, `..` clamped at the root? Used only where a match DENIES
-// (module-loading forms of raw-sql.ts, a raw-sql specifier literal outside an
-// import declaration), so over-matching can only fail closed.
+// `/index` suffix, `..` clamped at the root, under any loader's reading of it
+// (literalReadings: `?`/`#` stripped, URL-normalized)? Used only where a
+// match DENIES (module-loading forms of raw-sql.ts, a raw-sql specifier
+// literal outside an import declaration), so over-matching can only fail
+// closed.
 const RAW_SQL_BASE_REL_LOWER = RAW_SQL_MODULE_REL.replace(/\.ts$/, "").toLowerCase();
 function namesRawSqlModule(fromRel, spec) {
   if (resolvesToRawSqlModule(fromRel, spec)) return true;
-  if (!isRepoShapedSpecifier(spec)) return false;
-  const stack = [];
-  for (const part of specifierParts(fromRel, stripSpecifierSuffix(spec))) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") stack.pop();
-    else stack.push(part);
-  }
-  const lower = stack
-    .join("/")
-    .toLowerCase()
-    .replace(/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/, "")
-    .replace(/\/index$/, "");
-  return lower === RAW_SQL_BASE_REL_LOWER;
+  return literalReadings(spec).some((reading) => {
+    if (!isRepoShapedSpecifier(reading)) return false;
+    const stack = [];
+    for (const part of specifierParts(fromRel, reading)) {
+      if (part === "" || part === ".") continue;
+      if (part === "..") stack.pop();
+      else stack.push(part);
+    }
+    const lower = stack
+      .join("/")
+      .toLowerCase()
+      .replace(/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/, "")
+      .replace(/\/index$/, "");
+    return lower === RAW_SQL_BASE_REL_LOWER;
+  });
 }
 
 // Populated from the real Layer 2 scan list before any file is checked (see
@@ -741,21 +830,24 @@ const UNSCANNED_DATA_EXTS = new Set([".json"]);
 function unscannedFileReason(rel) {
   if (scannedFiles.has(rel)) return undefined;
   if (UNSCANNED_DATA_EXTS.has(extname(rel))) return undefined;
-  return `resolves to "${rel}", a file outside the Layer 2 scan`;
+  return `resolves to "${rel}", a file outside the Layer 2 scan — if loading it is intended, add a measured (file, literal, count) entry to UNSCANNED_LITERAL_EXEMPTIONS in scripts/checks/check-raw-sql-usage.mjs (\`.json\` is the only extension accepted as data without one)`;
 }
 
-/**
- * UNSCANNED_IMPORT predicate: the reason `spec` (seen in `fromRel`) reaches
- * code this gate does not analyse, or undefined when it does not.
- */
-function unscannedTargetReason(fromRel, spec) {
-  const r = resolveOnDisk(fromRel, spec);
+// A specifier or character as a JSON string body, so a tab or newline in a
+// violation message is visible.
+function printable(text) {
+  return JSON.stringify(text).slice(1, -1);
+}
+
+// The reason a resolution (resolveOnDisk / resolvePathOnDisk) reaches code
+// this gate does not analyse, or undefined when it does not.
+function resolutionReason(r) {
   if (r === undefined) return undefined;
   switch (r.kind) {
     case RESOLVE_KIND.ESCAPES_ROOT:
       return "walks above the repository root";
     case RESOLVE_KIND.SUSPICIOUS:
-      return "contains '%' (Node ESM percent-decodes a specifier; this gate does not)";
+      return `contains ${r.chars.map((ch) => `'${printable(ch)}'`).join(", ")}, outside the module-specifier charset [A-Za-z0-9@._/-] (loaders disagree on what '?', '#', '%', '\\', whitespace and control characters mean; this gate refuses them rather than model each loader)`;
     case RESOLVE_KIND.CASE_MISMATCH:
       return `matches "${r.rel}" only case-insensitively (case-sensitive and case-insensitive filesystems would load different files)`;
     case RESOLVE_KIND.PACKAGE_DIR:
@@ -771,23 +863,40 @@ function unscannedTargetReason(fromRel, spec) {
   }
 }
 
+/**
+ * UNSCANNED_IMPORT predicate for a MODULE-SPECIFIER position: the reason
+ * `spec` (seen in `fromRel`) reaches code this gate does not analyse — or is
+ * refused for its characters — or undefined when it does not.
+ */
+function unscannedTargetReason(fromRel, spec) {
+  return resolutionReason(resolveOnDisk(fromRel, spec));
+}
+
 // A literal made only of `.`/`..` segments, outside a module-specifier
 // position, is a directory path — `new URL("../..", import.meta.url)` /
 // `resolve(dir, "..")`, the repo-root idiom across scripts/. Handed to a
 // loader under another name it reaches only an ancestor directory of the
 // file: above the repo root nothing a PR can place (allowed); inside the repo
 // that directory's package.json "main"/"exports" (denied when either is
-// present) or else its index file, judged like any other target. Judged by
-// this rule rather than by per-file exemptions, which every new script using
-// the idiom would otherwise need. Module-specifier positions stay on
-// unscannedTargetReason, where every one of these results denies.
+// present, or when package.json cannot be read as a JSON object) or else its
+// index file, judged like any other target. Judged by this rule rather than
+// by per-file exemptions, which every new script using the idiom would
+// otherwise need. Module-specifier positions stay on unscannedTargetReason,
+// where every one of these results denies.
 const ANCESTOR_DIR_LITERAL_RE = /^\.{1,2}(\/\.{1,2})*\/?$/;
-function ancestorDirLiteralReason(fromRel, spec) {
-  const r = resolveOnDisk(fromRel, spec);
+function ancestorDirReason(r) {
   if (r === undefined || r.kind === RESOLVE_KIND.ESCAPES_ROOT) return undefined;
-  if (r.kind !== RESOLVE_KIND.PACKAGE_DIR) return unscannedTargetReason(fromRel, spec);
+  if (r.kind !== RESOLVE_KIND.PACKAGE_DIR) return resolutionReason(r);
   const prefix = r.rel === "" ? "" : `${r.rel}/`;
-  const pkg = JSON.parse(readFileSync(join(ROOT, `${prefix}package.json`), "utf8"));
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(join(ROOT, `${prefix}package.json`), "utf8"));
+  } catch (err) {
+    return `resolves to "${r.rel}/", whose ${prefix}package.json cannot be read as JSON (${err.message}) — this gate cannot tell what that directory loads`;
+  }
+  if (pkg === null || typeof pkg !== "object") {
+    return `resolves to "${r.rel}/", whose ${prefix}package.json is not a JSON object — this gate cannot tell what that directory loads`;
+  }
   if (pkg.main !== undefined || pkg.exports !== undefined) {
     return `resolves to "${r.rel}/", a directory whose package.json "main"/"exports" this gate cannot follow`;
   }
@@ -795,6 +904,26 @@ function ancestorDirLiteralReason(fromRel, spec) {
     const hit = lookupPath(`${prefix}index${e}`);
     if (hit === undefined || hit.isDirectory) continue;
     return hit.exact ? unscannedFileReason(hit.rel) : `matches "${hit.rel}" only case-insensitively`;
+  }
+  return undefined;
+}
+
+// UNSCANNED_IMPORT predicate for every OTHER literal (N1): no blanket charset
+// refusal here — ordinary message strings start with `@/` or `./` and hold
+// spaces (scripts/checks/check-operator-echo-escaped.mjs) — so each reading a
+// loader can make of the literal (literalReadings) is resolved on disk, and
+// the literal denies if ANY reading reaches an unscanned target or test path,
+// or holds `%` (Node ESM percent-decodes; this gate does not).
+function unscannedLiteralReason(fromRel, value) {
+  for (const reading of literalReadings(value)) {
+    if (!isRepoShapedSpecifier(reading)) continue;
+    const readAs = reading === value ? "" : `read as "${printable(reading)}", `;
+    if (reading.includes("%")) {
+      return `${readAs}contains '%' (Node ESM percent-decodes a specifier; this gate does not)`;
+    }
+    const r = resolvePathOnDisk(fromRel, reading);
+    const reason = ANCESTOR_DIR_LITERAL_RE.test(reading) ? ancestorDirReason(r) : resolutionReason(r);
+    if (reason !== undefined) return `${readAs}${reason}`;
   }
   return undefined;
 }
@@ -1155,11 +1284,12 @@ function checkNodeModulesSpecifier(sf, rel) {
 }
 
 // ---------------------------------------------------------------------------
-// UNSCANNED_IMPORT — one predicate (unscannedTargetReason above), two scans:
+// UNSCANNED_IMPORT — one on-disk candidate walk, two predicates, two scans:
 // checkUnscannedImport inspects the module-specifier positions (import/export
 // declaration, `import x = require()`, a `require()`/`import()` call's literal
-// first argument — F3), and checkUnscannedLiteralAnywhere (N1) inspects every
-// OTHER expression-position literal, since a loader reached under another
+// first argument — F3) with unscannedTargetReason (charset-strict), and
+// checkUnscannedLiteralAnywhere (N1) inspects every OTHER expression-position
+// literal with unscannedLiteralReason (every loader reading), since a loader reached under another
 // name (`createRequire(...)(...)`, `module.require(...)`, `require.call(...)`,
 // `new Worker(new URL(...))`, …) still spells its target as a plain literal.
 // The second scan skips the positions the first already inspected
@@ -1172,10 +1302,10 @@ function checkNodeModulesSpecifier(sf, rel) {
 // listed here gets no exemption at all.
 // ---------------------------------------------------------------------------
 //
-// Measured on the real tree (round 4). Counts are of OCCURRENCES of the
+// Measured on the real tree (rounds 4-5). Counts are of OCCURRENCES of the
 // value in the two scans, whether or not it currently resolves to an
 // unscanned target — so the count does not depend on what happens to exist
-// on disk (`.next/` is generated and absent on a fresh CI checkout).
+// on disk.
 const UNSCANNED_LITERAL_EXEMPTIONS = new Map([
   [
     "scripts/checks/classify-fail-closed-test.mjs",
@@ -1192,14 +1322,6 @@ const UNSCANNED_LITERAL_EXEMPTIONS = new Map([
       ["../extension/src/lib/crypto.ts", 1],
     ]),
   ],
-  [
-    "next-env.d.ts",
-    // Next-generated: references its own generated route types.
-    new Map([
-      ["./.next/types/routes.d.ts", 1],
-      ["./.next/types/root-params.d.ts", 1],
-    ]),
-  ],
   ["src/app/layout.tsx", new Map([["./globals.css", 1]])], // bundler CSS import
 ]);
 
@@ -1214,7 +1336,7 @@ function judgeUnscanned(tally, rel, line, value, what, reasonFor = unscannedTarg
   }
   const reason = reasonFor(rel, value);
   if (reason === undefined) return;
-  violate("UNSCANNED_IMPORT", rel, line, `${what} "${value}" ${reason}`);
+  violate("UNSCANNED_IMPORT", rel, line, `${what} "${printable(value)}" ${reason}`);
 }
 
 function checkUnscannedImport(sf, rel, tally) {
@@ -1260,8 +1382,7 @@ function checkUnscannedLiteralAnywhere(sf, rel, tally) {
     if (isModuleSpecifierPositionLiteral(lit)) continue; // already inspected by checkUnscannedImport
     const value = literalValue(lit);
     if (value === undefined) continue;
-    const reasonFor = ANCESTOR_DIR_LITERAL_RE.test(value) ? ancestorDirLiteralReason : unscannedTargetReason;
-    judgeUnscanned(tally, rel, lineOf(lit), value, "literal", reasonFor);
+    judgeUnscanned(tally, rel, lineOf(lit), value, "literal", unscannedLiteralReason);
   }
 }
 

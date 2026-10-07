@@ -851,9 +851,10 @@ describe("check-raw-sql-usage Layer 2 — UNSCANNED_IMPORT", () => {
     expect(result.stdout).toContain("check-raw-sql-usage: OK");
   });
 
-  // S-R3-2(i): a trailing bundler-style `?query`/`#fragment` suffix does not
-  // change which file on disk the specifier reaches — stripped before
-  // resolution.
+  // S-R3-2(i) / S-R5-1: loaders disagree on a `?query`/`#fragment` suffix
+  // (ESM strips it, tsx/Node CJS keep it in the file name), so a
+  // module-specifier holding `?` or `#` is refused for its characters,
+  // whatever it reaches.
   it("deny: import specifier with a bundler ?raw query suffix (S-R3-2)", () => {
     const result = run({
       "scripts/fixture.ts": `import helperRaw from "./helper.test?raw";\nexport const h = helperRaw;\n`,
@@ -861,15 +862,16 @@ describe("check-raw-sql-usage Layer 2 — UNSCANNED_IMPORT", () => {
     });
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("UNSCANNED_IMPORT");
+    expect(result.stderr).toContain(`import specifier "./helper.test?raw" contains '?'`);
   });
 
-  it("allow: import specifier with a bundler ?raw query suffix over a benign path (S-R3-2)", () => {
+  it("deny: import specifier with a bundler ?raw query suffix over a benign path (S-R5-1: refused by charset, not by target)", () => {
     const result = run({
       "scripts/fixture.ts": `import helperRaw from "./latest-util?raw";\nexport const h = helperRaw;\n`,
       "scripts/latest-util.ts": `export const helper = 1;\n`,
     });
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`import specifier "./latest-util?raw" contains '?'`);
   });
 
   // S-R3-2(i): on a case-insensitive filesystem (the Node/macOS/Windows
@@ -1120,10 +1122,8 @@ describe("check-raw-sql-usage Layer 2 — on-disk specifier resolver (round 4)",
       details: ['"./globals.css" appears 2 time(s) in src/app/layout.tsx; the measured exemption expects 1'],
     },
     {
-      name: "allow: an exemption is counted by occurrence, not by what exists on disk (next-env.d.ts with no generated .next/)",
-      files: {
-        "next-env.d.ts": `import "./.next/types/routes.d.ts";\nimport "./.next/types/root-params.d.ts";\n`,
-      },
+      name: "allow: an exemption is counted by occurrence, not by what exists on disk (layout.tsx ./globals.css with no globals.css)",
+      files: { "src/app/layout.tsx": `import "./globals.css";\nexport const x = 1;\n` },
     },
     // A `.`/`..`-only literal outside a module-specifier position is a
     // directory path (the scripts/ repo-root idiom), judged by what that
@@ -1166,6 +1166,176 @@ describe("check-raw-sql-usage Layer 2 — on-disk specifier resolver (round 4)",
       },
       reasons: ["UNSCANNED_IMPORT"],
       details: ["a directory carrying package.json"],
+    },
+  ];
+
+  for (const r of rows) {
+    it(r.name, () => {
+      const result = run(r.files, r.opts);
+      const reasons = r.reasons ?? [];
+      expect(result.code).toBe(reasons.length > 0 ? 1 : 0);
+      for (const reason of reasons) expect(result.stderr).toContain(`${reason}:`);
+      for (const detail of r.details ?? []) expect(result.stderr).toContain(detail);
+      if (reasons.length === 0) expect(result.stdout).toContain("check-raw-sql-usage: OK");
+    });
+  }
+});
+
+// Round 5 (S-R5-1): the loaders disagree on what a specifier's characters
+// mean — tsx CJS keeps `#` in the file name, plain Node CJS keeps `?` and
+// `#`, `new URL()` drops tab/LF/CR, trims C0 controls and space, and reads
+// `\` as `/`. H1-H3 / U2-U4 are the round-5 probes. A module-specifier
+// position refuses any character outside [A-Za-z0-9@._/-]; every other
+// literal is judged under each loader reading instead (no charset refusal —
+// ordinary messages start with `@/` and hold spaces). `details` pins the
+// branch that denied.
+describe("check-raw-sql-usage Layer 2 — specifier characters and loader readings (round 5)", () => {
+  const FORGE = `export const renderSql = (s) => String(s);\nexport function run(tx, x) { return tx.$queryRawUnsafe(x); }\n`;
+  const USE_RUN = (spec) => `import { run } from "${spec}";\nexport const go = (tx, x) => run(tx, x);\n`;
+  const USE_RENDER = (spec) =>
+    `import { renderSql } from "${spec}";\nexport const go = (tx, x) => tx.$queryRawUnsafe(renderSql(x));\n`;
+  const VIA_CREATE_REQUIRE = (spec) =>
+    `import { createRequire } from "node:module";\nconst req = createRequire(import.meta.url);\nexport const m = req("${spec}");\n`;
+
+  const rows = [
+    {
+      name: "deny: H1 — ../src/lib/prisma/raw-sql#x is not credited as raw-sql.ts (tsx CJS loads the unscanned raw-sql#x)",
+      files: { "src/lib/prisma/raw-sql#x": FORGE, "scripts/p.ts": USE_RENDER("../src/lib/prisma/raw-sql#x") },
+      reasons: ["UNSCANNED_IMPORT", "RAW_SQL_NAMES"],
+      details: [
+        `import specifier "../src/lib/prisma/raw-sql#x" contains '#'`,
+        '"renderSql" occurs outside an allowed position',
+      ],
+    },
+    {
+      name: "deny: H2 — ../src/app/h#x.test.ts (a # hides a test-file target)",
+      files: { "src/app/h#x.test.ts": FORGE, "scripts/q.ts": USE_RUN("../src/app/h#x.test.ts") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`import specifier "../src/app/h#x.test.ts" contains '#'`],
+    },
+    {
+      name: "deny: H3 — require(\"./h?x.test.js\") (plain Node CJS keeps ? in the file name)",
+      files: { "scripts/h?x.test.js": FORGE, "scripts/q.cjs": `const { run } = require("./h?x.test.js");\nmodule.exports = run;\n` },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`require() of "./h?x.test.js" contains '?'`],
+    },
+    {
+      name: "deny: U2 — a tab inside an ESM import specifier (new URL() drops it)",
+      files: { "docs/forge.mjs": FORGE, "scripts/q.mjs": USE_RUN("../do\\tcs/forge.mjs") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`import specifier "../do\\tcs/forge.mjs" contains '\\t'`],
+    },
+    {
+      name: "deny: U3 — a trailing space on an ESM import specifier (new URL() trims it)",
+      files: { "docs/forge.mjs": FORGE, "scripts/q.mjs": USE_RUN("../docs/forge.mjs ") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`import specifier "../docs/forge.mjs " contains ' '`],
+    },
+    {
+      name: "deny: U4 — a backslash in a dynamic import() specifier (read as /)",
+      files: {
+        "docs/forge.ts": FORGE,
+        "scripts/q.ts": `export async function go() {\n  return import("../docs\\\\forge.ts");\n}\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`import() of "../docs\\\\forge.ts" contains '\\\\'`],
+    },
+    {
+      name: "deny: the H1 shape as an other literal (createRequire) — the as-written reading reaches the unscanned raw-sql#x",
+      files: { "src/lib/prisma/raw-sql#x": FORGE, "scripts/p.ts": VIA_CREATE_REQUIRE("../src/lib/prisma/raw-sql#x") },
+      reasons: ["UNSCANNED_IMPORT", "SPECIFIER_LITERAL"],
+      details: [`literal "../src/lib/prisma/raw-sql#x" resolves to "src/lib/prisma/raw-sql#x", a file outside the Layer 2 scan`],
+    },
+    {
+      name: "deny: an other literal whose ?-stripped reading reaches an unscanned test file (ESM / bundlers strip the suffix)",
+      files: { "scripts/h.test.ts": FORGE, "scripts/fixture.ts": VIA_CREATE_REQUIRE("./h.test?x") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`literal "./h.test?x" read as "./h.test", resolves to "scripts/h.test.ts", a file outside the Layer 2 scan`],
+    },
+    {
+      name: "deny: an other literal whose URL-normalized reading (tab removed) reaches an unscanned file",
+      files: { "docs/forge.ts": FORGE, "src/app/a.ts": VIA_CREATE_REQUIRE("../../docs/fo\\trge") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`read as "../../docs/forge", resolves to "docs/forge.ts", a file outside the Layer 2 scan`],
+    },
+    {
+      name: "deny: an other literal that is repo-shaped only once URL-normalized (backslashes read as /)",
+      files: { "docs/forge.ts": FORGE, "src/app/a.ts": VIA_CREATE_REQUIRE("..\\\\..\\\\docs\\\\forge") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`read as "../../docs/forge", resolves to "docs/forge.ts", a file outside the Layer 2 scan`],
+    },
+    {
+      name: "deny: an other literal whose URL-normalized reading (leading/trailing space trimmed) reaches an unscanned file",
+      files: { "docs/forge.ts": FORGE, "src/app/a.ts": VIA_CREATE_REQUIRE(" ../../docs/forge ") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`read as "../../docs/forge", resolves to "docs/forge.ts", a file outside the Layer 2 scan`],
+    },
+    {
+      name: "deny: an other literal holding % (Node ESM percent-decodes)",
+      files: { "scripts/fixture.ts": VIA_CREATE_REQUIRE("./h%2Etest.ts") },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [`literal "./h%2Etest.ts" contains '%'`],
+    },
+    {
+      name: "allow: an @/ message string holding spaces and a paren (check-operator-echo-escaped style) — no charset refusal outside specifier positions",
+      files: {
+        "src/lib/security/unsafe-display-chars.ts": "export const x = 1;\n",
+        "scripts/checks/echo.mjs":
+          'export const hint = (m) =>\n  "Import it from " +\n  "@/lib/security/unsafe-display-chars), or annotate the line with " +\n  m;\n',
+      },
+    },
+    // M1: a `.`/`..` literal reaching an ancestor whose package.json is not a
+    // readable JSON object fails closed with a named reason, not a stack.
+    {
+      name: "deny: a \"..\" literal reaching a directory whose package.json is malformed JSON",
+      files: {
+        "scripts/sub/package.json": "{ bad json",
+        "scripts/sub/deeper/a.mjs": `import { resolve } from "node:path";\nexport const root = resolve(import.meta.dirname, "..");\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['literal ".." resolves to "scripts/sub/", whose scripts/sub/package.json cannot be read as JSON'],
+    },
+    {
+      name: "deny: a \"..\" literal reaching a directory whose package.json is JSON null",
+      files: {
+        "scripts/sub/package.json": "null\n",
+        "scripts/sub/deeper/a.mjs": `import { resolve } from "node:path";\nexport const root = resolve(import.meta.dirname, "..");\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ["whose scripts/sub/package.json is not a JSON object"],
+    },
+    // M2: the unscanned-file message says where the measured exemptions live.
+    {
+      name: "deny: a new CSS-module import names UNSCANNED_LITERAL_EXEMPTIONS as the next step",
+      files: {
+        "src/app/x.module.css": ".a {}\n",
+        "src/app/x.tsx": `import styles from "./x.module.css";\nexport const c = styles.a;\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: [
+        'resolves to "src/app/x.module.css", a file outside the Layer 2 scan',
+        "UNSCANNED_LITERAL_EXEMPTIONS in scripts/checks/check-raw-sql-usage.mjs (`.json` is the only extension accepted as data without one)",
+      ],
+    },
+    // F-R5-1: next-env.d.ts is Next-generated and gitignored; `npm run dev`
+    // rewrites it to reference ./.next/dev/types/. It is left out of the scan
+    // by name — and, being unscanned, a specifier reaching it still denies.
+    {
+      name: "allow: a dev-mode next-env.d.ts referencing ./.next/dev/types/routes.d.ts",
+      files: {
+        "next-env.d.ts": `/// <reference types="next" />\nimport "./.next/dev/types/routes.d.ts";\nimport "./.next/dev/types/root-params.d.ts";\n`,
+        ".next/dev/types/routes.d.ts": "export {};\n",
+        ".next/dev/types/root-params.d.ts": "export {};\n",
+      },
+    },
+    {
+      name: "deny: a scanned file importing ../next-env.d.ts (excluded from the scan, so judged as an unscanned target)",
+      files: {
+        "next-env.d.ts": `import "./.next/dev/types/routes.d.ts";\n`,
+        "scripts/x.ts": `import "../next-env.d.ts";\nexport const x = 1;\n`,
+      },
+      reasons: ["UNSCANNED_IMPORT"],
+      details: ['import specifier "../next-env.d.ts" resolves to "next-env.d.ts", a file outside the Layer 2 scan'],
     },
   ];
 
