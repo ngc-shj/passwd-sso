@@ -51,10 +51,40 @@ const {
     },
   );
 
+  // Every transaction handed to a $transaction callback models the RLS GUC
+  // state of that one transaction: the seams' bypass assert (a tagged $queryRaw
+  // over current_setting) reads back only what set_config wrote on the SAME tx,
+  // so a wrapper that skips setBypassRlsGucs fails here as it would in Postgres.
+  // $executeRaw still delegates to the tx's own mock, so call-recording tests
+  // keep observing it.
+  function withGucState<T extends { $executeRaw: (...args: never[]) => unknown }>(tx: T) {
+    const gucs = new Map<string, unknown>();
+    const executeRaw = tx.$executeRaw as unknown as (...args: unknown[]) => unknown;
+    return {
+      ...tx,
+      $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const match = /set_config\('([^']+)', (?:'([^']*)'|\$)/.exec(strings.join("$"));
+        if (match) gucs.set(match[1], match[2] ?? values[0]);
+        return executeRaw(strings, ...values);
+      },
+      $queryRaw: async (strings: TemplateStringsArray) => {
+        const sql = strings.join("$");
+        if (!sql.includes("current_setting('app.bypass_rls'")) {
+          throw new Error(`unmodelled $queryRaw in test mock: ${sql}`);
+        }
+        return [{
+          bypass_rls: gucs.get("app.bypass_rls") ?? null,
+          bypass_purpose: gucs.get("app.bypass_purpose") ?? null,
+        }];
+      },
+    };
+  }
+
   // Use function keyword so vitest accepts these as constructors
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function MockPrismaClient(this: any, _opts: unknown) {
-    this.$transaction = mockTransaction;
+    this.$transaction = (fn: (tx: ReturnType<typeof withGucState<typeof txClient>>) => Promise<unknown>) =>
+      mockTransaction((tx: typeof txClient) => fn(withGucState(tx)));
     this.$executeRaw = mockExecuteRaw;
     this.$queryRawUnsafe = mockQueryRawUnsafe;
     this.$executeRawUnsafe = mockExecuteRawUnsafe;
@@ -177,7 +207,16 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
   deliverToWebhookRecords: mockDeliverToWebhookRecords,
 }));
 
-import { createWorker, purgeRetention, onWebhookDeliveryFailure } from "./audit-outbox-worker";
+import {
+  createWorker,
+  purgeRetention,
+  onWebhookDeliveryFailure,
+  processDeliveryBatch,
+  processWebhookDeliveryBatch,
+  reapStuckRows,
+  reapStuckDeliveries,
+  reapStuckWebhookDeliveries,
+} from "./audit-outbox-worker";
 // PrismaClient is mocked to MockPrismaClient by vi.mock("@prisma/client") above;
 // importing it here gives `new PrismaClient(...)` a real construct signature at
 // type-check time while resolving to the mock at runtime.
@@ -617,6 +656,8 @@ describe("createWorker lifecycle", () => {
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeUndefined();
+    // Not vacuous: the claim itself ran rather than throwing.
+    expect(mockLoggerError).not.toHaveBeenCalledWith(expect.anything(), "worker.claim_batch_failed");
   }, 15000);
 });
 
@@ -634,6 +675,8 @@ describe("claimBatch", () => {
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeUndefined();
+    // Not vacuous: the claim itself ran rather than throwing.
+    expect(mockLoggerError).not.toHaveBeenCalledWith(expect.anything(), "worker.claim_batch_failed");
   }, 15000);
 });
 
@@ -669,6 +712,138 @@ describe("setBypassRlsGucs", () => {
     );
     expect(tenantIdCall).toBeDefined();
   }, 15000);
+});
+
+// ─── Wrappers set the bypass GUCs before their seam runs ─────────────────────
+//
+// The exported *InTx seams only ASSERT the audit-write bypass; the production
+// wrappers are what set it. Each test records every statement, tagged with the
+// transaction it ran on, and checks the set_config calls precede the seam's
+// statement on that same transaction. The GUC-state mock (withGucState) makes
+// the seam throw before its statement when the wrapper skipped the setter, so
+// the statement is then never recorded and the lookup below fails.
+
+describe("wrappers set the audit-write bypass before the seam statement", () => {
+  beforeEach(resetMocks);
+
+  interface TxEvent {
+    tx: number;
+    sql: string;
+  }
+
+  function recordTxEvents(respond: (sql: string) => unknown = () => []): TxEvent[] {
+    const events: TxEvent[] = [];
+    let txSeq = 0;
+    mockTransaction.mockImplementation(async function (fn: TxFn) {
+      const tx = ++txSeq;
+      const record = (result: (sql: string) => unknown) =>
+        vi.fn(async (first: unknown, ..._rest: unknown[]) => {
+          const sql = typeof first === "string" ? first : (first as TemplateStringsArray).join("$");
+          events.push({ tx, sql });
+          return result(sql);
+        });
+      return fn({
+        $executeRaw: record(() => undefined),
+        $queryRawUnsafe: record(respond),
+        $executeRawUnsafe: record(() => 0),
+        auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+        auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+        auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
+      });
+    });
+    return events;
+  }
+
+  // Also pins the statement to the materialized key-set shape (C1): its LIMIT
+  // sits in `picked`, evaluated once, and the write reads the keys from it.
+  function expectBypassSetBefore(events: TxEvent[], isStatement: (sql: string) => boolean): void {
+    const at = events.findIndex((e) => isStatement(e.sql));
+    expect(at).toBeGreaterThanOrEqual(0);
+    const earlier = events
+      .slice(0, at)
+      .filter((e) => e.tx === events[at].tx)
+      .map((e) => e.sql);
+    expect(earlier.some((sql) => sql.includes("set_config('app.bypass_rls', 'on'"))).toBe(true);
+    expect(earlier.some((sql) => sql.includes("set_config('app.bypass_purpose'"))).toBe(true);
+    expect(events[at].sql).toMatch(/^\s*WITH picked AS MATERIALIZED \(/);
+    expect(events[at].sql).toMatch(/WHERE "?id"? IN \(SELECT "?id"? FROM picked\)/);
+  }
+
+  const isOutboxClaim = (sql: string) =>
+    sql.includes("UPDATE audit_outbox") && sql.includes("SET status = 'PROCESSING'");
+  const isDeliveryClaim = (sql: string) =>
+    sql.includes(`UPDATE "audit_deliveries"`) && sql.includes(`SET "status" = 'PROCESSING'`);
+  const isWebhookDeliveryClaim = (sql: string) =>
+    sql.includes("UPDATE webhook_deliveries") && sql.includes("SET status = 'PROCESSING'");
+
+  it("claimBatch sets the bypass before the outbox claim", async () => {
+    // claimBatch is not exported and has no real-DB caller; the worker loop is
+    // its only entry. Stop on the delivery claim (the loop's next step), so a
+    // claimBatch whose seam throws still ends the run instead of spinning.
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    const events = recordTxEvents((sql) => {
+      if (isDeliveryClaim(sql)) worker.stop();
+      return [];
+    });
+    await worker.start();
+
+    expectBypassSetBefore(events, isOutboxClaim);
+    expect(mockLoggerError).not.toHaveBeenCalledWith(expect.anything(), "worker.claim_batch_failed");
+  }, 15000);
+
+  it("processDeliveryBatch sets the bypass before the delivery claim", async () => {
+    const events = recordTxEvents();
+    await processDeliveryBatch(new PrismaClient(), 5);
+    expectBypassSetBefore(events, isDeliveryClaim);
+  });
+
+  it("processWebhookDeliveryBatch sets the bypass before the webhook delivery claim", async () => {
+    const events = recordTxEvents();
+    await processWebhookDeliveryBatch(new PrismaClient(), 5);
+    expectBypassSetBefore(events, isWebhookDeliveryClaim);
+  });
+
+  it("reapStuckRows sets the bypass before the outbox reap", async () => {
+    const events = recordTxEvents();
+    await reapStuckRows(new PrismaClient(), 5);
+    expectBypassSetBefore(
+      events,
+      (sql) => sql.includes("UPDATE audit_outbox") && sql.includes("reaped after timeout"),
+    );
+  });
+
+  it("reapStuckDeliveries sets the bypass before the delivery reap", async () => {
+    const events = recordTxEvents();
+    await reapStuckDeliveries(new PrismaClient(), 5);
+    expectBypassSetBefore(
+      events,
+      (sql) => sql.includes(`UPDATE "audit_deliveries"`) && sql.includes("reaped: processing timeout exceeded"),
+    );
+  });
+
+  it("reapStuckWebhookDeliveries sets the bypass before the webhook delivery reap", async () => {
+    const events = recordTxEvents();
+    await reapStuckWebhookDeliveries(new PrismaClient(), 5);
+    expectBypassSetBefore(
+      events,
+      (sql) => sql.includes("UPDATE webhook_deliveries") && sql.includes("reaped: processing timeout exceeded"),
+    );
+  });
+
+  it("purgeRetention sets the bypass before each of its four purge statements", async () => {
+    const events = recordTxEvents();
+    await purgeRetention(new PrismaClient(), { limit: 5 });
+    expectBypassSetBefore(
+      events,
+      (sql) => sql.includes("DELETE FROM audit_outbox") && sql.includes("status = 'SENT'"),
+    );
+    expectBypassSetBefore(
+      events,
+      (sql) => sql.includes("DELETE FROM audit_outbox") && sql.includes("status = 'FAILED'"),
+    );
+    expectBypassSetBefore(events, (sql) => sql.includes(`DELETE FROM "audit_deliveries"`));
+    expectBypassSetBefore(events, (sql) => sql.includes("DELETE FROM webhook_deliveries"));
+  });
 });
 
 // ─── Error paths ──────────────────────────────────────────────────────────────
@@ -935,6 +1110,8 @@ describe("webhook delivery enqueue", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
+    // Not vacuous: the row was claimed and reached the audit_logs INSERT.
+    expect(mockAuditLogsInsert).toHaveBeenCalled();
     expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
@@ -961,6 +1138,8 @@ describe("webhook delivery enqueue", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
+    // Not vacuous: the row was claimed and reached the audit_logs INSERT.
+    expect(mockAuditLogsInsert).toHaveBeenCalled();
     expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
@@ -1064,6 +1243,8 @@ describe("webhook delivery enqueue — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
+    // Not vacuous: the row was claimed and reached the audit_logs INSERT.
+    expect(mockAuditLogsInsert).toHaveBeenCalled();
     expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
@@ -1089,6 +1270,8 @@ describe("webhook delivery enqueue — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
+    // Not vacuous: the row was claimed and reached the audit_logs INSERT.
+    expect(mockAuditLogsInsert).toHaveBeenCalled();
     expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
@@ -1115,6 +1298,8 @@ describe("webhook delivery enqueue — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
+    // Not vacuous: the row was claimed and reached the audit_logs INSERT.
+    expect(mockAuditLogsInsert).toHaveBeenCalled();
     expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
@@ -1140,6 +1325,8 @@ describe("webhook delivery enqueue — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
+    // Not vacuous: the row was claimed and reached the audit_logs INSERT.
+    expect(mockAuditLogsInsert).toHaveBeenCalled();
     expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 });
@@ -1218,6 +1405,8 @@ describe("reaper — invoked on first loop tick", () => {
     // so the mock actually verifies the boundedness change (not just tolerates it).
     expect(reapCall![0] as string).toContain("LIMIT");
     expect(reapCall![0] as string).toContain("ORDER BY processing_started_at");
+    expect(reapCall![0] as string).toMatch(/^\s*WITH picked AS MATERIALIZED \(/);
+    expect(reapCall![0] as string).toContain("WHERE id IN (SELECT id FROM picked)");
   }, 15000);
 
   it("reapStuckRows does not write a direct audit log when no rows are reaped (empty result)", async () => {
@@ -1235,6 +1424,12 @@ describe("reaper — invoked on first loop tick", () => {
         call[3] === AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
     );
     expect(reapedInsert).toBeUndefined();
+    // Not vacuous: the reap itself ran (a seam that threw would also leave no
+    // audit insert behind).
+    expect(mockLoggerError).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "worker.reaper.stuck_reset_failed",
+    );
   }, 15000);
 
   it("reapStuckRows writes a direct audit log for each reaped row", async () => {
@@ -1690,6 +1885,15 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
         call[3] === AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
     );
     expect(deadLetterInsert).toBeUndefined();
+    // Not vacuous: the row was claimed and recordError took the retry branch.
+    const retryUpdate = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("UPDATE audit_outbox") &&
+        call[0].includes("status = 'PENDING'") &&
+        call[1] === 3,
+    );
+    expect(retryUpdate).toBeDefined();
   }, 15000);
 });
 

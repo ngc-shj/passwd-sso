@@ -76,6 +76,57 @@ describe("collectSourceFiles", () => {
   });
 });
 
+describe("optional extension set", () => {
+  const JS_FAMILY = [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"];
+
+  it("default set is unchanged: .mjs/.js/.cjs/.mts/.cts are not collected", () => {
+    write("src/a.ts");
+    write("src/b.mjs");
+    write("src/c.js");
+    write("src/d.cjs");
+    write("src/e.mts");
+    write("src/f.cts");
+    expect(rels(walkSourceFiles(join(root, "src")))).toEqual(["src/a.ts"]);
+  });
+
+  it("threads the set through recursion, so a nested file of a widened extension is collected", () => {
+    write("src/a/b/deep.mjs");
+    write("src/a/c.cts");
+    expect(rels(walkSourceFiles(join(root, "src"), JS_FAMILY))).toEqual([
+      "src/a/b/deep.mjs",
+      "src/a/c.cts",
+    ]);
+  });
+
+  it("widens the .test/.spec exclusion to the same set", () => {
+    write("src/keep.mjs");
+    for (const ext of JS_FAMILY) {
+      write(`src/nested/x.test${ext}`);
+      write(`src/nested/y.spec${ext}`);
+    }
+    expect(rels(walkSourceFiles(join(root, "src"), JS_FAMILY))).toEqual(["src/keep.mjs"]);
+  });
+
+  it("still skips __tests__ and refuses a symlink under a widened set", () => {
+    write("src/__tests__/t.mjs");
+    write("src/ok.js");
+    expect(rels(walkSourceFiles(join(root, "src"), JS_FAMILY))).toEqual(["src/ok.js"]);
+    symlinkSync("./ok.js", join(root, "src", "alias.mjs"));
+    expect(() => walkSourceFiles(join(root, "src"), JS_FAMILY)).toThrow(/refusing to decide about a symlink/);
+  });
+
+  it("collectSourceFiles passes the set to both directory and single-file targets", () => {
+    write("scripts/nested/gate.mjs");
+    write("scripts/one.cjs");
+    write("scripts/one.test.cjs");
+    expect(rels(collectSourceFiles(["scripts/nested", "scripts/one.cjs", "scripts/one.test.cjs"], root, JS_FAMILY))).toEqual([
+      "scripts/nested/gate.mjs",
+      "scripts/one.cjs",
+    ]);
+    expect(collectSourceFiles(["scripts/nested", "scripts/one.cjs"], root)).toEqual([]);
+  });
+});
+
 describe("walkSourceFiles — inputs it refuses rather than guesses about", () => {
   /**
    * Every case here was found by review of a version that FOLLOWED symlinks.
