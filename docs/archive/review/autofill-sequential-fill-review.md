@@ -151,3 +151,44 @@ Plan revision 2 added:
 - **TE-4:** the C6 row starts the fill without `onSelect`.
 - **TE-5:** toFake is `["setTimeout","clearTimeout","Date","performance"]`, `queueMicrotask` stays real, the React row runs on real timers, and existing tests pass `lateFieldWindowMs: 0`.
 - **TE-6:** precedent cited.
+
+---
+
+# Round 3
+Date: 2026-10-08
+
+## Findings (single reviewer, three expert sections)
+- **FN-R3-1 [Major] design** (R41/R50). The CRXJS loader's `import()` is not awaited by `executeScript`, so an immediate retry races listener registration. C5 reaches only frames whose content script never ran: re-injection is a no-op in live frames (module cache), and the window guard keys block it in orphaned frames.
+- **FN-R3-2 [Minor]** The manifest selection predicate is unspecified. In dev mode the path is `src/content/form-detector.ts-loader.js`.
+- **FN-R3-3 [Major] design.** A deferred write run from a MutationObserver callback (a microtask) can land in the same task as the password write, which brings the Sony race back.
+- **FN-R3-4 [Major] design.** The single-target climb counts hidden, submit and other controls, and it fails on sparse div pages.
+- **FN-R3-5 [Major] design.** The deadline gating every write contradicts `lateFieldWindowMs: 0` in existing tests, and long forms would drop their tail fields.
+- **FN-R3-6 [Minor]** `isFillActive` lags behind supersession.
+- **FN-R3-7 [Minor]** The C7 `func` path is not covered by `isFillActive`.
+- **SEC-R3-1 [Major] design** (R48/R49/R43). Candidates 1 and 3 re-admit the page-wrapper ancestor that `isCoLocatedWith` deliberately rejects. A deferred secret would then land in another section of the page.
+- **SEC-R3-2 [Minor]** The C7 `func` spans tasks with no re-check before each write and no FR4/FR5 coverage.
+- **SEC-R3-3 [Minor] question.** Sony DOM facts. The orchestrator probed the live page:
+  - `closest(form)` and `closest(table)` are null for all three fields;
+  - the common ancestor is `div.sc-5dd586e9-0`, not `body`;
+  - the only other visible fillable control is one id-less text input elsewhere;
+  - the highest ancestor of 店番号 containing no foreign visible fillable control is `div.ReactModalPortal`, which holds all three targets.
+- **TE-R3-1 [Major]** (RT1). The fallback tests mock an instant listener; add retry and backoff rows.
+- **TE-R3-2 [Major]** (RT4/RT7). A React row for the deferral path.
+- **TE-R3-3 [Major]** Deadline-semantics rows.
+- **TE-R3-4 [Minor]** Dev-shape and no-match manifest rows.
+- **TE-R3-5 [Minor] prose.** `Date` is the plan's own addition to the faked set; the old literal appears in two test trees.
+- **TE-R3-6 [Minor]** The root-rule deny rows pass trivially; add rows for an SPA wrapper, a hidden sibling and a page-wrapping form.
+
+## Scope decision
+The orchestrator proposed narrowing the scope to stop the spiral. The user chose to keep the full scope.
+
+## Resolution (plan revision 4)
+- **FN-R3-1:** after injection, retry only on "Receiving end does not exist", with a bounded backoff of 10 × 50 ms; then fail closed with the existing codes. For LOGIN, the `func` runs after the budget is exhausted. C5's reach is stated.
+- **FN-R3-2 / TE-R3-4:** an explicit predicate covering both shapes, with a fail-closed no-match.
+- **FN-R3-3 / TE-R3-2:** every write runs from the sequencer's own `setTimeout` task, with at least one macrotask since the previous write. The observer only marks steps dirty.
+- **FN-R3-4 / SEC-R3-1 / TE-R3-6:** one root rule: the highest ancestor of the anchor containing no foreign visible, usable, allowlisted control at T0, refused at `body`/`html`. The form and table candidates are dropped, because the rule subsumes them. Sony resolves to `div.ReactModalPortal`.
+- **FN-R3-5 / TE-R3-3:** the deadline gates only deferred steps and relocation. Writes to valid T0 targets are bounded by generation and supersession.
+- **FN-R3-6:** `isFillActive` is generation-match and not exited.
+- **FN-R3-7 / SEC-R3-2:** the C7 `func` re-checks connected, type and visibility before each write. FR4, FR5 and C6 not covering the `func` is a declared residual, removed by SC5.
+- **TE-R3-1:** retry rows (allow and deny) and a manual VE1 row.
+- **TE-R3-5:** wording fixed; both test trees named.

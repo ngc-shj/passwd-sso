@@ -1,6 +1,6 @@
 # Plan: sequential autofill writes with fixed targets (`#654` + Sony Bank login)
 
-Revision 3 (after plan review rounds 1-2, see `autofill-sequential-fill-review.md`).
+Revision 4 (after plan review rounds 1-3, see `autofill-sequential-fill-review.md`).
 
 ## Project context
 
@@ -72,10 +72,10 @@ function isFillActive(): boolean;
 - **Order and yield.** Steps run in order, with a `setTimeout(0)` yield between writes.
 - **Target resolution.** A step's target is its `initial` element while that element is connected and `accepts` it. Otherwise it is `relocate(root)`. When `initial` is null, `relocate` re-runs the step's T0 predicate inside the root. A relocated result counts only when it lies inside `root` and `accepts` it. `root` is `null` when C1a refuses a root, and then a step whose initial element is gone stays unfilled.
 - **Deferral.** Steps with a target at T0 run first, in order. A step with no T0 target is deferred and does not delay later steps.
-- **Waiting for late fields.** A step without a target is retried when the DOM mutates. The MutationObserver is created only when `document.body` exists, observes `childList`, `attributes` (`disabled`, `readonly`, `hidden`, `style`, `class`) and `subtree`, and runs until the absolute deadline.
+- **Waiting for late fields.** A step without a target is retried when the DOM mutates. The observer callback only marks steps dirty and schedules the loop; it never writes. Every write, deferred or not, runs from the sequencer's own `setTimeout` task, and at least one macrotask has passed since the previous write. The first write of a run needs no prior yield. The MutationObserver is created only when `document.body` exists, observes `childList`, `attributes` (`disabled`, `readonly`, `hidden`, `style`, `class`) and `subtree`, and runs until the absolute deadline.
 - **Write check.** Immediately before each write, in the same synchronous task, check:
   - same generation;
-  - before the deadline;
+  - for a deferred step, or a relocated target: before the deadline (T0 + `lateFieldWindowMs`, measured with `performance.now()`). A step that becomes resolvable at exactly the deadline is past it. Writes to valid T0 targets are bounded by generation and supersession only, not by the clock;
   - `isConnected`;
   - `accepts(el)`;
   - not yet written by this sequence. Write-once applies to T0 targets too.
@@ -86,7 +86,7 @@ function isFillActive(): boolean;
   - call every step's `release` exactly once. A secret shared by several steps (split OTP) is released only at exit;
   - on error, log a closed-set code through `select-diag-lib`, the only console sink the extension lint allows on the content side, never a value.
 - The un-awaited `perform…()` call in each listener has a `.catch` that routes into the same sink.
-- `isFillActive()` is true from the start of a run until its exit.
+- `isFillActive()` is `runGeneration === currentGeneration && !exited`, so supersession clears it synchronously.
 - Control class: behaviour, not a guard.
 
 ### C1a: T0 targets and one bounded-root rule
@@ -97,17 +97,18 @@ function isFillActive(): boolean;
   - **Identity:** its detector.
 
   The results are each step's `initial`. A null `initial` means the step is deferred (FR3).
-- **Root.** One rule for all kinds: `boundedRoot(anchor, t0Targets)`, exported from `fill-sequence-lib.ts`.
+- **Root.** One rule for all kinds, intent-aligned with `isCoLocatedWith`: `boundedRoot(anchor, t0Targets)`, exported from `fill-sequence-lib.ts`.
   - Anchor: the LOGIN focused or hinted field, else the first identifier target, else the password; the CC number; the first identity target.
-  - Candidates, in order:
-    1. `anchor.form`;
-    2. `anchor.closest("table")`;
-    3. the nearest common ancestor of all non-null T0 targets of the sequence. With a single target, climb from it to the first ancestor that contains another fillable control (`input` or `select`).
-  - Refusal: a candidate that is `body` or `documentElement` gives `null`, which means no relocation. That case cannot reopen the page-wide decoy (SEC-1).
-  - Covered by this rule:
-    - Sony Bank: no form, so the common ancestor of 店番号, 口座番号 and the password.
-    - Div-based `#654` checkouts: the card component that contains the number and its siblings.
-- **Re-anchoring.** When the root is detached, `boundedRoot` is recomputed from the already-written anchor if it is still connected. Otherwise the root is `null`.
+  - The root is the highest ancestor of the anchor that contains no foreign control at T0.
+  - A foreign control is a visible, usable `input` or `select` of an allowlisted fillable type for that kind that is not one of the sequence's T0 targets. Hidden, submit, button and checkbox inputs are ignored. The check runs once, at T0.
+  - If the climb reaches `body` or `documentElement`, the result is `null`: no relocation.
+  - This rule replaces the form and table candidates. A page-wrapping `<form>` or an SPA wrapper (`#app`, `main`) contains foreign controls, so it is never the root.
+  - Measured on the live Sony Bank page:
+    - no `<form>` or `<table>` holds the three fields;
+    - the root is `div.ReactModalPortal`, which holds 店番号, 口座番号 and the password, and nothing else that is fillable;
+    - the only other visible fillable control on the page is outside it.
+  - Div-based `#654` checkouts: the root is the card component, whatever the highest container is that holds the number and no unrelated field.
+- **Re-anchoring.** When the root is detached, `boundedRoot` is recomputed from the already-written anchor if it is still connected, using the T0 foreign-control set. Otherwise the root is `null`.
 - **Identifier set for LOGIN:** the username target plus the custom-field targets.
 
 ### C2: LOGIN (`autofill-lib.ts` `performAutofill` becomes `async`)
@@ -129,18 +130,22 @@ The same conversion as C3.
 ### C5: bundle path from the manifest (`background/index.ts`)
 
 - Every `executeScript({ files })` that injects the content bundle takes its path from `chrome.runtime.getManifest().content_scripts`. That covers the CC fallback, the Identity fallback, the shortcut command, and the LOGIN retry (C7).
-  - Select the entry whose `js` includes the form-detector loader, and fail closed with the existing error codes if none matches.
+  - Selection: the first `js` entry, in any `content_scripts` item, whose path contains `form-detector` and matches `/-loader(-[A-Za-z0-9_-]+)?\.js$/`. That covers the production shape `assets/form-detector.ts-loader-<hash>.js` and the dev shape `src/content/form-detector.ts-loader.js`. No match fails closed with the existing error codes.
+  - Retry: the CRXJS loader's `import()` is not awaited by `executeScript`, so the message is retried only on "Receiving end does not exist", up to 10 attempts at 50 ms apart. After the last attempt, fail closed with the existing code. Frame targets are unchanged.
+  - Reach: the injected bundle registers listeners only in frames whose content script never ran (for example, opened before install or before host permission). In a live frame, re-injection is a no-op because of the module cache. In an orphaned frame, the window guard keys block it.
   - The literal `src/content/form-detector.js` does not exist in the build, so those fallbacks always fail today.
 - Frame targeting is unchanged.
 
 ### C7: LOGIN fallback (`injectDirectAutofill`)
 
-- **Delivery order:** the `AUTOFILL_FILL` message first; if it fails, inject the bundle (C5) and retry the message; if that also fails, use the existing inline `func`.
+- **Delivery order:** the `AUTOFILL_FILL` message first; if it fails, inject the bundle and retry the message (C5); once that budget is exhausted, use the existing inline `func`.
 - **The inline `func` is kept.** It is the path that works today for tabs whose content script was orphaned by an extension reload.
 - **Changes to its writes:**
   - It becomes `async`.
   - It writes custom fields, then username, then password, with an `await new Promise(r => setTimeout(r, 0))` between fields.
   - It gains the C2 custom-field allowlist and the visibility check.
+  - Before each write it re-checks `isConnected`, the allowlisted type and visibility, in the same task as the write.
+  - Declared residual, removed by SC5: FR4 (supersession), FR5 (reference drop) and C6 (dropdown suppression) do not cover the `func` path.
 - **The duplication is deliberate and declared** (R1). Unifying it with C2 is SC5.
 
 ### C6: dropdown suppression (`form-detector-lib.ts`, `cc-form-detector-lib.ts`, `identity-form-detector-lib.ts`)
@@ -181,24 +186,38 @@ The same conversion as C3.
   - re-selection supersession;
   - custom field and OTP rejected when hidden or of a non-allowlisted type.
 - **Identity:** one late-field row and one supersession row.
+- **Deferral and timing:**
+  - A React row on real timers: the password's `onInput` mounts a matching custom-field input that was absent at T0. Assert that the custom field is written (the deferred step ran) and that the password survives. Red-proven by letting the observer callback write directly.
+  - Window 0: every T0 target of a multi-field form is still written.
+  - A deferred field that appears at exactly the deadline is not written.
+- **Root rule:** for each pair below, the deny row must fail under the round-3 rule and pass under this one, and the allow row must still fill:
+  - an SPA `#app` wrapper holding a late "cvv" or password field in another section;
+  - a hidden input next to the card number;
+  - a page-wrapping `<form>`;
+  - allow: Sony-shaped T0 targets, and a late CVV inside a div card component.
 - **Deny side:**
   - a page that reveals a CSS-hidden password decoy outside the root after the username write does not receive the password;
   - a CC autocomplete field inserted outside the root does not receive the CVV.
 - **Background:**
-  - The injected path comes from the mocked manifest (the real shape: `assets/form-detector.ts-loader-<hash>.js`) for all four callers. Red-proven against the old literal.
+  - The injected path comes from the mocked manifest for all four callers. Rows cover the production shape, the dev shape (`src/content/form-detector.ts-loader.js`) and no match (fails closed). Red-proven against the old literal, which both test trees assert today: `__tests__/background.test.ts` and `__tests__/background/inline-matches.test.ts`.
+  - Retry rows:
+    - the first post-inject retry rejects with "Receiving end does not exist" and a later one succeeds (allow);
+    - every attempt fails, giving the existing error code; for LOGIN, the `func` then runs exactly once (deny).
+    - Red-proven without the backoff.
   - The frame-scope assertions are retargeted to the new calls, not deleted: frame-only `{tabId, frameIds:[n]}`, and popup `{tabId}` top-only.
   - LOGIN order: message, then bundle retry, then `func`.
   - The `func` writes custom fields before the password, with a yield between fields.
 - **Detectors:** the dropdown does not reopen while `isFillActive()` is true. The row starts the fill directly (the popup path) after advancing past 1500 ms, so the existing `autofillSuppressUntil` cannot mask a missing check (RT7).
 - **Determinism:**
   - each public fill accepts an optional `lateFieldWindowMs`, and existing tests pass `0`;
-  - fake timers use `toFake: ["setTimeout", "clearTimeout", "Date", "performance"]` (the `ui/suggestion-dropdown.test.ts` precedent). `queueMicrotask` stays real, because jsdom MutationObserver callbacks are microtasks. The deadline reads `performance.now()`;
+  - fake timers use `toFake: ["setTimeout", "clearTimeout", "Date", "performance"]`. This extends the `ui/suggestion-dropdown.test.ts` precedent with `Date`, which the C6 row needs because `autofillSuppressUntil` reads `Date.now()`. `queueMicrotask` stays real, because jsdom MutationObserver callbacks are microtasks. The deadline reads `performance.now()`;
   - the React row runs on real timers, because the React scheduler uses `MessageChannel`;
   - window-end rows: trigger the mutation, flush microtasks, then `await vi.advanceTimersByTimeAsync(window)`;
   - every test awaits settlement, and `afterEach` disconnects, resets the generation and restores real timers (shuffle is on).
 - **Existing tests:** synchronous assertions become `await perform…()`. No assertion is weakened.
 - **Red proof:** each new row fails on the current code. C1's yield, deadline, generation, root confinement, write-once rule and `release` are each mutation-proven on a scratch copy.
 - **Live probe (VE1):** run before and after, by hand.
+- **Manual (VE1):** on a tab opened before the extension had host permission, a fill succeeds through the bundle retry.
 
 ## Considerations & constraints
 
@@ -226,11 +245,11 @@ The same conversion as C3.
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Sequential writer: yield, absolute deadline, one generation per frame, user-input supersession, release on exit | pending |
-| C1a | T0-fixed targets; one bounded-root rule refusing body/html; deferral | pending |
+| C1 | Sequential writer: writes only from sequencer tasks, deadline for deferred and relocated steps, one generation per frame, user-input supersession, release on exit | pending |
+| C1a | T0-fixed targets; root = highest ancestor with no foreign control at T0, refusing body/html; deferral | pending |
 | C2 | LOGIN via C1, password after identifiers, custom-field/OTP allowlist | pending |
 | C3 | Credit card via C1 | pending |
 | C4 | Identity via C1 | pending |
-| C5 | Bundle path resolved from the manifest for all four `executeScript({files})` callers | pending |
+| C5 | Bundle path from the manifest (prod and dev), bounded retry, all four callers | pending |
 | C7 | LOGIN fallback: message, then bundle retry, then sequential inline `func` | pending |
 | C6 | Dropdown suppressed while a fill is active | pending |
