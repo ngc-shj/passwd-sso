@@ -31,9 +31,14 @@ function writeFiles(root, files) {
   }
 }
 
-// Every fixture tree holds one clean file, so a row whose subject is skipped
-// still analyses >0 files and cannot pass through ZERO_FILES_SCANNED.
-const BASELINE = { "src/clean.ts": "export const clean = 1;\n" };
+// Every fixture tree holds one clean file per scan root, so a row whose
+// subject is skipped still analyses >0 files in each root and cannot pass
+// through ZERO_FILES_SCANNED.
+const BASELINE = {
+  "src/clean.ts": "export const clean = 1;\n",
+  "scripts/clean.ts": "export const clean = 1;\n",
+  "prisma/clean.ts": "export const clean = 1;\n",
+};
 
 function run(files, { baseline = true, prepare } = {}) {
   const root = mkdtempSync(join(tmpdir(), "limited-subquery-write-"));
@@ -464,6 +469,16 @@ describe("deny/skip/error — the walk (scan roots, extensions, exclusions)", ()
     const result = run({ "docs/readme.ts": "export const x = 1;\n" }, { baseline: false });
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("ZERO_FILES_SCANNED");
+  });
+
+  it("error: one scan root with zero files fails closed, naming that root", () => {
+    const result = run(
+      { "src/clean.ts": "export const clean = 1;\n", "scripts/clean.ts": "export const clean = 1;\n" },
+      { baseline: false },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("ZERO_FILES_SCANNED");
+    expect(result.stderr).toMatch(/no source files under prisma \(/);
   });
 
   it("error: a file that fails to parse fails closed", () => {

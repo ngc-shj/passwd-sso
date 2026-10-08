@@ -103,8 +103,14 @@ try {
   process.exit(1);
 }
 
+// Per scan root, so a root that silently drops out (renamed, emptied) fails
+// the gate instead of shrinking the scanned set unnoticed.
+const scannedPerRoot = new Map(SCAN_ROOTS.map((root) => [root, 0]));
+
 for (const { rel, sf } of files) {
   scanned++;
+  const root = SCAN_ROOTS.find((r) => rel.startsWith(`${r}/`));
+  if (root !== undefined) scannedPerRoot.set(root, scannedPerRoot.get(root) + 1);
   const diagnostics = sf.compilerNode.parseDiagnostics;
   if (!Array.isArray(diagnostics) || diagnostics.length > 0) {
     parseErrors.push(rel);
@@ -129,10 +135,11 @@ for (const { rel, sf } of files) {
 }
 
 let failed = false;
-if (scanned === 0) {
+const emptyRoots = SCAN_ROOTS.filter((root) => scannedPerRoot.get(root) === 0);
+if (emptyRoots.length > 0) {
   failed = true;
   console.error(
-    `ZERO_FILES_SCANNED: check-limited-subquery-write found no source files under ${SCAN_ROOTS.join(", ")} (root ${ROOT}).`,
+    `ZERO_FILES_SCANNED: check-limited-subquery-write found no source files under ${emptyRoots.join(", ")} (root ${ROOT}).`,
   );
 }
 if (parseErrors.length > 0) {
