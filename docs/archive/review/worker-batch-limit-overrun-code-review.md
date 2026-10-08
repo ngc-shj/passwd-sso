@@ -82,3 +82,38 @@ RT1 clean; RT2 N/A; RT4 clean; RT6 clean; RT7 T-CR1-1; RT9 clean; RT10 clean; RT
   - Every clause was red-proven on throwaway copies.
 - Modified files: `scripts/checks/lib/sql-scan.mjs`, `scripts/checks/check-limited-subquery-write.mjs`, `src/__tests__/workers/worker-policy-manifest.test.ts`, `scripts/__tests__/{sql-scan,check-limited-subquery-write}.test.mjs`
 - Verification: 281/281 targeted tests; the gate is OK on the tree; raw-sql gate OK; tsc and eslint clean.
+
+---
+
+# Round 2
+Date: 2026-10-08
+
+## Changes from Previous Round
+Reviewed the round-1 fixes: `55dde39ba` (M5/M6 test comment) and `f2a89e6d8` (S-CR1-1 write forms and fail-closed). Single reviewer, three expert sections. 264/264 targeted tests pass, the gate is OK on the tree, and INV4 extraction matches the old regex on the 8 modules (25/25).
+
+R43 against the round-1 state: C2's denied set is a superset. The only widening is a correct one: a materialized CTE after a SEARCH/CYCLE comma is now parsed. INV4 is stricter or equal. Nothing moved from deny to allow.
+
+## Functionality Findings
+- **F-CR2-1 [Major]** `mergeActions` reads a top-level `CASE … WHEN … THEN` at MERGE depth as a MERGE WHEN clause. Consequences:
+  - (a) A parenless writing MERGE is neither a write nor unrecognised, so INV4 drops it.
+  - (b) A C1-shaped MERGE whose SET uses CASE is false-denied with UNRECOGNISED_WRITE.
+  - (c) `WHEN MATCHED AND CASE WHEN c THEN insert END THEN UPDATE` reads as an INSERT action.
+- **F-CR2-2 [Major]** (R48/R52) INV4 inherits the parenthesis gate on `unrecognisedWrites`. That gate is valid only for C2's LIMIT question. Parenless unbounded writes (`EXPLAIN ANALYZE DELETE …`, `PREPARE … AS DELETE …`, the F-CR2-1 MERGE) drop out of INV4, so as a class its extraction is narrower than main's regex. Ungated, INV4 has 0 unrecognised literals on the 8 modules.
+- **F-CR2-3 [Minor]** An upsert whose INSERT source has a top-level LIMIT is denied with a "rescanned per row" rationale that does not apply.
+- **F-CR2-4 [Minor]** The gate's own stderr literals sit on its false-deny boundary. Prose with a parenthesis plus LIMIT plus a write word would deny with SQL remediation text.
+
+## Security Findings
+No findings. Checked:
+- the parenthesis justification for C2;
+- INSERT-only MERGE plus a second statement;
+- `ON UPDATE|DELETE`;
+- `DO UPDATE` in comments and strings;
+- opaque `${…}` between UPDATE and SET.
+
+[Adjacent] F-CR2-2 is the security-relevant item.
+
+## Testing Findings
+- **T-CR2-1 [Minor]** INV4 `WRITE_FORM_DENY` rows that contain a parenthesis pass through the unrecognised-write backstop, not through the clause they name. A mutant scanner without `skipSearchCycle` or the opaque skip stays green.
+
+## Recurring Issue Check
+R29 (the 25/25 figure is a point measurement), R42 (MERGE with CASE), R47, R48, R49, R52, RT7 fire as above. R43 and R50 OK. Other rows N/A or clean.
