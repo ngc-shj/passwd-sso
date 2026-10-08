@@ -239,3 +239,26 @@ Verified: F1, S1, S2 and T2 are correct.
 - F-R5-2, F-R5-3, S-R5-1: wording.
 - T-R5-1: same-fixture allow assertions on each deny fixture; a `boundedRoot` unit row on a Sony-shaped DOM including the outside text input, expecting the portal-equivalent div; a "replaced below a non-body root" row; mutation-proven with both mutants.
 - T-R5-2: the precondition is asserted in the fixture.
+
+---
+
+# Round 6
+Date: 2026-10-08
+
+## Findings
+- **F-R6-1 [Minor] prose** (R48). FR3 states a stricter rule than C1, which accepts an `initial` that passes `accepts` again with no root check (the T0 baseline).
+- **T-R6-1 [Minor] prose** (RT7; can only be confirmed by building and running). The window-0 abandon row could pass on a design without immediate abandonment if the disabled target is the first step. Place it at a later step, and add the immediate-abandonment mutant.
+- **T-R6-2 [Minor] prose.** "Below the foreign control" is ambiguous; it should say "outside the anchor's parent element".
+
+Verified correct: F-R5-1 (every step ends in a terminal state), F-R5-2, F-R5-3, S-R5-1 (checked against `isElementVisible` and `findPasswordInput`), T-R5-1 (both mutants caught by the Sony-shaped unit row), T-R5-2. Security: no findings.
+
+## Resolution (plan revision 7)
+All three Minors were fixed in the plan text.
+
+## Saturation call (round 6)
+1. Six rounds have completed.
+2. No Critical or Major is open.
+3. No finding targets the design: the reviewer labelled all three remaining findings prose.
+4. The remaining Minors are prose and have been fixed. T-R6-1 can only be confirmed by building, and the row and mutant are now specified.
+
+Every contract is locked. Nothing is carried forward. Out of scope: SC1–SC5 (follow-up issues filed when the PR opens).

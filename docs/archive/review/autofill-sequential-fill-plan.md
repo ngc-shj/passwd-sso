@@ -1,6 +1,6 @@
 # Plan: sequential autofill writes with fixed targets (`#654` + Sony Bank login)
 
-Revision 6 (after plan review rounds 1-5, see `autofill-sequential-fill-review.md`).
+Revision 7 (final, after plan review rounds 1-6, see `autofill-sequential-fill-review.md`).
 
 ## Project context
 
@@ -40,7 +40,7 @@ Every fill function writes all of its fields in one synchronous pass.
   - find a field created, replaced, revealed or enabled inside the T0 root.
 
   `document.activeElement` is never consulted after T0.
-- **FR3.** A step waits when its target is missing at T0, has been detached, or its `initial` fails `accepts` at its turn. A waiting step does not block later steps, and it runs as soon as its field becomes valid inside the T0 root. The wait ends at an absolute deadline (T0 + `lateFieldWindowMs`, default 1000 ms). A step is "unfilled" until it has performed its own write. The field's current DOM value plays no part, so prefilled fields are overwritten as they are today.
+- **FR3.** A step waits when its target is missing at T0, has been detached, or its `initial` fails `accepts` at its turn. A waiting step does not block later steps. It runs as soon as its `initial` passes `accepts` again, or a relocated field becomes valid inside the T0 root. The wait ends at an absolute deadline (T0 + `lateFieldWindowMs`, default 1000 ms). A step is "unfilled" until it has performed its own write. The field's current DOM value plays no part, so prefilled fields are overwritten as they are today.
 - **FR4.** A frame has at most one active fill. Starting a new fill of any kind (LOGIN, CC, IDENTITY) supersedes the pending one. A trusted `keydown`, `pointerdown` or `paste` during the window also supersedes it. A superseded sequence never writes again.
 - **FR5.** Secret reachability is bounded by the sequence.
   - Steps read `payload.<field>` when they write; they do not capture copies.
@@ -197,7 +197,7 @@ The same conversion as C3.
   - A React row on real timers. A native `input` listener on the password element inserts a matching custom-field input that was absent at T0. Because it is native, it runs before React's root-delegated handler. Assert that the custom field is written (the deferred step ran) and that the password survives. The red proof lets the observer callback write directly; the test also asserts, as a precondition, that this mutant loses the password.
   - Window 0: every T0 target of a multi-field form is still written.
   - A T0 target that is disabled at its turn and re-enabled after the deadline is not written. The run exits, `isFillActive()` becomes false, and `release` runs exactly once.
-  - The same with window 0: a T0 target disabled at its turn is abandoned at once, and the run exits.
+  - The same with window 0, with the disabled target placed at a later step whose turn comes after the deadline timer: it is abandoned at once, and the run exits.
   - A deferred field that appears at exactly the deadline is not written.
 - **Root rule:**
   - Allow rows use bare-page fixtures: no fillable control on the page besides the sequence's own targets. That covers:
@@ -207,7 +207,7 @@ The same conversion as C3.
     - a hidden input next to the card number, where the late CVV is still filled;
     - the Identity late-field row;
     - the LOGIN deferral row.
-  - Paired rows on the same fixture: a visible foreign control bounds the root, a late field beyond it is not written, and a late field inside the card or login section, below the foreign control, is written. Cases:
+  - Paired rows on the same fixture: a visible foreign control bounds the root, a late field beyond it is not written, and a late field inside the section's root but outside the anchor's parent element is written. Cases:
     - an SPA `#app` wrapper holding a "cvv" or password field in another section. Precondition asserted: that field is not a T0 target;
     - a page-wrapping `<form>` that holds a foreign control.
   - A `boundedRoot` unit row on a Sony-shaped DOM: three fields in sibling blocks inside a portal div, plus an id-less text input outside it. The result is the portal div.
@@ -233,7 +233,7 @@ The same conversion as C3.
   - window-end rows: trigger the mutation, flush microtasks, then `await vi.advanceTimersByTimeAsync(window)`;
   - every test awaits settlement, and `afterEach` disconnects, resets the generation and restores real timers (shuffle is on).
 - **Existing tests:** synchronous assertions become `await perform…()`. No assertion is weakened.
-- **Red proof:** each new row fails on the current code. C1's yield, deadline, generation, root confinement, write-once rule and `release` are each mutation-proven on a scratch copy.
+- **Red proof:** each new row fails on the current code. C1's yield, deadline, immediate abandonment, generation, root confinement, write-once rule and `release` are each mutation-proven on a scratch copy. The immediate-abandonment mutant abandons only in the deadline handler.
 - **Live probe (VE1):** run before and after, by hand.
 - **Manual (VE1):** on a tab opened before the extension had host permission, a fill succeeds through the bundle retry.
 
@@ -263,11 +263,11 @@ The same conversion as C3.
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Sequential writer: writes only from sequencer tasks, step states with the deadline on waiting steps, one generation per frame, user-input supersession, release on exit | pending |
-| C1a | T0-fixed targets; root = highest ancestor with no visible foreign control at T0, at most body | pending |
-| C2 | LOGIN via C1, password after identifiers, custom-field/OTP allowlist | pending |
-| C3 | Credit card via C1 | pending |
-| C4 | Identity via C1 | pending |
-| C5 | Bundle path from the manifest (prod and dev), bounded retry, all four callers | pending |
-| C7 | LOGIN fallback: message, then bundle retry, then sequential inline `func` | pending |
-| C6 | Dropdown suppressed while a fill is active | pending |
+| C1 | Sequential writer: writes only from sequencer tasks, step states with the deadline on waiting steps, one generation per frame, user-input supersession, release on exit | locked |
+| C1a | T0-fixed targets; root = highest ancestor with no visible foreign control at T0, at most body | locked |
+| C2 | LOGIN via C1, password after identifiers, custom-field/OTP allowlist | locked |
+| C3 | Credit card via C1 | locked |
+| C4 | Identity via C1 | locked |
+| C5 | Bundle path from the manifest (prod and dev), bounded retry, all four callers | locked |
+| C7 | LOGIN fallback: message, then bundle retry, then sequential inline `func` | locked |
+| C6 | Dropdown suppressed while a fill is active | locked |
