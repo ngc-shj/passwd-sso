@@ -430,9 +430,13 @@ describe("deny — the overrunning forms from the probe and review log", () => {
     ["upsert: INSERT … SELECT … IN (… LIMIT … FOR UPDATE) ON CONFLICT DO UPDATE", `INSERT INTO audit_outbox (id, attempt_count) SELECT o.id, o.attempt_count FROM audit_outbox o WHERE o.id IN (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) ON CONFLICT (id) DO UPDATE SET attempt_count = audit_outbox.attempt_count + 1`],
     // An upsert is a write, so C2's one shape applies to it as to UPDATE and
     // DELETE: a LIMIT outside a materialized key set denies wherever it sits.
+    // This one is policy, not rescan: the source LIMIT caps the source once
+    // (F-CR2-3); the deny keeps one shape across every write form.
     ["upsert: a top-level source LIMIT", `INSERT INTO t (id) SELECT id FROM u LIMIT 10 ON CONFLICT (id) DO UPDATE SET a = 1`],
     ["a write after a recursive CTE's SEARCH … SET clause", `WITH RECURSIVE r AS (SELECT id FROM audit_outbox UNION ALL SELECT id FROM r WHERE false) SEARCH DEPTH FIRST BY id SET ord DELETE FROM audit_outbox WHERE id IN (SELECT id FROM r LIMIT 2)`],
     ["a write after a recursive CTE's CYCLE … SET … USING clause", `WITH RECURSIVE r AS (SELECT id FROM audit_outbox UNION ALL SELECT id FROM r WHERE false) CYCLE id SET is_cycle TO true DEFAULT false USING path ${SET} WHERE id IN (SELECT id FROM r LIMIT 2)`],
+    // F-CR2-1: read as a MERGE (LIMITED_SUBQUERY_WRITE), not left unrecognised.
+    ["MERGE with CASE in its SET and a LIMIT in its ON clause", `MERGE INTO audit_outbox t USING (SELECT 1 AS one) s ON t.id IN (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) WHEN MATCHED THEN UPDATE SET status = CASE WHEN t.attempt_count > 3 THEN 'FAILED' ELSE 'PENDING' END`],
   ];
   for (const [name, sql] of rows) {
     it(`deny: ${name}`, () => {
@@ -462,12 +466,20 @@ describe("deny — an UPDATE/DELETE/MERGE the gate cannot read as a statement (U
     ["DO UPDATE with no INSERT head", `ON CONFLICT (id) DO UPDATE SET a = 1 WHERE id IN (${SUB} LIMIT 2)`],
     ["a MERGE whose WHEN clause does not parse", `MERGE INTO audit_outbox t USING audit_outbox s ON t.id IN (${SUB} LIMIT 2) WHEN MATCHED UPDATE SET a = 1`],
     ["an allowed LIMIT position still denies next to an unrecognised write", `WITH picked AS MATERIALIZED (${SUB} LIMIT 2) EXPLAIN ANALYZE ${SET} WHERE id IN (SELECT id FROM picked)`],
+    ["a MERGE whose CASE never reaches END", `WITH picked AS MATERIALIZED (${SUB} LIMIT 2) MERGE INTO audit_outbox t USING picked p ON t.id = p.id WHEN MATCHED THEN UPDATE SET status = CASE WHEN t.attempt_count > 3 THEN 'FAILED'`],
   ];
   for (const [name, sql] of rows) {
     it(`deny: ${name}`, () => {
       expectUnrecognised(run({ "src/workers/fixture.ts": stringCall(sql) }), "src/workers/fixture.ts:");
     });
   }
+
+  // F-CR2-4: a declared false deny; the help text names the way out.
+  it("deny: prose holding a parenthesis, a write keyword and a row-limit keyword", () => {
+    const result = run({ "src/workers/fixture.ts": stringCall("Update failed (over the limit of 3 rows)") });
+    expectUnrecognised(result, "src/workers/fixture.ts:");
+    expect(result.stderr).toContain("message or log line that holds a parenthesis");
+  });
 });
 
 describe("deny/skip/error — the walk (scan roots, extensions, exclusions)", () => {
@@ -550,6 +562,11 @@ describe("allow — the C1 shapes", () => {
 
   it("allow: a MERGE reading a materialized key set", () => {
     const sql = `WITH picked AS MATERIALIZED (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) MERGE INTO audit_outbox t USING picked p ON t.id = p.id WHEN MATCHED THEN UPDATE SET attempt_count = t.attempt_count + 1`;
+    expectAllow(run({ "src/workers/fixture.ts": stringCall(sql) }));
+  });
+
+  it("allow: a MERGE reading a materialized key set, with CASE in its SET (F-CR2-1)", () => {
+    const sql = `WITH picked AS MATERIALIZED (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) MERGE INTO audit_outbox t USING picked p ON t.id = p.id WHEN MATCHED THEN UPDATE SET status = CASE WHEN t.attempt_count > 3 THEN 'FAILED' ELSE 'PENDING' END`;
     expectAllow(run({ "src/workers/fixture.ts": stringCall(sql) }));
   });
 

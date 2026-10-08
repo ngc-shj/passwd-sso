@@ -530,20 +530,47 @@ function skipAlias(tokens, end, stop) {
 }
 
 /**
+ * First WORD `upper` in [from, end) at `depth` that is not inside a
+ * `CASE … END` expression at that depth (nested CASEs counted), or -1 when
+ * there is none. Returns null when the range holds an END with no CASE or a
+ * CASE whose END never comes: the caller cannot tell clause words from
+ * expression words then.
+ */
+function clauseWordAt(tokens, from, end, depth, upper) {
+  let openCase = 0;
+  for (let j = from; j < end; j++) {
+    const t = tokens[j];
+    if (t.depth !== depth) continue;
+    if (isWord(t, "CASE")) openCase++;
+    else if (isWord(t, "END")) {
+      if (openCase === 0) return null;
+      openCase--;
+    } else if (openCase === 0 && isWord(t, upper)) return j;
+  }
+  return openCase === 0 ? -1 : null;
+}
+
+/**
  * The WHEN clauses of a MERGE between `from` and the statement end, at the
  * MERGE's depth: `WHEN [NOT] MATCHED [BY SOURCE|TARGET] [AND …] THEN
- * <action>`. Returns the action tokens, each `{ token, action }` with
- * action UPDATE (followed by SET), DELETE, INSERT, NOTHING (`DO NOTHING`)
- * or null when unreadable.
+ * <action>`. A `CASE … WHEN … THEN … END` expression at that depth (in the ON
+ * condition, a WHEN condition or an action's SET) is skipped, so only clause
+ * WHEN / THEN are read. Returns the action tokens, each `{ token, action }`
+ * with action UPDATE (followed by SET), DELETE, INSERT, NOTHING
+ * (`DO NOTHING`) or null when unreadable; or null when a CASE is unbalanced.
  */
 function mergeActions(tokens, from, end, depth) {
   const out = [];
-  for (let j = from; j < end; j++) {
-    if (tokens[j].depth !== depth || !isWord(tokens[j], "WHEN")) continue;
-    const then = findWordAt(tokens, j + 1, end, depth, "THEN");
+  let j = from;
+  for (;;) {
+    const when = clauseWordAt(tokens, j, end, depth, "WHEN");
+    if (when === null) return null;
+    if (when === -1) return out;
+    const then = clauseWordAt(tokens, when + 1, end, depth, "THEN");
+    if (then === null) return null;
     if (then === -1) {
-      out.push({ token: j, action: null });
-      continue;
+      out.push({ token: when, action: null });
+      return out;
     }
     const a = tokens[then + 1];
     let action = null;
@@ -552,9 +579,8 @@ function mergeActions(tokens, from, end, depth) {
     else if (isWord(a, "INSERT")) action = "INSERT";
     else if (isWord(a, "DO") && isWord(tokens[then + 2], "NOTHING")) action = "NOTHING";
     out.push({ token: then + 1, action });
-    j = then;
+    j = then + 1;
   }
-  return out;
 }
 
 /**
@@ -596,7 +622,7 @@ function parseWriteHead(tokens, i, end) {
     const headEnd = skipAlias(tokens, parsed.end, (w) => isWord(w, "USING"));
     if (!isWord(tokens[headEnd], "USING")) return null;
     const actions = mergeActions(tokens, headEnd, end, t.depth);
-    if (actions.length === 0 || actions.some((a) => a.action === null)) return null;
+    if (actions === null || actions.length === 0 || actions.some((a) => a.action === null)) return null;
     const writing = actions.filter((a) => a.action === "UPDATE" || a.action === "DELETE");
     const consumed = [i, ...writing.map((a) => a.token)];
     if (writing.length === 0) return { kind: null, consumed };
@@ -756,8 +782,14 @@ function findInGroups(tokens) {
  *     `{ token, word, depth, line }`, that no write above accounts for (its
  *     head, a MERGE's WHEN … THEN action, an upsert's DO UPDATE, or a MERGE
  *     whose actions are only INSERT / DO NOTHING) and that is not
- *     `FOR [NO KEY] UPDATE` or `ON UPDATE|DELETE` — reported only when the
- *     literal holds a parenthesis (see below). Callers fail closed on them.
+ *     `FOR [NO KEY] UPDATE` or `ON UPDATE|DELETE`. Reported in every
+ *     literal, prose included; callers fail closed on them, each under its
+ *     own condition.
+ *   - hasParenGroup: whether the literal holds a `(`. C2 ignores
+ *     unrecognisedWrites without one: UPDATE, DELETE and MERGE have no LIMIT
+ *     clause, so a LIMIT/FETCH can bound one only through a subquery or a CTE
+ *     body, both parenthesised. That reasoning is about a LIMIT's reach, not
+ *     about whether the word writes, so INV4 does not apply it.
  *   - inGroups: every `IN (` group (see findInGroups).
  */
 export function analyzeSql(input) {
@@ -853,20 +885,19 @@ export function analyzeSql(input) {
     });
   }
 
-  // UPDATE, DELETE and MERGE have no LIMIT clause, so a LIMIT/FETCH can bound
-  // one only through a subquery or a CTE body, both parenthesised. A literal
-  // without a parenthesis is prose to this rule ("Update your profile before
-  // the limit is reached"), even when it embeds `UPDATE <t> SET` mid-sentence.
+  // Reported whether or not the literal is prose: which callers may ignore a
+  // word, and on what condition, is each caller's own question (C2 asks it
+  // through hasParenGroup; INV4 never ignores one).
   const unrecognisedWrites = [];
-  const hasParenGroup = tokens.some((t) => t.type === TOKEN.LPAREN);
-  for (let k = 0; hasParenGroup && k < tokens.length; k++) {
+  for (let k = 0; k < tokens.length; k++) {
     const t = tokens[k];
     if (t.type !== TOKEN.WORD || !WRITE_WORDS.has(t.upper)) continue;
     if (accounted.has(k) || isKnownNonWrite(tokens, k)) continue;
     unrecognisedWrites.push({ token: k, word: t.upper, depth: t.depth, line: t.line });
   }
+  const hasParenGroup = tokens.some((t) => t.type === TOKEN.LPAREN);
 
-  return { tokens, limits, withLists, writes, unrecognisedWrites, inGroups };
+  return { tokens, limits, withLists, writes, unrecognisedWrites, hasParenGroup, inGroups };
 }
 
 /**

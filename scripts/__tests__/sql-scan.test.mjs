@@ -193,6 +193,55 @@ describe("analyzeSql — MERGE, upsert, opaque prefixes (S-CR1-1)", () => {
   });
 });
 
+// F-CR2-1: a CASE expression at MERGE depth holds WHEN / THEN that are not
+// MERGE clauses.
+describe("analyzeSql — CASE inside a MERGE", () => {
+  const read = (sql) => {
+    const a = analyzeSql(sqlInputFromSourceText(sql));
+    return { writes: a.writes.map((w) => [w.kind, w.target.name]), unrecognised: a.unrecognisedWrites.map((u) => u.word) };
+  };
+
+  it("reads a MERGE whose SET uses CASE as a MERGE write", () => {
+    expect(read("MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET a = CASE WHEN u.x THEN 1 ELSE 2 END")).toEqual({
+      writes: [[WRITE_KIND.MERGE, "t"]],
+      unrecognised: [],
+    });
+  });
+
+  it("reads the clause after a CASE in a WHEN condition, not the CASE's own THEN", () => {
+    // Read naively, `THEN insert` is the action and the clause's UPDATE is left over.
+    expect(read("MERGE INTO t USING u ON t.id = u.id WHEN MATCHED AND CASE WHEN u.c THEN insert END THEN UPDATE SET a = 1")).toEqual({
+      writes: [[WRITE_KIND.MERGE, "t"]],
+      unrecognised: [],
+    });
+  });
+
+  it("skips a CASE nested inside a CASE", () => {
+    const sql =
+      "MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET a = CASE WHEN u.x THEN CASE WHEN u.y THEN 1 END ELSE 2 END " +
+      "WHEN NOT MATCHED THEN INSERT (id) VALUES (u.id)";
+    expect(read(sql)).toEqual({ writes: [[WRITE_KIND.MERGE, "t"]], unrecognised: [] });
+  });
+
+  it("skips a CASE in the ON condition", () => {
+    expect(read("MERGE INTO t USING u ON CASE WHEN u.k THEN t.id = u.id ELSE false END WHEN MATCHED THEN DELETE")).toEqual({
+      writes: [[WRITE_KIND.MERGE, "t"]],
+      unrecognised: [],
+    });
+  });
+
+  it("leaves a MERGE with an unbalanced CASE unrecognised", () => {
+    expect(read("MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET a = CASE WHEN u.x THEN 1")).toEqual({
+      writes: [],
+      unrecognised: ["MERGE", "UPDATE"],
+    });
+    expect(read("MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET a = 1 END")).toEqual({
+      writes: [],
+      unrecognised: ["MERGE", "UPDATE"],
+    });
+  });
+});
+
 describe("analyzeSql — unrecognisedWrites", () => {
   const unrecognised = (sql) => analyzeSql(sqlInputFromSourceText(sql)).unrecognisedWrites.map((u) => u.word);
 
@@ -221,11 +270,19 @@ describe("analyzeSql — unrecognisedWrites", () => {
     expect(unrecognised("CREATE RULE r AS ON UPDATE TO t DO INSTEAD NOTHING; SELECT (1)")).toEqual([]);
   });
 
-  it("does not report a word in a literal with no parenthesis (prose)", () => {
-    expect(unrecognised("Update your profile before the limit is reached")).toEqual([]);
-    expect(unrecognised("Worker failed to UPDATE audit_outbox SET status for a batch over the LIMIT")).toEqual([]);
-    expect(unrecognised("Update failed; Delete the row and retry")).toEqual([]);
-    expect(unrecognised("Update failed (limit 3)")).toEqual(["UPDATE"]);
+  // F-CR2-2: the parenthesis condition is C2's, not the scanner's.
+  it("reports a word in a literal with no parenthesis (prose) too", () => {
+    expect(unrecognised("Update your profile before the limit is reached")).toEqual(["UPDATE"]);
+    expect(unrecognised("Worker failed to UPDATE audit_outbox SET status for a batch over the LIMIT")).toEqual(["UPDATE"]);
+    expect(unrecognised("Update failed; Delete the row and retry")).toEqual(["UPDATE", "DELETE"]);
+    expect(unrecognised("EXPLAIN ANALYZE DELETE FROM t WHERE status = 'SENT'")).toEqual(["DELETE"]);
+    expect(unrecognised("PREPARE p AS DELETE FROM t WHERE status = 'SENT'")).toEqual(["DELETE"]);
+  });
+
+  it("says whether the literal holds a parenthesis", () => {
+    expect(analyzeSql("Update failed; Delete the row and retry").hasParenGroup).toBe(false);
+    expect(analyzeSql("Update failed (limit 3)").hasParenGroup).toBe(true);
+    expect(analyzeSql("SELECT 'a (b)' -- (c)").hasParenGroup).toBe(false);
   });
 
   it("does not report a word inside a comment, string, quoted identifier or substitution", () => {

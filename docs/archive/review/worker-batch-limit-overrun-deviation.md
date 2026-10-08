@@ -56,10 +56,10 @@ Any remaining UPDATE / DELETE / MERGE word that no statement accounts for, other
 - INV4 reports the literal unbounded.
 
 The parenthesis condition replaces the plan's prose protection. UPDATE, DELETE and MERGE have no LIMIT clause, so a LIMIT can bound one only through a subquery or CTE body, both of which are parenthesised. Measured on the tree:
-- 166 literals hold such a word (HTTP method names, GRANT lists, log prose).
+- 168 literals hold such a word (HTTP method names, GRANT lists, log prose). This figure was re-measured in code review round 2; the earlier count was 166.
 - None of them holds a LIMIT or FETCH, so C2 still passes.
 - The 8 manifest modules hold none.
-- INV4 still extracts the same 25 candidate literals the old regex found.
+- INV4 still extracts the same 25 candidate literals the old regex found. This is a measurement on the current modules, not a class claim; see the round-2 correction below.
 
 Behaviour changes and residuals:
 - An `INSERT … SELECT … LIMIT … ON CONFLICT DO UPDATE` allow row became a deny row, because an upsert is now a write.
@@ -68,3 +68,12 @@ Behaviour changes and residuals:
   - a parenless write outside statement position (e.g. `EXPLAIN ANALYZE DELETE … WHERE …`, invisible to INV4 as well);
   - a write keyword inside a `${…}` substitution.
 - A plain `INSERT … SELECT … IN (… LIMIT … FOR UPDATE)` is not a write: the overrun needs the statement to update the rows it locked.
+
+### D-4 correction (code review round 2: F-CR2-1, F-CR2-2)
+
+- **The parenthesis condition now belongs to C2 only.** The scanner reports unrecognised write words in every literal and exposes `hasParenGroup` separately. C2 denies a LIMIT only when both hold. INV4 uses the ungated list, so a parenless unbounded write is now caught: `EXPLAIN ANALYZE DELETE …`, `PREPARE … AS DELETE …`, or a MERGE.
+  - INV4 is therefore case-insensitive, and it fails closed on any literal in a manifest module that holds a write word, prose included. Main's case-sensitive regex was looser.
+  - The 8 manifest modules hold no such literal: 25 candidates, 0 unrecognised.
+  - The residual "a parenless write outside statement position is invisible to INV4 as well" is withdrawn. It remains a C2-only bypass.
+- **MERGE action detection skips `CASE … END` spans.** It counts nested CASEs, and an unbalanced CASE leaves the MERGE unrecognised. Before this, a CASE in SET or in the WHEN condition was read as a MERGE clause.
+- **Upsert source LIMIT.** C2 denies an upsert's INSERT-source LIMIT by policy, to keep one shape across every write. The reason is not that this LIMIT gets rescanned.

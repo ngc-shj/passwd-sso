@@ -24,6 +24,12 @@
  *       is re-evaluated per row when correlated, so it does not count).
  * Any other position denies, naming the file and line and giving the C1 shape.
  *
+ * An upsert is held to the same shape by policy, not because its LIMIT is
+ * rescanned: a LIMIT at the top level of an upsert's INSERT source (`INSERT
+ * … SELECT … LIMIT n ON CONFLICT … DO UPDATE`) caps that source once, yet it
+ * still denies, so that one shape covers every write this gate reads instead
+ * of a per-form list of safe positions.
+ *
  * A write statement is one of these in statement position — the start of the
  * literal, after `;`, the start of a CTE body, or the main statement after a
  * WITH list (including a recursive CTE's SEARCH / CYCLE clauses), with any
@@ -38,15 +44,20 @@
  * a MERGE's WHEN … THEN action, an upsert's DO UPDATE, or a MERGE whose
  * actions are only INSERT / DO NOTHING — and that is not `FOR UPDATE`,
  * `FOR NO KEY UPDATE`, or a referential action / rule event `ON UPDATE` /
- * `ON DELETE`, is an unrecognised write when the literal holds at least one
- * parenthesis. Then every `LIMIT` and `FETCH FIRST|NEXT` in that literal
- * denies, wherever it sits. The parenthesis condition is what keeps prose
- * out ("Update your profile before the limit is reached", or `UPDATE <t> SET`
+ * `ON DELETE`, is an unrecognised write (the scanner reports it in every
+ * literal). This gate acts on one only when the literal holds at least one
+ * parenthesis (the scanner's `hasParenGroup`). Then every `LIMIT` and
+ * `FETCH FIRST|NEXT` in that literal denies, wherever it sits. The
+ * parenthesis condition is this gate's own, and is what keeps prose out
+ * ("Update your profile before the limit is reached", or `UPDATE <t> SET`
  * embedded mid-sentence): UPDATE, DELETE and MERGE have no LIMIT clause, so a
  * LIMIT can bound one only through a subquery or a CTE body, and both are
- * parenthesised. When this rule landed, the literals in the tree holding such
- * a word were HTTP method names, GRANT lists and log prose, and none of them
- * held a LIMIT or FETCH.
+ * parenthesised. It answers "can this LIMIT reach a write", not "is this a
+ * write", so the INV4 guard does not apply it. When this rule landed, the
+ * literals in the tree holding such a word were HTTP method names, GRANT
+ * lists and log prose, and none of them held a LIMIT or FETCH. Prose that
+ * holds a parenthesis, a write keyword and a row-limit keyword together is a
+ * false deny; reword it.
  *
  * Scope: every non-test `.ts .tsx .mts .cts .js .mjs .cjs` file under src/,
  * scripts/ and prisma/, walked by scripts/checks/lib/ast-project.mjs (test
@@ -58,7 +69,8 @@
  * Control class: best-effort tripwire. Adjudication is a lexical reading of
  * literal text, not the SQL parser. Every LIMIT position this gate allows is
  * one the INV4 guard's LIMIT-location clause also accepts (INV4 additionally
- * reports every MERGE and upsert as unbounded). It says nothing about writes
+ * reports every MERGE and upsert as unbounded, and every unrecognised write
+ * whether or not its literal holds a parenthesis). It says nothing about writes
  * without a LIMIT; those are INV4's concern.
  *
  * Declared bypasses (each pinned by an allow row in the self-test):
@@ -103,17 +115,26 @@ const LITERAL_KINDS = [
 const LIMITED_SUBQUERY_WRITE = "LIMITED_SUBQUERY_WRITE";
 const UNRECOGNISED_WRITE = "UNRECOGNISED_WRITE";
 
+// This file is under scripts/, so the gate reads its own string literals. None
+// of the message literals below may hold a row-limit keyword (LIMIT, FETCH
+// FIRST|NEXT) together with a parenthesis and an UPDATE / DELETE / MERGE word
+// that is not `FOR UPDATE`: that literal would be denied as an unrecognised
+// write next to a LIMIT. C1_SHAPE's first literal holds the row-limit keyword
+// and only `FOR UPDATE`; its second holds the write words and no row-limit
+// keyword. Keep each message's write words and row-limit words in separate
+// literals.
 const C1_SHAPE =
   "WITH picked AS MATERIALIZED (SELECT <keys> FROM <table> WHERE … ORDER BY … LIMIT $n [FOR UPDATE SKIP LOCKED]) " +
   "<UPDATE|DELETE> … WHERE (<keys>) IN (SELECT <keys> FROM picked) …";
 
 /**
  * The LIMIT/FETCH entries of `analysis.limits` that deny, each with its
- * reason: every one when the literal holds an unrecognised write, otherwise
- * those outside every allowed position of a literal holding a write.
+ * reason: every one when the literal holds an unrecognised write and a
+ * parenthesis, otherwise those outside every allowed position of a literal
+ * holding a write.
  */
 function deniedLimits(analysis) {
-  if (analysis.unrecognisedWrites.length > 0) {
+  if (analysis.hasParenGroup && analysis.unrecognisedWrites.length > 0) {
     return analysis.limits.map((limit) => ({ limit, reason: UNRECOGNISED_WRITE }));
   }
   return misplacedLimits(analysis).map((limit) => ({ limit, reason: LIMITED_SUBQUERY_WRITE }));
@@ -196,18 +217,23 @@ const misplaced = violations.filter((v) => v.reason === LIMITED_SUBQUERY_WRITE).
 if (unrecognised.length > 0) {
   failed = true;
   console.error(
-    "UNRECOGNISED_WRITE: a LIMIT/FETCH shares a literal with an UPDATE/DELETE/MERGE this gate cannot read as a statement, so it cannot tell what the LIMIT bounds:",
+    "UNRECOGNISED_WRITE: a row limit shares a literal with a write keyword this gate cannot read as a statement, so it cannot tell what the row limit bounds:",
   );
   for (const v of unrecognised) console.error(`  ${v.rel}:${v.line}  ${keywordOf(v)} next to an unrecognised write`);
   console.error(
     "\nWrite the statement in a form the gate reads (DELETE FROM <t>, UPDATE <t> … SET, MERGE INTO <t> … THEN UPDATE|DELETE, " +
       "INSERT INTO <t> … ON CONFLICT … DO UPDATE) at statement position, bounded by the C1 shape:\n  " +
-      C1_SHAPE,
+      C1_SHAPE +
+      "\nIf the literal is not SQL but a message or log line that holds a parenthesis, reword it so the write keyword " +
+      "and the row-limit keyword are not in the same literal.",
   );
 }
 if (misplaced.length > 0) {
   failed = true;
-  console.error("LIMITED_SUBQUERY_WRITE: a LIMIT/FETCH bounds a write from a position PostgreSQL may rescan per row:");
+  console.error(
+    "LIMITED_SUBQUERY_WRITE: a LIMIT/FETCH bounds a write from outside the one allowed position " +
+      "(a position PostgreSQL may rescan per row; an upsert's INSERT source is held to the same shape by policy):",
+  );
   for (const v of misplaced) {
     console.error(`  ${v.rel}:${v.line}  ${keywordOf(v)} in a write statement outside a depth-0 MATERIALIZED CTE body`);
   }

@@ -117,3 +117,36 @@ No findings. Checked:
 
 ## Recurring Issue Check
 R29 (the 25/25 figure is a point measurement), R42 (MERGE with CASE), R47, R48, R49, R52, RT7 fire as above. R43 and R50 OK. Other rows N/A or clean.
+
+## Resolution Status (round 2)
+Every round-2 finding was fixed in one commit and red-proven on throwaway copies (`scratchpad/cr2fix/`, mutants M1–M8).
+
+### F-CR2-1 [Major] CASE read as a MERGE WHEN
+- Action: `clauseWordAt` skips `CASE … END` at MERGE depth, counting nested CASEs. An unbalanced CASE or a stray END returns null.
+- Rows added:
+  - scanner: CASE in SET, CASE in the WHEN condition (case c), nested CASE, CASE in ON, unbalanced;
+  - C2: a deny row with CASE plus a LIMIT in ON; an allow row for the C1-shaped MERGE with CASE;
+  - INV4: a deny row for the parenless CASE MERGE.
+- Red proof: M1 (drop the CASE skip) turns those 8 rows red and leaves the existing MERGE rows green.
+- Modified file: `scripts/checks/lib/sql-scan.mjs` (`clauseWordAt`, `mergeActions`)
+
+### F-CR2-2 [Major] INV4 inherited the C2-only parenthesis gate
+- Action: `unrecognisedWrites` is ungated, and `hasParenGroup` is exposed. C2's `deniedLimits` requires both. INV4 uses the ungated list.
+- Rows added: INV4 deny rows for parenless `EXPLAIN ANALYZE DELETE` and `PREPARE … AS DELETE`.
+- Red proof:
+  - M2 (re-gate INV4): 6 rows red;
+  - M3 (un-gate C2): the C2 prose rows and the no-parenthesis bypass row red.
+- Measurement: 25 candidates and 0 unrecognised on the 8 modules.
+- Modified files: `sql-scan.mjs`, `check-limited-subquery-write.mjs`, `worker-policy-manifest.test.ts`
+
+### F-CR2-3 [Minor] Upsert rationale
+- Action: the header and message say the upsert source LIMIT is denied by policy (one shape across the class), not because it is rescanned.
+
+### F-CR2-4 [Minor] The gate's own message literals
+- Action: a comment beside `C1_SHAPE` states the self-scan constraint, and the message is reworded. The UNRECOGNISED_WRITE help now covers messages or log lines that hold a parenthesis, and a deny row pins it.
+
+### T-CR2-1 [Minor] INV4 deny rows pinned to their clause
+- Action: each `WRITE_FORM_DENY` row asserts its detail prefix.
+- Red proof: M4 (no `skipSearchCycle`), M5 (no opaque skip) and M6 (the reviewer's mutant) are now red.
+
+Verification: 295/295 tests across 4 targeted files; the gate is OK on the tree; raw-sql gate OK; tsc and eslint clean.

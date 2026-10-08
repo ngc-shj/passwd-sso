@@ -461,7 +461,10 @@ export function classifySweeps(
 // C5 extraction (assertion 1): every string/template literal in a module's AST
 // that the shared scanner reads as holding a write statement (statement-
 // position UPDATE/DELETE/MERGE/upsert with its own grammar, any case) or an
-// unrecognised UPDATE/DELETE/MERGE word.
+// unrecognised UPDATE/DELETE/MERGE word. INV4 takes unrecognised words with
+// no parenthesis condition: C2's condition asks whether a LIMIT can reach a
+// write, and a parenless write (`EXPLAIN ANALYZE DELETE …`) is still unbounded.
+// Prose holding such a word in a worker module therefore fails closed.
 // ---------------------------------------------------------------------------
 
 const LITERAL_KINDS = [
@@ -1006,59 +1009,104 @@ describe("C4 extraction — every write the scanner reads, any case", () => {
     expect(classifySweeps(statements, []).map((v) => v.kind)).toEqual(["unbounded"]);
   });
 
-  it("does not extract prose that only starts with Update / Delete", () => {
-    expect(
-      extractSweepStatementsFromSource('export const m = "Update failed; Delete the row and retry";', "fixture.ts"),
-    ).toEqual([]);
+  // F-CR2-2: INV4 has no prose condition; a write word in any literal of a
+  // worker module is extracted and, unread, reported unbounded.
+  it("extracts prose holding a write word and reports it unrecognised", () => {
+    const statements = extractSweepStatementsFromSource(
+      'export const m = "Update failed; Delete the row and retry";',
+      "fixture.ts",
+    );
+    expect(statements).toHaveLength(1);
+    expect(classifySweeps(statements, []).map((v) => v.detail.split(" (literal line")[0])).toEqual([
+      "unrecognised UPDATE",
+      "unrecognised DELETE",
+    ]);
+  });
+
+  it("does not extract prose without a write word", () => {
+    expect(extractSweepStatementsFromSource('export const m = "Insert failed; retry later";', "fixture.ts")).toEqual([]);
   });
 });
 
 // S-CR1-1: write forms the scanner first missed. Each deny row is a form that
 // overran (MERGE, upsert: rolled-back probes) or that the statement-position
 // reader skipped; INV4 must report it, and MERGE / upsert stay unbounded even
-// when written in the C1 shape.
-const WRITE_FORM_DENY: ReadonlyArray<readonly [string, string]> = [
+// when written in the C1 shape. The third column is the only violation's
+// detail up to its " (literal line" suffix: the write the scanner read
+// (`<KIND> <table>`) or the unrecognised marker, so a row that passes through
+// the unrecognised-word backstop instead of the clause it names is red (T-CR2-1).
+const UNRECOGNISED = "unrecognised";
+const WRITE_FORM_DENY: ReadonlyArray<readonly [string, string, string]> = [
   [
     "MERGE with the LIMIT in its ON clause",
     "MERGE INTO audit_outbox t USING (SELECT 1 AS one) s ON t.id IN (SELECT id FROM audit_outbox ORDER BY processing_started_at LIMIT $1 FOR UPDATE SKIP LOCKED) WHEN MATCHED THEN UPDATE SET attempt_count = t.attempt_count + 1",
+    "MERGE audit_outbox",
   ],
   [
     "MERGE with a join source and an IN (… LIMIT … FOR UPDATE) predicate",
     "MERGE INTO audit_outbox t USING audit_outbox s ON t.id = s.id AND s.id IN (SELECT id FROM audit_outbox LIMIT $1 FOR UPDATE SKIP LOCKED) WHEN MATCHED THEN DELETE",
+    "MERGE audit_outbox",
   ],
   [
     "INSERT … SELECT … IN (… LIMIT … FOR UPDATE) ON CONFLICT DO UPDATE",
     "INSERT INTO audit_outbox (id, attempt_count) SELECT o.id, o.attempt_count FROM audit_outbox o WHERE o.id IN (SELECT id FROM audit_outbox LIMIT $1 FOR UPDATE SKIP LOCKED) ON CONFLICT (id) DO UPDATE SET attempt_count = audit_outbox.attempt_count + 1",
+    "UPSERT audit_outbox",
   ],
   [
     "a write behind an opaque ${…} prefix",
     "${hint} UPDATE audit_outbox SET status = 'PROCESSING' WHERE id IN (SELECT id FROM audit_outbox LIMIT $1 FOR UPDATE SKIP LOCKED)",
+    "UPDATE audit_outbox",
   ],
   [
     "a write after a recursive CTE's SEARCH … SET clause",
     "WITH RECURSIVE r AS (SELECT id FROM t UNION ALL SELECT t.id FROM t JOIN r ON t.p = r.id) SEARCH DEPTH FIRST BY id SET ord DELETE FROM t WHERE id IN (SELECT id FROM r)",
+    "DELETE t",
   ],
   [
     "a write after a recursive CTE's CYCLE … SET … USING clause",
     "WITH RECURSIVE r AS (SELECT id FROM t UNION ALL SELECT id FROM r WHERE false) CYCLE id SET is_cycle TO true DEFAULT false USING path UPDATE t SET a = 1 WHERE status = 'SENT'",
+    "UPDATE t",
   ],
   [
     "an unrecognised write form (EXPLAIN ANALYZE executes the UPDATE)",
     "EXPLAIN ANALYZE UPDATE audit_outbox SET status = 'PROCESSING' WHERE id IN (SELECT id FROM audit_outbox LIMIT $1 FOR UPDATE SKIP LOCKED)",
+    `${UNRECOGNISED} UPDATE`,
   ],
-  ["an upsert without any LIMIT", "INSERT INTO t (id, n) VALUES ($1, 0) ON CONFLICT (id) DO UPDATE SET n = t.n + 1"],
+  // F-CR2-2: parenless unrecognised writes. C2's parenthesis condition does
+  // not apply to INV4.
+  [
+    "a parenless EXPLAIN ANALYZE DELETE",
+    "EXPLAIN ANALYZE DELETE FROM audit_outbox WHERE status = 'SENT'",
+    `${UNRECOGNISED} DELETE`,
+  ],
+  [
+    "a parenless PREPARE … AS DELETE",
+    "PREPARE p AS DELETE FROM audit_outbox WHERE status = 'SENT'",
+    `${UNRECOGNISED} DELETE`,
+  ],
+  // F-CR2-1: a CASE expression's WHEN / THEN at MERGE depth are not MERGE
+  // clauses, so a parenless MERGE whose SET uses CASE is read as a MERGE.
+  [
+    "a parenless MERGE whose SET uses CASE",
+    "MERGE INTO audit_outbox t USING audit_outbox s ON t.id = s.id WHEN MATCHED THEN UPDATE SET status = CASE WHEN s.attempt_count > 3 THEN 'FAILED' ELSE 'PENDING' END",
+    "MERGE audit_outbox",
+  ],
+  ["an upsert without any LIMIT", "INSERT INTO t (id, n) VALUES ($1, 0) ON CONFLICT (id) DO UPDATE SET n = t.n + 1", "UPSERT t"],
   [
     "an upsert whose source and DO UPDATE both pin the key",
     "INSERT INTO t (id) SELECT id FROM u WHERE id = $1 ON CONFLICT (id) DO UPDATE SET n = 1 WHERE t.id = $1",
+    "UPSERT t",
   ],
-  ["a MERGE whose ON clause pins the key", "MERGE INTO t USING u ON t.id = u.id AND t.id = $1 WHEN MATCHED THEN DELETE"],
+  ["a MERGE whose ON clause pins the key", "MERGE INTO t USING u ON t.id = u.id AND t.id = $1 WHEN MATCHED THEN DELETE", "MERGE t"],
   [
     "a MERGE without any LIMIT",
     "MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET n = u.n WHEN NOT MATCHED THEN INSERT (id, n) VALUES (u.id, u.n)",
+    "MERGE t",
   ],
   [
     "a MERGE reading a materialized key set (the C1 shape does not apply to MERGE)",
     "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1 FOR UPDATE SKIP LOCKED) MERGE INTO t USING picked p ON t.id = p.id WHEN MATCHED THEN DELETE",
+    "MERGE t",
   ],
 ];
 
@@ -1071,8 +1119,10 @@ const WRITE_FORM_ALLOW: ReadonlyArray<readonly [string, string]> = [
 ];
 
 describe("INV4 write forms (S-CR1-1)", () => {
-  it.each(WRITE_FORM_DENY)("deny: %s", (_label, sql) => {
-    expect(classifySweeps([sqlStatement(sql)], []).map((v) => v.kind)).toContain("unbounded");
+  it.each(WRITE_FORM_DENY)("deny: %s", (_label, sql, detail) => {
+    const violations = classifySweeps([sqlStatement(sql)], []);
+    expect(violations.map((v) => v.kind)).toEqual(["unbounded"]);
+    expect(violations.map((v) => v.detail.split(" (literal line")[0])).toEqual([detail]);
   });
 
   it.each(WRITE_FORM_ALLOW)("allow: %s", (_label, sql) => {
