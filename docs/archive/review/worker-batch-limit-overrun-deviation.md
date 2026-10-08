@@ -20,3 +20,11 @@ So the defect is plan-dependent for M5 and M6. It needs a plan the current index
 Disposition: the M5 and M6 forced-plan tests stay as post-fix cap assertions. The regression path for those two members is closed by C2, which denies the pre-fix shape statically. No further plan-forcing was added. The other way to get a red would be a temporary index created inside the rolled-back test transaction, which takes a SHARE lock on a shared table for the test's duration and adds schema DDL to a cap test; that costs more than it buys, given C2.
 
 Anti-Deferral: this is not a deferral. The fix (C1) applies to M5 and M6. Only the pre-fix red proof is missing, and the reason is recorded above.
+
+## D-2: write detection also checks the write's grammar
+
+C2 identifies a write statement by an `UPDATE` / `DELETE` keyword in statement position. The scanner additionally requires `DELETE FROM <target>` or `UPDATE <target> … SET`, so prose that happens to start with "Update …" (log messages, comments rendered as strings) is not read as a write.
+
+This narrows detection only within PostgreSQL's own grammar: every real write statement has that form. The same check gives C4 the write's target table. It therefore also covers U7: under C1, the old `tableOf` read `SKIP` from `FOR UPDATE SKIP LOCKED`.
+
+Self-test rows pin both sides: prose allow rows, and a lowercase write deny row.

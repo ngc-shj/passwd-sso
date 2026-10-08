@@ -55,19 +55,28 @@ import { Project, ts } from "ts-morph";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, relative } from "node:path";
 
+/** The extension set every walker defaults to. */
+export const DEFAULT_SOURCE_EXTENSIONS = Object.freeze([".ts", ".tsx"]);
+
 /**
- * True for a source file we scan (.ts/.tsx, excluding test files).
+ * True for a source file we scan (an extension in `extensions`, excluding test
+ * files).
  *
  * `.spec.` is listed alongside `.test.` for the reason the module docblock
  * gives: the drift this file exists to stop was one copy excluding `.test.ts`
  * but not `.test.tsx`. A copy excluding `.test.` but not `.spec.` is the same
  * shape. No `.spec.ts` exists under any current scan root, so this changes no
  * gate's selection today — it removes a way for them to disagree tomorrow.
+ *
+ * The test-suffix match is derived from the same `extensions` set, so a gate
+ * that widens the set to `.mjs` cannot scan an `a.test.mjs` the default set
+ * would never have admitted.
  */
-function isScannableSourceFile(name) {
+function isScannableSourceFile(name, extensions = DEFAULT_SOURCE_EXTENSIONS) {
   const ext = extname(name);
-  if (ext !== ".ts" && ext !== ".tsx") return false;
-  return !/\.(test|spec)\.(ts|tsx)$/.test(name);
+  if (!extensions.includes(ext)) return false;
+  const stem = name.slice(0, -ext.length);
+  return !/\.(test|spec)$/.test(stem);
 }
 
 /** A fresh in-memory ts-morph project (no Program / no dependency resolution). */
@@ -132,13 +141,14 @@ export function createProgramProject(tsConfigFilePath) {
 }
 
 /**
- * Recursively collect .ts/.tsx source files under `dir`, EXCLUDING test files
- * (`*.test.*`, `*.spec.*`) and anything under a `__tests__` directory.
+ * Recursively collect source files under `dir` (by default .ts/.tsx; a gate may
+ * pass its own `extensions` list), EXCLUDING test files (`*.test.*`,
+ * `*.spec.*`) and anything under a `__tests__` directory.
  *
  * Missing directories yield an empty list. A SYMLINK throws — see below; that is
  * the one input this walker refuses rather than guessing about.
  */
-export function walkSourceFiles(dir) {
+export function walkSourceFiles(dir, extensions = DEFAULT_SOURCE_EXTENSIONS) {
   const out = [];
   let entries;
   try {
@@ -177,11 +187,11 @@ export function walkSourceFiles(dir) {
     }
     if (e.isDirectory()) {
       if (e.name === "__tests__") continue;
-      out.push(...walkSourceFiles(full));
+      out.push(...walkSourceFiles(full, extensions));
       continue;
     }
     if (!e.isFile()) continue;
-    if (!isScannableSourceFile(e.name)) continue;
+    if (!isScannableSourceFile(e.name, extensions)) continue;
     out.push(full);
   }
   return out;
@@ -192,8 +202,9 @@ export function walkSourceFiles(dir) {
  * recursively) or a SINGLE FILE (included directly if it is a scannable source
  * file). Lets a gate scan a mix like ["src/app/api", "src/lib", "src/auth.ts"]
  * without dropping the single-file entry. Paths are resolved against `root`.
+ * `extensions` is passed through to walkSourceFiles and the single-file check.
  */
-export function collectSourceFiles(targets, root) {
+export function collectSourceFiles(targets, root, extensions = DEFAULT_SOURCE_EXTENSIONS) {
   const out = [];
   for (const t of targets) {
     const full = isAbsolute(t) ? t : join(root, t);
@@ -204,8 +215,8 @@ export function collectSourceFiles(targets, root) {
       continue;
     }
     if (stat.isDirectory()) {
-      out.push(...walkSourceFiles(full));
-    } else if (stat.isFile() && isScannableSourceFile(full)) {
+      out.push(...walkSourceFiles(full, extensions));
+    } else if (stat.isFile() && isScannableSourceFile(full, extensions)) {
       out.push(full);
     }
   }
@@ -225,8 +236,8 @@ export function* sourceFiles(project, srcDir, repoRoot) {
  * Like `sourceFiles`, but over a mixed list of directory/single-file `targets`
  * (see collectSourceFiles). `targets` are resolved against `repoRoot`.
  */
-export function* sourceFilesFrom(project, targets, repoRoot) {
-  for (const file of collectSourceFiles(targets, repoRoot)) {
+export function* sourceFilesFrom(project, targets, repoRoot, extensions = DEFAULT_SOURCE_EXTENSIONS) {
+  for (const file of collectSourceFiles(targets, repoRoot, extensions)) {
     const rel = relative(repoRoot, file).split("\\").join("/");
     const sf = project.createSourceFile(rel, readFileSync(file, "utf8"), {
       overwrite: true,
