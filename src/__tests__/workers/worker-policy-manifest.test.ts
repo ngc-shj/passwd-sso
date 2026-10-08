@@ -19,10 +19,11 @@
  *
  * Per the worker-runtime-invariants plan (C5, INV4/INV5), two further fields are
  * mechanized:
- *   - `sweepBounds` (every `rawSql: true` entry): every extracted raw-SQL
- *     DELETE/UPDATE sweep statement in the entry's modules must be LIMIT-bounded,
- *     single-row-by-id, or covered by exactly one tight, used
- *     `sweepBounds.exemptions[]` entry (INV4).
+ *   - `sweepBounds` (every `rawSql: true` entry): every raw-SQL DELETE/UPDATE
+ *     write statement the shared scanner (scripts/checks/lib/sql-scan.mjs)
+ *     reads in the entry's modules must be capped by a materialized key set
+ *     (worker-batch-limit-overrun plan, C4), single-row-by-id, or covered by
+ *     exactly one tight, used `sweepBounds.exemptions[]` entry (INV4).
  *   - `runtimeBounds` (audit-outbox-worker only): cross-checked against the
  *     literal constants in src/lib/constants/audit/audit.ts and the
  *     `@default(8)` maxAttempts lines in prisma/schema.prisma (INV5).
@@ -43,7 +44,18 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { parseRouteSource } from "../proxy/ast-guards";
-import { Node, SyntaxKind } from "ts-morph";
+import { SyntaxKind } from "ts-morph";
+// The SQL scanner shared with check-limited-subquery-write.mjs (C2), so the
+// two tripwires read write statements, WITH lists and LIMITs the same way.
+import {
+  TOKEN,
+  analyzeSql,
+  keyListOf,
+  matchKeySelect,
+  nameOf,
+  sqlInputFromNode,
+  sqlInputFromSourceText,
+} from "../../../scripts/checks/lib/sql-scan.mjs";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const WORKERS_DIR = path.join(REPO_ROOT, "src/workers");
@@ -162,29 +174,23 @@ export interface SweepViolation {
 }
 
 /**
- * Remove every balanced parenthesised group from a SQL string, leaving only the
- * top-level text. A `LIMIT` or `WHERE key =` buried inside a subselect
- * (`... WHERE EXISTS (SELECT 1 FROM y LIMIT 1)`, `... WHERE col IN (SELECT id
- * FROM y WHERE id = $1)`) does NOT bound or single-row-shape the OUTER
- * DELETE/UPDATE, so boundedness must be judged on the top-level text only. A
- * plain regex cannot strip nested parens; walk the string tracking paren depth
- * and keep only depth-0 characters.
+ * One raw-SQL literal: its source text (what an exemption's `match` and a
+ * violation message read) and the scanner input (the literal's cooked text
+ * split around its `${…}` substitutions, each an opaque token).
  */
-function topLevelSql(statement: string): string {
-  let depth = 0;
-  let out = "";
-  for (const ch of statement) {
-    if (ch === "(") {
-      depth++;
-      continue;
-    }
-    if (ch === ")") {
-      if (depth > 0) depth--;
-      continue;
-    }
-    if (depth === 0) out += ch;
-  }
-  return out;
+type SqlInput = ReturnType<typeof sqlInputFromSourceText>;
+
+export interface SweepStatement {
+  text: string;
+  input: SqlInput;
+}
+
+type SqlAnalysis = ReturnType<typeof analyzeSql>;
+type SqlWrite = SqlAnalysis["writes"][number];
+
+/** A test-side statement built from template source text (`…${expr}…`). */
+function sqlStatement(text: string): SweepStatement {
+  return { text, input: sqlInputFromSourceText(text) };
 }
 
 // Per-table primary/unique-key registry (S6): a single-row pass or an exemption
@@ -198,101 +204,190 @@ const PK_BY_TABLE: Record<string, readonly string[]> = {
 // Every table has `id` as its primary key unless overridden above.
 const DEFAULT_PK_COLUMNS = ["id"] as const;
 
-function tableOf(statement: string): string | null {
-  // Outer DELETE FROM <table> or UPDATE <table>. Table may be quoted.
-  const m =
-    /\bDELETE\s+FROM\s+"?(\w+)"?/i.exec(statement) ??
-    /\bUPDATE\s+"?(\w+)"?/i.exec(statement);
-  return m ? m[1] : null;
-}
-
-function pkColumnsOf(statement: string): readonly string[] {
-  const table = tableOf(statement);
-  return (table !== null ? PK_BY_TABLE[table] : undefined) ?? DEFAULT_PK_COLUMNS;
-}
-
 /**
- * True when the statement's TOP-LEVEL WHERE is a single-row equality on a
- * primary/unique key of the statement's own table — e.g.
- * `UPDATE audit_chain_anchors ... WHERE tenant_id = $3` (tenant_id is that
- * table's PK) or any `... WHERE id = $1`. A `WHERE tenant_id =` on a table
- * whose PK is `id` is NOT single-row and is rejected.
+ * Key columns of the write's target table. The target comes from the
+ * scanner's reading of the write's own grammar (`DELETE FROM <t>` /
+ * `UPDATE <t> … SET`), so `FOR UPDATE SKIP LOCKED` in a CTE body is never
+ * read as a table. An opaque `${…}` target has no name and resolves to the
+ * default key (declared residual).
  */
-function isTopLevelSingleRowByKey(statement: string): boolean {
-  const top = topLevelSql(statement);
-  return pkColumnsOf(statement).some((key) =>
-    new RegExp(`\\bWHERE\\s+"?${key}"?\\s*=`, "i").test(top),
-  );
+function pkColumnsOf(write: SqlWrite): readonly string[] {
+  const table = write.target.name;
+  if (table !== null && Object.hasOwn(PK_BY_TABLE, table)) return PK_BY_TABLE[table];
+  return DEFAULT_PK_COLUMNS;
+}
+
+// A right-hand side that names one value: `$1`, `42`, `'x'`, `${v}`.
+const SCALAR_TOKEN_TYPES: ReadonlySet<string> = new Set([
+  TOKEN.PARAM,
+  TOKEN.NUMBER,
+  TOKEN.STRING,
+  TOKEN.OPAQUE,
+]);
+
+/** True when tokens [from, end) are only `::type` casts. */
+function isCastsOnly(analysis: SqlAnalysis, from: number, end: number): boolean {
+  const { tokens } = analysis;
+  for (let j = from; j < end; j += 3) {
+    if (tokens[j]?.text !== ":" || tokens[j + 1]?.text !== ":" || tokens[j + 2]?.type !== TOKEN.WORD) {
+      return false;
+    }
+    if (j + 3 > end) return false;
+  }
+  return true;
 }
 
 /**
- * True when the statement bounds its DELETE/UPDATE row set by a LIMIT that
- * actually caps the *key set being mutated* — the canonical
- * `... WHERE <keys> IN (SELECT <keys> FROM <same table> WHERE ... LIMIT n)`
- * shape used by every capped sweep in this codebase. This is the crucial
- * distinction the review flagged: a LIMIT inside a subselect bounds the outer
- * statement ONLY when that subselect selects the same key set fed to
- * `WHERE <keys> IN (…)`. A LIMIT inside an EXISTS/scalar probe
- * (`WHERE EXISTS (SELECT 1 … LIMIT 1)`) does NOT cap the deleted rows.
+ * True when every key column of the write's table is pinned by a top-level
+ * AND conjunct `<key> = <one value>[::type]` — e.g.
+ * `UPDATE audit_chain_anchors ... WHERE tenant_id = $3::uuid` (tenant_id is
+ * that table's PK) or any `... WHERE id = $1`. An equality under OR or NOT,
+ * inside a subselect, against `ANY(…)` or a column, or on a column that is not
+ * the table's key does not count.
+ */
+function isTopLevelSingleRowByKey(analysis: SqlAnalysis, write: SqlWrite): boolean {
+  const { tokens } = analysis;
+  const pinned = new Set<string>();
+  // A conjunct under a top-level OR or a leading NOT is never exactly
+  // `<key> = <value>`, so the shape check below excludes it too.
+  for (const c of write.conjuncts) {
+    const key = tokens[c.start];
+    const op = tokens[c.start + 1];
+    const value = tokens[c.start + 2];
+    if (key.type !== TOKEN.WORD && key.type !== TOKEN.QIDENT) continue;
+    if (op?.type !== TOKEN.OP || op.text !== "=") continue;
+    if (value === undefined || !SCALAR_TOKEN_TYPES.has(value.type)) continue;
+    if (!isCastsOnly(analysis, c.start + 3, c.end)) continue;
+    const name = nameOf(key);
+    if (name !== null) pinned.add(name);
+  }
+  return pkColumnsOf(write).every((key) => pinned.has(key));
+}
+
+/** Tokens of type OPAQUE in [start, end). */
+function opaqueCount(analysis: SqlAnalysis, start: number, end: number): number {
+  return analysis.tokens.slice(start, end).filter((t) => t.type === TOKEN.OPAQUE).length;
+}
+
+/**
+ * The IN group's key list names exactly the write's mutated keys: the table's
+ * key columns, or one identical `${…}` substitution in both positions (M11,
+ * M12 — C4 cannot resolve it to a key; declared residual).
+ */
+function isWriteKeyList(
+  analysis: SqlAnalysis,
+  write: SqlWrite,
+  group: NonNullable<SqlWrite["conjuncts"][number]["inGroup"]>,
+  keys: readonly string[],
+): boolean {
+  if (
+    keys.length === 1 &&
+    opaqueCount(analysis, group.lhs.start, group.lhs.end) === 1 &&
+    opaqueCount(analysis, group.open + 1, group.close ?? group.open + 1) === 1
+  ) {
+    return true;
+  }
+  const pk = pkColumnsOf(write);
+  return keys.length === pk.length && pk.every((key) => keys.includes(key));
+}
+
+// A LIMIT argument that is one bounded value. `LIMIT ALL` and `LIMIT NULL`
+// (or any expression the scanner cannot read as one value) do not bound.
+const BOUNDING_LIMIT_ARG_TYPES: ReadonlySet<string> = new Set([TOKEN.PARAM, TOKEN.NUMBER, TOKEN.OPAQUE]);
+
+function isBoundingLimit(analysis: SqlAnalysis, limitIndex: number): boolean {
+  const limit = analysis.limits[limitIndex];
+  if (limit.kind !== "LIMIT") return false;
+  const arg = analysis.tokens[limit.token + 1];
+  return arg !== undefined && BOUNDING_LIMIT_ARG_TYPES.has(arg.type);
+}
+
+/**
+ * True when the write caps its mutated key set with the C1 shape
+ * (worker-batch-limit-overrun plan, C4):
  *
- * The left side may be a single column (`WHERE id IN`), a parenthesised key
- * list / composite key (`WHERE (id) IN`, `WHERE (tenant_id, id) IN`), or a
- * template-interpolated key list (`WHERE (${keyList}) IN`). The requirement is
- * that the outer IN-list keys are byte-identical to the inner SELECT projection
- * (so the LIMIT bounds exactly the keys being deleted), and the subselect has a
- * LIMIT before the matching close paren.
+ *   WITH <cte> AS MATERIALIZED (SELECT <keys> … LIMIT n)
+ *   <UPDATE|DELETE> … WHERE … AND (<keys>) IN (SELECT <keys> FROM <cte>) AND …
+ *
+ * Every clause is required:
+ *   - the IN is a top-level AND conjunct of the write's own WHERE (not under
+ *     OR or NOT — the scanner links `inGroup` only then);
+ *   - the IN body is exactly `SELECT <keys> FROM <name>`: no WHERE, set
+ *     operation, join or second FROM item;
+ *   - the IN list and the projection are the same keys, and they are the
+ *     table's key columns (or one identical `${…}`);
+ *   - <name> is a CTE of the write's own WITH list, which sits at the
+ *     literal's depth 0, declared before the write when the write is itself a
+ *     CTE body (a non-recursive WITH sees only earlier CTEs);
+ *   - that CTE is `AS MATERIALIZED` (token-exact) — an inlined CTE is the
+ *     rescannable pre-fix shape again;
+ *   - its body has a top-level `LIMIT` with one bounded value.
+ * A materialized CTE is evaluated once per statement, so the LIMIT caps the
+ * keys the write can touch. Anything else is "unbounded".
  */
-function isKeySetLimited(statement: string): boolean {
-  // Capture: WHERE <lhs> IN ( SELECT <proj> FROM ... LIMIT ... )
-  // lhs / proj may be `col`, `"col"`, `(col)`, `(a, b)`, or `(${x})`.
-  const re =
-    /\bWHERE\s+\(?\s*([\w$.,"' {}]+?)\s*\)?\s+IN\s*\(\s*SELECT\s+\(?\s*([\w$.,"' {}]+?)\s*\)?\s+FROM\b[\s\S]*?\bLIMIT\b[\s\S]*?\)/i;
-  const m = re.exec(statement);
-  if (!m) return false;
-  // Normalize away whitespace AND quoting so `"id"` == `id`.
-  const normalize = (s: string): string => s.replace(/[\s"']/g, "");
-  // The IN-list keys must equal the SELECT projection — the LIMIT then bounds
-  // exactly the mutated key set.
-  return normalize(m[1]) === normalize(m[2]);
+function isKeySetLimited(analysis: SqlAnalysis, write: SqlWrite): boolean {
+  if (write.withList === null) return false;
+  const list = analysis.withLists[write.withList];
+  if (list.depth !== 0) return false;
+  return write.conjuncts.some((conjunct) => {
+    const group = conjunct.inGroup;
+    if (group === null) return false;
+    const select = matchKeySelect(analysis, group.open, group.close);
+    if (select === null) return false;
+    const keys = keyListOf(analysis, group.lhs.start, group.lhs.end);
+    if (keys === null || keys.length !== select.keys.length) return false;
+    if (!keys.every((key, i) => key === select.keys[i])) return false;
+    if (!isWriteKeyList(analysis, write, group, keys)) return false;
+    const cteIndex = list.ctes.findIndex((cte) => cte.name === select.from);
+    if (cteIndex === -1) return false;
+    if (write.cte !== null && (list.recursive ? cteIndex === write.cte : cteIndex >= write.cte)) return false;
+    const cte = list.ctes[cteIndex];
+    return cte.materialized && cte.limits.some((idx) => isBoundingLimit(analysis, idx));
+  });
 }
 
 /**
- * A statement is genuinely bounded iff it either mutates a single row by its
- * table's PK, or caps the mutated key set with a `WHERE <pk> IN (SELECT <pk> …
- * LIMIT n)`. A top-level `LIMIT` alone would also bound it, but Postgres does
- * not allow a bare `LIMIT` on DELETE/UPDATE, so the key-set-IN form is the real
- * shape — checked explicitly so a subselect-internal LIMIT that does NOT cap the
- * key set (EXISTS probe) is correctly rejected.
+ * A write is bounded iff it mutates a single row by its table's PK, or caps
+ * its mutated key set with the C1 shape. Postgres has no `LIMIT` on
+ * DELETE/UPDATE, so a LIMIT anywhere else (an EXISTS probe, a subselect
+ * inside IN) does not bound it.
  */
-function isBounded(statement: string): boolean {
-  return isTopLevelSingleRowByKey(statement) || isKeySetLimited(statement);
+function isBounded(analysis: SqlAnalysis, write: SqlWrite): boolean {
+  return isTopLevelSingleRowByKey(analysis, write) || isKeySetLimited(analysis, write);
+}
+
+function describeWrite(write: SqlWrite): string {
+  const target = write.target.name ?? (write.target.opaque !== null ? `\${${write.target.opaque}}` : "?");
+  return `${write.kind} ${target} (literal line ${write.line + 1})`;
 }
 
 /**
- * Pure classifier: given the extracted SQL statement strings for one worker
- * module (or the union of a worker's modules) plus the exemptions scoped to
- * that module, returns the list of sweep-boundedness violations. An empty
- * array means every statement passes.
+ * Pure classifier: given the raw-SQL literals holding a write for one worker
+ * module plus the exemptions scoped to that module, returns the list of
+ * sweep-boundedness violations. Every write statement in a literal is judged
+ * on its own, so a bounded write does not carry a second write in the same
+ * literal. An empty array means every write passes.
  */
 export function classifySweeps(
-  statements: string[],
+  statements: SweepStatement[],
   exemptions: SweepExemption[],
 ): SweepViolation[] {
   const violations: SweepViolation[] = [];
+  const analysed = statements.map((statement) => ({ statement, analysis: analyzeSql(statement.input) }));
+  const isSingleRowLiteral = ({ analysis }: (typeof analysed)[number]): boolean =>
+    analysis.writes.length > 0 && analysis.writes.every((write) => isTopLevelSingleRowByKey(analysis, write));
 
-  // Pre-compute, for every exemption, which statements its `match` hits and
-  // whether the statement it identifies is itself already bounded (an exemption
-  // may only DOCUMENT an already-single-row statement, never GRANT boundedness
-  // to an unbounded sweep — S5/S6).
-  const exemptionMatchCounts = exemptions.map((exemption) => {
-    const matchingStatements = statements.filter((statement) =>
-      statement.includes(exemption.match),
-    );
-    return { exemption, matchingStatements };
-  });
+  // Pre-compute, for every exemption, which literals its `match` hits and
+  // whether the literal it identifies is itself already single-row (an
+  // exemption may only DOCUMENT an already-single-row statement, never GRANT
+  // boundedness to an unbounded sweep — S5/S6).
+  const exemptionMatches = exemptions.map((exemption) => ({
+    exemption,
+    matching: analysed.filter(({ statement }) => statement.text.includes(exemption.match)),
+  }));
 
-  for (const { exemption, matchingStatements } of exemptionMatchCounts) {
-    if (matchingStatements.length === 0) {
+  for (const { exemption, matching } of exemptionMatches) {
+    if (matching.length === 0) {
       violations.push({
         statement: exemption.match,
         kind: "unused-exemption",
@@ -300,82 +395,79 @@ export function classifySweeps(
       });
       continue;
     }
-    if (matchingStatements.length >= 2) {
+    if (matching.length >= 2) {
       violations.push({
         statement: exemption.match,
         kind: "ambiguous-exemption",
-        detail: `exemption match "${exemption.match}" (module ${exemption.module}) matches ${matchingStatements.length} statements — must match exactly 1`,
+        detail: `exemption match "${exemption.match}" (module ${exemption.module}) matches ${matching.length} statements — must match exactly 1`,
       });
       continue;
     }
-    const [target] = matchingStatements;
-    // Tightness gate: the exemption's target must be a top-level single-row
-    // equality on its table's PK (subselects stripped). LIMIT is NOT accepted
-    // here — a LIMIT-bounded statement needs no exemption (it passes on its own).
-    if (!isTopLevelSingleRowByKey(target)) {
+    // Tightness gate: every write in the target literal must be a top-level
+    // single-row equality on its table's PK (subselects do not count). A
+    // key-set-bounded write needs no exemption (it passes on its own).
+    if (!isSingleRowLiteral(matching[0])) {
       violations.push({
-        statement: target,
+        statement: matching[0].statement.text,
         kind: "loose-exemption",
-        detail: `exemption match "${exemption.match}" (module ${exemption.module}) identifies a statement that is not a top-level single-row equality on the table's primary key (subselect-internal equality or a non-PK column does not count): ${target}`,
+        detail: `exemption match "${exemption.match}" (module ${exemption.module}) identifies a statement that is not a top-level single-row equality on the table's primary key (subselect-internal equality or a non-PK column does not count): ${matching[0].statement.text}`,
       });
     }
   }
 
-  const tightlyExemptedStatements = new Set(
-    exemptionMatchCounts
-      .filter(
-        ({ matchingStatements }) =>
-          matchingStatements.length === 1 &&
-          isTopLevelSingleRowByKey(matchingStatements[0]),
-      )
-      .map(({ matchingStatements }) => matchingStatements[0]),
+  const tightlyExempted = new Set(
+    exemptionMatches
+      .filter(({ matching }) => matching.length === 1 && isSingleRowLiteral(matching[0]))
+      .map(({ matching }) => matching[0]),
   );
 
-  for (const statement of statements) {
-    if (isBounded(statement)) continue;
-    if (tightlyExemptedStatements.has(statement)) continue;
-    violations.push({
-      statement,
-      kind: "unbounded",
-      detail: `no top-level LIMIT, no top-level single-row PK equality, and no valid exemption covers this statement: ${statement}`,
-    });
+  for (const entry of analysed) {
+    if (tightlyExempted.has(entry)) continue;
+    for (const write of entry.analysis.writes) {
+      if (isBounded(entry.analysis, write)) continue;
+      violations.push({
+        statement: entry.statement.text,
+        kind: "unbounded",
+        detail: `${describeWrite(write)}: not a top-level single-row PK equality, not \`(<keys>) IN (SELECT <keys> FROM <materialized CTE with LIMIT>)\` as a top-level AND conjunct, and no valid exemption covers it: ${entry.statement.text}`,
+      });
+    }
   }
 
   return violations;
 }
 
 // ---------------------------------------------------------------------------
-// C5 extraction (assertion 1): pull every string/template literal's full text
-// out of a module's AST and keep only DELETE FROM / leading UPDATE candidates.
+// C5 extraction (assertion 1): every string/template literal in a module's AST
+// that the shared scanner reads as holding a write statement (statement-
+// position UPDATE/DELETE with its own grammar, any case).
 // ---------------------------------------------------------------------------
 
-const SWEEP_CANDIDATE_RE = /DELETE FROM|\bUPDATE\s/;
+const LITERAL_KINDS = [
+  SyntaxKind.StringLiteral,
+  SyntaxKind.NoSubstitutionTemplateLiteral,
+  SyntaxKind.TemplateExpression,
+] as const;
 
-function extractSweepStatements(modulePath: string): string[] {
-  const source = readFileSync(path.join(REPO_ROOT, modulePath), "utf8");
+function extractSweepStatementsFromSource(source: string, modulePath: string): SweepStatement[] {
   const sf = parseRouteSource(source, modulePath);
-  const statements: string[] = [];
-
-  const kinds = [
-    SyntaxKind.StringLiteral,
-    SyntaxKind.NoSubstitutionTemplateLiteral,
-    SyntaxKind.TemplateExpression,
-  ];
-  for (const kind of kinds) {
+  const statements: SweepStatement[] = [];
+  for (const kind of LITERAL_KINDS) {
     for (const node of sf.getDescendantsOfKind(kind)) {
-      // Skip TemplateExpression nodes that are nested inside another
-      // TemplateExpression's span (not applicable here — TemplateExpression
-      // does not nest within itself via getDescendantsOfKind double-counting,
-      // but guard defensively against a Head/Middle/Tail child also being
-      // separately visited under a different kind).
-      if (kind === SyntaxKind.TemplateExpression && !Node.isTemplateExpression(node)) continue;
-      const text = node.getText();
-      if (SWEEP_CANDIDATE_RE.test(text)) {
-        statements.push(text);
+      const input = sqlInputFromNode(node);
+      if (input === null) continue;
+      if (analyzeSql(input).writes.length > 0) {
+        statements.push({ text: node.getText(), input });
       }
     }
   }
   return statements;
+}
+
+function extractSweepStatements(modulePath: string): SweepStatement[] {
+  return extractSweepStatementsFromSource(
+    readFileSync(path.join(REPO_ROOT, modulePath), "utf8"),
+    modulePath,
+  );
 }
 
 describe("worker-policy-manifest.json parity", () => {
@@ -620,22 +712,29 @@ describe("worker-policy-manifest.json parity", () => {
 });
 
 describe("classifySweeps self-test (RT7 proof — the guard must be able to fail)", () => {
+  const classify = (texts: string[], exemptions: SweepExemption[] = []): SweepViolation[] =>
+    classifySweeps(texts.map(sqlStatement), exemptions);
+
   it("(a) an unbounded DELETE with no LIMIT, no WHERE id=, no exemption is flagged", () => {
-    const violations = classifySweeps(["DELETE FROM x WHERE status = 'SENT'"], []);
+    const violations = classify(["DELETE FROM x WHERE status = 'SENT'"]);
     expect(violations).toHaveLength(1);
     expect(violations[0].kind).toBe("unbounded");
   });
 
-  it("(b) a DELETE with a TOP-LEVEL LIMIT passes", () => {
-    const violations = classifySweeps(
-      ["DELETE FROM x WHERE id IN (SELECT id FROM x WHERE status = 'SENT' LIMIT 5)"],
-      [],
-    );
+  it("(b) a DELETE capped by a materialized key-set CTE (C1 shape) passes", () => {
+    const violations = classify([
+      "WITH picked AS MATERIALIZED (SELECT id FROM x WHERE status = 'SENT' LIMIT 5) DELETE FROM x WHERE id IN (SELECT id FROM picked)",
+    ]);
     expect(violations).toEqual([]);
   });
 
+  it("(b2) the pre-fix shape — LIMIT inside the IN subselect, which a rescan re-evaluates — is flagged", () => {
+    const violations = classify(["DELETE FROM x WHERE id IN (SELECT id FROM x WHERE status = 'SENT' LIMIT 5)"]);
+    expect(violations.map((v) => v.kind)).toEqual(["unbounded"]);
+  });
+
   it("(c) a single-row top-level WHERE id = statement passes", () => {
-    const violations = classifySweeps(["DELETE FROM x WHERE id = $1"], []);
+    const violations = classify(["DELETE FROM x WHERE id = $1"]);
     expect(violations).toEqual([]);
   });
 
@@ -643,7 +742,7 @@ describe("classifySweeps self-test (RT7 proof — the guard must be able to fail
     // audit_chain_anchors' PK is tenant_id (PK_BY_TABLE), so this UPDATE is a
     // bona-fide single-row statement and is NOT itself unbounded. The stale
     // exemption (its match never appears) is still flagged unused.
-    const violations = classifySweeps(
+    const violations = classify(
       ["UPDATE audit_chain_anchors SET a=1 WHERE tenant_id = $1"],
       [{ module: "m", match: "UPDATE nonexistent", reason: "x".repeat(10) }],
     );
@@ -652,7 +751,7 @@ describe("classifySweeps self-test (RT7 proof — the guard must be able to fail
   });
 
   it("(e) an over-broad exemption targeting an unbounded, non-PK-WHERE statement is rejected as loose-exemption", () => {
-    const violations = classifySweeps(
+    const violations = classify(
       ["DELETE FROM x WHERE status='SENT'"],
       [{ module: "m", match: "DELETE FROM x", reason: "x".repeat(10) }],
     );
@@ -660,36 +759,23 @@ describe("classifySweeps self-test (RT7 proof — the guard must be able to fail
   });
 
   it("(f) an exemption targeting a statement whose only equality is inside a subselect is rejected as loose-exemption, not silently passed", () => {
-    const statements = [
-      "DELETE FROM x WHERE id IN (SELECT id FROM x WHERE status = 'PROCESSING')",
-    ];
-    const violations = classifySweeps(statements, [
-      { module: "m", match: "DELETE FROM x", reason: "x".repeat(10) },
-    ]);
+    const violations = classify(
+      ["DELETE FROM x WHERE id IN (SELECT id FROM x WHERE status = 'PROCESSING')"],
+      [{ module: "m", match: "DELETE FROM x", reason: "x".repeat(10) }],
+    );
     expect(violations.some((v) => v.kind === "loose-exemption")).toBe(true);
   });
 
   it("(g) flags an unbounded DELETE whose only WHERE id= is inside a subselect", () => {
-    // The outer DELETE has no top-level LIMIT and no exemption; its only
-    // `WHERE id =` is buried in a subselect, so it is NOT top-level
-    // single-row-shaped. The top-level-only judgement strips the subselect and
-    // sees an unbounded multi-row sweep.
-    const violations = classifySweeps(
-      ["DELETE FROM x WHERE owner_id IN (SELECT owner_id FROM y WHERE id = $1)"],
-      [],
-    );
+    // The outer DELETE's only `WHERE id =` is buried in a subselect, so it is
+    // NOT top-level single-row-shaped: an unbounded multi-row sweep.
+    const violations = classify(["DELETE FROM x WHERE owner_id IN (SELECT owner_id FROM y WHERE id = $1)"]);
     expect(violations.some((v) => v.kind === "unbounded")).toBe(true);
   });
 
-  it("(h) flags an unbounded DELETE whose only LIMIT is inside a subselect (top-level LIMIT judgement)", () => {
-    // `DELETE FROM x WHERE EXISTS (SELECT 1 FROM y LIMIT 1)` — the LIMIT bounds
-    // the EXISTS probe, not the number of x rows deleted. A regex that matched
-    // LIMIT anywhere would pass this unbounded sweep; the top-level judgement
-    // strips the subselect and correctly flags it.
-    const violations = classifySweeps(
-      ["DELETE FROM x WHERE EXISTS (SELECT 1 FROM y LIMIT 1)"],
-      [],
-    );
+  it("(h) flags an unbounded DELETE whose only LIMIT is inside an EXISTS probe", () => {
+    // The LIMIT bounds the EXISTS probe, not the number of x rows deleted.
+    const violations = classify(["DELETE FROM x WHERE EXISTS (SELECT 1 FROM y LIMIT 1)"]);
     expect(violations.some((v) => v.kind === "unbounded")).toBe(true);
   });
 
@@ -698,7 +784,7 @@ describe("classifySweeps self-test (RT7 proof — the guard must be able to fail
     // tenant. An exemption must not be able to declare it single-row just
     // because the column happens to be named tenant_id (which IS the PK on a
     // different table, audit_chain_anchors).
-    const violations = classifySweeps(
+    const violations = classify(
       ["DELETE FROM audit_outbox WHERE tenant_id = $1"],
       [{ module: "m", match: "DELETE FROM audit_outbox", reason: "x".repeat(10) }],
     );
@@ -708,10 +794,198 @@ describe("classifySweeps self-test (RT7 proof — the guard must be able to fail
   it("(j) accepts the genuine anchor exemption: WHERE tenant_id = on audit_chain_anchors (its PK)", () => {
     // The one real exemption in the manifest. tenant_id IS audit_chain_anchors'
     // primary key, so this is a legitimate single-row UPDATE.
-    const violations = classifySweeps(
-      ["UPDATE audit_chain_anchors SET chain_seq=$1, prev_hash=$2 WHERE tenant_id = $3"],
-      [],
-    );
+    const violations = classify([
+      "UPDATE audit_chain_anchors SET chain_seq=$1, prev_hash=$2 WHERE tenant_id = $3::uuid",
+    ]);
     expect(violations).toEqual([]);
+  });
+
+  it("(k) a single-row equality against ANY(…) or a column is not single-row", () => {
+    expect(classify(["DELETE FROM x WHERE id = ANY($1)"]).map((v) => v.kind)).toEqual(["unbounded"]);
+    expect(classify(["DELETE FROM x WHERE id = id"]).map((v) => v.kind)).toEqual(["unbounded"]);
+  });
+
+  it("(k2) a key equality under a top-level OR or a leading NOT is not single-row", () => {
+    expect(classify(["DELETE FROM x WHERE id = $1 OR status = 'SENT'"]).map((v) => v.kind)).toEqual(["unbounded"]);
+    expect(classify(["DELETE FROM x WHERE NOT id = $1"]).map((v) => v.kind)).toEqual(["unbounded"]);
+  });
+
+  it("(l) an exemption cannot carry a second, unbounded write in its literal", () => {
+    const violations = classify(
+      ["UPDATE audit_chain_anchors SET a = 1 WHERE tenant_id = $1; DELETE FROM audit_outbox WHERE status = 'SENT'"],
+      [{ module: "m", match: "UPDATE audit_chain_anchors", reason: "x".repeat(10) }],
+    );
+    expect(violations.map((v) => v.kind).sort()).toEqual(["loose-exemption", "unbounded"]);
+  });
+});
+
+// C4 pairs (worker-batch-limit-overrun plan): each deny row breaks exactly one
+// clause of the C1 shape that the allow rows satisfy.
+const C1_CLAIM =
+  "WITH picked AS MATERIALIZED (SELECT id FROM t WHERE status = 'PENDING' ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED) " +
+  "UPDATE t SET status = 'PROCESSING' WHERE id IN (SELECT id FROM picked) AND status = 'PENDING' RETURNING *";
+
+const C4_DENY: ReadonlyArray<readonly [string, string]> = [
+  [
+    "a CTE body without LIMIT, plus a NOT EXISTS (… LIMIT 1) probe",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t WHERE status = 'SENT') DELETE FROM t WHERE id IN (SELECT id FROM picked) AND NOT EXISTS (SELECT 1 FROM u WHERE u.t_id = t.id LIMIT 1)",
+  ],
+  [
+    "the IN under a top-level OR",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1) DELETE FROM t WHERE id IN (SELECT id FROM picked) OR status = 'SENT'",
+  ],
+  [
+    "the IN under NOT",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1) DELETE FROM t WHERE NOT (id IN (SELECT id FROM picked))",
+  ],
+  [
+    "an IN body with UNION",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1) DELETE FROM t WHERE id IN (SELECT id FROM picked UNION SELECT id FROM t)",
+  ],
+  [
+    "an IN body with a JOIN",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1) DELETE FROM t WHERE id IN (SELECT id FROM picked JOIN t USING (id))",
+  ],
+  [
+    "an IN body with a second FROM item",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1) DELETE FROM t WHERE id IN (SELECT id FROM picked, t)",
+  ],
+  [
+    "a non-key IN column",
+    "WITH picked AS MATERIALIZED (SELECT tenant_id FROM t LIMIT $1) DELETE FROM t WHERE tenant_id IN (SELECT tenant_id FROM picked)",
+  ],
+  [
+    "an IN list that differs from the projection",
+    "WITH picked AS MATERIALIZED (SELECT owner_id FROM t LIMIT $1) DELETE FROM t WHERE id IN (SELECT owner_id FROM picked)",
+  ],
+  ["LIMIT ALL", "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT ALL) DELETE FROM t WHERE id IN (SELECT id FROM picked)"],
+  ["LIMIT NULL", "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT NULL) DELETE FROM t WHERE id IN (SELECT id FROM picked)"],
+  [
+    "a LIMIT nested below the CTE body's top level",
+    "WITH picked AS MATERIALIZED (SELECT id FROM (SELECT id FROM t LIMIT $1) s) DELETE FROM t WHERE id IN (SELECT id FROM picked)",
+  ],
+  ["a CTE without MATERIALIZED", "WITH picked AS (SELECT id FROM t LIMIT $1) DELETE FROM t WHERE id IN (SELECT id FROM picked)"],
+  [
+    "a CTE declared AS NOT MATERIALIZED",
+    "WITH picked AS NOT MATERIALIZED (SELECT id FROM t LIMIT $1) DELETE FROM t WHERE id IN (SELECT id FROM picked)",
+  ],
+  [
+    "an IN reading a different CTE name",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1), other AS (SELECT id FROM t) DELETE FROM t WHERE id IN (SELECT id FROM other)",
+  ],
+  [
+    "an IN reading a CTE declared after the write's own CTE (not in scope: resolves to a table)",
+    "WITH deleted AS (DELETE FROM t WHERE id IN (SELECT id FROM picked) RETURNING id), picked AS MATERIALIZED (SELECT id FROM t LIMIT $1) SELECT count(*) FROM deleted",
+  ],
+  [
+    "a materialized key set in a nested WITH scope, not the literal's depth-0 list",
+    "WITH d AS (WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1) DELETE FROM t WHERE id IN (SELECT id FROM picked) RETURNING id) SELECT count(*) FROM d",
+  ],
+  [
+    "nested-scope shadowing: the write binds `picked` to the inner, unbounded CTE",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1), d AS (WITH picked AS (SELECT id FROM t) DELETE FROM t WHERE id IN (SELECT id FROM picked) RETURNING id) SELECT count(*) FROM d",
+  ],
+  [
+    "a second, unbounded write in the same literal as a bounded one",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1), d AS (DELETE FROM t WHERE id IN (SELECT id FROM picked) RETURNING id) UPDATE t SET status = 'X' WHERE status = 'SENT'",
+  ],
+  ["a lowercase unbounded write", "delete from t where status = 'SENT'"],
+  [
+    "a C1 shape keyed on id for a table whose key is tenant_id (PK_BY_TABLE)",
+    "WITH picked AS MATERIALIZED (SELECT id FROM audit_chain_anchors LIMIT $1 FOR UPDATE SKIP LOCKED) UPDATE audit_chain_anchors SET a = 1 WHERE (id) IN (SELECT id FROM picked)",
+  ],
+  [
+    "an opaque ${…} target table resolves to the default id key, so a tenant_id key list is not its key",
+    "WITH picked AS MATERIALIZED (SELECT tenant_id FROM ${tableIdent} LIMIT $1) DELETE FROM ${tableIdent} WHERE (tenant_id) IN (SELECT tenant_id FROM picked)",
+  ],
+  [
+    "a ${…} key list mixed with a named column (not one identical substitution)",
+    "WITH picked AS MATERIALIZED (SELECT ${keyList}, owner_id FROM ${tableIdent} LIMIT $1) DELETE FROM ${tableIdent} WHERE (${keyList}, owner_id) IN (SELECT ${keyList}, owner_id FROM picked)",
+  ],
+  [
+    "${…} key lists whose substitution text differs between the two positions",
+    "WITH picked AS MATERIALIZED (SELECT ${keyList} FROM ${tableIdent} LIMIT $1) DELETE FROM ${tableIdent} WHERE (${otherKeys}) IN (SELECT ${keyList} FROM picked)",
+  ],
+];
+
+const C4_ALLOW: ReadonlyArray<readonly [string, string]> = [
+  ["the C1 claim shape", C1_CLAIM],
+  [
+    "the C1 shape with FOR UPDATE on a PK_BY_TABLE override table (target read from the write, not from SKIP)",
+    "WITH picked AS MATERIALIZED (SELECT tenant_id FROM audit_chain_anchors ORDER BY tenant_id LIMIT $1 FOR UPDATE SKIP LOCKED) UPDATE audit_chain_anchors SET a = 1 WHERE (tenant_id) IN (SELECT tenant_id FROM picked)",
+  ],
+  [
+    "the C1 shape as a CTE-body write reading an earlier CTE",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $2), deleted AS (DELETE FROM t WHERE id IN (SELECT id FROM picked) RETURNING id, tenant_id) SELECT tenant_id, COUNT(*) FROM deleted GROUP BY tenant_id",
+  ],
+  [
+    "residual: identical ${…} key lists in both positions (cannot be resolved to a key)",
+    "WITH picked AS MATERIALIZED (SELECT ${keyList} FROM ${tableIdent} LIMIT $1) DELETE FROM ${tableIdent} WHERE (${keyList}) IN (SELECT ${keyList} FROM picked)",
+  ],
+  [
+    "residual: an opaque ${…} target table resolves to the default id key",
+    "WITH picked AS MATERIALIZED (SELECT id FROM ${tableIdent} LIMIT $1) DELETE FROM ${tableIdent} WHERE (id) IN (SELECT id FROM picked)",
+  ],
+];
+
+describe("C4 sweepBounds pairs — the C1 shape and each broken clause", () => {
+  it.each(C4_DENY)("deny: %s", (_label, sql) => {
+    expect(classifySweeps([sqlStatement(sql)], []).map((v) => v.kind)).toContain("unbounded");
+  });
+
+  it.each(C4_ALLOW)("allow: %s", (_label, sql) => {
+    expect(classifySweeps([sqlStatement(sql)], [])).toEqual([]);
+  });
+});
+
+// The fifteen members (worker-batch-limit-overrun plan, M1–M15) read from the
+// worker sources as they stand, so a member drifting out of the C1 shape fails
+// here by name and the allow side cannot drift from production.
+const C1_MEMBERS: ReadonlyArray<readonly [string, string]> = [
+  ["src/workers/audit-outbox-worker.ts", "claimOutboxBatchInTx"],
+  ["src/workers/audit-outbox-worker.ts", "claimDeliveriesInTx"],
+  ["src/workers/audit-outbox-worker.ts", "claimWebhookDeliveriesInTx"],
+  ["src/workers/audit-outbox-worker.ts", "reapStuckRowsInTx"],
+  ["src/workers/audit-outbox-worker.ts", "reapStuckDeliveriesInTx"],
+  ["src/workers/audit-outbox-worker.ts", "reapStuckWebhookDeliveriesInTx"],
+  ["src/workers/audit-outbox-worker.ts", "purgeDeliveryRetentionInTx"],
+  ["src/workers/audit-outbox-worker.ts", "purgeWebhookDeliveryRetentionInTx"],
+  ["src/workers/audit-outbox-worker.ts", "purgeSentAgedInTx"],
+  ["src/workers/audit-outbox-worker.ts", "purgeFailedAgedInTx"],
+  ["src/workers/retention-gc-worker/sweep.ts", "sweepExpiryEntry"],
+  ["src/workers/retention-gc-worker/sweep.ts", "sweepGuardedExpiryEntry"],
+  ["src/workers/retention-gc-worker/sweep.ts", "sweepAuditProvenanceEntry"],
+  ["src/workers/retention-gc-worker/sweep.ts", "sweepPerTenantAge"],
+  ["src/workers/retention-gc-worker/sweep.ts", "sweepExpiredAccessRequests"],
+];
+
+describe("C4 allow: each C1 member as it stands in the worker sources", () => {
+  it.each(C1_MEMBERS)("%s#%s holds exactly one write, bounded by its materialized key set", (modulePath, fnName) => {
+    const sf = parseRouteSource(readFileSync(path.join(REPO_ROOT, modulePath), "utf8"), modulePath);
+    const fn = sf.getFunction(fnName);
+    expect(fn, `${modulePath}#${fnName} not found`).toBeDefined();
+    const writes = extractSweepStatementsFromSource(fn?.getText() ?? "", modulePath).flatMap((statement) => {
+      const analysis = analyzeSql(statement.input);
+      return analysis.writes.map((write) => ({ analysis, write }));
+    });
+    expect(writes).toHaveLength(1);
+    expect(isKeySetLimited(writes[0].analysis, writes[0].write)).toBe(true);
+  });
+});
+
+describe("C4 extraction — every write the scanner reads, any case", () => {
+  it("extracts a lowercase write and the classifier flags it", () => {
+    const statements = extractSweepStatementsFromSource(
+      'export const q = "delete from audit_outbox where status = \'SENT\'";',
+      "fixture.ts",
+    );
+    expect(statements).toHaveLength(1);
+    expect(classifySweeps(statements, []).map((v) => v.kind)).toEqual(["unbounded"]);
+  });
+
+  it("does not extract prose that only starts with Update / Delete", () => {
+    expect(
+      extractSweepStatementsFromSource('export const m = "Update failed; Delete the row and retry";', "fixture.ts"),
+    ).toEqual([]);
   });
 });

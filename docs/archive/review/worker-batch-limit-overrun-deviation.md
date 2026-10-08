@@ -28,3 +28,17 @@ C2 identifies a write statement by an `UPDATE` / `DELETE` keyword in statement p
 This narrows detection only within PostgreSQL's own grammar: every real write statement has that form. The same check gives C4 the write's target table. It therefore also covers U7: under C1, the old `tableOf` read `SKIP` from `FOR UPDATE SKIP LOCKED`.
 
 Self-test rows pin both sides: prose allow rows, and a lowercase write deny row.
+
+## D-3: C4 residuals J and K are closed, not residual
+
+The plan declared two C4 residuals to be pinned as allow rows:
+- J: a nested WITH scope redeclaring `picked`;
+- K: a second, unbounded write in the same literal as a bounded one.
+
+C4's acceptance rules close both:
+- Each write statement is judged on its own, so an unbounded second write denies (K). A sweepBounds exemption now applies only when every write in the literal is single-row.
+- `<cte>` resolves only in the write's own WITH list at depth 0. A write inside a nested WITH has its list at depth 1, so it is not accepted (J).
+
+Both are pinned as deny rows, and each is red-proven. Allow rows pinning a residual remain only for the two `${…}` cases: identical `${…}` key text, and an opaque table that defaults to the key `id`.
+
+Also tightened, beyond the plan: `isTopLevelSingleRowByKey` now requires a top-level conjunct that is exactly `<key> = <one value>` for every key column. `= ANY(…)`, a column-to-column comparison, OR and NOT now count as unbounded. Self-test rows (k) and (k2) pin this.

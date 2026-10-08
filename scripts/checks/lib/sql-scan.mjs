@@ -501,16 +501,27 @@ function statementEnd(tokens, from, depth) {
 }
 
 /**
+ * @typedef {{ inToken: number, negated: boolean, lhs: { start: number, end: number },
+ *   open: number, close: number | undefined, depth: number }} InGroup
+ * @typedef {{ start: number, end: number, hasOr: boolean, negated: boolean,
+ *   inGroup: InGroup | null }} Conjunct
+ */
+
+/**
  * Split [start, end) at top-level (depth `depth`) AND. A top-level OR makes
  * the whole range one conjunct flagged `hasOr` (AND binds tighter than OR, so
  * no AND operand is then a conjunct of the whole WHERE). The AND of a
- * `BETWEEN x AND y` is not a separator.
+ * `BETWEEN x AND y` is not a separator. `inGroup` starts null; analyzeSql
+ * links it.
+ *
+ * @returns {Conjunct[]}
  */
 function splitConjuncts(tokens, start, end, depth) {
+  const conjunct = (s, e, hasOr) => ({ start: s, end: e, hasOr, negated: isWord(tokens[s], "NOT"), inGroup: null });
   const top = [];
   for (let j = start; j < end; j++) if (tokens[j].depth === depth) top.push(j);
   const hasOr = top.some((j) => isWord(tokens[j], "OR"));
-  if (hasOr) return [{ start, end, hasOr: true, negated: isWord(tokens[start], "NOT") }];
+  if (hasOr) return [conjunct(start, end, true)];
   const out = [];
   let s = start;
   let pendingBetween = false;
@@ -521,11 +532,11 @@ function splitConjuncts(tokens, start, end, depth) {
         pendingBetween = false;
         continue;
       }
-      out.push({ start: s, end: j, hasOr: false, negated: isWord(tokens[s], "NOT") });
+      out.push(conjunct(s, j, false));
       s = j + 1;
     }
   }
-  out.push({ start: s, end, hasOr: false, negated: isWord(tokens[s], "NOT") });
+  out.push(conjunct(s, end, false));
   return out.filter((c) => c.end > c.start);
 }
 
@@ -533,6 +544,8 @@ function splitConjuncts(tokens, start, end, depth) {
  * Every `IN (` group: `{ inToken, negated, lhs: {start, end}, open, close, depth }`.
  * The left operand is a parenthesised group ending right before IN (row
  * value), or a dotted name chain. `close` is undefined when unbalanced.
+ *
+ * @returns {InGroup[]}
  */
 function findInGroups(tokens) {
   const out = [];
@@ -655,7 +668,6 @@ export function analyzeSql(input) {
     }
     const conjuncts = where ? splitConjuncts(tokens, where.start, where.end, depth) : [];
     for (const c of conjuncts) {
-      c.inGroup = null;
       if (c.hasOr || c.negated) continue;
       const g = inByLhsStart.get(`${c.start}:${c.end - 1}`);
       if (g && !g.negated) c.inGroup = g;

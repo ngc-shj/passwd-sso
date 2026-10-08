@@ -246,6 +246,13 @@ describe("analyzeSql — WHERE conjuncts and IN groups", () => {
     expect(second.inGroup).toBeNull();
   });
 
+  it("gives every conjunct an inGroup, null when it is not an IN", () => {
+    const [a, b] = analyzeSql("DELETE FROM t WHERE a = 1 AND b = 2").writes[0].conjuncts;
+    expect(a).toHaveProperty("inGroup", null);
+    expect(b).toHaveProperty("inGroup", null);
+    expect(analyzeSql("DELETE FROM t WHERE a = 1 OR b = 2").writes[0].conjuncts[0]).toHaveProperty("inGroup", null);
+  });
+
   it("does not link NOT (…) IN or NOT IN", () => {
     expect(analyzeSql("DELETE FROM t WHERE NOT id IN (SELECT id FROM p)").writes[0].conjuncts[0].inGroup).toBeNull();
     expect(analyzeSql("DELETE FROM t WHERE id NOT IN (SELECT id FROM p)").writes[0].conjuncts[0].inGroup).toBeNull();
