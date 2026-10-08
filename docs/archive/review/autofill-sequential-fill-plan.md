@@ -271,3 +271,24 @@ The same conversion as C3.
 | C5 | Bundle path from the manifest (prod and dev), bounded retry, all four callers | locked |
 | C7 | LOGIN fallback: message, then bundle retry, then sequential inline `func` | locked |
 | C6 | Dropdown suppressed while a fill is active | locked |
+
+## Implementation Checklist
+
+Files:
+- New: `extension/src/content/fill-sequence-lib.ts` (C1, C1a `boundedRoot`, `isFillActive`).
+- `extension/src/content/autofill-lib.ts` (C2), `autofill-cc-lib.ts` (C3), `autofill-identity-lib.ts` (C4): async, built on C1. Each listener's call gets a `.catch` into the `select-diag-lib` closed codes.
+- `extension/src/content/select-diag-lib.ts`: closed codes for fill errors.
+- `extension/src/content/form-detector-lib.ts`, `cc-form-detector-lib.ts`, `identity-form-detector-lib.ts`: C6 focus-handler guard.
+- `extension/src/background/index.ts`:
+  - C5, the manifest-derived loader path and the bounded retry, for the CC fallback, the Identity fallback, the shortcut command and the LOGIN retry;
+  - C7, the sequential inline `func`.
+
+Tests:
+- New: `extension/src/__tests__/content/fill-sequence-lib.test.ts`.
+- Changed: `extension/src/__tests__/content/{autofill,autofill-cc,autofill-identity}.test.ts`, which become async and gain the new rows (including the React rows); the detector tests for C6; `extension/src/__tests__/background.test.ts` and `extension/src/__tests__/background/inline-matches.test.ts`, which assert the old literal and the frame-scope injection.
+
+Reuse:
+- the existing `setInputValue` / `setSelectValue` helpers;
+- `isElementVisible` and `isUsableField` from the detector libs;
+- the `select-diag-lib` sink;
+- the `toFake` precedent in `ui/suggestion-dropdown.test.ts`.
