@@ -541,6 +541,10 @@ function clauseWordAt(tokens, from, end, depth, upper) {
   for (let j = from; j < end; j++) {
     const t = tokens[j];
     if (t.depth !== depth) continue;
+    // After `.` or `AS` PostgreSQL accepts a reserved word as a column name or
+    // label (`p.end`, `u.case`, `RETURNING id AS end`): not a keyword here.
+    const prev = tokens[j - 1];
+    if (prev !== undefined && (prev.type === TOKEN.DOT || isWord(prev, "AS"))) continue;
     if (isWord(t, "CASE")) openCase++;
     else if (isWord(t, "END")) {
       if (openCase === 0) return null;

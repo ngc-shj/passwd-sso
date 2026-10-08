@@ -150,3 +150,47 @@ Every round-2 finding was fixed in one commit and red-proven on throwaway copies
 - Red proof: M4 (no `skipSearchCycle`), M5 (no opaque skip) and M6 (the reviewer's mutant) are now red.
 
 Verification: 295/295 tests across 4 targeted files; the gate is OK on the tree; raw-sql gate OK; tsc and eslint clean.
+
+---
+
+# Round 3
+Date: 2026-10-08
+
+## Changes from Previous Round
+Reviewed `c9c7ff1ce`, the round-2 fixes. All of them are correct and introduce no fail-open regression.
+
+R43 against the round-2 state:
+- C2: the only deny-to-allow change is the intended C1-shaped MERGE with a balanced CASE.
+- INV4: extraction is a superset of round 2. An INSERT-only MERGE containing a CASE now reads as a known non-write, which aligns it with the case without CASE.
+
+The reviewer re-measured 25 candidates and 0 unrecognised on the 8 modules, and the M1 mutant came back red.
+
+## Functionality Findings
+- **F-CR3-1 [Minor, class (i), local]** (R47) `clauseWordAt` counted a dotted reserved-word column (`p.end`, `u.case`) or a label (`AS end`) as CASE/END. The result was that a correct C1-shaped MERGE was falsely denied with UNRECOGNISED_WRITE. This fails closed.
+- **F-CR3-2 [Minor, class (i), local]** (R52) Ungated INV4 extraction reads prose, module specifiers and literal types. These cannot be exempted, and the violation detail gave no remedy. The 8 modules hold none today.
+
+## Security Findings
+No findings. Checked: C2 still decides the same way after the paren gate moved; a MERGE action cannot hide behind CASE, a dotted name or `${…}`; exemption matching on newly extracted literals.
+
+## Testing Findings
+No findings. The WRITE_FORM_DENY detail pins work, and the scanner CASE rows separate nesting, a stray END and an unclosed CASE.
+
+## Resolution Status (round 3)
+### F-CR3-1 [Minor]
+- Action: in `clauseWordAt`, a word right after `.` or `AS` is not counted as a keyword.
+- Scanner rows added: `u.end` in SET, `u.case` in a WHEN condition, `RETURNING … AS end`.
+- Red proof: removing the skip on a throwaway copy turns the new row red (1 of 71).
+- Modified files: `scripts/checks/lib/sql-scan.mjs` (`clauseWordAt`), `scripts/__tests__/sql-scan.test.mjs`
+### F-CR3-2 [Minor]
+- Action: the INV4 unrecognised-write detail now says to reword or move a message/identifier literal, and that an exemption cannot cover it.
+- The optional narrowing (skipping module specifiers and literal-type positions) was not done.
+
+#### F-CR3-2 optional narrowing — Accepted
+- **Anti-Deferral check**: acceptable risk.
+- **Justification**:
+  - Worst case: a future import specifier or literal type in one of the 8 worker modules that contains `update`/`delete`/`merge` fails INV4. That failure is loud and fail-closed, and the detail now gives the remedy.
+  - Likelihood: low. No such literal exists today; 15 near-misses do not trip.
+  - Cost to fix: about 30 lines of AST position classification plus rows, on a security test, for a false deny that cannot hide a write.
+- **Orchestrator sign-off**: false-deny only; no exposure.
+
+Verification: 279/279 targeted tests; the gate is OK on the tree; eslint and tsc are clean.

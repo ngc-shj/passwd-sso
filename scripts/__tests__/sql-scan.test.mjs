@@ -230,6 +230,21 @@ describe("analyzeSql — CASE inside a MERGE", () => {
     });
   });
 
+  it("does not count a qualified column or a label named case / end as CASE / END", () => {
+    expect(read("MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET finished_at = u.end")).toEqual({
+      writes: [[WRITE_KIND.MERGE, "t"]],
+      unrecognised: [],
+    });
+    expect(read("MERGE INTO t USING u ON t.id = u.id WHEN MATCHED AND u.case THEN DELETE")).toEqual({
+      writes: [[WRITE_KIND.MERGE, "t"]],
+      unrecognised: [],
+    });
+    expect(read("MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN DELETE RETURNING t.id AS end")).toEqual({
+      writes: [[WRITE_KIND.MERGE, "t"]],
+      unrecognised: [],
+    });
+  });
+
   it("leaves a MERGE with an unbalanced CASE unrecognised", () => {
     expect(read("MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET a = CASE WHEN u.x THEN 1")).toEqual({
       writes: [],

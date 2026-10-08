@@ -368,7 +368,10 @@ function describeWrite(write: SqlWrite): string {
 }
 
 function describeUnrecognisedWrite(word: SqlUnrecognisedWrite): string {
-  return `unrecognised ${word.word} (literal line ${word.line + 1})`;
+  return (
+    `unrecognised ${word.word} (literal line ${word.line + 1}); ` +
+    "if this literal is a message or identifier rather than SQL, reword it or move it out of the module — an exemption cannot cover it"
+  );
 }
 
 /**
