@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 import { Project } from "ts-morph";
 import {
   TOKEN,
+  WRITE_KIND,
   analyzeSql,
   keyListOf,
   matchKeySelect,
@@ -120,8 +121,8 @@ describe("analyzeSql — write statements", () => {
   });
 
   it("does not count UPDATE/DELETE outside statement position", () => {
-    expect(analyzeSql("INSERT INTO t SELECT * FROM u ON CONFLICT (id) DO UPDATE SET a = 1").writes).toEqual([]);
     expect(analyzeSql("ALTER TABLE t ADD FOREIGN KEY (a) REFERENCES u ON DELETE CASCADE").writes).toEqual([]);
+    expect(analyzeSql("SELECT 1; ON CONFLICT (id) DO UPDATE SET a = 1").writes).toEqual([]);
   });
 
   it("does not count prose that only starts with the keyword", () => {
@@ -143,6 +144,92 @@ describe("analyzeSql — write statements", () => {
         "UPDATE audit_chain_anchors SET a = 1 WHERE (tenant_id) IN (SELECT tenant_id FROM p)",
     );
     expect(a.writes.map((w) => w.target.name)).toEqual(["audit_chain_anchors"]);
+  });
+});
+
+describe("analyzeSql — MERGE, upsert, opaque prefixes (S-CR1-1)", () => {
+  const kinds = (sql) => analyzeSql(sqlInputFromSourceText(sql)).writes.map((w) => [w.kind, w.target.name ?? w.target.opaque]);
+
+  it("reads MERGE INTO … THEN UPDATE and … THEN DELETE as MERGE writes", () => {
+    expect(kinds("MERGE INTO t AS x USING u ON x.id = u.id WHEN MATCHED THEN UPDATE SET a = 1")).toEqual([[WRITE_KIND.MERGE, "t"]]);
+    expect(kinds("merge into ONLY public.t USING u ON t.id = u.id WHEN NOT MATCHED BY SOURCE THEN DELETE")).toEqual([[WRITE_KIND.MERGE, "t"]]);
+  });
+
+  it("gives a MERGE and an upsert no WHERE and no conjuncts, even with a key equality", () => {
+    const [merge] = analyzeSql("MERGE INTO t USING u ON t.id = u.id AND t.id = 1 WHEN MATCHED THEN DELETE").writes;
+    expect(merge).toMatchObject({ where: null, conjuncts: [] });
+    const [upsert] = analyzeSql("INSERT INTO t (id) SELECT id FROM u WHERE id = 1 ON CONFLICT (id) DO UPDATE SET a = 1 WHERE t.id = 1").writes;
+    expect(upsert).toMatchObject({ where: null, conjuncts: [] });
+  });
+
+  it("does not read a MERGE whose actions are only INSERT / DO NOTHING as a write, nor as unrecognised", () => {
+    const a = analyzeSql("MERGE INTO t USING (SELECT 1) u ON true WHEN NOT MATCHED THEN INSERT VALUES (1) WHEN MATCHED THEN DO NOTHING");
+    expect(a.writes).toEqual([]);
+    expect(a.unrecognisedWrites).toEqual([]);
+  });
+
+  it("reads INSERT … ON CONFLICT … DO UPDATE SET as an UPSERT write", () => {
+    expect(kinds("INSERT INTO t (id) SELECT id FROM u WHERE id IN (SELECT 1) ON CONFLICT (id) DO UPDATE SET a = 1")).toEqual([
+      [WRITE_KIND.UPSERT, "t"],
+    ]);
+    expect(kinds("INSERT INTO t AS x VALUES (1) ON CONFLICT ON CONSTRAINT t_pkey DO UPDATE SET a = x.a + 1")).toEqual([
+      [WRITE_KIND.UPSERT, "t"],
+    ]);
+  });
+
+  it("does not read INSERT … ON CONFLICT DO NOTHING or a plain INSERT as a write", () => {
+    expect(kinds("INSERT INTO t (id) VALUES ($1) ON CONFLICT DO NOTHING")).toEqual([]);
+    expect(kinds("INSERT INTO t (id) SELECT id FROM u LIMIT 1")).toEqual([]);
+  });
+
+  it("treats ${…} tokens before a head as transparent", () => {
+    expect(kinds("${hint} UPDATE t SET a = 1")).toEqual([[WRITE_KIND.UPDATE, "t"]]);
+    expect(kinds("${a}${b}\n DELETE FROM ${tableIdent} WHERE true")).toEqual([[WRITE_KIND.DELETE, "tableIdent"]]);
+    expect(kinds("SELECT 1; ${hint} MERGE INTO t USING u ON true WHEN MATCHED THEN DELETE")).toEqual([[WRITE_KIND.MERGE, "t"]]);
+  });
+
+  it("does not read a ${…} that is not followed by a head as a write", () => {
+    expect(kinds("${verb} FROM t WHERE id = 1")).toEqual([]);
+  });
+});
+
+describe("analyzeSql — unrecognisedWrites", () => {
+  const unrecognised = (sql) => analyzeSql(sqlInputFromSourceText(sql)).unrecognisedWrites.map((u) => u.word);
+
+  it("reports an UPDATE/DELETE/MERGE word no statement accounts for", () => {
+    expect(unrecognised("EXPLAIN ANALYZE UPDATE t SET a = 1 WHERE id IN (SELECT 1)")).toEqual(["UPDATE"]);
+    expect(unrecognised("(DELETE FROM t WHERE id IN (SELECT 1))")).toEqual(["DELETE"]);
+    expect(unrecognised("SELECT 1; ON CONFLICT (id) DO UPDATE SET a = 1")).toEqual(["UPDATE"]);
+    expect(unrecognised("MERGE INTO t USING u ON (t.id = u.id) WHEN MATCHED UPDATE SET a = 1")).toEqual(["MERGE", "UPDATE"]);
+  });
+
+  it("records the word's position", () => {
+    const a = analyzeSql("SELECT 1;\nEXPLAIN (ANALYZE) DELETE FROM t");
+    expect(a.unrecognisedWrites).toEqual([{ token: a.tokens.findIndex((t) => t.upper === "DELETE"), word: "DELETE", depth: 0, line: 1 }]);
+  });
+
+  it("does not report the words a recognised write accounts for", () => {
+    expect(unrecognised("MERGE INTO t USING u ON (t.id = u.id) WHEN MATCHED AND u.x THEN UPDATE SET a = 1 WHEN NOT MATCHED BY SOURCE THEN DELETE")).toEqual([]);
+    expect(unrecognised("INSERT INTO t (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET a = 1")).toEqual([]);
+    expect(unrecognised("WITH d AS (DELETE FROM t RETURNING id) UPDATE u SET a = (SELECT count(*) FROM d)")).toEqual([]);
+  });
+
+  it("does not report FOR [NO KEY] UPDATE or ON UPDATE|DELETE", () => {
+    expect(unrecognised("SELECT id FROM t LIMIT (1) FOR UPDATE SKIP LOCKED")).toEqual([]);
+    expect(unrecognised("SELECT id FROM t LIMIT (1) FOR NO KEY UPDATE")).toEqual([]);
+    expect(unrecognised("CREATE TABLE t (a int REFERENCES u (id) ON DELETE CASCADE ON UPDATE NO ACTION)")).toEqual([]);
+    expect(unrecognised("CREATE RULE r AS ON UPDATE TO t DO INSTEAD NOTHING; SELECT (1)")).toEqual([]);
+  });
+
+  it("does not report a word in a literal with no parenthesis (prose)", () => {
+    expect(unrecognised("Update your profile before the limit is reached")).toEqual([]);
+    expect(unrecognised("Worker failed to UPDATE audit_outbox SET status for a batch over the LIMIT")).toEqual([]);
+    expect(unrecognised("Update failed; Delete the row and retry")).toEqual([]);
+    expect(unrecognised("Update failed (limit 3)")).toEqual(["UPDATE"]);
+  });
+
+  it("does not report a word inside a comment, string, quoted identifier or substitution", () => {
+    expect(unrecognised("SELECT ('UPDATE t SET a = 1') -- DELETE FROM t\n, \"merge\" FROM ${deleteSql}")).toEqual([]);
   });
 });
 
@@ -184,6 +271,26 @@ describe("analyzeSql — WITH lists", () => {
   it("records a nested WITH list at its own depth", () => {
     const a = analyzeSql("UPDATE t SET a = 1 WHERE id IN (WITH q AS MATERIALIZED (SELECT id FROM t LIMIT 1) SELECT id FROM q)");
     expect(a.withLists.map((l) => l.depth)).toEqual([1]);
+  });
+
+  it("skips a recursive CTE's SEARCH and CYCLE clauses to the main statement", () => {
+    const search = analyzeSql(
+      "WITH RECURSIVE r AS (SELECT id FROM t) SEARCH DEPTH FIRST BY id, p SET ord DELETE FROM t WHERE id IN (SELECT id FROM r)",
+    );
+    expect(search.writes.map((w) => [w.kind, w.withList, w.cte])).toEqual([["DELETE", 0, null]]);
+    const both = analyzeSql(
+      "WITH RECURSIVE r AS (SELECT id FROM t) SEARCH BREADTH FIRST BY id SET ord CYCLE id SET is_cycle TO true DEFAULT false USING path, " +
+        "q AS MATERIALIZED (SELECT id FROM r LIMIT 1) UPDATE t SET a = 1 WHERE id IN (SELECT id FROM q)",
+    );
+    expect(both.withLists[0].ctes.map((c) => c.name)).toEqual(["r", "q"]);
+    expect(both.writes.map((w) => [w.kind, w.withList])).toEqual([["UPDATE", 0]]);
+    expect(analyzeSql("WITH RECURSIVE r AS (SELECT 1) CYCLE id SET c USING p DELETE FROM t").writes).toHaveLength(1);
+  });
+
+  it("does not skip a SEARCH / CYCLE clause that does not parse", () => {
+    const a = analyzeSql("WITH RECURSIVE r AS (SELECT 1) SEARCH FIRST BY id SET ord DELETE FROM t WHERE id IN (SELECT 1)");
+    expect(a.writes).toEqual([]);
+    expect(a.unrecognisedWrites.map((u) => u.word)).toEqual(["DELETE"]);
   });
 
   it("is not fooled by WITH TIME ZONE / WITH ORDINALITY / WITH (storage options)", () => {

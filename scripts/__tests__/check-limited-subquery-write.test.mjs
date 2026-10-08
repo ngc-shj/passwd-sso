@@ -5,8 +5,10 @@
  * the tracked repo files.
  *
  * Deny rows: every member M1–M15 exactly as it was before the fix, every
- * overrunning form from the plan's probe and review log, and the shapes the
- * rule refuses by class. Allow rows: each C1 shape, the nearest non-writes,
+ * overrunning form from the plan's probe and review log (including the MERGE,
+ * upsert, opaque-prefix and SEARCH / CYCLE forms of S-CR1-1), the shapes the
+ * rule refuses by class, and an UPDATE/DELETE/MERGE it cannot read
+ * (UNRECOGNISED_WRITE). Allow rows: each C1 shape, the nearest non-writes,
  * and one row per declared bypass (pinning the blind spot, not endorsing it).
  */
 import { describe, it, expect, afterEach } from "vitest";
@@ -371,6 +373,12 @@ function expectDeny(result, line) {
   expect(result.stderr).toContain("WITH picked AS MATERIALIZED");
   if (line !== undefined) expect(result.stderr).toContain(line);
 }
+function expectUnrecognised(result, line) {
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain("UNRECOGNISED_WRITE");
+  expect(result.stderr).not.toContain("LIMITED_SUBQUERY_WRITE:");
+  if (line !== undefined) expect(result.stderr).toContain(line);
+}
 function expectAllow(result) {
   expect(result.stderr).toBe("");
   expect(result.code).toBe(0);
@@ -415,10 +423,49 @@ describe("deny — the overrunning forms from the probe and review log", () => {
     ["a second LIMIT outside the materialized body", `WITH picked AS MATERIALIZED (${SUB} LIMIT 2) ${SET} WHERE id IN (SELECT id FROM picked) AND tenant_id IN (SELECT id FROM tenants LIMIT 1)`],
     ["lowercase write", `with r as (update audit_outbox set attempt_count = 1 where id in (select id from audit_outbox limit 2 for update skip locked) returning id) select count(*) from r`],
     ["write after ;", `SELECT 1; DELETE FROM audit_outbox WHERE id IN (SELECT id FROM audit_outbox LIMIT 2)`],
+    // S-CR1-1: write forms beyond DELETE FROM / UPDATE … SET. The MERGE and
+    // upsert rows overran their LIMIT in rolled-back probes (3 rows for 2).
+    ["MERGE: IN (… LIMIT … FOR UPDATE) in the ON clause", `MERGE INTO audit_outbox t USING (SELECT 1 AS one) s ON t.id IN (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) WHEN MATCHED THEN UPDATE SET attempt_count = t.attempt_count + 1`],
+    ["MERGE: join source plus an IN (… LIMIT … FOR UPDATE) predicate", `MERGE INTO audit_outbox t USING audit_outbox s ON t.id = s.id AND s.id IN (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) WHEN MATCHED THEN DELETE`],
+    ["upsert: INSERT … SELECT … IN (… LIMIT … FOR UPDATE) ON CONFLICT DO UPDATE", `INSERT INTO audit_outbox (id, attempt_count) SELECT o.id, o.attempt_count FROM audit_outbox o WHERE o.id IN (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) ON CONFLICT (id) DO UPDATE SET attempt_count = audit_outbox.attempt_count + 1`],
+    // An upsert is a write, so C2's one shape applies to it as to UPDATE and
+    // DELETE: a LIMIT outside a materialized key set denies wherever it sits.
+    ["upsert: a top-level source LIMIT", `INSERT INTO t (id) SELECT id FROM u LIMIT 10 ON CONFLICT (id) DO UPDATE SET a = 1`],
+    ["a write after a recursive CTE's SEARCH … SET clause", `WITH RECURSIVE r AS (SELECT id FROM audit_outbox UNION ALL SELECT id FROM r WHERE false) SEARCH DEPTH FIRST BY id SET ord DELETE FROM audit_outbox WHERE id IN (SELECT id FROM r LIMIT 2)`],
+    ["a write after a recursive CTE's CYCLE … SET … USING clause", `WITH RECURSIVE r AS (SELECT id FROM audit_outbox UNION ALL SELECT id FROM r WHERE false) CYCLE id SET is_cycle TO true DEFAULT false USING path ${SET} WHERE id IN (SELECT id FROM r LIMIT 2)`],
   ];
   for (const [name, sql] of rows) {
     it(`deny: ${name}`, () => {
       expectDeny(run({ "src/workers/fixture.ts": stringCall(sql) }));
+    });
+  }
+});
+
+describe("deny — a write behind an opaque ${…} prefix (S-CR1-1)", () => {
+  it("deny: a hint substitution before UPDATE", () => {
+    const src = unsafeCall(`\${a}
+      UPDATE audit_outbox SET status = 'PROCESSING'
+      WHERE id IN (SELECT id FROM audit_outbox WHERE status = 'PENDING' ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED)`);
+    expectDeny(run({ "src/workers/fixture.ts": src }), "src/workers/fixture.ts:4 ");
+  });
+
+  it("deny: two substitutions before DELETE", () => {
+    const src = unsafeCall(`\${a}\${b} DELETE FROM audit_outbox WHERE id IN (SELECT id FROM audit_outbox LIMIT $1)`);
+    expectDeny(run({ "src/workers/fixture.ts": src }));
+  });
+});
+
+describe("deny — an UPDATE/DELETE/MERGE the gate cannot read as a statement (UNRECOGNISED_WRITE)", () => {
+  const rows = [
+    ["EXPLAIN ANALYZE (executes the write)", `EXPLAIN ANALYZE ${SET} WHERE id IN (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED)`],
+    ["a parenthesised write", `(${SET} WHERE id IN (${SUB} LIMIT 2 FOR UPDATE))`],
+    ["DO UPDATE with no INSERT head", `ON CONFLICT (id) DO UPDATE SET a = 1 WHERE id IN (${SUB} LIMIT 2)`],
+    ["a MERGE whose WHEN clause does not parse", `MERGE INTO audit_outbox t USING audit_outbox s ON t.id IN (${SUB} LIMIT 2) WHEN MATCHED UPDATE SET a = 1`],
+    ["an allowed LIMIT position still denies next to an unrecognised write", `WITH picked AS MATERIALIZED (${SUB} LIMIT 2) EXPLAIN ANALYZE ${SET} WHERE id IN (SELECT id FROM picked)`],
+  ];
+  for (const [name, sql] of rows) {
+    it(`deny: ${name}`, () => {
+      expectUnrecognised(run({ "src/workers/fixture.ts": stringCall(sql) }), "src/workers/fixture.ts:");
     });
   }
 });
@@ -501,6 +548,16 @@ describe("allow — the C1 shapes", () => {
     expectAllow(run({ "src/workers/fixture.ts": stringCall(sql) }));
   });
 
+  it("allow: a MERGE reading a materialized key set", () => {
+    const sql = `WITH picked AS MATERIALIZED (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) MERGE INTO audit_outbox t USING picked p ON t.id = p.id WHEN MATCHED THEN UPDATE SET attempt_count = t.attempt_count + 1`;
+    expectAllow(run({ "src/workers/fixture.ts": stringCall(sql) }));
+  });
+
+  it("allow: an upsert whose source reads a materialized key set", () => {
+    const sql = `WITH picked AS MATERIALIZED (${SUB} LIMIT 2 FOR UPDATE SKIP LOCKED) INSERT INTO audit_outbox (id) SELECT id FROM picked ON CONFLICT (id) DO UPDATE SET attempt_count = audit_outbox.attempt_count + 1`;
+    expectAllow(run({ "src/workers/fixture.ts": stringCall(sql) }));
+  });
+
   it("allow: FETCH FIRST at the top of a materialized body", () => {
     const sql = `WITH picked AS MATERIALIZED (${SUB} FETCH FIRST 2 ROWS ONLY) ${SET} WHERE id IN (SELECT id FROM picked)`;
     expectAllow(run({ "src/workers/fixture.ts": stringCall(sql) }));
@@ -512,11 +569,19 @@ describe("allow — the nearest non-writes", () => {
     ["a standalone SELECT … LIMIT", `SELECT id FROM audit_outbox ORDER BY created_at LIMIT $1`],
     ["a SELECT … FOR UPDATE … LIMIT with no write", `SELECT id FROM audit_outbox WHERE status = 'PENDING' ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED`],
     ["a SELECT … LIMIT … FOR NO KEY UPDATE", `SELECT id FROM audit_outbox LIMIT 1 FOR NO KEY UPDATE`],
+    // With a parenthesis, so the FOR UPDATE word would count as an unrecognised write if not known.
+    ["a SELECT … IN (…) … LIMIT … FOR UPDATE SKIP LOCKED", `SELECT id FROM audit_outbox WHERE status IN ('PENDING') LIMIT $1 FOR UPDATE SKIP LOCKED`],
+    ["a SELECT … IN (…) … LIMIT … FOR NO KEY UPDATE", `SELECT id FROM audit_outbox WHERE status IN ('PENDING') LIMIT 1 FOR NO KEY UPDATE`],
     ["IN (SELECT …) without LIMIT", `DELETE FROM audit_outbox WHERE id IN (SELECT id FROM audit_outbox WHERE status = 'FAILED')`],
     ["the old shape inside a SQL -- comment", `UPDATE t SET a = 1 WHERE id = $1 -- was: WHERE id IN (SELECT id FROM t LIMIT 1)`],
     ["the old shape inside a SQL /* */ comment", `DELETE FROM t /* WHERE id IN (SELECT id FROM t LIMIT 1) */ WHERE id = $1`],
     ["the old shape inside a SQL string", `UPDATE t SET note = 'id IN (SELECT id FROM t LIMIT 1)' WHERE id = $1`],
-    ["INSERT … SELECT … LIMIT … ON CONFLICT DO UPDATE (no statement-position write)", `INSERT INTO t (id) SELECT id FROM u LIMIT 10 ON CONFLICT (id) DO UPDATE SET a = 1`],
+    ["INSERT … SELECT … LIMIT … ON CONFLICT DO NOTHING", `INSERT INTO t (id) SELECT id FROM u ORDER BY id LIMIT 10 ON CONFLICT DO NOTHING`],
+    ["INSERT … ON CONFLICT DO NOTHING without LIMIT", `INSERT INTO t (id) VALUES ($1) ON CONFLICT DO NOTHING`],
+    ["an upsert without any LIMIT", `INSERT INTO t (id, n) VALUES ($1, 0) ON CONFLICT (id) DO UPDATE SET n = t.n + 1`],
+    ["a MERGE without any LIMIT", `MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET n = u.n WHEN NOT MATCHED THEN DELETE`],
+    ["a MERGE whose actions are only INSERT / DO NOTHING, with a LIMIT", `MERGE INTO t USING (SELECT id FROM u LIMIT 10) s ON t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id) WHEN MATCHED THEN DO NOTHING`],
+    ["FK ON DELETE CASCADE / ON UPDATE text next to a LIMIT", `ALTER TABLE t ADD FOREIGN KEY (a) REFERENCES u (id) ON DELETE CASCADE ON UPDATE NO ACTION; SELECT id FROM t LIMIT 1`],
     ["prose that starts with Update and mentions a limit", `Update your profile before the limit is reached`],
     // Grammatical `UPDATE <t> SET`, but mid-sentence: only statement position excludes it.
     ["prose that embeds UPDATE <t> SET mid-sentence and mentions a LIMIT", `Worker failed to UPDATE audit_outbox SET status for a batch over the LIMIT`],
@@ -557,6 +622,17 @@ describe("allow — declared bypasses (pinned blind spots)", () => {
           "DELETE FROM t WHERE id IN (SELECT id FROM t LIMIT 1 FOR UPDATE SKIP LOCKED);\n",
       }),
     );
+  });
+
+  it("bypass: an unrecognised write in a literal with no parenthesis", () => {
+    // Only the interpolated `${…}` can hold the bounding subquery here.
+    const src = unsafeCall(`EXPLAIN ANALYZE DELETE FROM t WHERE id = ANY \${a}; SELECT 1 LIMIT 1`);
+    expectAllow(run({ "src/workers/fixture.ts": src }));
+  });
+
+  it("bypass: the write keyword itself inside a substitution", () => {
+    const src = unsafeCall(`\${a} FROM t WHERE id IN (SELECT id FROM t LIMIT 1 FOR UPDATE SKIP LOCKED)`);
+    expectAllow(run({ "src/workers/fixture.ts": src }));
   });
 
   it("bypass: a plpgsql body (dollar-quoted) in a literal", () => {

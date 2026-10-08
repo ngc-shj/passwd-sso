@@ -23,7 +23,9 @@
  *     write statement the shared scanner (scripts/checks/lib/sql-scan.mjs)
  *     reads in the entry's modules must be capped by a materialized key set
  *     (worker-batch-limit-overrun plan, C4), single-row-by-id, or covered by
- *     exactly one tight, used `sweepBounds.exemptions[]` entry (INV4).
+ *     exactly one tight, used `sweepBounds.exemptions[]` entry (INV4). A MERGE,
+ *     an upsert and any UPDATE/DELETE/MERGE word the scanner cannot read as a
+ *     statement are always unbounded.
  *   - `runtimeBounds` (audit-outbox-worker only): cross-checked against the
  *     literal constants in src/lib/constants/audit/audit.ts and the
  *     `@default(8)` maxAttempts lines in prisma/schema.prisma (INV5).
@@ -187,6 +189,7 @@ export interface SweepStatement {
 
 type SqlAnalysis = ReturnType<typeof analyzeSql>;
 type SqlWrite = SqlAnalysis["writes"][number];
+type SqlUnrecognisedWrite = SqlAnalysis["unrecognisedWrites"][number];
 
 /** A test-side statement built from template source text (`…${expr}…`). */
 function sqlStatement(text: string): SweepStatement {
@@ -350,7 +353,10 @@ function isKeySetLimited(analysis: SqlAnalysis, write: SqlWrite): boolean {
  * A write is bounded iff it mutates a single row by its table's PK, or caps
  * its mutated key set with the C1 shape. Postgres has no `LIMIT` on
  * DELETE/UPDATE, so a LIMIT anywhere else (an EXISTS probe, a subselect
- * inside IN) does not bound it.
+ * inside IN) does not bound it. A MERGE's rows come from its join and an
+ * upsert's from its INSERT source; the scanner gives both no WHERE and no
+ * conjuncts, so each matches neither shape and is unbounded (no current
+ * member uses either).
  */
 function isBounded(analysis: SqlAnalysis, write: SqlWrite): boolean {
   return isTopLevelSingleRowByKey(analysis, write) || isKeySetLimited(analysis, write);
@@ -359,6 +365,10 @@ function isBounded(analysis: SqlAnalysis, write: SqlWrite): boolean {
 function describeWrite(write: SqlWrite): string {
   const target = write.target.name ?? (write.target.opaque !== null ? `\${${write.target.opaque}}` : "?");
   return `${write.kind} ${target} (literal line ${write.line + 1})`;
+}
+
+function describeUnrecognisedWrite(word: SqlUnrecognisedWrite): string {
+  return `unrecognised ${word.word} (literal line ${word.line + 1})`;
 }
 
 /**
@@ -375,7 +385,9 @@ export function classifySweeps(
   const violations: SweepViolation[] = [];
   const analysed = statements.map((statement) => ({ statement, analysis: analyzeSql(statement.input) }));
   const isSingleRowLiteral = ({ analysis }: (typeof analysed)[number]): boolean =>
-    analysis.writes.length > 0 && analysis.writes.every((write) => isTopLevelSingleRowByKey(analysis, write));
+    analysis.unrecognisedWrites.length === 0 &&
+    analysis.writes.length > 0 &&
+    analysis.writes.every((write) => isTopLevelSingleRowByKey(analysis, write));
 
   // Pre-compute, for every exemption, which literals its `match` hits and
   // whether the literal it identifies is itself already single-row (an
@@ -422,6 +434,15 @@ export function classifySweeps(
   );
 
   for (const entry of analysed) {
+    // An unrecognised write is never exempted: an exemption on its literal
+    // is loose (isSingleRowLiteral), so the literal is never tightly exempted.
+    for (const word of entry.analysis.unrecognisedWrites) {
+      violations.push({
+        statement: entry.statement.text,
+        kind: "unbounded",
+        detail: `${describeUnrecognisedWrite(word)}: the scanner cannot read this write as a statement, so its bound cannot be judged: ${entry.statement.text}`,
+      });
+    }
     if (tightlyExempted.has(entry)) continue;
     for (const write of entry.analysis.writes) {
       if (isBounded(entry.analysis, write)) continue;
@@ -439,7 +460,8 @@ export function classifySweeps(
 // ---------------------------------------------------------------------------
 // C5 extraction (assertion 1): every string/template literal in a module's AST
 // that the shared scanner reads as holding a write statement (statement-
-// position UPDATE/DELETE with its own grammar, any case).
+// position UPDATE/DELETE/MERGE/upsert with its own grammar, any case) or an
+// unrecognised UPDATE/DELETE/MERGE word.
 // ---------------------------------------------------------------------------
 
 const LITERAL_KINDS = [
@@ -455,7 +477,8 @@ function extractSweepStatementsFromSource(source: string, modulePath: string): S
     for (const node of sf.getDescendantsOfKind(kind)) {
       const input = sqlInputFromNode(node);
       if (input === null) continue;
-      if (analyzeSql(input).writes.length > 0) {
+      const analysis = analyzeSql(input);
+      if (analysis.writes.length > 0 || analysis.unrecognisedWrites.length > 0) {
         statements.push({ text: node.getText(), input });
       }
     }
@@ -987,5 +1010,95 @@ describe("C4 extraction — every write the scanner reads, any case", () => {
     expect(
       extractSweepStatementsFromSource('export const m = "Update failed; Delete the row and retry";', "fixture.ts"),
     ).toEqual([]);
+  });
+});
+
+// S-CR1-1: write forms the scanner first missed. Each deny row is a form that
+// overran (MERGE, upsert: rolled-back probes) or that the statement-position
+// reader skipped; INV4 must report it, and MERGE / upsert stay unbounded even
+// when written in the C1 shape.
+const WRITE_FORM_DENY: ReadonlyArray<readonly [string, string]> = [
+  [
+    "MERGE with the LIMIT in its ON clause",
+    "MERGE INTO audit_outbox t USING (SELECT 1 AS one) s ON t.id IN (SELECT id FROM audit_outbox ORDER BY processing_started_at LIMIT $1 FOR UPDATE SKIP LOCKED) WHEN MATCHED THEN UPDATE SET attempt_count = t.attempt_count + 1",
+  ],
+  [
+    "MERGE with a join source and an IN (… LIMIT … FOR UPDATE) predicate",
+    "MERGE INTO audit_outbox t USING audit_outbox s ON t.id = s.id AND s.id IN (SELECT id FROM audit_outbox LIMIT $1 FOR UPDATE SKIP LOCKED) WHEN MATCHED THEN DELETE",
+  ],
+  [
+    "INSERT … SELECT … IN (… LIMIT … FOR UPDATE) ON CONFLICT DO UPDATE",
+    "INSERT INTO audit_outbox (id, attempt_count) SELECT o.id, o.attempt_count FROM audit_outbox o WHERE o.id IN (SELECT id FROM audit_outbox LIMIT $1 FOR UPDATE SKIP LOCKED) ON CONFLICT (id) DO UPDATE SET attempt_count = audit_outbox.attempt_count + 1",
+  ],
+  [
+    "a write behind an opaque ${…} prefix",
+    "${hint} UPDATE audit_outbox SET status = 'PROCESSING' WHERE id IN (SELECT id FROM audit_outbox LIMIT $1 FOR UPDATE SKIP LOCKED)",
+  ],
+  [
+    "a write after a recursive CTE's SEARCH … SET clause",
+    "WITH RECURSIVE r AS (SELECT id FROM t UNION ALL SELECT t.id FROM t JOIN r ON t.p = r.id) SEARCH DEPTH FIRST BY id SET ord DELETE FROM t WHERE id IN (SELECT id FROM r)",
+  ],
+  [
+    "a write after a recursive CTE's CYCLE … SET … USING clause",
+    "WITH RECURSIVE r AS (SELECT id FROM t UNION ALL SELECT id FROM r WHERE false) CYCLE id SET is_cycle TO true DEFAULT false USING path UPDATE t SET a = 1 WHERE status = 'SENT'",
+  ],
+  [
+    "an unrecognised write form (EXPLAIN ANALYZE executes the UPDATE)",
+    "EXPLAIN ANALYZE UPDATE audit_outbox SET status = 'PROCESSING' WHERE id IN (SELECT id FROM audit_outbox LIMIT $1 FOR UPDATE SKIP LOCKED)",
+  ],
+  ["an upsert without any LIMIT", "INSERT INTO t (id, n) VALUES ($1, 0) ON CONFLICT (id) DO UPDATE SET n = t.n + 1"],
+  [
+    "an upsert whose source and DO UPDATE both pin the key",
+    "INSERT INTO t (id) SELECT id FROM u WHERE id = $1 ON CONFLICT (id) DO UPDATE SET n = 1 WHERE t.id = $1",
+  ],
+  ["a MERGE whose ON clause pins the key", "MERGE INTO t USING u ON t.id = u.id AND t.id = $1 WHEN MATCHED THEN DELETE"],
+  [
+    "a MERGE without any LIMIT",
+    "MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN UPDATE SET n = u.n WHEN NOT MATCHED THEN INSERT (id, n) VALUES (u.id, u.n)",
+  ],
+  [
+    "a MERGE reading a materialized key set (the C1 shape does not apply to MERGE)",
+    "WITH picked AS MATERIALIZED (SELECT id FROM t LIMIT $1 FOR UPDATE SKIP LOCKED) MERGE INTO t USING picked p ON t.id = p.id WHEN MATCHED THEN DELETE",
+  ],
+];
+
+// Neither a write nor an unrecognised one: no violation at all.
+const WRITE_FORM_ALLOW: ReadonlyArray<readonly [string, string]> = [
+  ["INSERT … ON CONFLICT DO NOTHING", "INSERT INTO t (id) VALUES ($1) ON CONFLICT DO NOTHING"],
+  ["a MERGE whose actions are only INSERT / DO NOTHING", "MERGE INTO t USING u ON t.id = u.id WHEN NOT MATCHED THEN INSERT (id) VALUES (u.id) WHEN MATCHED THEN DO NOTHING"],
+  ["a standalone SELECT … FOR UPDATE … LIMIT", "SELECT id FROM t ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED"],
+  ["FK ON DELETE CASCADE / ON UPDATE text", "ALTER TABLE t ADD FOREIGN KEY (a) REFERENCES u (id) ON DELETE CASCADE ON UPDATE NO ACTION"],
+];
+
+describe("INV4 write forms (S-CR1-1)", () => {
+  it.each(WRITE_FORM_DENY)("deny: %s", (_label, sql) => {
+    expect(classifySweeps([sqlStatement(sql)], []).map((v) => v.kind)).toContain("unbounded");
+  });
+
+  it.each(WRITE_FORM_ALLOW)("allow: %s", (_label, sql) => {
+    expect(classifySweeps([sqlStatement(sql)], [])).toEqual([]);
+  });
+
+  it("extracts each deny form from module source", () => {
+    for (const [label, sql] of WRITE_FORM_DENY) {
+      const source = `declare const hint: string;\nexport const q = \`${sql}\`;\n`;
+      expect(extractSweepStatementsFromSource(source, "fixture.ts"), label).toHaveLength(1);
+    }
+  });
+
+  it("an exemption cannot cover a MERGE, an upsert or an unrecognised write", () => {
+    const literals = [
+      "MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN DELETE",
+      "INSERT INTO s (id) VALUES ($1) ON CONFLICT (id) DO UPDATE SET n = 1",
+      // A single-row write does not carry an unrecognised one in its literal.
+      "UPDATE audit_chain_anchors SET a = 1 WHERE tenant_id = $1; EXPLAIN ANALYZE DELETE FROM v WHERE id IN (SELECT 1)",
+    ];
+    const exemptions = ["MERGE INTO t", "INSERT INTO s", "UPDATE audit_chain_anchors"].map((match) => ({
+      module: "m",
+      match,
+      reason: "x".repeat(10),
+    }));
+    const kinds = classifySweeps(literals.map(sqlStatement), exemptions).map((v) => v.kind).sort();
+    expect(kinds).toEqual(["loose-exemption", "loose-exemption", "loose-exemption", "unbounded", "unbounded", "unbounded"]);
   });
 });

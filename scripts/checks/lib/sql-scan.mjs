@@ -422,8 +422,10 @@ function parseWithList(tokens, w) {
       limits: [],
     });
     i = close + 1;
-    // SEARCH / CYCLE clauses of a recursive CTE end at the next ',' or the
-    // main statement; skip nothing — a following comma continues the list.
+    // A recursive CTE's SEARCH and CYCLE clauses sit between its body and the
+    // next ',' or the main statement. Their own SET would otherwise end the
+    // list at SEARCH and hide the main statement's position.
+    i = skipSearchCycle(tokens, i);
     if (tokens[i]?.type === TOKEN.COMMA) {
       i++;
       continue;
@@ -431,6 +433,55 @@ function parseWithList(tokens, w) {
     break;
   }
   return { withToken: w, depth: tokens[w].depth, recursive, ctes, mainStatement: i };
+}
+
+/** End of a `name [, name …]` list starting at `i`, or -1 when none starts there. */
+function nameListEnd(tokens, i) {
+  if (!isNameToken(tokens[i])) return -1;
+  i++;
+  while (tokens[i]?.type === TOKEN.COMMA && isNameToken(tokens[i + 1])) i += 2;
+  return i;
+}
+
+/** End of one constant `value[::type]` at `i`, or -1. */
+function constantEnd(tokens, i) {
+  const t = tokens[i];
+  if (t === undefined || ![TOKEN.WORD, TOKEN.STRING, TOKEN.NUMBER, TOKEN.PARAM, TOKEN.OPAQUE].includes(t.type)) return -1;
+  i++;
+  while (tokens[i]?.text === ":" && tokens[i + 1]?.text === ":" && isNameToken(tokens[i + 2])) i += 3;
+  return i;
+}
+
+/**
+ * Skip `SEARCH {BREADTH|DEPTH} FIRST BY cols SET col` and then
+ * `CYCLE cols SET col [TO value DEFAULT value] USING col` after a CTE body,
+ * each optional. Returns the first token after them; a clause that does not
+ * parse is not skipped, so the WITH list ends there as before.
+ */
+function skipSearchCycle(tokens, i) {
+  if (
+    isWord(tokens[i], "SEARCH") &&
+    (isWord(tokens[i + 1], "BREADTH") || isWord(tokens[i + 1], "DEPTH")) &&
+    isWord(tokens[i + 2], "FIRST") &&
+    isWord(tokens[i + 3], "BY")
+  ) {
+    const cols = nameListEnd(tokens, i + 4);
+    if (cols !== -1 && isWord(tokens[cols], "SET") && isNameToken(tokens[cols + 1])) i = cols + 2;
+  }
+  if (isWord(tokens[i], "CYCLE")) {
+    const cols = nameListEnd(tokens, i + 1);
+    if (cols !== -1 && isWord(tokens[cols], "SET") && isNameToken(tokens[cols + 1])) {
+      let j = cols + 2;
+      if (isWord(tokens[j], "TO")) {
+        const to = constantEnd(tokens, j + 1);
+        if (to === -1 || !isWord(tokens[to], "DEFAULT")) return i;
+        j = constantEnd(tokens, to + 1);
+        if (j === -1) return i;
+      }
+      if (isWord(tokens[j], "USING") && isNameToken(tokens[j + 1])) i = j + 2;
+    }
+  }
+  return i;
 }
 
 /**
@@ -458,33 +509,132 @@ function parseTarget(tokens, i) {
   return { end: i, target };
 }
 
+export const WRITE_KIND = Object.freeze({
+  DELETE: "DELETE",
+  UPDATE: "UPDATE",
+  MERGE: "MERGE",
+  UPSERT: "UPSERT",
+});
+
+/** First index in [from, end) of a WORD `upper` at `depth`, or -1. */
+function findWordAt(tokens, from, end, depth, upper) {
+  for (let j = from; j < end; j++) if (tokens[j].depth === depth && isWord(tokens[j], upper)) return j;
+  return -1;
+}
+
+/** `[[AS] alias]` after a target ending at `end`; `stop` says which word is not an alias. */
+function skipAlias(tokens, end, stop) {
+  if (isWord(tokens[end], "AS") && isNameToken(tokens[end + 1])) return end + 2;
+  if (tokens[end]?.type === TOKEN.WORD && !stop(tokens[end])) return end + 1;
+  return end;
+}
+
 /**
- * Statement-position UPDATE/DELETE, checked against the statement's own
- * grammar: `DELETE FROM <target>` and `UPDATE <target> [[AS] alias] SET`. So
- * `FOR UPDATE`, `ON DELETE CASCADE`, `DO UPDATE SET` (never in statement
- * position) and prose such as "Update your profile" are not writes.
+ * The WHEN clauses of a MERGE between `from` and the statement end, at the
+ * MERGE's depth: `WHEN [NOT] MATCHED [BY SOURCE|TARGET] [AND …] THEN
+ * <action>`. Returns the action tokens, each `{ token, action }` with
+ * action UPDATE (followed by SET), DELETE, INSERT, NOTHING (`DO NOTHING`)
+ * or null when unreadable.
  */
-function parseWriteHead(tokens, i) {
+function mergeActions(tokens, from, end, depth) {
+  const out = [];
+  for (let j = from; j < end; j++) {
+    if (tokens[j].depth !== depth || !isWord(tokens[j], "WHEN")) continue;
+    const then = findWordAt(tokens, j + 1, end, depth, "THEN");
+    if (then === -1) {
+      out.push({ token: j, action: null });
+      continue;
+    }
+    const a = tokens[then + 1];
+    let action = null;
+    if (isWord(a, "UPDATE") && isWord(tokens[then + 2], "SET")) action = "UPDATE";
+    else if (isWord(a, "DELETE")) action = "DELETE";
+    else if (isWord(a, "INSERT")) action = "INSERT";
+    else if (isWord(a, "DO") && isWord(tokens[then + 2], "NOTHING")) action = "NOTHING";
+    out.push({ token: then + 1, action });
+    j = then;
+  }
+  return out;
+}
+
+/**
+ * Statement-position write, checked against the statement's own grammar:
+ *   - `DELETE FROM <target>`;
+ *   - `UPDATE <target> [[AS] alias] SET`;
+ *   - `MERGE INTO <target> [[AS] alias] USING … WHEN … THEN UPDATE|DELETE`
+ *     (at least one UPDATE or DELETE action);
+ *   - `INSERT INTO <target> … ON CONFLICT … DO UPDATE SET` (an upsert).
+ * So `FOR UPDATE`, `ON DELETE CASCADE`, a `DO UPDATE SET` with no INSERT head
+ * and prose such as "Update your profile" are not writes here (analyzeSql
+ * decides separately whether such a word is a known non-write).
+ *
+ * Returns `{ kind, target, headEnd, consumed }` — `consumed` lists the
+ * UPDATE/DELETE/MERGE word tokens this write accounts for — or
+ * `{ kind: null, consumed }` for a MERGE whose actions are only INSERT or
+ * DO NOTHING (a known non-write), or null.
+ */
+function parseWriteHead(tokens, i, end) {
   const t = tokens[i];
   if (isWord(t, "DELETE")) {
     if (!isWord(tokens[i + 1], "FROM")) return null;
     const parsed = parseTarget(tokens, i + 2);
     if (!parsed) return null;
-    let end = parsed.end;
-    if (isWord(tokens[end], "AS") && isNameToken(tokens[end + 1])) end += 2;
-    else if (tokens[end]?.type === TOKEN.WORD && !isClauseWord(tokens[end])) end += 1;
-    return { kind: "DELETE", target: parsed.target, headEnd: end };
+    const headEnd = skipAlias(tokens, parsed.end, isClauseWord);
+    return { kind: WRITE_KIND.DELETE, target: parsed.target, headEnd, consumed: [i] };
   }
   if (isWord(t, "UPDATE")) {
     const parsed = parseTarget(tokens, i + 1);
     if (!parsed) return null;
-    let end = parsed.end;
-    if (isWord(tokens[end], "AS") && isNameToken(tokens[end + 1])) end += 2;
-    else if (tokens[end]?.type === TOKEN.WORD && !isWord(tokens[end], "SET")) end += 1;
-    if (!isWord(tokens[end], "SET")) return null;
-    return { kind: "UPDATE", target: parsed.target, headEnd: end };
+    const headEnd = skipAlias(tokens, parsed.end, (w) => isWord(w, "SET"));
+    if (!isWord(tokens[headEnd], "SET")) return null;
+    return { kind: WRITE_KIND.UPDATE, target: parsed.target, headEnd, consumed: [i] };
+  }
+  if (isWord(t, "MERGE")) {
+    if (!isWord(tokens[i + 1], "INTO")) return null;
+    const parsed = parseTarget(tokens, i + 2);
+    if (!parsed) return null;
+    const headEnd = skipAlias(tokens, parsed.end, (w) => isWord(w, "USING"));
+    if (!isWord(tokens[headEnd], "USING")) return null;
+    const actions = mergeActions(tokens, headEnd, end, t.depth);
+    if (actions.length === 0 || actions.some((a) => a.action === null)) return null;
+    const writing = actions.filter((a) => a.action === "UPDATE" || a.action === "DELETE");
+    const consumed = [i, ...writing.map((a) => a.token)];
+    if (writing.length === 0) return { kind: null, consumed };
+    return { kind: WRITE_KIND.MERGE, target: parsed.target, headEnd, consumed };
+  }
+  if (isWord(t, "INSERT")) {
+    if (!isWord(tokens[i + 1], "INTO")) return null;
+    const parsed = parseTarget(tokens, i + 2);
+    if (!parsed) return null;
+    for (let j = parsed.end; j < end; j++) {
+      if (tokens[j].depth !== t.depth || !isWord(tokens[j], "ON") || !isWord(tokens[j + 1], "CONFLICT")) continue;
+      const doAt = findWordAt(tokens, j + 2, end, t.depth, "DO");
+      if (doAt !== -1 && isWord(tokens[doAt + 1], "UPDATE") && isWord(tokens[doAt + 2], "SET")) {
+        return { kind: WRITE_KIND.UPSERT, target: parsed.target, headEnd: parsed.end, consumed: [doAt + 1] };
+      }
+      return null;
+    }
+    return null;
   }
   return null;
+}
+
+const WRITE_WORDS = new Set(["UPDATE", "DELETE", "MERGE"]);
+
+/**
+ * An UPDATE/DELETE word that is not a statement by grammar: the row-lock
+ * clause `FOR UPDATE` / `FOR NO KEY UPDATE`, and a referential action or rule
+ * event `ON UPDATE` / `ON DELETE`.
+ */
+function isKnownNonWrite(tokens, k) {
+  const t = tokens[k];
+  const prev = tokens[k - 1];
+  if (t.upper === "UPDATE") {
+    if (isWord(prev, "FOR")) return true;
+    if (isWord(prev, "KEY") && isWord(tokens[k - 2], "NO") && isWord(tokens[k - 3], "FOR")) return true;
+  }
+  if ((t.upper === "UPDATE" || t.upper === "DELETE") && isWord(prev, "ON")) return true;
+  return false;
 }
 
 const CLAUSE_WORDS = new Set(["WHERE", "USING", "RETURNING", "SET", "FROM"]);
@@ -592,14 +742,22 @@ function findInGroups(tokens) {
  *   - limits: every `LIMIT` and `FETCH FIRST|NEXT`, as
  *     `{ token, kind: "LIMIT"|"FETCH", depth, line, arg }` (`arg` is the
  *     upper-cased text of the next token, so `ALL` / `NULL` are visible).
- *   - writes: every statement-position UPDATE/DELETE, as
+ *   - writes: every statement-position write (see parseWriteHead; `${…}`
+ *     tokens before the head are transparent), as
  *     `{ kind, token, depth, line, target: {name, opaque, tokens}, end,
- *        withList, cte, where: {start, end} | null, conjuncts }` where
- *     `withList` is the index of the WITH list whose main statement this
- *     is, or whose CTE body holds it (then `cte` is that CTE's index);
- *     conjuncts are `{ start, end, hasOr, negated, inGroup }` with `inGroup`
- *     set when the conjunct is exactly `<lhs> IN ( … )` (never under a
- *     top-level OR or a leading NOT).
+ *        withList, cte, where: {start, end} | null, conjuncts }` where `kind`
+ *     is a WRITE_KIND, `withList` is the index of the WITH list whose main
+ *     statement this is, or whose CTE body holds it (then `cte` is that
+ *     CTE's index); conjuncts are `{ start, end, hasOr, negated, inGroup }`
+ *     with `inGroup` set when the conjunct is exactly `<lhs> IN ( … )` (never
+ *     under a top-level OR or a leading NOT). MERGE and UPSERT have
+ *     `where: null` and no conjuncts.
+ *   - unrecognisedWrites: every UPDATE / DELETE / MERGE word token, as
+ *     `{ token, word, depth, line }`, that no write above accounts for (its
+ *     head, a MERGE's WHEN … THEN action, an upsert's DO UPDATE, or a MERGE
+ *     whose actions are only INSERT / DO NOTHING) and that is not
+ *     `FOR [NO KEY] UPDATE` or `ON UPDATE|DELETE` — reported only when the
+ *     literal holds a parenthesis (see below). Callers fail closed on them.
  *   - inGroups: every `IN (` group (see findInGroups).
  */
 export function analyzeSql(input) {
@@ -647,13 +805,22 @@ export function analyzeSql(input) {
   for (const g of inGroups) inByLhsStart.set(`${g.lhs.start}:${g.close}`, g);
 
   const writes = [];
-  for (const [i, ctx] of [...positions.entries()].sort((a, b) => a[0] - b[0])) {
-    const head = parseWriteHead(tokens, i);
-    if (!head) continue;
+  const accounted = new Set(); // UPDATE/DELETE/MERGE word tokens a parsed statement explains
+  for (const [position, ctx] of [...positions.entries()].sort((a, b) => a[0] - b[0])) {
+    // A `${…}` substitution before the head (a hint, a fragment) is
+    // transparent: the write after it is still at statement position.
+    let i = position;
+    while (tokens[i]?.type === TOKEN.OPAQUE) i++;
+    if (i >= tokens.length) continue;
     const depth = tokens[i].depth;
     const end = statementEnd(tokens, i + 1, depth);
+    const head = parseWriteHead(tokens, i, end);
+    if (!head) continue;
+    for (const k of head.consumed) accounted.add(k);
+    if (head.kind === null) continue;
     let where = null;
-    for (let j = head.headEnd; j < end; j++) {
+    const hasWhere = head.kind === WRITE_KIND.DELETE || head.kind === WRITE_KIND.UPDATE;
+    for (let j = head.headEnd; hasWhere && j < end; j++) {
       if (isWord(tokens[j], "WHERE") && tokens[j].depth === depth) {
         let whereEnd = end;
         for (let k = j + 1; k < end; k++) {
@@ -686,7 +853,20 @@ export function analyzeSql(input) {
     });
   }
 
-  return { tokens, limits, withLists, writes, inGroups };
+  // UPDATE, DELETE and MERGE have no LIMIT clause, so a LIMIT/FETCH can bound
+  // one only through a subquery or a CTE body, both parenthesised. A literal
+  // without a parenthesis is prose to this rule ("Update your profile before
+  // the limit is reached"), even when it embeds `UPDATE <t> SET` mid-sentence.
+  const unrecognisedWrites = [];
+  const hasParenGroup = tokens.some((t) => t.type === TOKEN.LPAREN);
+  for (let k = 0; hasParenGroup && k < tokens.length; k++) {
+    const t = tokens[k];
+    if (t.type !== TOKEN.WORD || !WRITE_WORDS.has(t.upper)) continue;
+    if (accounted.has(k) || isKnownNonWrite(tokens, k)) continue;
+    unrecognisedWrites.push({ token: k, word: t.upper, depth: t.depth, line: t.line });
+  }
+
+  return { tokens, limits, withLists, writes, unrecognisedWrites, inGroups };
 }
 
 /**

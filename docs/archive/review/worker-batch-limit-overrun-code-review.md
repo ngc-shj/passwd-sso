@@ -68,3 +68,17 @@ RT1 clean; RT2 N/A; RT4 clean; RT6 clean; RT7 T-CR1-1; RT9 clean; RT10 clean; RT
 - VE2 (worker bundle boot): `verified-local`. The pre-pr `Smoke: worker-bundle-boot` step was part of the 84/84 run.
 
 ## Resolution Status
+
+### T-CR1-1 [Major] M5/M6 forced-plan rows not marked as post-fix only
+- Action: a comment above `FORCED_PLAN_MEMBERS` states that M1–M4 overran pre-fix, while M5/M6 did not (deviation D-1). Their rows are post-fix cap assertions, and C2 catches a revert statically.
+- Modified file: `src/__tests__/db-integration/audit-outbox-sweep-caps.integration.test.ts` (`FORCED_PLAN_MEMBERS`)
+
+### S-CR1-1 [Major] write recogniser missed MERGE / upsert / opaque-prefixed / SEARCH-CYCLE writes
+- Action: the scanner recognises MERGE (UPDATE/DELETE actions), upsert, opaque-prefixed writes and SEARCH/CYCLE.
+  - Fail-closed `unrecognisedWrites` applies to parenthesised literals: C2 reports `UNRECOGNISED_WRITE`, and INV4 reports unbounded.
+  - INV4 judges MERGE and upsert unbounded.
+  - The gate header and deviation D-2 are corrected, and D-4 is added.
+  - The plan-review round-3 claim "MERGE stays bounded" held only for a MERGE whose source is the LIMIT subquery. An ON-clause or join-source predicate overran (3/2).
+  - Every clause was red-proven on throwaway copies.
+- Modified files: `scripts/checks/lib/sql-scan.mjs`, `scripts/checks/check-limited-subquery-write.mjs`, `src/__tests__/workers/worker-policy-manifest.test.ts`, `scripts/__tests__/{sql-scan,check-limited-subquery-write}.test.mjs`
+- Verification: 281/281 targeted tests; the gate is OK on the tree; raw-sql gate OK; tsc and eslint clean.

@@ -14,11 +14,8 @@
  * Rule. For every string literal, no-substitution template and template
  * literal (read generically — the tag, if any, is never consulted, and each
  * `${…}` substitution is one opaque token) under src/, scripts/ and prisma/:
- * if the literal holds a write statement — an UPDATE or DELETE in statement
- * position (the start of the literal, after `;`, the start of a CTE body, or
- * the main statement after a WITH list) that parses as `DELETE FROM <target>`
- * or `UPDATE <target> … SET`, so `FOR UPDATE` / `FOR NO KEY UPDATE` never
- * counts — then every `LIMIT` and every `FETCH FIRST|NEXT` token in it must sit
+ * if the literal holds a write statement, then every `LIMIT` and every
+ * `FETCH FIRST|NEXT` token in it must sit
  *   (a) at the top level of a CTE body,
  *   (b) of a CTE declared `AS MATERIALIZED (` (token-exact: `AS NOT
  *       MATERIALIZED` does not count),
@@ -26,6 +23,30 @@
  *       statement's own list; a materialized CTE nested inside an expression
  *       is re-evaluated per row when correlated, so it does not count).
  * Any other position denies, naming the file and line and giving the C1 shape.
+ *
+ * A write statement is one of these in statement position — the start of the
+ * literal, after `;`, the start of a CTE body, or the main statement after a
+ * WITH list (including a recursive CTE's SEARCH / CYCLE clauses), with any
+ * `${…}` substitutions before it treated as transparent:
+ *   - `DELETE FROM <target>`;
+ *   - `UPDATE <target> … SET`;
+ *   - `MERGE INTO <target> … USING … WHEN [NOT] MATCHED … THEN UPDATE|DELETE`;
+ *   - `INSERT INTO <target> … ON CONFLICT … DO UPDATE SET` (an upsert).
+ *
+ * Fail closed on the rest (UNRECOGNISED_WRITE). An UPDATE, DELETE or MERGE
+ * word token that none of those statements accounts for — not a write head,
+ * a MERGE's WHEN … THEN action, an upsert's DO UPDATE, or a MERGE whose
+ * actions are only INSERT / DO NOTHING — and that is not `FOR UPDATE`,
+ * `FOR NO KEY UPDATE`, or a referential action / rule event `ON UPDATE` /
+ * `ON DELETE`, is an unrecognised write when the literal holds at least one
+ * parenthesis. Then every `LIMIT` and `FETCH FIRST|NEXT` in that literal
+ * denies, wherever it sits. The parenthesis condition is what keeps prose
+ * out ("Update your profile before the limit is reached", or `UPDATE <t> SET`
+ * embedded mid-sentence): UPDATE, DELETE and MERGE have no LIMIT clause, so a
+ * LIMIT can bound one only through a subquery or a CTE body, and both are
+ * parenthesised. When this rule landed, the literals in the tree holding such
+ * a word were HTTP method names, GRANT lists and log prose, and none of them
+ * held a LIMIT or FETCH.
  *
  * Scope: every non-test `.ts .tsx .mts .cts .js .mjs .cjs` file under src/,
  * scripts/ and prisma/, walked by scripts/checks/lib/ast-project.mjs (test
@@ -36,8 +57,9 @@
  *
  * Control class: best-effort tripwire. Adjudication is a lexical reading of
  * literal text, not the SQL parser. Every LIMIT position this gate allows is
- * one the INV4 guard's LIMIT-location clause also accepts. It says nothing
- * about writes without a LIMIT; those are INV4's concern.
+ * one the INV4 guard's LIMIT-location clause also accepts (INV4 additionally
+ * reports every MERGE and upsert as unbounded). It says nothing about writes
+ * without a LIMIT; those are INV4's concern.
  *
  * Declared bypasses (each pinned by an allow row in the self-test):
  *   - SQL split across several literals or built by concatenation: each
@@ -46,7 +68,12 @@
  *   - the bounding subquery placed in a separate raw-SQL fragment that is
  *     interpolated into the write (the substitution is opaque);
  *   - SQL in prisma/migrations/*.sql (not a scanned extension) and plpgsql
- *     bodies (a dollar-quoted body is a string constant to this scanner).
+ *     bodies (a dollar-quoted body is a string constant to this scanner);
+ *   - an unrecognised write in a literal with no parenthesis at all: only
+ *     an opaque `${…}` fragment could then carry the bounding subquery, which
+ *     is the interpolated-fragment bypass above;
+ *   - a write whose UPDATE / DELETE / MERGE keyword itself comes from a
+ *     `${…}` substitution (the keyword is inside the opaque token).
  * Recovery path: review, plus the integration cap tests for known members.
  *
  * This file never spells the raw-SQL helper names as string literals
@@ -73,9 +100,24 @@ const LITERAL_KINDS = [
   SyntaxKind.TemplateExpression,
 ];
 
+const LIMITED_SUBQUERY_WRITE = "LIMITED_SUBQUERY_WRITE";
+const UNRECOGNISED_WRITE = "UNRECOGNISED_WRITE";
+
 const C1_SHAPE =
   "WITH picked AS MATERIALIZED (SELECT <keys> FROM <table> WHERE … ORDER BY … LIMIT $n [FOR UPDATE SKIP LOCKED]) " +
   "<UPDATE|DELETE> … WHERE (<keys>) IN (SELECT <keys> FROM picked) …";
+
+/**
+ * The LIMIT/FETCH entries of `analysis.limits` that deny, each with its
+ * reason: every one when the literal holds an unrecognised write, otherwise
+ * those outside every allowed position of a literal holding a write.
+ */
+function deniedLimits(analysis) {
+  if (analysis.unrecognisedWrites.length > 0) {
+    return analysis.limits.map((limit) => ({ limit, reason: UNRECOGNISED_WRITE }));
+  }
+  return misplacedLimits(analysis).map((limit) => ({ limit, reason: LIMITED_SUBQUERY_WRITE }));
+}
 
 /** Indexes into `analysis.limits` that sit outside every allowed position. */
 function misplacedLimits(analysis) {
@@ -127,8 +169,8 @@ for (const { rel, sf } of files) {
         parseErrors.push(`${rel}:${node.getStartLineNumber()} (${err.message})`);
         continue;
       }
-      for (const limit of misplacedLimits(analysis)) {
-        violations.push({ rel, line: node.getStartLineNumber() + limit.line, kind: limit.kind });
+      for (const { limit, reason } of deniedLimits(analysis)) {
+        violations.push({ rel, line: node.getStartLineNumber() + limit.line, kind: limit.kind, reason });
       }
     }
   }
@@ -147,13 +189,27 @@ if (parseErrors.length > 0) {
   console.error("PARSE_ERROR: these files could not be analysed:");
   for (const p of parseErrors) console.error(`  ${p}`);
 }
-if (violations.length > 0) {
+const keywordOf = (v) => (v.kind === "FETCH" ? "FETCH FIRST|NEXT" : "LIMIT");
+const byLocation = (a, b) => a.rel.localeCompare(b.rel) || a.line - b.line;
+const unrecognised = violations.filter((v) => v.reason === UNRECOGNISED_WRITE).sort(byLocation);
+const misplaced = violations.filter((v) => v.reason === LIMITED_SUBQUERY_WRITE).sort(byLocation);
+if (unrecognised.length > 0) {
+  failed = true;
+  console.error(
+    "UNRECOGNISED_WRITE: a LIMIT/FETCH shares a literal with an UPDATE/DELETE/MERGE this gate cannot read as a statement, so it cannot tell what the LIMIT bounds:",
+  );
+  for (const v of unrecognised) console.error(`  ${v.rel}:${v.line}  ${keywordOf(v)} next to an unrecognised write`);
+  console.error(
+    "\nWrite the statement in a form the gate reads (DELETE FROM <t>, UPDATE <t> … SET, MERGE INTO <t> … THEN UPDATE|DELETE, " +
+      "INSERT INTO <t> … ON CONFLICT … DO UPDATE) at statement position, bounded by the C1 shape:\n  " +
+      C1_SHAPE,
+  );
+}
+if (misplaced.length > 0) {
   failed = true;
   console.error("LIMITED_SUBQUERY_WRITE: a LIMIT/FETCH bounds a write from a position PostgreSQL may rescan per row:");
-  violations.sort((a, b) => a.rel.localeCompare(b.rel) || a.line - b.line);
-  for (const v of violations) {
-    const keyword = v.kind === "FETCH" ? "FETCH FIRST|NEXT" : "LIMIT";
-    console.error(`  ${v.rel}:${v.line}  ${keyword} in a write statement outside a depth-0 MATERIALIZED CTE body`);
+  for (const v of misplaced) {
+    console.error(`  ${v.rel}:${v.line}  ${keywordOf(v)} in a write statement outside a depth-0 MATERIALIZED CTE body`);
   }
   console.error(`\nSelect the key set once in a materialized CTE instead (plan: worker-batch-limit-overrun, C1):\n  ${C1_SHAPE}`);
 }
