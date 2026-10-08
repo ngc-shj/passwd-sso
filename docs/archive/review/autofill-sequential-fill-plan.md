@@ -1,6 +1,6 @@
 # Plan: sequential autofill writes with fixed targets (`#654` + Sony Bank login)
 
-Revision 4 (after plan review rounds 1-3, see `autofill-sequential-fill-review.md`).
+Revision 5 (after plan review rounds 1-4, see `autofill-sequential-fill-review.md`).
 
 ## Project context
 
@@ -37,7 +37,7 @@ Every fill function writes all of its fields in one synchronous pass.
 - **FR1.** One field is written per task: write, then yield a macrotask before the next write.
 - **FR2.** Every target decision is fixed at T0, before the first write. Re-detection after a write may only:
   - re-validate an already-chosen element;
-  - find a field created or replaced inside the T0 root.
+  - find a field created, replaced, revealed or enabled inside the T0 root.
 
   `document.activeElement` is never consulted after T0.
 - **FR3.** A step whose target is missing at T0 does not block later steps. It is deferred and runs as soon as its field appears inside the T0 root. A step whose target is detached after T0 also waits. The wait ends at an absolute deadline (T0 + `lateFieldWindowMs`, default 1000 ms). A step is "unfilled" until it has performed its own write. The field's current DOM value plays no part, so prefilled fields are overwritten as they are today.
@@ -71,7 +71,11 @@ function isFillActive(): boolean;
 
 - **Order and yield.** Steps run in order, with a `setTimeout(0)` yield between writes.
 - **Target resolution.** A step's target is its `initial` element while that element is connected and `accepts` it. Otherwise it is `relocate(root)`. When `initial` is null, `relocate` re-runs the step's T0 predicate inside the root. A relocated result counts only when it lies inside `root` and `accepts` it. `root` is `null` when C1a refuses a root, and then a step whose initial element is gone stays unfilled.
-- **Deferral.** Steps with a target at T0 run first, in order. A step with no T0 target is deferred and does not delay later steps.
+- **Step states.** A step is `pending`, `waiting`, `written` or `abandoned`.
+  - A `pending` step whose `initial` passes the write check at its turn is written, whatever the time.
+  - A step with no T0 target, whose target was detached, or whose `initial` fails `accepts` at its turn becomes `waiting`. It does not delay later steps, and it is deadline-bound, including any later write to its own `initial`.
+  - At the deadline, every `waiting` step becomes `abandoned`.
+  - The run exits when no step is `pending` or `waiting`.
 - **Waiting for late fields.** A step without a target is retried when the DOM mutates. The observer callback only marks steps dirty and schedules the loop; it never writes. Every write, deferred or not, runs from the sequencer's own `setTimeout` task, and at least one macrotask has passed since the previous write. The first write of a run needs no prior yield. The MutationObserver is created only when `document.body` exists, observes `childList`, `attributes` (`disabled`, `readonly`, `hidden`, `style`, `class`) and `subtree`, and runs until the absolute deadline.
 - **Write check.** Immediately before each write, in the same synchronous task, check:
   - same generation;
@@ -81,7 +85,7 @@ function isFillActive(): boolean;
   - not yet written by this sequence. Write-once applies to T0 targets too.
 - **Generation.** The generation is module-scoped per frame. A new run increments it.
 - **User-input supersession.** A run registers capture-phase listeners on `window` for its lifetime. A trusted `keydown`, `pointerdown` or `paste` increments the generation; a `keydown` with `repeat` is ignored. This is best-effort UX, and the page can suppress it. The cross-kind protection rests on the generation counter, which the page cannot touch.
-- **Exit** (settle, deadline, stale generation, or thrown error):
+- **Exit** (no `pending` or `waiting` step remains, stale generation, or thrown error; the deadline only abandons `waiting` steps):
   - disconnect the observer, clear timers, remove the listeners;
   - call every step's `release` exactly once. A secret shared by several steps (split OTP) is released only at exit;
   - on error, log a closed-set code through `select-diag-lib`, the only console sink the extension lint allows on the content side, never a value.
@@ -101,14 +105,15 @@ function isFillActive(): boolean;
   - Anchor: the LOGIN focused or hinted field, else the first identifier target, else the password; the CC number; the first identity target.
   - The root is the highest ancestor of the anchor that contains no foreign control at T0.
   - A foreign control is a visible, usable `input` or `select` of an allowlisted fillable type for that kind that is not one of the sequence's T0 targets. Hidden, submit, button and checkbox inputs are ignored. The check runs once, at T0.
-  - If the climb reaches `body` or `documentElement`, the result is `null`: no relocation.
-  - This rule replaces the form and table candidates. A page-wrapping `<form>` or an SPA wrapper (`#app`, `main`) contains foreign controls, so it is never the root.
+  - If no foreign control bounds the climb, the root is `body`. The `html` element is never the root.
+  - Baseline equivalence. A `body` root lets a control that was hidden or unusable at T0 and matches a step's predicate be written for at most `lateFieldWindowMs`, and only on a page with no other visible fillable control. That is no wider than today: the T0 page-wide `findPasswordInput` already admits any visible password field on a form-less page, including opacity-0 and offscreen ones.
+  - This rule replaces the form and table candidates. A page-wrapping `<form>` or an SPA wrapper (`#app`, `main`) is never the root when it holds a visible foreign control. A control hidden at T0 does not bound the climb.
   - Measured on the live Sony Bank page:
     - no `<form>` or `<table>` holds the three fields;
     - the root is `div.ReactModalPortal`, which holds 店番号, 口座番号 and the password, and nothing else that is fillable;
     - the only other visible fillable control on the page is outside it.
   - Div-based `#654` checkouts: the root is the card component, whatever the highest container is that holds the number and no unrelated field.
-- **Re-anchoring.** When the root is detached, `boundedRoot` is recomputed from the already-written anchor if it is still connected, using the T0 foreign-control set. Otherwise the root is `null`.
+- **Re-anchoring.** When the root is detached, `boundedRoot` is recomputed from the already-written anchor if it is still connected, using the T0 foreign-control set. Otherwise the root is `null`. Foreign controls re-rendered since T0 drop out of that set. Only a page script that reparents the anchor can exploit this, and such a script already has full read access to every field.
 - **Identifier set for LOGIN:** the username target plus the custom-field targets.
 
 ### C2: LOGIN (`autofill-lib.ts` `performAutofill` becomes `async`)
@@ -187,16 +192,23 @@ The same conversion as C3.
   - custom field and OTP rejected when hidden or of a non-allowlisted type.
 - **Identity:** one late-field row and one supersession row.
 - **Deferral and timing:**
-  - A React row on real timers: the password's `onInput` mounts a matching custom-field input that was absent at T0. Assert that the custom field is written (the deferred step ran) and that the password survives. Red-proven by letting the observer callback write directly.
+  - A React row on real timers. A native `input` listener on the password element inserts a matching custom-field input that was absent at T0. Because it is native, it runs before React's root-delegated handler. Assert that the custom field is written (the deferred step ran) and that the password survives. The red proof lets the observer callback write directly; the test also asserts, as a precondition, that this mutant loses the password.
   - Window 0: every T0 target of a multi-field form is still written.
+  - A T0 target that is disabled at its turn and re-enabled after the deadline is not written. The run exits, `isFillActive()` becomes false, and `release` runs exactly once.
   - A deferred field that appears at exactly the deadline is not written.
-- **Root rule:** for each pair below, the deny row must fail under the round-3 rule and pass under this one, and the allow row must still fill:
-  - an SPA `#app` wrapper holding a late "cvv" or password field in another section;
-  - a hidden input next to the card number;
-  - a page-wrapping `<form>`;
-  - allow: Sony-shaped T0 targets, and a late CVV inside a div card component.
+- **Root rule:**
+  - Allow rows use bare-page fixtures: no fillable control on the page besides the sequence's own targets. That covers:
+    - the four `#654` rows;
+    - Sony-shaped T0 targets;
+    - a late CVV inside a div card component;
+    - a hidden input next to the card number, where the late CVV is still filled;
+    - the Identity late-field row;
+    - the LOGIN deferral row.
+  - Deny rows: a visible foreign control bounds the root, and a late field beyond it is not written. Cases:
+    - an SPA `#app` wrapper holding a "cvv" or password field in another section;
+    - a page-wrapping `<form>` that holds a foreign control.
 - **Deny side:**
-  - a page that reveals a CSS-hidden password decoy outside the root after the username write does not receive the password;
+  - a page that reveals a CSS-hidden password decoy outside the root, beyond a visible foreign control, after the username write does not receive the password;
   - a CC autocomplete field inserted outside the root does not receive the CVV.
 - **Background:**
   - The injected path comes from the mocked manifest for all four callers. Rows cover the production shape, the dev shape (`src/content/form-detector.ts-loader.js`) and no match (fails closed). Red-proven against the old literal, which both test trees assert today: `__tests__/background.test.ts` and `__tests__/background/inline-matches.test.ts`.
@@ -225,7 +237,7 @@ The same conversion as C3.
 
 - **SC1:** the inline detector's MutationObserver watches `childList` only, so dropdown display misses attribute-only changes. This is display-side. Follow-up issue filed when the PR opens.
 - **SC2:** the toolbar-popup vs inline focus difference (VE2) is a browser property and is not changed.
-- **SC3:** fill delivery is pinned to `frameId` rather than `documentId`, and the top frame skips `allowedHosts`. This plan does not widen either. Pinning to `documentId` needs `sender.documentId` on the content path and `webNavigation` (a permission change) on the popup path. Follow-up issue.
+- **SC3:** fill delivery is pinned to `frameId` rather than `documentId`, and the top frame skips `allowedHosts`. The C5 retry adds up to 500 ms to the `frameId`-bound interval, but only on frames whose content script never ran. The decrypt interval already has this kind of window and is of similar size. Pinning to `documentId` needs `sender.documentId` on the content path and `webNavigation` (a permission change) on the popup path. Follow-up issue.
 - **SC5:** unify the LOGIN inline `func` (C7) with C2 once a manual check confirms that the bundle retry works on tabs with orphaned content scripts. Follow-up issue.
 - **SC4:** LOGIN password detection does not exclude a field the CC detector claims as a masked CVV on a page holding both forms. This is pre-existing. FR4 closes the concurrent case; the static overlap is a follow-up issue.
 
@@ -239,14 +251,14 @@ The same conversion as C3.
 1. **Sony Bank:** pick the entry from the inline dropdown on 店番号. 店番号, 口座番号 and the password are filled and stay filled.
 2. **Card form that reveals expiry and CVV after the number:** one pick fills everything.
 3. **Pick card A, then card B at once, or start typing:** A stops before its next write, and its references are dropped.
-4. **A page that reveals a hidden password field elsewhere after the username is written:** that field is never filled.
+4. **A page that reveals a hidden password field outside the root after the username is written:** that field is never filled. Outside the root means beyond a visible foreign control.
 
 ## Go/No-Go Gate
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Sequential writer: writes only from sequencer tasks, deadline for deferred and relocated steps, one generation per frame, user-input supersession, release on exit | pending |
-| C1a | T0-fixed targets; root = highest ancestor with no foreign control at T0, refusing body/html; deferral | pending |
+| C1 | Sequential writer: writes only from sequencer tasks, step states with the deadline on waiting steps, one generation per frame, user-input supersession, release on exit | pending |
+| C1a | T0-fixed targets; root = highest ancestor with no visible foreign control at T0, at most body | pending |
 | C2 | LOGIN via C1, password after identifiers, custom-field/OTP allowlist | pending |
 | C3 | Credit card via C1 | pending |
 | C4 | Identity via C1 | pending |

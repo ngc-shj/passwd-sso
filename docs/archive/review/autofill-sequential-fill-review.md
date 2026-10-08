@@ -192,3 +192,29 @@ The orchestrator proposed narrowing the scope to stop the spiral. The user chose
 - **FN-R3-7 / SEC-R3-2:** the C7 `func` re-checks connected, type and visibility before each write. FR4, FR5 and C6 not covering the `func` is a declared residual, removed by SC5.
 - **TE-R3-1:** retry rows (allow and deny) and a manual VE1 row.
 - **TE-R3-5:** wording fixed; both test trees named.
+
+---
+
+# Round 4
+Date: 2026-10-08
+
+## Findings
+- **F1 [Critical] design** (R52/R41). The revision-4 root rule refuses at `body`/`html`. On pages with no foreign control (a dedicated payment step, a PSP iframe, identifier-first login) the climb always reaches `html`, so the root is `null` and `#654` is not fixed on its canonical shapes. The refusal was a round-2 patch for the old rule. The new rule excludes foreign controls by construction, so the refusal adds no safety. Fix: drop it. The root is then `body`, which is no wider than the T0 page-wide password baseline.
+- **F2 [Major] design** (R38). The deadline exit contradicts clock-free T0 writes: either the window-0 run breaks, or a run never terminates (a T0 step whose initial is transiently invalid). Fix: define step states. A waiting step of any kind is deadline-bound and abandoned at the deadline; the run exits when every step is written or abandoned. Add a row for a T0 target disabled at its turn and re-enabled after the deadline.
+- **S1 [Minor] prose** (R49/R29). Wording overclaims:
+  - "the SPA wrapper is never the root" holds only with a visible foreign control;
+  - scenario 4;
+  - FR2 should also cover revealed and enabled fields;
+  - add the baseline-equivalence note and the re-anchoring note.
+- **S2 [Minor] prose** (R51/R49). SC3's "not widened" is false: the C5 retry adds up to 500 ms to the frameId-bound interval.
+- **T1 [Major] design** (RT10/RT7). The allow and `#654` rows need bare-page fixtures, plus a deny pair bounded by a foreign control. The hidden-input pair is mislabelled as deny.
+- **T2 [Minor]** (reachable only by building and executing). The deferral row's mutant may not go red if the mount shares the React commit. Insert the late field from a native listener, and assert the mutant loses the password as a precondition.
+
+Verified: the round-3 resolutions for FN-R3-1/2/3/6/7, SEC-R3-2 and TE-R3-1/4/5 are complete.
+
+## Resolution (plan revision 5)
+- F1: the root is the highest ancestor of the anchor with no foreign control at T0, up to and including `body`. The `html` element is never the root. Baseline equivalence is stated.
+- F2: step states `pending`, `waiting`, `written` and `abandoned`, with exit when no step is pending or waiting. Rows added.
+- S1, S2: wording corrected.
+- T1: bare-page fixtures, the foreign-bounded deny pair, and the label fix.
+- T2: native-listener insertion, with the mutant precondition asserted in the test.
