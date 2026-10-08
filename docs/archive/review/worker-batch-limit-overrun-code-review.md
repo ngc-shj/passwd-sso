@@ -194,3 +194,19 @@ No findings. The WRITE_FORM_DENY detail pins work, and the scanner CASE rows sep
 - **Orchestrator sign-off**: false-deny only; no exposure.
 
 Verification: 279/279 targeted tests; the gate is OK on the tree; eslint and tsc are clean.
+
+---
+
+# Round 4
+Date: 2026-10-08
+
+Reviewed `7f53fa153`. Functionality, security and testing all report no findings.
+
+- The DOT/AS skip cannot hide a real keyword. In PostgreSQL, the token after `AS` (ColLabel) or after `.` (attribute name) is always a name, even when it is a reserved word.
+- `CAST(… AS …)` sits one parenthesis level deeper and is filtered by depth.
+- A masking attempt over an unbalanced CASE still fails closed.
+- R43: no widening beyond F-CR3-1's false-deny scope.
+- RT7: the reviewer reproduced the red proof independently.
+- Verification: 279/279 targeted tests; the gate is OK on the tree.
+
+Review loop closed after 4 rounds.
