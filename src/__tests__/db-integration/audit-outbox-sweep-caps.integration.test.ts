@@ -430,6 +430,12 @@ describe("audit-outbox sweep caps (C8)", () => {
   const stuckSince = () => new Date(Date.now() - AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS - 60_000);
   const dueSince = () => new Date(Date.now() - 60_000);
 
+  // M1–M4 overran against the pre-fix SQL under these settings, so their rows
+  // fail if the materialized key set is undone. M5 and M6 did not: with no
+  // index on processing_started_at, the planner unique-ifies their subquery on
+  // the outer side and evaluates it once even under the forced settings (see
+  // deviation D-1). Their rows are post-fix cap assertions only; a revert of
+  // their key set is caught statically by check-limited-subquery-write.
   const FORCED_PLAN_MEMBERS: ForcedPlanMember[] = [
     {
       name: "M1 claimOutboxBatchInTx",
