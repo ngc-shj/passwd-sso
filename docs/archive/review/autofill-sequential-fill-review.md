@@ -93,3 +93,61 @@ Triggered: RT2 (T3), RT4 (T1), RT6 (T2), RT7 (T1), RT10 (T4, T5), RT11 (T6). Che
 - P12: SC3 follow-up, cost recorded.
 - P13: SC4 follow-up. With one generation per frame, the concurrent collision is closed; the static overlap is pre-existing.
 - P14: kept as a manual VE1 artifact.
+
+---
+
+# Round 2
+Date: 2026-10-08
+
+## Changes from Previous Round
+Plan revision 2 added:
+- T0-fixed targets (C1a);
+- one generation per frame, plus supersession on user input;
+- C5, which deletes the inline LOGIN fallback;
+- C6, which suppresses the dropdown during a fill;
+- the expanded test plan.
+
+## Findings (single reviewer, three expert sections)
+### Functionality
+- **FN-1 [Critical] design** (R41/R29/R34). C5's "inject `form-detector.js` and retry" points at a file that does not exist in the build.
+  - `dist/manifest.json` registers `assets/form-detector.ts-loader-<hash>.js`, and `dist/src/content/` holds only `token-bridge.js` and `webauthn-interceptor.js`. The orchestrator verified this.
+  - The CC, Identity and shortcut-command fallbacks (`background/index.ts` lines 1123, 1876, 1916) have therefore always failed since `#717`.
+  - `injectDirectAutofill` is the only fallback that works, and it covers orphaned content scripts after an extension reload. R2's rationale was wrong.
+- **FN-2 [Major] design.** A step with no T0 target blocks the later steps for the whole window. An unmatched custom field delays the password by 1 s, and user input in that second drops the password.
+- **FN-3 [Major] design.** The CC and Identity root is undefined on pages with no form and no table. `isCoLocatedWith` is a boolean predicate, not a container, and Identity has no co-location concept.
+- **FN-4 [Major] design.** The password relocation's "nearest common ancestor of the identifiers" is degenerate for a single identifier, can exclude the password, and "identifiers" is undefined.
+- **FN-5 [Minor]** `relocate` for null-initial steps; split OTP shares one secret across steps.
+- **FN-6 [Minor]** Write-once should hold for the T0 targets too.
+- **FN-7 [Minor]** The content side has no logger; use the `select-diag-lib` closed codes and `.catch` the un-awaited call.
+- **FN-8 [Minor]** A held Enter repeats `keydown`; ignore `e.repeat`.
+- **FN-9 [Minor] prose** Forbidden-pattern scopes.
+
+### Security
+- **SEC-1 [Major] design** (R43). Confinement can degenerate to `body` or `html`, which reopens the page-wide decoy. Refuse relocation in that case.
+- **SEC-2 [Minor] prose** (R49). User-input supersession is best-effort UX that the page can suppress; register it in the capture phase on `window`.
+- **SEC-3 [Minor] design** (R3). Removing the fallback would delete the frame-scope injection tests. Carry them over.
+
+### Testing
+- **TE-1 [Critical] design** (RT1/RT5). A mocked `executeScript` hides the nonexistent path; the existing command test already asserts it. Derive the path from the manifest and prove the test fails on the old literal.
+- **TE-2 [Major]** Keep and retarget the frame-scope injection tests.
+- **TE-3 [Major]** (R29/RT1). React and the root type were unverified. The orchestrator verified them: the live page has `__reactFiber$`/`__reactProps$` on the password input and `__reactContainer$` on `#__next` (a createRoot / concurrent root), with Next 16.2.6.
+- **TE-4 [Major]** (RT7). The C6 row is masked by the existing 1500 ms suppression; start the fill without `onSelect`.
+- **TE-5 [Major]** (RT2/RT11). Specify the `toFake` list and the deadline clock; keep `queueMicrotask` real; run the React row on real timers; existing tests use `lateFieldWindowMs: 0`.
+- **TE-6 [Minor] prose.** Cite the `suggestion-dropdown.test.ts` toFake precedent.
+
+## Resolution (plan revision 3)
+- **FN-1 / TE-1:** C5 becomes "resolve the bundle path from `chrome.runtime.getManifest().content_scripts`" for all four `executeScript({files})` callers (LOGIN retry, CC, Identity, shortcut command). The tests take the path from a mocked manifest of the real shape, and red-prove against the old literal.
+  - The inline LOGIN fallback is kept (C7) and made sequential, with the password last and a yield between fields. Its duplication is declared, and unification is SC5, after manual verification of the bundle retry on orphaned tabs.
+- **FN-2:** a step with no T0 target is deferred and does not block. Ordering is guaranteed among targets present at T0, and late steps run when they appear.
+- **FN-3 / FN-4 / SEC-1:** one bounded-root rule (C1a) for every kind: the anchor's `form`, else its `table`, else the nearest common ancestor of the T0 targets of that sequence. The single-target case climbs to the first ancestor holding another fillable control. A root that is `body` or `html` disables relocation.
+- **FN-5:** null-initial steps re-run their T0 predicate inside the root. A shared secret (split OTP) is released at exit.
+- **FN-6:** the write-once check is part of the same-task check.
+- **FN-7:** closed codes in `select-diag-lib`; `.catch` on the listener's call.
+- **FN-8:** `e.repeat` is ignored.
+- **FN-9:** forbidden patterns are scoped to `extension/src`; `findFocusedTextInput` is named.
+- **SEC-2:** registered in the capture phase on `window`; stated as best-effort, page-suppressible UX.
+- **SEC-3 / TE-2:** the frame-scope tests are kept.
+- **TE-3:** verified (createRoot, React 19 / Next 16.2.6); the harness mounts with `createRoot`.
+- **TE-4:** the C6 row starts the fill without `onSelect`.
+- **TE-5:** toFake is `["setTimeout","clearTimeout","Date","performance"]`, `queueMicrotask` stays real, the React row runs on real timers, and existing tests pass `lateFieldWindowMs: 0`.
+- **TE-6:** precedent cited.
