@@ -262,3 +262,16 @@ Verified:
 4. The only remaining Minor, RV6-1, is prose and has been fixed.
 
 The plan exits review and proceeds to Phase 2. Nothing is carried forward. Open residuals are stated in the plan itself: the C2 declared bypasses; the C4 residuals (nested `picked` scope, a second unbounded write in one literal, `${…}` keys and table); SC1–SC3; and the accepted dev-DB ambient-row residuals for M1–M8.
+
+---
+
+# Round 6 addendum
+Date: 2026-10-08
+
+## Findings
+- **Func-R6-1 / Test-R6-1 [Major, convergent] design** (R1/R3/RT7). The new extension set for `walkSourceFiles` / `collectSourceFiles` was not required to pass through their internal recursion and delegation (`ast-project.mjs` around lines 180 and 207). Nested `.mjs` files would then fall back to `.ts`/`.tsx`, and flat self-test fixtures would not catch it.
+
+Verified: all round-5 resolutions hold against code. The `walkSourceFiles` / `collectSourceFiles` names and the symlink refusal exist. M9/M10 have the DELETE at the start of a CTE body. The RLS clause is identical on all three tables.
+
+## Resolution (plan revision 7, applied during Phase 2)
+This entry was appended by a review run left over from the session before the restart. The finding stands. The extension set is threaded through every internal call. The per-extension deny fixtures sit one directory below the fixture root.

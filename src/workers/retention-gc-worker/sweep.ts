@@ -152,9 +152,12 @@ export async function enqueueAuditInWorkerTx(
  * - Identifiers (table, cutoffColumn, keyColumns) are validated at worker boot
  *   via sqlIdentifier in createWorker; called here defensively too.
  * - bypass_rls GUC is set in-tx for every globalDelete entry (INV-C2b).
- * - DELETE is batch-bounded via (keys) IN (SELECT keys ... LIMIT $1) — the
- *   ONLY parameter bound is batchSize; all other tokens come from the registry
- *   (literal strings, allowlist-validated), never from runtime input.
+ * - DELETE is batch-bounded via a `WITH picked AS MATERIALIZED (... LIMIT $1)`
+ *   key set, read once by `(keys) IN (SELECT keys FROM picked)` (C1 — the
+ *   subquery is evaluated exactly once per statement, so a rescanning plan
+ *   cannot touch more than `batchSize` rows). The ONLY parameter bound is
+ *   batchSize; all other tokens come from the registry (literal strings,
+ *   allowlist-validated), never from runtime input.
  *
  * @returns Number of rows deleted.
  */
@@ -185,12 +188,13 @@ export async function sweepExpiryEntry(
   const keyList = joinSql(keyIdents, trustedSql`, `);
 
   return tx.$executeRawUnsafe<number>(
-    renderSql(trustedSql`DELETE FROM ${tableIdent}
-    WHERE (${keyList}) IN (
+    renderSql(trustedSql`WITH picked AS MATERIALIZED (
       SELECT ${keyList} FROM ${tableIdent}
       WHERE ${cutoffIdent} < now()${predicateSql}
       LIMIT $1
-    )`),
+    )
+    DELETE FROM ${tableIdent}
+    WHERE (${keyList}) IN (SELECT ${keyList} FROM picked)`),
     batchSize,
   );
 }
@@ -199,11 +203,13 @@ export async function sweepExpiryEntry(
  * Batch-bounded DELETE for an EXPIRY_GUARDED entry — an expiry delete on a parent
  * table gated by a code-defined "no live dependents" guard (GUARD_SQL[entry.guard]).
  *
- * Same (keys) IN (SELECT keys WHERE cutoff < now() AND <guard> LIMIT $1) shape as
- * sweepExpiryEntry. The guard's NOT EXISTS subqueries are compile-time literals
- * keyed by the closed GuardName enum — never registry data (S1). bypass_rls is set
- * (globalDelete) so the parent delete AND the FK-cascade to child rows span all
- * tenants under the existing RLS policies. batchSize is the only bound param.
+ * Same `WITH picked AS MATERIALIZED (... LIMIT $1) ... (keys) IN (SELECT keys
+ * FROM picked)` shape as sweepExpiryEntry (C1), with the guard's WHERE clause
+ * inside the materialized subquery. The guard's NOT EXISTS subqueries are
+ * compile-time literals keyed by the closed GuardName enum — never registry
+ * data (S1). bypass_rls is set (globalDelete) so the parent delete AND the
+ * FK-cascade to child rows span all tenants under the existing RLS policies.
+ * batchSize is the only bound param.
  */
 export async function sweepGuardedExpiryEntry(
   tx: Prisma.TransactionClient,
@@ -222,13 +228,14 @@ export async function sweepGuardedExpiryEntry(
   const keyList = joinSql(keyIdents, trustedSql`, `);
 
   return tx.$executeRawUnsafe<number>(
-    renderSql(trustedSql`DELETE FROM ${tableIdent}
-    WHERE (${keyList}) IN (
+    renderSql(trustedSql`WITH picked AS MATERIALIZED (
       SELECT ${keyList} FROM ${tableIdent}
       WHERE ${cutoffIdent} < now()
       ${guardSql}
       LIMIT $1
-    )`),
+    )
+    DELETE FROM ${tableIdent}
+    WHERE (${keyList}) IN (SELECT ${keyList} FROM picked)`),
     batchSize,
   );
 }
@@ -238,8 +245,9 @@ export async function sweepGuardedExpiryEntry(
  *
  * For credential tables whose rows carry forensic provenance (lastUsedIp/At,
  * actor binding), this deletes each expired row FIRST — batch-bound via the
- * same (keys) IN (SELECT keys ... LIMIT $1) shape as sweepExpiryEntry, with
- * the provenance columns added to the RETURNING projection — then emits the
+ * same `WITH picked AS MATERIALIZED (... LIMIT $1) ... (keys) IN (SELECT keys
+ * FROM picked)` shape as sweepExpiryEntry (C1), with the provenance columns
+ * added to the RETURNING projection — then emits the
  * audit event from the RETURNING rows, all in the same tx. Emitting from
  * rows the DELETE actually removed (rather than a prior SELECT) is what
  * makes this race-safe: two concurrent sweep instances can no longer both
@@ -294,16 +302,18 @@ export async function sweepAuditProvenanceEntry(
   const params: unknown[] = entry.retentionDays
     ? [batchSize, entry.retentionDays]
     : [batchSize];
-  // Batch-bounded (id) IN (SELECT id ... LIMIT $1) DELETE, RETURNING the
-  // provenance projection so the audit can be emitted from what was actually
-  // deleted — mirrors sweepExpiryEntry's shape, extended with RETURNING.
+  // Batch-bounded WITH picked AS MATERIALIZED (... LIMIT $1) DELETE, RETURNING
+  // the provenance projection so the audit can be emitted from what was
+  // actually deleted — mirrors sweepExpiryEntry's shape (C1), extended with
+  // RETURNING.
   const rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(
-    renderSql(trustedSql`DELETE FROM ${tableIdent}
-       WHERE (id) IN (
+    renderSql(trustedSql`WITH picked AS MATERIALIZED (
          SELECT id FROM ${tableIdent}
          WHERE ${cutoffSql}${guardSql}
          LIMIT $1
        )
+       DELETE FROM ${tableIdent}
+       WHERE (id) IN (SELECT id FROM picked)
        RETURNING ${projection}`),
     ...params,
   );
@@ -430,16 +440,18 @@ export async function sweepPerTenantAge(
     const retention = tenant[col] as number;
     const cutoff = new Date(Date.now() - retention * MS_PER_DAY);
 
-    // Batch-bounded (id) IN (SELECT id ... LIMIT) — table/cutoffColumn are
-    // allowlist-validated; tenant id, cutoff, batchSize are bound params.
+    // Batch-bounded WITH picked AS MATERIALIZED (... LIMIT $3) ... (id) IN
+    // (SELECT id FROM picked) (C1) — table/cutoffColumn are allowlist-validated;
+    // tenant id, cutoff, batchSize are bound params.
     const deleted = await tx.$executeRawUnsafe<number>(
-      renderSql(trustedSql`DELETE FROM ${tableIdent}
-         WHERE (id) IN (
+      renderSql(trustedSql`WITH picked AS MATERIALIZED (
            SELECT id FROM ${tableIdent}
            WHERE tenant_id = $1::uuid
              AND ${cutoffIdent} < $2::timestamptz
            LIMIT $3
-         )`),
+         )
+         DELETE FROM ${tableIdent}
+         WHERE (id) IN (SELECT id FROM picked)`),
       tenant.id,
       cutoff,
       batchSize,
@@ -623,17 +635,20 @@ export async function sweepTrashEntry(
  * inheriting the relaxed guard. The UPDATE is a static template (no
  * interpolated values — injection-free by construction) and idempotent
  * (re-running finds fewer or zero newly-expired rows). Batch-bounded via the
- * `(id) IN (SELECT id ... LIMIT $1)` key-set shape used by every other sweep
- * in this file, so one cycle never flips an unbounded number of rows.
+ * `WITH picked AS MATERIALIZED (... LIMIT $1) ... (id) IN (SELECT id FROM
+ * picked)` key-set shape (C1) used by every other sweep in this file, so the
+ * materialized CTE is evaluated exactly once per statement and one cycle
+ * never flips more than `batchSize` rows, whatever plan PostgreSQL picks.
  * CAS by construction: the outer WHERE ALSO repeats `status = 'PENDING'`
  * (AND-appended after the key-set-IN clause, not just inside the inner
  * SELECT), so under READ COMMITTED's EvalPlanQual re-check a row concurrently
  * approved between the SELECT and the UPDATE is re-evaluated against the
  * outer predicate and skipped — it cannot flip APPROVED back to EXPIRED. The
- * key-set-IN clause is kept WHERE-leading (rather than status-leading) so it
- * stays structurally recognizable to the static sweepBounds check in
- * worker-policy-manifest.test.ts, which requires the batch-limiting
- * `WHERE <keys> IN (SELECT <keys> ... LIMIT n)` shape to be contiguous.
+ * key-set-IN clause stays a top-level AND conjunct reading from the `picked`
+ * MATERIALIZED CTE, so it stays structurally recognizable to the static
+ * sweepBounds check in worker-policy-manifest.test.ts, which requires
+ * `(<keys>) IN (SELECT <keys> FROM <materialized cte>)` as a top-level AND
+ * conjunct.
  *
  * Runs under the worker's bypass_rls GUC (RLS-enabled table, NOBYPASSRLS
  * role) — same pattern as sweepExpiryEntry's globalDelete branch. Requires
@@ -648,13 +663,14 @@ export async function sweepExpiredAccessRequests(
   await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
 
   return tx.$executeRawUnsafe<number>(
-    `UPDATE access_requests
+    `WITH picked AS MATERIALIZED (
+       SELECT id FROM access_requests
+       WHERE status = 'PENDING' AND expires_at < now()
+       LIMIT $1
+     )
+     UPDATE access_requests
        SET status = 'EXPIRED'
-       WHERE (id) IN (
-         SELECT id FROM access_requests
-         WHERE status = 'PENDING' AND expires_at < now()
-         LIMIT $1
-       )
+       WHERE (id) IN (SELECT id FROM picked)
        AND status = 'PENDING'`,
     batchSize,
   );

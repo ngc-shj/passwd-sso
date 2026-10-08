@@ -4,9 +4,10 @@
  * The integration tests prove BEHAVIOR (correct rows deleted on a live DB).
  * This unit test pins the generated SQL TEXT and parameter binding — the
  * string-building surface (keyList join, predicate concatenation, the
- * (keys) IN (SELECT ... LIMIT $1) shape) — so a regression that double-binds,
- * binds an extra param, or leaks a non-literal token into the SQL is caught
- * even when the row math coincidentally still matches.
+ * `WITH picked AS MATERIALIZED (... LIMIT $1) ... (keys) IN (SELECT keys FROM
+ * picked)` shape, C1) — so a regression that double-binds, binds an extra
+ * param, or leaks a non-literal token into the SQL is caught even when the
+ * row math coincidentally still matches.
  *
  * Explicit string assertions, NOT snapshots (the repo has no snapshot infra
  * and snapshots drift unread).
@@ -48,15 +49,17 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
     // Batch param bound positionally as exactly [batchSize] — no extra params.
     expect(params).toEqual([100]);
 
-    // Batch-bounded (keys) IN (SELECT keys ... LIMIT $1) shape — exact text (Step 0
+    // Batch-bounded WITH picked AS MATERIALIZED (... LIMIT $1) ... (keys) IN
+    // (SELECT keys FROM picked) shape (C1) — exact text (Step 0
     // characterization, raw-sql-ident-branded-type plan NF1).
     expect(sql).toBe(
-      `DELETE FROM sessions
-    WHERE (id) IN (
+      `WITH picked AS MATERIALIZED (
       SELECT id FROM sessions
       WHERE expires < now()
       LIMIT $1
-    )`,
+    )
+    DELETE FROM sessions
+    WHERE (id) IN (SELECT id FROM picked)`,
     );
     // No template-interpolated non-literal token leaked into the SQL.
     expect(sql).not.toContain("${");
@@ -78,12 +81,13 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
     const [sql, ...params] = executeRawUnsafe.mock.calls[0];
     expect(params).toEqual([500]);
     expect(sql).toBe(
-      `DELETE FROM verification_tokens
-    WHERE (identifier, token) IN (
+      `WITH picked AS MATERIALIZED (
       SELECT identifier, token FROM verification_tokens
       WHERE expires < now()
       LIMIT $1
-    )`,
+    )
+    DELETE FROM verification_tokens
+    WHERE (identifier, token) IN (SELECT identifier, token FROM picked)`,
     );
   });
 
@@ -107,12 +111,13 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
     // Predicate is rendered from the structured clauses — boolean as a literal,
     // never an interpolated arbitrary value (S1). Exact text (Step 0).
     expect(sql).toBe(
-      `DELETE FROM mcp_clients
-    WHERE (id) IN (
+      `WITH picked AS MATERIALIZED (
       SELECT id FROM mcp_clients
       WHERE dcr_expires_at < now() AND is_dcr = true AND tenant_id IS NULL
       LIMIT $1
-    )`,
+    )
+    DELETE FROM mcp_clients
+    WHERE (id) IN (SELECT id FROM picked)`,
     );
     expect(sql).not.toContain("${");
   });
@@ -158,11 +163,11 @@ describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
     expect(sql).not.toContain("250");
     expect(sql).not.toContain("${");
 
-    // Batch-bounded (id) IN (SELECT ... LIMIT $1) shape with both family-guard
-    // NOT EXISTS clauses (the SC5 protection) — exact text (Step 0).
+    // Batch-bounded WITH picked AS MATERIALIZED (... LIMIT $1) ... (id) IN
+    // (SELECT id FROM picked) shape (C1) with both family-guard NOT EXISTS
+    // clauses (the SC5 protection) — exact text (Step 0).
     expect(sql).toBe(
-      `DELETE FROM mcp_access_tokens
-    WHERE (id) IN (
+      `WITH picked AS MATERIALIZED (
       SELECT id FROM mcp_access_tokens
       WHERE expires_at < now()
       AND NOT EXISTS (
@@ -176,7 +181,9 @@ describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
          AND d.revoked_at IS NULL AND d.expires_at > now()
      )
       LIMIT $1
-    )`,
+    )
+    DELETE FROM mcp_access_tokens
+    WHERE (id) IN (SELECT id FROM picked)`,
     );
   });
 });
@@ -227,18 +234,19 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     const deleted = await sweepAuditProvenanceEntry(tx, entry, 100);
     expect(deleted).toBe(1);
 
-    // DELETE: batch-bounded (id) IN (SELECT id ... LIMIT $1), RETURNING id + all
-    // provenance cols, no FOR UPDATE (the DELETE itself takes the row lock).
-    // Exact text (Step 0).
+    // DELETE: batch-bounded WITH picked AS MATERIALIZED (... LIMIT $1) ... (id)
+    // IN (SELECT id FROM picked), RETURNING id + all provenance cols, no FOR
+    // UPDATE (the DELETE itself takes the row lock). Exact text (Step 0).
     const [deleteSql, ...deleteParams] = queryRawUnsafe.mock.calls[0];
     expect(deleteParams).toEqual([100]);
     expect(deleteSql).toBe(
-      `DELETE FROM extension_tokens
-       WHERE (id) IN (
+      `WITH picked AS MATERIALIZED (
          SELECT id FROM extension_tokens
          WHERE expires_at < now()
          LIMIT $1
        )
+       DELETE FROM extension_tokens
+       WHERE (id) IN (SELECT id FROM picked)
        RETURNING id, tenant_id, user_id, last_used_at, last_used_ip, last_used_user_agent`,
     );
     expect(deleteSql).not.toContain("FOR UPDATE");
@@ -320,8 +328,7 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     // The guard lives in the DELETE's inner SELECT (the batch-bound id list).
     // Exact text (Step 0).
     expect(deleteSql).toBe(
-      `DELETE FROM emergency_access_grants
-       WHERE (id) IN (
+      `WITH picked AS MATERIALIZED (
          SELECT id FROM emergency_access_grants
          WHERE created_at < now() AND (
        emergency_access_grants.status IN ('REVOKED', 'REJECTED')
@@ -329,6 +336,8 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
      )
          LIMIT $1
        )
+       DELETE FROM emergency_access_grants
+       WHERE (id) IN (SELECT id FROM picked)
        RETURNING id, tenant_id, owner_id, status, token_expires_at`,
     );
   });
@@ -348,12 +357,13 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     expect(deleteSql).not.toContain("status IN");
     // Exact text (Step 0).
     expect(deleteSql).toBe(
-      `DELETE FROM api_keys
-       WHERE (id) IN (
+      `WITH picked AS MATERIALIZED (
          SELECT id FROM api_keys
          WHERE expires_at < now()
          LIMIT $1
        )
+       DELETE FROM api_keys
+       WHERE (id) IN (SELECT id FROM picked)
        RETURNING id, tenant_id, user_id`,
     );
   });
@@ -373,12 +383,13 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     const [deleteSql, ...deleteParams] = queryRawUnsafe.mock.calls[0];
     // Exact text (Step 0).
     expect(deleteSql).toBe(
-      `DELETE FROM access_requests
-       WHERE (id) IN (
+      `WITH picked AS MATERIALIZED (
          SELECT id FROM access_requests
          WHERE expires_at < now() - ($2 || ' days')::interval
          LIMIT $1
        )
+       DELETE FROM access_requests
+       WHERE (id) IN (SELECT id FROM picked)
        RETURNING id, tenant_id, status`,
     );
     // retentionDays is bound as $2 (a value), never interpolated into the SQL text.

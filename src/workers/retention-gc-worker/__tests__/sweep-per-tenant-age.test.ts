@@ -72,14 +72,17 @@ describe("sweepPerTenantAge (SC3)", () => {
     expect(total).toBe(5);
     const [sql, ...params] = executeRawUnsafe.mock.calls[0];
     // Exact text (Step 0 characterization, raw-sql-ident-branded-type plan NF1).
+    // C1 shape: WITH picked AS MATERIALIZED (... LIMIT $3) ... (id) IN
+    // (SELECT id FROM picked).
     expect(sql).toBe(
-      `DELETE FROM password_entry_histories
-         WHERE (id) IN (
+      `WITH picked AS MATERIALIZED (
            SELECT id FROM password_entry_histories
            WHERE tenant_id = $1::uuid
              AND changed_at < $2::timestamptz
            LIMIT $3
-         )`,
+         )
+         DELETE FROM password_entry_histories
+         WHERE (id) IN (SELECT id FROM picked)`,
     );
     expect(sql).not.toContain("${");
     // params: [tenantId, cutoffDate, batchSize]

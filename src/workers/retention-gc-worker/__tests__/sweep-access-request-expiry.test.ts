@@ -54,16 +54,20 @@ describe("sweepExpiredAccessRequests (C7)", () => {
     // under READ COMMITTED's EvalPlanQual re-check: a row concurrently
     // approved between the inner SELECT and the UPDATE re-evaluates the outer
     // predicate and is skipped, so it cannot flip APPROVED -> EXPIRED. The
-    // key-set-IN clause stays WHERE-leading (worker-policy-manifest's static
-    // sweepBounds check requires `WHERE (id) IN (SELECT id ... LIMIT)` as a
-    // contiguous shape to recognize the batch bound).
+    // key-set-IN clause stays a top-level AND conjunct reading from the
+    // `picked` MATERIALIZED CTE (C1) so worker-policy-manifest's static
+    // sweepBounds check — which requires `(<keys>) IN (SELECT <keys> FROM
+    // <materialized cte>)` as a top-level AND conjunct — still recognizes the
+    // batch bound.
     expect(sql).toMatch(/\(id\)\s+IN\s*\([\s\S]*?\)\s+AND\s+status\s*=\s*'PENDING'/);
     expect(sql).toContain("WHERE status = 'PENDING' AND expires_at < now()");
     expect(sql).toContain("LIMIT $1");
     // Batch-bounded key-set-IN shape (same pattern as every other sweeper in
-    // this file): the outer UPDATE's (id) IN list matches the inner SELECT id
-    // projection, so the LIMIT caps exactly the rows mutated.
-    expect(sql).toMatch(/\(id\)\s+IN\s*\(\s*SELECT\s+id\s+FROM\s+access_requests/);
+    // this file): the outer UPDATE's (id) IN list reads from the `picked`
+    // MATERIALIZED CTE, whose own SELECT id projection is bounded by the LIMIT,
+    // so the LIMIT caps exactly the rows mutated (C1).
+    expect(sql).toMatch(/\(id\)\s+IN\s*\(\s*SELECT\s+id\s+FROM\s+picked\s*\)/);
+    expect(sql).toMatch(/WITH\s+picked\s+AS\s+MATERIALIZED\s*\(\s*SELECT\s+id\s+FROM\s+access_requests/);
     expect(params).toEqual([250]);
   });
 
