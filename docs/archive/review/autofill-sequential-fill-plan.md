@@ -1,6 +1,6 @@
 # Plan: sequential autofill writes with fixed targets (`#654` + Sony Bank login)
 
-Revision 5 (after plan review rounds 1-4, see `autofill-sequential-fill-review.md`).
+Revision 6 (after plan review rounds 1-5, see `autofill-sequential-fill-review.md`).
 
 ## Project context
 
@@ -40,7 +40,7 @@ Every fill function writes all of its fields in one synchronous pass.
   - find a field created, replaced, revealed or enabled inside the T0 root.
 
   `document.activeElement` is never consulted after T0.
-- **FR3.** A step whose target is missing at T0 does not block later steps. It is deferred and runs as soon as its field appears inside the T0 root. A step whose target is detached after T0 also waits. The wait ends at an absolute deadline (T0 + `lateFieldWindowMs`, default 1000 ms). A step is "unfilled" until it has performed its own write. The field's current DOM value plays no part, so prefilled fields are overwritten as they are today.
+- **FR3.** A step waits when its target is missing at T0, has been detached, or its `initial` fails `accepts` at its turn. A waiting step does not block later steps, and it runs as soon as its field becomes valid inside the T0 root. The wait ends at an absolute deadline (T0 + `lateFieldWindowMs`, default 1000 ms). A step is "unfilled" until it has performed its own write. The field's current DOM value plays no part, so prefilled fields are overwritten as they are today.
 - **FR4.** A frame has at most one active fill. Starting a new fill of any kind (LOGIN, CC, IDENTITY) supersedes the pending one. A trusted `keydown`, `pointerdown` or `paste` during the window also supersedes it. A superseded sequence never writes again.
 - **FR5.** Secret reachability is bounded by the sequence.
   - Steps read `payload.<field>` when they write; they do not capture copies.
@@ -74,7 +74,7 @@ function isFillActive(): boolean;
 - **Step states.** A step is `pending`, `waiting`, `written` or `abandoned`.
   - A `pending` step whose `initial` passes the write check at its turn is written, whatever the time.
   - A step with no T0 target, whose target was detached, or whose `initial` fails `accepts` at its turn becomes `waiting`. It does not delay later steps, and it is deadline-bound, including any later write to its own `initial`.
-  - At the deadline, every `waiting` step becomes `abandoned`.
+  - At the deadline, every `waiting` step becomes `abandoned`. A step that would become `waiting` at or after the deadline becomes `abandoned` at once.
   - The run exits when no step is `pending` or `waiting`.
 - **Waiting for late fields.** A step without a target is retried when the DOM mutates. The observer callback only marks steps dirty and schedules the loop; it never writes. Every write, deferred or not, runs from the sequencer's own `setTimeout` task, and at least one macrotask has passed since the previous write. The first write of a run needs no prior yield. The MutationObserver is created only when `document.body` exists, observes `childList`, `attributes` (`disabled`, `readonly`, `hidden`, `style`, `class`) and `subtree`, and runs until the absolute deadline.
 - **Write check.** Immediately before each write, in the same synchronous task, check:
@@ -106,13 +106,15 @@ function isFillActive(): boolean;
   - The root is the highest ancestor of the anchor that contains no foreign control at T0.
   - A foreign control is a visible, usable `input` or `select` of an allowlisted fillable type for that kind that is not one of the sequence's T0 targets. Hidden, submit, button and checkbox inputs are ignored. The check runs once, at T0.
   - If no foreign control bounds the climb, the root is `body`. The `html` element is never the root.
-  - Baseline equivalence. A `body` root lets a control that was hidden or unusable at T0 and matches a step's predicate be written for at most `lateFieldWindowMs`, and only on a page with no other visible fillable control. That is no wider than today: the T0 page-wide `findPasswordInput` already admits any visible password field on a form-less page, including opacity-0 and offscreen ones.
+  - Baseline equivalence. A `body` root lets a control that was hidden or unusable at T0 and matches a step's predicate be written for at most `lateFieldWindowMs`, and only on a page with no other visible fillable control. Such a field must also pass `accepts`, including visibility, when it is written. That is no wider than today:
+    - Password: the T0 page-wide `findPasswordInput` already admits any visible password field on a form-less page, including opacity-0 and offscreen ones.
+    - CVV: the CC detector rejects `opacity <= 0.05`, but it admits offscreen and clipped fields at T0 today.
   - This rule replaces the form and table candidates. A page-wrapping `<form>` or an SPA wrapper (`#app`, `main`) is never the root when it holds a visible foreign control. A control hidden at T0 does not bound the climb.
   - Measured on the live Sony Bank page:
     - no `<form>` or `<table>` holds the three fields;
     - the root is `div.ReactModalPortal`, which holds 店番号, 口座番号 and the password, and nothing else that is fillable;
     - the only other visible fillable control on the page is outside it.
-  - Div-based `#654` checkouts: the root is the card component, whatever the highest container is that holds the number and no unrelated field.
+  - Div-based `#654` checkouts: the root is the card component, whatever the highest container is that holds the number and no unrelated field. The "replaced" case is fixed when the replaced subtree is strictly below the root. A remount of the root itself leaves the remaining fields unfilled, which is the same as today.
 - **Re-anchoring.** When the root is detached, `boundedRoot` is recomputed from the already-written anchor if it is still connected, using the T0 foreign-control set. Otherwise the root is `null`. Foreign controls re-rendered since T0 drop out of that set. Only a page script that reparents the anchor can exploit this, and such a script already has full read access to every field.
 - **Identifier set for LOGIN:** the username target plus the custom-field targets.
 
@@ -195,6 +197,7 @@ The same conversion as C3.
   - A React row on real timers. A native `input` listener on the password element inserts a matching custom-field input that was absent at T0. Because it is native, it runs before React's root-delegated handler. Assert that the custom field is written (the deferred step ran) and that the password survives. The red proof lets the observer callback write directly; the test also asserts, as a precondition, that this mutant loses the password.
   - Window 0: every T0 target of a multi-field form is still written.
   - A T0 target that is disabled at its turn and re-enabled after the deadline is not written. The run exits, `isFillActive()` becomes false, and `release` runs exactly once.
+  - The same with window 0: a T0 target disabled at its turn is abandoned at once, and the run exits.
   - A deferred field that appears at exactly the deadline is not written.
 - **Root rule:**
   - Allow rows use bare-page fixtures: no fillable control on the page besides the sequence's own targets. That covers:
@@ -204,9 +207,12 @@ The same conversion as C3.
     - a hidden input next to the card number, where the late CVV is still filled;
     - the Identity late-field row;
     - the LOGIN deferral row.
-  - Deny rows: a visible foreign control bounds the root, and a late field beyond it is not written. Cases:
-    - an SPA `#app` wrapper holding a "cvv" or password field in another section;
+  - Paired rows on the same fixture: a visible foreign control bounds the root, a late field beyond it is not written, and a late field inside the card or login section, below the foreign control, is written. Cases:
+    - an SPA `#app` wrapper holding a "cvv" or password field in another section. Precondition asserted: that field is not a T0 target;
     - a page-wrapping `<form>` that holds a foreign control.
+  - A `boundedRoot` unit row on a Sony-shaped DOM: three fields in sibling blocks inside a portal div, plus an id-less text input outside it. The result is the portal div.
+  - A `#654` "replaced" row in which the replaced subtree lies below a non-`body` root.
+  - Mutation-proven with "`null` whenever a foreign control exists" and "the anchor's parent".
 - **Deny side:**
   - a page that reveals a CSS-hidden password decoy outside the root, beyond a visible foreign control, after the username write does not receive the password;
   - a CC autocomplete field inserted outside the root does not receive the CVV.

@@ -218,3 +218,24 @@ Verified: the round-3 resolutions for FN-R3-1/2/3/6/7, SEC-R3-2 and TE-R3-1/4/5 
 - S1, S2: wording corrected.
 - T1: bare-page fixtures, the foreign-bounded deny pair, and the label fix.
 - T2: native-listener insertion, with the mutant precondition asserted in the test.
+
+---
+
+# Round 5
+Date: 2026-10-08
+
+## Findings
+- **F-R5-1 [Major] design** (R38). A step that becomes `waiting` after the deadline is never abandoned. This happens when its turn comes after T0 + window: window 0, or a page that blocks the main thread. The run then never exits: `isFillActive` stays true, `release` never runs, and the listeners stay registered.
+- **F-R5-2 [Minor] prose** (R49). The `#654` "replaced" case is fixed only when the replaced subtree is strictly below the root. A remount of the root itself leaves the field unfilled, which is safe and matches today's behaviour.
+- **F-R5-3 [Minor] prose.** FR3 should list the third waiting cause.
+- **S-R5-1 [Minor] prose** (R29). The baseline note should cover the CVV through offscreen and clipped fields. The CC detector rejects `opacity <= 0.05`.
+- **T-R5-1 [Major] design** (RT10/RT7). Revision 5 split the pairs. No row pins a root that is neither `body` nor `null`, so the mutants "null when foreign" and "anchor's parent" pass. Restore same-fixture pairs, add a `boundedRoot` unit row on a Sony-shaped DOM, and add a "replaced" row below a non-body root.
+- **T-R5-2 [Minor]** (reachable only by building and executing). Add a fixture precondition that the foreign "cvv" is not a T0 target.
+
+Verified: F1, S1, S2 and T2 are correct.
+
+## Resolution (plan revision 6)
+- F-R5-1: a step that would enter `waiting` at or after the deadline becomes `abandoned` at once; window-0 disabled-target row added.
+- F-R5-2, F-R5-3, S-R5-1: wording.
+- T-R5-1: same-fixture allow assertions on each deny fixture; a `boundedRoot` unit row on a Sony-shaped DOM including the outside text input, expecting the portal-equivalent div; a "replaced below a non-body root" row; mutation-proven with both mutants.
+- T-R5-2: the precondition is asserted in the fixture.
