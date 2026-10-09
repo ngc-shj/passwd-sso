@@ -3,7 +3,11 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { performCreditCardAutofill } from "../../content/autofill-cc-lib";
-import { __resetFillSequenceForTests } from "../../content/fill-sequence-lib";
+import { performIdentityAutofill } from "../../content/autofill-identity-lib";
+import {
+  __resetFillSequenceForTests,
+  DEFAULT_LATE_FIELD_WINDOW_MS,
+} from "../../content/fill-sequence-lib";
 import { EXT_MSG } from "../../lib/constants";
 import type { CreditCardAutofillPayload } from "../../types/messages";
 
@@ -588,7 +592,7 @@ describe("performCreditCardAutofill — dynamic forms (#654)", () => {
   const DETAILS = `<input autocomplete="cc-exp" placeholder="MM/YY" /><input autocomplete="cc-csc" />`;
 
   async function settle(fill: Promise<void>): Promise<void> {
-    await vi.advanceTimersByTimeAsync(1100);
+    await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
     await fill;
   }
 
@@ -694,6 +698,26 @@ describe("performCreditCardAutofill — dynamic forms (#654)", () => {
 
     expect(q("[autocomplete=cc-number]").value).toBe("5500000000000004");
     expect(q("[autocomplete=cc-csc]").value).toBe("222");
+  });
+
+  // FR4: a newer request supersedes the pending fill even when its own T0
+  // detection finds nothing to fill.
+  it("a later fill request that finds no form still ends a pending CVV step", async () => {
+    setupForm(`<div id="card"><input autocomplete="cc-number" /><div id="details"></div></div>`);
+
+    const fill = performCreditCardAutofill(card({ expiryMonth: "", expiryYear: "" }));
+    await vi.advanceTimersByTimeAsync(5);
+    await performIdentityAutofill({
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
+      fullName: "Jane Doe", givenName: "", familyName: "", familyNameKana: "", givenNameKana: "",
+      address: "", addressLine2: "", city: "", state: "", postalCode: "", country: "",
+      phone: "", email: "", dateOfBirth: "", nationality: "",
+    });
+    q("#details").innerHTML = `<input autocomplete="cc-csc" />`;
+    await settle(fill);
+
+    expect(q("[autocomplete=cc-number]").value).toBe("4111111111111111");
+    expect(q("[autocomplete=cc-csc]").value).toBe("");
   });
 
   it("drops the CVV reference at its write", async () => {

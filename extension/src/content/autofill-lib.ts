@@ -4,6 +4,7 @@ import { extractHost, isHostMatch } from "../lib/url-matching";
 import {
   resolveFillRoot,
   runFillSequence,
+  supersedeActiveFill,
   type FillRoot,
   type FillStep,
   type FillTarget,
@@ -43,6 +44,9 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
   input.dispatchEvent(new Event("blur", { bubbles: true }));
 }
+
+// Input types a username can be written into.
+const USERNAME_TYPES = ["text", "email", "tel"];
 
 function isUsableInput(input: HTMLInputElement) {
   return !input.disabled && !input.readOnly;
@@ -84,7 +88,7 @@ function findUsernameInput(
 ) {
   const isUsernameLike = (candidate: HTMLInputElement): boolean => {
     if (!isUsableInput(candidate)) return false;
-    if (!["text", "email", "tel"].includes(candidate.type)) return false;
+    if (!USERNAME_TYPES.includes(candidate.type)) return false;
 
     const ac = (candidate.autocomplete || "").toLowerCase().trim();
     if (ac === "username" || ac === "email") return true;
@@ -152,7 +156,7 @@ function findFocusedTextInput(): HTMLInputElement | null {
   const active = document.activeElement;
   if (!(active instanceof HTMLInputElement)) return null;
   if (!isUsableInput(active)) return null;
-  if (!["text", "email", "tel"].includes(active.type)) return null;
+  if (!USERNAME_TYPES.includes(active.type)) return null;
   return active;
 }
 
@@ -262,7 +266,7 @@ function isPasswordTarget(el: FillTarget): boolean {
 
 function isUsernameTarget(el: FillTarget): boolean {
   return (
-    el instanceof HTMLInputElement && isUsableInput(el) && ["text", "email", "tel"].includes(el.type)
+    el instanceof HTMLInputElement && isUsableInput(el) && USERNAME_TYPES.includes(el.type)
   );
 }
 
@@ -289,12 +293,16 @@ function inDocumentOrder(elements: HTMLInputElement[]): HTMLInputElement[] {
   );
 }
 
-export function performAutofill(
+export async function performAutofill(
   payload: AutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
 ): Promise<void> {
   // Frame-origin gate: never write the credential into a cross-origin subframe.
-  if (!isFrameAllowedToFill(payload.allowedHosts)) return Promise.resolve();
+  // The newer request still ends this frame's pending fill (FR4).
+  if (!isFrameAllowedToFill(payload.allowedHosts)) {
+    supersedeActiveFill();
+    return;
+  }
 
   // ── T0: every target decision is made here, before the first write ──
   const inputs = Array.from(
@@ -318,7 +326,7 @@ export function performAutofill(
   const hintedUsernameInput =
     hintedInput &&
     isUsableInput(hintedInput) &&
-    ["text", "email", "tel"].includes(hintedInput.type)
+    USERNAME_TYPES.includes(hintedInput.type)
       ? hintedInput
       : null;
 

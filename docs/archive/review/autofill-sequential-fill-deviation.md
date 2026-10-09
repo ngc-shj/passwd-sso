@@ -57,3 +57,26 @@
 - **Test fixes on the way:**
   - The supersession rows in `fill-sequence-lib.test.ts` advanced past the run's end before dispatching the event. They now advance only through the first task.
   - A deadline row was added because the "deadline check removed" mutant survived: a sequencer task that runs past the deadline before the deadline handler.
+
+## Step 2-5 self-R-check dispositions
+
+Every finding below was fixed in Phase 2, and every new row was red-proven on a scratch copy.
+
+- **SR-S1, R38 (security):** CC and Identity returned early, when T0 detection found nothing, without superseding the pending run.
+  - Fix: the new `supersedeActiveFill()` is called on both returns.
+  - Rows: a cross-kind row in each direction, red with the call removed.
+- **SR-T6, R3 (testing):** the same gap on the LOGIN frame-gate return. The newer request is refused by this frame but still supersedes it, failing safe: no earlier entry keeps writing.
+  - Row: red with the call removed.
+- **SR-S2, R2:** `["text", "email", "tel"]` is now `USERNAME_TYPES` in `autofill-lib.ts` (all four uses) and in `direct-autofill.ts`, where the constant stays function-local because the function is serialized.
+- **SR-F1 and SR-T4, RT3:** the tests now use `BUNDLE_RESEND_ATTEMPTS`, `BUNDLE_RESEND_INTERVAL_MS` and `DEFAULT_LATE_FIELD_WINDOW_MS` instead of copying their values.
+- **SR-T1, missing plan rows:** three background rows were added:
+  - the Identity fallback, with the dev-shape loader and the originating frame;
+  - LOGIN ordering: message, then bundle, then resend;
+  - LOGIN when every resend gets "no receiver": the bundle comes first, then the `func` exactly once.
+
+  Red against four mutants: Identity on the old literal, the LOGIN retry removed, the `func` run twice, and the `func` run before the bundle.
+- **SR-T2, RT9:** a row rebuilds `directAutofill` from `toString()`, as `executeScript` does. It is red when a module-scope reference is added.
+- **SR-T3, RT6 and RT7:**
+  - The three `perform…()` functions are now `async`, so a throw during T0 detection reaches the listener's `.catch` and the closed-code sink. One row per kind checks this; each is red when its function is not `async`.
+  - The release-throw row asserts `fill-release-error`.
+- **SR-T5, RT11:** the no-body row removes its stray input in a `finally` block.

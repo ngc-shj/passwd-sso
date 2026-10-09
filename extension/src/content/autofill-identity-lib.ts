@@ -11,6 +11,7 @@ import {
 import {
   resolveFillRoot,
   runFillSequence,
+  supersedeActiveFill,
   type FillStep,
   type FillTarget,
 } from "./fill-sequence-lib";
@@ -98,13 +99,16 @@ function writeField(el: FillTarget, value: string, diagField: SelectDiagField): 
   }
 }
 
-export function performIdentityAutofill(
+export async function performIdentityAutofill(
   payload: IdentityAutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
 ): Promise<void> {
   // T0: the detector's result is every step's initial target.
   const fields = detectIdentityFields(document);
-  if (!fields) return Promise.resolve();
+  if (!fields) {
+    supersedeActiveFill();
+    return;
+  }
 
   const steps: FillStep[] = [];
   // A step whose payload value is empty is not created.

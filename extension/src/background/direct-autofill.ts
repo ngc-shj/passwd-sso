@@ -68,11 +68,11 @@ export async function directAutofill(
   const usernameInput: HTMLInputElement | null =
     hintedInput instanceof HTMLInputElement &&
     isUsableInput(hintedInput) &&
-    ["text", "email", "tel"].includes(hintedInput.type)
+    USERNAME_TYPES.includes(hintedInput.type)
       ? hintedInput
       : active instanceof HTMLInputElement &&
           isUsableInput(active) &&
-          ["text", "email", "tel"].includes(active.type)
+          USERNAME_TYPES.includes(active.type)
         ? active
         : null;
 
@@ -105,7 +105,7 @@ export async function directAutofill(
       const c = inputs[i];
       if (
         isUsableInput(c) &&
-        ["text", "email", "tel"].includes(c.type)
+        USERNAME_TYPES.includes(c.type)
       ) {
         fallbackUsername = c;
         break;

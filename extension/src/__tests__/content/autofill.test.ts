@@ -3,7 +3,10 @@
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { performAutofill } from "../../content/autofill-lib";
-import { __resetFillSequenceForTests } from "../../content/fill-sequence-lib";
+import {
+  __resetFillSequenceForTests,
+  DEFAULT_LATE_FIELD_WINDOW_MS,
+} from "../../content/fill-sequence-lib";
 import type { AutofillPayload } from "../../types/messages";
 import { AUTOFILL_FILL } from "../../lib/constants";
 
@@ -817,7 +820,7 @@ describe("performAutofill — sequential fill", () => {
   }
 
   async function settle(fill: Promise<void>): Promise<void> {
-    await vi.advanceTimersByTimeAsync(1100);
+    await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
     await fill;
   }
 
@@ -859,6 +862,35 @@ describe("performAutofill — sequential fill", () => {
     expect(byId("user").value).toBe("bob");
   });
 
+  // FR4: a newer request this frame refuses at the origin gate still ends the
+  // frame's pending fill, so the earlier entry cannot keep writing.
+  it("a later request refused by the frame gate still ends a pending fill", async () => {
+    setupForm(`<div id="login"><input id="user" type="text" /></div>`);
+    byId("user").focus();
+    const fill = performAutofill(loginPayload({ password: "first-pw" }));
+    await vi.advanceTimersByTimeAsync(5);
+
+    const originalTop = window.top;
+    const originalLocation = window.location;
+    Object.defineProperty(window, "top", { configurable: true, value: {} });
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL("https://attacker.example/frame"),
+    });
+    try {
+      await performAutofill(loginPayload({ password: "other-pw", allowedHosts: ["bank.example"] }));
+    } finally {
+      Object.defineProperty(window, "top", { configurable: true, value: originalTop });
+      Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+    }
+
+    addPassword(document.getElementById("login") as HTMLElement, "pw");
+    await settle(fill);
+
+    expect(byId("user").value).toBe("alice");
+    expect(byId("pw").value).toBe("");
+  });
+
   it("does not write a custom field into a password input that matches its label", async () => {
     setupForm(`
       <input id="pin" type="password" />
@@ -881,7 +913,7 @@ describe("performAutofill — sequential fill", () => {
     const fill = performAutofill(
       loginPayload({ password: "", customFields: [{ label: "member", value: "M-1" }] }),
     );
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS);
     byId("member").style.display = "";
     await settle(fill);
 

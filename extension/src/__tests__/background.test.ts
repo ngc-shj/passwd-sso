@@ -8,6 +8,7 @@ import {
   DISCONNECT_REASON_KEY,
 } from "../lib/constants";
 import { DISCONNECT_REASON } from "../lib/disconnect-reason";
+import { BUNDLE_RESEND_ATTEMPTS } from "../background/content-bundle";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
 import type { SessionState } from "../lib/session-storage";
@@ -1576,6 +1577,86 @@ describe("background message flow", () => {
       (c: unknown[]) => "args" in (c[0] as object),
     );
     expect(injectCall?.[0]?.target).toEqual({ tabId: 1, frameIds: [7] });
+  });
+
+  const fillFromFrame7 = () =>
+    new Promise((resolve) => {
+      messageHandlers[0](
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+          frameId: 7,
+        },
+        (resp) => resolve(resp),
+      );
+    });
+
+  const callOrder = (mock: { mock: { invocationCallOrder: number[] } }) =>
+    mock.mock.invocationCallOrder;
+
+  it("C5/C7: LOGIN delivers by message, then the bundle and a resend; the func never runs once a resend lands", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    chromeMock?.tabs.sendMessage
+      .mockRejectedValueOnce(new Error(NO_RECEIVER))
+      .mockRejectedValueOnce(new Error(NO_RECEIVER))
+      .mockResolvedValueOnce(undefined);
+
+    const res = await fillFromFrame7();
+
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+    const calls = chromeMock!.scripting.executeScript.mock.calls as unknown[][];
+    expect(calls.map((c) => Object.keys(c[0] as object).sort())).toEqual([["files", "target"]]);
+    const [firstSend, , lastSend] = callOrder(chromeMock!.tabs.sendMessage);
+    const [inject] = callOrder(chromeMock!.scripting.executeScript);
+    expect(firstSend).toBeLessThan(inject);
+    expect(inject).toBeLessThan(lastSend);
+  });
+
+  it("C5/C7: LOGIN runs the func exactly once, after the bundle, when every resend has no receiver", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    chromeMock?.tabs.sendMessage.mockRejectedValue(new Error(NO_RECEIVER));
+
+    const res = await fillFromFrame7();
+
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1 + BUNDLE_RESEND_ATTEMPTS);
+    const calls = chromeMock!.scripting.executeScript.mock.calls as unknown[][];
+    expect(calls.map((c) => ("files" in (c[0] as object) ? "bundle" : "func"))).toEqual([
+      "bundle",
+      "func",
+    ]);
+    const sends = callOrder(chromeMock!.tabs.sendMessage);
+    const [, funcCall] = callOrder(chromeMock!.scripting.executeScript);
+    expect(sends[sends.length - 1]).toBeLessThan(funcCall);
+  });
+
+  it("C5: the Identity fallback injects the manifest's loader into the originating frame", async () => {
+    stubLoginFetch({ username: "Jane Doe" }, EXT_ENTRY_TYPE.IDENTITY);
+    setDecryptedPlaintext("aa", JSON.stringify({ fullName: "Jane Doe", phone: "555-1234" }));
+    chromeMock!.runtime.getManifest.mockReturnValue(manifestWithContentScripts([DEV_LOADER]));
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    chromeMock?.tabs.sendMessage
+      .mockRejectedValueOnce(new Error(NO_RECEIVER))
+      .mockResolvedValueOnce(undefined);
+
+    const res = await fillFromFrame7();
+
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledTimes(1);
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 1, frameIds: [7] },
+      files: [DEV_LOADER],
+    });
+    const sentTypes = chromeMock!.tabs.sendMessage.mock.calls.map(
+      (c: unknown[]) => (c[1] as { type?: string }).type,
+    );
+    expect(sentTypes).toEqual(["AUTOFILL_IDENTITY_FILL", "AUTOFILL_IDENTITY_FILL"]);
   });
 
   it("popup AUTOFILL direct-injection fallback stays top-frame-only (no frameId, fail-safe)", async () => {

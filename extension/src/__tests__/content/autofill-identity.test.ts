@@ -3,7 +3,11 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { performIdentityAutofill } from "../../content/autofill-identity-lib";
-import { __resetFillSequenceForTests } from "../../content/fill-sequence-lib";
+import { performCreditCardAutofill } from "../../content/autofill-cc-lib";
+import {
+  __resetFillSequenceForTests,
+  DEFAULT_LATE_FIELD_WINDOW_MS,
+} from "../../content/fill-sequence-lib";
 import { EXT_MSG } from "../../lib/constants";
 import type { IdentityAutofillPayload } from "../../types/messages";
 
@@ -512,7 +516,7 @@ describe("performIdentityAutofill — sequential fill", () => {
   }
 
   async function settle(fill: Promise<void>): Promise<void> {
-    await vi.advanceTimersByTimeAsync(1100);
+    await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
     await fill;
   }
 
@@ -539,6 +543,35 @@ describe("performIdentityAutofill — sequential fill", () => {
     expect(q("[autocomplete=name]").value).toBe("Jane Doe");
     expect(q("[autocomplete=email]").value).toBe("jane@example.com");
     expect(q("[autocomplete=tel]").value).toBe("555-1234");
+  });
+
+  // FR4: a newer request supersedes the pending fill even when its own T0
+  // detection finds nothing to fill.
+  it("a later card fill that finds no card form still ends a pending step", async () => {
+    setupForm(`
+      <div id="profile">
+        <input autocomplete="name" />
+        <input autocomplete="email" />
+        <div id="slot"></div>
+      </div>
+    `);
+
+    const fill = performIdentityAutofill(
+      payload({ fullName: "Jane Doe", email: "jane@example.com", phone: "111-1111" }),
+    );
+    await vi.advanceTimersByTimeAsync(5);
+    await performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "",
+    });
+    q("#slot").innerHTML = `<input autocomplete="tel" />`;
+    await settle(fill);
+
+    expect(q("[autocomplete=tel]").value).toBe("");
   });
 
   it("a second fill supersedes a pending one: a late field gets only the second value", async () => {

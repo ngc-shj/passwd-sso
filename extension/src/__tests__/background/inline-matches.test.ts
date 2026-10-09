@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EXT_ENTRY_TYPE, EXT_MSG } from "../../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
+import {
+  BUNDLE_RESEND_ATTEMPTS,
+  BUNDLE_RESEND_INTERVAL_MS,
+} from "../../background/content-bundle";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
 
@@ -615,7 +619,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("C5: resends after a 50 ms backoff while the injected bundle has no receiver yet", async () => {
+  it("C5: resends after the backoff while the injected bundle has no receiver yet", async () => {
     await unlock();
     // Initial send, then the first post-inject resend: no receiver. Second resend lands.
     const times = queueCcSendResults([NO_RECEIVER, NO_RECEIVER]);
@@ -624,23 +628,24 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
     expect(res.ok).toBe(true);
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(3);
-    // The post-inject resends are spaced by the backoff, not fired back to back.
-    expect(times[2] - times[1]).toBeGreaterThanOrEqual(40);
+    // The post-inject resends are spaced by the backoff, not fired back to back
+    // (10 ms of slack for real-timer jitter).
+    expect(times[2] - times[1]).toBeGreaterThanOrEqual(BUNDLE_RESEND_INTERVAL_MS - 10);
     // Every resend stays scoped to the originating frame.
     for (const call of chromeMock!.tabs.sendMessage.mock.calls) {
       expect(call[2]).toEqual({ frameId: 42 });
     }
   });
 
-  it("C5: fails closed with AUTOFILL_INJECT_FAILED after 10 post-inject attempts with no receiver", async () => {
+  it("C5: fails closed with AUTOFILL_INJECT_FAILED once the post-inject attempts run out", async () => {
     await unlock();
     queueCcSendResults(Array.from({ length: 50 }, () => NO_RECEIVER));
 
     const res = await ccFillFromFrame42();
 
     expect(res).toMatchObject({ ok: false, error: "AUTOFILL_INJECT_FAILED" });
-    // 1 initial send + 10 post-inject attempts, then no more.
-    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(11);
+    // 1 initial send + the post-inject attempts, then no more.
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1 + BUNDLE_RESEND_ATTEMPTS);
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledTimes(1);
   });
 

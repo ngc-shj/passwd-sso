@@ -141,4 +141,18 @@ describe("directAutofill", () => {
     expect($("#brchNum").value).toBe("123");
     expect($("#pw").value).toBe("pw");
   });
+
+  // executeScript runs the function from its source text in the page, where no
+  // module scope exists. Rebuilding it from toString() fails on any import or
+  // module-scope reference that the direct import above would hide.
+  it("runs when rebuilt from its own source, as executeScript does", async () => {
+    const serialized = new Function(`return (${directAutofill.toString()})`)() as typeof directAutofill;
+    document.body.innerHTML = SONY_SHAPE;
+
+    await serialized("", "pw", null, CUSTOM_FIELDS);
+
+    expect($("#brchNum").value).toBe("123");
+    expect($("#accountNum").value).toBe("4567890");
+    expect($("#loginPwd_inputPass").value).toBe("pw");
+  });
 });

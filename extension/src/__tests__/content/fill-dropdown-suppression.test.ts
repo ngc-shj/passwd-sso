@@ -111,7 +111,8 @@ describe.each([
     await vi.advanceTimersByTimeAsync(0);
     expect(showDropdownMock).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(1000);
+    const { DEFAULT_LATE_FIELD_WINDOW_MS } = await import("../../content/fill-sequence-lib");
+    await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS);
     await fill.done;
     focus("target");
     await vi.advanceTimersByTimeAsync(0);

@@ -61,6 +61,15 @@ function supersedeActiveRun(): void {
   activeRun?.checkGeneration();
 }
 
+/**
+ * Supersedes the active run without starting one. A fill request whose T0
+ * detection finds nothing to fill still ends the earlier run (FR4), so no
+ * earlier step can write after a newer request.
+ */
+export function supersedeActiveFill(): void {
+  supersedeActiveRun();
+}
+
 export function runFillSequence(
   root: FillRoot | null,
   steps: FillStep[],

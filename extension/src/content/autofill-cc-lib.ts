@@ -13,6 +13,7 @@ import {
 import {
   resolveFillRoot,
   runFillSequence,
+  supersedeActiveFill,
   type FillRoot,
   type FillStep,
   type FillTarget,
@@ -143,13 +144,16 @@ function writeExpiryPart(
   }
 }
 
-export function performCreditCardAutofill(
+export async function performCreditCardAutofill(
   payload: CreditCardAutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
 ): Promise<void> {
   // T0: the detector's result is every step's initial target.
   const fields = detectCreditCardFields(document);
-  if (!fields?.cardNumber) return Promise.resolve();
+  if (!fields?.cardNumber) {
+    supersedeActiveFill();
+    return;
+  }
   const cardNumber = fields.cardNumber;
 
   // Steps, in order: name, number, expiry, CVV. A step whose payload value is

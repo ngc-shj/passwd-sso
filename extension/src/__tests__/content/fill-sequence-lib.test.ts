@@ -620,7 +620,7 @@ describe("runFillSequence — release on every exit path", () => {
 
   it("calls every release even when one release throws", async () => {
     document.body.innerHTML = `<input id="a"><input id="b">`;
-    vi.spyOn(console, "debug").mockImplementation(() => {});
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
     const r = recorder();
     const throwing = r.step("a", $("#a"));
     throwing.release = () => {
@@ -631,6 +631,7 @@ describe("runFillSequence — release on every exit path", () => {
     await vi.runAllTimersAsync();
     await done;
     expect(r.releases).toEqual({ a: 1, b: 1 });
+    expect(debug).toHaveBeenCalledWith("[passwd-sso] Fill error: fill-release-error");
   });
 });
 
@@ -664,12 +665,15 @@ describe("isFillActive", () => {
     html.removeChild(document.body);
     const a = document.createElement("input");
     html.appendChild(a);
-    const r = recorder();
-    const done = runFillSequence(html, [r.step("a", a)]);
-    await vi.runAllTimersAsync();
-    await done;
-    expect(a.value).toBe("a");
-    a.remove();
+    try {
+      const r = recorder();
+      const done = runFillSequence(html, [r.step("a", a)]);
+      await vi.runAllTimersAsync();
+      await done;
+      expect(a.value).toBe("a");
+    } finally {
+      a.remove();
+    }
   });
 });
 
