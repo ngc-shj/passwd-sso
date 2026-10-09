@@ -1018,6 +1018,28 @@ describe("performAutofill — sequential fill", () => {
     expect(byId("pw").value).toBe("secret");
   });
 
+  // Sony Bank: 口座番号 is the entry's username and is labelled only through
+  // aria-labelledby; with the password focused (the popup case) the username
+  // search must still find it from the referenced label text.
+  it("writes the username into a field labelled through aria-labelledby when nothing usable is focused", async () => {
+    setupForm(`
+      <div><span id="brchNum_label">店番号</span><input id="brchNum" type="text" aria-labelledby="brchNum_label" /></div>
+      <div><span id="accountNum_label">口座番号</span><input id="accountNum" type="text" aria-labelledby="accountNum_label" /></div>
+      <div><span id="loginPwd_label">ログインパスワード</span><input id="pw" type="password" aria-labelledby="loginPwd_label" /></div>
+    `);
+    byId("pw").focus();
+
+    await settle(
+      performAutofill(
+        loginPayload({ username: "4567890", customFields: [{ label: "brchNum", value: "001" }] }),
+      ),
+    );
+
+    expect(byId("brchNum").value).toBe("001");
+    expect(byId("accountNum").value).toBe("4567890");
+    expect(byId("pw").value).toBe("secret");
+  });
+
   it("drops the password and TOTP references on exit", async () => {
     setupForm(`
       <input id="user" type="text" autocomplete="username" />

@@ -10,6 +10,7 @@ import {
   type FillTarget,
 } from "./fill-sequence-lib";
 import { FILL_DIAG_CODE, logFillError } from "./select-diag-lib";
+import { labelledByText } from "./labelled-by";
 
 /**
  * Whether this frame is allowed to receive the decrypted credential. The SW
@@ -102,6 +103,7 @@ function findUsernameInput(
       candidate.getAttribute("ng-reflect-name"),
       candidate.getAttribute("aria-label"),
       candidate.getAttribute("aria-labelledby"),
+      labelledByText(candidate),
       candidate.closest("label")?.textContent ?? "",
       (() => {
         const id = candidate.id;

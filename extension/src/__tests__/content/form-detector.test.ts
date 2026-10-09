@@ -276,6 +276,25 @@ describe("isLikelyUsernameInput", () => {
     expect(isLikelyUsernameInput(input)).toBe(true);
   });
 
+  // Sony Bank: the visible label is a separate element named by aria-labelledby.
+  it("detects a field whose aria-labelledby label text is a login id", () => {
+    document.body.innerHTML = `
+      <span id="accountNum_label">口座番号</span>
+      <input id="accountNum" type="text" aria-labelledby="accountNum_label" />
+    `;
+    const input = document.getElementById("accountNum") as HTMLInputElement;
+    expect(isLikelyUsernameInput(input)).toBe(true);
+  });
+
+  it("does not detect a field whose aria-labelledby label text is unrelated", () => {
+    document.body.innerHTML = `
+      <span id="memo_label">メモ</span>
+      <input id="memo" type="text" aria-labelledby="memo_label" />
+    `;
+    const input = document.getElementById("memo") as HTMLInputElement;
+    expect(isLikelyUsernameInput(input)).toBe(false);
+  });
+
   it("does not detect generic search field", () => {
     document.body.innerHTML = `<input id="search" name="query" type="text" placeholder="Search" />`;
     const input = document.getElementById("search") as HTMLInputElement;
