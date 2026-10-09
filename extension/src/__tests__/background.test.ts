@@ -11,7 +11,11 @@ import { DISCONNECT_REASON } from "../lib/disconnect-reason";
 import { BUNDLE_RESEND_ATTEMPTS } from "../background/content-bundle";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
-import { createExecuteScriptMock, documentIdFor } from "./helpers/execute-script-mock";
+import {
+  createExecuteScriptMock,
+  documentIdFor,
+  probeOrigin,
+} from "./helpers/execute-script-mock";
 import type { SessionState } from "../lib/session-storage";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
@@ -116,10 +120,12 @@ const NO_RECEIVER = "Could not establish connection. Receiving end does not exis
 // URL each frame's document reports to the content-bundle probe, and the frames
 // an allFrames probe answers for. Reset with every chrome mock.
 let probeUrls: Record<number, string> = {};
+let probeOrigins: Record<number, string> = {};
 let probeFrames: number[] = [0];
 
 function installChromeMock() {
   probeUrls = {};
+  probeOrigins = {};
   probeFrames = [0];
   messageHandlers = [];
   alarmHandlers = [];
@@ -161,6 +167,8 @@ function installChromeMock() {
       executeScript: createExecuteScriptMock(
         (frameId) => probeUrls[frameId] ?? "https://example.com/login",
         () => probeFrames,
+        (frameId) =>
+          probeOrigins[frameId] ?? probeOrigin(probeUrls[frameId] ?? "https://example.com/login"),
       ),
       registerContentScripts: vi.fn().mockResolvedValue(undefined),
       unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
@@ -723,6 +731,23 @@ describe("background message flow", () => {
     ]);
   });
 
+  it("injects no shortcut bundle when an in-scope frame's document has no id", async () => {
+    chromeMock!.scripting.executeScript.mockResolvedValueOnce([
+      { frameId: 0, documentId: documentIdFor(0), result: { href: "https://example.com/", origin: "https://example.com" } },
+      { frameId: 3, documentId: "", result: { href: "https://example.com/f", origin: "https://example.com" } },
+    ]);
+    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(new Error(NO_RECEIVER));
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    await commandHandlers[0](CMD_TRIGGER_AUTOFILL);
+
+    const bundleCalls = chromeMock!.scripting.executeScript.mock.calls.filter(
+      (c: unknown[]) => "files" in (c[0] as object),
+    );
+    expect(bundleCalls).toHaveLength(0);
+  });
+
   it("fetches and decrypts password overviews", async () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -1061,7 +1086,7 @@ describe("background message flow", () => {
     // with hint -> unserializable, 4th: retry with null hint
     chromeMock?.scripting.executeScript
       .mockResolvedValueOnce([
-        { frameId: 0, documentId: documentIdFor(0), result: "https://example.com/login" },
+        { frameId: 0, documentId: documentIdFor(0), result: { href: "https://example.com/login", origin: "https://example.com" } },
       ])
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error("Value is unserializable"))
@@ -1726,12 +1751,13 @@ describe("background message flow", () => {
 
     it("keeps the func pinned when the bundle injection into the probed document fails", async () => {
       chromeMock!.scripting.executeScript.mockImplementationOnce(async () => [
-        { frameId: 7, documentId: documentIdFor(7), result: "https://example.com/login" },
+        { frameId: 7, documentId: documentIdFor(7), result: { href: "https://example.com/login", origin: "https://example.com" } },
       ]);
       chromeMock!.scripting.executeScript.mockRejectedValueOnce(new Error("No document with id"));
 
-      await fillWithNoReceiver();
+      const res = await fillWithNoReceiver();
 
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
       expect(injectionKinds()).toEqual(["probe", "bundle", "func"]);
       expect(funcTargets()).toEqual([{ tabId: 1, documentIds: [documentIdFor(7)] }]);
     });
@@ -1754,6 +1780,76 @@ describe("background message flow", () => {
       const res = await fillWithNoReceiver();
 
       expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "AUTOFILL_INJECT_FAILED" });
+      expect(injectionKinds()).toEqual(["probe"]);
+    });
+
+    // An about:blank or srcdoc login frame has no host in its URL but inherits its
+    // creator's origin; the host check reads the origin, so it still fills.
+    it("fills an about:blank frame whose inherited origin is on the entry's host", async () => {
+      probeUrls = { 7: "about:blank" };
+      probeOrigins = { 7: "https://example.com" };
+
+      const res = await fillWithNoReceiver();
+
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+      expect(injectionKinds()).toEqual(["probe", "func"]);
+      expect(funcTargets()).toEqual([{ tabId: 1, documentIds: [documentIdFor(7)] }]);
+    });
+
+    it("runs no fallback in a sandboxed frame whose origin is opaque", async () => {
+      probeUrls = { 7: "https://example.com/login" };
+      probeOrigins = { 7: "null" };
+
+      const res = await fillWithNoReceiver();
+
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "AUTOFILL_INJECT_FAILED" });
+      expect(injectionKinds()).toEqual(["probe"]);
+    });
+
+    // The popup lists every entry, not only matching ones, and binds no sender
+    // host: its fallback is not host-checked.
+    it("still fills from the popup when the page is on another host", async () => {
+      stubLoginFetch({ username: "alice", urlHost: "example.com" });
+      applyToken("t", Date.now() + 60_000, "");
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+      chromeMock?.tabs.sendMessage.mockRejectedValue(new Error(NO_RECEIVER));
+      probeUrls = { 0: "https://other.example/login" };
+
+      const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+
+      expect(res).toEqual({ type: "AUTOFILL", ok: true });
+      expect(injectionKinds()).toEqual(["probe", "bundle", "func"]);
+      expect(funcTargets()).toEqual([{ tabId: 1, documentIds: [documentIdFor(0)] }]);
+    });
+
+    it.each([
+      { name: "a null result", result: null },
+      { name: "a bare href string", result: "https://example.com/login" },
+    ])("runs no fallback when the probe returns $name", async ({ result }) => {
+      chromeMock!.scripting.executeScript.mockResolvedValueOnce([
+        { frameId: 7, documentId: documentIdFor(7), result },
+      ]);
+
+      const res = await fillWithNoReceiver();
+
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "AUTOFILL_INJECT_FAILED" });
+      expect(injectionKinds()).toEqual(["probe"]);
+    });
+
+    // The popup has no host check to catch a malformed probe, so the probe's own
+    // shape check is what keeps the func from running unpinned to a known URL.
+    it("runs no popup fallback when the probe result is not a location", async () => {
+      stubLoginFetch({ username: "alice", urlHost: "example.com" });
+      applyToken("t", Date.now() + 60_000, "");
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+      chromeMock?.tabs.sendMessage.mockRejectedValue(new Error(NO_RECEIVER));
+      chromeMock!.scripting.executeScript.mockResolvedValueOnce([
+        { frameId: 0, documentId: documentIdFor(0), result: "https://example.com/login" },
+      ]);
+
+      const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+
+      expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "AUTOFILL_INJECT_FAILED" });
       expect(injectionKinds()).toEqual(["probe"]);
     });
 

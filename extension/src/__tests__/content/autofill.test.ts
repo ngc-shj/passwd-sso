@@ -1005,9 +1005,9 @@ describe("performAutofill — sequential fill", () => {
     expect(byId("pw").value).toBe("secret");
   });
 
-  it("keeps a focused autocomplete=username field whose name contains 'otp' as the username", async () => {
+  it.each(["username", "email"])("keeps a focused autocomplete=%s field whose name contains 'otp' as the username", async (autocomplete) => {
     setupForm(`
-      <input id="user" type="text" name="hotpepper_id" autocomplete="username" />
+      <input id="user" type="text" name="hotpepper_id" autocomplete="${autocomplete}" />
       <input id="pw" type="password" />
     `);
     byId("user").focus();

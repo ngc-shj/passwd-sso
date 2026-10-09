@@ -7,6 +7,14 @@ type Injection = {
   files?: string[];
 };
 
+export function probeOrigin(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "null";
+  }
+}
+
 export const documentIdFor = (frameId: number): string => `doc-${frameId}`;
 
 /**
@@ -14,11 +22,14 @@ export const documentIdFor = (frameId: number): string => `doc-${frameId}`;
  * call without `args` (the location probe; the direct-autofill func always
  * passes args) gets one InjectionResult per targeted frame — every frame in
  * `frames` for an `allFrames` target, frame 0 for a bare `{ tabId }` — carrying
- * that frame's documentId and `urlFor(frameId)`. Every other call resolves [].
+ * that frame's documentId and a `{ href, origin }` result: `urlFor(frameId)` and
+ * `originFor(frameId)`, which defaults to the URL's own origin ("null" for
+ * about: URLs). Every other call resolves [].
  */
 export function createExecuteScriptMock(
   urlFor: (frameId: number) => string = () => "https://example.com/login",
   frames: () => number[] = () => [0],
+  originFor: (frameId: number) => string = (frameId) => probeOrigin(urlFor(frameId)),
 ) {
   return vi.fn(async (injection: Injection) => {
     if (injection.func && !injection.args) {
@@ -28,7 +39,7 @@ export function createExecuteScriptMock(
       return frameIds.map((frameId) => ({
         frameId,
         documentId: documentIdFor(frameId),
-        result: urlFor(frameId),
+        result: { href: urlFor(frameId), origin: originFor(frameId) },
       }));
     }
     return [];

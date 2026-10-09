@@ -57,6 +57,7 @@ import {
   injectContentBundleInto,
   probeDocument,
   resendUntilReceived,
+  type ProbedDocument,
 } from "./content-bundle";
 import { directAutofill } from "./direct-autofill";
 import { classifyError, warnBackground } from "./log";
@@ -1731,6 +1732,13 @@ async function performAutofillForEntry(
   // read the filled value. So when the originating frame is unknown
   // (popup/context-menu), scope to the TOP FRAME ONLY (`frameId: 0`) rather than
   // broadcasting. When the frame is known, scope to it.
+  // CC/Identity have no content-side origin gate, so a fallback delivery bound
+  // to a sender host (content message, context menu) only goes to a document
+  // still on that host: the requesting document may have been replaced.
+  const isSenderDocument =
+    typeof enforceSenderHost === "string"
+      ? (probed: ProbedDocument) => extractHost(probed.origin) === enforceSenderHost
+      : undefined;
   const sendSensitiveFillMessage = (payload: unknown, documentId?: string): Promise<unknown> =>
     chrome.tabs.sendMessage(
       tabId,
@@ -1884,8 +1892,10 @@ async function performAutofillForEntry(
       // Fallback: inject the bundled content script (frame-scoped) for pages
       // where the manifest content script has not attached yet, then retry.
       try {
-        await injectContentBundleAndResend(executeTarget, (documentId) =>
-          sendSensitiveFillMessage(ccPayload, documentId),
+        await injectContentBundleAndResend(
+          executeTarget,
+          (documentId) => sendSensitiveFillMessage(ccPayload, documentId),
+          isSenderDocument,
         );
       } catch {
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
@@ -1922,8 +1932,10 @@ async function performAutofillForEntry(
       await sendSensitiveFillMessage(identityPayload);
     } catch {
       try {
-        await injectContentBundleAndResend(executeTarget, (documentId) =>
-          sendSensitiveFillMessage(identityPayload, documentId),
+        await injectContentBundleAndResend(
+          executeTarget,
+          (documentId) => sendSensitiveFillMessage(identityPayload, documentId),
+          isSenderDocument,
         );
       } catch {
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
@@ -2013,7 +2025,7 @@ async function performAutofillForEntry(
       // context menu) only accepts a document still on one of the entry's
       // hosts: the frame may have navigated since the request was checked.
       if (typeof enforceSenderHost === "string") {
-        const probedHost = extractHost(probed.url);
+        const probedHost = extractHost(probed.origin);
         if (!probedHost || !entryHosts.some((h) => isHostMatch(h, probedHost))) {
           return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
         }

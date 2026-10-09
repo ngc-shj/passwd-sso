@@ -571,12 +571,12 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
   // ── C5: bundle path from the manifest + bounded resend ──
 
-  const ccFillFromFrame42 = () =>
+  const ccFillFromFrame42 = (senderUrl = "https://shop.example/checkout") =>
     sendMessage(
       { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId: "cc-1" },
       {
-        tab: { id: 7, url: "https://shop.example/checkout" },
-        url: "https://shop.example/checkout",
+        tab: { id: 7, url: senderUrl },
+        url: senderUrl,
         frameId: 42,
       },
     ) as Promise<{ ok: boolean; error?: string }>;
@@ -672,7 +672,8 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     await unlock();
     queueCcSendResults([NO_RECEIVER]);
 
-    const res = await ccFillFromFrame42();
+    // The request comes from the probed host, so only the bundle scope decides.
+    const res = await ccFillFromFrame42(url.startsWith("about:") ? undefined : url);
 
     const bundleCalls = chromeMock!.scripting.executeScript.mock.calls.filter(
       (c: unknown[]) => "files" in (c[0] as object),
@@ -682,11 +683,33 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(injected ? 2 : 1);
   });
 
+  // CC/Identity have no content-side origin gate: a fallback bound to the
+  // sender's host only delivers to a document still on that host.
+  it.each([
+    { url: "https://shop.example/other/step", delivered: true },
+    { url: "https://evil.example/checkout", delivered: false },
+    { url: "https://pay.shop.example/checkout", delivered: false },
+  ])("C5: delivers the CC fallback to $url: $delivered", async ({ url, delivered }) => {
+    probeUrl = url;
+    await unlock();
+    queueCcSendResults([NO_RECEIVER]);
+
+    const res = await ccFillFromFrame42();
+
+    const bundleCalls = chromeMock!.scripting.executeScript.mock.calls.filter(
+      (c: unknown[]) => "files" in (c[0] as object),
+    );
+    expect(bundleCalls).toHaveLength(delivered ? 1 : 0);
+    expect(res).toMatchObject(delivered ? { ok: true } : { ok: false, error: "AUTOFILL_INJECT_FAILED" });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(delivered ? 2 : 1);
+  });
+
   it.each([
     // Synthetic: a frameIds:[n] target never yields two results; this pins the
     // single-result invariant itself.
-    { name: "more than one result", probe: [{ frameId: 42, documentId: "a", result: "https://shop.example/" }, { frameId: 42, documentId: "b", result: "https://shop.example/" }] },
-    { name: "no documentId", probe: [{ frameId: 42, documentId: "", result: "https://shop.example/" }] },
+    { name: "more than one result", probe: [{ frameId: 42, documentId: "a", result: { href: "https://shop.example/", origin: "https://shop.example" } }, { frameId: 42, documentId: "b", result: { href: "https://shop.example/", origin: "https://shop.example" } }] },
+    { name: "a non-object result", probe: [{ frameId: 42, documentId: "a", result: null }] },
+    { name: "no documentId", probe: [{ frameId: 42, documentId: "", result: { href: "https://shop.example/", origin: "https://shop.example" } }] },
     { name: "no document", probe: [] },
   ])("C5: fails closed without injecting when the frame's document cannot be pinned ($name)", async ({ probe }) => {
     await unlock();

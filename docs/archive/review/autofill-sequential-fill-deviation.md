@@ -128,3 +128,11 @@ Supersedes D9's LOGIN wording.
 ## D14: OTP detection defers to the page's own autocomplete (Phase 3 round 2: F-R2-1)
 
 - `findOtpInput`'s hint branch skips fields declared `autocomplete="username"` or `"email"`, as `findUsernameInput` already treats those as definitive. A substring hint such as "hotpepper_id", which contains "otp", no longer turns a username field into an OTP target.
+
+## D15: the sender-host check covers CC/Identity and reads the document's origin (Phase 3 round 3: SEC-R3-1, F-R3-1)
+
+- **CC and Identity:** when the request is bound to a sender host (the content message or the context menu), the fallback delivers only to a probed document whose host equals that sender host. CC and Identity have no content-side origin gate, and the requesting document may have been replaced.
+- **The probe returns the origin:** the probe now also returns `self.origin`, and both sender-host checks (LOGIN against the entry's hosts, CC/Identity against the sender host) read the host from that origin.
+  - An `about:blank` or `srcdoc` login frame inherits its creator's origin, so a context-menu fill into one still works, as it did before round 2.
+  - A sandboxed frame's `"null"` origin fails closed.
+  - The bundle's manifest-scope check still reads the href.

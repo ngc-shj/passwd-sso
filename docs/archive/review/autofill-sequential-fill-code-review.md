@@ -1,7 +1,7 @@
 # Code Review: autofill-sequential-fill
 
 Date: 2026-10-10
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
 
@@ -110,3 +110,43 @@ Incremental review of `6c726fec8`, the round 1 fixes.
 ## Resolution Status
 
 Every round 2 finding is resolved, and every new row is red-proven on a scratch copy.
+
+---
+
+# Round 3
+
+## Changes from Previous Round
+
+Incremental review of `4eafab66c`, the round 2 fixes.
+
+## Functionality Findings
+
+- **F-R3-1 [Minor]:** a context-menu LOGIN fill into an `about:blank` or `srcdoc` iframe failed, because the host check read the host from the document's URL, and an `about:` URL has none.
+  - Resolved: the probe returns `self.origin`, and the host checks read it (D15).
+  - Rows: an `about:blank` frame with an inherited origin fills; a sandboxed frame with a `"null"` origin does not. Both are red when the host is read from the URL.
+
+## Security Findings
+
+- **SEC-R3-1 [Minor]:** the CC and Identity fallbacks delivered to the successor document with no origin check, the same class as S4.
+  - Resolved: D15.
+  - Rows: a different path on the same host is delivered; another host and a subdomain are refused. Red with the check removed.
+- **A1 [Minor]:** unchanged. This is the deferred SC3 follow-up.
+
+## Testing Findings
+
+- **T10 [Minor]:** the popup's exemption from the host check had no row.
+  - Resolved: a popup row on another host still fills. Red when the check is applied to the popup.
+- **T11 [Minor]:** the probe-result shape check had no row.
+  - Resolved:
+    - content-path rows for a null result and a bare string;
+    - a CC fail-closed row for a non-object result;
+    - a popup row for a bare string, which is the only path where the shape check is not backed by a host check. Red with the shape check removed.
+  - On the content path the mutant is equivalent, because a malformed result fails the host check as well.
+- **T12 [Minor]:** an empty `documentId` in an `allFrames` probe had no row.
+  - Resolved: shortcut row. Red with the check removed.
+- **T13 [Minor]:** D14's `email` arm had no row.
+  - Resolved: the row is parameterised over `username` and `email`. Red with the `email` arm dropped.
+
+## Resolution Status
+
+Every round 3 finding is resolved, and every new row is red-proven on a scratch copy. A1 (SC3, unpinned first send) stays a declared follow-up.

@@ -8,7 +8,7 @@
 // `src/content/form-detector.js` exists in the build.
 //
 // Delivery is pinned to one document. A probe reads each target document's URL
-// together with its documentId; documents outside the bundle's own manifest
+// and origin together with its documentId; documents outside the bundle's own manifest
 // `matches` are refused (activeTab reaches pages the manifest deliberately does
 // not match, such as plain http:// hosts), and the bundle and every resend go to
 // the probed documentId, so a navigation in the frame during the resend window
@@ -27,6 +27,7 @@ export const CONTENT_BUNDLE_ERROR = {
   NOT_FOUND: "CONTENT_BUNDLE_NOT_FOUND",
   SCOPE_REFUSED: "CONTENT_BUNDLE_SCOPE_REFUSED",
   DOCUMENT_UNKNOWN: "CONTENT_BUNDLE_DOCUMENT_UNKNOWN",
+  DOCUMENT_REFUSED: "CONTENT_BUNDLE_DOCUMENT_REFUSED",
 } as const;
 
 const NO_RECEIVER_RE = /Receiving end does not exist/;
@@ -88,7 +89,25 @@ function isNoReceiverError(err: unknown): boolean {
   return NO_RECEIVER_RE.test(message);
 }
 
-export type ProbedDocument = { documentId: string; url: string };
+/**
+ * One probed document. `url` decides the bundle's manifest scope; `origin` is
+ * the document's effective origin for host checks — an about:blank or srcdoc
+ * frame inherits its creator's, and a sandboxed one reports "null".
+ */
+export type ProbedDocument = { documentId: string; url: string; origin: string };
+
+type ProbeResult = { href: string; origin: string };
+
+const probeLocation = (): ProbeResult => ({ href: location.href, origin: self.origin });
+
+function isProbeResult(value: unknown): value is ProbeResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as ProbeResult).href === "string" &&
+    typeof (value as ProbeResult).origin === "string"
+  );
+}
 
 /**
  * Pin the single document a frame target (no `allFrames`) holds right now: its
@@ -98,15 +117,12 @@ export type ProbedDocument = { documentId: string; url: string };
 export async function probeDocument(
   target: chrome.scripting.InjectionTarget,
 ): Promise<ProbedDocument> {
-  const probes = await chrome.scripting.executeScript({
-    target,
-    func: () => location.href,
-  });
+  const probes = await chrome.scripting.executeScript({ target, func: probeLocation });
   const [probe] = probes;
-  if (probes.length !== 1 || !probe.documentId || typeof probe.result !== "string") {
+  if (probes.length !== 1 || !probe.documentId || !isProbeResult(probe.result)) {
     throw new Error(CONTENT_BUNDLE_ERROR.DOCUMENT_UNKNOWN);
   }
-  return { documentId: probe.documentId, url: probe.result };
+  return { documentId: probe.documentId, url: probe.result.href, origin: probe.result.origin };
 }
 
 /** Whether `url` is inside the bundle's own manifest content_scripts matches. */
@@ -136,25 +152,27 @@ export async function injectContentBundleInto(
 /**
  * Inject the content bundle into the in-scope documents of `target` and return
  * their documentIds. A target without `allFrames` names one frame and must
- * resolve to exactly one in-scope document. Throws (so the caller fails closed
+ * resolve to exactly one in-scope document, which `acceptDocument` (when given)
+ * must also accept. Throws (so the caller fails closed
  * with its own error code) when the bundle path is unknown, no target document
  * is in the bundle's manifest scope, or the frame's document cannot be pinned.
  */
 export async function injectContentBundle(
   target: chrome.scripting.InjectionTarget,
+  acceptDocument?: (probed: ProbedDocument) => boolean,
 ): Promise<string[]> {
   if (!resolveContentBundle()) throw new Error(CONTENT_BUNDLE_ERROR.NOT_FOUND);
   if (!target.allFrames) {
     const probed = await probeDocument(target);
+    if (acceptDocument && !acceptDocument(probed)) {
+      throw new Error(CONTENT_BUNDLE_ERROR.DOCUMENT_REFUSED);
+    }
     await injectContentBundleInto(target.tabId, probed);
     return [probed.documentId];
   }
-  const probes = await chrome.scripting.executeScript({
-    target,
-    func: () => location.href,
-  });
+  const probes = await chrome.scripting.executeScript({ target, func: probeLocation });
   const documentIds = probes
-    .filter((probe) => typeof probe.result === "string" && isInBundleScope(probe.result))
+    .filter((probe) => isProbeResult(probe.result) && isInBundleScope(probe.result.href))
     .map((probe) => probe.documentId);
   if (documentIds.length === 0) throw new Error(CONTENT_BUNDLE_ERROR.SCOPE_REFUSED);
   if (documentIds.some((id) => !id)) throw new Error(CONTENT_BUNDLE_ERROR.DOCUMENT_UNKNOWN);
@@ -186,8 +204,9 @@ export async function resendUntilReceived<T>(send: () => Promise<T>): Promise<T>
 export async function injectContentBundleAndResend<T>(
   target: chrome.scripting.InjectionTarget,
   send: (documentId: string | undefined) => Promise<T>,
+  acceptDocument?: (probed: ProbedDocument) => boolean,
 ): Promise<T> {
-  const documentIds = await injectContentBundle(target);
+  const documentIds = await injectContentBundle(target, acceptDocument);
   const documentId = target.allFrames ? undefined : documentIds[0];
   return resendUntilReceived(() => send(documentId));
 }
