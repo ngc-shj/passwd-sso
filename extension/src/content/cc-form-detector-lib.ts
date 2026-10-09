@@ -24,6 +24,7 @@ import {
   isDropdownVisible,
   handleDropdownKeydown,
 } from "./ui/suggestion-dropdown";
+import { isFillActive } from "./fill-sequence-lib";
 
 // ── Types ──
 
@@ -52,6 +53,10 @@ const FILLABLE_INPUT_TYPES = new Set([
 
 const isUsableField = (el: HTMLInputElement | HTMLSelectElement): boolean =>
   isUsableFieldOfType(el, FILLABLE_INPUT_TYPES);
+
+/** Visible + usable + allowlisted: the detector's own admission rule for a field. */
+export const isCreditCardFillable = (el: HTMLInputElement | HTMLSelectElement): boolean =>
+  isElementVisible(el) && isUsableField(el);
 
 // ── Regex patterns ──
 
@@ -423,6 +428,8 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
   const focusHandler = (e: FocusEvent) => {
     if (destroyed) return;
     if (Date.now() < autofillSuppressUntil) return;
+    // A fill moves focus field by field; the dropdown stays closed until it ends.
+    if (isFillActive()) return;
     const input = e.target;
     if (!(input instanceof HTMLInputElement)) return;
     if (!isUsableInput(input)) return;

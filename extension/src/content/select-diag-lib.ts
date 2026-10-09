@@ -47,3 +47,22 @@ export function logNoSelectMatch(field: SelectDiagField): void {
     console.debug(`[passwd-sso] No exact match for select: ${field}`);
   }
 }
+
+// Fill-sequence failures (fill-sequence-lib.ts and the un-awaited perform…() calls in
+// the content listeners). Same rule as above: a closed set, never a value — a step's
+// write callback runs page listeners, so an error message could carry anything.
+export const FILL_DIAG_CODE = {
+  SEQUENCE_ERROR: "fill-sequence-error",
+  RELEASE_ERROR: "fill-release-error",
+  LOGIN_FILL_FAILED: "fill-login-failed",
+  CC_FILL_FAILED: "fill-cc-failed",
+  IDENTITY_FILL_FAILED: "fill-identity-failed",
+} as const;
+
+export type FillDiagCode = (typeof FILL_DIAG_CODE)[keyof typeof FILL_DIAG_CODE];
+
+export function logFillError(code: FillDiagCode): void {
+  if (typeof console !== "undefined" && console.debug) {
+    console.debug(`[passwd-sso] Fill error: ${code}`);
+  }
+}

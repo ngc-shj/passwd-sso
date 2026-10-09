@@ -1,6 +1,14 @@
 import type { AutofillPayload } from "../types/messages";
 import { AUTOFILL_FILL } from "../lib/constants";
 import { extractHost, isHostMatch } from "../lib/url-matching";
+import {
+  resolveFillRoot,
+  runFillSequence,
+  type FillRoot,
+  type FillStep,
+  type FillTarget,
+} from "./fill-sequence-lib";
+import { FILL_DIAG_CODE, logFillError } from "./select-diag-lib";
 
 /**
  * Whether this frame is allowed to receive the decrypted credential. The SW
@@ -46,11 +54,14 @@ function escapeSelectorValue(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
 }
 
-function findPasswordInput(inputs: HTMLInputElement[]) {
-  const isVisible = (input: HTMLInputElement) =>
+function isVisible(input: HTMLInputElement) {
+  return (
     getComputedStyle(input).display !== "none" &&
-    getComputedStyle(input).visibility !== "hidden";
+    getComputedStyle(input).visibility !== "hidden"
+  );
+}
 
+function findPasswordInput(inputs: HTMLInputElement[]) {
   const byAutocomplete = inputs.find(
     (i) =>
       isUsableInput(i) &&
@@ -231,10 +242,61 @@ function findOtpInput(inputs: HTMLInputElement[]): HTMLInputElement | null {
   );
 }
 
-export function performAutofill(payload: AutofillPayload) {
-  // Frame-origin gate: never write the credential into a cross-origin subframe.
-  if (!isFrameAllowedToFill(payload.allowedHosts)) return;
+// Custom-field and OTP targets: free-text types only, never a password or hidden field.
+const TEXT_LIKE_TYPES = ["text", "email", "tel", "number"];
+// Every LOGIN-fillable type, for the bounded-root foreign-control check.
+const LOGIN_FILLABLE_TYPES = ["text", "email", "tel", "number", "password"];
 
+function isTextLikeTarget(el: FillTarget): boolean {
+  return (
+    el instanceof HTMLInputElement &&
+    isUsableInput(el) &&
+    TEXT_LIKE_TYPES.includes(el.type) &&
+    isVisible(el)
+  );
+}
+
+function isPasswordTarget(el: FillTarget): boolean {
+  return el instanceof HTMLInputElement && isUsableInput(el) && el.type === "password" && isVisible(el);
+}
+
+function isUsernameTarget(el: FillTarget): boolean {
+  return (
+    el instanceof HTMLInputElement && isUsableInput(el) && ["text", "email", "tel"].includes(el.type)
+  );
+}
+
+function isLoginForeignCandidate(el: FillTarget): boolean {
+  return (
+    el instanceof HTMLInputElement &&
+    isUsableInput(el) &&
+    LOGIN_FILLABLE_TYPES.includes(el.type) &&
+    isVisible(el)
+  );
+}
+
+function inputsIn(root: FillRoot): HTMLInputElement[] {
+  return Array.from(root.querySelectorAll("input"));
+}
+
+function matchesLabel(input: HTMLInputElement, lower: string): boolean {
+  return input.id.toLowerCase() === lower || input.name.toLowerCase() === lower;
+}
+
+function inDocumentOrder(elements: HTMLInputElement[]): HTMLInputElement[] {
+  return [...elements].sort((a, b) =>
+    a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+  );
+}
+
+export function performAutofill(
+  payload: AutofillPayload,
+  opts: { lateFieldWindowMs?: number } = {},
+): Promise<void> {
+  // Frame-origin gate: never write the credential into a cross-origin subframe.
+  if (!isFrameAllowedToFill(payload.allowedHosts)) return Promise.resolve();
+
+  // ── T0: every target decision is made here, before the first write ──
   const inputs = Array.from(
     document.querySelectorAll("input")
   ) as HTMLInputElement[];
@@ -265,12 +327,7 @@ export function performAutofill(payload: AutofillPayload) {
   if (payload.customFields) {
     for (const { label } of payload.customFields) {
       const lower = label.toLowerCase();
-      const target = inputs.find(
-        (i) =>
-          isUsableInput(i) &&
-          i.type !== "password" &&
-          (i.id.toLowerCase() === lower || i.name.toLowerCase() === lower),
-      );
+      const target = inputs.find((i) => isTextLikeTarget(i) && matchesLabel(i, lower));
       if (target) customFieldMap.set(lower, target);
     }
   }
@@ -298,18 +355,64 @@ export function performAutofill(payload: AutofillPayload) {
       passwordInput,
     );
 
-  if (usernameInput && payload.username) {
-    setInputValue(usernameInput, payload.username);
-  }
-  if (passwordInput && payload.password) {
-    setInputValue(passwordInput, payload.password);
+  const nonCustomInputsIn = (root: FillRoot) =>
+    inputsIn(root).filter((i) => !customFieldTargets.has(i));
+
+  // ── Steps, in order: custom fields, username, password, TOTP ──
+  // Custom fields go first and the password after the identifiers: a
+  // React-controlled password written before the next field's focus() is reset
+  // by its own onBlur from stale state (see fill-sequence-lib.ts).
+  const steps: FillStep[] = [];
+
+  for (const [index, { label }] of (payload.customFields ?? []).entries()) {
+    const lower = label.toLowerCase();
+    steps.push({
+      key: `custom-${index}`,
+      initial: customFieldMap.get(lower) ?? null,
+      relocate: (root) =>
+        inputsIn(root).find((i) => isTextLikeTarget(i) && matchesLabel(i, lower)) ?? null,
+      accepts: isTextLikeTarget,
+      write: (el) => setInputValue(el as HTMLInputElement, payload.customFields?.[index]?.value ?? ""),
+      release: () => {},
+    });
   }
 
+  if (payload.username) {
+    steps.push({
+      key: "username",
+      initial: usernameInput,
+      relocate: (root) => {
+        const scoped = nonCustomInputsIn(root);
+        return findUsernameInput(scoped, findPasswordInput(scoped));
+      },
+      accepts: isUsernameTarget,
+      write: (el) => setInputValue(el as HTMLInputElement, payload.username),
+      release: () => {},
+    });
+  }
+
+  if (payload.password) {
+    steps.push({
+      key: "password",
+      initial: passwordInput,
+      relocate: (root) => findPasswordInput(inputsIn(root)),
+      accepts: isPasswordTarget,
+      write: (el) => setInputValue(el as HTMLInputElement, payload.password),
+      release: () => {
+        payload.password = "";
+      },
+    });
+  }
+
+  const otpTargets: HTMLInputElement[] = [];
   if (payload.totpCode) {
     const otpForm = passwordInput?.form ?? scopeForm;
     const otpScopedInputs = otpForm
       ? (Array.from(otpForm.querySelectorAll("input")) as HTMLInputElement[])
       : null;
+    const releaseTotp = () => {
+      payload.totpCode = "";
+    };
 
     // Try split OTP fields first (e.g. 6 separate single-digit inputs)
     const codeLen = payload.totpCode.length;
@@ -317,29 +420,49 @@ export function performAutofill(payload: AutofillPayload) {
       (otpScopedInputs ? findSplitOtpInputs(otpScopedInputs, codeLen) : null) ??
       findSplitOtpInputs(inputs, codeLen);
     if (splitInputs) {
+      otpTargets.push(...splitInputs);
       for (let i = 0; i < codeLen; i++) {
-        setInputValue(splitInputs[i], payload.totpCode[i]);
+        steps.push({
+          key: `totp-${i}`,
+          initial: splitInputs[i],
+          relocate: (root) => findSplitOtpInputs(inputsIn(root), codeLen)?.[i] ?? null,
+          accepts: isTextLikeTarget,
+          write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? ""),
+          release: releaseTotp,
+        });
       }
     } else {
       // Fall back to single OTP field
       const otpInput =
         (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ??
         findOtpInput(inputs);
-      if (otpInput) {
-        setInputValue(otpInput, payload.totpCode);
-      }
+      if (otpInput) otpTargets.push(otpInput);
+      steps.push({
+        key: "totp",
+        initial: otpInput,
+        relocate: (root) => findOtpInput(inputsIn(root)),
+        accepts: isTextLikeTarget,
+        write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode ?? ""),
+        release: releaseTotp,
+      });
     }
   }
 
-  // Generic custom field autofill using pre-built label→input map
-  if (payload.customFields) {
-    for (const { label, value } of payload.customFields) {
-      const target = customFieldMap.get(label.toLowerCase());
-      if (target) {
-        setInputValue(target, value);
-      }
-    }
-  }
+  // ── Root: anchored on the focused/hinted field, else the first identifier,
+  // else the password ──
+  const identifiers = inDocumentOrder(
+    [usernameInput, ...customFieldTargets].filter((i): i is HTMLInputElement => i !== null),
+  );
+  const anchor =
+    effectiveFocusedUsername ?? effectiveHintedUsername ?? identifiers[0] ?? passwordInput;
+  const t0Targets = [usernameInput, passwordInput, ...customFieldTargets, ...otpTargets].filter(
+    (i): i is HTMLInputElement => i !== null,
+  );
+  const { root, reanchor } = anchor
+    ? resolveFillRoot(anchor, t0Targets, isLoginForeignCandidate)
+    : { root: null, reanchor: () => null };
+
+  return runFillSequence(root, steps, { ...opts, reanchor });
 }
 
 // Guard against double-registration when this script is injected more than once
@@ -354,7 +477,7 @@ if (
   chrome.runtime.onMessage.addListener((message: AutofillPayload, sender: chrome.runtime.MessageSender) => {
     // Only accept messages from our own extension — reject external senders
     if (message?.type === AUTOFILL_FILL && sender.id === chrome.runtime.id) {
-      performAutofill(message);
+      performAutofill(message).catch(() => logFillError(FILL_DIAG_CODE.LOGIN_FILL_FAILED));
     }
   });
 }

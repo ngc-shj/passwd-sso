@@ -49,6 +49,27 @@ type MessageHandler = (
 let messageHandlers: MessageHandler[] = [];
 let chromeMock: ReturnType<typeof installChromeMock> | null = null;
 
+// Content-bundle loader paths as CRXJS emits them (dist/manifest.json for
+// production; `<id>-loader.js` for the dev server).
+const PROD_LOADER = "assets/form-detector.ts-loader-D6NUAxWB.js";
+const DEV_LOADER = "src/content/form-detector.ts-loader.js";
+function manifestWithContentScripts(js: string[]) {
+  return {
+    manifest_version: 3,
+    name: "__MSG_extName__",
+    version: "0.0.0",
+    content_scripts: [
+      {
+        js,
+        matches: ["https://*/*", "http://localhost/*"],
+        run_at: "document_idle",
+        all_frames: true,
+      },
+    ],
+  };
+}
+const NO_RECEIVER = "Could not establish connection. Receiving end does not exist.";
+
 function installChromeMock() {
   messageHandlers = [];
   const chromeMock = {
@@ -59,6 +80,7 @@ function installChromeMock() {
       sendMessage: vi.fn().mockResolvedValue({ ok: true }),
       getContexts: vi.fn().mockResolvedValue([]),
       getURL: vi.fn((path: string) => `chrome-extension://test-extension-id/${path}`),
+      getManifest: vi.fn(() => manifestWithContentScripts([PROD_LOADER])),
     },
     offscreen: {
       createDocument: vi.fn().mockResolvedValue(undefined),
@@ -525,7 +547,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith(
       expect.objectContaining({
         target: { tabId: 7, frameIds: [42] },
-        files: ["src/content/form-detector.js"],
+        files: [PROD_LOADER],
       }),
     );
     // Retry after injection is still frame-scoped to 42.
@@ -534,6 +556,102 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
       expect.objectContaining({ type: EXT_MSG.AUTOFILL_CC_FILL }),
       { frameId: 42 },
     );
+  });
+
+  // ── C5: bundle path from the manifest + bounded resend ──
+
+  const ccFillFromFrame42 = () =>
+    sendMessage(
+      { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId: "cc-1" },
+      {
+        tab: { id: 7, url: "https://shop.example/checkout" },
+        url: "https://shop.example/checkout",
+        frameId: 42,
+      },
+    ) as Promise<{ ok: boolean; error?: string }>;
+
+  /** sendMessage mock that rejects with each queued error in turn, then resolves; returns call times. */
+  function queueCcSendResults(errors: string[]): number[] {
+    const times: number[] = [];
+    const queue = [...errors];
+    chromeMock!.tabs.sendMessage = vi.fn(async () => {
+      times.push(performance.now());
+      const next = queue.shift();
+      if (next !== undefined) throw new Error(next);
+      return {};
+    });
+    return times;
+  }
+
+  it("C5: injects the dev-server loader path when the manifest has the dev shape", async () => {
+    chromeMock!.runtime.getManifest.mockReturnValue(manifestWithContentScripts([DEV_LOADER]));
+    await unlock();
+    queueCcSendResults([NO_RECEIVER]);
+
+    const res = await ccFillFromFrame42();
+
+    expect(res.ok).toBe(true);
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 7, frameIds: [42] },
+      files: [DEV_LOADER],
+    });
+  });
+
+  it("C5: fails closed with AUTOFILL_INJECT_FAILED when no manifest entry is the form-detector loader", async () => {
+    chromeMock!.runtime.getManifest.mockReturnValue(
+      manifestWithContentScripts([
+        // The pre-C5 literal (not a loader) and a loader of another bundle.
+        "src/content/form-detector.js",
+        "assets/token-bridge.ts-loader-Ab12_-.js",
+      ]),
+    );
+    await unlock();
+    queueCcSendResults([NO_RECEIVER]);
+
+    const res = await ccFillFromFrame42();
+
+    expect(res).toMatchObject({ ok: false, error: "AUTOFILL_INJECT_FAILED" });
+    expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("C5: resends after a 50 ms backoff while the injected bundle has no receiver yet", async () => {
+    await unlock();
+    // Initial send, then the first post-inject resend: no receiver. Second resend lands.
+    const times = queueCcSendResults([NO_RECEIVER, NO_RECEIVER]);
+
+    const res = await ccFillFromFrame42();
+
+    expect(res.ok).toBe(true);
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(3);
+    // The post-inject resends are spaced by the backoff, not fired back to back.
+    expect(times[2] - times[1]).toBeGreaterThanOrEqual(40);
+    // Every resend stays scoped to the originating frame.
+    for (const call of chromeMock!.tabs.sendMessage.mock.calls) {
+      expect(call[2]).toEqual({ frameId: 42 });
+    }
+  });
+
+  it("C5: fails closed with AUTOFILL_INJECT_FAILED after 10 post-inject attempts with no receiver", async () => {
+    await unlock();
+    queueCcSendResults(Array.from({ length: 50 }, () => NO_RECEIVER));
+
+    const res = await ccFillFromFrame42();
+
+    expect(res).toMatchObject({ ok: false, error: "AUTOFILL_INJECT_FAILED" });
+    // 1 initial send + 10 post-inject attempts, then no more.
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(11);
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledTimes(1);
+  });
+
+  it("C5: does not resend on a post-inject rejection other than 'Receiving end does not exist'", async () => {
+    await unlock();
+    queueCcSendResults([NO_RECEIVER, "The message port closed before a response was received."]);
+
+    const res = await ccFillFromFrame42();
+
+    expect(res).toMatchObject({ ok: false, error: "AUTOFILL_INJECT_FAILED" });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(2);
   });
 
   it("C9: rejects an oversized entryId before any fetch", async () => {

@@ -7,8 +7,19 @@ import {
   detectCreditCardFields,
   detectExpiryFormat,
   formatCombinedExpiry,
+  isCreditCardFillable,
+  type CreditCardFormFields,
 } from "./cc-form-detector-lib";
 import {
+  resolveFillRoot,
+  runFillSequence,
+  type FillRoot,
+  type FillStep,
+  type FillTarget,
+} from "./fill-sequence-lib";
+import {
+  FILL_DIAG_CODE,
+  logFillError,
   logNoSelectMatch,
   SELECT_DIAG_FIELD,
   type SelectDiagField,
@@ -113,16 +124,59 @@ function setSelectValue(
 
 // ── Main autofill function ──
 
-export function performCreditCardAutofill(payload: CreditCardAutofillPayload): void {
-  const fields = detectCreditCardFields(document);
-  if (!fields) return;
+type CcField = keyof Omit<CreditCardFormFields, "expiryFormat">;
 
-  if (fields.cardholderName && payload.cardholderName) {
-    setInputValue(fields.cardholderName, payload.cardholderName);
+function relocateCcField(field: CcField): (root: FillRoot) => FillTarget | null {
+  return (root) => detectCreditCardFields(root)?.[field] ?? null;
+}
+
+function writeExpiryPart(
+  el: FillTarget,
+  value: string,
+  normalizer: (v: string) => string,
+  diagField: SelectDiagField,
+): void {
+  if (el instanceof HTMLSelectElement) {
+    setSelectValue(el, value, normalizer, diagField);
+  } else {
+    setInputValue(el, value);
+  }
+}
+
+export function performCreditCardAutofill(
+  payload: CreditCardAutofillPayload,
+  opts: { lateFieldWindowMs?: number } = {},
+): Promise<void> {
+  // T0: the detector's result is every step's initial target.
+  const fields = detectCreditCardFields(document);
+  if (!fields?.cardNumber) return Promise.resolve();
+  const cardNumber = fields.cardNumber;
+
+  // Steps, in order: name, number, expiry, CVV. A step whose payload value is
+  // empty is not created.
+  const steps: FillStep[] = [];
+  const noRelease = () => {};
+
+  if (payload.cardholderName) {
+    steps.push({
+      key: "cardholderName",
+      initial: fields.cardholderName,
+      relocate: relocateCcField("cardholderName"),
+      accepts: isCreditCardFillable,
+      write: (el) => setInputValue(el as HTMLInputElement, payload.cardholderName),
+      release: noRelease,
+    });
   }
 
-  if (fields.cardNumber && payload.cardNumber) {
-    setInputValue(fields.cardNumber, payload.cardNumber);
+  if (payload.cardNumber) {
+    steps.push({
+      key: "cardNumber",
+      initial: cardNumber,
+      relocate: relocateCcField("cardNumber"),
+      accepts: isCreditCardFillable,
+      write: (el) => setInputValue(el as HTMLInputElement, payload.cardNumber),
+      release: noRelease,
+    });
   }
 
   // Expiry
@@ -130,47 +184,74 @@ export function performCreditCardAutofill(payload: CreditCardAutofillPayload): v
   // Without the payload guard, formatCombinedExpiry("", "", "MM/YY") yields "00/00"
   // and setInputValue writes it over whatever the user typed. The split branch below
   // has always guarded; the combined branch had not.
-  if (
-    fields.expiryFormat === "combined" &&
-    fields.expiryCombined &&
-    payload.expiryMonth &&
-    payload.expiryYear
-  ) {
-    const format = detectExpiryFormat(fields.expiryCombined);
-    const combined = formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format);
-    setInputValue(fields.expiryCombined, combined);
-  } else {
-    if (fields.expiryMonth && payload.expiryMonth) {
-      if (fields.expiryMonth instanceof HTMLSelectElement) {
-        setSelectValue(
-          fields.expiryMonth,
-          payload.expiryMonth,
-          normalizeMonthValue,
-          SELECT_DIAG_FIELD.CC_EXPIRY_MONTH,
-        );
-      } else {
-        setInputValue(fields.expiryMonth, payload.expiryMonth);
-      }
-    }
-    if (fields.expiryYear && payload.expiryYear) {
-      if (fields.expiryYear instanceof HTMLSelectElement) {
-        setSelectValue(
-          fields.expiryYear,
-          payload.expiryYear,
-          normalizeYearValue,
-          SELECT_DIAG_FIELD.CC_EXPIRY_YEAR,
-        );
-      } else {
-        setInputValue(fields.expiryYear, payload.expiryYear);
-      }
-    }
+  const hasT0Expiry = Boolean(fields.expiryCombined || fields.expiryMonth || fields.expiryYear);
+  const wantCombined = fields.expiryFormat === "combined" || !hasT0Expiry;
+  const wantSplit = fields.expiryFormat === "split" || !hasT0Expiry;
+  if (wantCombined && payload.expiryMonth && payload.expiryYear) {
+    steps.push({
+      key: "expiryCombined",
+      initial: fields.expiryCombined,
+      relocate: relocateCcField("expiryCombined"),
+      accepts: isCreditCardFillable,
+      write: (el) => {
+        const input = el as HTMLInputElement;
+        const format = detectExpiryFormat(input);
+        setInputValue(input, formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format));
+      },
+      release: noRelease,
+    });
+  }
+  if (wantSplit && payload.expiryMonth) {
+    steps.push({
+      key: "expiryMonth",
+      initial: fields.expiryMonth,
+      relocate: relocateCcField("expiryMonth"),
+      accepts: isCreditCardFillable,
+      write: (el) =>
+        writeExpiryPart(el, payload.expiryMonth, normalizeMonthValue, SELECT_DIAG_FIELD.CC_EXPIRY_MONTH),
+      release: noRelease,
+    });
+  }
+  if (wantSplit && payload.expiryYear) {
+    steps.push({
+      key: "expiryYear",
+      initial: fields.expiryYear,
+      relocate: relocateCcField("expiryYear"),
+      accepts: isCreditCardFillable,
+      write: (el) =>
+        writeExpiryPart(el, payload.expiryYear, normalizeYearValue, SELECT_DIAG_FIELD.CC_EXPIRY_YEAR),
+      release: noRelease,
+    });
   }
 
-  if (fields.cvv && payload.cvv) {
-    setInputValue(fields.cvv, payload.cvv);
-    // CVV memory wipe — overwrite payload property immediately after use
-    payload.cvv = "";
+  if (payload.cvv) {
+    steps.push({
+      key: "cvv",
+      initial: fields.cvv,
+      relocate: relocateCcField("cvv"),
+      accepts: isCreditCardFillable,
+      write: (el) => {
+        setInputValue(el as HTMLInputElement, payload.cvv);
+        // CVV memory wipe — overwrite payload property immediately after use
+        payload.cvv = "";
+      },
+      release: () => {
+        payload.cvv = "";
+      },
+    });
   }
+
+  const t0Targets = [
+    fields.cardholderName,
+    fields.cardNumber,
+    fields.expiryMonth,
+    fields.expiryYear,
+    fields.expiryCombined,
+    fields.cvv,
+  ].filter((el): el is HTMLInputElement | HTMLSelectElement => el !== null);
+  const { root, reanchor } = resolveFillRoot(cardNumber, t0Targets, isCreditCardFillable);
+
+  return runFillSequence(root, steps, { ...opts, reanchor });
 }
 
 // Guard against double-registration (manifest content script + programmatic re-injection).
@@ -184,7 +265,7 @@ if (
   chrome.runtime.onMessage.addListener((message: CreditCardAutofillPayload, sender: chrome.runtime.MessageSender) => {
     // Only accept messages from our own extension — reject external senders
     if (message?.type === EXT_MSG.AUTOFILL_CC_FILL && sender.id === chrome.runtime.id) {
-      performCreditCardAutofill(message);
+      performCreditCardAutofill(message).catch(() => logFillError(FILL_DIAG_CODE.CC_FILL_FAILED));
     }
   });
 }

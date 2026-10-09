@@ -90,6 +90,27 @@ const DEFAULT_OVERVIEW_PLAINTEXT = JSON.stringify({
 const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
 const setDecryptedPlaintext = keyedDecrypt.set;
 
+// Content-bundle loader paths as CRXJS emits them (dist/manifest.json for
+// production; `<id>-loader.js` for the dev server).
+const PROD_LOADER = "assets/form-detector.ts-loader-D6NUAxWB.js";
+const DEV_LOADER = "src/content/form-detector.ts-loader.js";
+function manifestWithContentScripts(js: string[]) {
+  return {
+    manifest_version: 3,
+    name: "__MSG_extName__",
+    version: "0.0.0",
+    content_scripts: [
+      {
+        js,
+        matches: ["https://*/*", "http://localhost/*"],
+        run_at: "document_idle",
+        all_frames: true,
+      },
+    ],
+  };
+}
+const NO_RECEIVER = "Could not establish connection. Receiving end does not exist.";
+
 function installChromeMock() {
   messageHandlers = [];
   alarmHandlers = [];
@@ -111,6 +132,7 @@ function installChromeMock() {
       sendMessage: vi.fn().mockResolvedValue({ ok: true }),
       getContexts: vi.fn().mockResolvedValue([]),
       getURL: vi.fn((path: string) => `chrome-extension://test-extension-id/${path}`),
+      getManifest: vi.fn(() => manifestWithContentScripts([PROD_LOADER])),
     },
     offscreen: {
       createDocument: vi.fn().mockResolvedValue(undefined),
@@ -660,7 +682,7 @@ describe("background message flow", () => {
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith(
       expect.objectContaining({
         target: { tabId: 1, allFrames: true },
-        files: ["src/content/form-detector.js"],
+        files: [PROD_LOADER],
       }),
     );
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(2);
@@ -995,12 +1017,15 @@ describe("background message flow", () => {
     setDecryptedPlaintext("aa", JSON.stringify({ password: "secret" }));
     setDecryptedPlaintext("11", JSON.stringify({ username: "alice", urlHost: "example.com" }));
 
-    // Message-based autofill must fail so direct fallback runs.
-    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(
+    // Message-based autofill (initial send and the post-inject resend) must
+    // fail so direct fallback runs.
+    chromeMock?.tabs.sendMessage.mockRejectedValue(
       new Error("Could not establish connection"),
     );
-    // 1st call: direct fallback with hint -> unserializable, 2nd: retry with null hint
+    // 1st call: bundle injection, 2nd: direct fallback with hint ->
+    // unserializable, 3rd: retry with null hint
     chromeMock?.scripting.executeScript
+      .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error("Value is unserializable"))
       .mockResolvedValueOnce([]);
 
@@ -1120,6 +1145,7 @@ describe("background message flow", () => {
 
   const stubLoginFetch = (
     overview: Record<string, unknown> = { username: "alice", urlHost: "example.com" },
+    entryType: string = EXT_ENTRY_TYPE.LOGIN,
   ) => {
     vi.stubGlobal(
       "fetch",
@@ -1157,7 +1183,7 @@ describe("background message flow", () => {
               id: "pw-1",
               encryptedBlob: { ciphertext: "aa", iv: "bb", authTag: "cc" },
               encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
-              entryType: EXT_ENTRY_TYPE.LOGIN,
+              entryType,
               aadVersion: 1,
             }),
           };
@@ -1519,8 +1545,9 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    // Force the message path to fail so the executeScript fallback runs.
-    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(new Error("no connection"));
+    // Force the message path (initial send and the post-inject resend) to fail
+    // so both executeScript fallbacks run.
+    chromeMock?.tabs.sendMessage.mockRejectedValue(new Error("no connection"));
 
     const res = await new Promise((resolve) => {
       const handler = messageHandlers[0];
@@ -1536,7 +1563,15 @@ describe("background message flow", () => {
     });
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
 
-    // Fallback injection must target ONLY the originating frame, never all frames.
+    // Both fallback injections — the content bundle and the inline func — must
+    // target ONLY the originating frame, never all frames.
+    const bundleCall = chromeMock?.scripting.executeScript.mock.calls.find(
+      (c: unknown[]) => "files" in (c[0] as object),
+    );
+    expect(bundleCall?.[0]).toEqual({
+      target: { tabId: 1, frameIds: [7] },
+      files: [PROD_LOADER],
+    });
     const injectCall = chromeMock?.scripting.executeScript.mock.calls.find(
       (c: unknown[]) => "args" in (c[0] as object),
     );
@@ -1548,7 +1583,7 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(new Error("no connection"));
+    chromeMock?.tabs.sendMessage.mockRejectedValue(new Error("no connection"));
 
     // The real popup/context-menu path: EXT_MSG.AUTOFILL carries an explicit
     // tabId and no originating frameId (the popup is not a tab frame).
@@ -1558,6 +1593,10 @@ describe("background message flow", () => {
     // With no known frame, the decrypted credential must NOT be injected into
     // every frame ({ allFrames: true }) — that would deliver it to a
     // cross-origin third-party iframe. Fail safe to the top frame only.
+    const bundleCall = chromeMock?.scripting.executeScript.mock.calls.find(
+      (c: unknown[]) => "files" in (c[0] as object),
+    );
+    expect(bundleCall?.[0]).toEqual({ target: { tabId: 1 }, files: [PROD_LOADER] });
     const injectCall = chromeMock?.scripting.executeScript.mock.calls.find(
       (c: unknown[]) => "args" in (c[0] as object),
     );

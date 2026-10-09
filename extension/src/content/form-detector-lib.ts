@@ -15,6 +15,7 @@ import {
   handleDropdownKeydown,
 } from "./ui/suggestion-dropdown";
 import { getShadowHost } from "./ui/shadow-host";
+import { isFillActive } from "./fill-sequence-lib";
 
 /** Returns false when the extension has been reloaded/updated and this content script is orphaned. */
 function isContextValid(): boolean {
@@ -505,6 +506,8 @@ export function initFormDetector(): FormDetectorCleanup {
   const focusHandler = (e: FocusEvent) => {
     if (destroyed) return;
     if (Date.now() < autofillSuppressUntil) return;
+    // A fill moves focus field by field; the dropdown stays closed until it ends.
+    if (isFillActive()) return;
     const input = e.target;
     if (!(input instanceof HTMLInputElement)) return;
     if (!isUsableInput(input)) return;
