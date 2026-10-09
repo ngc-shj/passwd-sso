@@ -61,7 +61,7 @@ R1 OK; R3: the direct-inject LOGIN twin `injectDirectAutofill` in `background/in
 
 Evidence:
 - `extension/vitest.config.ts`: the default environment is node, the autofill tests opt into jsdom per file, and `sequence.shuffle` is on.
-- react, react-dom and @testing-library/react are devDependencies.
+- react, react-dom and `@testing-library/react` are devDependencies.
 - About 70 synchronous `perform*` assertions must become async.
 - The background tests only assert message construction.
 - The repo has no precedent for fake timers combined with MutationObserver.

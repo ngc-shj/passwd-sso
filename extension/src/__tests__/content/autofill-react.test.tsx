@@ -19,6 +19,7 @@ import { flushSync } from "react-dom";
 import { performAutofill } from "../../content/autofill-lib";
 import { __resetFillSequenceForTests } from "../../content/fill-sequence-lib";
 import type { AutofillPayload } from "../../types/messages";
+import { AUTOFILL_FILL } from "../../lib/constants";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
 
@@ -91,7 +92,7 @@ function $(id: string): HTMLInputElement {
 
 function payload(): AutofillPayload {
   return {
-    type: "AUTOFILL_FILL",
+    type: AUTOFILL_FILL,
     username: "",
     password: "dummy-pw",
     customFields: [

@@ -5,6 +5,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { performAutofill } from "../../content/autofill-lib";
 import { __resetFillSequenceForTests } from "../../content/fill-sequence-lib";
 import type { AutofillPayload } from "../../types/messages";
+import { AUTOFILL_FILL } from "../../lib/constants";
 
 // Existing rows assert T0 targets only: a zero late-field window keeps them free
 // of the deferral wait (every T0 target is still written).
@@ -795,7 +796,7 @@ describe("performAutofill — sequential fill", () => {
   });
 
   const loginPayload = (overrides: Partial<AutofillPayload> = {}): AutofillPayload => ({
-    type: "AUTOFILL_FILL",
+    type: AUTOFILL_FILL,
     username: "alice",
     password: "secret",
     ...overrides,
