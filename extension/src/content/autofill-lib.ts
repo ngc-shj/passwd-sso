@@ -240,6 +240,10 @@ function findOtpInput(inputs: HTMLInputElement[]): HTMLInputElement | null {
     inputs.find((i) => {
       if (!isUsableInput(i)) return false;
       if (!["text", "tel", "number"].includes(i.type)) return false;
+      // The page's own declaration wins over a substring hint ("hotpepper_id"
+      // contains "otp"), as it does for findUsernameInput.
+      const ac = (i.autocomplete || "").toLowerCase().trim();
+      if (ac === "username" || ac === "email") return false;
       const hints = getHints(i);
       return otpHintRe.test(hints) || otpHintJaRe.test(hints);
     }) ?? null

@@ -1005,6 +1005,19 @@ describe("performAutofill — sequential fill", () => {
     expect(byId("pw").value).toBe("secret");
   });
 
+  it("keeps a focused autocomplete=username field whose name contains 'otp' as the username", async () => {
+    setupForm(`
+      <input id="user" type="text" name="hotpepper_id" autocomplete="username" />
+      <input id="pw" type="password" />
+    `);
+    byId("user").focus();
+
+    await settle(performAutofill(loginPayload({ totpCode: "123456" })));
+
+    expect(byId("user").value).toBe("alice");
+    expect(byId("pw").value).toBe("secret");
+  });
+
   it("drops the password and TOTP references on exit", async () => {
     setupForm(`
       <input id="user" type="text" autocomplete="username" />

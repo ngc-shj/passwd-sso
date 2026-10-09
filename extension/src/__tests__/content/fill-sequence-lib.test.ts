@@ -281,6 +281,25 @@ describe("runFillSequence — step states and the deadline", () => {
     expect(r.log).toEqual(written);
   });
 
+  it("ends a waiting step that relocates to a late field an earlier step already wrote", async () => {
+    document.body.innerHTML = ``;
+    const r = recorder();
+    const late = (root: FillRoot) => root.querySelector<HTMLInputElement>("#late");
+    const run = track(
+      runFillSequence(document.body, [
+        r.step("first", null, { relocate: late }),
+        r.step("second", null, { relocate: late }),
+      ]),
+    );
+    await runTasks();
+    addInput(document.body, { id: "late" });
+    await flushMicrotasks();
+    await runTasks();
+
+    expect(r.log).toEqual(["first"]);
+    expect(run.settled()).toBe(true);
+  });
+
   it("ends a step whose T0 target an earlier step owns, without waiting out the window", async () => {
     document.body.innerHTML = `<input id="a">`;
     const r = recorder();

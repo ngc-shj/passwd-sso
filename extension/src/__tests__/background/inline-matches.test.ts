@@ -78,6 +78,7 @@ const NO_RECEIVER = "Could not establish connection. Receiving end does not exis
 let probeUrl = "https://shop.example/checkout";
 
 function installChromeMock() {
+  probeUrl = "https://shop.example/checkout";
   messageHandlers = [];
   const chromeMock = {
     runtime: {
@@ -466,7 +467,6 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
-    probeUrl = "https://shop.example/checkout";
     chromeMock = installChromeMock();
     await loadBackground();
   });
@@ -683,7 +683,9 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
   });
 
   it.each([
-    { name: "two documents", probe: [{ frameId: 42, documentId: "a", result: "https://shop.example/" }, { frameId: 42, documentId: "b", result: "https://shop.example/" }] },
+    // Synthetic: a frameIds:[n] target never yields two results; this pins the
+    // single-result invariant itself.
+    { name: "more than one result", probe: [{ frameId: 42, documentId: "a", result: "https://shop.example/" }, { frameId: 42, documentId: "b", result: "https://shop.example/" }] },
     { name: "no documentId", probe: [{ frameId: 42, documentId: "", result: "https://shop.example/" }] },
     { name: "no document", probe: [] },
   ])("C5: fails closed without injecting when the frame's document cannot be pinned ($name)", async ({ probe }) => {

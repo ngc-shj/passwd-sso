@@ -53,8 +53,9 @@ import {
 } from "../lib/dpop-key";
 import { swFetchAuthenticated } from "./dpop-fetch";
 import {
-  injectContentBundle,
   injectContentBundleAndResend,
+  injectContentBundleInto,
+  probeDocument,
   resendUntilReceived,
 } from "./content-bundle";
 import { directAutofill } from "./direct-autofill";
@@ -1997,19 +1998,32 @@ async function performAutofillForEntry(
     // only if it is the top frame or its own origin matches one of these.
     ...(entryHosts.length ? { allowedHosts: entryHosts } : {}),
   };
-  // The document the bundle went into; the func fallback stays pinned to it.
-  let bundleDocumentId: string | undefined;
+  // The one document every fallback delivery is pinned to: the bundle, its
+  // resends and the direct func. Without it, the fallback does not run.
+  let pinnedDocumentId: string | undefined;
   try {
     await sendFillMessage(loginPayload);
     messageFillSucceeded = true;
   } catch {
-    // No listener in the frame: inject the bundle (frame-scoped) and resend.
+    // No listener in the frame: pin its document, inject the bundle there and
+    // resend.
     try {
-      [bundleDocumentId] = await injectContentBundle(executeTarget);
-      await resendUntilReceived(() => sendFillMessage(loginPayload, bundleDocumentId));
+      const probed = await probeDocument(executeTarget);
+      // A caller that bound the request to a sender host (content message,
+      // context menu) only accepts a document still on one of the entry's
+      // hosts: the frame may have navigated since the request was checked.
+      if (typeof enforceSenderHost === "string") {
+        const probedHost = extractHost(probed.url);
+        if (!probedHost || !entryHosts.some((h) => isHostMatch(h, probedHost))) {
+          return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+        }
+      }
+      pinnedDocumentId = probed.documentId;
+      await injectContentBundleInto(tabId, probed);
+      await resendUntilReceived(() => sendFillMessage(loginPayload, probed.documentId));
       messageFillSucceeded = true;
     } catch {
-      // Continue to direct fallback injection below.
+      // Continue to the pinned direct fallback below.
     }
   }
 
@@ -2017,10 +2031,11 @@ async function performAutofillForEntry(
   // (see direct-autofill.ts).
   // Scoped to the originating frame (executeTarget) so the password is not
   // injected into sibling/subframes; popup callers (no frameId) target the tab.
-  // Once the bundle went into a document, the func is pinned to that document.
-  const directTarget: chrome.scripting.InjectionTarget = bundleDocumentId
-    ? { tabId, documentIds: [bundleDocumentId] }
-    : executeTarget;
+  // Pinned to the probed document, so a navigation since cannot receive it.
+  const directTarget: chrome.scripting.InjectionTarget = {
+    tabId,
+    documentIds: pinnedDocumentId ? [pinnedDocumentId] : [],
+  };
   const injectDirectAutofill = async (
     hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
   ) =>
@@ -2039,6 +2054,9 @@ async function performAutofillForEntry(
   // The direct fallback doesn't support TOTP and would overwrite OTP fields
   // with username values, so running both approaches causes conflicts.
   if (!messageFillSucceeded) {
+    // No pinned document (the probe failed or found no single document): the
+    // credential has nowhere it can be delivered safely.
+    if (!pinnedDocumentId) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
     try {
       await injectDirectAutofill(serializableTargetHint);
     } catch (err) {

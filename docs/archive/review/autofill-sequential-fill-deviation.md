@@ -110,3 +110,21 @@ Every finding below was fixed in Phase 2, and every new row was red-proven on a 
 - **Deadline (F2):** once the deadline handler has run, the deadline counts as reached, even if `performance.now()` is a fraction of a millisecond short, because `setTimeout` truncates the delay. The delay is now rounded up.
 - **Polling (F3):** waiting steps are also re-checked every `WAITING_POLL_MS` (100 ms) until the deadline. A field can become acceptable without a mutation under `<body>`, for example through a CSS transition or a stylesheet or `<html>` class change.
   - Like the observer, the poll only schedules the sequencer's own task and never writes.
+
+## D12: the LOGIN fallback runs only against a pinned document (Phase 3 round 2: S3, S4, F-R2-3)
+
+Supersedes D9's LOGIN wording.
+
+- **Pinning:** the LOGIN fallback probes the frame's document first.
+  - Every later delivery goes to the probed `documentId`: the bundle, its resends, and the direct `func`. That holds even when the bundle injection fails or the document is outside the bundle scope, as on an `http://` page, where the `func` still fills.
+  - When the probe finds no single document, or rejects, no fallback runs and the result is `AUTOFILL_INJECT_FAILED`. Before, the `func` went by `frameId` to whatever document the frame held.
+- **Sender host:** when the caller bound the request to a sender host (the content message or the context menu), the probed document must still be on one of the entry's hosts (`isHostMatch`). A path change on the same host is allowed.
+- **Still deferred (SC3):** pinning the first send to `sender.documentId` remains a follow-up.
+
+## D13: a relocated field another step already wrote ends the step (Phase 3 round 2: F-R2-2)
+
+- The first-wins rule from D10 also applies when relocating: a waiting step whose `relocate` returns an element an earlier step already wrote is abandoned at once.
+
+## D14: OTP detection defers to the page's own autocomplete (Phase 3 round 2: F-R2-1)
+
+- `findOtpInput`'s hint branch skips fields declared `autocomplete="username"` or `"email"`, as `findUsernameInput` already treats those as definitive. A substring hint such as "hotpepper_id", which contains "otp", no longer turns a username field into an OTP target.

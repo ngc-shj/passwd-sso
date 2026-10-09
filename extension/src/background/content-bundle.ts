@@ -88,6 +88,51 @@ function isNoReceiverError(err: unknown): boolean {
   return NO_RECEIVER_RE.test(message);
 }
 
+export type ProbedDocument = { documentId: string; url: string };
+
+/**
+ * Pin the single document a frame target (no `allFrames`) holds right now: its
+ * documentId and URL, read together. Throws DOCUMENT_UNKNOWN unless exactly one
+ * document with a non-empty id answers.
+ */
+export async function probeDocument(
+  target: chrome.scripting.InjectionTarget,
+): Promise<ProbedDocument> {
+  const probes = await chrome.scripting.executeScript({
+    target,
+    func: () => location.href,
+  });
+  const [probe] = probes;
+  if (probes.length !== 1 || !probe.documentId || typeof probe.result !== "string") {
+    throw new Error(CONTENT_BUNDLE_ERROR.DOCUMENT_UNKNOWN);
+  }
+  return { documentId: probe.documentId, url: probe.result };
+}
+
+/** Whether `url` is inside the bundle's own manifest content_scripts matches. */
+export function isInBundleScope(url: string): boolean {
+  const bundle = resolveContentBundle();
+  return !!bundle && bundle.matches.some((pattern) => matchesPattern(url, pattern));
+}
+
+async function injectBundleFile(tabId: number, documentIds: string[]): Promise<void> {
+  const bundle = resolveContentBundle();
+  if (!bundle) throw new Error(CONTENT_BUNDLE_ERROR.NOT_FOUND);
+  await chrome.scripting.executeScript({
+    target: { tabId, documentIds },
+    files: [bundle.file],
+  });
+}
+
+/** Inject the bundle into one probed document, refusing one outside the bundle's scope. */
+export async function injectContentBundleInto(
+  tabId: number,
+  probed: ProbedDocument,
+): Promise<void> {
+  if (!isInBundleScope(probed.url)) throw new Error(CONTENT_BUNDLE_ERROR.SCOPE_REFUSED);
+  await injectBundleFile(tabId, [probed.documentId]);
+}
+
 /**
  * Inject the content bundle into the in-scope documents of `target` and return
  * their documentIds. A target without `allFrames` names one frame and must
@@ -98,28 +143,22 @@ function isNoReceiverError(err: unknown): boolean {
 export async function injectContentBundle(
   target: chrome.scripting.InjectionTarget,
 ): Promise<string[]> {
-  const bundle = resolveContentBundle();
-  if (!bundle) throw new Error(CONTENT_BUNDLE_ERROR.NOT_FOUND);
+  if (!resolveContentBundle()) throw new Error(CONTENT_BUNDLE_ERROR.NOT_FOUND);
+  if (!target.allFrames) {
+    const probed = await probeDocument(target);
+    await injectContentBundleInto(target.tabId, probed);
+    return [probed.documentId];
+  }
   const probes = await chrome.scripting.executeScript({
     target,
     func: () => location.href,
   });
-  if (!target.allFrames && probes.length !== 1) {
-    throw new Error(CONTENT_BUNDLE_ERROR.DOCUMENT_UNKNOWN);
-  }
   const documentIds = probes
-    .filter(
-      (probe) =>
-        typeof probe.result === "string" &&
-        bundle.matches.some((pattern) => matchesPattern(probe.result as string, pattern)),
-    )
+    .filter((probe) => typeof probe.result === "string" && isInBundleScope(probe.result))
     .map((probe) => probe.documentId);
   if (documentIds.length === 0) throw new Error(CONTENT_BUNDLE_ERROR.SCOPE_REFUSED);
   if (documentIds.some((id) => !id)) throw new Error(CONTENT_BUNDLE_ERROR.DOCUMENT_UNKNOWN);
-  await chrome.scripting.executeScript({
-    target: { tabId: target.tabId, documentIds },
-    files: [bundle.file],
-  });
+  await injectBundleFile(target.tabId, documentIds);
   return documentIds;
 }
 

@@ -186,7 +186,8 @@ export function runFillSequence(
 
   // A waiting step (deferred, detached, or failing `accepts` at its turn) is
   // deadline-bound, including a later write to its own initial element.
-  function resolveWaiting(step: FillStep): FillTarget | null {
+  function resolveWaiting(index: number): FillTarget | null {
+    const step = steps[index];
     if (isPastDeadline()) return null;
     const initial = step.initial;
     if (initial && initial.isConnected && !written.has(initial) && step.accepts(initial)) {
@@ -196,7 +197,12 @@ export function runFillSequence(
     if (!scope || !step.relocate) return null;
     const el = step.relocate(scope);
     if (!el || !el.isConnected || !scope.contains(el)) return null;
-    if (written.has(el) || !step.accepts(el)) return null;
+    // The field it relocates to is owned by the step that wrote it (first wins).
+    if (written.has(el)) {
+      states[index] = "abandoned";
+      return null;
+    }
+    if (!step.accepts(el)) return null;
     return el;
   }
 
@@ -230,7 +236,7 @@ export function runFillSequence(
         states[i] = isPastDeadline() ? "abandoned" : "waiting";
       }
       if (states[i] === "waiting") {
-        const el = resolveWaiting(step);
+        const el = resolveWaiting(i);
         if (el) {
           writeStep(i, el);
           scheduleTick();

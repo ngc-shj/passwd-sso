@@ -1,7 +1,7 @@
 # Code Review: autofill-sequential-fill
 
 Date: 2026-10-10
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 
@@ -61,3 +61,52 @@ Phase 2 Step 2-5 covered R1–R57, RS1–RS6 and RT1–RT11 (deviation log). Thi
 ## Resolution Status
 
 Every round 1 finding is resolved, and every new row is red-proven on a scratch copy.
+
+---
+
+# Round 2
+
+## Changes from Previous Round
+
+Incremental review of `6c726fec8`, the round 1 fixes.
+
+## Functionality Findings
+
+- **F-R2-1 [Minor]:** the OTP reservation outranked a focused `autocomplete="username"` field whose name happened to contain "otp".
+  - Resolved: D14.
+  - Row: "hotpepper_id". Red with the autocomplete guard removed.
+- **F-R2-2 [Minor]:** a collision found by relocation still waited out the window.
+  - Resolved: D13.
+  - Row: two deferred steps relocate to one late field. Red with the rule removed.
+- **F-R2-3 [Minor, adjacent]:** the same issue as S3. Resolved with it.
+
+## Security Findings
+
+- **S3 [Major]:** the LOGIN `func` fell back to an unpinned frame target whenever the bundle injection failed, including on a navigation during the window.
+  - Resolved: D12.
+  - Rows:
+    - outside the bundle scope, the `func` is pinned to the probed document;
+    - when the bundle injection fails, the `func` stays pinned;
+    - when the probe finds no document or rejects, no fallback runs (`AUTOFILL_INJECT_FAILED`).
+  - Red against three mutants: an unpinned fallback, the `func` always targeted by frame, and the pin set only after the bundle succeeds.
+- **S4 [Minor]:** the probe pinned whichever document was present.
+  - Resolved: D12, with the sender-host check.
+  - Rows: deny on host mismatch, allow on same host with a different path. Red with the host check removed.
+- **A1 [Minor, adjacent]:** the first send is still unpinned. This is the known SC3 follow-up.
+
+## Testing Findings
+
+- **T5 [Major]:** the `func` fallback target was not asserted. The fallback branch no longer exists (S3); the pinned-target rows above cover every `func` delivery.
+- **T6 [Major]:** the unserializable retry's mock queue was misaligned by the probe.
+  - Resolved: the queue now includes the probe and the bundle, and both `func` attempts are asserted pinned.
+- **T7 [Major]:** the `allFrames` probe mock returned frame 0 only.
+  - Resolved: the helper returns every listed frame.
+  - Row: the shortcut's bundle reaches only the in-scope frame. Red with the scope filter bypassed.
+- **T8 [Minor]:** `probeUrl` was reset in only one `describe` block.
+  - Resolved: it is reset in `installChromeMock`, and `background.test.ts` resets its probe state there too.
+- **T9 [Minor]:** the synthetic "two documents" row was misnamed.
+  - Resolved: renamed to "more than one result", with a comment.
+
+## Resolution Status
+
+Every round 2 finding is resolved, and every new row is red-proven on a scratch copy.
