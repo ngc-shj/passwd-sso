@@ -52,7 +52,11 @@ import {
   resetInMemoryKeyCache,
 } from "../lib/dpop-key";
 import { swFetchAuthenticated } from "./dpop-fetch";
-import { injectContentBundleAndResend } from "./content-bundle";
+import {
+  injectContentBundle,
+  injectContentBundleAndResend,
+  resendUntilReceived,
+} from "./content-bundle";
 import { directAutofill } from "./direct-autofill";
 import { classifyError, warnBackground } from "./log";
 import {
@@ -1709,11 +1713,14 @@ async function performAutofillForEntry(
   // because each frame self-verifies its origin against allowedHosts before
   // filling (isFrameAllowedToFill). chrome.tabs.sendMessage's options overload
   // rejects `undefined`, so only pass frame-targeting options when an
-  // originating frame is known.
-  const sendFillMessage = (payload: unknown): Promise<unknown> =>
-    hasFrameTarget
-      ? chrome.tabs.sendMessage(tabId, payload, { frameId })
-      : chrome.tabs.sendMessage(tabId, payload);
+  // originating frame is known. A resend after bundle injection is pinned to
+  // the injected document (`documentId`), not to whatever the frame holds now.
+  const sendFillMessage = (payload: unknown, documentId?: string): Promise<unknown> =>
+    documentId
+      ? chrome.tabs.sendMessage(tabId, payload, { documentId })
+      : hasFrameTarget
+        ? chrome.tabs.sendMessage(tabId, payload, { frameId })
+        : chrome.tabs.sendMessage(tabId, payload);
 
   // CC/Identity fill target. Unlike LOGIN, CC/Identity entries are hostless by
   // design (user-picked, usable on any site), so there is no allowedHosts gate a
@@ -1723,8 +1730,12 @@ async function performAutofillForEntry(
   // read the filled value. So when the originating frame is unknown
   // (popup/context-menu), scope to the TOP FRAME ONLY (`frameId: 0`) rather than
   // broadcasting. When the frame is known, scope to it.
-  const sendSensitiveFillMessage = (payload: unknown): Promise<unknown> =>
-    chrome.tabs.sendMessage(tabId, payload, { frameId: frameId ?? 0 });
+  const sendSensitiveFillMessage = (payload: unknown, documentId?: string): Promise<unknown> =>
+    chrome.tabs.sendMessage(
+      tabId,
+      payload,
+      documentId ? { documentId } : { frameId: frameId ?? 0 },
+    );
 
   let blobPlain: string;
   let overviewPlain: string;
@@ -1872,8 +1883,8 @@ async function performAutofillForEntry(
       // Fallback: inject the bundled content script (frame-scoped) for pages
       // where the manifest content script has not attached yet, then retry.
       try {
-        await injectContentBundleAndResend(executeTarget, () =>
-          sendSensitiveFillMessage(ccPayload),
+        await injectContentBundleAndResend(executeTarget, (documentId) =>
+          sendSensitiveFillMessage(ccPayload, documentId),
         );
       } catch {
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
@@ -1910,8 +1921,8 @@ async function performAutofillForEntry(
       await sendSensitiveFillMessage(identityPayload);
     } catch {
       try {
-        await injectContentBundleAndResend(executeTarget, () =>
-          sendSensitiveFillMessage(identityPayload),
+        await injectContentBundleAndResend(executeTarget, (documentId) =>
+          sendSensitiveFillMessage(identityPayload, documentId),
         );
       } catch {
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
@@ -1986,15 +1997,16 @@ async function performAutofillForEntry(
     // only if it is the top frame or its own origin matches one of these.
     ...(entryHosts.length ? { allowedHosts: entryHosts } : {}),
   };
+  // The document the bundle went into; the func fallback stays pinned to it.
+  let bundleDocumentId: string | undefined;
   try {
     await sendFillMessage(loginPayload);
     messageFillSucceeded = true;
   } catch {
     // No listener in the frame: inject the bundle (frame-scoped) and resend.
     try {
-      await injectContentBundleAndResend(executeTarget, () =>
-        sendFillMessage(loginPayload),
-      );
+      [bundleDocumentId] = await injectContentBundle(executeTarget);
+      await resendUntilReceived(() => sendFillMessage(loginPayload, bundleDocumentId));
       messageFillSucceeded = true;
     } catch {
       // Continue to direct fallback injection below.
@@ -2005,11 +2017,15 @@ async function performAutofillForEntry(
   // (see direct-autofill.ts).
   // Scoped to the originating frame (executeTarget) so the password is not
   // injected into sibling/subframes; popup callers (no frameId) target the tab.
+  // Once the bundle went into a document, the func is pinned to that document.
+  const directTarget: chrome.scripting.InjectionTarget = bundleDocumentId
+    ? { tabId, documentIds: [bundleDocumentId] }
+    : executeTarget;
   const injectDirectAutofill = async (
     hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
   ) =>
     chrome.scripting.executeScript({
-      target: executeTarget,
+      target: directTarget,
       args: [
         username,
         password ?? "",

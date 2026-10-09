@@ -11,6 +11,7 @@ import { DISCONNECT_REASON } from "../lib/disconnect-reason";
 import { BUNDLE_RESEND_ATTEMPTS } from "../background/content-bundle";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
+import { createExecuteScriptMock, documentIdFor } from "./helpers/execute-script-mock";
 import type { SessionState } from "../lib/session-storage";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
@@ -150,7 +151,7 @@ function installChromeMock() {
       clear: vi.fn(),
     },
     scripting: {
-      executeScript: vi.fn().mockResolvedValue([]),
+      executeScript: createExecuteScriptMock(),
       registerContentScripts: vi.fn().mockResolvedValue(undefined),
       unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
     },
@@ -680,12 +681,15 @@ describe("background message flow", () => {
     const handler = commandHandlers[0];
     await handler(CMD_TRIGGER_AUTOFILL);
 
-    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: { tabId: 1, allFrames: true },
-        files: [PROD_LOADER],
-      }),
-    );
+    // The probe covers every frame; the bundle goes to the in-scope documents.
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 1, allFrames: true },
+      func: expect.any(Function),
+    });
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 1, documentIds: [documentIdFor(0)] },
+      files: [PROD_LOADER],
+    });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(2);
   });
 
@@ -1564,19 +1568,24 @@ describe("background message flow", () => {
     });
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
 
-    // Both fallback injections — the content bundle and the inline func — must
-    // target ONLY the originating frame, never all frames.
+    // Every fallback injection reaches ONLY the originating frame, never all
+    // frames: the probe targets frame 7, and the bundle and the inline func are
+    // pinned to the document the probe found there.
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 1, frameIds: [7] },
+      func: expect.any(Function),
+    });
     const bundleCall = chromeMock?.scripting.executeScript.mock.calls.find(
       (c: unknown[]) => "files" in (c[0] as object),
     );
     expect(bundleCall?.[0]).toEqual({
-      target: { tabId: 1, frameIds: [7] },
+      target: { tabId: 1, documentIds: [documentIdFor(7)] },
       files: [PROD_LOADER],
     });
     const injectCall = chromeMock?.scripting.executeScript.mock.calls.find(
       (c: unknown[]) => "args" in (c[0] as object),
     );
-    expect(injectCall?.[0]?.target).toEqual({ tabId: 1, frameIds: [7] });
+    expect(injectCall?.[0]?.target).toEqual({ tabId: 1, documentIds: [documentIdFor(7)] });
   });
 
   const fillFromFrame7 = () =>
@@ -1595,6 +1604,15 @@ describe("background message flow", () => {
   const callOrder = (mock: { mock: { invocationCallOrder: number[] } }) =>
     mock.mock.invocationCallOrder;
 
+  // executeScript calls by role: the location probe (func, no args), the bundle
+  // (files) and the direct-autofill func (args).
+  const injectionKinds = () =>
+    (chromeMock!.scripting.executeScript.mock.calls as unknown[][]).map((c) => {
+      const injection = c[0] as object;
+      if ("files" in injection) return "bundle";
+      return "args" in injection ? "func" : "probe";
+    });
+
   it("C5/C7: LOGIN delivers by message, then the bundle and a resend; the func never runs once a resend lands", async () => {
     stubLoginFetch({ username: "alice", urlHost: "example.com" });
     applyToken("t", Date.now() + 60_000, "");
@@ -1607,12 +1625,13 @@ describe("background message flow", () => {
     const res = await fillFromFrame7();
 
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
-    const calls = chromeMock!.scripting.executeScript.mock.calls as unknown[][];
-    expect(calls.map((c) => Object.keys(c[0] as object).sort())).toEqual([["files", "target"]]);
+    expect(injectionKinds()).toEqual(["probe", "bundle"]);
     const [firstSend, , lastSend] = callOrder(chromeMock!.tabs.sendMessage);
-    const [inject] = callOrder(chromeMock!.scripting.executeScript);
-    expect(firstSend).toBeLessThan(inject);
+    const [probe, inject] = callOrder(chromeMock!.scripting.executeScript);
+    expect(firstSend).toBeLessThan(probe);
     expect(inject).toBeLessThan(lastSend);
+    // The resends are pinned to the injected document.
+    expect(chromeMock!.tabs.sendMessage.mock.calls[2][2]).toEqual({ documentId: documentIdFor(7) });
   });
 
   it("C5/C7: LOGIN runs the func exactly once, after the bundle, when every resend has no receiver", async () => {
@@ -1625,14 +1644,15 @@ describe("background message flow", () => {
 
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1 + BUNDLE_RESEND_ATTEMPTS);
-    const calls = chromeMock!.scripting.executeScript.mock.calls as unknown[][];
-    expect(calls.map((c) => ("files" in (c[0] as object) ? "bundle" : "func"))).toEqual([
-      "bundle",
-      "func",
-    ]);
+    expect(injectionKinds()).toEqual(["probe", "bundle", "func"]);
     const sends = callOrder(chromeMock!.tabs.sendMessage);
-    const [, funcCall] = callOrder(chromeMock!.scripting.executeScript);
+    const [, , funcCall] = callOrder(chromeMock!.scripting.executeScript);
     expect(sends[sends.length - 1]).toBeLessThan(funcCall);
+    // The func stays pinned to the document the bundle went into.
+    const funcInjection = chromeMock!.scripting.executeScript.mock.calls[2][0] as {
+      target: unknown;
+    };
+    expect(funcInjection.target).toEqual({ tabId: 1, documentIds: [documentIdFor(7)] });
   });
 
   it("C5: the Identity fallback injects the manifest's loader into the originating frame", async () => {
@@ -1648,11 +1668,16 @@ describe("background message flow", () => {
     const res = await fillFromFrame7();
 
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
-    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledTimes(1);
+    expect(injectionKinds()).toEqual(["probe", "bundle"]);
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
       target: { tabId: 1, frameIds: [7] },
+      func: expect.any(Function),
+    });
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 1, documentIds: [documentIdFor(7)] },
       files: [DEV_LOADER],
     });
+    expect(chromeMock!.tabs.sendMessage.mock.calls[1][2]).toEqual({ documentId: documentIdFor(7) });
     const sentTypes = chromeMock!.tabs.sendMessage.mock.calls.map(
       (c: unknown[]) => (c[1] as { type?: string }).type,
     );
@@ -1674,14 +1699,23 @@ describe("background message flow", () => {
     // With no known frame, the decrypted credential must NOT be injected into
     // every frame ({ allFrames: true }) — that would deliver it to a
     // cross-origin third-party iframe. Fail safe to the top frame only.
+    // The probe targets the top frame only; the bundle and the func are then
+    // pinned to the top frame's document.
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 1 },
+      func: expect.any(Function),
+    });
     const bundleCall = chromeMock?.scripting.executeScript.mock.calls.find(
       (c: unknown[]) => "files" in (c[0] as object),
     );
-    expect(bundleCall?.[0]).toEqual({ target: { tabId: 1 }, files: [PROD_LOADER] });
+    expect(bundleCall?.[0]).toEqual({
+      target: { tabId: 1, documentIds: [documentIdFor(0)] },
+      files: [PROD_LOADER],
+    });
     const injectCall = chromeMock?.scripting.executeScript.mock.calls.find(
       (c: unknown[]) => "args" in (c[0] as object),
     );
-    expect(injectCall?.[0]?.target).toEqual({ tabId: 1 });
+    expect(injectCall?.[0]?.target).toEqual({ tabId: 1, documentIds: [documentIdFor(0)] });
   });
 });
 

@@ -39,6 +39,11 @@ export type FillSequenceOptions = {
 
 export const DEFAULT_LATE_FIELD_WINDOW_MS = 1000;
 
+// A waiting step can become acceptable without any mutation under <body> (a
+// CSS transition, a stylesheet or <html> class change), so waiting steps are
+// also re-checked on this interval until the deadline.
+export const WAITING_POLL_MS = 100;
+
 const SUPERSEDING_INPUT_EVENTS = ["keydown", "pointerdown", "paste"] as const;
 
 const OBSERVED_ATTRIBUTES = ["disabled", "readonly", "hidden", "style", "class"];
@@ -80,12 +85,23 @@ export function runFillSequence(
   const deadline =
     performance.now() + (opts.lateFieldWindowMs ?? DEFAULT_LATE_FIELD_WINDOW_MS);
 
-  const states: StepState[] = steps.map(() => "pending");
+  // Two steps that chose the same element at T0: the first one owns it, and the
+  // later one ends at once instead of waiting out the window for a field it can
+  // never write (write-once).
+  const states: StepState[] = steps.map((step, i) =>
+    step.initial && steps.slice(0, i).some((earlier) => earlier.initial === step.initial)
+      ? "abandoned"
+      : "pending",
+  );
   const written = new Set<FillTarget>();
   let currentRoot = root;
   let exited = false;
   let tickTimer: ReturnType<typeof setTimeout> | null = null;
   let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  // setTimeout truncates a fractional delay, so the handler can run just before
+  // performance.now() reaches the deadline; once it has run, the deadline holds.
+  let deadlineReached = false;
   let observer: MutationObserver | null = null;
   let resolveRun!: () => void;
   const done = new Promise<void>((resolve) => {
@@ -93,7 +109,7 @@ export function runFillSequence(
   });
 
   const isCurrent = () => runGeneration === currentGeneration && !exited;
-  const isPastDeadline = () => performance.now() >= deadline;
+  const isPastDeadline = () => deadlineReached || performance.now() >= deadline;
 
   const onUserInput = (e: Event) => {
     if (!e.isTrusted) return;
@@ -109,8 +125,10 @@ export function runFillSequence(
     observer = null;
     if (tickTimer !== null) clearTimeout(tickTimer);
     if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+    if (pollTimer !== null) clearTimeout(pollTimer);
     tickTimer = null;
     deadlineTimer = null;
+    pollTimer = null;
     for (const type of SUPERSEDING_INPUT_EVENTS) {
       window.removeEventListener(type, onUserInput, true);
     }
@@ -145,6 +163,18 @@ export function runFillSequence(
   function scheduleTick(): void {
     if (exited || tickTimer !== null) return;
     tickTimer = setTimeout(guarded(tick), 0);
+  }
+
+  // Like the observer, the poll only schedules the loop.
+  function schedulePoll(): void {
+    if (exited || pollTimer !== null || isPastDeadline()) return;
+    pollTimer = setTimeout(
+      guarded(() => {
+        pollTimer = null;
+        scheduleTick();
+      }),
+      WAITING_POLL_MS,
+    );
   }
 
   function resolvedRoot(): FillRoot | null {
@@ -208,11 +238,18 @@ export function runFillSequence(
         }
       }
     }
-    if (!hasOpenSteps()) exit();
+    if (!hasOpenSteps()) {
+      exit();
+      return;
+    }
+    if (states.includes("waiting")) schedulePoll();
   }
 
   function onDeadline(): void {
     deadlineTimer = null;
+    deadlineReached = true;
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = null;
     if (!isCurrent()) {
       exit();
       return;
@@ -257,7 +294,10 @@ export function runFillSequence(
       });
     }
     scheduleTick();
-    deadlineTimer = setTimeout(guarded(onDeadline), Math.max(0, deadline - performance.now()));
+    deadlineTimer = setTimeout(
+      guarded(onDeadline),
+      Math.max(0, Math.ceil(deadline - performance.now())),
+    );
   } catch {
     exit(FILL_DIAG_CODE.SEQUENCE_ERROR);
   }

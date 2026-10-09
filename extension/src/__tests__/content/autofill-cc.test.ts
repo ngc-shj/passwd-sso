@@ -693,9 +693,14 @@ describe("performCreditCardAutofill — dynamic forms (#654)", () => {
     await vi.advanceTimersByTimeAsync(5);
     const second = performCreditCardAutofill(card({ cardNumber: "5500000000000004", cvv: "222" }));
     await vi.advanceTimersByTimeAsync(5);
+    // The second request arrives while the first run's CVV step is waiting.
     q("#details").innerHTML = `<input autocomplete="cc-csc" />`;
+    const writes: string[] = [];
+    const cvv = q("[autocomplete=cc-csc]");
+    cvv.addEventListener("input", () => writes.push(cvv.value));
     await settle(Promise.all([first, second]).then(() => {}));
 
+    expect(writes).toEqual(["222"]);
     expect(q("[autocomplete=cc-number]").value).toBe("5500000000000004");
     expect(q("[autocomplete=cc-csc]").value).toBe("222");
   });

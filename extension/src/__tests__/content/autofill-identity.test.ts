@@ -571,6 +571,7 @@ describe("performIdentityAutofill — sequential fill", () => {
     q("#slot").innerHTML = `<input autocomplete="tel" />`;
     await settle(fill);
 
+    expect(q("[autocomplete=name]").value).toBe("Jane Doe");
     expect(q("[autocomplete=tel]").value).toBe("");
   });
 
@@ -591,9 +592,14 @@ describe("performIdentityAutofill — sequential fill", () => {
       payload({ fullName: "John Roe", email: "john@example.com", phone: "222-2222" }),
     );
     await vi.advanceTimersByTimeAsync(5);
+    // The second request arrives while the first run's phone step is waiting.
     q("#slot").innerHTML = `<input autocomplete="tel" />`;
+    const writes: string[] = [];
+    const tel = q("[autocomplete=tel]");
+    tel.addEventListener("input", () => writes.push(tel.value));
     await settle(Promise.all([first, second]).then(() => {}));
 
+    expect(writes).toEqual(["222-2222"]);
     expect(q("[autocomplete=tel]").value).toBe("222-2222");
     expect(q("[autocomplete=name]").value).toBe("John Roe");
   });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EXT_ENTRY_TYPE, EXT_MSG } from "../../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
+import { createExecuteScriptMock, documentIdFor } from "../helpers/execute-script-mock";
 import {
   BUNDLE_RESEND_ATTEMPTS,
   BUNDLE_RESEND_INTERVAL_MS,
@@ -73,6 +74,8 @@ function manifestWithContentScripts(js: string[]) {
   };
 }
 const NO_RECEIVER = "Could not establish connection. Receiving end does not exist.";
+// URL the content-bundle probe reports for each targeted document.
+let probeUrl = "https://shop.example/checkout";
 
 function installChromeMock() {
   messageHandlers = [];
@@ -97,7 +100,7 @@ function installChromeMock() {
       clear: vi.fn(),
     },
     scripting: {
-      executeScript: vi.fn().mockResolvedValue([]),
+      executeScript: createExecuteScriptMock(() => probeUrl),
       registerContentScripts: vi.fn().mockResolvedValue(undefined),
       unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
     },
@@ -463,6 +466,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    probeUrl = "https://shop.example/checkout";
     chromeMock = installChromeMock();
     await loadBackground();
   });
@@ -548,17 +552,20 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     )) as { ok: boolean };
 
     expect(res.ok).toBe(true);
-    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: { tabId: 7, frameIds: [42] },
-        files: [PROD_LOADER],
-      }),
-    );
-    // Retry after injection is still frame-scoped to 42.
+    // The probe targets frame 42 only; the bundle goes to the document found there.
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 7, frameIds: [42] },
+      func: expect.any(Function),
+    });
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 7, documentIds: [documentIdFor(42)] },
+      files: [PROD_LOADER],
+    });
+    // The retry after injection is pinned to that document.
     expect(chromeMock?.tabs.sendMessage).toHaveBeenLastCalledWith(
       7,
       expect.objectContaining({ type: EXT_MSG.AUTOFILL_CC_FILL }),
-      { frameId: 42 },
+      { documentId: documentIdFor(42) },
     );
   });
 
@@ -596,7 +603,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
     expect(res.ok).toBe(true);
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
-      target: { tabId: 7, frameIds: [42] },
+      target: { tabId: 7, documentIds: [documentIdFor(42)] },
       files: [DEV_LOADER],
     });
   });
@@ -631,9 +638,12 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     // The post-inject resends are spaced by the backoff, not fired back to back
     // (10 ms of slack for real-timer jitter).
     expect(times[2] - times[1]).toBeGreaterThanOrEqual(BUNDLE_RESEND_INTERVAL_MS - 10);
-    // Every resend stays scoped to the originating frame.
-    for (const call of chromeMock!.tabs.sendMessage.mock.calls) {
-      expect(call[2]).toEqual({ frameId: 42 });
+    // The first send targets the originating frame; every resend is pinned to
+    // the document the bundle went into.
+    const [first, ...resends] = chromeMock!.tabs.sendMessage.mock.calls;
+    expect(first[2]).toEqual({ frameId: 42 });
+    for (const call of resends) {
+      expect(call[2]).toEqual({ documentId: documentIdFor(42) });
     }
   });
 
@@ -646,7 +656,46 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     expect(res).toMatchObject({ ok: false, error: "AUTOFILL_INJECT_FAILED" });
     // 1 initial send + the post-inject attempts, then no more.
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1 + BUNDLE_RESEND_ATTEMPTS);
+    // One probe and one bundle injection.
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledTimes(2);
+  });
+
+  // The bundle only goes where the manifest's own content_scripts.matches reach;
+  // activeTab would otherwise let it into pages the manifest deliberately skips.
+  it.each([
+    { url: "https://shop.example/checkout", injected: true },
+    { url: "http://localhost:3000/checkout", injected: true },
+    { url: "http://shop.example/checkout", injected: false },
+    { url: "about:blank", injected: false },
+  ])("C5: injects the bundle into $url: $injected", async ({ url, injected }) => {
+    probeUrl = url;
+    await unlock();
+    queueCcSendResults([NO_RECEIVER]);
+
+    const res = await ccFillFromFrame42();
+
+    const bundleCalls = chromeMock!.scripting.executeScript.mock.calls.filter(
+      (c: unknown[]) => "files" in (c[0] as object),
+    );
+    expect(bundleCalls).toHaveLength(injected ? 1 : 0);
+    expect(res).toMatchObject(injected ? { ok: true } : { ok: false, error: "AUTOFILL_INJECT_FAILED" });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(injected ? 2 : 1);
+  });
+
+  it.each([
+    { name: "two documents", probe: [{ frameId: 42, documentId: "a", result: "https://shop.example/" }, { frameId: 42, documentId: "b", result: "https://shop.example/" }] },
+    { name: "no documentId", probe: [{ frameId: 42, documentId: "", result: "https://shop.example/" }] },
+    { name: "no document", probe: [] },
+  ])("C5: fails closed without injecting when the frame's document cannot be pinned ($name)", async ({ probe }) => {
+    await unlock();
+    queueCcSendResults([NO_RECEIVER]);
+    chromeMock!.scripting.executeScript.mockResolvedValueOnce(probe);
+
+    const res = await ccFillFromFrame42();
+
+    expect(res).toMatchObject({ ok: false, error: "AUTOFILL_INJECT_FAILED" });
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledTimes(1);
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("C5: does not resend on a post-inject rejection other than 'Receiving end does not exist'", async () => {

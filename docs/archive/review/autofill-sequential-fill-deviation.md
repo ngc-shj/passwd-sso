@@ -80,3 +80,33 @@ Every finding below was fixed in Phase 2, and every new row was red-proven on a 
   - The three `perform…()` functions are now `async`, so a throw during T0 detection reaches the listener's `.catch` and the closed-code sink. One row per kind checks this; each is red when its function is not `async`.
   - The release-throw row asserts `fill-release-error`.
 - **SR-T5, RT11:** the no-body row removes its stray input in a `finally` block.
+
+## D9: C5's bundle module, pinned to one document and gated by scope (Phase 3 round 1: F4, S1, S2)
+
+- **Location:** C5 lives in `extension/src/background/content-bundle.ts`, not inline in `index.ts`. That makes it a unit the tests can drive, and lets it export `BUNDLE_RESEND_*` for them.
+- **Pinning by document (S1):**
+  - A probe, `executeScript({ func: () => location.href })` against the caller's frame target, returns that document's `documentId` and URL together.
+  - The bundle is then injected into `{ tabId, documentIds }`, and every resend uses `chrome.tabs.sendMessage(..., { documentId })`.
+  - The LOGIN `func` fallback targets the same `documentIds` once a bundle injection resolved a document.
+  - A frame target that does not resolve to exactly one document with an id fails closed under the caller's existing error code.
+  - This corrects the rationale in SC3: pinning the post-injection interval needs no new permission, because `executeScript` returns `documentId` and `sendMessage` accepts it. The first send and the content path (the original SC3 scope) remain a follow-up.
+- **Scope gate (S2):**
+  - A probed document is injected only when its URL matches the bundle entry's own manifest `content_scripts[].matches`. `matchesPattern` covers the forms the manifest uses; any other form matches nothing.
+  - `activeTab` would otherwise let the now-working injection reach `http://` pages the manifest skips. The LOGIN `func` behaviour on such pages already existed and is unchanged.
+
+## D10: precedence for one element claimed by two steps (Phase 3 round 1: F1, F5)
+
+- **OTP fields (F1):**
+  - OTP targets are reserved before the username is chosen; the focused field, the hinted field and the username candidate list all exclude them. The OTP code therefore lands in a focused or hinted OTP field, as it did on `main`, where TOTP was written after the username and overwrote it.
+- **Other shared elements (F5):** when two steps choose the same element at T0, the first one in step order owns it, and the later step is abandoned at once instead of waiting out the window. The cases are:
+  - two custom fields with one label;
+  - Identity keys that resolve to one element, such as `address`/`addressLine2` or `country`/`region`;
+  - a custom field whose label names the OTP field.
+
+  This replaces `main`'s last-writer-wins. That outcome was never a contract, and first-wins keeps the run from staying open for no write.
+
+## D11: wake-ups for waiting steps (Phase 3 round 1: F2, F3)
+
+- **Deadline (F2):** once the deadline handler has run, the deadline counts as reached, even if `performance.now()` is a fraction of a millisecond short, because `setTimeout` truncates the delay. The delay is now rounded up.
+- **Polling (F3):** waiting steps are also re-checked every `WAITING_POLL_MS` (100 ms) until the deadline. A field can become acceptable without a mutation under `<body>`, for example through a CSS transition or a stylesheet or `<html>` class change.
+  - Like the observer, the poll only schedules the sequencer's own task and never writes.

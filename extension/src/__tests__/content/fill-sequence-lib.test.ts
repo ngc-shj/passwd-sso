@@ -216,6 +216,84 @@ describe("runFillSequence — step states and the deadline", () => {
     expect(run.settled()).toBe(true);
   });
 
+  // Pins the comparison itself: the first task runs at exactly T0 + 0, so the
+  // deferred step meets the deadline with no handler ordering in play.
+  it.each([
+    { window: 0, written: [] },
+    { window: 1, written: ["late"] },
+  ])("with window $window, a deferred step resolvable on the first task writes $written", async ({ window, written }) => {
+    document.body.innerHTML = `<input id="late">`;
+    const r = recorder();
+    const steps = [
+      r.step("late", null, { relocate: (root) => root.querySelector<HTMLInputElement>("#late") }),
+    ];
+    const done = runFillSequence(document.body, steps, { lateFieldWindowMs: window });
+    await vi.runAllTimersAsync();
+    await done;
+
+    expect(r.log).toEqual(written);
+  });
+
+  // setTimeout truncates a fractional delay, so the deadline handler can run while
+  // performance.now() is still short of the deadline. A step that starts waiting
+  // after the handler ran must still end the run.
+  it("ends the run when a step starts waiting after the deadline handler, before the clock reaches it", async () => {
+    document.body.innerHTML = `<input id="a"><input id="b" disabled>`;
+    vi.spyOn(performance, "now").mockReturnValue(0);
+    const r = recorder();
+    const steps = [
+      r.step("a", $("#a"), {
+        // The deadline handler runs inside this write (a busy page).
+        write: (el) => {
+          (el as HTMLInputElement).value = "a";
+          vi.advanceTimersByTime(200);
+        },
+      }),
+      r.step("b", $("#b")),
+    ];
+    const run = track(runFillSequence(document.body, steps, { lateFieldWindowMs: 100 }));
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(isFillActive()).toBe(false);
+    expect(run.settled()).toBe(true);
+    expect(r.releases).toEqual({ a: 1, b: 1 });
+  });
+
+  // A field can become acceptable with no mutation under <body> (a CSS
+  // transition, a stylesheet change); waiting steps are polled until the deadline.
+  it.each([
+    { revealAt: 300, written: ["a", "late"] },
+    { revealAt: 1100, written: ["a"] },
+  ])("writes a waiting step that becomes acceptable without a mutation at $revealAt ms: $written", async ({ revealAt, written }) => {
+    document.body.innerHTML = `<input id="a"><input id="late">`;
+    let ready = false;
+    setTimeout(() => (ready = true), revealAt);
+    const r = recorder();
+    const steps = [
+      r.step("a", $("#a")),
+      r.step("late", $("#late"), { accepts: () => ready }),
+    ];
+    const done = runFillSequence(document.body, steps);
+    await vi.advanceTimersByTimeAsync(1500);
+    await done;
+
+    expect(r.log).toEqual(written);
+  });
+
+  it("ends a step whose T0 target an earlier step owns, without waiting out the window", async () => {
+    document.body.innerHTML = `<input id="a">`;
+    const r = recorder();
+    const run = track(
+      runFillSequence(document.body, [r.step("first", $("#a")), r.step("second", $("#a"))]),
+    );
+    await runTasks();
+
+    expect(r.log).toEqual(["first"]);
+    expect(run.settled()).toBe(true);
+    expect(r.releases).toEqual({ first: 1, second: 1 });
+  });
+
   // A throttled timer can run a sequencer task after the deadline but before the
   // deadline handler; the write check itself must refuse the waiting step.
   it("does not write a waiting step whose task runs past the deadline before the handler", async () => {
@@ -559,15 +637,18 @@ describe("runFillSequence — supersession", () => {
     expect(r.log).toEqual(["a", "b"]);
   });
 
-  it("removes its capture-phase window listeners on exit", async () => {
+  it("registers its window listeners in the capture phase and removes the same ones on exit", async () => {
     document.body.innerHTML = `<input id="a">`;
+    const add = vi.spyOn(window, "addEventListener");
     const remove = vi.spyOn(window, "removeEventListener");
     const done = runFillSequence(document.body, [recorder().step("a", $("#a"))]);
     await vi.runAllTimersAsync();
     await done;
 
     for (const type of ["keydown", "pointerdown", "paste"]) {
-      expect(remove).toHaveBeenCalledWith(type, expect.any(Function), true);
+      const added = add.mock.calls.find((c) => c[0] === type);
+      expect(added?.[2]).toBe(true);
+      expect(remove).toHaveBeenCalledWith(type, added?.[1], true);
     }
   });
 });

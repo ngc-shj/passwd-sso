@@ -343,28 +343,59 @@ export async function performAutofill(
 
   const focusedUsername = findFocusedTextInput();
   // If focused input is reserved for a custom field, don't use it as username target
-  const effectiveFocusedUsername =
+  const nonCustomFocused =
     focusedUsername && !customFieldTargets.has(focusedUsername) ? focusedUsername : null;
-  const effectiveHintedUsername =
+  const nonCustomHinted =
     hintedUsernameInput && !customFieldTargets.has(hintedUsernameInput) ? hintedUsernameInput : null;
 
-  const scopeForm = (effectiveFocusedUsername ?? effectiveHintedUsername ?? focusedUsername ?? hintedUsernameInput)?.form ?? null;
+  const scopeForm = (nonCustomFocused ?? nonCustomHinted ?? focusedUsername ?? hintedUsernameInput)?.form ?? null;
   const passwordInput =
     (scopeForm
       ? findPasswordInput(
           Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[],
         )
       : null) ?? findPasswordInput(inputs);
+
+  // OTP targets are reserved before the username is chosen: the dropdown opens
+  // on an OTP field and OTP pages autofocus it, so the focused or hinted field is
+  // often the OTP field itself. Writes are write-once, so a username step on it
+  // would leave the code unwritten.
+  const codeLen = payload.totpCode?.length ?? 0;
+  let splitOtpInputs: HTMLInputElement[] | null = null;
+  let singleOtpInput: HTMLInputElement | null = null;
+  if (payload.totpCode) {
+    const otpForm = passwordInput?.form ?? scopeForm;
+    const otpScopedInputs = otpForm
+      ? (Array.from(otpForm.querySelectorAll("input")) as HTMLInputElement[])
+      : null;
+    // Try split OTP fields first (e.g. 6 separate single-digit inputs)
+    splitOtpInputs =
+      (otpScopedInputs ? findSplitOtpInputs(otpScopedInputs, codeLen) : null) ??
+      findSplitOtpInputs(inputs, codeLen);
+    if (!splitOtpInputs) {
+      // Fall back to single OTP field
+      singleOtpInput =
+        (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ?? findOtpInput(inputs);
+    }
+  }
+  const otpTargets = new Set<HTMLInputElement>(
+    splitOtpInputs ?? (singleOtpInput ? [singleOtpInput] : []),
+  );
+  const isReserved = (i: HTMLInputElement) => customFieldTargets.has(i) || otpTargets.has(i);
+
+  const effectiveFocusedUsername =
+    nonCustomFocused && !otpTargets.has(nonCustomFocused) ? nonCustomFocused : null;
+  const effectiveHintedUsername =
+    nonCustomHinted && !otpTargets.has(nonCustomHinted) ? nonCustomHinted : null;
   const usernameInput =
     effectiveFocusedUsername ??
     effectiveHintedUsername ??
     findUsernameInput(
-      inputs.filter((i) => !customFieldTargets.has(i)),
+      inputs.filter((i) => !isReserved(i)),
       passwordInput,
     );
 
-  const nonCustomInputsIn = (root: FillRoot) =>
-    inputsIn(root).filter((i) => !customFieldTargets.has(i));
+  const unreservedInputsIn = (root: FillRoot) => inputsIn(root).filter((i) => !isReserved(i));
 
   // ── Steps, in order: custom fields, username, password, TOTP ──
   // Custom fields go first and the password after the identifiers: a
@@ -390,7 +421,7 @@ export async function performAutofill(
       key: "username",
       initial: usernameInput,
       relocate: (root) => {
-        const scoped = nonCustomInputsIn(root);
+        const scoped = unreservedInputsIn(root);
         return findUsernameInput(scoped, findPasswordInput(scoped));
       },
       accepts: isUsernameTarget,
@@ -412,27 +443,16 @@ export async function performAutofill(
     });
   }
 
-  const otpTargets: HTMLInputElement[] = [];
   if (payload.totpCode) {
-    const otpForm = passwordInput?.form ?? scopeForm;
-    const otpScopedInputs = otpForm
-      ? (Array.from(otpForm.querySelectorAll("input")) as HTMLInputElement[])
-      : null;
     const releaseTotp = () => {
       payload.totpCode = "";
     };
 
-    // Try split OTP fields first (e.g. 6 separate single-digit inputs)
-    const codeLen = payload.totpCode.length;
-    const splitInputs =
-      (otpScopedInputs ? findSplitOtpInputs(otpScopedInputs, codeLen) : null) ??
-      findSplitOtpInputs(inputs, codeLen);
-    if (splitInputs) {
-      otpTargets.push(...splitInputs);
+    if (splitOtpInputs) {
       for (let i = 0; i < codeLen; i++) {
         steps.push({
           key: `totp-${i}`,
-          initial: splitInputs[i],
+          initial: splitOtpInputs[i],
           relocate: (root) => findSplitOtpInputs(inputsIn(root), codeLen)?.[i] ?? null,
           accepts: isTextLikeTarget,
           write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? ""),
@@ -440,14 +460,9 @@ export async function performAutofill(
         });
       }
     } else {
-      // Fall back to single OTP field
-      const otpInput =
-        (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ??
-        findOtpInput(inputs);
-      if (otpInput) otpTargets.push(otpInput);
       steps.push({
         key: "totp",
-        initial: otpInput,
+        initial: singleOtpInput,
         relocate: (root) => findOtpInput(inputsIn(root)),
         accepts: isTextLikeTarget,
         write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode ?? ""),
@@ -462,7 +477,12 @@ export async function performAutofill(
     [usernameInput, ...customFieldTargets].filter((i): i is HTMLInputElement => i !== null),
   );
   const anchor =
-    effectiveFocusedUsername ?? effectiveHintedUsername ?? identifiers[0] ?? passwordInput;
+    effectiveFocusedUsername ??
+    effectiveHintedUsername ??
+    identifiers[0] ??
+    passwordInput ??
+    [...otpTargets][0] ??
+    null;
   const t0Targets = [usernameInput, passwordInput, ...customFieldTargets, ...otpTargets].filter(
     (i): i is HTMLInputElement => i !== null,
   );

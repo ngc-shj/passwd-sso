@@ -855,9 +855,13 @@ describe("performAutofill — sequential fill", () => {
     const second = performAutofill(loginPayload({ username: "bob", password: "second-pw" }));
     await vi.advanceTimersByTimeAsync(5);
 
-    addPassword(document.getElementById("login") as HTMLElement, "pw");
+    // The second request arrives while the first run's password step is waiting.
+    const writes: string[] = [];
+    const pw = addPassword(document.getElementById("login") as HTMLElement, "pw");
+    pw.addEventListener("input", () => writes.push(pw.value));
     await settle(Promise.all([first, second]).then(() => {}));
 
+    expect(writes).toEqual(["second-pw"]);
     expect(byId("pw").value).toBe("second-pw");
     expect(byId("user").value).toBe("bob");
   });
@@ -940,6 +944,65 @@ describe("performAutofill — sequential fill", () => {
     await settle(performAutofill(loginPayload({ password: "", totpCode: "123456" })));
 
     expect(byId("otp").value).toBe("");
+  });
+
+  // The dropdown opens on OTP fields and OTP pages autofocus them, so the focused
+  // or hinted field is often the OTP field; it is reserved for the code.
+  it("writes the TOTP into a focused single OTP field, not the username", async () => {
+    setupForm(`<input id="otp" type="text" autocomplete="one-time-code" />`);
+    byId("otp").focus();
+
+    await settle(
+      performAutofill(
+        loginPayload({ password: "", totpCode: "123456", targetHint: { id: "otp" } }),
+      ),
+    );
+
+    expect(byId("otp").value).toBe("123456");
+  });
+
+  it("writes the first digit into a focused first box of a split OTP group", async () => {
+    setupForm(`
+      <form>${Array.from({ length: 6 }, (_, i) => `<input id="d${i}" type="text" maxlength="1" />`).join("")}</form>
+    `);
+    byId("d0").focus();
+
+    await settle(
+      performAutofill(loginPayload({ password: "", totpCode: "123456", targetHint: { id: "d0" } })),
+    );
+
+    expect(Array.from({ length: 6 }, (_, i) => byId(`d${i}`).value).join("")).toBe("123456");
+  });
+
+  it("does not write the username into a reserved OTP field when another username field exists", async () => {
+    setupForm(`
+      <form>
+        <input id="user" type="text" name="username" />
+        <input id="pw" type="password" />
+        <input id="otp" type="text" autocomplete="one-time-code" />
+      </form>
+    `);
+    byId("otp").focus();
+
+    await settle(performAutofill(loginPayload({ totpCode: "123456" })));
+
+    expect(byId("user").value).toBe("alice");
+    expect(byId("pw").value).toBe("secret");
+    expect(byId("otp").value).toBe("123456");
+  });
+
+  // Without focus or a hint, the username search walks back from the password;
+  // an OTP field labelled like an account field must still get the code.
+  it("does not pick a reserved OTP field as the username when nothing is focused", async () => {
+    setupForm(`
+      <input id="mfa" type="text" aria-label="Account MFA" />
+      <input id="pw" type="password" />
+    `);
+
+    await settle(performAutofill(loginPayload({ totpCode: "123456" })));
+
+    expect(byId("mfa").value).toBe("123456");
+    expect(byId("pw").value).toBe("secret");
   });
 
   it("drops the password and TOTP references on exit", async () => {
