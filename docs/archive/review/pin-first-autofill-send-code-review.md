@@ -59,3 +59,44 @@ RT1 Finding F-T2 · RT4 adjacent to F-T1, not scored · RT6 Checked · RT7 Check
 - **Red proof:** probing the content path by frame, without the documentId check (main's D12 behaviour) → the test fails.
 - `pinDocument`'s `probed.documentId !== origin.documentId` check stays as defence in depth, documented in code. No Chrome contract produces a different id for a `documentIds` probe, so there is no realistic test input for it.
 - **Modified files:** `extension/src/__tests__/background.test.ts`, `extension/src/__tests__/helpers/execute-script-mock.ts`.
+
+---
+
+# Code Review: pin-first-autofill-send
+Date: 2026-10-10
+Review round: 2
+
+## Changes from Previous Round
+- Round 1's fixes (`cd057aa23`) changed copy and tests only; no production `.ts` was touched.
+- **F-F1, F-T1, F-T2:** resolved. The functionality, security and testing experts each verified them independently. The testing expert re-derived the ordering guarantees from `handleMessage` / `updateBadgeForTab`, and ran the suite 5× with no flakes.
+
+## Functionality Findings
+No findings. All five `ORIGIN_MISMATCH` sites read correctly with the new copy.
+
+## Security Findings
+No findings.
+- R43: no production change, so there was nothing to widen.
+- `pinDocument`'s documentId-equality branch is unreachable under the Chrome contract. Removing `setDocumentAnswer` therefore costs no coverage of a reachable path.
+
+## Testing Findings
+- **F-T3 [Major]** — `clickMenuItem` waited a fixed 30 ms before negative assertions. This is the same failure mode as F-T1:
+  - in three new tests: the Identity and CC "not the click host" tests, and the Identity probe-empty test;
+  - in three pre-existing context-menu deny tests: the cross-origin subframe, navigated-away and no-click-host tests.
+
+  The expert suggested a follow-up. The orchestrator fixed all six here instead (pre-existing defects in changed files are in scope).
+
+## Recurring Issue Check
+### Functionality expert
+R1-R57: no instances. R36/R37 copy checked; R40 re-verified.
+### Security expert
+R1 Checked · R17 Checked · R43 Checked — no production diff · R47/R48/R49/R51 Checked — untouched · RS3 Checked — `setDocumentAnswer` removal leaves no reachable branch uncovered · others N/A
+### Testing expert
+RT1 Checked · RT4 adjacent to F-T3 · RT5 Checked · RT7 Checked — ordering re-derived from code · RT8 Checked · RT9 Checked · RT11 Checked · R1-R57: F-T3 only
+
+## Resolution Status
+
+### F-T3 [Major] Sleep-based negatives behind `clickMenuItem`
+- **Action:** `clickMenuItem` now waits until the click's one observable outcome occurs: a fill message (`AUTOFILL_FILL` / `AUTOFILL_CC_FILL` / `AUTOFILL_IDENTITY_FILL`) or the failure badge (`"!"`) that `notifyFillFailure` sets. Every caller gains this; a negative assertion after it is ordered behind the handler's completion.
+- **Red proof** (scratch copy): an `acceptsDocument` that always accepts → both "not the click host" deny tests fail.
+- **Modified file:** `extension/src/__tests__/background.test.ts` (`clickMenuItem`, `clickOutcomes`).
+- **Not changed:** one other fixed 30 ms wait remains in `background.test.ts`, the pre-existing token-refresh test "does not retry account A's 401 under account B's token". It has no click outcome to wait on, and a microtask drain is not a faithful replacement if that path uses short timers. It is outside this change's subject and is reported to the user.

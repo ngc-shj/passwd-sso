@@ -1756,15 +1756,30 @@ describe("background message flow", () => {
   // of performAutofillForEntry's six positional arguments. These drive the real
   // click handler through the real guard, so the wiring itself is under test.
 
+  const FILL_MESSAGE_TYPES = new Set(["AUTOFILL_FILL", "AUTOFILL_CC_FILL", "AUTOFILL_IDENTITY_FILL"]);
+  const clickOutcomes = () =>
+    (chromeMock?.tabs.sendMessage.mock.calls ?? []).filter((c: unknown[]) =>
+      FILL_MESSAGE_TYPES.has((c[1] as { type?: string })?.type ?? ""),
+    ).length +
+    (chromeMock?.action.setBadgeText.mock.calls ?? []).filter(
+      ([arg]: unknown[]) => (arg as { text?: string })?.text === "!",
+    ).length;
+
   const clickMenuItem = async (
     info: Record<string, unknown>,
     tab: Record<string, unknown> | undefined = { id: 1 },
   ) => {
     const handler = contextMenuClickHandlers[0];
     expect(typeof handler).toBe("function");
+    const before = clickOutcomes();
     handler(info, tab);
     // The handler is void-returning and fires the fill without awaiting it.
-    await new Promise((r) => setTimeout(r, 30));
+    // Every click ends in exactly one observable outcome — a fill message, or
+    // the failure badge notifyFillFailure sets — so wait for that outcome
+    // rather than a fixed delay: a negative assertion after it is then real.
+    await vi.waitFor(() => {
+      expect(clickOutcomes()).toBeGreaterThan(before);
+    });
   };
 
   // parseMenuEntryId only accepts a UUID-shaped suffix, so the menu id cannot
