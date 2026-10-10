@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractHost,
   isHostMatch,
+  parseHttpOrigin,
   sortByUrlMatch,
 } from "../../lib/url-matching";
 import urlMatchCases from "../../../test/fixtures/url-match-cases.json";
@@ -20,6 +21,30 @@ describe("isHostMatch", () => {
       expect(isHostMatch(c.stored, c.current)).toBe(c.expected);
     });
   }
+});
+
+// C5: the background refuses a popup expectedOrigin that is not a bare http(s)
+// origin (scheme + host + port only) before any fetch or decrypt. parseHttpOrigin
+// is the gate: it must accept a serialized origin and refuse anything a full URL
+// (trailing slash, path) would otherwise smuggle through.
+describe("parseHttpOrigin", () => {
+  it.each([
+    "https://example.com",
+    "http://localhost:3000",
+  ])("accepts %s", (value) => {
+    expect(parseHttpOrigin(value)).toBe(value);
+  });
+
+  it.each([
+    ["https://example.com/", "trailing slash is not a bare origin"],
+    ["https://example.com/login", "a path means it is a full URL, not an origin"],
+    ["ftp://x", "non-http(s) scheme"],
+    ["", "empty string"],
+    [123, "non-string"],
+    ["null", "the literal string null is not an origin"],
+  ] as const)("refuses %s (%s)", (value) => {
+    expect(parseHttpOrigin(value)).toBeNull();
+  });
 });
 
 describe("sortByUrlMatch", () => {

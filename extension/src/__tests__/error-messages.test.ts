@@ -87,8 +87,12 @@ function popupReachableCodes(): string[] {
     const start = INDEX_SRC.indexOf(`case EXT_MSG.${msg}:`);
     expect(start, `${msg} handler not found`).toBeGreaterThan(-1);
     const rest = INDEX_SRC.slice(start + 1);
-    const end = rest.indexOf("\n      case EXT_MSG.");
-    const body = end > -1 ? rest.slice(0, end) : rest.slice(0, 4000);
+    // The next arm at any indentation. A fixed-width needle matched nothing in
+    // handleMessage (its arms are indented 4), so every scan fell through to a
+    // window that spanned neighbouring handlers.
+    const end = rest.search(/\n\s*case EXT_MSG\./);
+    expect(end, `${msg} handler has no following arm`).toBeGreaterThan(-1);
+    const body = rest.slice(0, end);
     for (const m of body.matchAll(/"([A-Z][A-Z0-9_]{2,})"/g)) {
       // Message-type constants and header values are not error codes.
       if (m[1].startsWith("EXT_") || m[1] === msg) continue;
@@ -108,6 +112,13 @@ describe("humanizeError", () => {
     for (const code of codes) {
       expect(humanizeError(code), `${code} is unmapped`).not.toBe(code);
     }
+  });
+
+  it("maps the code the background failsafe returns to the popup", () => {
+    // respondWithFailure answers a throwing popup handler (COPY_PASSWORD,
+    // FETCH_PASSWORDS, ...) with INTERNAL_ERROR, which the view renders.
+    expect(INDEX_SRC).toContain('error: "INTERNAL_ERROR"');
+    expect(humanizeError("INTERNAL_ERROR")).not.toBe("INTERNAL_ERROR");
   });
 
   it("maps the codes the context-menu click path emits itself", () => {

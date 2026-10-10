@@ -13,6 +13,9 @@ import { AUTOFILL_FILL } from "../../lib/constants";
 // Existing rows assert T0 targets only: a zero late-field window keeps them free
 // of the deferral wait (every T0 target is still written).
 const NO_WAIT = { lateFieldWindowMs: 0 };
+// The jsdom page's host. The content frame gate (isFrameAllowedToFill) fills
+// only a frame whose host is in allowedHosts, so a payload meant to fill names it.
+const PAGE_HOST = new URL(window.location.href).hostname;
 
 afterEach(() => {
   __resetFillSequenceForTests();
@@ -31,6 +34,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
     }, NO_WAIT);
@@ -49,6 +53,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "bob",
       password: "pw",
     }, NO_WAIT);
@@ -67,6 +72,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "secret",
     }, NO_WAIT);
@@ -85,6 +91,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "myjcb-user",
       password: "secret",
     }, NO_WAIT);
@@ -106,6 +113,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "focus-user",
       password: "secret",
     }, NO_WAIT);
@@ -123,6 +131,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "hint-user",
       password: "secret",
       targetHint: { id: "userId", name: "userId", type: "text" },
@@ -143,6 +152,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       customFields: [{ label: "brchNum", value: "001" }],
@@ -162,6 +172,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       customFields: [{ label: "accountid", value: "123456789012" }],
@@ -178,6 +189,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       customFields: [{ label: "nonexistent", value: "ignored" }],
@@ -196,6 +208,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "123456",
@@ -215,6 +228,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "654321",
@@ -232,6 +246,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "111222",
@@ -249,6 +264,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
     }, NO_WAIT);
@@ -264,6 +280,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "123456",
@@ -282,6 +299,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "",
       totpCode: "123456",
@@ -300,6 +318,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "654321",
@@ -326,6 +345,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "999888",
@@ -351,6 +371,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "123456",
@@ -378,6 +399,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "987654",
@@ -406,6 +428,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "111222",
@@ -433,6 +456,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -457,6 +481,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -479,6 +504,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "314159",
@@ -507,6 +533,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -532,6 +559,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "12345678",
@@ -561,6 +589,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "654321",
@@ -603,6 +632,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "999888",
@@ -634,6 +664,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -659,6 +690,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -767,8 +799,38 @@ describe("performAutofill — frame-origin gate", () => {
     expect((inputs[1] as HTMLInputElement).value).toBe("");
   });
 
-  it("always fills the top frame regardless of allowedHosts", async () => {
+  // Simulate the top frame (window.top === window.self, unchanged) at a given
+  // location and/or self.origin. jsdom's self.origin does not follow a
+  // window.location override, so the two are set independently; a row that
+  // does not need one leaves it at the jsdom default (http://localhost:3000).
+  async function inTopFrame(
+    { href, origin }: { href?: string; origin?: string },
+    run: () => Promise<void>,
+  ) {
+    const originalLocation = window.location;
+    const originalOrigin = self.origin;
+    if (href !== undefined) {
+      Object.defineProperty(window, "location", { configurable: true, value: new URL(href) });
+    }
+    if (origin !== undefined) {
+      Object.defineProperty(window, "origin", { configurable: true, value: origin });
+    }
+    try {
+      await run();
+    } finally {
+      if (href !== undefined) {
+        Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+      }
+      if (origin !== undefined) {
+        Object.defineProperty(window, "origin", { configurable: true, value: originalOrigin });
+      }
+    }
+  }
+
+  it("does NOT fill the top frame when neither allowedHosts nor topFrameOrigin matches", async () => {
     // Default jsdom context is the top frame (window.top === window.self).
+    // C4 removed the unconditional top-frame pass: a top frame now self-checks
+    // like any other frame.
     setupForm(`
       <input type="text" autocomplete="username" />
       <input type="password" autocomplete="current-password" />
@@ -782,7 +844,127 @@ describe("performAutofill — frame-origin gate", () => {
     }, NO_WAIT);
 
     const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+  });
+
+  // C4 acceptance table.
+  it("top frame on evil.example with allowedHosts [bank.example] and no topFrameOrigin: no write", async () => {
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    await inTopFrame({ href: "https://evil.example/" }, async () => {
+      await performAutofill({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        allowedHosts: ["bank.example"],
+      }, NO_WAIT);
+    });
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+  });
+
+  it("top frame on evil.example with topFrameOrigin https://evil.example: writes", async () => {
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    await inTopFrame({ origin: "https://evil.example" }, async () => {
+      await performAutofill({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        topFrameOrigin: "https://evil.example",
+      }, NO_WAIT);
+    });
+
+    const inputs = document.querySelectorAll("input");
     expect((inputs[1] as HTMLInputElement).value).toBe("secret");
+  });
+
+  it("top frame with an http self.origin against an https topFrameOrigin: no write", async () => {
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    await inTopFrame({ origin: "http://bank.example" }, async () => {
+      await performAutofill({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        topFrameOrigin: "https://bank.example",
+      }, NO_WAIT);
+    });
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+  });
+
+  it("top frame on evil.bank.example with allowedHosts [other.example] and topFrameOrigin https://bank.example: no write (exact origin, not isHostMatch)", async () => {
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    await inTopFrame(
+      { href: "https://evil.bank.example/", origin: "https://evil.bank.example" },
+      async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          allowedHosts: ["other.example"],
+          topFrameOrigin: "https://bank.example",
+        }, NO_WAIT);
+      },
+    );
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+  });
+
+  it("top frame on the entry host with allowedHosts: writes", async () => {
+    // jsdom's default top-frame host (localhost) is the entry host here.
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    await performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+      allowedHosts: [PAGE_HOST],
+    }, NO_WAIT);
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("secret");
+  });
+
+  it("subframe on evil.example with allowedHosts [bank.example] and topFrameOrigin https://evil.example: no write", async () => {
+    // A subframe ignores topFrameOrigin entirely (C4).
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    await inSubframe("https://evil.example/iframe", async () => {
+      await performAutofill({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        allowedHosts: ["bank.example"],
+        topFrameOrigin: "https://evil.example",
+      }, NO_WAIT);
+    });
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
   });
 });
 
@@ -802,6 +984,7 @@ describe("performAutofill — sequential fill", () => {
     type: AUTOFILL_FILL,
     username: "alice",
     password: "secret",
+    allowedHosts: [PAGE_HOST],
     ...overrides,
   });
 
@@ -1119,4 +1302,3 @@ describe("performAutofill — sequential fill", () => {
     expect(byId("decoy").value).toBe("");
   });
 });
-

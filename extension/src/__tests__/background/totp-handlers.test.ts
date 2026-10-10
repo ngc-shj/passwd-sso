@@ -138,10 +138,13 @@ function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
   bgModule.applyToken(token, expiresAt, cnfJkt);
 }
 
+// Every message this file drives through handleMessage is extension-page-only
+// (COPY_TOTP, UNLOCK_VAULT, AUTOFILL), so the default sender is an extension
+// page — otherwise C5's sender gate refuses it before it does anything.
 function sendMsg(message: unknown): Promise<unknown> {
   return new Promise((resolve) => {
     const handler = messageHandlers[0];
-    handler(message, { tab: { id: 1 } }, (resp) => resolve(resp));
+    handler(message, { url: chrome.runtime.getURL("popup/index.html") }, (resp) => resolve(resp));
   });
 }
 
@@ -366,7 +369,12 @@ describe("AUTOFILL with TOTP", () => {
 
     await unlockVault();
 
-    const res = await sendMsg({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMsg({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: "https://example.com",
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(
       1,
@@ -385,7 +393,12 @@ describe("AUTOFILL with TOTP", () => {
 
     await unlockVault();
 
-    const res = await sendMsg({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMsg({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: "https://example.com",
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
     const msgCall = chromeMock?.tabs.sendMessage.mock.calls.find(
       (c) => (c[1] as { type: string }).type === "AUTOFILL_FILL",
@@ -408,7 +421,12 @@ describe("AUTOFILL with TOTP", () => {
 
     await unlockVault();
 
-    const res = await sendMsg({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMsg({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: "https://example.com",
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(
       1,

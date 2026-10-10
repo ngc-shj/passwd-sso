@@ -25,6 +25,7 @@ const ERROR_KEY_MAP: Record<string, string> = {
   COPY_TOTP_FAILED: "errors.copyTotpFailed",
   UNLOCK_FAILED: "errors.unlockFailed",
   NO_TOKEN: "errors.noToken",
+  INTERNAL_ERROR: "errors.internalError",
 };
 
 export function humanizeError(code: string): string {

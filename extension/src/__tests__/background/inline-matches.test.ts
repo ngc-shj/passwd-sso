@@ -151,10 +151,25 @@ function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
   if (!bgModule) throw new Error("loadBackground() must run first");
   bgModule.applyToken(token, expiresAt, cnfJkt);
 }
-function sendMessage(message: unknown, sender: unknown = {}): Promise<unknown> {
+// Default sender: an extension page (every UNLOCK_VAULT call in this file
+// relies on it). Content-origin calls (GET_*_MATCHES_FOR_URL,
+// AUTOFILL_FROM_CONTENT) pass an explicit content sender instead — otherwise
+// C5's sender gate refuses an extension-page-only message, and C7 has no
+// browser-set URL to read for a content-allowed one.
+function sendMessage(
+  message: unknown,
+  sender: unknown = { url: "chrome-extension://test-extension-id/popup/index.html" },
+): Promise<unknown> {
   return new Promise((resolve) => {
     messageHandlers[0](message, sender, (resp) => resolve(resp));
   });
+}
+
+// C7: GET_*_MATCHES_FOR_URL derives its URL from the browser-set
+// MessageSender, not from the message. A top-frame content sender reproduces
+// what the old message.url field used to describe.
+function topFrameContentSender(url: string) {
+  return { frameId: 0, url, tab: { id: 1, url } };
 }
 
 /** Build the PASSWORDS list fetch + per-entry overview decryption. */
@@ -236,10 +251,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     );
     await unlock();
 
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_MATCHES_FOR_URL,
-      url: "https://github.com/login",
-    })) as { entries: Array<{ id: string }> };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL },
+      topFrameContentSender("https://github.com/login"),
+    )) as { entries: Array<{ id: string }> };
 
     expect(res.entries.map((e) => e.id)).toEqual(["login-1"]);
   });
@@ -251,10 +266,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     );
     await unlock();
 
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_MATCHES_FOR_URL,
-      url: "https://gitlab.com/login",
-    })) as { entries: unknown[] };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL },
+      topFrameContentSender("https://gitlab.com/login"),
+    )) as { entries: unknown[] };
 
     expect(res.entries).toEqual([]);
   });
@@ -270,10 +285,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     );
     await unlock();
 
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
-      url: "https://store.apple.com/checkout",
-    })) as { type: string; entries: Array<{ id: string; username: string }> };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+      topFrameContentSender("https://store.apple.com/checkout"),
+    )) as { type: string; entries: Array<{ id: string; username: string }> };
 
     expect(res.type).toBe(EXT_MSG.GET_CC_MATCHES_FOR_URL);
     expect(res.entries.map((e) => e.id)).toEqual(["cc-1"]);
@@ -288,10 +303,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     );
     await unlock();
 
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
-      url: "https://shop.example/address",
-    })) as { entries: Array<{ id: string; username: string }> };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL },
+      topFrameContentSender("https://shop.example/address"),
+    )) as { entries: Array<{ id: string; username: string }> };
 
     expect(res.entries.map((e) => e.id)).toEqual(["id-1"]);
     expect(res.entries[0].username).toBe("Alice Smith");
@@ -306,10 +321,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     );
     await unlock();
 
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
-      url: "https://form.example/register",
-    })) as { entries: Array<{ id: string; username: string }> };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL },
+      topFrameContentSender("https://form.example/register"),
+    )) as { entries: Array<{ id: string; username: string }> };
 
     expect(res.entries.map((e) => e.id)).toEqual(["id-2"]);
     expect(res.entries[0].username).toBe("Taro Yamada");
@@ -328,10 +343,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     );
     await unlock();
 
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
-      url: "https://github.com/anything",
-    })) as { entries: Array<{ id: string }> };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+      topFrameContentSender("https://github.com/anything"),
+    )) as { entries: Array<{ id: string }> };
 
     expect(res.entries.map((e) => e.id)).toEqual(["cc-1"]);
   });
@@ -345,10 +360,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     );
     await unlock();
 
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
-      url: "file:///home/user/form.html",
-    })) as { entries: Array<{ id: string }> };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+      topFrameContentSender("file:///home/user/form.html"),
+    )) as { entries: Array<{ id: string }> };
 
     expect(res.entries.map((e) => e.id)).toEqual(["cc-1"]);
   });
@@ -360,10 +375,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     );
     await unlock();
 
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_MATCHES_FOR_URL,
-      url: "file:///home/user/form.html",
-    })) as { entries: unknown[] };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL },
+      topFrameContentSender("file:///home/user/form.html"),
+    )) as { entries: unknown[] };
 
     expect(res.entries).toEqual([]);
   });
@@ -372,10 +387,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
 
   it("CC reports disconnected when there is no token", async () => {
     // No unlock() → no token.
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
-      url: "https://store.apple.com/checkout",
-    })) as { disconnected?: boolean; entries: unknown[] };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+      topFrameContentSender("https://store.apple.com/checkout"),
+    )) as { disconnected?: boolean; entries: unknown[] };
 
     expect(res.disconnected).toBe(true);
     expect(res.entries).toEqual([]);
@@ -384,10 +399,10 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
   it("CC reports vaultLocked when connected but locked", async () => {
     applyToken("t", Date.now() + 60_000, "");
     // token applied but vault never unlocked → encryptionKey null
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
-      url: "https://store.apple.com/checkout",
-    })) as { vaultLocked: boolean; entries: unknown[] };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+      topFrameContentSender("https://store.apple.com/checkout"),
+    )) as { vaultLocked: boolean; entries: unknown[] };
 
     expect(res.vaultLocked).toBe(true);
     expect(res.entries).toEqual([]);
@@ -395,13 +410,186 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
 
   it("CC suppresses inline on the passwd-sso own-app origin", async () => {
     await unlock();
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
-      url: "https://localhost:3000/ja/passwords/new",
-    })) as { suppressInline: boolean; entries: unknown[] };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+      topFrameContentSender("https://localhost:3000/ja/passwords/new"),
+    )) as { suppressInline: boolean; entries: unknown[] };
 
     expect(res.suppressInline).toBe(true);
     expect(res.entries).toEqual([]);
+  });
+
+  // ── C7 table: resolveSenderMatchUrl decides on browser-set sender data,
+  // never on message.url/topUrl, which a content script can set to anything. ──
+
+  it("C7: a frame-0 content sender on evil.example spoofing url=bank.example gets no bank entries", async () => {
+    mockEntries(
+      [{ id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      {
+        type: EXT_MSG.GET_MATCHES_FOR_URL,
+        // Spoofed: a pre-C7 implementation reading message.url would match.
+        url: "https://bank.example/login",
+      },
+      { frameId: 0, url: "https://evil.example/", tab: { id: 1, url: "https://evil.example/" } },
+    )) as { entries: unknown[] };
+
+    expect(res.entries).toEqual([]);
+  });
+
+  it("C7: a same-origin subframe of a bank.example tab gets bank entries even when the message spoofs url/topUrl to other.example", async () => {
+    mockEntries(
+      [{ id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      {
+        type: EXT_MSG.GET_MATCHES_FOR_URL,
+        url: "https://other.example/",
+        topUrl: "https://other.example/",
+      },
+      {
+        frameId: 1,
+        url: "https://bank.example/widget",
+        origin: "https://bank.example",
+        tab: { id: 1, url: "https://bank.example/dashboard" },
+      },
+    )) as { entries: Array<{ id: string }> };
+
+    expect(res.entries.map((e) => e.id)).toEqual(["login-bank"]);
+  });
+
+  it("C7: a cross-origin subframe on widget.example is matched on its OWN url, not a spoofed topUrl=bank.example", async () => {
+    mockEntries(
+      [
+        { id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN },
+        { id: "login-widget", entryType: EXT_ENTRY_TYPE.LOGIN },
+      ],
+      [
+        { title: "Bank", username: "alice", urlHost: "bank.example" },
+        { title: "Widget", username: "bob", urlHost: "widget.example" },
+      ],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      {
+        type: EXT_MSG.GET_MATCHES_FOR_URL,
+        // Spoofed to the TOP page's own-app host; pre-C7 code honoured this.
+        topUrl: "https://bank.example/",
+      },
+      {
+        frameId: 2,
+        url: "https://widget.example/frame",
+        origin: "https://widget.example",
+        tab: { id: 1, url: "https://bank.example/dashboard" },
+      },
+    )) as { entries: Array<{ id: string }> };
+
+    expect(res.entries.map((e) => e.id)).toEqual(["login-widget"]);
+  });
+
+  it("C7: a subframe whose sender.tab has no url is matched on its own sender.url", async () => {
+    mockEntries(
+      [{ id: "login-widget", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Widget", username: "bob", urlHost: "widget.example" }],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL },
+      {
+        frameId: 3,
+        url: "https://widget.example/frame2",
+        origin: "https://widget.example",
+        // No tab.url at all (e.g. no host permission on the top origin, or
+        // mid-navigation) — the same-origin branch cannot even attempt a read.
+        tab: { id: 1 },
+      },
+    )) as { entries: Array<{ id: string }> };
+
+    expect(res.entries.map((e) => e.id)).toEqual(["login-widget"]);
+  });
+
+  it.each([
+    { type: EXT_MSG.GET_MATCHES_FOR_URL },
+    { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+    { type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL },
+  ])("C7: a sender with no url at all falls through to the catch-branch empty response for $type, even with a matching spoofed message url", async ({ type }) => {
+    mockEntries(
+      [
+        { id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN },
+        { id: "cc-1", entryType: EXT_ENTRY_TYPE.CREDIT_CARD },
+        { id: "id-1", entryType: EXT_ENTRY_TYPE.IDENTITY },
+      ],
+      [
+        { title: "Bank", username: "alice", urlHost: "bank.example" },
+        { title: "Card", cardholderName: "Alice", urlHost: "bank.example" },
+        { title: "Me", fullName: "Alice Smith", urlHost: "bank.example" },
+      ],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      { type, url: "https://bank.example/login", topUrl: "https://bank.example/login" },
+      { frameId: 0, tab: { id: 1 } },
+    )) as { entries: unknown[]; vaultLocked: boolean; suppressInline: boolean };
+
+    expect(res).toEqual({ type, entries: [], vaultLocked: false, suppressInline: false });
+  });
+
+  // ── C7 badge: the LOGIN badge reads the same sender-derived URL ──
+
+  it("C7 badge: a matching sender updates the tab badge with the sender-derived url", async () => {
+    mockEntries(
+      [{ id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
+    );
+    await unlock();
+
+    await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL },
+      topFrameContentSender("https://bank.example/login"),
+    );
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "1", tabId: 1 });
+    });
+  });
+
+  it("C7 badge: a sender with no url and a spoofed matching message url does not update the badge", async () => {
+    mockEntries(
+      [{ id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
+    );
+    await unlock();
+    const badgesFor = (tabId: number) =>
+      (chromeMock?.action.setBadgeText.mock.calls ?? []).filter(
+        ([arg]) => (arg as { text?: string; tabId?: number }).text === "1" &&
+          (arg as { tabId?: number }).tabId === tabId,
+      );
+
+    // The spoofed request, from tab 1.
+    await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL, url: "https://bank.example/login" },
+      { frameId: 0, tab: { id: 1 } },
+    );
+    // Control: a legitimate request for the same page from tab 2, sent after
+    // it. Badge updates are fire-and-forget along the same path, so once the
+    // control's tab-2 badge has landed, a tab-1 badge from the spoofed request
+    // (started earlier) would have landed too.
+    const url = "https://bank.example/login";
+    await sendMessage({ type: EXT_MSG.GET_MATCHES_FOR_URL }, { frameId: 0, url, tab: { id: 2, url } });
+    await vi.waitFor(() => {
+      expect(badgesFor(2)).toHaveLength(1);
+    });
+    expect(badgesFor(1)).toEqual([]);
   });
 });
 
@@ -487,14 +675,17 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
         tab: { id: 7, url: "https://shop.example/checkout" },
         url: "https://shop.example/checkout",
         frameId: 42,
+        documentId: documentIdFor(42),
       },
     )) as { ok: boolean };
 
     expect(res.ok).toBe(true);
+    // C2: the content path addresses every delivery by the sender's own
+    // documentId, never by frameId.
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(
       7,
       expect.objectContaining({ type: EXT_MSG.AUTOFILL_CC_FILL }),
-      { frameId: 42 },
+      { documentId: documentIdFor(42) },
     );
     // autofill-cc-lib.ts is bundled via form-detector.ts content_scripts, so the
     // listener is already present — no fallback injection needed.
@@ -512,15 +703,17 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
       {
         tab: { id: 7, url: "https://shop.example/checkout" },
         url: "https://shop.example/checkout",
+        documentId: documentIdFor(0),
       },
     )) as { ok: boolean };
 
     expect(res.ok).toBe(true);
-    // Must target the top frame explicitly — NOT the two-arg tab-wide form.
+    // Must target the sender's own document explicitly — NOT the two-arg
+    // tab-wide form.
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(
       7,
       expect.objectContaining({ type: EXT_MSG.AUTOFILL_CC_FILL }),
-      { frameId: 0 },
+      { documentId: documentIdFor(0) },
     );
     expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
   });
@@ -548,13 +741,15 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
         tab: { id: 7, url: "https://shop.example/checkout" },
         url: "https://shop.example/checkout",
         frameId: 42,
+        documentId: documentIdFor(42),
       },
     )) as { ok: boolean };
 
     expect(res.ok).toBe(true);
-    // The probe targets frame 42 only; the bundle goes to the document found there.
+    // The probe re-checks the sender's own documentId only; the bundle goes to
+    // the document found there.
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
-      target: { tabId: 7, frameIds: [42] },
+      target: { tabId: 7, documentIds: [documentIdFor(42)] },
       func: expect.any(Function),
     });
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
@@ -578,6 +773,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
         tab: { id: 7, url: senderUrl },
         url: senderUrl,
         frameId: 42,
+        documentId: documentIdFor(42),
       },
     ) as Promise<{ ok: boolean; error?: string }>;
 
@@ -622,7 +818,14 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     const res = await ccFillFromFrame42();
 
     expect(res).toMatchObject({ ok: false, error: "AUTOFILL_INJECT_FAILED" });
-    expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
+    // C2: the fallback re-probes the sender's own document (to re-check it is
+    // still there and still on-host) before ever looking at the bundle, so the
+    // probe runs even though the bundle itself turns out to be unresolvable.
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledTimes(1);
+    expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 7, documentIds: [documentIdFor(42)] },
+      func: expect.any(Function),
+    });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -638,10 +841,10 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     // The post-inject resends are spaced by the backoff, not fired back to back
     // (10 ms of slack for real-timer jitter).
     expect(times[2] - times[1]).toBeGreaterThanOrEqual(BUNDLE_RESEND_INTERVAL_MS - 10);
-    // The first send targets the originating frame; every resend is pinned to
-    // the document the bundle went into.
+    // The first send targets the sender's own documentId; every resend is
+    // pinned to the document the bundle went into (the same one here).
     const [first, ...resends] = chromeMock!.tabs.sendMessage.mock.calls;
-    expect(first[2]).toEqual({ frameId: 42 });
+    expect(first[2]).toEqual({ documentId: documentIdFor(42) });
     for (const call of resends) {
       expect(call[2]).toEqual({ documentId: documentIdFor(42) });
     }
@@ -789,6 +992,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
         tab: { id: 7, url: "https://shop.example/checkout" },
         url: "https://shop.example/checkout",
         frameId: 1,
+        documentId: documentIdFor(1),
       },
     )) as { ok: boolean; error?: string };
 
@@ -823,20 +1027,20 @@ describe("M3: resolveInlineMatches suppresses inline when enableInlineSuggestion
   });
 
   it("GET_CC_MATCHES_FOR_URL returns suppressInline=true and empty entries", async () => {
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
-      url: "https://store.example.com/checkout",
-    })) as { suppressInline: boolean; entries: unknown[] };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+      topFrameContentSender("https://store.example.com/checkout"),
+    )) as { suppressInline: boolean; entries: unknown[] };
 
     expect(res.suppressInline).toBe(true);
     expect(res.entries).toEqual([]);
   });
 
   it("GET_IDENTITY_MATCHES_FOR_URL returns suppressInline=true and empty entries", async () => {
-    const res = (await sendMessage({
-      type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
-      url: "https://shop.example.com/address",
-    })) as { suppressInline: boolean; entries: unknown[] };
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL },
+      topFrameContentSender("https://shop.example.com/address"),
+    )) as { suppressInline: boolean; entries: unknown[] };
 
     expect(res.suppressInline).toBe(true);
     expect(res.entries).toEqual([]);

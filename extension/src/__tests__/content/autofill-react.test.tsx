@@ -95,6 +95,7 @@ function payload(): AutofillPayload {
     type: AUTOFILL_FILL,
     username: "",
     password: "dummy-pw",
+    allowedHosts: ["localhost"],
     customFields: [
       { label: "brchNum", value: "123" },
       { label: "accountNum", value: "4567890" },

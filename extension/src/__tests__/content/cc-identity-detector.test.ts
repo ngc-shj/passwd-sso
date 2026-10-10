@@ -89,7 +89,11 @@ describe("initCreditCardDetector", () => {
     const input = document.getElementById("ccnum") as HTMLInputElement;
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
 
-    expect(matchRequests(EXT_MSG.GET_CC_MATCHES_FOR_URL)).toHaveLength(1);
+    const ccRequests = matchRequests(EXT_MSG.GET_CC_MATCHES_FOR_URL);
+    expect(ccRequests).toHaveLength(1);
+    // C7: the background derives the page URL from MessageSender, not from
+    // this message — url/topUrl must not be sent.
+    expect(ccRequests[0].msg).toEqual({ type: EXT_MSG.GET_CC_MATCHES_FOR_URL });
     expect(showDropdownMock).toHaveBeenCalledTimes(1);
     expect(showDropdownMock.mock.calls[0][0].entryType).toBe("CREDIT_CARD");
     destroy();
@@ -262,7 +266,11 @@ describe("initIdentityDetector", () => {
     const input = document.getElementById("name") as HTMLInputElement;
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
 
-    expect(matchRequests(EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL)).toHaveLength(1);
+    const identityRequests = matchRequests(EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL);
+    expect(identityRequests).toHaveLength(1);
+    // C7: the background derives the page URL from MessageSender, not from
+    // this message — url/topUrl must not be sent.
+    expect(identityRequests[0].msg).toEqual({ type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL });
     expect(showDropdownMock.mock.calls[0][0].entryType).toBe("IDENTITY");
     destroy();
   });

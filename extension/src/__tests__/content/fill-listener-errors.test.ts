@@ -39,7 +39,7 @@ describe.each([
   {
     kind: "LOGIN",
     load: () => import("../../content/autofill-lib"),
-    message: { type: AUTOFILL_FILL, username: "alice", password: "secret" },
+    message: { type: AUTOFILL_FILL, username: "alice", password: "secret", allowedHosts: ["localhost"] },
     code: "fill-login-failed",
   },
   {

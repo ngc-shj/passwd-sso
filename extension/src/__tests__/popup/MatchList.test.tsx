@@ -296,6 +296,9 @@ describe("MatchList", () => {
     await waitFor(() => {
       expect(closeSpy).toHaveBeenCalled();
     });
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "AUTOFILL", expectedOrigin: "https://example.com" }),
+    );
     closeSpy.mockRestore();
   });
 
@@ -637,6 +640,7 @@ describe("MatchList", () => {
         entryId: "pw-1",
         tabId: 1,
         teamId: "team-1",
+        expectedOrigin: "https://example.com",
       });
     });
     closeSpy.mockRestore();
@@ -1086,7 +1090,11 @@ describe("MatchList", () => {
 
       await waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalledWith(
-          expect.objectContaining({ type: "AUTOFILL", entryId: "bank-1" }),
+          expect.objectContaining({
+            type: "AUTOFILL",
+            entryId: "bank-1",
+            expectedOrigin: "https://other.com",
+          }),
         );
       });
       // Sheet is dismissed.

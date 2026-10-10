@@ -28,6 +28,10 @@ export function MatchList({ tabUrl }: Props) {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const hasTabUrl = Boolean(tabUrl);
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
+  // The origin the user sees in this popup. The SW fills a top document only on
+  // this exact origin, so a navigation after the click cannot redirect the fill.
+  // Set whenever tabHost is (extractHost accepts http(s) URLs only).
+  const tabOrigin = tabHost && tabUrl ? new URL(tabUrl).origin : null;
   const isInsecurePage = tabUrl
     ? (() => {
         try {
@@ -99,7 +103,7 @@ export function MatchList({ tabUrl }: Props) {
     if (filling) return;
     setFilling(true);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) {
+    if (!tab?.id || !tabOrigin) {
       setToast({ message: humanizeError("NO_ACTIVE_TAB"), type: "error" });
       setFilling(false);
       return;
@@ -114,6 +118,7 @@ export function MatchList({ tabUrl }: Props) {
       entryId,
       tabId: tab.id,
       teamId,
+      expectedOrigin: tabOrigin,
     });
     if (res.ok) {
       setToast({ message: t("popup.autofillSent"), type: "success" });

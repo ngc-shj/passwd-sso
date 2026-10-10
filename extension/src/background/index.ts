@@ -34,7 +34,7 @@ import {
 import { getSettings, validateSettings, TimeoutAction } from "../lib/storage";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { humanizeError } from "../lib/error-messages";
-import { extractHost, isHostMatch } from "../lib/url-matching";
+import { extractHost, isHostMatch, parseHttpOrigin } from "../lib/url-matching";
 import {
   persistSession,
   loadSession,
@@ -59,6 +59,7 @@ import {
   resendUntilReceived,
   type ProbedDocument,
 } from "./content-bundle";
+import { AUTOFILL_REQUEST_KIND, type AutofillRequestOrigin } from "./autofill-request-origin";
 import { directAutofill } from "./direct-autofill";
 import { classifyError, warnBackground } from "./log";
 import {
@@ -79,6 +80,7 @@ import {
   CMD_LOCK_VAULT,
   EXT_ENTRY_TYPE,
   EXT_MSG,
+  EXTENSION_PAGE_ONLY_MESSAGES,
   PSSO_SHOW_SAVE_BANNER,
   PSSO_TRIGGER_INLINE_SUGGESTIONS,
   AUTOFILL_FILL,
@@ -848,8 +850,8 @@ initContextMenu({
   isConnected: () => currentToken !== null,
   isVaultUnlocked: () => encryptionKey !== null,
   isContextMenuEnabled: async () => cachedEnableContextMenu,
-  performAutofill: (entryId, tabId, teamId, enforceSenderHost, frameId) =>
-    performAutofillForEntry(entryId, tabId, undefined, teamId, frameId, enforceSenderHost),
+  performAutofill: (entryId, tabId, origin, teamId) =>
+    performAutofillForEntry(entryId, tabId, origin, undefined, teamId),
   notifyFillFailure: (error) => {
     void notifyAutofillFailure(error);
   },
@@ -937,6 +939,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
           return;
         }
         setTimeout(async () => {
+          // A newer login replaced this prompt while the timer ran: that one
+          // schedules its own push.
+          if (pendingSavePrompts.get(tabId) !== pending) return;
           // Re-check prompt preferences at delivery time
           if (pending.action === "save" && !cachedShowSavePrompt) {
             pendingSavePrompts.delete(tabId);
@@ -946,9 +951,24 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             pendingSavePrompts.delete(tabId);
             return;
           }
-          // Frame-scoped to the top frame: the save banner is a top-frame UI
-          // element and the pending password must never be broadcast tab-wide,
-          // which would deliver it to a cross-origin subframe's content script.
+          // The host was checked when the tab completed, but the top frame can
+          // navigate during this delay. Pin the document it holds now, check
+          // that one, and address the password to it alone: a document that
+          // replaces it later cannot receive it. Top frame only — the banner is
+          // top-frame UI and the password must never reach a subframe.
+          let probed: ProbedDocument;
+          try {
+            probed = await probeDocument({ tabId, frameIds: [0] });
+          } catch {
+            // No single document to pin: leave the prompt for the pull
+            // (CHECK_PENDING_SAVE), which checks the asking document's host.
+            return;
+          }
+          const probedHost = extractHost(probed.origin);
+          if (!probedHost || !isHostMatch(pending.host, probedHost)) {
+            pendingSavePrompts.delete(tabId);
+            return;
+          }
           chrome.tabs.sendMessage(tabId, {
             type: PSSO_SHOW_SAVE_BANNER,
             host: pending.host,
@@ -957,7 +977,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             action: pending.action,
             existingEntryId: pending.existingEntryId,
             existingTitle: pending.existingTitle,
-          }, { frameId: 0 }).then(() => {
+          }, { documentId: probed.documentId }).then(() => {
             // Delivered successfully — remove from pending
             pendingSavePrompts.delete(tabId);
           }).catch(() => {
@@ -1680,71 +1700,53 @@ async function fetchAndDecryptTeamBlob(
 async function performAutofillForEntry(
   entryId: string,
   tabId: number,
+  origin: AutofillRequestOrigin,
   targetHint?: AutofillTargetHint,
   teamId?: string,
-  frameId?: number,
-  // When set (non-null), the caller does not trust the entryId's origin binding
-  // and requires a LOGIN entry's host to match this host before releasing the
-  // password. Passed by the content-message path (AUTOFILL_FROM_CONTENT), where
-  // the entryId originates from an untrusted content script, and by the context
-  // menu, whose items are persisted browser state built for a host the tab may
-  // since have navigated away from. Only the popup passes undefined: its list is
-  // rendered live from the current tab at click time.
-  enforceSenderHost?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
 
-  // executeScript target for direct injection (CC/Identity file injection and
-  // the LOGIN fallback). When the originating frame is known — content-driven,
-  // or a context-menu click, which carries OnClickData.frameId — scope to it.
-  // When it is unknown (popup), inject into the TOP FRAME ONLY —
-  // `{ tabId }` with neither `frameIds` nor `allFrames` targets
-  // frame 0, not the whole tab. Do NOT "restore" `allFrames: true` here: that
-  // would inject the decrypted credential into every frame, including a
-  // cross-origin third-party iframe, where its page JS could read the filled
-  // value. Legitimate iframe fills go through the message path below, which the
-  // content-side per-frame origin gate (allowedHosts) makes safe.
-  const hasFrameTarget = typeof frameId === "number";
-  const executeTarget = hasFrameTarget
-    ? { tabId, frameIds: [frameId] }
-    : { tabId };
-  // AUTOFILL_FILL message target. Frame-scoped when the frame is known; for the
-  // popup (no frameId) it broadcasts tab-wide — safe FOR LOGIN
-  // because each frame self-verifies its origin against allowedHosts before
-  // filling (isFrameAllowedToFill). chrome.tabs.sendMessage's options overload
-  // rejects `undefined`, so only pass frame-targeting options when an
-  // originating frame is known. A resend after bundle injection is pinned to
-  // the injected document (`documentId`), not to whatever the frame holds now.
-  const sendFillMessage = (payload: unknown, documentId?: string): Promise<unknown> =>
-    documentId
-      ? chrome.tabs.sendMessage(tabId, payload, { documentId })
-      : hasFrameTarget
-        ? chrome.tabs.sendMessage(tabId, payload, { frameId })
-        : chrome.tabs.sendMessage(tabId, payload);
-
-  // CC/Identity fill target. Unlike LOGIN, CC/Identity entries are hostless by
-  // design (user-picked, usable on any site), so there is no allowedHosts gate a
-  // frame could self-verify against — a tab-wide broadcast would deliver card
-  // number / CVV / name / address in plaintext to EVERY frame, including a
-  // cross-origin third-party iframe (ad/payment widget) whose page JS could then
-  // read the filled value. So when the originating frame is unknown
-  // (popup/context-menu), scope to the TOP FRAME ONLY (`frameId: 0`) rather than
-  // broadcasting. When the frame is known, scope to it.
-  // CC/Identity have no content-side origin gate, so a fallback delivery bound
-  // to a sender host (content message, context menu) only goes to a document
-  // still on that host: the requesting document may have been replaced.
-  const isSenderDocument =
-    typeof enforceSenderHost === "string"
-      ? (probed: ProbedDocument) => extractHost(probed.origin) === enforceSenderHost
-      : undefined;
-  const sendSensitiveFillMessage = (payload: unknown, documentId?: string): Promise<unknown> =>
-    chrome.tabs.sendMessage(
-      tabId,
-      payload,
-      documentId ? { documentId } : { frameId: frameId ?? 0 },
-    );
+  // Every delivery of the decrypted payload goes to one document whose host was
+  // checked, addressed by documentId so a navigation in between cannot receive
+  // it: the content sender's own document, or a document probed before the
+  // first send (context menu, popup CC/Identity) or before the fallback (popup
+  // LOGIN). The one exception is the popup LOGIN first send, which is broadcast
+  // tab-wide so a login form inside an iframe fills; each frame checks its own
+  // host against allowedHosts / topFrameOrigin (isFrameAllowedToFill).
+  //
+  // The frame a probe reads. A content request names its document; the context
+  // menu names the clicked frame; the popup names no frame, so the top frame.
+  // Never `allFrames`: that would inject the decrypted credential into every
+  // frame, including a cross-origin third-party iframe whose page JS could read
+  // the filled value.
+  const probeTarget: chrome.scripting.InjectionTarget =
+    origin.kind === AUTOFILL_REQUEST_KIND.CONTENT
+      ? { tabId, documentIds: [origin.documentId] }
+      : {
+          tabId,
+          frameIds: [origin.kind === AUTOFILL_REQUEST_KIND.CONTEXT_MENU ? origin.frameId : 0],
+        };
+  // Pin the document the request is bound to. A content request accepts only its
+  // own document: if that one is gone, the fill fails rather than following the
+  // frame to a document the user never picked from.
+  const pinDocument = async (): Promise<ProbedDocument | null> => {
+    try {
+      const probed = await probeDocument(probeTarget);
+      if (
+        origin.kind === AUTOFILL_REQUEST_KIND.CONTENT &&
+        probed.documentId !== origin.documentId
+      ) {
+        return null;
+      }
+      return probed;
+    } catch {
+      return null;
+    }
+  };
+  const sendToDocument = (payload: unknown, documentId: string): Promise<unknown> =>
+    chrome.tabs.sendMessage(tabId, payload, { documentId });
 
   let blobPlain: string;
   let overviewPlain: string;
@@ -1844,8 +1846,8 @@ async function performAutofillForEntry(
   }
 
   // Hosts this entry is bound to. Sent to the content script so each frame can
-  // self-verify its origin before writing the password (a popup/context-menu
-  // fill has no known frameId and is broadcast to every frame).
+  // self-verify its host before writing the password (the popup LOGIN fill is
+  // broadcast to every frame).
   const entryHosts = [
     overview.urlHost ?? "",
     ...(overview.additionalUrlHosts ?? []),
@@ -1859,15 +1861,74 @@ async function performAutofillForEntry(
   // isSenderAuthorizedForRpId defense-in-depth and closes the gap where host
   // filtering lived only in the untrusted content-side dropdown.
   // CC/Identity are user-picked and hostless by design, so scope to LOGIN.
+  // The popup is exempt: the user picked the entry for the page the popup
+  // showed, and the delivery is bound to that page's origin instead.
   if (
-    typeof enforceSenderHost === "string" &&
+    origin.kind !== AUTOFILL_REQUEST_KIND.POPUP &&
     entryType === EXT_ENTRY_TYPE.LOGIN
   ) {
-    const matches = entryHosts.some((h) => isHostMatch(h, enforceSenderHost));
+    const senderHost = origin.senderHost;
+    const matches = entryHosts.some((h) => isHostMatch(h, senderHost));
     if (!matches) {
       return { ok: false, error: "ORIGIN_MISMATCH" };
     }
   }
+
+  // Whether a probed document may receive this entry. LOGIN: a document on one
+  // of the entry's hosts, or, for the popup, on the exact origin the user saw.
+  // CC/Identity are hostless by design and have no content-side gate, so the
+  // document must be the requester's: on the sender host, or on the popup's
+  // exact origin.
+  const acceptsDocument = (probed: ProbedDocument): boolean => {
+    if (
+      origin.kind === AUTOFILL_REQUEST_KIND.POPUP &&
+      probed.origin === origin.expectedOrigin
+    ) {
+      return true;
+    }
+    const probedHost = extractHost(probed.origin);
+    if (!probedHost) return false;
+    if (entryType === EXT_ENTRY_TYPE.LOGIN) {
+      return entryHosts.some((h) => isHostMatch(h, probedHost));
+    }
+    return origin.kind !== AUTOFILL_REQUEST_KIND.POPUP && probedHost === origin.senderHost;
+  };
+
+  // CC/Identity delivery: one pinned document only, never a frame or the tab.
+  // A content request is already bound to its document; any other request
+  // probes its frame first and checks the document it found.
+  const deliverToRequester = async (
+    payload: unknown,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    let pinned: ProbedDocument | null = null;
+    let documentId: string;
+    if (origin.kind === AUTOFILL_REQUEST_KIND.CONTENT) {
+      documentId = origin.documentId;
+    } else {
+      pinned = await pinDocument();
+      if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
+      documentId = pinned.documentId;
+    }
+    try {
+      await sendToDocument(payload, documentId);
+      return { ok: true };
+    } catch {
+      // No listener in that document yet (the manifest content script never
+      // ran): inject the bundle into the same document and resend.
+    }
+    try {
+      const target = pinned ?? (await pinDocument());
+      if (!target || !acceptsDocument(target)) {
+        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      }
+      await injectContentBundleInto(tabId, target);
+      await resendUntilReceived(() => sendToDocument(payload, target.documentId));
+    } catch {
+      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+    }
+    return { ok: true };
+  };
 
   // ── Credit Card autofill path ──
   // autofill-cc-lib.ts is bundled in form-detector.ts (manifest content_scripts),
@@ -1886,22 +1947,7 @@ async function performAutofillForEntry(
       expiryYear: blob.expiryYear ?? "",
       cvv: blob.cvv ?? "",
     };
-    try {
-      await sendSensitiveFillMessage(ccPayload);
-    } catch {
-      // Fallback: inject the bundled content script (frame-scoped) for pages
-      // where the manifest content script has not attached yet, then retry.
-      try {
-        await injectContentBundleAndResend(
-          executeTarget,
-          (documentId) => sendSensitiveFillMessage(ccPayload, documentId),
-          isSenderDocument,
-        );
-      } catch {
-        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
-      }
-    }
-    return { ok: true };
+    return deliverToRequester(ccPayload);
   }
 
   // ── Identity autofill path ──
@@ -1928,20 +1974,7 @@ async function performAutofillForEntry(
       dateOfBirth: blob.dateOfBirth ?? "",
       nationality: blob.nationality ?? "",
     };
-    try {
-      await sendSensitiveFillMessage(identityPayload);
-    } catch {
-      try {
-        await injectContentBundleAndResend(
-          executeTarget,
-          (documentId) => sendSensitiveFillMessage(identityPayload, documentId),
-          isSenderDocument,
-        );
-      } catch {
-        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
-      }
-    }
-    return { ok: true };
+    return deliverToRequester(identityPayload);
   }
 
   // ── LOGIN autofill path (original logic) ──
@@ -1995,10 +2028,6 @@ async function performAutofillForEntry(
   let messageFillSucceeded = false;
   // autofill-lib.ts is bundled in form-detector.ts (manifest content_scripts),
   // so the AUTOFILL_FILL listener is already present — no executeScript needed.
-  // Frame-scoped delivery: when the originating frame is known (content-driven
-  // fill), the password goes ONLY to that frame — never broadcast tab-wide,
-  // which would leak it into a cross-origin subframe embedded in the page.
-  // Popup/context-menu callers pass no frameId and keep tab-wide behavior.
   const loginPayload = {
     type: AUTOFILL_FILL,
     username,
@@ -2006,33 +2035,45 @@ async function performAutofillForEntry(
     ...(totpCode ? { totpCode } : {}),
     ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
     ...(textCustomFields.length ? { customFields: textCustomFields } : {}),
-    // Frame-origin gate for the tab-wide (popup) broadcast: each frame fills
-    // only if it is the top frame or its own origin matches one of these.
+    // Each receiving frame checks its own host against these before writing,
+    // and the top frame also its origin against topFrameOrigin (popup only).
     ...(entryHosts.length ? { allowedHosts: entryHosts } : {}),
+    ...(origin.kind === AUTOFILL_REQUEST_KIND.POPUP
+      ? { topFrameOrigin: origin.expectedOrigin }
+      : {}),
   };
-  // The one document every fallback delivery is pinned to: the bundle, its
-  // resends and the direct func. Without it, the fallback does not run.
-  let pinnedDocumentId: string | undefined;
+  // The one document every delivery after a pin goes to: the first send of a
+  // context-menu fill, and the bundle, its resends and the direct func of any
+  // fallback. Without it, the fallback does not run.
+  let pinned: ProbedDocument | null = null;
+  let firstSendDocumentId: string | undefined;
+  if (origin.kind === AUTOFILL_REQUEST_KIND.CONTENT) {
+    firstSendDocumentId = origin.documentId;
+  } else if (origin.kind === AUTOFILL_REQUEST_KIND.CONTEXT_MENU) {
+    pinned = await pinDocument();
+    if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+    if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
+    firstSendDocumentId = pinned.documentId;
+  }
   try {
-    await sendFillMessage(loginPayload);
+    // The popup broadcasts (no documentId); every other request goes to its
+    // one document.
+    await (firstSendDocumentId
+      ? sendToDocument(loginPayload, firstSendDocumentId)
+      : chrome.tabs.sendMessage(tabId, loginPayload));
     messageFillSucceeded = true;
   } catch {
-    // No listener in the frame: pin its document, inject the bundle there and
-    // resend.
+    // No listener in the document: pin it (if not already), inject the bundle
+    // there and resend. The document must still pass the host rule — the frame
+    // may have navigated since the request was checked.
     try {
-      const probed = await probeDocument(executeTarget);
-      // A caller that bound the request to a sender host (content message,
-      // context menu) only accepts a document still on one of the entry's
-      // hosts: the frame may have navigated since the request was checked.
-      if (typeof enforceSenderHost === "string") {
-        const probedHost = extractHost(probed.origin);
-        if (!probedHost || !entryHosts.some((h) => isHostMatch(h, probedHost))) {
-          return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
-        }
+      pinned ??= await pinDocument();
+      if (!pinned || !acceptsDocument(pinned)) {
+        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       }
-      pinnedDocumentId = probed.documentId;
-      await injectContentBundleInto(tabId, probed);
-      await resendUntilReceived(() => sendFillMessage(loginPayload, probed.documentId));
+      const target = pinned;
+      await injectContentBundleInto(tabId, target);
+      await resendUntilReceived(() => sendToDocument(loginPayload, target.documentId));
       messageFillSucceeded = true;
     } catch {
       // Continue to the pinned direct fallback below.
@@ -2040,13 +2081,11 @@ async function performAutofillForEntry(
   }
 
   // Direct fallback for pages where content-script messaging is blocked/unstable
-  // (see direct-autofill.ts).
-  // Scoped to the originating frame (executeTarget) so the password is not
-  // injected into sibling/subframes; popup callers (no frameId) target the tab.
-  // Pinned to the probed document, so a navigation since cannot receive it.
+  // (see direct-autofill.ts). Pinned to the one checked document, so neither a
+  // sibling frame nor a navigation since can receive the password.
   const directTarget: chrome.scripting.InjectionTarget = {
     tabId,
-    documentIds: pinnedDocumentId ? [pinnedDocumentId] : [],
+    documentIds: pinned ? [pinned.documentId] : [],
   };
   const injectDirectAutofill = async (
     hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
@@ -2068,7 +2107,7 @@ async function performAutofillForEntry(
   if (!messageFillSucceeded) {
     // No pinned document (the probe failed or found no single document): the
     // credential has nowhere it can be delivered safely.
-    if (!pinnedDocumentId) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+    if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
     try {
       await injectDirectAutofill(serializableTargetHint);
     } catch (err) {
@@ -2110,6 +2149,35 @@ const CONTENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 function isValidContentId(value: unknown): value is string {
   return typeof value === "string" && CONTENT_ID_RE.test(value);
+}
+
+/**
+ * The page URL an inline suggestion request is matched against, from the
+ * browser-set MessageSender only — a content script cannot choose which host's
+ * entries it learns. It reproduces what the detectors used to send,
+ * `window.top?.location?.href ?? window.location.href`: the top document's URL
+ * when the sender can read it (it is the top frame, or a subframe on the same
+ * origin), else the sender's own URL.
+ *
+ * AUTOFILL_FROM_CONTENT binds secret release to the frame's own `sender.url`
+ * instead. The two agree on the host whenever the same-origin case below fires
+ * (same origin implies same host); the top-URL fallback here exists only so
+ * suggestions in a same-origin iframe stay what they were.
+ *
+ * Null when the sender has no URL: not a content script, refused for every kind.
+ */
+function resolveSenderMatchUrl(sender: chrome.runtime.MessageSender): string | null {
+  if (!sender.url) return null;
+  if (sender.frameId === 0) return sender.url;
+  const topUrl = sender.tab?.url;
+  if (topUrl && sender.origin) {
+    try {
+      if (new URL(topUrl).origin === sender.origin) return topUrl;
+    } catch {
+      // An unparseable tab URL is not a same-origin top; use the sender's own.
+    }
+  }
+  return sender.url;
 }
 
 /**
@@ -2160,11 +2228,31 @@ async function resolveInlineMatches(
 
 // ── Message handler ──────────────────────────────────────────
 
+/**
+ * Whether the message came from one of this extension's own pages (popup,
+ * options, offscreen). MessageSender.url is set by the browser; a content
+ * script reports the page's URL, and another extension's page its own
+ * extension URL. Keyed on the URL, not on `sender.tab`: the options page opens
+ * in a tab.
+ */
+function isExtensionPageSender(sender: chrome.runtime.MessageSender): boolean {
+  return typeof sender.url === "string" && sender.url.startsWith(chrome.runtime.getURL(""));
+}
+
 async function handleMessage(
   message: ExtensionMessage,
   _sender: chrome.runtime.MessageSender,
   sendResponse: (response: ExtensionResponse) => void,
 ): Promise<void> {
+  // Messages that release secrets, take an arbitrary tabId or change vault /
+  // token state are for extension pages only. Refused before anything else —
+  // hydration, activity registration, the handler — so a content script in any
+  // frame gets a failure and causes nothing.
+  if (EXTENSION_PAGE_ONLY_MESSAGES.has(message.type) && !isExtensionPageSender(_sender)) {
+    respondWithFailure(message, sendResponse);
+    return;
+  }
+
   // Wait for session hydration to complete before processing any message.
   // This prevents race conditions where the SW restarts and messages arrive
   // before in-memory state (token, encryptionKey) is restored. Bounded so a
@@ -2182,9 +2270,7 @@ async function handleMessage(
   //    a trusted user gesture (userGesture: true — see form-detector-lib.ts).
   //    A page-triggerable message without that field must NOT extend it.
   const isExtensionPageMessage =
-    message.type !== EXT_MSG.KEEPALIVE_PING &&
-    typeof _sender.url === "string" &&
-    _sender.url.startsWith(chrome.runtime.getURL(""));
+    message.type !== EXT_MSG.KEEPALIVE_PING && isExtensionPageSender(_sender);
   const isTrustedContentActivity =
     message.type === EXT_MSG.AUTOFILL_FROM_CONTENT && message.userGesture === true;
   if (isExtensionPageMessage || isTrustedContentActivity) {
@@ -2655,10 +2741,19 @@ async function handleMessage(
     case EXT_MSG.AUTOFILL_CREDIT_CARD:
     case EXT_MSG.AUTOFILL_IDENTITY: {
       const responseType = message.type;
+      // The popup names the exact origin it showed the user; the fill goes only
+      // to a top document on that origin. Refuse anything that is not an
+      // http(s) origin before any fetch or decrypt.
+      const expectedOrigin = parseHttpOrigin(message.expectedOrigin);
+      if (!expectedOrigin) {
+        sendResponse({ type: responseType, ok: false, error: "ORIGIN_MISMATCH" });
+        return;
+      }
       try {
         const result = await performAutofillForEntry(
           message.entryId,
           message.tabId,
+          { kind: AUTOFILL_REQUEST_KIND.POPUP, expectedOrigin },
           undefined,
           message.teamId,
         );
@@ -2678,7 +2773,16 @@ async function handleMessage(
     }
 
     case EXT_MSG.GET_MATCHES_FOR_URL: {
-      const effectiveUrl = message.topUrl ?? message.url;
+      const effectiveUrl = resolveSenderMatchUrl(_sender);
+      if (!effectiveUrl) {
+        sendResponse({
+          type: EXT_MSG.GET_MATCHES_FOR_URL,
+          entries: [],
+          vaultLocked: false,
+          suppressInline: false,
+        });
+        return;
+      }
       try {
         const result = await resolveInlineMatches("login", effectiveUrl);
         sendResponse({ type: EXT_MSG.GET_MATCHES_FOR_URL, ...result });
@@ -2707,7 +2811,16 @@ async function handleMessage(
     }
 
     case EXT_MSG.GET_CC_MATCHES_FOR_URL: {
-      const effectiveUrl = message.topUrl ?? message.url;
+      const effectiveUrl = resolveSenderMatchUrl(_sender);
+      if (!effectiveUrl) {
+        sendResponse({
+          type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
+          entries: [],
+          vaultLocked: false,
+          suppressInline: false,
+        });
+        return;
+      }
       try {
         const result = await resolveInlineMatches("credit_card", effectiveUrl);
         sendResponse({ type: EXT_MSG.GET_CC_MATCHES_FOR_URL, ...result });
@@ -2723,7 +2836,16 @@ async function handleMessage(
     }
 
     case EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL: {
-      const effectiveUrl = message.topUrl ?? message.url;
+      const effectiveUrl = resolveSenderMatchUrl(_sender);
+      if (!effectiveUrl) {
+        sendResponse({
+          type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
+          entries: [],
+          vaultLocked: false,
+          suppressInline: false,
+        });
+        return;
+      }
       try {
         const result = await resolveInlineMatches("identity", effectiveUrl);
         sendResponse({ type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL, ...result });
@@ -2772,8 +2894,6 @@ async function handleMessage(
           });
           return;
         }
-        // C8: deliver card/identity plaintext only to the originating frame.
-        const frameId = _sender.frameId;
         // Re-bind LOGIN password release to the SENDER FRAME's host — the
         // entryId came from an untrusted content script (host filtering in the
         // content dropdown is not a security boundary). Use `_sender.url` (the
@@ -2786,7 +2906,11 @@ async function handleMessage(
         // unknown: a content-driven fill with no resolvable origin must not
         // release a password.
         const senderHost = _sender.url ? extractHost(_sender.url) : null;
-        if (!senderHost) {
+        // Every delivery goes to the sender's own document (the one whose
+        // _sender.url was just checked), never to whatever its frame holds by
+        // the time the entry is decrypted. No documentId, no fill.
+        const documentId = _sender.documentId;
+        if (!senderHost || !documentId) {
           sendResponse({
             type: EXT_MSG.AUTOFILL_FROM_CONTENT,
             ok: false,
@@ -2797,10 +2921,9 @@ async function handleMessage(
         const result = await performAutofillForEntry(
           message.entryId,
           tabId,
+          { kind: AUTOFILL_REQUEST_KIND.CONTENT, documentId, senderHost },
           message.targetHint,
           message.teamId,
-          frameId,
-          senderHost,
         );
         sendResponse({
           type: EXT_MSG.AUTOFILL_FROM_CONTENT,
@@ -3060,6 +3183,83 @@ async function handleMessage(
   }
 }
 
+/**
+ * The failure response for `message`'s type. It has no side effect and never
+ * releases a secret: used when a handler throws, and when a message is refused
+ * for its sender. Each branch returns the correct response shape for the
+ * message type.
+ */
+function respondWithFailure(
+  message: ExtensionMessage,
+  sendResponse: (response: ExtensionResponse) => void,
+): void {
+  try {
+    switch (message.type) {
+      case EXT_MSG.START_CONNECT:
+        sendResponse({ type: EXT_MSG.START_CONNECT, ok: false, errorCode: "GENERIC_FAILURE" } as ExtensionResponse);
+        break;
+      case EXT_MSG.GET_STATUS:
+        sendResponse({ type: EXT_MSG.GET_STATUS, hasToken: false, expiresAt: null, vaultUnlocked: false } as ExtensionResponse);
+        break;
+      case EXT_MSG.GET_TOKEN:
+        sendResponse({ type: EXT_MSG.GET_TOKEN, token: null } as ExtensionResponse);
+        break;
+      case EXT_MSG.GET_MATCHES_FOR_URL:
+        sendResponse({ type: EXT_MSG.GET_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
+        break;
+      case EXT_MSG.GET_CC_MATCHES_FOR_URL:
+        sendResponse({ type: EXT_MSG.GET_CC_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
+        break;
+      case EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL:
+        sendResponse({ type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
+        break;
+      case EXT_MSG.FETCH_PASSWORDS:
+        sendResponse({ type: EXT_MSG.FETCH_PASSWORDS, entries: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.COPY_PASSWORD:
+        sendResponse({ type: EXT_MSG.COPY_PASSWORD, password: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.COPY_TOTP:
+        sendResponse({ type: EXT_MSG.COPY_TOTP, code: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.LOGIN_DETECTED:
+        sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" } as ExtensionResponse);
+        break;
+      case EXT_MSG.SAVE_LOGIN:
+        sendResponse({ type: EXT_MSG.SAVE_LOGIN, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.UPDATE_LOGIN:
+        sendResponse({ type: EXT_MSG.UPDATE_LOGIN, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.CHECK_PENDING_SAVE:
+        sendResponse({ type: EXT_MSG.CHECK_PENDING_SAVE, action: "none" } as ExtensionResponse);
+        break;
+      case EXT_MSG.AUTOFILL_CREDIT_CARD:
+        sendResponse({ type: EXT_MSG.AUTOFILL_CREDIT_CARD, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.AUTOFILL_IDENTITY:
+        sendResponse({ type: EXT_MSG.AUTOFILL_IDENTITY, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.PASSKEY_GET_MATCHES:
+        sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, entries: [], vaultLocked: true } as ExtensionResponse);
+        break;
+      case EXT_MSG.PASSKEY_CHECK_DUPLICATE:
+        sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, entries: [], vaultLocked: true } as ExtensionResponse);
+        break;
+      case EXT_MSG.PASSKEY_SIGN_ASSERTION:
+        sendResponse({ type: EXT_MSG.PASSKEY_SIGN_ASSERTION, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.PASSKEY_CREATE_CREDENTIAL:
+        sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      default:
+        sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+    }
+  } catch {
+    // sendResponse may already have been called or the port may be closed
+  }
+}
+
 chrome.runtime.onMessage.addListener(
   (
     message: ExtensionMessage,
@@ -3069,72 +3269,7 @@ chrome.runtime.onMessage.addListener(
     handleMessage(message, _sender, sendResponse).catch(() => {
       // Failsafe: ensure sendResponse is called even on unexpected errors
       // to prevent the caller (popup/content script) from hanging.
-      // Each branch returns the correct response shape for the message type.
-      try {
-        switch (message.type) {
-          case EXT_MSG.START_CONNECT:
-            sendResponse({ type: EXT_MSG.START_CONNECT, ok: false, errorCode: "GENERIC_FAILURE" } as ExtensionResponse);
-            break;
-          case EXT_MSG.GET_STATUS:
-            sendResponse({ type: EXT_MSG.GET_STATUS, hasToken: false, expiresAt: null, vaultUnlocked: false } as ExtensionResponse);
-            break;
-          case EXT_MSG.GET_TOKEN:
-            sendResponse({ type: EXT_MSG.GET_TOKEN, token: null } as ExtensionResponse);
-            break;
-          case EXT_MSG.GET_MATCHES_FOR_URL:
-            sendResponse({ type: EXT_MSG.GET_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
-            break;
-          case EXT_MSG.GET_CC_MATCHES_FOR_URL:
-            sendResponse({ type: EXT_MSG.GET_CC_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
-            break;
-          case EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL:
-            sendResponse({ type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
-            break;
-          case EXT_MSG.FETCH_PASSWORDS:
-            sendResponse({ type: EXT_MSG.FETCH_PASSWORDS, entries: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          case EXT_MSG.COPY_PASSWORD:
-            sendResponse({ type: EXT_MSG.COPY_PASSWORD, password: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          case EXT_MSG.COPY_TOTP:
-            sendResponse({ type: EXT_MSG.COPY_TOTP, code: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          case EXT_MSG.LOGIN_DETECTED:
-            sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" } as ExtensionResponse);
-            break;
-          case EXT_MSG.SAVE_LOGIN:
-            sendResponse({ type: EXT_MSG.SAVE_LOGIN, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          case EXT_MSG.UPDATE_LOGIN:
-            sendResponse({ type: EXT_MSG.UPDATE_LOGIN, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          case EXT_MSG.CHECK_PENDING_SAVE:
-            sendResponse({ type: EXT_MSG.CHECK_PENDING_SAVE, action: "none" } as ExtensionResponse);
-            break;
-          case EXT_MSG.AUTOFILL_CREDIT_CARD:
-            sendResponse({ type: EXT_MSG.AUTOFILL_CREDIT_CARD, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          case EXT_MSG.AUTOFILL_IDENTITY:
-            sendResponse({ type: EXT_MSG.AUTOFILL_IDENTITY, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          case EXT_MSG.PASSKEY_GET_MATCHES:
-            sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, entries: [], vaultLocked: true } as ExtensionResponse);
-            break;
-          case EXT_MSG.PASSKEY_CHECK_DUPLICATE:
-            sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, entries: [], vaultLocked: true } as ExtensionResponse);
-            break;
-          case EXT_MSG.PASSKEY_SIGN_ASSERTION:
-            sendResponse({ type: EXT_MSG.PASSKEY_SIGN_ASSERTION, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          case EXT_MSG.PASSKEY_CREATE_CREDENTIAL:
-            sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
-            break;
-          default:
-            sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
-        }
-      } catch {
-        // sendResponse may already have been called or the port may be closed
-      }
+      respondWithFailure(message, sendResponse);
     });
     return true;
   },
