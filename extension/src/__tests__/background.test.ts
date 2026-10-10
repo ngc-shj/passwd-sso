@@ -1774,9 +1774,12 @@ describe("background message flow", () => {
     const before = clickOutcomes();
     handler(info, tab);
     // The handler is void-returning and fires the fill without awaiting it.
-    // Every click ends in exactly one observable outcome — a fill message, or
+    // A click on an entry item (login/cc/id prefix + UUID, the only shape this
+    // helper is used with) ends in one observable outcome — a fill message, or
     // the failure badge notifyFillFailure sets — so wait for that outcome
     // rather than a fixed delay: a negative assertion after it is then real.
+    // Other menu ids (open-popup, separators, a non-UUID suffix) have no such
+    // outcome and would time out here.
     await vi.waitFor(() => {
       expect(clickOutcomes()).toBeGreaterThan(before);
     });

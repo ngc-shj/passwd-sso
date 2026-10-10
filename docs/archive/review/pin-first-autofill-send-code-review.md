@@ -100,3 +100,44 @@ RT1 Checked · RT4 adjacent to F-T3 · RT5 Checked · RT7 Checked — ordering r
 - **Red proof** (scratch copy): an `acceptsDocument` that always accepts → both "not the click host" deny tests fail.
 - **Modified file:** `extension/src/__tests__/background.test.ts` (`clickMenuItem`, `clickOutcomes`).
 - **Not changed:** one other fixed 30 ms wait remains in `background.test.ts`, the pre-existing token-refresh test "does not retry account A's 401 under account B's token". It has no click outcome to wait on, and a microtask drain is not a faithful replacement if that path uses short timers. It is outside this change's subject and is reported to the user.
+
+---
+
+# Code Review: pin-first-autofill-send
+Date: 2026-10-10
+Review round: 3
+
+## Changes from Previous Round
+F-T3 resolved (`905858e6c`). The experts independently verified the following:
+- no production code changed;
+- every exercised click shape ends in exactly one outcome;
+- a deny test cannot pass on a failure badge while a fill lands later, because `acceptsDocument` gates each send before it happens and the only other `"!"` setter is the vault-locked badge;
+- `FILL_MESSAGE_TYPES` is the closed class of fill types: LOGIN, CC and Identity. PASSKEY entries get no menu item.
+
+## Functionality Findings
+No findings.
+
+## Security Findings
+No findings. R43: no production diff.
+
+## Testing Findings
+- **F-T4 [Minor]** — `clickMenuItem`'s comment claimed that every click ends in one outcome. That holds only for the entry-item shapes the helper is used with. The open-popup id, separators, a non-UUID suffix and a missing tab id have no outcome; they would time out, so a vacuous pass is not possible.
+
+## Recurring Issue Check
+### Functionality expert
+R1-R57 no instances · R17 Checked — all 10 call sites use the helper · R34 Checked — the remaining token-refresh wait is named, with its reason · R40/R42 Checked
+### Security expert
+R42 Checked — `FILL_MESSAGE_TYPES` re-derived from the menu prefixes · R43 Checked — no production diff · R47/R48/R51 N/A — untouched · RS1-RS6 N/A
+### Testing expert
+R1-R57 no instances · RT1 Checked · RT3 Checked · RT4 Checked — the subject of F-T3; re-run 5× · RT5 Checked · RT7 Checked · RT8 Checked · RT10 Checked · RT11 Checked
+
+## Tightening-only skip — Round 3
+Findings applied directly (no Round 4 review):
+- **[F-T4] [Minor]** `clickMenuItem` comment overstated its precondition (`extension/src/__tests__/background.test.ts`, `clickMenuItem`). The comment now names the entry-item shape the helper is used with, and says that other menu ids would time out.
+
+Justification: F-T4 is within Round 2's fix scope, is an inline comment-wording change, and touches no security boundary.
+
+## Final state
+- `cd extension && npx vitest run`: 1309 passed.
+- `npx tsc --noEmit`, `npm run build`, `node scripts/checks/lint-extension.mjs`: pass.
+- `scripts/pre-pr.sh`: passed (76/76) on the implementation state. It re-runs at push.
