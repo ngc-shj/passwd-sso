@@ -13,6 +13,9 @@ import { AUTOFILL_FILL } from "../../lib/constants";
 // Existing rows assert T0 targets only: a zero late-field window keeps them free
 // of the deferral wait (every T0 target is still written).
 const NO_WAIT = { lateFieldWindowMs: 0 };
+// The jsdom page's host. The content frame gate (isFrameAllowedToFill) fills
+// only a frame whose host is in allowedHosts, so a payload meant to fill names it.
+const PAGE_HOST = new URL(window.location.href).hostname;
 
 afterEach(() => {
   __resetFillSequenceForTests();
@@ -31,7 +34,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
     }, NO_WAIT);
@@ -50,7 +53,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "bob",
       password: "pw",
     }, NO_WAIT);
@@ -69,7 +72,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "secret",
     }, NO_WAIT);
@@ -88,7 +91,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "myjcb-user",
       password: "secret",
     }, NO_WAIT);
@@ -110,7 +113,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "focus-user",
       password: "secret",
     }, NO_WAIT);
@@ -128,7 +131,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "hint-user",
       password: "secret",
       targetHint: { id: "userId", name: "userId", type: "text" },
@@ -149,7 +152,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       customFields: [{ label: "brchNum", value: "001" }],
@@ -169,7 +172,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       customFields: [{ label: "accountid", value: "123456789012" }],
@@ -186,7 +189,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       customFields: [{ label: "nonexistent", value: "ignored" }],
@@ -205,7 +208,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "123456",
@@ -225,7 +228,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "654321",
@@ -243,7 +246,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "111222",
@@ -261,7 +264,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
     }, NO_WAIT);
@@ -277,7 +280,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "123456",
@@ -296,7 +299,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "",
       totpCode: "123456",
@@ -315,7 +318,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "654321",
@@ -342,7 +345,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "999888",
@@ -368,7 +371,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "123456",
@@ -396,7 +399,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "987654",
@@ -425,7 +428,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "111222",
@@ -453,7 +456,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -478,7 +481,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -501,7 +504,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "314159",
@@ -530,7 +533,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -556,7 +559,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "12345678",
@@ -586,7 +589,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "654321",
@@ -629,7 +632,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "alice",
       password: "secret",
       totpCode: "999888",
@@ -661,7 +664,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -687,7 +690,7 @@ describe("performAutofill", () => {
 
     await performAutofill({
       type: "AUTOFILL_FILL",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
       username: "",
       password: "",
       totpCode: "123456",
@@ -936,7 +939,7 @@ describe("performAutofill — frame-origin gate", () => {
       type: "AUTOFILL_FILL",
       username: "alice",
       password: "secret",
-      allowedHosts: ["localhost"],
+      allowedHosts: [PAGE_HOST],
     }, NO_WAIT);
 
     const inputs = document.querySelectorAll("input");
@@ -981,7 +984,7 @@ describe("performAutofill — sequential fill", () => {
     type: AUTOFILL_FILL,
     username: "alice",
     password: "secret",
-    allowedHosts: ["localhost"],
+    allowedHosts: [PAGE_HOST],
     ...overrides,
   });
 

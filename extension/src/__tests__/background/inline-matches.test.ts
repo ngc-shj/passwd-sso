@@ -418,6 +418,173 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     expect(res.suppressInline).toBe(true);
     expect(res.entries).toEqual([]);
   });
+
+  // ── C7 table: resolveSenderMatchUrl decides on browser-set sender data,
+  // never on message.url/topUrl, which a content script can set to anything. ──
+
+  it("C7: a frame-0 content sender on evil.example spoofing url=bank.example gets no bank entries", async () => {
+    mockEntries(
+      [{ id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      {
+        type: EXT_MSG.GET_MATCHES_FOR_URL,
+        // Spoofed: a pre-C7 implementation reading message.url would match.
+        url: "https://bank.example/login",
+      },
+      { frameId: 0, url: "https://evil.example/", tab: { id: 1, url: "https://evil.example/" } },
+    )) as { entries: unknown[] };
+
+    expect(res.entries).toEqual([]);
+  });
+
+  it("C7: a same-origin subframe of a bank.example tab gets bank entries even when the message spoofs url/topUrl to other.example", async () => {
+    mockEntries(
+      [{ id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      {
+        type: EXT_MSG.GET_MATCHES_FOR_URL,
+        url: "https://other.example/",
+        topUrl: "https://other.example/",
+      },
+      {
+        frameId: 1,
+        url: "https://bank.example/widget",
+        origin: "https://bank.example",
+        tab: { id: 1, url: "https://bank.example/dashboard" },
+      },
+    )) as { entries: Array<{ id: string }> };
+
+    expect(res.entries.map((e) => e.id)).toEqual(["login-bank"]);
+  });
+
+  it("C7: a cross-origin subframe on widget.example is matched on its OWN url, not a spoofed topUrl=bank.example", async () => {
+    mockEntries(
+      [
+        { id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN },
+        { id: "login-widget", entryType: EXT_ENTRY_TYPE.LOGIN },
+      ],
+      [
+        { title: "Bank", username: "alice", urlHost: "bank.example" },
+        { title: "Widget", username: "bob", urlHost: "widget.example" },
+      ],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      {
+        type: EXT_MSG.GET_MATCHES_FOR_URL,
+        // Spoofed to the TOP page's own-app host; pre-C7 code honoured this.
+        topUrl: "https://bank.example/",
+      },
+      {
+        frameId: 2,
+        url: "https://widget.example/frame",
+        origin: "https://widget.example",
+        tab: { id: 1, url: "https://bank.example/dashboard" },
+      },
+    )) as { entries: Array<{ id: string }> };
+
+    expect(res.entries.map((e) => e.id)).toEqual(["login-widget"]);
+  });
+
+  it("C7: a subframe whose sender.tab has no url is matched on its own sender.url", async () => {
+    mockEntries(
+      [{ id: "login-widget", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Widget", username: "bob", urlHost: "widget.example" }],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL },
+      {
+        frameId: 3,
+        url: "https://widget.example/frame2",
+        origin: "https://widget.example",
+        // No tab.url at all (e.g. no host permission on the top origin, or
+        // mid-navigation) — the same-origin branch cannot even attempt a read.
+        tab: { id: 1 },
+      },
+    )) as { entries: Array<{ id: string }> };
+
+    expect(res.entries.map((e) => e.id)).toEqual(["login-widget"]);
+  });
+
+  it.each([
+    { type: EXT_MSG.GET_MATCHES_FOR_URL },
+    { type: EXT_MSG.GET_CC_MATCHES_FOR_URL },
+    { type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL },
+  ])("C7: a sender with no url at all falls through to the catch-branch empty response for $type, even with a matching spoofed message url", async ({ type }) => {
+    mockEntries(
+      [
+        { id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN },
+        { id: "cc-1", entryType: EXT_ENTRY_TYPE.CREDIT_CARD },
+        { id: "id-1", entryType: EXT_ENTRY_TYPE.IDENTITY },
+      ],
+      [
+        { title: "Bank", username: "alice", urlHost: "bank.example" },
+        { title: "Card", cardholderName: "Alice", urlHost: "bank.example" },
+        { title: "Me", fullName: "Alice Smith", urlHost: "bank.example" },
+      ],
+    );
+    await unlock();
+
+    const res = (await sendMessage(
+      { type, url: "https://bank.example/login", topUrl: "https://bank.example/login" },
+      { frameId: 0, tab: { id: 1 } },
+    )) as { entries: unknown[]; vaultLocked: boolean; suppressInline: boolean };
+
+    expect(res).toEqual({ type, entries: [], vaultLocked: false, suppressInline: false });
+  });
+
+  // ── C7 badge: the LOGIN badge reads the same sender-derived URL ──
+
+  it("C7 badge: a matching sender updates the tab badge with the sender-derived url", async () => {
+    mockEntries(
+      [{ id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
+    );
+    await unlock();
+
+    await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL },
+      topFrameContentSender("https://bank.example/login"),
+    );
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "1", tabId: 1 });
+    });
+  });
+
+  it("C7 badge: a sender with no url and a spoofed matching message url does not update the badge", async () => {
+    mockEntries(
+      [{ id: "login-bank", entryType: EXT_ENTRY_TYPE.LOGIN }],
+      [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
+    );
+    await unlock();
+    // Unlock itself drives badge updates (connected/unlocked state badges,
+    // some fire-and-forget) — let them settle, then clear that history so
+    // only this message's own effect is observed.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    chromeMock?.action.setBadgeText.mockClear();
+
+    await sendMessage(
+      { type: EXT_MSG.GET_MATCHES_FOR_URL, url: "https://bank.example/login" },
+      { frameId: 0, tab: { id: 1 } },
+    );
+
+    // Give any fire-and-forget badge update from THIS message a chance to
+    // run before asserting its absence.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(chromeMock?.action.setBadgeText).not.toHaveBeenCalled();
+  });
 });
 
 // ── C8 (frame-targeted fill) + C9 (id validation) via AUTOFILL_FROM_CONTENT ──
