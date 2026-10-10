@@ -52,6 +52,14 @@ import {
   resetInMemoryKeyCache,
 } from "../lib/dpop-key";
 import { swFetchAuthenticated } from "./dpop-fetch";
+import {
+  injectContentBundleAndResend,
+  injectContentBundleInto,
+  probeDocument,
+  resendUntilReceived,
+  type ProbedDocument,
+} from "./content-bundle";
+import { directAutofill } from "./direct-autofill";
 import { classifyError, warnBackground } from "./log";
 import {
   attemptTokenRefreshWith,
@@ -1117,12 +1125,11 @@ chrome.commands.onCommand.addListener(async (command) => {
       await chrome.tabs.sendMessage(tab.id, { type: PSSO_TRIGGER_INLINE_SUGGESTIONS });
     } catch {
       // Ensure content script is present on already-open tabs, then retry.
+      const tabId = tab.id;
       try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id, allFrames: true },
-          files: ["src/content/form-detector.js"],
-        });
-        await chrome.tabs.sendMessage(tab.id, { type: PSSO_TRIGGER_INLINE_SUGGESTIONS });
+        await injectContentBundleAndResend({ tabId, allFrames: true }, () =>
+          chrome.tabs.sendMessage(tabId, { type: PSSO_TRIGGER_INLINE_SUGGESTIONS }),
+        );
       } catch {
         // ignore on restricted pages
       }
@@ -1708,11 +1715,14 @@ async function performAutofillForEntry(
   // because each frame self-verifies its origin against allowedHosts before
   // filling (isFrameAllowedToFill). chrome.tabs.sendMessage's options overload
   // rejects `undefined`, so only pass frame-targeting options when an
-  // originating frame is known.
-  const sendFillMessage = (payload: unknown): Promise<unknown> =>
-    hasFrameTarget
-      ? chrome.tabs.sendMessage(tabId, payload, { frameId })
-      : chrome.tabs.sendMessage(tabId, payload);
+  // originating frame is known. A resend after bundle injection is pinned to
+  // the injected document (`documentId`), not to whatever the frame holds now.
+  const sendFillMessage = (payload: unknown, documentId?: string): Promise<unknown> =>
+    documentId
+      ? chrome.tabs.sendMessage(tabId, payload, { documentId })
+      : hasFrameTarget
+        ? chrome.tabs.sendMessage(tabId, payload, { frameId })
+        : chrome.tabs.sendMessage(tabId, payload);
 
   // CC/Identity fill target. Unlike LOGIN, CC/Identity entries are hostless by
   // design (user-picked, usable on any site), so there is no allowedHosts gate a
@@ -1722,8 +1732,19 @@ async function performAutofillForEntry(
   // read the filled value. So when the originating frame is unknown
   // (popup/context-menu), scope to the TOP FRAME ONLY (`frameId: 0`) rather than
   // broadcasting. When the frame is known, scope to it.
-  const sendSensitiveFillMessage = (payload: unknown): Promise<unknown> =>
-    chrome.tabs.sendMessage(tabId, payload, { frameId: frameId ?? 0 });
+  // CC/Identity have no content-side origin gate, so a fallback delivery bound
+  // to a sender host (content message, context menu) only goes to a document
+  // still on that host: the requesting document may have been replaced.
+  const isSenderDocument =
+    typeof enforceSenderHost === "string"
+      ? (probed: ProbedDocument) => extractHost(probed.origin) === enforceSenderHost
+      : undefined;
+  const sendSensitiveFillMessage = (payload: unknown, documentId?: string): Promise<unknown> =>
+    chrome.tabs.sendMessage(
+      tabId,
+      payload,
+      documentId ? { documentId } : { frameId: frameId ?? 0 },
+    );
 
   let blobPlain: string;
   let overviewPlain: string;
@@ -1871,11 +1892,11 @@ async function performAutofillForEntry(
       // Fallback: inject the bundled content script (frame-scoped) for pages
       // where the manifest content script has not attached yet, then retry.
       try {
-        await chrome.scripting.executeScript({
-          target: executeTarget,
-          files: ["src/content/form-detector.js"],
-        });
-        await sendSensitiveFillMessage(ccPayload);
+        await injectContentBundleAndResend(
+          executeTarget,
+          (documentId) => sendSensitiveFillMessage(ccPayload, documentId),
+          isSenderDocument,
+        );
       } catch {
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       }
@@ -1911,11 +1932,11 @@ async function performAutofillForEntry(
       await sendSensitiveFillMessage(identityPayload);
     } catch {
       try {
-        await chrome.scripting.executeScript({
-          target: executeTarget,
-          files: ["src/content/form-detector.js"],
-        });
-        await sendSensitiveFillMessage(identityPayload);
+        await injectContentBundleAndResend(
+          executeTarget,
+          (documentId) => sendSensitiveFillMessage(identityPayload, documentId),
+          isSenderDocument,
+        );
       } catch {
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       }
@@ -1978,164 +1999,76 @@ async function performAutofillForEntry(
   // fill), the password goes ONLY to that frame — never broadcast tab-wide,
   // which would leak it into a cross-origin subframe embedded in the page.
   // Popup/context-menu callers pass no frameId and keep tab-wide behavior.
+  const loginPayload = {
+    type: AUTOFILL_FILL,
+    username,
+    ...(password ? { password } : {}),
+    ...(totpCode ? { totpCode } : {}),
+    ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
+    ...(textCustomFields.length ? { customFields: textCustomFields } : {}),
+    // Frame-origin gate for the tab-wide (popup) broadcast: each frame fills
+    // only if it is the top frame or its own origin matches one of these.
+    ...(entryHosts.length ? { allowedHosts: entryHosts } : {}),
+  };
+  // The one document every fallback delivery is pinned to: the bundle, its
+  // resends and the direct func. Without it, the fallback does not run.
+  let pinnedDocumentId: string | undefined;
   try {
-    await sendFillMessage({
-      type: AUTOFILL_FILL,
-      username,
-      ...(password ? { password } : {}),
-      ...(totpCode ? { totpCode } : {}),
-      ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
-      ...(textCustomFields.length ? { customFields: textCustomFields } : {}),
-      // Frame-origin gate for the tab-wide (popup) broadcast: each frame fills
-      // only if it is the top frame or its own origin matches one of these.
-      ...(entryHosts.length ? { allowedHosts: entryHosts } : {}),
-    });
+    await sendFillMessage(loginPayload);
     messageFillSucceeded = true;
   } catch {
-    // Continue to direct fallback injection below.
+    // No listener in the frame: pin its document, inject the bundle there and
+    // resend.
+    try {
+      const probed = await probeDocument(executeTarget);
+      // A caller that bound the request to a sender host (content message,
+      // context menu) only accepts a document still on one of the entry's
+      // hosts: the frame may have navigated since the request was checked.
+      if (typeof enforceSenderHost === "string") {
+        const probedHost = extractHost(probed.origin);
+        if (!probedHost || !entryHosts.some((h) => isHostMatch(h, probedHost))) {
+          return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+        }
+      }
+      pinnedDocumentId = probed.documentId;
+      await injectContentBundleInto(tabId, probed);
+      await resendUntilReceived(() => sendFillMessage(loginPayload, probed.documentId));
+      messageFillSucceeded = true;
+    } catch {
+      // Continue to the pinned direct fallback below.
+    }
   }
 
-  // Direct fallback for pages where content-script messaging is blocked/unstable.
+  // Direct fallback for pages where content-script messaging is blocked/unstable
+  // (see direct-autofill.ts).
   // Scoped to the originating frame (executeTarget) so the password is not
   // injected into sibling/subframes; popup callers (no frameId) target the tab.
+  // Pinned to the probed document, so a navigation since cannot receive it.
+  const directTarget: chrome.scripting.InjectionTarget = {
+    tabId,
+    documentIds: pinnedDocumentId ? [pinnedDocumentId] : [],
+  };
   const injectDirectAutofill = async (
     hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
   ) =>
     chrome.scripting.executeScript({
-      target: executeTarget,
+      target: directTarget,
       args: [
         username,
         password ?? "",
         hintArg,
         textCustomFields,
       ],
-      func: (
-        usernameArg: string,
-        passwordArg: string,
-        targetHintArg?: {
-          id?: string;
-          name?: string;
-          type?: string;
-          autocomplete?: string;
-        } | null,
-        customFieldsArg?: Array<{ label: string; value: string }>,
-      ) => {
-      const isUsableInput = (input: HTMLInputElement) =>
-        !input.disabled && !input.readOnly;
-      const isVisible = (input: HTMLInputElement) =>
-        getComputedStyle(input).display !== "none" &&
-        getComputedStyle(input).visibility !== "hidden";
-
-      const setInputValue = (input: HTMLInputElement, value: string) => {
-        input.focus();
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value",
-        )?.set;
-        if (setter) setter.call(input, value);
-        else input.value = value;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-        input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
-        input.dispatchEvent(new Event("blur", { bubbles: true }));
-      };
-
-      const inputs = Array.from(
-        document.querySelectorAll("input"),
-      ) as HTMLInputElement[];
-
-      const findInputByHint = () => {
-        if (!targetHintArg) return null;
-        return (
-          inputs.find((i) => !!targetHintArg.id && i.id === targetHintArg.id) ??
-          inputs.find((i) => !!targetHintArg.name && i.name === targetHintArg.name) ??
-          inputs.find(
-            (i) =>
-              !!targetHintArg.autocomplete &&
-              i.autocomplete === targetHintArg.autocomplete &&
-              (!targetHintArg.type || i.type === targetHintArg.type),
-          ) ??
-          null
-        );
-      };
-
-      const active = document.activeElement;
-      const hintedInput = findInputByHint();
-      const usernameInput: HTMLInputElement | null =
-        hintedInput instanceof HTMLInputElement &&
-        isUsableInput(hintedInput) &&
-        ["text", "email", "tel"].includes(hintedInput.type)
-          ? hintedInput
-          : active instanceof HTMLInputElement &&
-              isUsableInput(active) &&
-              ["text", "email", "tel"].includes(active.type)
-            ? active
-            : null;
-
-      const findPasswordInScope = (scopeInputs: HTMLInputElement[]) => {
-        const byAutocomplete = scopeInputs.find(
-          (i) =>
-            isUsableInput(i) &&
-            i.type === "password" &&
-            isVisible(i) &&
-            i.autocomplete === "current-password",
-        );
-        if (byAutocomplete) return byAutocomplete;
-        const pwInputs = scopeInputs.filter(
-          (i) => isUsableInput(i) && i.type === "password" && isVisible(i),
-        );
-        return pwInputs.length ? pwInputs[pwInputs.length - 1] : null;
-      };
-
-      const scopeForm = (usernameInput ?? hintedInput)?.form ?? null;
-      const scopedInputs = scopeForm
-        ? (Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[])
-        : inputs;
-      const passwordInput =
-        findPasswordInScope(scopedInputs) ?? findPasswordInScope(inputs);
-
-      let fallbackUsername = usernameInput;
-      if (!fallbackUsername && passwordInput) {
-        const pwIndex = inputs.indexOf(passwordInput);
-        for (let i = pwIndex - 1; i >= 0; i -= 1) {
-          const c = inputs[i];
-          if (
-            isUsableInput(c) &&
-            ["text", "email", "tel"].includes(c.type)
-          ) {
-            fallbackUsername = c;
-            break;
-          }
-        }
-      }
-
-      // Fill custom fields by matching label to input id/name
-      const cfTargets = new Set<HTMLInputElement>();
-      if (customFieldsArg) {
-        for (const { label, value } of customFieldsArg) {
-          const lower = label.toLowerCase();
-          const target = inputs.find(
-            (i) => isUsableInput(i) && (i.id.toLowerCase() === lower || i.name.toLowerCase() === lower),
-          );
-          if (target) {
-            cfTargets.add(target);
-            setInputValue(target, value);
-          }
-        }
-      }
-
-      // Skip username fill if target is reserved for a custom field
-      if (fallbackUsername && usernameArg && !cfTargets.has(fallbackUsername)) {
-        setInputValue(fallbackUsername, usernameArg);
-      }
-      if (passwordInput && passwordArg) setInputValue(passwordInput, passwordArg);
-      },
+      func: directAutofill,
     });
 
   // Only run direct fallback when message-based autofill failed.
   // The direct fallback doesn't support TOTP and would overwrite OTP fields
   // with username values, so running both approaches causes conflicts.
   if (!messageFillSucceeded) {
+    // No pinned document (the probe failed or found no single document): the
+    // credential has nowhere it can be delivered safely.
+    if (!pinnedDocumentId) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
     try {
       await injectDirectAutofill(serializableTargetHint);
     } catch (err) {

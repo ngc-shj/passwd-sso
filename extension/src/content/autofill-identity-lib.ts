@@ -3,8 +3,21 @@
 
 import { EXT_MSG } from "../lib/constants";
 import type { IdentityAutofillPayload } from "../types/messages";
-import { detectIdentityFields } from "./identity-form-detector-lib";
 import {
+  detectIdentityFields,
+  isIdentityFillable,
+  type IdentityFormFields,
+} from "./identity-form-detector-lib";
+import {
+  resolveFillRoot,
+  runFillSequence,
+  supersedeActiveFill,
+  type FillStep,
+  type FillTarget,
+} from "./fill-sequence-lib";
+import {
+  FILL_DIAG_CODE,
+  logFillError,
   logNoSelectMatch,
   SELECT_DIAG_FIELD,
   type SelectDiagField,
@@ -78,42 +91,62 @@ function setSelectValue(
 
 // ── Main autofill function ──
 
-function fillField(
-  field: HTMLInputElement | HTMLSelectElement | null,
-  value: string,
-  diagField: SelectDiagField,
-): void {
-  if (!field || !value) return;
-  if (field instanceof HTMLSelectElement) {
-    setSelectValue(field, value, diagField);
+function writeField(el: FillTarget, value: string, diagField: SelectDiagField): void {
+  if (el instanceof HTMLSelectElement) {
+    setSelectValue(el, value, diagField);
   } else {
-    setInputValue(field, value);
+    setInputValue(el, value);
   }
 }
 
-export function performIdentityAutofill(payload: IdentityAutofillPayload): void {
+export async function performIdentityAutofill(
+  payload: IdentityAutofillPayload,
+  opts: { lateFieldWindowMs?: number } = {},
+): Promise<void> {
+  // T0: the detector's result is every step's initial target.
   const fields = detectIdentityFields(document);
-  if (!fields) return;
+  if (!fields) {
+    supersedeActiveFill();
+    return;
+  }
+
+  const steps: FillStep[] = [];
+  // A step whose payload value is empty is not created.
+  const addStep = (
+    field: keyof IdentityFormFields,
+    value: () => string,
+    diagField: SelectDiagField,
+  ) => {
+    if (!value()) return;
+    steps.push({
+      key: field,
+      initial: fields[field],
+      relocate: (root) => detectIdentityFields(root)?.[field] ?? null,
+      accepts: isIdentityFillable,
+      write: (el) => writeField(el, value(), diagField),
+      release: () => {},
+    });
+  };
 
   // ── Name ──
   // Prefer structured given/family; fall back to the monolithic fullName ONLY for
   // a combined `name` field. NEVER split fullName into the split fields (forbidden).
   const hasStructuredName = Boolean(payload.givenName || payload.familyName);
-  fillField(fields.givenName, payload.givenName, SELECT_DIAG_FIELD.IDENTITY_GIVEN_NAME);
-  fillField(fields.familyName, payload.familyName, SELECT_DIAG_FIELD.IDENTITY_FAMILY_NAME);
+  addStep("givenName", () => payload.givenName, SELECT_DIAG_FIELD.IDENTITY_GIVEN_NAME);
+  addStep("familyName", () => payload.familyName, SELECT_DIAG_FIELD.IDENTITY_FAMILY_NAME);
   if (!hasStructuredName) {
-    fillField(fields.fullName, payload.fullName, SELECT_DIAG_FIELD.IDENTITY_FULL_NAME);
+    addStep("fullName", () => payload.fullName, SELECT_DIAG_FIELD.IDENTITY_FULL_NAME);
   }
 
   // Kana (フリガナ) — structured only, no monolithic fallback.
-  fillField(
-    fields.familyNameKana,
-    payload.familyNameKana,
+  addStep(
+    "familyNameKana",
+    () => payload.familyNameKana,
     SELECT_DIAG_FIELD.IDENTITY_FAMILY_NAME_KANA,
   );
-  fillField(
-    fields.givenNameKana,
-    payload.givenNameKana,
+  addStep(
+    "givenNameKana",
+    () => payload.givenNameKana,
     SELECT_DIAG_FIELD.IDENTITY_GIVEN_NAME_KANA,
   );
 
@@ -121,35 +154,45 @@ export function performIdentityAutofill(payload: IdentityAutofillPayload): void 
   // The `address` slot already carries structured addressLine1 when present and
   // the monolithic address otherwise (resolved in the background); filling the
   // address-line1 field from a single value is not a mis-split.
-  fillField(fields.address, payload.address, SELECT_DIAG_FIELD.IDENTITY_ADDRESS);
-  fillField(
-    fields.addressLine2,
-    payload.addressLine2,
+  addStep("address", () => payload.address, SELECT_DIAG_FIELD.IDENTITY_ADDRESS);
+  addStep(
+    "addressLine2",
+    () => payload.addressLine2,
     SELECT_DIAG_FIELD.IDENTITY_ADDRESS_LINE2,
   );
-  fillField(fields.city, payload.city, SELECT_DIAG_FIELD.IDENTITY_CITY);
-  fillField(
-    fields.postalCode,
-    payload.postalCode,
+  addStep("city", () => payload.city, SELECT_DIAG_FIELD.IDENTITY_CITY);
+  addStep(
+    "postalCode",
+    () => payload.postalCode,
     SELECT_DIAG_FIELD.IDENTITY_POSTAL_CODE,
   );
-  fillField(fields.country, payload.country, SELECT_DIAG_FIELD.IDENTITY_COUNTRY);
+  addStep("country", () => payload.country, SELECT_DIAG_FIELD.IDENTITY_COUNTRY);
 
   // Region (address-level1) prefers the structured state, falling back to the
   // legacy nationality value for entries that predate the structured fields.
-  fillField(
-    fields.region,
-    payload.state || payload.nationality,
+  addStep(
+    "region",
+    () => payload.state || payload.nationality,
     SELECT_DIAG_FIELD.IDENTITY_REGION,
   );
 
-  fillField(fields.phone, payload.phone, SELECT_DIAG_FIELD.IDENTITY_PHONE);
-  fillField(fields.email, payload.email, SELECT_DIAG_FIELD.IDENTITY_EMAIL);
-  fillField(
-    fields.dateOfBirth,
-    payload.dateOfBirth,
+  addStep("phone", () => payload.phone, SELECT_DIAG_FIELD.IDENTITY_PHONE);
+  addStep("email", () => payload.email, SELECT_DIAG_FIELD.IDENTITY_EMAIL);
+  addStep(
+    "dateOfBirth",
+    () => payload.dateOfBirth,
     SELECT_DIAG_FIELD.IDENTITY_DATE_OF_BIRTH,
   );
+
+  const t0Targets = Object.values(fields).filter(
+    (el): el is HTMLInputElement | HTMLSelectElement => el !== null,
+  );
+  const anchor = steps.map((step) => step.initial).find((el) => el !== null) ?? null;
+  const { root, reanchor } = anchor
+    ? resolveFillRoot(anchor, t0Targets, isIdentityFillable)
+    : { root: null, reanchor: () => null };
+
+  return runFillSequence(root, steps, { ...opts, reanchor });
 }
 
 // Guard against double-registration (manifest content script + programmatic re-injection).
@@ -163,7 +206,9 @@ if (
   chrome.runtime.onMessage.addListener((message: IdentityAutofillPayload, sender: chrome.runtime.MessageSender) => {
     // Only accept messages from our own extension — reject external senders
     if (message?.type === EXT_MSG.AUTOFILL_IDENTITY_FILL && sender.id === chrome.runtime.id) {
-      performIdentityAutofill(message);
+      performIdentityAutofill(message).catch(() =>
+        logFillError(FILL_DIAG_CODE.IDENTITY_FILL_FAILED),
+      );
     }
   });
 }

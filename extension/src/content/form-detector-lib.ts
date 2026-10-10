@@ -15,6 +15,8 @@ import {
   handleDropdownKeydown,
 } from "./ui/suggestion-dropdown";
 import { getShadowHost } from "./ui/shadow-host";
+import { isFillActive } from "./fill-sequence-lib";
+import { labelledByText } from "./labelled-by";
 
 /** Returns false when the extension has been reloaded/updated and this content script is orphaned. */
 function isContextValid(): boolean {
@@ -287,6 +289,7 @@ export function isLikelyUsernameInput(input: HTMLInputElement): boolean {
     input.getAttribute("ng-reflect-name"),
     input.getAttribute("aria-label"),
     input.getAttribute("aria-labelledby"),
+    labelledByText(input),
     input.getAttribute("data-testid"),
     input.getAttribute("data-test"),
     (input.closest("label")?.textContent ?? ""),
@@ -505,6 +508,8 @@ export function initFormDetector(): FormDetectorCleanup {
   const focusHandler = (e: FocusEvent) => {
     if (destroyed) return;
     if (Date.now() < autofillSuppressUntil) return;
+    // A fill moves focus field by field; the dropdown stays closed until it ends.
+    if (isFillActive()) return;
     const input = e.target;
     if (!(input instanceof HTMLInputElement)) return;
     if (!isUsableInput(input)) return;

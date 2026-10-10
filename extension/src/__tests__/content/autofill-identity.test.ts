@@ -3,6 +3,11 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { performIdentityAutofill } from "../../content/autofill-identity-lib";
+import { performCreditCardAutofill } from "../../content/autofill-cc-lib";
+import {
+  __resetFillSequenceForTests,
+  DEFAULT_LATE_FIELD_WINDOW_MS,
+} from "../../content/fill-sequence-lib";
 import { EXT_MSG } from "../../lib/constants";
 import type { IdentityAutofillPayload } from "../../types/messages";
 
@@ -22,8 +27,13 @@ beforeEach(() => {
 // history intact, and vitest.config.ts sets no restoreMocks — without this the
 // console assertions below become order-dependent.
 afterEach(() => {
+  __resetFillSequenceForTests();
   vi.restoreAllMocks();
 });
+
+// Existing rows assert T0 targets only: a zero late-field window keeps them free
+// of the deferral wait (every T0 target is still written).
+const NO_WAIT = { lateFieldWindowMs: 0 };
 
 function setupForm(html: string) {
   document.body.innerHTML = html;
@@ -54,7 +64,7 @@ function payload(
 }
 
 describe("performIdentityAutofill", () => {
-  it("fills fields by autocomplete attributes", () => {
+  it("fills fields by autocomplete attributes", async () => {
     setupForm(`
       <input autocomplete="name" />
       <input autocomplete="address-line1" />
@@ -62,13 +72,14 @@ describe("performIdentityAutofill", () => {
       <input autocomplete="email" />
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         fullName: "Jane Doe",
         address: "123 Main St",
         phone: "555-1234",
         email: "jane@example.com",
       }),
+      NO_WAIT,
     );
 
     const inputs = document.querySelectorAll("input");
@@ -78,7 +89,7 @@ describe("performIdentityAutofill", () => {
     expect((inputs[3] as HTMLInputElement).value).toBe("jane@example.com");
   });
 
-  it("fills region select element", () => {
+  it("fills region select element", async () => {
     setupForm(`
       <input autocomplete="name" />
       <input autocomplete="tel" />
@@ -89,85 +100,90 @@ describe("performIdentityAutofill", () => {
       </select>
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({ fullName: "Jane Doe", phone: "555-1234", nationality: "CA" }),
+      NO_WAIT,
     );
 
     const regionSelect = document.querySelector('[autocomplete="address-level1"]') as HTMLSelectElement;
     expect(regionSelect.value).toBe("CA");
   });
 
-  it("fills date of birth field", () => {
+  it("fills date of birth field", async () => {
     setupForm(`
       <input autocomplete="name" />
       <input autocomplete="bday" />
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({ fullName: "Jane Doe", dateOfBirth: "1990-01-15" }),
+      NO_WAIT,
     );
 
     const dobInput = document.querySelector('[autocomplete="bday"]') as HTMLInputElement;
     expect(dobInput.value).toBe("1990-01-15");
   });
 
-  it("does not fill when fewer than 2 identity fields exist", () => {
+  it("does not fill when fewer than 2 identity fields exist", async () => {
     setupForm(`
       <input autocomplete="name" />
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         fullName: "Jane Doe",
         address: "123 Main St",
         phone: "555-1234",
         email: "jane@example.com",
       }),
+      NO_WAIT,
     );
 
     const nameInput = document.querySelector('[autocomplete="name"]') as HTMLInputElement;
     expect(nameInput.value).toBe("");
   });
 
-  it("skips display:none input (visibility check)", () => {
+  it("skips display:none input (visibility check)", async () => {
     setupForm(`
       <input autocomplete="name" />
       <input autocomplete="tel" />
       <input autocomplete="email" style="display: none" />
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         fullName: "Jane Doe",
         phone: "555-1234",
         email: "hidden@example.com",
       }),
+      NO_WAIT,
     );
 
     const emailInput = document.querySelector('[autocomplete="email"]') as HTMLInputElement;
     expect(emailInput.value).toBe("");
   });
 
-  it("skips visibility:hidden input (visibility check)", () => {
+  it("skips visibility:hidden input (visibility check)", async () => {
     setupForm(`
       <input autocomplete="name" />
       <input autocomplete="tel" style="visibility: hidden" />
       <input autocomplete="email" />
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         fullName: "Jane Doe",
         phone: "555-1234",
         email: "jane@example.com",
       }),
+      NO_WAIT,
     );
 
     const phoneInput = document.querySelector('[autocomplete="tel"]') as HTMLInputElement;
     expect(phoneInput.value).toBe("");
   });
 
-  it("does not fill login fields when identity autofill runs (non-destructive)", () => {
+  it("does not fill login fields when identity autofill runs (non-destructive)", async () => {
     setupForm(`
       <input type="text" autocomplete="username" />
       <input type="password" autocomplete="current-password" />
@@ -176,12 +192,13 @@ describe("performIdentityAutofill", () => {
       <input autocomplete="email" />
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         fullName: "Jane Doe",
         phone: "555-1234",
         email: "jane@example.com",
       }),
+      NO_WAIT,
     );
 
     const usernameInput = document.querySelector('[autocomplete="username"]') as HTMLInputElement;
@@ -190,7 +207,7 @@ describe("performIdentityAutofill", () => {
     expect(passwordInput.value).toBe("");
   });
 
-  it("fills fields detected by Japanese labels", () => {
+  it("fills fields detected by Japanese labels", async () => {
     setupForm(`
       <label for="name">氏名</label>
       <input id="name" type="text" />
@@ -200,12 +217,13 @@ describe("performIdentityAutofill", () => {
       <input id="tel" type="text" />
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         fullName: "山田太郎",
         address: "東京都渋谷区1-2-3",
         phone: "03-1234-5678",
       }),
+      NO_WAIT,
     );
 
     const nameInput = document.getElementById("name") as HTMLInputElement;
@@ -218,7 +236,7 @@ describe("performIdentityAutofill", () => {
 
   // ── T2: structured split fill (non-vacuous — distinct value per field) ──
 
-  it("routes each structured field to its correctly-typed split field", () => {
+  it("routes each structured field to its correctly-typed split field", async () => {
     setupForm(`
       <input autocomplete="given-name" />
       <input autocomplete="family-name" />
@@ -238,7 +256,7 @@ describe("performIdentityAutofill", () => {
       </select>
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         givenName: "Jane",
         familyName: "Doe",
@@ -249,6 +267,7 @@ describe("performIdentityAutofill", () => {
         postalCode: "90210",
         country: "US",
       }),
+      NO_WAIT,
     );
 
     expect((document.querySelector('[autocomplete="given-name"]') as HTMLInputElement).value).toBe("Jane");
@@ -263,7 +282,7 @@ describe("performIdentityAutofill", () => {
 
   // ── Kana fill: kana values land only in the kana fields ──
 
-  it("routes kana values to kana fields without touching the plain name fields", () => {
+  it("routes kana values to kana fields without touching the plain name fields", async () => {
     setupForm(`
       <label for="sei">姓</label>
       <input id="sei" type="text" />
@@ -275,13 +294,14 @@ describe("performIdentityAutofill", () => {
       <input id="mei-kana" type="text" />
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         familyName: "山田",
         givenName: "太郎",
         familyNameKana: "ヤマダ",
         givenNameKana: "タロウ",
       }),
+      NO_WAIT,
     );
 
     expect((document.getElementById("sei") as HTMLInputElement).value).toBe("山田");
@@ -292,7 +312,7 @@ describe("performIdentityAutofill", () => {
 
   // ── T3: back-compat no-mis-split ──
 
-  it("leaves split name fields EMPTY for a legacy entry (only fullName) on a split form", () => {
+  it("leaves split name fields EMPTY for a legacy entry (only fullName) on a split form", async () => {
     setupForm(`
       <input autocomplete="given-name" />
       <input autocomplete="family-name" />
@@ -300,7 +320,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     // Legacy entry: only the monolithic fullName, no structured given/family.
-    performIdentityAutofill(payload({ fullName: "Jane Doe", phone: "555-1234" }));
+    await performIdentityAutofill(payload({ fullName: "Jane Doe", phone: "555-1234" }), NO_WAIT);
 
     expect((document.querySelector('[autocomplete="given-name"]') as HTMLInputElement).value).toBe("");
     expect((document.querySelector('[autocomplete="family-name"]') as HTMLInputElement).value).toBe("");
@@ -308,13 +328,13 @@ describe("performIdentityAutofill", () => {
     expect((document.querySelector('[autocomplete="tel"]') as HTMLInputElement).value).toBe("555-1234");
   });
 
-  it("fills a combined name field from fullName for a legacy entry", () => {
+  it("fills a combined name field from fullName for a legacy entry", async () => {
     setupForm(`
       <input autocomplete="name" />
       <input autocomplete="tel" />
     `);
 
-    performIdentityAutofill(payload({ fullName: "Jane Doe", phone: "555-1234" }));
+    await performIdentityAutofill(payload({ fullName: "Jane Doe", phone: "555-1234" }), NO_WAIT);
 
     expect((document.querySelector('[autocomplete="name"]') as HTMLInputElement).value).toBe("Jane Doe");
   });
@@ -324,7 +344,7 @@ describe("performIdentityAutofill", () => {
   // in the real text field, and the radio's value must be untouched. Exercises
   // the real production write path (performIdentityAutofill → detectIdentityFields),
   // the whole point of routing the fill path through the -lib twin.
-  it("writes email into the real text field, never into the id=Email radio (reported bug)", () => {
+  it("writes email into the real text field, never into the id=Email radio (reported bug)", async () => {
     setupForm(`
       <form>
         <input id="Email" name="AuthenicationType" type="radio" value="Email" />
@@ -333,8 +353,9 @@ describe("performIdentityAutofill", () => {
       </form>
     `);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({ email: "jane@example.com", fullName: "Jane Doe" }),
+      NO_WAIT,
     );
 
     // The radio keeps its submit value — no PII written into it.
@@ -344,7 +365,7 @@ describe("performIdentityAutofill", () => {
     expect((document.querySelector('input[name="fullName"]') as HTMLInputElement).value).toBe("Jane Doe");
   });
 
-  it("fills an attribute-less input (resolved type=text)", () => {
+  it("fills an attribute-less input (resolved type=text)", async () => {
     // Load-bearing: HTMLInputElement.type resolves to "text" with no type attr,
     // so the fillable-type allowlist must admit it.
     setupForm(`
@@ -352,7 +373,7 @@ describe("performIdentityAutofill", () => {
       <input name="phone" />
     `);
 
-    performIdentityAutofill(payload({ fullName: "Jane Doe", phone: "555-1234" }));
+    await performIdentityAutofill(payload({ fullName: "Jane Doe", phone: "555-1234" }), NO_WAIT);
 
     expect((document.querySelector('[name="fullName"]') as HTMLInputElement).value).toBe("Jane Doe");
     expect((document.querySelector('[name="phone"]') as HTMLInputElement).value).toBe("555-1234");
@@ -379,12 +400,13 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
     ) as HTMLSelectElement;
   }
 
-  it("logs the extension's own field identifier, never the identity value, when no option matches", () => {
+  it("logs the extension's own field identifier, never the identity value, when no option matches", async () => {
     const select = setupCountrySelectForm();
     const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({ phone: "555-0100", country: "Nowhereland" }),
+      NO_WAIT,
     );
 
     expect((document.querySelector('[autocomplete="tel"]') as HTMLInputElement).value)
@@ -410,7 +432,7 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
     expect(select.value).toBe("");
   });
 
-  it("does not touch the select or dispatch events when no option matches", () => {
+  it("does not touch the select or dispatch events when no option matches", async () => {
     const select = setupCountrySelectForm();
     const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
     const onChange = vi.fn();
@@ -418,8 +440,9 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
     select.addEventListener("change", onChange);
     select.addEventListener("input", onInput);
 
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({ phone: "555-0100", country: "Nowhereland" }),
+      NO_WAIT,
     );
 
     // Reachability floor: every assertion below is a denial, so all of them are
@@ -435,7 +458,7 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
 });
 
 describe("hostile page cannot route a filled value into the diagnostic", () => {
-  it("does not log the address when the page copies it into the select's name", () => {
+  it("does not log the address when the page copies it into the select's name", async () => {
     setupForm(`
       <input autocomplete="address-line1" />
       <input autocomplete="tel" />
@@ -456,12 +479,13 @@ describe("hostile page cannot route a filled value into the diagnostic", () => {
     });
 
     const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
-    performIdentityAutofill(
+    await performIdentityAutofill(
       payload({
         address: "12 Rue Secrete",
         phone: "555-0100",
         country: "Nowhereland",
       }),
+      NO_WAIT,
     );
 
     expect(select.name).toBe("12 Rue Secrete");
@@ -472,3 +496,112 @@ describe("hostile page cannot route a filled value into the diagnostic", () => {
     expect(logged).toContain("identity-country");
   });
 });
+
+// ── Sequential fill ───────────────────────────────────────────
+
+describe("performIdentityAutofill — sequential fill", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = "";
+  });
+
+  function q(selector: string): HTMLInputElement {
+    const el = document.querySelector<HTMLInputElement>(selector);
+    if (!el) throw new Error(`fixture missing ${selector}`);
+    return el;
+  }
+
+  async function settle(fill: Promise<void>): Promise<void> {
+    await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
+    await fill;
+  }
+
+  it("fills a phone field created after the name write", async () => {
+    setupForm(`
+      <div id="profile">
+        <input autocomplete="name" />
+        <input autocomplete="email" />
+        <div id="slot"></div>
+      </div>
+    `);
+    q("[autocomplete=name]").addEventListener(
+      "input",
+      () => (q("#slot").innerHTML = `<input autocomplete="tel" />`),
+      { once: true },
+    );
+
+    await settle(
+      performIdentityAutofill(
+        payload({ fullName: "Jane Doe", email: "jane@example.com", phone: "555-1234" }),
+      ),
+    );
+
+    expect(q("[autocomplete=name]").value).toBe("Jane Doe");
+    expect(q("[autocomplete=email]").value).toBe("jane@example.com");
+    expect(q("[autocomplete=tel]").value).toBe("555-1234");
+  });
+
+  // FR4: a newer request supersedes the pending fill even when its own T0
+  // detection finds nothing to fill.
+  it("a later card fill that finds no card form still ends a pending step", async () => {
+    setupForm(`
+      <div id="profile">
+        <input autocomplete="name" />
+        <input autocomplete="email" />
+        <div id="slot"></div>
+      </div>
+    `);
+
+    const fill = performIdentityAutofill(
+      payload({ fullName: "Jane Doe", email: "jane@example.com", phone: "111-1111" }),
+    );
+    await vi.advanceTimersByTimeAsync(5);
+    await performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "",
+    });
+    q("#slot").innerHTML = `<input autocomplete="tel" />`;
+    await settle(fill);
+
+    expect(q("[autocomplete=name]").value).toBe("Jane Doe");
+    expect(q("[autocomplete=tel]").value).toBe("");
+  });
+
+  it("a second fill supersedes a pending one: a late field gets only the second value", async () => {
+    setupForm(`
+      <div id="profile">
+        <input autocomplete="name" />
+        <input autocomplete="email" />
+        <div id="slot"></div>
+      </div>
+    `);
+
+    const first = performIdentityAutofill(
+      payload({ fullName: "Jane Doe", email: "jane@example.com", phone: "111-1111" }),
+    );
+    await vi.advanceTimersByTimeAsync(5);
+    const second = performIdentityAutofill(
+      payload({ fullName: "John Roe", email: "john@example.com", phone: "222-2222" }),
+    );
+    await vi.advanceTimersByTimeAsync(5);
+    // The second request arrives while the first run's phone step is waiting.
+    q("#slot").innerHTML = `<input autocomplete="tel" />`;
+    const writes: string[] = [];
+    const tel = q("[autocomplete=tel]");
+    tel.addEventListener("input", () => writes.push(tel.value));
+    await settle(Promise.all([first, second]).then(() => {}));
+
+    expect(writes).toEqual(["222-2222"]);
+    expect(q("[autocomplete=tel]").value).toBe("222-2222");
+    expect(q("[autocomplete=name]").value).toBe("John Roe");
+  });
+});
+
