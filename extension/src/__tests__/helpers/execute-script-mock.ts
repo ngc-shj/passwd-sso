@@ -39,19 +39,16 @@ export type ProbeAnswer = { documentId: string; href: string; origin: string };
  * and `originFor(frameId)`, which defaults to the URL's own origin ("null" for
  * about: URLs). Every other call resolves [].
  *
- * Two knobs let a test go past that per-frame default:
- * - `queueFrameAnswer(frameId, answer)` sets what the NEXT probe of that frame
- *   returns (consumed once, FIFO across repeated calls), independently of the
- *   frame's steady-state answer — a document a frame held at an earlier probe
- *   does not have to be the one it holds at a later one (navigation). `null`
- *   means the frame currently resolves no document (gone).
- * - `setDocumentAnswer(documentId, answer)` fixes what a `documentIds` probe
- *   for exactly that id returns, bypassing the frame lookup entirely. `null`
- *   means that id resolves to no document — Chrome returns no InjectionResult
- *   for a document that no longer exists, so a stale `documentIds: [id]`
- *   probe (the C2 fallback re-check after a navigation) must see the same.
+ * `queueFrameAnswer(frameId, answer)` sets what the NEXT probe of that frame
+ * returns (consumed once, FIFO across repeated calls), independently of the
+ * frame's steady-state answer — a document a frame held at an earlier probe
+ * does not have to be the one it holds at a later one (navigation). `null`
+ * means the frame currently resolves no document (gone). A `documentIds` probe
+ * resolves through the same frame answer and returns [] unless the frame still
+ * holds exactly that document, as Chrome returns no InjectionResult for a
+ * document that no longer exists; it never answers with a different document.
  *
- * Neither knob is consulted unless a test calls it, so default behaviour (one
+ * The knob is not consulted unless a test calls it, so default behaviour (one
  * steady `doc-<frameId>` document per frame) is unchanged.
  */
 export function createExecuteScriptMock(
@@ -60,16 +57,11 @@ export function createExecuteScriptMock(
   originFor: (frameId: number) => string = (frameId) => probeOrigin(urlFor(frameId)),
 ) {
   const frameAnswerQueues = new Map<number, Array<ProbeAnswer | null>>();
-  const documentAnswers = new Map<string, ProbeAnswer | null>();
 
   function queueFrameAnswer(frameId: number, answer: ProbeAnswer | null): void {
     const queue = frameAnswerQueues.get(frameId) ?? [];
     queue.push(answer);
     frameAnswerQueues.set(frameId, queue);
-  }
-
-  function setDocumentAnswer(documentId: string, answer: ProbeAnswer | null): void {
-    documentAnswers.set(documentId, answer);
   }
 
   // The frame's current answer: the next queued override if one is pending,
@@ -85,11 +77,6 @@ export function createExecuteScriptMock(
   }
 
   function answerForDocument(documentId: string) {
-    if (documentAnswers.has(documentId)) {
-      const answer = documentAnswers.get(documentId) ?? null;
-      const frameId = frameIdOfDocument(documentId) ?? -1;
-      return toResult(frameId, answer);
-    }
     const frameId = frameIdOfDocument(documentId);
     if (frameId === null) return [];
     const answer = answerForFrame(frameId);
@@ -110,5 +97,5 @@ export function createExecuteScriptMock(
     return [];
   });
 
-  return Object.assign(mock, { queueFrameAnswer, setDocumentAnswer });
+  return Object.assign(mock, { queueFrameAnswer });
 }

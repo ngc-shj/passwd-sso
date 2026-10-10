@@ -2308,16 +2308,14 @@ describe("background message flow", () => {
     });
 
     // D12: the content path's fallback accepts ONLY the sender's own document,
-    // never a same-host document the frame now holds instead. The probe of
-    // `documentIds:[senderId]` resolves — Chrome found a document for that
-    // documentId — but it reports a DIFFERENT documentId, as it would for a
-    // same-host redirect that replaced the document between the pick and the
-    // send. Unlike the context-menu path (which probes before the first send
-    // and accepts whatever current document that probe finds), the content
-    // path must refuse: the request came from the document the user actually
-    // picked from, and that document is gone.
-    it("D12: refuses the fallback when the probe reports a new document on the same host", async () => {
-      chromeMock!.scripting.executeScript.setDocumentAnswer(documentIdFor(7), {
+    // never a same-host document the frame now holds instead. Frame 7 has been
+    // replaced by a same-host redirect between the pick and the send: its
+    // sender document (doc-7) is gone, and the frame holds doc-7-new. Unlike
+    // the context-menu path (which probes the frame before the first send and
+    // accepts whatever current document that probe finds), the content path
+    // must refuse: the request came from the document the user picked from.
+    it("D12: refuses the fallback when the frame now holds a new document on the same host", async () => {
+      chromeMock!.scripting.executeScript.queueFrameAnswer(7, {
         documentId: "doc-7-new",
         href: "https://example.com/login/step2",
         origin: "https://example.com",
@@ -2326,6 +2324,12 @@ describe("background message flow", () => {
       const res = await fillWithNoReceiver();
 
       expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "AUTOFILL_INJECT_FAILED" });
+      // Nothing reached the new document: no bundle, no resend, no func.
+      const targets = (chromeMock!.scripting.executeScript.mock.calls as unknown[][])
+        .map((c) => (c[0] as { target: unknown }).target);
+      expect(JSON.stringify(targets)).not.toContain("doc-7-new");
+      const sendOptions = (chromeMock!.tabs.sendMessage.mock.calls as unknown[][]).map((c) => c[2]);
+      expect(sendOptions).toEqual([{ documentId: documentIdFor(7) }]);
       expect(injectionKinds()).toEqual(["probe"]);
     });
 
@@ -4843,18 +4847,18 @@ describe("C5 sender gate: EXTENSION_PAGE_ONLY_MESSAGES refused from content send
   });
 
   it("allows KEEPALIVE_PING from the popup sender: no sendResponse call at all (today's no-op)", async () => {
-    let called = false;
-    await new Promise<void>((resolve) => {
-      messageHandlers[0](
-        { type: EXT_MSG.KEEPALIVE_PING },
-        { url: chrome.runtime.getURL("popup/index.html") },
-        () => {
-          called = true;
-        },
-      );
-      setTimeout(resolve, 20);
-    });
-    expect(called).toBe(false);
+    const keepaliveResponses: unknown[] = [];
+    messageHandlers[0](
+      { type: EXT_MSG.KEEPALIVE_PING },
+      { url: chrome.runtime.getURL("popup/index.html") },
+      (response: unknown) => keepaliveResponses.push(response),
+    );
+    // Control: a message dispatched after it passes the same hydration await
+    // and then does more work before answering. Once it has answered, the
+    // KEEPALIVE_PING handler has run to completion, so its silence is real.
+    const status = await sendMessage({ type: EXT_MSG.GET_STATUS });
+    expect(status).toEqual(expect.objectContaining({ type: EXT_MSG.GET_STATUS }));
+    expect(keepaliveResponses).toEqual([]);
   });
 
   // A CONTENT_ALLOWED_MESSAGES member must NOT be refused by the gate: it is

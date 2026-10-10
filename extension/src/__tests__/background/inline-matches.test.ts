@@ -569,21 +569,27 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
       [{ title: "Bank", username: "alice", urlHost: "bank.example" }],
     );
     await unlock();
-    // Unlock itself drives badge updates (connected/unlocked state badges,
-    // some fire-and-forget) — let them settle, then clear that history so
-    // only this message's own effect is observed.
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    chromeMock?.action.setBadgeText.mockClear();
+    const badgesFor = (tabId: number) =>
+      (chromeMock?.action.setBadgeText.mock.calls ?? []).filter(
+        ([arg]) => (arg as { text?: string; tabId?: number }).text === "1" &&
+          (arg as { tabId?: number }).tabId === tabId,
+      );
 
+    // The spoofed request, from tab 1.
     await sendMessage(
       { type: EXT_MSG.GET_MATCHES_FOR_URL, url: "https://bank.example/login" },
       { frameId: 0, tab: { id: 1 } },
     );
-
-    // Give any fire-and-forget badge update from THIS message a chance to
-    // run before asserting its absence.
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(chromeMock?.action.setBadgeText).not.toHaveBeenCalled();
+    // Control: a legitimate request for the same page from tab 2, sent after
+    // it. Badge updates are fire-and-forget along the same path, so once the
+    // control's tab-2 badge has landed, a tab-1 badge from the spoofed request
+    // (started earlier) would have landed too.
+    const url = "https://bank.example/login";
+    await sendMessage({ type: EXT_MSG.GET_MATCHES_FOR_URL }, { frameId: 0, url, tab: { id: 2, url } });
+    await vi.waitFor(() => {
+      expect(badgesFor(2)).toHaveLength(1);
+    });
+    expect(badgesFor(1)).toEqual([]);
   });
 });
 
