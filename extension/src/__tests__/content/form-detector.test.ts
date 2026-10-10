@@ -5,13 +5,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   findPasswordInputs,
   findUsernameInput,
-  isUsableInput,
   isLikelyUsernameInput,
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
   hasVisiblePopoverOverlayNear,
 } from "../../content/form-detector-lib";
+import { isUsableInput } from "../../content/field-query-lib";
 
 // Mock chrome.runtime for the module import
 vi.stubGlobal("chrome", {

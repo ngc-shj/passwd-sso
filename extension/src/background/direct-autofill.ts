@@ -9,6 +9,14 @@
 // It duplicates the content-side LOGIN fill on purpose (plan C7 / SC5): it writes
 // sequentially, password last, but has no supersession, reference drop or
 // dropdown suppression.
+//
+// It also re-implements, inline, the content side's card-form exclusion
+// (ccFormFields + isLoginEligible in content/): a masked CVV of the card form is
+// never the password target and a card field never the username target, unless
+// the page declares a LOGIN autocomplete. The patterns and tokens arrive as args
+// from lib/cc-patterns.ts, so only the matching code is duplicated; a parity test
+// pins the two implementations to the same targets. Without the pattern args
+// (older callers) no exclusion runs.
 
 export async function directAutofill(
   usernameArg: string,
@@ -20,15 +28,24 @@ export async function directAutofill(
     autocomplete?: string;
   } | null,
   customFieldsArg?: Array<{ label: string; value: string }>,
+  ccPatternsArg?: {
+    number: Array<{ source: string; flags: string }>;
+    neighbour: Array<{ source: string; flags: string }>;
+  } | null,
+  loginTokensArg?: string[] | null,
 ): Promise<void> {
   const USERNAME_TYPES = ["text", "email", "tel"];
   const CUSTOM_FIELD_TYPES = ["text", "email", "tel", "number"];
   const PASSWORD_TYPES = ["password"];
   const isUsableInput = (input: HTMLInputElement) =>
     !input.disabled && !input.readOnly;
-  const isVisible = (input: HTMLInputElement) =>
-    getComputedStyle(input).display !== "none" &&
-    getComputedStyle(input).visibility !== "hidden";
+  // Same rule as the content side's isElementVisible: hidden, or near-transparent.
+  const isVisible = (el: HTMLElement) => {
+    const style = getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const opacity = Number.parseFloat(style.opacity);
+    return !(Number.isFinite(opacity) && opacity <= 0.05);
+  };
 
   const setInputValue = (input: HTMLInputElement, value: string) => {
     input.focus();
@@ -47,6 +64,87 @@ export async function directAutofill(
   const inputs = Array.from(
     document.querySelectorAll("input"),
   ) as HTMLInputElement[];
+
+  // ── The card form (mirror of ccFormFields; see the header) ──
+  type Field = HTMLInputElement | HTMLSelectElement;
+  const CARD_FILLABLE_TYPES = ["text", "tel", "number", "password"];
+  const toRegExps = (list: Array<{ source: string; flags: string }> | undefined) =>
+    (list ?? []).map(({ source, flags }) => new RegExp(source, flags));
+  const numberPatterns = toRegExps(ccPatternsArg?.number);
+  const neighbourPatterns = toRegExps(ccPatternsArg?.neighbour);
+  const loginTokens = loginTokensArg ?? [];
+  const autocompleteTokens = (el: Element) =>
+    (el.getAttribute("autocomplete") ?? "").toLowerCase().trim().split(/\s+/);
+  const hintOf = (el: Field) => {
+    const parts: string[] = [];
+    if (el.name) parts.push(el.name);
+    if (el.id) parts.push(el.id);
+    if (el instanceof HTMLInputElement && el.placeholder) parts.push(el.placeholder);
+    const ariaLabel = el.getAttribute("aria-label");
+    if (ariaLabel) parts.push(ariaLabel);
+    const id = el.id;
+    if (id && typeof CSS !== "undefined" && CSS.escape) {
+      const label = el.ownerDocument.querySelector(`label[for="${CSS.escape(id)}"]`);
+      if (label?.textContent) parts.push(label.textContent);
+    }
+    const parentLabel = el.closest("label");
+    if (parentLabel?.textContent) parts.push(parentLabel.textContent);
+    return parts.join(" ").toLowerCase();
+  };
+  const isCardFillable = (el: Field) =>
+    isVisible(el) &&
+    (el instanceof HTMLInputElement
+      ? CARD_FILLABLE_TYPES.includes(el.type) && !el.disabled && !el.readOnly
+      : !el.disabled);
+  const hasCcToken = (el: Field) => autocompleteTokens(el).some((t) => t.startsWith("cc-"));
+  const allFields: Field[] = [
+    ...inputs,
+    ...(Array.from(document.querySelectorAll("select")) as HTMLSelectElement[]),
+  ];
+  const cardForm = new Set<Field>(ccPatternsArg ? allFields.filter(hasCcToken) : []);
+  if (ccPatternsArg) {
+    const candidates = allFields.filter(isCardFillable);
+    const cardNumber =
+      candidates.find(
+        (el) => (el.getAttribute("autocomplete") ?? "").toLowerCase().trim() === "cc-number",
+      ) ??
+      candidates.find((el) => numberPatterns.some((re) => re.test(hintOf(el)))) ??
+      null;
+    if (cardNumber instanceof HTMLInputElement) {
+      const neighbours = allFields.filter(
+        (el) =>
+          el !== cardNumber &&
+          isCardFillable(el) &&
+          (hasCcToken(el) || neighbourPatterns.some((re) => re.test(hintOf(el)))),
+      );
+      let inBlock: ((el: Field) => boolean) | null = null;
+      const form = cardNumber.form;
+      if (form) {
+        const inForm = (el: Field) => el.form === form || form.contains(el);
+        if (neighbours.some(inForm)) inBlock = inForm;
+      }
+      if (!inBlock) {
+        const sameFormOrNone = neighbours.filter((el) => el.form === null || el.form === form);
+        for (
+          let ancestor = cardNumber.parentElement;
+          ancestor && ancestor !== document.body && ancestor !== document.documentElement;
+          ancestor = ancestor.parentElement
+        ) {
+          const block = ancestor;
+          if (sameFormOrNone.some((el) => block.contains(el))) {
+            inBlock = (el) => sameFormOrNone.includes(el) && block.contains(el);
+            break;
+          }
+        }
+      }
+      if (inBlock) {
+        cardForm.add(cardNumber);
+        for (const el of neighbours) if (inBlock(el)) cardForm.add(el);
+      }
+    }
+  }
+  const isLoginEligible = (el: HTMLInputElement) =>
+    !cardForm.has(el) || autocompleteTokens(el).some((t) => loginTokens.includes(t));
 
   const findInputByHint = () => {
     if (!targetHintArg) return null;
@@ -68,15 +166,18 @@ export async function directAutofill(
   const usernameInput: HTMLInputElement | null =
     hintedInput instanceof HTMLInputElement &&
     isUsableInput(hintedInput) &&
-    USERNAME_TYPES.includes(hintedInput.type)
+    USERNAME_TYPES.includes(hintedInput.type) &&
+    isLoginEligible(hintedInput)
       ? hintedInput
       : active instanceof HTMLInputElement &&
           isUsableInput(active) &&
-          USERNAME_TYPES.includes(active.type)
+          USERNAME_TYPES.includes(active.type) &&
+          isLoginEligible(active)
         ? active
         : null;
 
-  const findPasswordInScope = (scopeInputs: HTMLInputElement[]) => {
+  const findPasswordInScope = (allScopeInputs: HTMLInputElement[]) => {
+    const scopeInputs = allScopeInputs.filter(isLoginEligible);
     const byAutocomplete = scopeInputs.find(
       (i) =>
         isUsableInput(i) &&
@@ -105,7 +206,8 @@ export async function directAutofill(
       const c = inputs[i];
       if (
         isUsableInput(c) &&
-        USERNAME_TYPES.includes(c.type)
+        USERNAME_TYPES.includes(c.type) &&
+        isLoginEligible(c)
       ) {
         fallbackUsername = c;
         break;

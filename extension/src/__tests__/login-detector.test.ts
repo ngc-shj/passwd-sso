@@ -23,9 +23,13 @@ vi.stubGlobal("chrome", {
 });
 
 // Mock form-detector-lib exports
+// The card-form source is opaque here: findPasswordInputs/findUsernameInput are
+// mocked, so the CC exclusion itself is tested against the real module in
+// content/login-capture-cc.test.ts.
 vi.mock("../content/form-detector-lib", () => ({
   findPasswordInputs: vi.fn(),
   findUsernameInput: vi.fn(),
+  lazyCcForm: () => () => new Set<HTMLElement>(),
 }));
 
 // Mock save banner

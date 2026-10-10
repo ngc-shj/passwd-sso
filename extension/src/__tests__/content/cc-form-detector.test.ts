@@ -2,7 +2,9 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { detectCreditCardFields, detectExpiryFormat, formatCombinedExpiry, CC_DETECT_RE } from "../../content/cc-form-detector-lib";
+import { detectExpiryFormat, formatCombinedExpiry } from "../../content/cc-form-detector-lib";
+import { detectCreditCardFields } from "../../content/cc-field-detection-lib";
+import { CC_DETECT_RE } from "../../lib/cc-patterns";
 
 // Polyfill CSS.escape for jsdom
 if (typeof globalThis.CSS === "undefined") {

@@ -17,6 +17,14 @@ import {
 import { getShadowHost } from "./ui/shadow-host";
 import { isFillActive } from "./fill-sequence-lib";
 import { labelledByText } from "./labelled-by";
+import {
+  isUsableInput,
+  isElementVisible,
+  getHintString,
+  resolveOpacity,
+} from "./field-query-lib";
+import { ccFormFields } from "./cc-field-detection-lib";
+import { isLoginEligible } from "./login-field-eligibility";
 
 /** Returns false when the extension has been reloaded/updated and this content script is orphaned. */
 function isContextValid(): boolean {
@@ -30,97 +38,6 @@ function isContextValid(): boolean {
 // ── Form field detection ────────────────────────────────────
 
 const trackedInputs = new WeakSet<HTMLInputElement>();
-
-export function isUsableInput(input: HTMLInputElement): boolean {
-  return !input.disabled && !input.readOnly;
-}
-
-/**
- * Whether a field may receive autofill. An input must resolve to one of the
- * caller's `allowedTypes` (a fail-closed allowlist that keeps radio/checkbox/
- * hidden/submit and unknown future types out — see the identity/CC detectors),
- * and be enabled and writable. Selects have no `type` and are gated on enabled
- * only. `allowedTypes` differs per detector (identity vs CC), so it is passed in.
- */
-export function isUsableFieldOfType(
-  el: HTMLInputElement | HTMLSelectElement,
-  allowedTypes: ReadonlySet<string>,
-): boolean {
-  if (el instanceof HTMLInputElement) {
-    return allowedTypes.has(el.type) && !el.disabled && !el.readOnly;
-  }
-  return !el.disabled;
-}
-
-function resolveOpacity(value: string): number {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 1;
-}
-
-// ── Shared detector helpers (used by the CC + Identity detectors) ──
-// isElementVisible is the DETECTION-time visibility check — intentionally
-// looser than isElementVisuallySafe (it omits the clipPath/transform anti-
-// spoofing checks the display-safety gate applies). Keep the two distinct.
-
-export function isElementVisible(element: HTMLElement): boolean {
-  const style = getComputedStyle(element);
-  if (style.display === "none" || style.visibility === "hidden") return false;
-  if (resolveOpacity(style.opacity) <= 0.05) return false;
-  return true;
-}
-
-export function getHintString(el: HTMLElement): string {
-  const parts: string[] = [];
-  if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement) {
-    if (el.name) parts.push(el.name);
-    if (el.id) parts.push(el.id);
-    if (el instanceof HTMLInputElement && el.placeholder) parts.push(el.placeholder);
-  }
-  const ariaLabel = el.getAttribute("aria-label");
-  if (ariaLabel) parts.push(ariaLabel);
-  // Walk up to find associated label
-  const id = el.id;
-  if (id && typeof CSS !== "undefined" && CSS.escape) {
-    const label = el.ownerDocument.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`);
-    if (label?.textContent) parts.push(label.textContent);
-  }
-  const parentLabel = el.closest("label");
-  if (parentLabel?.textContent) parts.push(parentLabel.textContent);
-  return parts.join(" ").toLowerCase();
-}
-
-// Module-private: only findFieldByAutocomplete consumes it. The detectors
-// resolve autocomplete matches through that helper, never directly.
-function getAutocomplete(el: HTMLElement): string {
-  return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
-}
-
-/** Find the first usable field whose autocomplete attribute equals acValue.
- * `isUsable` is the caller's per-detector fillable-type predicate (required —
- * a missing predicate is a compile error, keeping the #717 fail-closed gate). */
-export function findFieldByAutocomplete(
-  fields: (HTMLInputElement | HTMLSelectElement)[],
-  acValue: string,
-  isUsable: (el: HTMLInputElement | HTMLSelectElement) => boolean,
-): HTMLInputElement | HTMLSelectElement | null {
-  return fields.find((f) => getAutocomplete(f) === acValue && isUsable(f)) ?? null;
-}
-
-/** Find the first usable field whose hint matches the latin or JA regex. */
-export function findFieldByRegex(
-  fields: (HTMLInputElement | HTMLSelectElement)[],
-  regex: RegExp,
-  regexJa: RegExp,
-  isUsable: (el: HTMLInputElement | HTMLSelectElement) => boolean,
-): HTMLInputElement | HTMLSelectElement | null {
-  return (
-    fields.find((f) => {
-      if (!isUsable(f)) return false;
-      const hint = getHintString(f);
-      return regex.test(hint) || regexJa.test(hint);
-    }) ?? null
-  );
-}
 
 export function isElementVisuallySafe(element: HTMLElement): boolean {
   const style = getComputedStyle(element);
@@ -211,15 +128,47 @@ export function hasVisiblePopoverOverlayNear(input: HTMLInputElement): boolean {
   return false;
 }
 
-export function findPasswordInputs(root: ParentNode): HTMLInputElement[] {
+/** Every usable password input, card fields included. Input tracking only. */
+function rawPasswordInputs(root: ParentNode): HTMLInputElement[] {
   return Array.from(root.querySelectorAll<HTMLInputElement>('input[type="password"]')).filter(
     isUsableInput,
   );
 }
 
+/**
+ * The card form on the page, scanned at most once per caller and only when
+ * asked: a page with no password input never pays for a card scan.
+ */
+export type CcFormSource = () => ReadonlySet<HTMLElement>;
+
+export function lazyCcForm(): CcFormSource {
+  let ccForm: ReadonlySet<HTMLElement> | null = null;
+  return () => (ccForm ??= ccFormFields(document));
+}
+
+/**
+ * The password inputs LOGIN may use: a masked CVV of the card form is not one
+ * (unless the page declares a LOGIN autocomplete on it).
+ */
+export function findPasswordInputs(
+  root: ParentNode,
+  ccForm: CcFormSource = lazyCcForm(),
+): HTMLInputElement[] {
+  const passwords = rawPasswordInputs(root);
+  if (passwords.length === 0) return passwords;
+  const form = ccForm();
+  return passwords.filter((input) => isLoginEligible(input, form));
+}
+
+/**
+ * The username input paired with `passwordInput`. With `ccForm`, a field of
+ * the card form is never chosen; without it (input tracking) every field is.
+ */
 export function findUsernameInput(
   passwordInput: HTMLInputElement,
+  ccForm: CcFormSource | null = null,
 ): HTMLInputElement | null {
+  const isEligible = (i: HTMLInputElement) => !ccForm || isLoginEligible(i, ccForm());
   const form = passwordInput.closest("form");
   const scope: ParentNode = form ?? document;
   const inputs = Array.from(scope.querySelectorAll<HTMLInputElement>("input"));
@@ -238,7 +187,7 @@ export function findUsernameInput(
   if (pwIndex <= 0) return null;
   for (let i = pwIndex - 1; i >= 0; i--) {
     const c = inputs[i];
-    if (isUsableInput(c) && (c.type === "text" || c.type === "email")) {
+    if (isUsableInput(c) && (c.type === "text" || c.type === "email") && isEligible(c)) {
       return c;
     }
   }
@@ -496,13 +445,18 @@ export function initFormDetector(): FormDetectorCleanup {
     return { destroy: () => {} };
   }
 
-  const shouldTriggerForInput = (input: HTMLInputElement): boolean => {
+  // The per-field checks run first; the associated-password lookup and the
+  // card-form check only for an input that would otherwise trigger, so focusing
+  // an unrelated field never costs a card scan. A field of the card form (a
+  // masked CVV is a password input) gets the CC dropdown, not this one.
+  const shouldTriggerForInput = (input: HTMLInputElement, ccForm: CcFormSource): boolean => {
     if (!isElementVisuallySafe(input)) return false;
-    const isPasswordInput = input.type === "password";
-    const isAssociatedUsername = findAssociatedPasswordInput(input) !== null;
-    const isLikelyUsername = isLikelyUsernameInput(input);
-    const isOtp = isLikelyOtpInput(input);
-    return isPasswordInput || isAssociatedUsername || isLikelyUsername || isOtp;
+    const wouldTrigger =
+      input.type === "password" ||
+      isLikelyUsernameInput(input) ||
+      isLikelyOtpInput(input) ||
+      findAssociatedPasswordInput(input, ccForm) !== null;
+    return wouldTrigger && isLoginEligible(input, ccForm());
   };
 
   const focusHandler = (e: FocusEvent) => {
@@ -515,7 +469,7 @@ export function initFormDetector(): FormDetectorCleanup {
     if (!isUsableInput(input)) return;
 
     // Trigger for password inputs, associated usernames, and likely login IDs.
-    if (!shouldTriggerForInput(input)) return;
+    if (!shouldTriggerForInput(input, lazyCcForm())) return;
 
     requestMatches(input);
   };
@@ -541,8 +495,10 @@ export function initFormDetector(): FormDetectorCleanup {
   };
 
   // Scan existing inputs
+  // Runs on every mutation batch and navigation and only tracks inputs, so it
+  // takes the raw scan: eligibility is decided at trigger and capture time.
   const scanInputs = () => {
-    const passwordInputs = findPasswordInputs(document);
+    const passwordInputs = rawPasswordInputs(document);
     for (const input of passwordInputs) {
       trackInput(input);
       const usernameInput = findUsernameInput(input);
@@ -619,14 +575,16 @@ export function initFormDetector(): FormDetectorCleanup {
   const runtimeMessageHandler = (message: { type?: string }) => {
     if (destroyed) return;
     if (message?.type !== PSSO_VAULT_STATE_CHANGED && message?.type !== PSSO_TRIGGER_INLINE_SUGGESTIONS) return;
+    // One card scan for the whole handler, however many inputs it tries.
+    const ccForm = lazyCcForm();
     const active = document.activeElement;
-    if (active instanceof HTMLInputElement && shouldTriggerForInput(active)) {
+    if (active instanceof HTMLInputElement && shouldTriggerForInput(active, ccForm)) {
       requestMatches(active);
       return;
     }
     if (message?.type === PSSO_TRIGGER_INLINE_SUGGESTIONS) {
       const firstCandidate = Array.from(document.querySelectorAll<HTMLInputElement>("input")).find(
-        (i) => shouldTriggerForInput(i),
+        (i) => shouldTriggerForInput(i, ccForm),
       );
       if (firstCandidate) {
         firstCandidate.focus();
@@ -684,13 +642,14 @@ export function initFormDetector(): FormDetectorCleanup {
 
 function findAssociatedPasswordInput(
   input: HTMLInputElement,
+  ccForm: CcFormSource,
 ): HTMLInputElement | null {
   if (input.type === "password") return input;
   const form = input.closest("form");
   const scope: ParentNode = form ?? document;
-  const passwordInputs = findPasswordInputs(scope);
+  const passwordInputs = findPasswordInputs(scope, ccForm);
   for (const pw of passwordInputs) {
-    const username = findUsernameInput(pw);
+    const username = findUsernameInput(pw, ccForm);
     if (username === input) return pw;
   }
   return null;

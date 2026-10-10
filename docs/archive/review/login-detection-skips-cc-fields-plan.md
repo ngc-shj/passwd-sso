@@ -234,3 +234,27 @@ export function isLoginEligible(el: HTMLInputElement, ccForm: ReadonlySet<HTMLEl
 | C4 | inline trigger + shared finders | locked |
 | C5 | save capture | locked |
 | C6 | direct-fallback inline exclusion + parity test | locked |
+
+## Implementation Checklist
+
+Phase 2 Step 2-1. Member sets were derived by grep; see C1, the member set, and the testing sections.
+
+### Production
+- New modules: `lib/cc-patterns.ts`, `content/field-query-lib.ts`, `content/cc-field-detection-lib.ts`, `content/login-field-eligibility.ts`.
+- Modified:
+  - `content/form-detector-lib.ts`
+  - `content/cc-form-detector-lib.ts`
+  - `content/identity-form-detector-lib.ts`
+  - `content/autofill-cc-lib.ts`
+  - `content/autofill-lib.ts`
+  - `content/login-detector-lib.ts`
+  - `background/direct-autofill.ts`
+  - `background/index.ts`
+
+### Test importers of moved symbols (R19)
+- `__tests__/content/cc-form-detector.test.ts` (three-way split)
+- `__tests__/content/form-detector.test.ts` (`isUsableInput`)
+- `__tests__/login-detector.test.ts`: its wholesale mock gains `lazyCcForm`.
+
+### CI parity
+The extension's gates are `npm test`, `npm run build` and `lint-extension.mjs`. All three run in `scripts/pre-pr.sh`, so there is no gap.

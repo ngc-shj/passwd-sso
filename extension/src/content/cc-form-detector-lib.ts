@@ -1,23 +1,19 @@
-// Pure logic module for credit card form detection (exported, testable).
-// detectCreditCardFields is side-effect-free; initCreditCardDetector wires the
-// inline-suggestion lifecycle (focus → match request → dropdown → fill).
+// Credit card inline detector and expiry formatting. Field detection itself
+// (detectCreditCardFields) lives in cc-field-detection-lib; initCreditCardDetector
+// wires the inline-suggestion lifecycle (focus → match request → dropdown → fill).
 
 import type { DecryptedEntry } from "../types/messages";
 import { t } from "../lib/i18n";
 import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } from "../lib/constants";
 import {
-  isUsableInput,
-  isUsableFieldOfType,
-  isElementVisible,
-  getHintString,
-  findFieldByAutocomplete,
-  findFieldByRegex,
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
   hasVisiblePopoverOverlayNear,
   showInlineNotice,
 } from "./form-detector-lib";
+import { isUsableInput } from "./field-query-lib";
+import { ccClaimedFields } from "./cc-field-detection-lib";
 import {
   showDropdown,
   hideDropdown,
@@ -25,127 +21,6 @@ import {
   handleDropdownKeydown,
 } from "./ui/suggestion-dropdown";
 import { isFillActive } from "./fill-sequence-lib";
-
-// ── Types ──
-
-export interface CreditCardFormFields {
-  cardholderName: HTMLInputElement | null;
-  cardNumber: HTMLInputElement | null;
-  expiryMonth: HTMLInputElement | HTMLSelectElement | null;
-  expiryYear: HTMLInputElement | HTMLSelectElement | null;
-  expiryCombined: HTMLInputElement | null;
-  cvv: HTMLInputElement | null;
-  expiryFormat: "split" | "combined";
-}
-
-// ── Fillable input types ──
-// Only free-text-like input types can receive CC autofill. Radio / checkbox /
-// hidden / submit etc. must never be claimed as card fields — a payment-method
-// radio like `<input type="radio" id="card_number_pay">` would otherwise match
-// by hint and trigger the CC dropdown on focus. `password` is included because
-// CVV fields are commonly masked.
-const FILLABLE_INPUT_TYPES = new Set([
-  "text",
-  "tel",
-  "number",
-  "password",
-]);
-
-const isUsableField = (el: HTMLInputElement | HTMLSelectElement): boolean =>
-  isUsableFieldOfType(el, FILLABLE_INPUT_TYPES);
-
-/** Visible + usable + allowlisted: the detector's own admission rule for a field. */
-export const isCreditCardFillable = (el: HTMLInputElement | HTMLSelectElement): boolean =>
-  isElementVisible(el) && isUsableField(el);
-
-// ── Regex patterns ──
-
-export const CC_DETECT_RE = {
-  number:      /card.?num|cc.?num|\bcard.?no\b|\bccno\b|\bpan\b/i,
-  name:        /card.?holder|holder.?name|cc.?name|card.?name|name.?on.?card|meigi/i,
-  expiryMonth: /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}month|card.?month|cc.?month|expire\W{0,2}mm?\b/i,
-  expiryYear:  /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}year|card.?year|cc.?year|expire\W{0,2}yy?\b/i,
-  cvv:         /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|card.?code/i,
-} as const;
-
-// `conf.?num` (matches fields like `conf_number`) is deliberately NOT in
-// CC_DETECT_RE.cvv: it also matches generic "confirmation number" fields (order/booking pages),
-// and since regex fallback picks the first DOM match, an unrelated conf-number
-// field appearing before the real CVV would receive the CVV write. It is only
-// used as a CVV candidate when the field lives in the SAME form as the detected
-// card-number field (see findConfNumCvvInForm).
-export const CC_CONF_NUM_RE = /conf.?num/i;
-
-const CC_NUMBER_JA_RE = /カード番号/;
-const CC_NAME_JA_RE = /名義|カード名義/;
-
-const CC_EXPIRY_RE = /expir|exp.?date|valid.?thru|card.?exp/i;
-const CC_EXPIRY_JA_RE = /有効期限/;
-
-const CC_EXPIRY_MONTH_JA_RE = /月/;
-const CC_EXPIRY_YEAR_JA_RE = /年/;
-
-const CC_CVV_JA_RE = /セキュリティコード/;
-
-// ── Autocomplete attributes (standard) ──
-
-const AC_CC_NUMBER = "cc-number";
-const AC_CC_NAME = "cc-name";
-const AC_CC_EXP = "cc-exp";
-const AC_CC_EXP_MONTH = "cc-exp-month";
-const AC_CC_EXP_YEAR = "cc-exp-year";
-const AC_CC_CSC = "cc-csc";
-
-// ── Field finder ──
-
-/** A `conf_number` field only looks like a CVV if it carries a CVV-specific
- * signal: masked input (type=password) or a 3–4 char length cap. A generic
- * confirmation-number text field has neither. */
-function looksLikeCvvField(el: HTMLInputElement): boolean {
-  if (el.type === "password") return true;
-  return el.maxLength === 3 || el.maxLength === 4;
-}
-
-/**
- * True when the candidate is co-located with the card-number field:
- * - both belong to the same <form>, OR
- * - (form-less pages) both live in the SAME <table>. A page-wrapper ancestor
- *   (#app, main, ...) is deliberately NOT enough — SPAs wrap the whole page in
- *   one, which would re-admit an unrelated confirmation-number section. Only a
- *   shared <table> counts as "same local group" on form-less markup.
- */
-function isCoLocatedWith(candidate: HTMLElement, cardNumber: HTMLElement): boolean {
-  const cardForm = cardNumber.closest("form");
-  const candForm = candidate.closest("form");
-  if (cardForm || candForm) return cardForm !== null && cardForm === candForm;
-
-  // Form-less: require a shared <table> (not merely any common ancestor).
-  const candTable = candidate.closest("table");
-  return candTable !== null && candTable === cardNumber.closest("table");
-}
-
-/**
- * Find a `conf.?num`-hinted CVV candidate, but ONLY when it is co-located with
- * the already-detected card-number field (same <form>, or same <table> on
- * form-less pages) AND carries a CVV-specific signal (masked / length-capped).
- * This scopes the generic "confirmation number" match to genuine card forms
- * and prevents an unrelated order/booking confirmation-number field elsewhere
- * on the page from receiving the CVV write.
- */
-function findConfNumCvvInForm(
-  fields: (HTMLInputElement | HTMLSelectElement)[],
-  cardNumber: HTMLInputElement,
-): HTMLInputElement | null {
-  return (
-    (fields.find((f) => {
-      if (!(f instanceof HTMLInputElement)) return false;
-      if (!isUsableField(f)) return false;
-      if (!CC_CONF_NUM_RE.test(getHintString(f))) return false;
-      if (!looksLikeCvvField(f)) return false;
-      return isCoLocatedWith(f, cardNumber);
-    }) as HTMLInputElement | undefined) ?? null
-  );
-}
 
 // ── Combined expiry format detection ──
 
@@ -186,73 +61,6 @@ export function formatCombinedExpiry(
   }
 }
 
-// ── Main detection function ──
-
-export function detectCreditCardFields(root: ParentNode): CreditCardFormFields | null {
-  const inputs = Array.from(root.querySelectorAll<HTMLInputElement>("input"));
-  const selects = Array.from(root.querySelectorAll<HTMLSelectElement>("select"));
-  const allFields: (HTMLInputElement | HTMLSelectElement)[] = [...inputs, ...selects];
-
-  // Only consider visible fields
-  const visibleFields = allFields.filter(
-    (f) => isElementVisible(f) && isUsableField(f),
-  );
-
-  if (visibleFields.length === 0) return null;
-
-  // Priority 1: autocomplete attributes
-  let cardNumber = findFieldByAutocomplete(visibleFields, AC_CC_NUMBER, isUsableField) as HTMLInputElement | null;
-  let cardholderName = findFieldByAutocomplete(visibleFields, AC_CC_NAME, isUsableField) as HTMLInputElement | null;
-  let expiryCombined = findFieldByAutocomplete(visibleFields, AC_CC_EXP, isUsableField) as HTMLInputElement | null;
-  let expiryMonth = findFieldByAutocomplete(visibleFields, AC_CC_EXP_MONTH, isUsableField);
-  let expiryYear = findFieldByAutocomplete(visibleFields, AC_CC_EXP_YEAR, isUsableField);
-  let cvv = findFieldByAutocomplete(visibleFields, AC_CC_CSC, isUsableField) as HTMLInputElement | null;
-
-  // Priority 2: name/id/label regex fallback
-  if (!cardNumber) {
-    cardNumber = findFieldByRegex(visibleFields, CC_DETECT_RE.number, CC_NUMBER_JA_RE, isUsableField) as HTMLInputElement | null;
-  }
-  if (!cardholderName) {
-    cardholderName = findFieldByRegex(visibleFields, CC_DETECT_RE.name, CC_NAME_JA_RE, isUsableField) as HTMLInputElement | null;
-  }
-  if (!cvv) {
-    cvv = findFieldByRegex(visibleFields, CC_DETECT_RE.cvv, CC_CVV_JA_RE, isUsableField) as HTMLInputElement | null;
-  }
-  // Same-form-scoped `conf.?num` fallback. Only after the strong CVV
-  // signals miss, and only when the candidate shares the card-number field's
-  // form — never a page-wide first match.
-  if (!cvv && cardNumber) {
-    cvv = findConfNumCvvInForm(visibleFields, cardNumber);
-  }
-  if (!expiryMonth && !expiryCombined) {
-    // Check for combined expiry first
-    const combined = findFieldByRegex(visibleFields, CC_EXPIRY_RE, CC_EXPIRY_JA_RE, isUsableField);
-    if (combined && combined instanceof HTMLInputElement) {
-      expiryCombined = combined;
-    } else {
-      expiryMonth = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryMonth, CC_EXPIRY_MONTH_JA_RE, isUsableField);
-    }
-  }
-  if (!expiryYear && !expiryCombined) {
-    expiryYear = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryYear, CC_EXPIRY_YEAR_JA_RE, isUsableField);
-  }
-
-  // Must have at least card number to consider this a CC form
-  if (!cardNumber) return null;
-
-  const hasCombined = expiryCombined !== null;
-
-  return {
-    cardholderName,
-    cardNumber,
-    expiryMonth: hasCombined ? null : expiryMonth,
-    expiryYear: hasCombined ? null : expiryYear,
-    expiryCombined: hasCombined ? expiryCombined : null,
-    cvv,
-    expiryFormat: hasCombined ? "combined" : "split",
-  };
-}
-
 // ── Inline detector ─────────────────────────────────────────
 
 declare const navigation: EventTarget | undefined;
@@ -266,21 +74,6 @@ function isContextValid(): boolean {
     return !!chrome.runtime?.id;
   } catch {
     return false;
-  }
-}
-
-/** Collect the detected CC field elements into a membership set for O(1) focus lookup. */
-function collectCcFields(fields: CreditCardFormFields, into: WeakSet<HTMLElement>): void {
-  const candidates = [
-    fields.cardholderName,
-    fields.cardNumber,
-    fields.expiryMonth,
-    fields.expiryYear,
-    fields.expiryCombined,
-    fields.cvv,
-  ];
-  for (const el of candidates) {
-    if (el) into.add(el);
   }
 }
 
@@ -315,8 +108,7 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
   const rescan = () => {
     if (destroyed) return;
     const next = new WeakSet<HTMLElement>();
-    const fields = detectCreditCardFields(document);
-    if (fields) collectCcFields(fields, next);
+    for (const el of ccClaimedFields(document)) next.add(el);
     ccFields = next;
   };
 

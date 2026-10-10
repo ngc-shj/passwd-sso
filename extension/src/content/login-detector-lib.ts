@@ -2,7 +2,12 @@
 // Separated from form-detector-lib.ts (already 586+ lines) as an independent module.
 // Side-effect-free — call initLoginDetector() to start.
 
-import { findPasswordInputs, findUsernameInput } from "./form-detector-lib";
+import {
+  findPasswordInputs,
+  findUsernameInput,
+  lazyCcForm,
+  type CcFormSource,
+} from "./form-detector-lib";
 import { showSaveBanner, hideSaveBanner } from "./ui/save-banner";
 import type { ExtensionResponse } from "../types/messages";
 import { PSSO_SHOW_SAVE_BANNER } from "../lib/constants";
@@ -26,8 +31,13 @@ const DETECT_DEBOUNCE_MS = 2 * MS_PER_SECOND;
  * Determine if a form looks like a password-change or registration form
  * (not a login form) and should be skipped.
  */
-export function shouldSkipForm(form: HTMLFormElement): boolean {
-  const passwordInputs = findPasswordInputs(form);
+export function shouldSkipForm(
+  form: HTMLFormElement,
+  ccForm: CcFormSource = lazyCcForm(),
+): boolean {
+  // A masked CVV of the card form is not counted: a login password next to a
+  // card form is a login form, not a two-password registration form.
+  const passwordInputs = findPasswordInputs(form, ccForm);
 
   // Multiple password fields → password change / registration form
   if (passwordInputs.length >= 2) return true;
@@ -67,16 +77,18 @@ export function shouldSkipForm(form: HTMLFormElement): boolean {
 export function extractCredentials(
   form: HTMLFormElement,
 ): { username: string; password: string } | null {
-  if (shouldSkipForm(form)) return null;
+  const ccForm = lazyCcForm();
+  if (shouldSkipForm(form, ccForm)) return null;
 
-  const passwordInputs = findPasswordInputs(form);
+  // The card form's CVV is never captured as a password.
+  const passwordInputs = findPasswordInputs(form, ccForm);
   if (passwordInputs.length !== 1) return null;
 
   const passwordInput = passwordInputs[0];
   const password = passwordInput.value;
   if (!password) return null;
 
-  const usernameInput = findUsernameInput(passwordInput);
+  const usernameInput = findUsernameInput(passwordInput, ccForm);
   const username = usernameInput?.value ?? "";
 
   return { username, password };
@@ -87,7 +99,8 @@ export function extractCredentials(
  * credentials. Used by click-based detection when there's no <form> submit.
  */
 export function extractCredentialsFromPage(): { username: string; password: string } | null {
-  const passwordInputs = findPasswordInputs(document);
+  const ccForm = lazyCcForm();
+  const passwordInputs = findPasswordInputs(document, ccForm);
   // Filter to visible, filled password fields
   const filled = passwordInputs.filter((p) => p.value);
   if (filled.length !== 1) return null;
@@ -99,9 +112,9 @@ export function extractCredentialsFromPage(): { username: string; password: stri
 
   // If the password is inside a form, check if the form should be skipped
   const form = passwordInput.closest("form");
-  if (form && shouldSkipForm(form)) return null;
+  if (form && shouldSkipForm(form, ccForm)) return null;
 
-  const usernameInput = findUsernameInput(passwordInput);
+  const usernameInput = findUsernameInput(passwordInput, ccForm);
   const username = usernameInput?.value ?? "";
 
   return { username, password };
