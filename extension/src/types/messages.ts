@@ -12,10 +12,13 @@ export type ExtensionMessage =
   | { type: typeof EXT_MSG.LOCK_VAULT }
   | { type: typeof EXT_MSG.FETCH_PASSWORDS }
   | { type: typeof EXT_MSG.COPY_PASSWORD; entryId: string; teamId?: string }
-  | { type: typeof EXT_MSG.AUTOFILL; entryId: string; tabId: number; teamId?: string }
-  | { type: typeof EXT_MSG.GET_MATCHES_FOR_URL; url: string; topUrl?: string }
-  | { type: typeof EXT_MSG.GET_CC_MATCHES_FOR_URL; url: string; topUrl?: string }
-  | { type: typeof EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL; url: string; topUrl?: string }
+  // expectedOrigin: the origin of the tab the popup rendered and the user
+  // confirmed. The SW only fills a top document on that exact origin.
+  | { type: typeof EXT_MSG.AUTOFILL; entryId: string; tabId: number; teamId?: string; expectedOrigin: string }
+  // The SW derives the page URL from MessageSender, never from the message.
+  | { type: typeof EXT_MSG.GET_MATCHES_FOR_URL }
+  | { type: typeof EXT_MSG.GET_CC_MATCHES_FOR_URL }
+  | { type: typeof EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL }
   | { type: typeof EXT_MSG.COPY_TOTP; entryId: string; teamId?: string }
   | {
       type: typeof EXT_MSG.AUTOFILL_FROM_CONTENT;
@@ -35,8 +38,8 @@ export type ExtensionMessage =
   | { type: typeof EXT_MSG.UPDATE_LOGIN; entryId: string; password: string }
   | { type: typeof EXT_MSG.DISMISS_SAVE_PROMPT }
   | { type: typeof EXT_MSG.CHECK_PENDING_SAVE }
-  | { type: typeof EXT_MSG.AUTOFILL_CREDIT_CARD; entryId: string; tabId: number; teamId?: string }
-  | { type: typeof EXT_MSG.AUTOFILL_IDENTITY; entryId: string; tabId: number; teamId?: string }
+  | { type: typeof EXT_MSG.AUTOFILL_CREDIT_CARD; entryId: string; tabId: number; teamId?: string; expectedOrigin: string }
+  | { type: typeof EXT_MSG.AUTOFILL_IDENTITY; entryId: string; tabId: number; teamId?: string; expectedOrigin: string }
   | { type: typeof EXT_MSG.KEEPALIVE_PING }
   | { type: typeof EXT_MSG.RESET_DPOP_KEY }
   // Passkey SW messages — senderUrl is intentionally absent: the SW reads it
@@ -192,12 +195,15 @@ export interface AutofillPayload {
   targetHint?: AutofillTargetHint;
   totpCode?: string;
   customFields?: Array<{ label: string; value: string }>;
-  // Hosts the entry is bound to (urlHost + additionalUrlHosts). A subframe must
-  // only fill when its OWN origin matches one of these — the SW broadcasts
-  // AUTOFILL_FILL to every frame for popup/context-menu fills (frame unknown),
-  // so each frame self-checks to keep a cross-origin third-party iframe from
-  // receiving the decrypted credential.
+  // Hosts the entry is bound to (urlHost + additionalUrlHosts). A frame only
+  // fills when its OWN host matches one of these — the SW broadcasts the popup
+  // fill to every frame so an embedded login iframe can fill, and each frame
+  // self-checks so a cross-origin third-party iframe does not.
   allowedHosts?: string[];
+  // Popup fills only: the exact origin the popup showed the user. The top frame
+  // also fills when its own origin equals it (a user-confirmed mismatched or
+  // hostless entry); a subframe ignores it.
+  topFrameOrigin?: string;
 }
 
 export interface AutofillTargetHint {

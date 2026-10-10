@@ -180,6 +180,7 @@
     "autofillInjectFailed": "Autofill could not run on this page.",
     "copyTotpFailed": "Could not copy the TOTP code.",
     "unlockFailed": "Could not unlock the vault.",
-    "noToken": "Not connected. Sign in to passwd-sso first."
+    "noToken": "Not connected. Sign in to passwd-sso first.",
+    "internalError": "Something went wrong. Try again."
   }
 }

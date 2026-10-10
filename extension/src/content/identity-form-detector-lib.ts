@@ -381,16 +381,10 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
       activeInput = null;
       return;
     }
-    const url = window.location.href;
-    let topUrl: string | undefined;
-    try {
-      topUrl = window.top?.location?.href;
-    } catch {
-      topUrl = undefined;
-    }
+    // The SW derives the page URL from MessageSender, not from this message.
     try {
       chrome.runtime.sendMessage(
-        { type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL, url, topUrl },
+        { type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL },
         (response) => {
           if (destroyed) return;
           if (!isContextValid()) { destroy(); return; }

@@ -27,7 +27,6 @@ export const CONTENT_BUNDLE_ERROR = {
   NOT_FOUND: "CONTENT_BUNDLE_NOT_FOUND",
   SCOPE_REFUSED: "CONTENT_BUNDLE_SCOPE_REFUSED",
   DOCUMENT_UNKNOWN: "CONTENT_BUNDLE_DOCUMENT_UNKNOWN",
-  DOCUMENT_REFUSED: "CONTENT_BUNDLE_DOCUMENT_REFUSED",
 } as const;
 
 const NO_RECEIVER_RE = /Receiving end does not exist/;
@@ -152,21 +151,16 @@ export async function injectContentBundleInto(
 /**
  * Inject the content bundle into the in-scope documents of `target` and return
  * their documentIds. A target without `allFrames` names one frame and must
- * resolve to exactly one in-scope document, which `acceptDocument` (when given)
- * must also accept. Throws (so the caller fails closed
+ * resolve to exactly one in-scope document. Throws (so the caller fails closed
  * with its own error code) when the bundle path is unknown, no target document
  * is in the bundle's manifest scope, or the frame's document cannot be pinned.
  */
 export async function injectContentBundle(
   target: chrome.scripting.InjectionTarget,
-  acceptDocument?: (probed: ProbedDocument) => boolean,
 ): Promise<string[]> {
   if (!resolveContentBundle()) throw new Error(CONTENT_BUNDLE_ERROR.NOT_FOUND);
   if (!target.allFrames) {
     const probed = await probeDocument(target);
-    if (acceptDocument && !acceptDocument(probed)) {
-      throw new Error(CONTENT_BUNDLE_ERROR.DOCUMENT_REFUSED);
-    }
     await injectContentBundleInto(target.tabId, probed);
     return [probed.documentId];
   }
@@ -204,9 +198,8 @@ export async function resendUntilReceived<T>(send: () => Promise<T>): Promise<T>
 export async function injectContentBundleAndResend<T>(
   target: chrome.scripting.InjectionTarget,
   send: (documentId: string | undefined) => Promise<T>,
-  acceptDocument?: (probed: ProbedDocument) => boolean,
 ): Promise<T> {
-  const documentIds = await injectContentBundle(target, acceptDocument);
+  const documentIds = await injectContentBundle(target);
   const documentId = target.allFrames ? undefined : documentIds[0];
   return resendUntilReceived(() => send(documentId));
 }

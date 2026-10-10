@@ -592,16 +592,10 @@ export function initFormDetector(): FormDetectorCleanup {
       currentContext = null;
       return;
     }
-    const url = window.location.href;
-    let topUrl: string | undefined;
-    try {
-      topUrl = window.top?.location?.href;
-    } catch {
-      topUrl = undefined;
-    }
+    // The SW derives the page URL from MessageSender, not from this message.
     try {
       chrome.runtime.sendMessage(
-        { type: "GET_MATCHES_FOR_URL", url, topUrl },
+        { type: "GET_MATCHES_FOR_URL" },
         (response) => {
           if (destroyed) return;
           if (!isContextValid()) { destroy(); return; }

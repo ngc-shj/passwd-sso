@@ -106,6 +106,48 @@ export const EXT_MSG = {
   PASSKEY_CREATE_CREDENTIAL: "PASSKEY_CREATE_CREDENTIAL",
 } as const;
 
+type ExtMsgType = (typeof EXT_MSG)[keyof typeof EXT_MSG];
+
+// Messages the SW accepts only from extension pages (popup, options,
+// offscreen). They take an arbitrary tabId, release secrets without a sender
+// host check, or change vault/token state, so a content script — which runs in
+// every frame of every page — must not be able to send them. The SW refuses
+// them unless MessageSender.url is an extension URL.
+export const EXTENSION_PAGE_ONLY_MESSAGES: ReadonlySet<ExtMsgType> = new Set([
+  EXT_MSG.AUTOFILL,
+  EXT_MSG.AUTOFILL_CREDIT_CARD,
+  EXT_MSG.AUTOFILL_IDENTITY,
+  EXT_MSG.CLEAR_TOKEN,
+  EXT_MSG.COPY_PASSWORD,
+  EXT_MSG.COPY_TOTP,
+  EXT_MSG.FETCH_PASSWORDS,
+  EXT_MSG.GET_STATUS,
+  EXT_MSG.GET_TOKEN,
+  EXT_MSG.KEEPALIVE_PING,
+  EXT_MSG.LOCK_VAULT,
+  EXT_MSG.RESET_DPOP_KEY,
+  EXT_MSG.UNLOCK_VAULT,
+]);
+
+// Messages content scripts send. Each handler binds what it releases to the
+// browser-set MessageSender, not to fields of the message.
+export const CONTENT_ALLOWED_MESSAGES: ReadonlySet<ExtMsgType> = new Set([
+  EXT_MSG.AUTOFILL_FROM_CONTENT,
+  EXT_MSG.CHECK_PENDING_SAVE,
+  EXT_MSG.DISMISS_SAVE_PROMPT,
+  EXT_MSG.GET_MATCHES_FOR_URL,
+  EXT_MSG.GET_CC_MATCHES_FOR_URL,
+  EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
+  EXT_MSG.LOGIN_DETECTED,
+  EXT_MSG.PASSKEY_CHECK_DUPLICATE,
+  EXT_MSG.PASSKEY_CREATE_CREDENTIAL,
+  EXT_MSG.PASSKEY_GET_MATCHES,
+  EXT_MSG.PASSKEY_SIGN_ASSERTION,
+  EXT_MSG.SAVE_LOGIN,
+  EXT_MSG.START_CONNECT,
+  EXT_MSG.UPDATE_LOGIN,
+]);
+
 // ── Content script message types ──
 // SW → content script: show the post-navigation save/update banner.
 export const PSSO_SHOW_SAVE_BANNER = "PSSO_SHOW_SAVE_BANNER";

@@ -10,6 +10,22 @@ export function extractHost(url: string): string | null {
   }
 }
 
+/**
+ * `value` itself when it is a serialized http(s) origin (scheme, host and port
+ * only, as `URL.origin` produces it), otherwise null. A full URL is refused,
+ * so the result can be compared to `self.origin` / a probed origin with `===`.
+ */
+export function parseHttpOrigin(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.origin === value ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeHost(host: string): string {
   return host.replace(/^www\./i, "").toLowerCase();
 }

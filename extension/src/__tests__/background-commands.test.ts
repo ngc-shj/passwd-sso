@@ -139,10 +139,14 @@ function installChromeMock() {
   return mock;
 }
 
+// Every message this file drives through handleMessage is extension-page-only
+// (UNLOCK_VAULT, LOCK_VAULT, GET_STATUS, ...), so the default sender is an
+// extension page — otherwise C5's sender gate refuses it before it does
+// anything.
 function sendMessage(message: unknown): Promise<unknown> {
   return new Promise((resolve) => {
     const handler = messageHandlers[0];
-    handler(message, {}, (resp) => resolve(resp));
+    handler(message, { url: chrome.runtime.getURL("popup/index.html") }, (resp) => resolve(resp));
   });
 }
 

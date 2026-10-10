@@ -14,15 +14,25 @@ import { labelledByText } from "./labelled-by";
 
 /**
  * Whether this frame is allowed to receive the decrypted credential. The SW
- * broadcasts AUTOFILL_FILL to every frame in the tab for popup/context-menu
- * fills (the target frame is unknown), so each frame must self-verify: the top
- * frame is the user-visible page and always allowed; a subframe fills only when
- * its own origin matches one of the entry's hosts. This blocks a cross-origin
- * third-party iframe (ad/analytics/support widget) from ever filling the
- * password. Entries with no bound host still fill in the top frame only.
+ * broadcasts the popup fill to every frame in the tab so an embedded login
+ * iframe can fill, so each frame self-verifies against its OWN document: a frame
+ * fills when its host matches one of the entry's hosts. The top frame also fills
+ * when its origin equals `topFrameOrigin`, the exact origin the popup showed the
+ * user (a confirmed mismatched or hostless entry). A document that replaced the
+ * requested one checks itself here, so a navigation before delivery cannot turn
+ * into a fill on another site.
  */
-function isFrameAllowedToFill(allowedHosts: string[] | undefined): boolean {
-  if (window.top === window.self) return true;
+function isFrameAllowedToFill(
+  allowedHosts: string[] | undefined,
+  topFrameOrigin: string | undefined,
+): boolean {
+  if (
+    window.top === window.self &&
+    typeof topFrameOrigin === "string" &&
+    self.origin === topFrameOrigin
+  ) {
+    return true;
+  }
   const frameHost = extractHost(window.location.href);
   if (!frameHost) return false;
   return (allowedHosts ?? []).some((h) => isHostMatch(h, frameHost));
@@ -305,7 +315,7 @@ export async function performAutofill(
 ): Promise<void> {
   // Frame-origin gate: never write the credential into a cross-origin subframe.
   // The newer request still ends this frame's pending fill (FR4).
-  if (!isFrameAllowedToFill(payload.allowedHosts)) {
+  if (!isFrameAllowedToFill(payload.allowedHosts, payload.topFrameOrigin)) {
     supersedeActiveFill();
     return;
   }

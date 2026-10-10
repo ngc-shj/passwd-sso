@@ -302,3 +302,43 @@ function resolveSenderMatchUrl(sender: chrome.runtime.MessageSender): string | n
 | C5 | popup `expectedOrigin` + extension-page-only sender gate | locked |
 | C6 | save-banner push pinned at delivery time | locked |
 | C7 | inline-match lookups use browser-set sender URLs | locked |
+
+## Implementation Checklist
+
+Derived in Phase 2 Step 2-1 (impact analysis).
+
+### Production
+- `extension/src/lib/constants.ts`: `EXTENSION_PAGE_ONLY_MESSAGES` and `CONTENT_ALLOWED_MESSAGES` (C5).
+- `extension/src/types/messages.ts`:
+  - `expectedOrigin` on `AUTOFILL` / `AUTOFILL_CREDIT_CARD` / `AUTOFILL_IDENTITY`;
+  - remove `url`/`topUrl` from `GET_*_MATCHES_FOR_URL`;
+  - `AutofillPayload.topFrameOrigin`.
+- `extension/src/background/index.ts`:
+  - `AUTOFILL_REQUEST_KIND` / `AutofillRequestOrigin`;
+  - `performAutofillForEntry` (C1-C3);
+  - the three callers;
+  - `respondWithFailure` extracted from the `onMessage` failsafe, and the sender gate (C5);
+  - the save-banner timer (C6);
+  - `resolveSenderMatchUrl` and the three `GET_*_MATCHES` handlers (C7).
+- `extension/src/background/context-menu.ts`: `ContextMenuDeps.performAutofill` and `handleContextMenuClick` (C1, `info.frameId ?? 0`).
+- `extension/src/content/autofill-lib.ts`: `isFrameAllowedToFill` (C4).
+- `extension/src/popup/components/MatchList.tsx`: `expectedOrigin` (C5).
+- `extension/src/content/form-detector-lib.ts`, `cc-form-detector-lib.ts`, `identity-form-detector-lib.ts`: stop sending `url`/`topUrl` (C7).
+
+### Reuse, do not reimplement
+- `probeDocument`, `ProbedDocument`, `injectContentBundleInto`, `resendUntilReceived` (`background/content-bundle.ts`).
+- `extractHost` and `isHostMatch` (`lib/url-matching.ts`).
+- The existing `onMessage` failsafe switch, which is extracted as is rather than rewritten.
+
+### Tests — all test trees
+`extension/src/__tests__` is the only tree that tests these symbols; the one co-located test, `lib/webauthn-rp-id.test.ts`, is unrelated.
+- **C4 top-frame gate.** Every content test that calls `performAutofill` or dispatches `AUTOFILL_FILL` in the jsdom top frame (`http://localhost:3000/`) without `allowedHosts` would now be denied. The member set comes from `grep -rlE "performAutofill\(|AUTOFILL_FILL" extension/src/__tests__`:
+  - `content/autofill.test.ts` (about 80 calls);
+  - `content/autofill-react.test.tsx`;
+  - `content/fill-listener-errors.test.ts`.
+
+  Each such payload gains `allowedHosts: ["localhost"]`, the jsdom host. A test that exercises the deny side keeps its own value.
+- The sender fixtures, the C2 `documentId` fixtures, the C7 sender migration, the context-menu positional assertions, the `MatchList` exact-shape assertion, and the mock helper are as listed in the Testing strategy.
+
+### CI parity
+The extension's CI gates are `npm test`, `npm run build` and `scripts/checks/lint-extension.mjs`. All three run in `scripts/pre-pr.sh`, so there is no gap.

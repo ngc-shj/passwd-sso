@@ -274,10 +274,18 @@ function callsWith(
   ).length;
 }
 
+// The default sender for every plain sendMessage() call: an extension page
+// (popup), matching what every C5 extension-page-only message (UNLOCK_VAULT,
+// GET_STATUS, AUTOFILL, ...) now requires. Content-origin messages go through
+// sendMessageWithSender with an explicit content sender instead.
+function extensionPageSender(): { url: string } {
+  return { url: chrome.runtime.getURL("popup/index.html") };
+}
+
 function sendMessage(message: unknown): Promise<unknown> {
   return new Promise((resolve) => {
     const handler = messageHandlers[0];
-    handler(message, {}, (resp) => resolve(resp));
+    handler(message, extensionPageSender(), (resp) => resolve(resp));
   });
 }
 
@@ -836,8 +844,17 @@ describe("background message flow", () => {
     });
   });
 
+  // The origin the popup showed the user for this tab. Picked once so every
+  // popup AUTOFILL* message in this describe and its payload assertions agree.
+  const POPUP_ORIGIN = "https://example.com";
+
   it("returns error when AUTOFILL called while vault locked", async () => {
-    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMessage({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: POPUP_ORIGIN,
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "VAULT_LOCKED" });
   });
 
@@ -848,12 +865,18 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMessage({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: POPUP_ORIGIN,
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
       type: "AUTOFILL_FILL",
       username: "alice",
       password: "secret",
+      topFrameOrigin: POPUP_ORIGIN,
     });
   });
 
@@ -867,12 +890,18 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMessage({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: POPUP_ORIGIN,
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
       type: "AUTOFILL_FILL",
       username: "fallback-user",
       password: "secret",
+      topFrameOrigin: POPUP_ORIGIN,
     });
   });
 
@@ -893,7 +922,12 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMessage({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: POPUP_ORIGIN,
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1,
       expect.objectContaining({
@@ -904,6 +938,13 @@ describe("background message flow", () => {
       }),
     );
   });
+
+  // C7: GET_MATCHES_FOR_URL derives its URL from the browser-set MessageSender
+  // (resolveSenderMatchUrl), never from message.url/topUrl. These sender shapes
+  // reproduce the frame situation the old url/topUrl fields used to describe,
+  // so each test still exercises the suppression logic rather than passing
+  // vacuously because the (now-ignored) message field happened to be right.
+  const topFrameContentSender = (url: string) => ({ frameId: 0, url, tab: { id: 1, url } });
 
   it("suppresses inline matches on passwd-sso origin", async () => {
     setDecryptedPlaintext(
@@ -918,10 +959,10 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({
-      type: "GET_MATCHES_FOR_URL",
-      url: "https://localhost:3000/ja/passwords/new",
-    });
+    const res = await sendMessageWithSender(
+      { type: "GET_MATCHES_FOR_URL" },
+      topFrameContentSender("https://localhost:3000/ja/passwords/new"),
+    );
 
     expect(res).toEqual({
       type: "GET_MATCHES_FOR_URL",
@@ -932,10 +973,10 @@ describe("background message flow", () => {
   });
 
   it("suppresses inline matches on passwd-sso origin even when vault is locked", async () => {
-    const res = await sendMessage({
-      type: "GET_MATCHES_FOR_URL",
-      url: "https://localhost:3000/ja/dashboard",
-    });
+    const res = await sendMessageWithSender(
+      { type: "GET_MATCHES_FOR_URL" },
+      topFrameContentSender("https://localhost:3000/ja/dashboard"),
+    );
 
     expect(res).toEqual({
       type: "GET_MATCHES_FOR_URL",
@@ -949,10 +990,10 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({
-      type: "GET_MATCHES_FOR_URL",
-      url: "http://localhost:3000/ja/dashboard",
-    });
+    const res = await sendMessageWithSender(
+      { type: "GET_MATCHES_FOR_URL" },
+      topFrameContentSender("http://localhost:3000/ja/dashboard"),
+    );
 
     expect(res).toEqual(
       expect.objectContaining({
@@ -967,11 +1008,19 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({
-      type: "GET_MATCHES_FOR_URL",
-      url: "about:blank",
-      topUrl: "https://localhost:3000/ja/dashboard",
-    });
+    // A same-origin subframe (frameId !== 0, origin === the tab's own origin):
+    // resolveSenderMatchUrl reads the top URL from sender.tab.url, exactly as
+    // the content script used to read window.top.location.href. Still
+    // suppressed — this is not the spoof C7 closes.
+    const res = await sendMessageWithSender(
+      { type: "GET_MATCHES_FOR_URL" },
+      {
+        frameId: 1,
+        url: "about:blank",
+        origin: "https://localhost:3000",
+        tab: { id: 1, url: "https://localhost:3000/ja/dashboard" },
+      },
+    );
 
     expect(res).toEqual({
       type: "GET_MATCHES_FOR_URL",
@@ -981,22 +1030,36 @@ describe("background message flow", () => {
     });
   });
 
-  it("suppresses using topUrl even when frame url is external", async () => {
+  it("matches on the frame's own URL when a cross-origin subframe spoofs the top page (C7 closes the topUrl spoof)", async () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({
-      type: "GET_MATCHES_FOR_URL",
-      url: "https://example.com/login",
-      topUrl: "https://localhost:3000/ja/auth/signin",
-    });
+    // A cross-origin subframe (sender.origin !== origin(sender.tab.url)):
+    // resolveSenderMatchUrl refuses to trust sender.tab.url for it, so it
+    // falls back to the frame's own sender.url — the message's spoofed topUrl,
+    // which pre-C7 code would have honoured, is never read.
+    const res = await sendMessageWithSender(
+      {
+        type: "GET_MATCHES_FOR_URL",
+        // Ignored: C7 reads only the browser-set sender, never the message.
+        topUrl: "https://localhost:3000/ja/auth/signin",
+      },
+      {
+        frameId: 1,
+        url: "https://example.com/login",
+        origin: "https://example.com",
+        tab: { id: 1, url: "https://localhost:3000/ja/auth/signin" },
+      },
+    );
 
-    expect(res).toEqual({
-      type: "GET_MATCHES_FOR_URL",
-      entries: [],
-      vaultLocked: false,
-      suppressInline: true,
-    });
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "GET_MATCHES_FOR_URL",
+        suppressInline: false,
+      }),
+    );
+    const matched = (res as { entries: Array<{ id: string }> }).entries;
+    expect(matched.map((e) => e.id)).toEqual(["pw-1"]);
   });
 
   it("does not suppress when serverUrl is missing", async () => {
@@ -1008,10 +1071,10 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({
-      type: "GET_MATCHES_FOR_URL",
-      url: "https://localhost:3000/ja/dashboard",
-    });
+    const res = await sendMessageWithSender(
+      { type: "GET_MATCHES_FOR_URL" },
+      topFrameContentSender("https://localhost:3000/ja/dashboard"),
+    );
 
     expect(res).toEqual(
       expect.objectContaining({
@@ -1056,7 +1119,12 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMessage({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: POPUP_ORIGIN,
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "NOT_FOUND" });
   });
 
@@ -1068,7 +1136,12 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    const res = await sendMessage({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: POPUP_ORIGIN,
+    });
     // executeScript fails but sendMessage reaches the listener bundled in form-detector.ts
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
   });
@@ -1099,7 +1172,11 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1", targetHint: { id: "user" } },
-        { tab: { id: 1, url: "https://example.com/login" }, url: "https://example.com/login" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+          documentId: documentIdFor(0),
+        },
         (resp) => resolve(resp),
       );
     });
@@ -1192,7 +1269,11 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "id-1" },
-        { tab: { id: 1, url: "https://any-site.example/checkout" }, url: "https://any-site.example/checkout" },
+        {
+          tab: { id: 1, url: "https://any-site.example/checkout" },
+          url: "https://any-site.example/checkout",
+          documentId: documentIdFor(0),
+        },
         (resp) => resolve(resp),
       );
     });
@@ -1279,7 +1360,11 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
-        { tab: { id: 1, url: "https://attacker.example/phish" }, url: "https://attacker.example/phish" },
+        {
+          tab: { id: 1, url: "https://attacker.example/phish" },
+          url: "https://attacker.example/phish",
+          documentId: documentIdFor(0),
+        },
         (resp) => resolve(resp),
       );
     });
@@ -1333,6 +1418,7 @@ describe("background message flow", () => {
           tab: { id: 1, url: "https://example.com/login" },
           url: "https://attacker.example/iframe",
           frameId: 9,
+          documentId: documentIdFor(9),
         },
         (resp) => resolve(resp),
       );
@@ -1393,7 +1479,9 @@ describe("background message flow", () => {
     expect(calls[0][1]).toEqual(
       expect.objectContaining({ type: "AUTOFILL_FILL", username: "alice" }),
     );
-    expect(calls[0][2]).toEqual({ frameId: 0 });
+    // C3: the context menu probes the clicked frame before the first send and
+    // addresses it by documentId, not frameId.
+    expect(calls[0][2]).toEqual({ documentId: documentIdFor(0) });
   });
 
   it("refuses the password when the clicked frame is a cross-origin subframe", async () => {
@@ -1468,14 +1556,13 @@ describe("background message flow", () => {
     });
   }
 
-  it("still fills a CREDIT_CARD on a navigated page, top-frame only (accepted residual)", async () => {
-    // C5 invariant 6, pinned as an explicit ALLOW rather than left implied.
-    // CC/Identity entries carry no host by design, so the origin gate — which is
-    // scoped to LOGIN — cannot adjudicate them, and a stale item stays fillable
-    // after the tab navigates. What BOUNDS that residual is the delivery path:
-    // sendSensitiveFillMessage pins { frameId: frameId ?? 0 }, so the card never
-    // broadcasts tab-wide. If a future change routes CC through sendFillMessage,
-    // this test is what fails.
+  // C5 invariant 6 (now C3): CC/Identity entries carry no host by design, so
+  // the origin gate — scoped to LOGIN — cannot adjudicate them. C3 closes the
+  // residual not with a host check on the entry, but by probing the clicked
+  // frame BEFORE the first send and requiring the probed host to be the click
+  // host: a stale menu item can no longer release the card to whatever
+  // document the clicked frame now holds.
+  function stubCreditCardFetch() {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -1510,6 +1597,10 @@ describe("background message flow", () => {
         return { ok: true, json: async () => ({}) };
       }),
     );
+  }
+
+  it("refuses a CREDIT_CARD fill when the probed frame is not the click host (C3)", async () => {
+    stubCreditCardFetch();
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     setDecryptedPlaintext(
@@ -1517,10 +1608,33 @@ describe("background message flow", () => {
       JSON.stringify({ title: "Card", cardNumber: "4111111111111111", cvv: "123" }),
     );
 
-    // Deliberately NO frameId: this is the case where the two senders diverge.
-    // sendFillMessage would broadcast tab-wide; sendSensitiveFillMessage pins
-    // frameId 0. With a frameId present both behave alike, so a test that
-    // supplied one could not tell them apart.
+    // Deliberately NO frameId: the click resolves the top frame (0), and the
+    // probe of that frame reports a document on a different host — the frame
+    // navigated between the click and the fill.
+    probeUrls = { 0: "https://other.example/elsewhere" };
+    await clickMenuItem({
+      menuItemId: `psso-cc-${MENU_ENTRY_UUID}`,
+      pageUrl: "https://unrelated.example/checkout",
+    });
+
+    const ccCalls = (chromeMock?.tabs.sendMessage.mock.calls ?? []).filter(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_CC_FILL",
+    );
+    expect(ccCalls.length).toBe(0);
+  });
+
+  it("fills a CREDIT_CARD once the probe confirms the click host (C3 allow)", async () => {
+    stubCreditCardFetch();
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    setDecryptedPlaintext(
+      "aa",
+      JSON.stringify({ title: "Card", cardNumber: "4111111111111111", cvv: "123" }),
+    );
+
+    // The probe of the clicked (top) frame reports the same host the click
+    // resolved, so the pinned document passes C3's check.
+    probeUrls = { 0: "https://unrelated.example/checkout" };
     await clickMenuItem({
       menuItemId: `psso-cc-${MENU_ENTRY_UUID}`,
       pageUrl: "https://unrelated.example/checkout",
@@ -1530,8 +1644,8 @@ describe("background message flow", () => {
       (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_CC_FILL",
     );
     expect(ccCalls.length).toBe(1);
-    // The bound: frame-scoped, never a tab-wide broadcast.
-    expect(ccCalls[0][2]).toEqual({ frameId: 0 });
+    // The bound: pinned to the probed document, never a tab-wide broadcast.
+    expect(ccCalls[0][2]).toEqual({ documentId: documentIdFor(0) });
   });
 
   it("rejects a LOGIN fill when the entry overview has no host at all (fail closed)", async () => {
@@ -1546,6 +1660,7 @@ describe("background message flow", () => {
         {
           tab: { id: 1, url: "https://example.com/login" },
           url: "https://example.com/login",
+          documentId: documentIdFor(0),
         },
         (resp) => resolve(resp),
       );
@@ -1573,6 +1688,7 @@ describe("background message flow", () => {
         {
           tab: { id: 1, url: "https://example.com/login" },
           url: "https://example.com/login",
+          documentId: documentIdFor(0),
         },
         (resp) => resolve(resp),
       );
@@ -1593,19 +1709,20 @@ describe("background message flow", () => {
           tab: { id: 1, url: "https://example.com/login" },
           url: "https://example.com/login",
           frameId: 7,
+          documentId: documentIdFor(7),
         },
         (resp) => resolve(resp),
       );
     });
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
 
-    // The password must be delivered frame-scoped ({ frameId }), never broadcast
-    // tab-wide, so a cross-origin subframe cannot capture it.
+    // The password must be delivered document-scoped ({ documentId }), never
+    // broadcast tab-wide, so a cross-origin subframe cannot capture it.
     const fillCall = chromeMock?.tabs.sendMessage.mock.calls.find(
       (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
     );
     expect(fillCall).toBeDefined();
-    expect(fillCall?.[2]).toEqual({ frameId: 7 });
+    expect(fillCall?.[2]).toEqual({ documentId: documentIdFor(7) });
     // The entry's hosts ride along so the receiving frame can self-verify origin.
     expect((fillCall?.[1] as { allowedHosts?: string[] }).allowedHosts).toEqual([
       "example.com",
@@ -1629,17 +1746,18 @@ describe("background message flow", () => {
           tab: { id: 1, url: "https://example.com/login" },
           url: "https://example.com/login",
           frameId: 7,
+          documentId: documentIdFor(7),
         },
         (resp) => resolve(resp),
       );
     });
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
 
-    // Every fallback injection reaches ONLY the originating frame, never all
-    // frames: the probe targets frame 7, and the bundle and the inline func are
-    // pinned to the document the probe found there.
+    // Every fallback injection reaches ONLY the originating document, never all
+    // frames: the probe (re-check before the fallback) and the bundle and the
+    // inline func are all pinned to the sender's own documentId.
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
-      target: { tabId: 1, frameIds: [7] },
+      target: { tabId: 1, documentIds: [documentIdFor(7)] },
       func: expect.any(Function),
     });
     const bundleCall = chromeMock?.scripting.executeScript.mock.calls.find(
@@ -1663,6 +1781,7 @@ describe("background message flow", () => {
           tab: { id: 1, url: "https://example.com/login" },
           url: "https://example.com/login",
           frameId: 7,
+          documentId: documentIdFor(7),
         },
         (resp) => resolve(resp),
       );
@@ -1806,20 +1925,26 @@ describe("background message flow", () => {
       expect(injectionKinds()).toEqual(["probe"]);
     });
 
-    // The popup lists every entry, not only matching ones, and binds no sender
-    // host: its fallback is not host-checked.
-    it("still fills from the popup when the page is on another host", async () => {
+    // C3: the popup's fallback now carries the same top-frame rule as its first
+    // send — a document the probe finds on neither the entry's hosts nor the
+    // popup's own expectedOrigin is refused. This closes what used to be a
+    // residual: the popup fallback used to accept any document the tab held.
+    it("refuses the popup's fallback when the probed page is on another host", async () => {
       stubLoginFetch({ username: "alice", urlHost: "example.com" });
       applyToken("t", Date.now() + 60_000, "");
       await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
       chromeMock?.tabs.sendMessage.mockRejectedValue(new Error(NO_RECEIVER));
       probeUrls = { 0: "https://other.example/login" };
 
-      const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+      const res = await sendMessage({
+        type: "AUTOFILL",
+        entryId: "pw-1",
+        tabId: 1,
+        expectedOrigin: POPUP_ORIGIN,
+      });
 
-      expect(res).toEqual({ type: "AUTOFILL", ok: true });
-      expect(injectionKinds()).toEqual(["probe", "bundle", "func"]);
-      expect(funcTargets()).toEqual([{ tabId: 1, documentIds: [documentIdFor(0)] }]);
+      expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "AUTOFILL_INJECT_FAILED" });
+      expect(injectionKinds()).toEqual(["probe"]);
     });
 
     it.each([
@@ -1847,7 +1972,12 @@ describe("background message flow", () => {
         { frameId: 0, documentId: documentIdFor(0), result: "https://example.com/login" },
       ]);
 
-      const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+      const res = await sendMessage({
+        type: "AUTOFILL",
+        entryId: "pw-1",
+        tabId: 1,
+        expectedOrigin: POPUP_ORIGIN,
+      });
 
       expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "AUTOFILL_INJECT_FAILED" });
       expect(injectionKinds()).toEqual(["probe"]);
@@ -1878,7 +2008,7 @@ describe("background message flow", () => {
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
     expect(injectionKinds()).toEqual(["probe", "bundle"]);
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
-      target: { tabId: 1, frameIds: [7] },
+      target: { tabId: 1, documentIds: [documentIdFor(7)] },
       func: expect.any(Function),
     });
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
@@ -1899,9 +2029,15 @@ describe("background message flow", () => {
 
     chromeMock?.tabs.sendMessage.mockRejectedValue(new Error("no connection"));
 
-    // The real popup/context-menu path: EXT_MSG.AUTOFILL carries an explicit
-    // tabId and no originating frameId (the popup is not a tab frame).
-    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    // The real popup path: EXT_MSG.AUTOFILL carries an explicit tabId and the
+    // popup's expectedOrigin, never an originating frameId (the popup is not a
+    // tab frame).
+    const res = await sendMessage({
+      type: "AUTOFILL",
+      entryId: "pw-1",
+      tabId: 1,
+      expectedOrigin: POPUP_ORIGIN,
+    });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
 
     // With no known frame, the decrypted credential must NOT be injected into
@@ -1910,7 +2046,7 @@ describe("background message flow", () => {
     // The probe targets the top frame only; the bundle and the func are then
     // pinned to the top frame's document.
     expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
-      target: { tabId: 1 },
+      target: { tabId: 1, frameIds: [0] },
       func: expect.any(Function),
     });
     const bundleCall = chromeMock?.scripting.executeScript.mock.calls.find(

@@ -2,6 +2,7 @@ import type { DecryptedEntry } from "../types/messages";
 import { EXT_ENTRY_TYPE } from "../lib/constants";
 import { t } from "../lib/i18n";
 import { classifyLastError, warnBackground } from "./log";
+import { AUTOFILL_REQUEST_KIND, type AutofillRequestOrigin } from "./autofill-request-origin";
 
 const PARENT_ID = "psso-parent";
 const ITEM_PREFIX = "psso-login-";
@@ -26,9 +27,8 @@ export interface ContextMenuDeps {
   performAutofill: (
     entryId: string,
     tabId: number,
+    origin: AutofillRequestOrigin,
     teamId?: string,
-    enforceSenderHost?: string,
-    frameId?: number,
   ) => Promise<{ ok: boolean; error?: string }>;
   notifyFillFailure: (error: string) => void;
 }
@@ -376,12 +376,13 @@ export function handleContextMenuClick(
       const tabId = tab.id;
       void (async () => {
         try {
+          // OnClickData.frameId is optional; a click without one targets the
+          // top frame, which is probed and host-checked like any other.
           const result = await deps!.performAutofill(
             entryId,
             tabId,
+            { kind: AUTOFILL_REQUEST_KIND.CONTEXT_MENU, frameId: info.frameId ?? 0, senderHost: host },
             teamId,
-            host,
-            info.frameId,
           );
           if (!result.ok) deps!.notifyFillFailure(result.error ?? "FILL_FAILED");
         } catch {

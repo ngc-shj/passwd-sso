@@ -169,10 +169,13 @@ function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
   bgModule.applyToken(token, expiresAt, cnfJkt);
 }
 
+// Every message this file drives through handleMessage is extension-page-only
+// (UNLOCK_VAULT, FETCH_PASSWORDS, ...), so the default sender is an extension
+// page — otherwise C5's sender gate refuses it before it does anything.
 function sendMessage(message: unknown): Promise<unknown> {
   return new Promise((resolve) => {
     const handler = messageHandlers[0];
-    handler(message, {}, (resp) => resolve(resp));
+    handler(message, { url: chrome.runtime.getURL("popup/index.html") }, (resp) => resolve(resp));
   });
 }
 
@@ -729,6 +732,7 @@ describe("team entries in background", () => {
         entryId: "team-pw-1",
         tabId: 1,
         teamId: "team-1",
+        expectedOrigin: "https://example.com",
       })) as { type: string; ok: boolean };
 
       expect(res.type).toBe("AUTOFILL");

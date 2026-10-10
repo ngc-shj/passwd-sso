@@ -256,7 +256,9 @@ describe("context-menu", () => {
         { id: 1 } as chrome.tabs.Tab,
       );
 
-      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 1, undefined, "github.com", undefined);
+      expect(deps.performAutofill).toHaveBeenCalledWith(
+        entryUuid, 1, { kind: "contextMenu", frameId: 0, senderHost: "github.com" }, undefined,
+      );
     });
 
     it("calls performAutofill with teamId for team entry clicks", () => {
@@ -267,7 +269,9 @@ describe("context-menu", () => {
         { id: 1 } as chrome.tabs.Tab,
       );
 
-      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 1, teamUuid, "github.com", undefined);
+      expect(deps.performAutofill).toHaveBeenCalledWith(
+        entryUuid, 1, { kind: "contextMenu", frameId: 0, senderHost: "github.com" }, teamUuid,
+      );
     });
 
     it("calls performAutofill with teamId for CC entry clicks", () => {
@@ -278,7 +282,9 @@ describe("context-menu", () => {
         { id: 2 } as chrome.tabs.Tab,
       );
 
-      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 2, teamUuid, "shop.example", undefined);
+      expect(deps.performAutofill).toHaveBeenCalledWith(
+        entryUuid, 2, { kind: "contextMenu", frameId: 0, senderHost: "shop.example" }, teamUuid,
+      );
     });
 
     it("calls performAutofill with teamId for ID entry clicks", () => {
@@ -289,7 +295,9 @@ describe("context-menu", () => {
         { id: 3 } as chrome.tabs.Tab,
       );
 
-      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 3, teamUuid, "forms.example", undefined);
+      expect(deps.performAutofill).toHaveBeenCalledWith(
+        entryUuid, 3, { kind: "contextMenu", frameId: 0, senderHost: "forms.example" }, teamUuid,
+      );
     });
 
     it("rejects malformed teamId:entryId format", () => {
@@ -376,7 +384,7 @@ describe("context-menu", () => {
       );
 
       expect(deps.performAutofill).toHaveBeenCalledWith(
-        entryUuid, 1, undefined, "widget.example", 7,
+        entryUuid, 1, { kind: "contextMenu", frameId: 7, senderHost: "widget.example" }, undefined,
       );
     });
 
@@ -391,7 +399,7 @@ describe("context-menu", () => {
       );
 
       expect(deps.performAutofill).toHaveBeenCalledWith(
-        entryUuid, 1, undefined, "github.com", 0,
+        entryUuid, 1, { kind: "contextMenu", frameId: 0, senderHost: "github.com" }, undefined,
       );
     });
 
@@ -401,8 +409,10 @@ describe("context-menu", () => {
         { id: 1, url: "https://github.com/login" } as chrome.tabs.Tab,
       );
 
+      // info.frameId is absent — the click targets the top frame, so the
+      // resolved origin is probed/pinned as frame 0.
       expect(deps.performAutofill).toHaveBeenCalledWith(
-        entryUuid, 1, undefined, "github.com", undefined,
+        entryUuid, 1, { kind: "contextMenu", frameId: 0, senderHost: "github.com" }, undefined,
       );
     });
 
@@ -419,7 +429,7 @@ describe("context-menu", () => {
       );
 
       expect(deps.performAutofill).toHaveBeenCalledWith(
-        entryUuid, 1, undefined, "github.com", undefined,
+        entryUuid, 1, { kind: "contextMenu", frameId: 0, senderHost: "github.com" }, undefined,
       );
     });
 

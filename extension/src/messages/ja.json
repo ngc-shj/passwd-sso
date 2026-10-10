@@ -180,6 +180,7 @@
     "autofillInjectFailed": "このページでは自動入力を実行できませんでした。",
     "copyTotpFailed": "TOTP コードをコピーできませんでした。",
     "unlockFailed": "保管庫をアンロックできませんでした。",
-    "noToken": "未接続です。先に passwd-sso にサインインしてください。"
+    "noToken": "未接続です。先に passwd-sso にサインインしてください。",
+    "internalError": "問題が発生しました。もう一度お試しください。"
   }
 }
