@@ -1,6 +1,6 @@
 # Plan: pin the first autofill send to a known document (`#876`) + sender-gate extension-page messages
 
-Revision 4 (after plan review rounds 1-3, see `pin-first-autofill-send-review.md`).
+Revision 8 (after plan review rounds 1-6; C7 added at the user's request in revision 5), see `pin-first-autofill-send-review.md`).
 
 ## Project context
 
@@ -31,6 +31,7 @@ Two more members of the same class, found while deriving the member set:
 - **FR3.** The popup LOGIN fill keeps its tab-wide broadcast, so a login form inside an iframe (embedded SSO) still fills. Each frame self-verifies, and the top frame no longer passes unconditionally.
 - **FR4.** The popup's explicit choice of a host-mismatched LOGIN (the confirmation sheet in `MatchList.tsx`) and of a hostless LOGIN keeps working, but only into a top document on the exact origin the popup showed the user.
 - **FR5.** Extension-page-only messages are refused from any sender that is not an extension page, with no side effect.
+- **FR6.** Inline-match lookups (`GET_*_MATCHES_FOR_URL`) decide on browser-set sender data, not on URLs the content script supplies.
 - **NF1.** No new permission. `documentId` comes from `MessageSender.documentId` or from the existing `executeScript` probe (`probeDocument`).
 - **NF2.** Unchanged: the fill sequencing (`fill-sequence-lib.ts`), the manifest-scope gate on bundle injection, and the CHECK_PENDING_SAVE pull. The pull answers the sending document through `sendResponse` after checking its frame host, so it is already bound to that document.
 
@@ -55,6 +56,7 @@ Two more members of the same class, found while deriving the member set:
 - `extension/src/types/messages.ts` — `AutofillPayload.topFrameOrigin`; `expectedOrigin` on the three popup messages.
 - `extension/src/lib/constants.ts` — `EXTENSION_PAGE_ONLY_MESSAGES`, `CONTENT_ALLOWED_MESSAGES`.
 - `extension/src/popup/components/MatchList.tsx` — sends `expectedOrigin`.
+- `extension/src/content/form-detector-lib.ts`, `cc-form-detector-lib.ts`, `identity-form-detector-lib.ts` — stop sending `url`/`topUrl` (C7).
 - Tests: `extension/src/__tests__/background.test.ts`, `context-menu.test.ts`, `content/autofill.test.ts`, `helpers/execute-script-mock.ts`, the `MatchList` popup test, and a new partition/AST test file.
 
 ## Contracts
@@ -168,6 +170,40 @@ function isFrameAllowedToFill(allowedHosts: string[] | undefined, topFrameOrigin
   - Deny: the probe reports a host not matching `pending.host`, so no `sendMessage` call is made.
   - Allow: the probe reports a matching host, so exactly one send is made, carrying `{ documentId: probed.documentId }` and the password.
 
+### C7: inline-match lookups use browser-set sender URLs
+
+```ts
+// background/index.ts
+function resolveSenderMatchUrl(sender: chrome.runtime.MessageSender): string | null;
+```
+
+- **What it returns.** It reproduces the content script's `window.top?.location?.href ?? window.location.href`, which the three detectors compute today, from browser-set data:
+  - `sender.frameId === 0` → `sender.url`;
+  - a subframe whose `sender.origin` equals the origin of `sender.tab.url` → `sender.tab.url`. Reading `window.top.location.href` succeeds exactly when the top document is same-origin. `sender.tab.url` can be absent (no host permission on the top origin, or mid-navigation) or unparseable; either way it is a non-match and falls through to the next case;
+  - otherwise → `sender.url`;
+  - no `sender.url` → `null`. A content-script sender always has `url`, so this is an unknown sender and fails closed for every kind.
+- **Null handling.** `resolveInlineMatches` and `updateBadgeForTab` keep their `string` parameters. When `resolveSenderMatchUrl` returns `null`, each of the three handlers answers with its existing catch-branch response (`entries: []`, `vaultLocked: false`, `suppressInline: false`) before calling `resolveInlineMatches`, and does not update the badge.
+  - This also covers CC/Identity, which deliberately return entries on *hostless* pages. A hostless page still has a `sender.url`, so that behaviour is unchanged; only an unknown sender is refused.
+- **Relation to `AUTOFILL_FROM_CONTENT`.** That handler binds secret release to the frame's own `sender.url`, and C7's same-origin case returns `sender.tab.url`. The two agree on the host whenever C7's case fires, because same origin implies same host. C7 keeps the top-URL fallback only for suggestion parity with today's content behaviour. A code comment at `resolveSenderMatchUrl` states this, so the two rationales are not "harmonised" later.
+- **Handlers.** `GET_MATCHES_FOR_URL`, `GET_CC_MATCHES_FOR_URL` and `GET_IDENTITY_MATCHES_FOR_URL` call `resolveInlineMatches(kind, resolveSenderMatchUrl(_sender))` and no longer read `message.url` / `message.topUrl`. The LOGIN badge update uses the same URL.
+- **Message types.** `url` and `topUrl` are removed from the three message types in `types/messages.ts`, and the three content detectors (`form-detector-lib.ts`, `cc-form-detector-lib.ts`, `identity-form-detector-lib.ts`) stop sending them. A field the background ignores must not stay in the contract.
+- **Behaviour change.**
+  - It applies only where the content-supplied value differed from the browser's. Under `document.domain` relaxation, a cross-origin-but-same-site top was readable from content and is not same-origin here, so the subframe now matches on its own URL.
+  - `document.domain` setting is deprecated and origin-keyed by default in current Chrome, so this case is accepted.
+- **Control class.** **Enforceable boundary** against a content sender choosing which host's entries it learns. Adjudication authority: the browser-set `MessageSender.url`, `origin`, `frameId` and `tab.url`.
+- **Acceptance.** Each row has a paired deny case and allow case.
+
+  | Sender | Message | Result |
+  |---|---|---|
+  | content sender on `https://evil.example/` (frame 0) | `url: "https://bank.example/"` | matches computed for `evil.example`; no bank entries |
+  | same-origin subframe of a `bank.example` tab | — | bank entries |
+  | cross-origin subframe on `widget.example` in a `bank.example` tab | — | matched on `widget.example` |
+  | same-origin subframe of a `bank.example` tab | `url`/`topUrl: "https://other.example/"` | bank entries (message ignored) |
+  | cross-origin subframe on `widget.example` | `topUrl: "https://bank.example/"` | matched on `widget.example`; no bank entries |
+  | subframe whose `sender.tab` has no `url` | — | matched on `sender.url` |
+  | sender without `url` | `url`/`topUrl: "https://bank.example/"` (spoofed, so the pre-C7 code would match it) | catch-branch empty response, no badge update; all three kinds |
+- **Consumer-flow walkthrough.** `resolveInlineMatches` reads the returned string as `effectiveUrl`: for `isOwnAppPage`, for `extractHost` (LOGIN), and for the badge's `updateBadgeForTab(tabId, url)`. The content detectors read only the response (`entries`, `vaultLocked`, `disconnected`, `suppressInline`), which is unchanged.
+
 ### Forbidden patterns
 
 - pattern: `chrome.tabs.sendMessage(tabId, payload, { frameId })` — reason: the first send must not be addressed by frame.
@@ -175,6 +211,7 @@ function isFrameAllowedToFill(allowedHosts: string[] | undefined, topFrameOrigin
 - pattern: `if (window.top === window.self) return true;` — reason: C4 removes the unconditional top-frame pass.
 - pattern: `enforceSenderHost?: string | null` — reason: replaced by `AutofillRequestOrigin` (C1).
 - pattern: `}, { frameId: 0 }).then(` — reason: the save-banner push must be addressed by `documentId` (C6).
+- pattern: `message.topUrl ?? message.url` — reason: inline-match lookups use the sender (C7).
 
 ## Testing strategy
 
@@ -208,6 +245,21 @@ function isFrameAllowedToFill(allowedHosts: string[] | undefined, topFrameOrigin
   - The files that drive `handleMessage` with a URL-less default sender are `background.test.ts`, `background-commands.test.ts`, `background/totp-handlers.test.ts`, `background/inline-matches.test.ts` and `background/team-entries.test.ts`. In each, the default sender becomes an extension-page sender, generalising `background.test.ts`'s existing `popupSender`. Content-origin calls keep an explicit content sender.
   - Every existing allow-side `AUTOFILL_FROM_CONTENT` sender fixture gains `documentId: documentIdFor(<its frameId>)`, consistent with what the probe mock reports for that frame. This includes the shared `fillFromFrame7` helper. Deny-side fixtures keep failing for their original reason.
   - Run the full extension suite after these updates and before any new assertion is written, so that a fixture refused by the new gates surfaces as a failure rather than as lost coverage.
+- **C7**:
+  - `background/inline-matches.test.ts` and `background.test.ts` cover the C7 table through `handleMessage` with explicit senders.
+  - Each existing test that passes `url`/`topUrl` in the message moves to a sender that reproduces the same *frame situation*, not just the same URL. The two topUrl-precedence tests in `background.test.ts` split:
+    - `"suppresses inline matches using topUrl from iframe context"` (frame `about:blank`) becomes a same-origin subframe sender, with `frameId` ≠ 0 and `origin` = `tab.url`'s origin. It stays suppressed.
+    - `"suppresses using topUrl even when frame url is external"` describes a cross-origin frame claiming the own-app top. That is the spoof C7 closes, so it is replaced by the cross-origin spoof row, with the expectation flipped: it is matched on the frame's own URL and not suppressed.
+  - Every deny row carries a spoofed message `url`/`topUrl` that the pre-C7 code would have honoured, so each deny test fails when C7 is reverted (red-proven).
+  - Every other member of `grep -rlE "GET_(CC_|IDENTITY_)?MATCHES_FOR_URL" extension/src/__tests__` in `background.test.ts` and `background/inline-matches.test.ts` moves to an explicit top-frame content sender, `{ frameId: 0, url: <its current message url>, origin, tab: { id, url } }`, so its effective URL is unchanged. Tests that assert only an empty or `false` result would otherwise stay green while exercising nothing:
+    - `"does not suppress inline matches when scheme differs from serverUrl"`;
+    - `"does not suppress when serverUrl is missing"`;
+    - `"LOGIN returns no entry when urlHost does not match the page host"`;
+    - `"LOGIN returns empty on a hostless (file://) page"`.
+
+    Each migrated test is red-proven by changing its sender URL on a scratchpad copy.
+  - New badge test: a `GET_MATCHES_FOR_URL` from a sender on a matching host calls `updateBadgeForTab(tab.id, <sender-derived url>)`. Paired deny: a sender without `url` whose message spoofs a matching `url` does not update the badge.
+  - `content/form-detector-inline.test.ts` and `content/cc-identity-detector.test.ts` assert that the sent message no longer carries `url`/`topUrl`. Member set: `grep -rlE "GET_(CC_|IDENTITY_)?MATCHES_FOR_URL" extension/src/__tests__`.
 - **`extension/src/__tests__/context-menu.test.ts`**: rewrite every existing exact-positional `performAutofill` assertion in the `handleContextMenuClick` and `click host binding (C5)` describe blocks to the new `(entryId, tabId, origin, targetHint, teamId)` shape. Each rewrite re-checks that the site's `teamId`, `frameId` and `senderHost` survive the reorder; do not edit them mechanically. Add a case with `info.frameId` absent → `frameId: 0`.
 - **`extension/src/__tests__/content/autofill.test.ts`**:
   - Rewrite the existing `"always fills the top frame regardless of allowedHosts"` test: a top frame with neither condition met now does not write.
@@ -236,11 +288,7 @@ function isFrameAllowedToFill(allowedHosts: string[] | undefined, topFrameOrigin
 
 - **SC1:** the popup LOGIN broadcast residual. Under the broadcast, every frame's content script receives the LOGIN payload before C4 decides; page JS cannot read the isolated world, but the plaintext is in the renderer process of every frame, including site-isolated third-party ones, so a compromised renderer can read it. This is pre-existing (today's broadcast has the same exposure) and not widened by this plan. The user requires iframe delivery, so the broadcast stays. Removing the residual needs per-frame enumeration in the background, through the `webNavigation` permission or an all-frames `executeScript` probe whose reach depends on per-frame host permission. A follow-up issue only if the user wants it.
 - **SC2:** `PSSO_TRIGGER_INLINE_SUGGESTIONS` sends carry no secret and are unchanged.
-- **SC4:** content-sender residuals outside C5's reach, under the compromised-content-script model C5 defends against:
-  - `AUTOFILL_FROM_CONTENT` for CC/Identity has no host binding, because those entries are hostless by design and the background cannot verify a user gesture in the requesting frame. C2 only makes sure the delivery reaches the requesting document.
-  - `GET_*_MATCHES_FOR_URL` match on the content-supplied `message.topUrl ?? message.url`, not on the browser-set `sender.url` / `sender.tab.url`. They return entry metadata, never secrets. Rebinding them requires reproducing the same-origin-top fallback from sender data.
-
-  Follow-up issue: "bind inline-match lookups to browser-set sender URLs".
+- **SC4:** `AUTOFILL_FROM_CONTENT` for CC/Identity has no host binding, because those entries are hostless by design. No host exists to bind to, and the background cannot verify a user gesture in the requesting frame. This is not a deferral but a property of the entry type; C2 makes sure the delivery reaches only the requesting document. (The `GET_*_MATCHES` half of the round-1 SC4 is now C7.)
 - **SC3:** `extractHost`/`isHostMatch` compare hostnames only, across the codebase. C4 and C3's popup rule use an exact origin for the new popup pin, but the existing `allowedHosts` and sender-host rules keep hostname semantics. Changing those is out of scope.
 
 ## Go/No-Go Gate
@@ -253,3 +301,4 @@ function isFrameAllowedToFill(allowedHosts: string[] | undefined, topFrameOrigin
 | C4 | content frame gate checks the top frame | locked |
 | C5 | popup `expectedOrigin` + extension-page-only sender gate | locked |
 | C6 | save-banner push pinned at delivery time | locked |
+| C7 | inline-match lookups use browser-set sender URLs | locked |

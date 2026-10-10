@@ -118,3 +118,85 @@ Further review of fixture completeness is reachable only by executing the suite,
 ## Recurring Issue Check
 ### Testing expert
 R1-R2 N/A · R3 Checked · R4-R18 N/A · R19 Finding F-T9, F-T10 · R20-R28 N/A · R29 Checked — round-2 citations re-verified · R30-R41 N/A · R42 Finding F-T9 (5 files derived) · R43-R57 N/A · RT1 Checked · RT2 Checked · RT3-RT6 N/A · RT7 N/A (not implemented yet) · RT8-RT9 N/A · RT10 Checked · RT11 N/A
+
+---
+
+# Plan Review: pin-first-autofill-send
+Date: 2026-10-10
+Review round: 4 (C7 added at the user's request: the `GET_*_MATCHES` half of SC4 moved into scope)
+
+## Changes from Previous Round
+- Revision 5 adds C7, which makes inline-match lookups use browser-set sender URLs, and FR6.
+- SC4 is narrowed to CC/Identity hostlessness, which is a property of the entry type, not a deferral.
+- Revision 6 applies this round's findings.
+
+## Functionality Findings
+- **F-F4 [Major, design, R40]** — `resolveSenderMatchUrl`'s `string | null` return does not fit its consumers, which take `string`, and `new URL(sender.tab.url)` is unguarded. **Resolved:** each handler short-circuits a null result to its catch-branch response; an absent or unparseable `tab.url` counts as a non-match.
+- **F-F5 [Major, design]** — "same as hostless" was wrong for CC/Identity. **Resolved:** a null result means an unknown sender, refused for every kind. Hostless pages still have a `sender.url`, so CC/Identity on them are unchanged.
+
+## Security Findings
+- **F-S6 [Minor, design, R49]** — The case of a missing or malformed `sender.tab.url` was undeclared. **Resolved:** declared, with an acceptance row.
+- **F-S7 [Minor, prose, R48]** — C7's same-origin fallback looks opposite to `AUTOFILL_FROM_CONTENT`'s frame-URL rationale. **Resolved:** C7 states why they agree on host and requires a code comment saying so.
+
+The expert also verified that C7 does not widen anything (R43): the same-origin case implies host equality, and opaque origins fall through. SC4's claim is accurate.
+
+## Testing Findings
+- **F-T11 [Major, design, RT7]** — Mechanically moving the topUrl-precedence tests to frame 0 loses subframe coverage. **Resolved:** they move to same-origin subframe senders.
+- **F-T12 [Major, design]** — The badge side effect had no test. **Resolved:** an allow test and a deny test were added.
+- **F-T13 [Major, design, RT10]** — No subframe row paired a spoofed message URL with the result. **Resolved:** same-origin and cross-origin spoof rows were added.
+
+## Recurring Issue Check
+### Functionality expert
+R1-R2 N/A · R3 Checked · R4-R28 N/A · R29 Checked — detector `url`/`topUrl` derivation and consumer signatures re-read · R30-R34 N/A · R35 Checked · R36-R39 N/A · R40 Finding F-F4 · R41 N/A · R42 Checked — `message.url`/`topUrl` consumers = 3 handlers + 3 detectors · R43 Checked — narrows · R44-R46 N/A · R47 Checked · R48 N/A · R49 Checked · R50-R57 N/A
+### Security expert
+R1 Checked · R2-R28 N/A · R29 Checked · R30-R33 N/A · R34 Checked · R35-R41 N/A · R42 Checked — the 3 message types · R43 Checked — no widening · R44-R46 N/A · R47 Checked · R48 Finding F-S7 · R49 Finding F-S6 · R50-R51 N/A · R52 Checked · R53-R57 N/A · RS1-RS2 N/A · RS3 Checked · RS4-RS6 N/A
+### Testing expert
+R1-R57 N/A except as cited · RT1 N/A · RT2 Checked — MessageSender fields constructible · RT3-RT4 N/A · RT5 Checked · RT6 N/A · RT7 Finding F-T11 · RT8 Checked · RT9 N/A · RT10 Finding F-T13 · RT11 N/A
+
+---
+
+# Plan Review: pin-first-autofill-send
+Date: 2026-10-10
+Review round: 5
+
+## Changes from Previous Round
+Revision 6 applied round 4 (C7 null handling, the `tab.url` guard, spoof rows, the badge test, subframe test migration). Revision 7 applies this round's testing findings.
+
+## Functionality Findings
+No findings. The expert verified F-F4 and F-F5 against the handlers: the three catch-branch literals are identical, the short-circuit skips the badge structurally, and hostless pages keep a `sender.url`.
+
+## Security Findings
+No findings. The expert verified F-S6 and F-S7. Re-verified R43: the revision only narrows. The acceptance rows pair each spoof with its legitimate counterpart.
+
+## Testing Findings
+- **F-T14 [Major, design/prose, RT7]** — Only one of the two topUrl-precedence tests is genuinely a same-origin subframe; the "frame url is external" test is the spoof C7 closes. **Resolved:** the tests split. The first migrates; the second is replaced by the cross-origin spoof row, with its expectation flipped.
+- **F-T15 [Major, design, RT10]** — The no-`sender.url` deny row had no spoofed message URL, so the pre-C7 code produced the same result, and the test would not fail on revert. **Resolved:** every deny row now carries a spoofed URL that the pre-C7 code would honour, and the badge deny test does too.
+
+## Recurring Issue Check
+### Functionality expert
+R1-R2 N/A · R3 Checked · R4-R28 N/A · R29 Checked · R30-R34 N/A · R35 Checked · R36-R39 N/A · R40 Checked — short-circuit verified · R41 N/A · R42 Checked — 3 handlers + 3 senders · R43 Checked · R44-R46 N/A · R47 Checked · R48 N/A · R49 Checked · R50-R57 N/A
+### Security expert
+R1 Checked · R2-R28 N/A · R29 Checked · R30-R33 N/A · R34 Checked · R35-R41 N/A · R42 Checked · R43 Checked — no widening · R44-R46 N/A · R47 Checked · R48 Checked · R49 Checked · R50-R51 N/A · R52 Checked · R53-R57 N/A · RS1-RS2 N/A · RS3 Checked · RS4-RS6 N/A
+### Testing expert
+R1-R18 N/A · R19 Finding F-T14 · R20-R57 N/A · RT1 N/A · RT2 Checked · RT3-RT4 N/A · RT5 Checked · RT6 N/A · RT7 Finding F-T14 · RT8 Checked · RT9 N/A · RT10 Finding F-T15 · RT11 N/A
+
+---
+
+# Plan Review: pin-first-autofill-send
+Date: 2026-10-10
+Review round: 6 (testing expert only — functionality and security returned "No findings" in round 5, and round 6 changed only C7's test bullets)
+
+## Testing Findings
+- The expert verified F-T14 and F-T15. All four C7 deny rows are red-provable against the current `message.topUrl ?? message.url` code.
+- **F-T16 [Major, design, R42/RT7]** — The migration rule named only 2 of the `GET_*_MATCHES` tests. Four un-itemised tests would pass vacuously if left unmigrated. **Resolved:** every member of the cited grep migrates to an explicit top-frame sender with the same URL, the four vacuous-risk tests are named, and each migrated test is red-proven.
+
+## Saturation call (round 6)
+- Rounds completed: 6, so condition 1 holds.
+- Open Critical/Major findings: none; F-T16 was resolved in revision 8. Condition 2 holds.
+- The design itself, contracts C1-C7, has drawn no finding since round 5 from functionality or security. Every round-6 finding is test-migration enumeration. The expert labelled F-T16 "design" in the sense of test-strategy design. Its remaining surface — whether every fixture actually exercises its path — is reachable only by executing the suite with red proofs, which is Phase 2 work.
+- The orchestrator records this exit as a judgment call on that label, surfaced to the user. It is not a re-labelling of the finding.
+- Remaining Minor findings: none open.
+
+## Recurring Issue Check
+### Testing expert
+R1-R18 N/A · R19 Checked · R20-R41 N/A · R42 Finding F-T16 · R43-R57 N/A · RT1 N/A · RT2 Checked · RT3-RT6 N/A · RT7 Finding F-T16 · RT8-RT9 N/A · RT10 Checked · RT11 N/A
