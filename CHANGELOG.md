@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.77](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.76...passwd-sso-v0.4.77) (2026-10-10)
+
+
+### Features
+
+* **sso:** resolve SSO tenants only through the claim registry ([#865](https://github.com/ngc-shj/passwd-sso/issues/865)) ([6b873f9](https://github.com/ngc-shj/passwd-sso/commit/6b873f9dc856e08f9f5f524093ff1654d29f501d))
+
+
+### Bug Fixes
+
+* **ci:** wait out registry propagation before asserting CLI provenance ([#856](https://github.com/ngc-shj/passwd-sso/issues/856)) ([48e28f7](https://github.com/ngc-shj/passwd-sso/commit/48e28f7fd14a4bc2e10214f89ce415f80d9cd23b))
+* **extension:** pin autofill deliveries to a checked document and gate extension-page messages ([#880](https://github.com/ngc-shj/passwd-sso/issues/880)) ([2b09df5](https://github.com/ngc-shj/passwd-sso/commit/2b09df57aca020fc57329f554856640f66219790))
+* **extension:** sequential autofill writes with fixed targets ([#879](https://github.com/ngc-shj/passwd-sso/issues/879)) ([3663c9a](https://github.com/ngc-shj/passwd-sso/commit/3663c9a7eb7f5fb1178b7e5a2e7526e58c18e9bb))
+* **raw-sql:** replace the raw-sql-ident marker with unforgeable SQL fragments ([#869](https://github.com/ngc-shj/passwd-sso/issues/869)) ([1d3e973](https://github.com/ngc-shj/passwd-sso/commit/1d3e97364d5923a4c30836a1f4e32d99ca8a9f05))
+* **scripts:** keep superuser URLs out of argv and ~/.psqlrc out of psql ([#858](https://github.com/ngc-shj/passwd-sso/issues/858)) ([9e3f5df](https://github.com/ngc-shj/passwd-sso/commit/9e3f5df0d7e5bd96dd5287bd998a2d6610c60183)), closes [#756](https://github.com/ngc-shj/passwd-sso/issues/756)
+* **security:** bump source-map-js and proxy-addr past new advisories ([#866](https://github.com/ngc-shj/passwd-sso/issues/866)) ([68ebf56](https://github.com/ngc-shj/passwd-sso/commit/68ebf56b46c5630f3c2dadca0e02fc63f95f5f56))
+* **security:** patch sharp (GHSA-wq5f-xc86-pv6w) and @modelcontextprotocol/sdk (GHSA-6qxp-vccf-f47h) ([#871](https://github.com/ngc-shj/passwd-sso/issues/871)) ([9696655](https://github.com/ngc-shj/passwd-sso/commit/9696655b89259c43da3e0b99d285417a24b87741))
+* **security:** unblock CI — override floors, RDS CA pin, bundled undici, unfixable-advisory suppression ([#863](https://github.com/ngc-shj/passwd-sso/issues/863)) ([0a4baa3](https://github.com/ngc-shj/passwd-sso/commit/0a4baa3932a5968eee9c2f408b23a0449e2739de))
+* **workers:** bound batch writes with a materialized key set ([#873](https://github.com/ngc-shj/passwd-sso/issues/873)) ([9c3ad6f](https://github.com/ngc-shj/passwd-sso/commit/9c3ad6f595a7931f7e73fa3534ad2d584ad04d13))
+
 ## [0.4.76](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.75...passwd-sso-v0.4.76) (2026-09-29)
 
 
