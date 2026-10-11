@@ -19,8 +19,6 @@ import { isFillActive } from "./fill-sequence-lib";
 import { labelledByText } from "./labelled-by";
 import {
   isUsableInput,
-  isElementVisible,
-  getHintString,
   resolveOpacity,
 } from "./field-query-lib";
 import { ccFormFields } from "./cc-field-detection-lib";
