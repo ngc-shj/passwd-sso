@@ -28,3 +28,27 @@
 
 - The CC detector's `rescan` now fills its WeakSet from `ccClaimedFields(document)`.
 - `detectExpiryFormat` and `formatCombinedExpiry` stay in `cc-form-detector-lib.ts`. `autofill-cc-lib` imports them from there and the detection symbols from `cc-field-detection-lib`.
+
+## D6: parity pins three username-walk divergences that predate this change (C6)
+
+C6 says the parity test asserts the same password and username targets. Three fixtures pin a different username target instead, with the reason in the test. In each, both implementations agree on the password target and on what the card-form rule excludes. The divergence is in the username fallback walk, which predates this change:
+
+- `directAutofill` takes the nearest preceding usable text field;
+- `performAutofill`'s `findUsernameInput` also requires a username-shaped hint (`isUsernameLike`).
+
+The fixtures, all in `__tests__/background/direct-autofill-parity.test.ts`:
+- **8, hidden card number:** the twin stops on the hidden field and writes nothing.
+- **14, lone card number:** the card number is not excluded (S12), so the twin's walk fills it.
+- **15, `利用者カード番号` login:** `isUsernameLike` has no card-number term, so the content fill writes no username. The twin fills it.
+
+Anti-Deferral:
+- **Not fixed here.** Mirroring `isUsernameLike` inside the self-contained twin would duplicate its whole Latin/JA hint grammar into a function that `#878` deletes.
+- **Worst case:** on the fallback path only, the username lands in a visible text field before the password, as on `main`. No password or CVV is involved.
+- **Owner:** `#878`.
+- The divergences are pinned, not hidden, so the parity test fails if either side changes.
+
+## D7: card fields placed directly under `<body>` form no card block (C2 known gap)
+
+- The ancestor search stops below `<body>` so that the whole page never becomes the card block. A card number whose card neighbours are siblings directly under `<body>`, with no wrapping element, therefore forms no block, and those fields stay LOGIN-eligible, as on `main`.
+- This is the same class as F-S10 (layout coverage the change does not reach, not a widening), and it fails toward today's behaviour.
+- Fixtures wrap card fields in a `<form>`, `<table>` or `<div>`, so the rule is exercised. A test fixture that was accidentally flat was caught by its red proof and fixed during Phase 2.
