@@ -40,6 +40,11 @@ export const LOGIN_AUTOCOMPLETE_TOKENS: readonly string[] = [
   "one-time-code",
 ];
 
+// Input types that can hold a card field. Radio / checkbox / hidden / submit
+// etc. are never card fields; `password` is included because CVV fields are
+// commonly masked.
+export const CARD_FILLABLE_INPUT_TYPES: readonly string[] = ["text", "tel", "number", "password"];
+
 // Hints that mark a card-number field, and hints that mark a field as part of
 // the card form besides the number. The single-character JA month/year
 // patterns (月 / 年) are left out of the neighbours: detectCreditCardFields uses
@@ -63,6 +68,7 @@ export type PatternSource = { source: string; flags: string };
 export type CardPatternSources = {
   number: PatternSource[];
   neighbour: PatternSource[];
+  fillableTypes: string[];
 };
 
 const toSource = (re: RegExp): PatternSource => ({ source: re.source, flags: re.flags });
@@ -70,4 +76,5 @@ const toSource = (re: RegExp): PatternSource => ({ source: re.source, flags: re.
 export const CARD_PATTERN_SOURCES: CardPatternSources = {
   number: CARD_NUMBER_PATTERNS.map(toSource),
   neighbour: CARD_NEIGHBOUR_PATTERNS.map(toSource),
+  fillableTypes: [...CARD_FILLABLE_INPUT_TYPES],
 };

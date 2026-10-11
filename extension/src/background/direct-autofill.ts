@@ -31,6 +31,7 @@ export async function directAutofill(
   ccPatternsArg?: {
     number: Array<{ source: string; flags: string }>;
     neighbour: Array<{ source: string; flags: string }>;
+    fillableTypes: string[];
   } | null,
   loginTokensArg?: string[] | null,
 ): Promise<void> {
@@ -67,7 +68,6 @@ export async function directAutofill(
 
   // ── The card form (mirror of ccFormFields; see the header) ──
   type Field = HTMLInputElement | HTMLSelectElement;
-  const CARD_FILLABLE_TYPES = ["text", "tel", "number", "password"];
   const toRegExps = (list: Array<{ source: string; flags: string }> | undefined) =>
     (list ?? []).map(({ source, flags }) => new RegExp(source, flags));
   const numberPatterns = toRegExps(ccPatternsArg?.number);
@@ -94,7 +94,7 @@ export async function directAutofill(
   const isCardFillable = (el: Field) =>
     isVisible(el) &&
     (el instanceof HTMLInputElement
-      ? CARD_FILLABLE_TYPES.includes(el.type) && !el.disabled && !el.readOnly
+      ? (ccPatternsArg?.fillableTypes ?? []).includes(el.type) && !el.disabled && !el.readOnly
       : !el.disabled);
   const hasCcToken = (el: Field) => autocompleteTokens(el).some((t) => t.startsWith("cc-"));
   const allFields: Field[] = [

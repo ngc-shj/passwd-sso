@@ -15,6 +15,7 @@ import {
   CC_EXPIRY_YEAR_JA_RE,
   CC_CVV_JA_RE,
   CARD_NEIGHBOUR_PATTERNS,
+  CARD_FILLABLE_INPUT_TYPES,
 } from "../lib/cc-patterns";
 import {
   isUsableFieldOfType,
@@ -42,12 +43,7 @@ export interface CreditCardFormFields {
 // radio like `<input type="radio" id="card_number_pay">` would otherwise match
 // by hint and trigger the CC dropdown on focus. `password` is included because
 // CVV fields are commonly masked.
-const FILLABLE_INPUT_TYPES = new Set([
-  "text",
-  "tel",
-  "number",
-  "password",
-]);
+const FILLABLE_INPUT_TYPES: ReadonlySet<string> = new Set(CARD_FILLABLE_INPUT_TYPES);
 
 const isUsableField = (el: HTMLInputElement | HTMLSelectElement): boolean =>
   isUsableFieldOfType(el, FILLABLE_INPUT_TYPES);
