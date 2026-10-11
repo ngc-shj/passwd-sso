@@ -110,7 +110,7 @@ export async function directAutofill(
       ) ??
       candidates.find((el) => numberPatterns.some((re) => re.test(hintOf(el)))) ??
       null;
-    if (cardNumber instanceof HTMLInputElement) {
+    if (cardNumber) {
       const neighbours = allFields.filter(
         (el) =>
           el !== cardNumber &&
