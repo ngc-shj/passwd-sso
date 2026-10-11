@@ -106,3 +106,40 @@ RT1/RT2/RT3/RT6/RT7/RT9/RT10/RT11 Checked · others N/A
 
 ### F-F3 [Major] Inverse claim layout
 - **Action:** D9 (known gap). No code change.
+
+---
+
+# Code Review: login-detection-skips-cc-fields
+Date: 2026-10-11
+Review round: 3
+
+## Changes from Previous Round
+**F-S3:** resolved (`aaa6707e1`), verified by the security and functionality experts.
+- `shouldSkipForm` now drops only `ccCardBlockFields` (anchored on a detected card number).
+- `ccFormFields` = `ccCardBlockFields` ∪ `cc-*` fields, with membership byte-identical for every caller.
+- The debounce-ordering reasoning of the new test was traced on both branches.
+
+## Functionality Findings
+- **F-PERF1 [Minor]** — On submit, `shouldSkipForm` calls `ccCardBlockFields(document)` alongside the memoised `ccForm` used by `findPasswordInputs`, so one capture can scan for cards twice.
+  - **Accepted:** capture runs only on a submit or click, a rare event. NF3 bounds the focus, mutation and fill-tick paths, which are unaffected, and the result sets are unchanged.
+
+## Security Findings
+No findings.
+- R43 (a): a page could plant a fake card block in a registration form, but it can already defeat the heuristic by renaming fields, so this is not a widening.
+- R43 (b): unchanged; it is C2 by design.
+
+## Testing Findings
+No findings. Only the new test submits twice in one test, and it discriminates on the captured password. The other double submits are the dedicated, pre-existing debounce tests.
+
+## Recurring Issue Check
+### Security expert
+R42/R43 Checked — no widening · R48/R49 Checked · RS5 Checked · others N/A
+### Functionality expert
+R1/R3/R10/R34/R42/R43/R48/R49 Checked · others N/A
+### Testing expert
+RT1/RT2/RT4/RT5/RT6/RT7/RT9/RT10/RT11 Checked · others N/A
+
+## Termination
+Every expert returned no Critical or Major finding. The one Minor finding is accepted with its reason above, so the loop ends after round 3.
+
+The full suite passes (`cd extension && npx vitest run`: 1381 passed), as do `tsc`, `npm run build` and `lint-extension.mjs`.
