@@ -214,4 +214,15 @@ describe("ccFormFields", () => {
     expect(fields.has(byName("account_security_code"))).toBe(true);
     expect(fields.has(byName("username"))).toBe(false);
   });
+
+  it("without a card number, a field carrying a cc-* autocomplete token is still a member", () => {
+    document.body.innerHTML = `
+      <form><input id="lone-csc" type="password" name="pin" autocomplete="cc-csc"></form>
+      <form><input id="pw" type="password" name="password"></form>
+    `;
+    const members = ccFormFields(document);
+    expect(members.has(document.getElementById("lone-csc") as HTMLElement)).toBe(true);
+    // Allow: the ordinary password on the same page is not a member.
+    expect(members.has(document.getElementById("pw") as HTMLElement)).toBe(false);
+  });
 });

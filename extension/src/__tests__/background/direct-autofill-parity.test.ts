@@ -431,4 +431,35 @@ describe("directAutofill / performAutofill parity (C6)", () => {
     const result = await expectParity(html);
     expect(result).toEqual({ username: "cardusername", password: "loginpw" });
   });
+
+  // ── hinted card field: it does not scope the password search ──
+  // The card form holds an unrelated eligible masked field ("pin") besides its
+  // CVV. A hint on the card number must not narrow the search to that form:
+  // both sides then take the last eligible password page-wide, the login one.
+  it("a targetHint on a card-form field does not scope the password search to the card form", async () => {
+    const html = `
+      <form id="card">
+        <input id="ccnum" type="text" name="card_number">
+        <input id="pin" type="password" name="pin">
+        <input id="cvv" type="password" name="cvv">
+      </form>
+      <form id="login">
+        <input id="username" type="text" name="username">
+        <input id="loginpw" type="password" name="password">
+      </form>
+    `;
+    const hint = { id: "ccnum" };
+    document.body.innerHTML = html;
+    await directAutofill(USERNAME, PASSWORD, hint, [], CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
+    const direct = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
+    __resetFillSequenceForTests();
+    document.body.innerHTML = html;
+    await performAutofill(
+      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: USERNAME, password: PASSWORD, targetHint: hint },
+      NO_WAIT,
+    );
+    const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
+    expect(direct).toEqual(content);
+    expect(direct.password).toBe("loginpw");
+  });
 });

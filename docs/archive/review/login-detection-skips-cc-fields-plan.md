@@ -73,7 +73,7 @@ export function isLoginEligible(el: HTMLInputElement, ccForm: ReadonlySet<HTMLEl
 ```
 
 - **`ccFormFields(root)`** is the set of fields that belong to the card form. It is built by a scan, not from `detectCreditCardFields`' single-valued claims: `detectCreditCardFields` claims one CVV, the first DOM match, so a `security_code` login field earlier in the page would take that claim and leave the real masked CVV unclaimed.
-  - **Empty** when `detectCreditCardFields(root)` finds no card number.
+  - **No card number** (`detectCreditCardFields(root)` finds none): only the fields carrying a `cc-*` autocomplete token, which the page itself declares as card fields.
   - **CC-hinted field.** A visible field (`isElementVisible`, which includes the opacity rule) that passes `isUsableField` (`FILLABLE_INPUT_TYPES`; inputs and selects), and either:
     - has a `getHintString` matching the CVV, expiry or holder-name regexes (Latin or JA, from `cc-patterns`; `conf.?num` excluded); or
     - carries a `cc-*` token.

@@ -192,7 +192,10 @@ export async function directAutofill(
     return pwInputs.length ? pwInputs[pwInputs.length - 1] : null;
   };
 
-  const scopeForm = (usernameInput ?? hintedInput)?.form ?? null;
+  // A hinted field of the card form does not scope the search, as on the content side.
+  const hintedScope =
+    hintedInput instanceof HTMLInputElement && isLoginEligible(hintedInput) ? hintedInput : null;
+  const scopeForm = (usernameInput ?? hintedScope)?.form ?? null;
   const scopedInputs = scopeForm
     ? (Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[])
     : inputs;

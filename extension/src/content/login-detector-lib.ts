@@ -46,8 +46,12 @@ export function shouldSkipForm(
   const action = form.action || "";
   if (action && SKIP_ACTION_RE.test(action)) return true;
 
-  // Too many additional fields → likely a registration form
-  const allInputs = Array.from(form.querySelectorAll<HTMLInputElement>("input"));
+  // Too many additional fields → likely a registration form. The card form's
+  // own fields (holder name, etc.) are not registration fields.
+  const cardForm = ccForm();
+  const allInputs = Array.from(form.querySelectorAll<HTMLInputElement>("input")).filter(
+    (input) => !cardForm.has(input),
+  );
   const extraFields = allInputs.filter((input) => {
     if (input.type === "hidden" || input.type === "submit" || input.type === "button") return false;
     if (input.type === "password") return false;

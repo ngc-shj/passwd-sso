@@ -52,3 +52,13 @@ Anti-Deferral:
 - The ancestor search stops below `<body>` so that the whole page never becomes the card block. A card number whose card neighbours are siblings directly under `<body>`, with no wrapping element, therefore forms no block, and those fields stay LOGIN-eligible, as on `main`.
 - This is the same class as F-S10 (layout coverage the change does not reach, not a widening), and it fails toward today's behaviour.
 - Fixtures wrap card fields in a `<form>`, `<table>` or `<div>`, so the rule is exercised. A test fixture that was accidentally flat was caught by its red proof and fixed during Phase 2.
+
+## D8: the CC detector's CVV claim prefers the card block (supersedes NF2/SC2 for the CVV claim)
+
+- NF2/SC2 kept `detectCreditCardFields` unchanged. Code review round 1 (F-F2) showed what that left in place under the FR4 fixture: the CVV regex's first page-wide match is an earlier login `security_code` field.
+  - The CC detector claims that field and opens the CC dropdown on it, competing with LOGIN's.
+  - A CC fill writes the card's CVV into the login field.
+- The defect predates this change and lies in the PR's own scenario, so it is fixed here.
+- The fix: the regex fallback for `cvv` now prefers a match inside the card block (`cardBlock`, the same rule as C2). Without a block it falls back to the first page-wide match, as before.
+  - The `cc-csc` autocomplete priority and the `conf.?num` fallback are unchanged, as are the other roles (number, name, expiry).
+- Tests in `cc-form-detector.test.ts` cover both cases: the in-block CVV is claimed over an earlier login `security_code`, and with no block the first page-wide match is claimed as before. Red proof: the first-match-only claim fails the in-block test.

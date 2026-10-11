@@ -142,7 +142,18 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
     cardholderName = findFieldByRegex(visibleFields, CC_DETECT_RE.name, CC_NAME_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!cvv) {
-    cvv = findFieldByRegex(visibleFields, CC_DETECT_RE.cvv, CC_CVV_JA_RE, isUsableField) as HTMLInputElement | null;
+    // Prefer a CVV-hinted field inside the card block: the first page-wide
+    // match can be an unrelated login field named "security_code" placed
+    // before the card form, which would then receive the card's CVV.
+    const cvvMatches = visibleFields.filter((f): f is HTMLInputElement => {
+      if (!(f instanceof HTMLInputElement) || !isUsableField(f)) return false;
+      const hint = getHintString(f);
+      return CC_DETECT_RE.cvv.test(hint) || CC_CVV_JA_RE.test(hint);
+    });
+    const inBlock = cardNumber
+      ? cardBlock(cardNumber, visibleFields.filter((f) => f !== cardNumber && isCardNeighbour(f)))
+      : null;
+    cvv = (inBlock ? cvvMatches.find(inBlock) : undefined) ?? cvvMatches[0] ?? null;
   }
   // Same-form-scoped `conf.?num` fallback. Only after the strong CVV
   // signals miss, and only when the candidate shares the card-number field's

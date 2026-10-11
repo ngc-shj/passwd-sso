@@ -580,3 +580,31 @@ describe("CC_DETECT_RE — regex matrix (T12)", () => {
     expect(CC_DETECT_RE[field].test(hint)).toBe(expected);
   });
 });
+
+describe("detectCreditCardFields: the CVV claim prefers the card block", () => {
+  it("claims the masked CVV inside the card form, not an earlier login security_code field", () => {
+    document.body.innerHTML = `
+      <form id="login">
+        <input id="loginsc" type="password" name="security_code">
+      </form>
+      <form id="card">
+        <input id="ccnum" type="text" name="card_number">
+        <input id="exp" type="text" name="exp_month">
+        <input id="cvv" type="password" name="cvv_code">
+      </form>
+    `;
+    expect(detectCreditCardFields(document)?.cvv?.id).toBe("cvv");
+  });
+
+  it("allow: with no card block (a lone card number), the first page-wide CVV match is claimed, as before", () => {
+    document.body.innerHTML = `
+      <form id="login">
+        <input id="loginsc" type="password" name="security_code">
+      </form>
+      <form id="card">
+        <input id="ccnum" type="text" name="card_number">
+      </form>
+    `;
+    expect(detectCreditCardFields(document)?.cvv?.id).toBe("loginsc");
+  });
+});

@@ -116,6 +116,29 @@ describe("login capture excludes the card form (submit path)", () => {
   });
 });
 
+describe("login capture: the card form's fields are not registration fields", () => {
+  // shouldSkipForm skips a form with 3+ registration-like fields. A cardholder
+  // field named "name" is part of the card form and must not be counted: with
+  // it, phone + country + name would reach 3 and the login password would be
+  // lost; without it, 2 remain and the form is a login form.
+  it("a combined form with a cardholder 'name' field and two other registration fields captures the login password", () => {
+    document.body.innerHTML = `
+      <form id="combined">
+        <input id="username" type="text" name="username" value="alice">
+        <input id="loginpw" type="password" name="password" value="login-secret">
+        <input id="phone" type="text" name="phone" value="1">
+        <input id="country" type="text" name="country" value="JP">
+        <input id="ccnum" type="text" name="card_number" value="4111111111111111">
+        <label>Name on card <input id="holder" type="text" name="name" value="A"></label>
+        <input id="cvv" type="password" name="cvv" value="123">
+      </form>
+    `;
+    start();
+    submitForm("combined");
+    expect(loginDetected()).toEqual(expect.objectContaining({ password: "login-secret" }));
+  });
+});
+
 describe("login capture excludes the card form (click path, extractCredentialsFromPage)", () => {
   it("a filled login password and a filled card CVV: the login password is captured", () => {
     document.body.innerHTML = `
