@@ -62,3 +62,12 @@ Anti-Deferral:
 - The fix: the regex fallback for `cvv` now prefers a match inside the card block (`cardBlock`, the same rule as C2). Without a block it falls back to the first page-wide match, as before.
   - The `cc-csc` autocomplete priority and the `conf.?num` fallback are unchanged, as are the other roles (number, name, expiry).
 - Tests in `cc-form-detector.test.ts` cover both cases: the in-block CVV is claimed over an earlier login `security_code`, and with no block the first page-wide match is claimed as before. Red proof: the first-match-only claim fails the in-block test.
+
+## D9: the block-preferring CVV claim can pick an in-block decoy (known gap, code review round 2 F-F3)
+
+- **The case.** D8 makes the CVV regex fallback prefer an in-block match. When the genuine CVV sits outside the card block while another CVV-hinted field sits inside it, the in-block field wins the claim.
+- **Why the code is unchanged.** The two fields are indistinguishable from markup alone.
+  - The alternative proposed in review, preferring the in-block field only when the page-wide first match is not co-located with the card number, picks the same in-block field for this layout. The out-of-block field is co-located with nothing, so it changes nothing.
+  - "The CVV-hinted field next to the card number is the CVV" is the rule that resolves the realistic FR4 case: an earlier login `security_code` field.
+- **Scope.** The precondition needs two CVV-hinted fields, with the inner one not being the CVV. The CC fill is user-initiated. The CVV value reaches a field on the same page, never another origin.
+- **Combined forms.** In a combined single `<form>`, both candidates are in the block, so DOM order decides, as on `main` (security round 2, Q1).

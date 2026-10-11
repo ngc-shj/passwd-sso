@@ -139,6 +139,35 @@ describe("login capture: the card form's fields are not registration fields", ()
   });
 });
 
+describe("login capture: a stray cc-* token does not make a registration form pass as login", () => {
+  // Only fields anchored on a detected card number leave the registration count.
+  // A new-password form with one registration field stays skipped even when the
+  // page tags that field with a cc-* token and there is no card number at all.
+  it("a new-password form whose phone field carries a spurious cc-* token is still skipped", () => {
+    document.body.innerHTML = `
+      <form id="signup">
+        <input id="username" type="text" name="username" value="alice">
+        <input id="newpw" type="password" name="password" autocomplete="new-password" value="new-secret">
+        <input id="phone" type="text" name="phone" autocomplete="tel cc-name" value="1">
+      </form>
+      <form id="login">
+        <input id="lu" type="text" name="username" value="bob">
+        <input id="lp" type="password" name="password" value="login-secret">
+      </form>
+    `;
+    start();
+    // The detector debounces LOGIN_DETECTED for 2 s after it SENDS one, so the
+    // order matters: the signup form goes first, then the plain login form as
+    // the control. If the signup form were captured, its password would be the
+    // only message (the login submit then falls inside the debounce).
+    submitForm("signup");
+    submitForm("login");
+    const detected = sentMessages.filter((m) => m.type === "LOGIN_DETECTED");
+    expect(detected).toHaveLength(1);
+    expect(detected[0]).toEqual(expect.objectContaining({ password: "login-secret" }));
+  });
+});
+
 describe("login capture excludes the card form (click path, extractCredentialsFromPage)", () => {
   it("a filled login password and a filled card CVV: the login password is captured", () => {
     document.body.innerHTML = `

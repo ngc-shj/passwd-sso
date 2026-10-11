@@ -61,3 +61,48 @@ RT1 Checked — the spy reaches internal callers · RT2/RT3/RT5/RT6/RT7/RT9/RT10
 - **Test:** a parity test with a hint on the card number, where the card form holds an eligible `pin`.
 - **Red proof:** the unvetted hint fails the test.
 - **Modified file:** `extension/src/background/direct-autofill.ts` (`scopeForm`).
+
+---
+
+# Code Review: login-detection-skips-cc-fields
+Date: 2026-10-11
+Review round: 2
+
+## Changes from Previous Round
+Round 1's fixes (`10164156b`):
+- **F-F1, F-S1, F-S2:** resolved and verified.
+- **F-F2:** resolved for its scenario. Its inverse layout is F-F3.
+- **Testing:** all four new tests were verified non-vacuous by tracing their reverts. F-S1's test pins a behaviour that has no code fix to revert.
+
+## Functionality Findings
+- **F-F3 [Major, narrow precondition]** — The block-preferring CVV claim picks an in-block decoy when the genuine CVV sits outside the block. **Disposition:** recorded as known gap D9, with no code change. The two fields cannot be told apart from markup, and the proposed alternative picks the same field for this layout.
+
+## Security Findings
+- **F-S3 [Major as filed, R42/R43]** — `shouldSkipForm`'s exclusion used `ccFormFields`, which also contains stray `cc-*` fields with no card number. A page could therefore make a registration form pass as a login form by tagging its fields. Excluding a field there is not the safe direction.
+  - The orchestrator's view on severity: the registration heuristic is not a boundary, because a page already controls its field names. The fix is applied regardless, because the member set was the wrong one for this consumer.
+- **Q1, Q3:** no regression. The combined-single-form CVV order is unchanged from `main` (in D9).
+- **Adjacent:** `findPasswordInputs` excluding a page-declared `cc-csc` confirm-password field is C2 by design. A page that declares its own field a card field controls that outcome either way.
+
+## Testing Findings
+No findings.
+
+## Recurring Issue Check
+### Functionality expert
+R3/R34/R42/R48/R49 F-F3 · R10 Checked — `cardBlock` hoisted, no cycle · NF3 Checked — cost in the same class, same cadence · others N/A or checked
+### Security expert
+R42/R43 F-S3 · R48 Checked — one shared `cardBlock` · R49 Checked · RS5 Checked · RT1/RT7/RT9/RT10 Checked · others N/A
+### Testing expert
+RT1/RT2/RT3/RT6/RT7/RT9/RT10/RT11 Checked · others N/A
+
+## Resolution Status
+
+### F-S3 [Major] Registration heuristic anchored on the wrong member set
+- **Action:** a new `ccCardBlockFields(root)` holds the card number plus its in-block neighbours, anchored on a detected card number; there is no `cc-*` fallback. `ccFormFields` = `ccCardBlockFields` ∪ `cc-*` fields. `shouldSkipForm` now drops only `ccCardBlockFields(document)`.
+- **Test:** a new-password signup form whose phone field carries a spurious `cc-name` is still skipped, with a plain login form as the control.
+  - The detector debounces for 2 s after a send, so the signup is submitted first and the test asserts exactly one `LOGIN_DETECTED`, the login password.
+  - The first draft, which submitted the control first, passed vacuously: the control's send debounced the signup submit. The red proof caught it.
+- **Red proof:** `ccForm()` restored in `shouldSkipForm` → the test fails.
+- **Modified files:** `extension/src/content/cc-field-detection-lib.ts`, `extension/src/content/login-detector-lib.ts`, `extension/src/__tests__/content/login-capture-cc.test.ts`.
+
+### F-F3 [Major] Inverse claim layout
+- **Action:** D9 (known gap). No code change.

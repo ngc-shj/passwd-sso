@@ -8,6 +8,7 @@ import {
   lazyCcForm,
   type CcFormSource,
 } from "./form-detector-lib";
+import { ccCardBlockFields } from "./cc-field-detection-lib";
 import { showSaveBanner, hideSaveBanner } from "./ui/save-banner";
 import type { ExtensionResponse } from "../types/messages";
 import { PSSO_SHOW_SAVE_BANNER } from "../lib/constants";
@@ -46,9 +47,11 @@ export function shouldSkipForm(
   const action = form.action || "";
   if (action && SKIP_ACTION_RE.test(action)) return true;
 
-  // Too many additional fields → likely a registration form. The card form's
-  // own fields (holder name, etc.) are not registration fields.
-  const cardForm = ccForm();
+  // Too many additional fields → likely a registration form. The card block's
+  // own fields (holder name, etc.) are not registration fields. Only fields
+  // anchored on a detected card number are dropped here: a stray `cc-*` token
+  // must not make a registration form pass as a login form.
+  const cardForm = ccCardBlockFields(document);
   const allInputs = Array.from(form.querySelectorAll<HTMLInputElement>("input")).filter(
     (input) => !cardForm.has(input),
   );

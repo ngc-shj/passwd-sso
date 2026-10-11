@@ -268,14 +268,25 @@ function cardBlock(
  * by an unrelated `security_code` login field earlier in the page.
  */
 export function ccFormFields(root: ParentNode): Set<HTMLElement> {
-  const fields: FormField[] = [
-    ...Array.from(root.querySelectorAll<HTMLInputElement>("input")),
-    ...Array.from(root.querySelectorAll<HTMLSelectElement>("select")),
-  ];
-  const members = new Set<HTMLElement>(fields.filter(hasCcAutocompleteToken));
+  const members = ccCardBlockFields(root);
+  for (const el of formFieldsIn(root)) {
+    if (hasCcAutocompleteToken(el)) members.add(el);
+  }
+  return members;
+}
+
+/**
+ * Only the card number and its neighbours inside the card block, anchored on
+ * a detected card number; empty without one. Unlike ccFormFields it leaves out
+ * a stray `cc-*` field with no card number around it, so a consumer for which
+ * excluding a field is NOT the safe direction (the login detector's
+ * registration-form heuristic) cannot be steered by a page adding such tokens.
+ */
+export function ccCardBlockFields(root: ParentNode): Set<HTMLElement> {
+  const members = new Set<HTMLElement>();
   const cardNumber = detectCreditCardFields(root)?.cardNumber ?? null;
   if (!cardNumber) return members;
-  const neighbours = fields.filter((el) => el !== cardNumber && isCardNeighbour(el));
+  const neighbours = formFieldsIn(root).filter((el) => el !== cardNumber && isCardNeighbour(el));
   const inBlock = cardBlock(cardNumber, neighbours);
   if (!inBlock) return members;
   members.add(cardNumber);
@@ -283,4 +294,11 @@ export function ccFormFields(root: ParentNode): Set<HTMLElement> {
     if (inBlock(el)) members.add(el);
   }
   return members;
+}
+
+function formFieldsIn(root: ParentNode): FormField[] {
+  return [
+    ...Array.from(root.querySelectorAll<HTMLInputElement>("input")),
+    ...Array.from(root.querySelectorAll<HTMLSelectElement>("select")),
+  ];
 }
