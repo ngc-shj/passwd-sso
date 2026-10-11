@@ -33,7 +33,12 @@ R1/R3/R10/R19/R42/R43/R48/R49 Checked · R34 F-S1 · RS5 Checked — internal co
 RT1 Checked — the spy reaches internal callers · RT2/RT3/RT5/RT6/RT7/RT9/RT10/RT11 Checked · RT4/RT8 N/A · R1-R57 N/A
 
 ## Environment Verification Report
-- **VE1** (a real page with a login form plus a card form): `blocked-deferred`. This is the Phase 1 constraint VE1, a manual check on the tailscale-served scratch pages before merge.
+- **VE1** (a real page with a login form plus a card form): `passed` (manual, 2026-10-12, tailscale-served scratch pages, extension built from this branch).
+  - Login form + card form: popup LOGIN fill and context-menu fill write the login password and leave the card CVV empty; the CVV inline dropdown offers card candidates only.
+  - Login password named `security_code` + card form: LOGIN fill writes the login field; card fill writes the CVV into the card's `cvv_code`, not the login field.
+  - Login form + `<div>`-only card widget: popup LOGIN fill leaves the div CVV empty.
+  - Card-only form submit shows no save-login banner; the login form submit (control) does.
+  - Unrelated pre-existing defect observed: split expiry inputs labelled `Expiry month` / `Expiry year` are detected as a combined expiry, so `MM/YY` lands in the month input. Present on `main`, unchanged here; tracked in #883.
 - Unit coverage: `cd extension && npx vitest run`, all passing.
 
 ## Resolution Status
