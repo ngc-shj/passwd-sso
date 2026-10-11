@@ -11,6 +11,7 @@ import {
   DISCONNECT_REASON_KEY,
 } from "../lib/constants";
 import { DISCONNECT_REASON } from "../lib/disconnect-reason";
+import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../lib/cc-patterns";
 import { BUNDLE_RESEND_ATTEMPTS } from "../background/content-bundle";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
@@ -1348,6 +1349,14 @@ describe("background message flow", () => {
       .filter((v): v is unknown[] => Array.isArray(v));
     expect(argsList.length).toBeGreaterThanOrEqual(2);
     expect(argsList[argsList.length - 1]?.[2]).toBeNull();
+    // C6: every direct-fallback injection — including this unserializable
+    // retry — carries the card-form patterns and LOGIN autocomplete tokens.
+    // Without them directAutofill runs no card-form exclusion at all.
+    for (const args of argsList) {
+      expect(args.length).toBe(6);
+      expect(args[4]).toEqual(CARD_PATTERN_SOURCES);
+      expect(args[5]).toEqual([...LOGIN_AUTOCOMPLETE_TOKENS]);
+    }
     // Both func attempts stay pinned to the probed document.
     const funcTargets = calls
       .map((call) => call[0] as { args?: unknown[]; target: unknown })
@@ -2191,6 +2200,11 @@ describe("background message flow", () => {
         .filter((injection) => injection.args)
         .map((injection) => injection.target);
 
+    const funcArgsList = () =>
+      (chromeMock!.scripting.executeScript.mock.calls as unknown[][])
+        .map((c) => (c[0] as { args?: unknown[] }).args)
+        .filter((v): v is unknown[] => Array.isArray(v));
+
     it("pins the func to the probed document when the page is outside the bundle scope", async () => {
       probeUrls = { 7: "http://example.com/login" };
 
@@ -2199,6 +2213,25 @@ describe("background message flow", () => {
       expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
       expect(injectionKinds()).toEqual(["probe", "func"]);
       expect(funcTargets()).toEqual([{ tabId: 1, documentIds: [documentIdFor(7)] }]);
+    });
+
+    // C6: the call site (background/index.ts injectDirectAutofill) always
+    // passes the card-form patterns and LOGIN autocomplete tokens as args[4]
+    // and args[5] — dropping either one would silently turn off directAutofill's
+    // card-form exclusion.
+    it("passes the card patterns and LOGIN tokens as args[4]/args[5] on the direct-fallback injection", async () => {
+      probeUrls = { 7: "http://example.com/login" };
+
+      const res = await fillWithNoReceiver();
+
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+      const argsList = funcArgsList();
+      expect(argsList.length).toBeGreaterThanOrEqual(1);
+      for (const args of argsList) {
+        expect(args.length).toBe(6);
+        expect(args[4]).toEqual(CARD_PATTERN_SOURCES);
+        expect(args[5]).toEqual([...LOGIN_AUTOCOMPLETE_TOKENS]);
+      }
     });
 
     it("keeps the func pinned when the bundle injection into the probed document fails", async () => {

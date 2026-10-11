@@ -2,7 +2,9 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { detectCreditCardFields, detectExpiryFormat, formatCombinedExpiry, CC_DETECT_RE } from "../../content/cc-form-detector-lib";
+import { detectExpiryFormat, formatCombinedExpiry } from "../../content/cc-form-detector-lib";
+import { detectCreditCardFields } from "../../content/cc-field-detection-lib";
+import { CC_DETECT_RE } from "../../lib/cc-patterns";
 
 // Polyfill CSS.escape for jsdom
 if (typeof globalThis.CSS === "undefined") {
@@ -576,5 +578,33 @@ describe("CC_DETECT_RE — regex matrix (T12)", () => {
     ["card_note", "cvv", false],
   ] as const)("%s → CC_DETECT_RE.%s matches:%s", (hint, field, expected) => {
     expect(CC_DETECT_RE[field].test(hint)).toBe(expected);
+  });
+});
+
+describe("detectCreditCardFields: the CVV claim prefers the card block", () => {
+  it("claims the masked CVV inside the card form, not an earlier login security_code field", () => {
+    document.body.innerHTML = `
+      <form id="login">
+        <input id="loginsc" type="password" name="security_code">
+      </form>
+      <form id="card">
+        <input id="ccnum" type="text" name="card_number">
+        <input id="exp" type="text" name="exp_month">
+        <input id="cvv" type="password" name="cvv_code">
+      </form>
+    `;
+    expect(detectCreditCardFields(document)?.cvv?.id).toBe("cvv");
+  });
+
+  it("allow: with no card block (a lone card number), the first page-wide CVV match is claimed, as before", () => {
+    document.body.innerHTML = `
+      <form id="login">
+        <input id="loginsc" type="password" name="security_code">
+      </form>
+      <form id="card">
+        <input id="ccnum" type="text" name="card_number">
+      </form>
+    `;
+    expect(detectCreditCardFields(document)?.cvv?.id).toBe("loginsc");
   });
 });

@@ -12,13 +12,15 @@ import {
   getHintString,
   findFieldByAutocomplete,
   findFieldByRegex,
+} from "./field-query-lib";
+import {
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
   hasVisiblePopoverOverlayNear,
   showInlineNotice,
 } from "./form-detector-lib";
-import { detectCreditCardFields } from "./cc-form-detector-lib";
+import { ccClaimedFields } from "./cc-field-detection-lib";
 import {
   showDropdown,
   hideDropdown,
@@ -174,20 +176,7 @@ export function detectIdentityFields(root: ParentNode): IdentityFormFields | nul
   // C4: a field already claimed by CC detection must never also be claimed by
   // identity detection — otherwise the identity focus handler races the CC
   // dropdown and can overwrite it on a card field.
-  const ccFields = detectCreditCardFields(root);
-  const ccClaimed = new Set<HTMLElement>();
-  if (ccFields) {
-    for (const el of [
-      ccFields.cardholderName,
-      ccFields.cardNumber,
-      ccFields.expiryMonth,
-      ccFields.expiryYear,
-      ccFields.expiryCombined,
-      ccFields.cvv,
-    ]) {
-      if (el) ccClaimed.add(el);
-    }
-  }
+  const ccClaimed = ccClaimedFields(root);
 
   const visibleFields = allFields.filter(
     (f) => isElementVisible(f) && isUsableField(f) && !ccClaimed.has(f),

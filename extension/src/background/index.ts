@@ -35,6 +35,7 @@ import { getSettings, validateSettings, TimeoutAction } from "../lib/storage";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { humanizeError } from "../lib/error-messages";
 import { extractHost, isHostMatch, parseHttpOrigin } from "../lib/url-matching";
+import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../lib/cc-patterns";
 import {
   persistSession,
   loadSession,
@@ -2092,11 +2093,15 @@ async function performAutofillForEntry(
   ) =>
     chrome.scripting.executeScript({
       target: directTarget,
+      // The card-form patterns and LOGIN autocomplete tokens are always passed:
+      // without them directAutofill runs no card-form exclusion.
       args: [
         username,
         password ?? "",
         hintArg,
         textCustomFields,
+        CARD_PATTERN_SOURCES,
+        [...LOGIN_AUTOCOMPLETE_TOKENS],
       ],
       func: directAutofill,
     });

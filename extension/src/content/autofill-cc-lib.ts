@@ -3,13 +3,12 @@
 
 import { EXT_MSG } from "../lib/constants";
 import type { CreditCardAutofillPayload } from "../types/messages";
+import { detectExpiryFormat, formatCombinedExpiry } from "./cc-form-detector-lib";
 import {
   detectCreditCardFields,
-  detectExpiryFormat,
-  formatCombinedExpiry,
   isCreditCardFillable,
   type CreditCardFormFields,
-} from "./cc-form-detector-lib";
+} from "./cc-field-detection-lib";
 import {
   resolveFillRoot,
   runFillSequence,

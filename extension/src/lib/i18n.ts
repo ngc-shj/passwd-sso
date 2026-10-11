@@ -3,7 +3,6 @@ import ja from "../messages/ja.json";
 
 const MESSAGES = { en, ja } as const;
 type Locale = keyof typeof MESSAGES;
-type Messages = (typeof MESSAGES)[Locale];
 
 function getLocale(): Locale {
   let raw: string | false = false;

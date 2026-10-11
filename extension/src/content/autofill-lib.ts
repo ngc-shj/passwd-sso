@@ -11,6 +11,8 @@ import {
 } from "./fill-sequence-lib";
 import { FILL_DIAG_CODE, logFillError } from "./select-diag-lib";
 import { labelledByText } from "./labelled-by";
+import { ccFormFields } from "./cc-field-detection-lib";
+import { isLoginEligible } from "./login-field-eligibility";
 
 /**
  * Whether this frame is allowed to receive the decrypted credential. The SW
@@ -324,6 +326,12 @@ export async function performAutofill(
   const inputs = Array.from(
     document.querySelectorAll("input")
   ) as HTMLInputElement[];
+  // The card form's fields are never LOGIN targets (a masked CVV is otherwise
+  // the "last password field"), unless the page declares a LOGIN autocomplete.
+  // Custom fields are exempt: they name their target explicitly.
+  const ccForm = ccFormFields(document);
+  const isEligible = (i: HTMLInputElement) => isLoginEligible(i, ccForm);
+  const loginInputs = inputs.filter(isEligible);
   const hintedInput =
     (payload.targetHint?.id
       ? inputs.find((i) => i.id === payload.targetHint?.id)
@@ -341,6 +349,7 @@ export async function performAutofill(
     null;
   const hintedUsernameInput =
     hintedInput &&
+    isEligible(hintedInput) &&
     isUsableInput(hintedInput) &&
     USERNAME_TYPES.includes(hintedInput.type)
       ? hintedInput
@@ -357,7 +366,8 @@ export async function performAutofill(
   }
   const customFieldTargets = new Set(customFieldMap.values());
 
-  const focusedUsername = findFocusedTextInput();
+  const focusedCandidate = findFocusedTextInput();
+  const focusedUsername = focusedCandidate && isEligible(focusedCandidate) ? focusedCandidate : null;
   // If focused input is reserved for a custom field, don't use it as username target
   const nonCustomFocused =
     focusedUsername && !customFieldTargets.has(focusedUsername) ? focusedUsername : null;
@@ -368,9 +378,9 @@ export async function performAutofill(
   const passwordInput =
     (scopeForm
       ? findPasswordInput(
-          Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[],
+          (Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[]).filter(isEligible),
         )
-      : null) ?? findPasswordInput(inputs);
+      : null) ?? findPasswordInput(loginInputs);
 
   // OTP targets are reserved before the username is chosen: the dropdown opens
   // on an OTP field and OTP pages autofocus it, so the focused or hinted field is
@@ -382,16 +392,16 @@ export async function performAutofill(
   if (payload.totpCode) {
     const otpForm = passwordInput?.form ?? scopeForm;
     const otpScopedInputs = otpForm
-      ? (Array.from(otpForm.querySelectorAll("input")) as HTMLInputElement[])
+      ? (Array.from(otpForm.querySelectorAll("input")) as HTMLInputElement[]).filter(isEligible)
       : null;
     // Try split OTP fields first (e.g. 6 separate single-digit inputs)
     splitOtpInputs =
       (otpScopedInputs ? findSplitOtpInputs(otpScopedInputs, codeLen) : null) ??
-      findSplitOtpInputs(inputs, codeLen);
+      findSplitOtpInputs(loginInputs, codeLen);
     if (!splitOtpInputs) {
       // Fall back to single OTP field
       singleOtpInput =
-        (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ?? findOtpInput(inputs);
+        (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ?? findOtpInput(loginInputs);
     }
   }
   const otpTargets = new Set<HTMLInputElement>(
@@ -407,11 +417,26 @@ export async function performAutofill(
     effectiveFocusedUsername ??
     effectiveHintedUsername ??
     findUsernameInput(
-      inputs.filter((i) => !isReserved(i)),
+      loginInputs.filter((i) => !isReserved(i)),
       passwordInput,
     );
 
-  const unreservedInputsIn = (root: FillRoot) => inputsIn(root).filter((i) => !isReserved(i));
+  // Relocates re-check eligibility against the page as it is now. Every
+  // relocate in one fill tick runs in a single task, so they share one card
+  // scan; the memo is dropped before the next tick.
+  let tickCcForm: Set<HTMLElement> | null = null;
+  const ccFormThisTick = (): Set<HTMLElement> => {
+    if (!tickCcForm) {
+      tickCcForm = ccFormFields(document);
+      queueMicrotask(() => {
+        tickCcForm = null;
+      });
+    }
+    return tickCcForm;
+  };
+  const eligibleInputsIn = (root: FillRoot) =>
+    inputsIn(root).filter((i) => isLoginEligible(i, ccFormThisTick()));
+  const unreservedInputsIn = (root: FillRoot) => eligibleInputsIn(root).filter((i) => !isReserved(i));
 
   // ── Steps, in order: custom fields, username, password, TOTP ──
   // Custom fields go first and the password after the identifiers: a
@@ -450,7 +475,7 @@ export async function performAutofill(
     steps.push({
       key: "password",
       initial: passwordInput,
-      relocate: (root) => findPasswordInput(inputsIn(root)),
+      relocate: (root) => findPasswordInput(eligibleInputsIn(root)),
       accepts: isPasswordTarget,
       write: (el) => setInputValue(el as HTMLInputElement, payload.password),
       release: () => {
@@ -469,7 +494,7 @@ export async function performAutofill(
         steps.push({
           key: `totp-${i}`,
           initial: splitOtpInputs[i],
-          relocate: (root) => findSplitOtpInputs(inputsIn(root), codeLen)?.[i] ?? null,
+          relocate: (root) => findSplitOtpInputs(eligibleInputsIn(root), codeLen)?.[i] ?? null,
           accepts: isTextLikeTarget,
           write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? ""),
           release: releaseTotp,
@@ -479,7 +504,7 @@ export async function performAutofill(
       steps.push({
         key: "totp",
         initial: singleOtpInput,
-        relocate: (root) => findOtpInput(inputsIn(root)),
+        relocate: (root) => findOtpInput(eligibleInputsIn(root)),
         accepts: isTextLikeTarget,
         write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode ?? ""),
         release: releaseTotp,
