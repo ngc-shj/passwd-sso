@@ -13,6 +13,7 @@ import { directAutofill } from "../../background/direct-autofill";
 import { performAutofill } from "../../content/autofill-lib";
 import { __resetFillSequenceForTests } from "../../content/fill-sequence-lib";
 import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../../lib/cc-patterns";
+import { AUTOFILL_FILL } from "../../lib/constants";
 
 // Polyfill CSS.escape for jsdom (label[for] lookups), as the sibling CC/identity
 // detector tests do.
@@ -61,7 +62,7 @@ async function runContent(html: string, focusId?: string): Promise<Targets> {
   if (focusId) (document.getElementById(focusId) as HTMLInputElement | null)?.focus();
   await performAutofill(
     {
-      type: "AUTOFILL_FILL",
+      type: AUTOFILL_FILL,
       allowedHosts: [PAGE_HOST],
       username: USERNAME,
       password: PASSWORD,
