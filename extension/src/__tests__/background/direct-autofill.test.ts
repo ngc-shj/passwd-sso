@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { directAutofill } from "../../background/direct-autofill";
+import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../../lib/cc-patterns";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -140,6 +141,50 @@ describe("directAutofill", () => {
 
     expect($("#brchNum").value).toBe("123");
     expect($("#pw").value).toBe("pw");
+  });
+
+  // C6: without the pattern/token args (older callers, or a 4-arg test call),
+  // no card-form exclusion runs at all — the masked CVV is still "the last
+  // password field", as it always was. This is the documented default, not a
+  // regression: the production call site (background/index.ts) always passes
+  // both args.
+  it("4-arg call (no card patterns): the card-form CVV is still the last-password target", async () => {
+    document.body.innerHTML = `
+      <input id="username" type="text" name="username">
+      <input id="loginpw" type="password" name="password">
+      <form>
+        <input id="ccnum" type="text" name="card_number">
+        <input id="cvv" type="password" name="security_code">
+      </form>
+    `;
+
+    await directAutofill("alice", "pw", null, []);
+
+    expect($("#cvv").value).toBe("pw");
+    expect($("#loginpw").value).toBe("");
+  });
+
+  it("6-arg call with the card patterns: the same markup excludes the card-form CVV", async () => {
+    document.body.innerHTML = `
+      <input id="username" type="text" name="username">
+      <input id="loginpw" type="password" name="password">
+      <form>
+        <input id="ccnum" type="text" name="card_number">
+        <input id="cvv" type="password" name="security_code">
+      </form>
+    `;
+
+    await directAutofill(
+      "alice",
+      "pw",
+      null,
+      [],
+      CARD_PATTERN_SOURCES,
+      [...LOGIN_AUTOCOMPLETE_TOKENS],
+    );
+
+    expect($("#loginpw").value).toBe("pw");
+    expect($("#cvv").value).toBe("");
   });
 
   // executeScript runs the function from its source text in the page, where no

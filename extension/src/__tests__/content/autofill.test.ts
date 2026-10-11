@@ -10,6 +10,14 @@ import {
 import type { AutofillPayload } from "../../types/messages";
 import { AUTOFILL_FILL } from "../../lib/constants";
 
+// NF3 call-count test wraps the real ccFormFields in a spy; every other test
+// in this file gets the unchanged implementation (importOriginal).
+vi.mock("../../content/cc-field-detection-lib", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../content/cc-field-detection-lib")>();
+  return { ...actual, ccFormFields: vi.fn(actual.ccFormFields) };
+});
+import { ccFormFields } from "../../content/cc-field-detection-lib";
+
 // Existing rows assert T0 targets only: a zero late-field window keeps them free
 // of the deferral wait (every T0 target is still written).
 const NO_WAIT = { lateFieldWindowMs: 0 };
@@ -1300,5 +1308,245 @@ describe("performAutofill — sequential fill", () => {
 
     expect(byId("user").value).toBe("alice");
     expect(byId("decoy").value).toBe("");
+  });
+});
+
+// ── CC field exclusion in fill (plan FR1-FR4, C3) ─────────────
+
+function byName(name: string): HTMLInputElement {
+  const el = document.querySelector(`[name="${name}"]`);
+  if (!(el instanceof HTMLInputElement)) throw new Error(`fixture missing input[name=${name}]`);
+  return el;
+}
+
+describe("performAutofill — CC field exclusion", () => {
+  it("fills the login password, not the masked card CVV (claim-stealing by position)", async () => {
+    setupForm(`
+      <input type="text" name="username" />
+      <input type="password" name="password" />
+      <div id="card">
+        <input name="cardNumber" />
+        <input type="password" name="cvv" />
+      </div>
+    `);
+
+    await performAutofill({
+      type: AUTOFILL_FILL,
+      allowedHosts: [PAGE_HOST],
+      username: "alice",
+      password: "secret",
+    }, NO_WAIT);
+
+    expect(byName("password").value).toBe("secret");
+    expect(byName("cvv").value).toBe("");
+  });
+
+  it("allow: the same page without a card number keeps today's last-password choice", async () => {
+    setupForm(`
+      <input type="text" name="username" />
+      <input type="password" name="password" />
+      <div id="card">
+        <input type="password" name="cvv" />
+      </div>
+    `);
+
+    await performAutofill({
+      type: AUTOFILL_FILL,
+      allowedHosts: [PAGE_HOST],
+      username: "alice",
+      password: "secret",
+    }, NO_WAIT);
+
+    // No card number anywhere on the page: FR3 keeps the pre-fix "last
+    // visible password wins" heuristic exactly, even though the field is
+    // still named "cvv".
+    expect(byName("cvv").value).toBe("secret");
+    expect(byName("password").value).toBe("");
+  });
+
+  it("FR2: fills a card-form field whose autocomplete explicitly declares current-password", async () => {
+    setupForm(`
+      <input type="text" name="username" />
+      <div id="card">
+        <input name="cardNumber" />
+        <input type="password" name="cvv" autocomplete="current-password" />
+      </div>
+    `);
+
+    await performAutofill({
+      type: AUTOFILL_FILL,
+      allowedHosts: [PAGE_HOST],
+      username: "alice",
+      password: "secret",
+    }, NO_WAIT);
+
+    expect(byName("cvv").value).toBe("secret");
+  });
+
+  it("FR4: a login password named security_code is filled, and the card CVV stays empty (claim-stealing)", async () => {
+    setupForm(`
+      <div id="login">
+        <input type="text" name="username" />
+        <input type="password" name="security_code" />
+      </div>
+      <div id="card">
+        <input name="cardNumber" />
+        <input type="password" name="cvv" />
+      </div>
+    `);
+
+    await performAutofill({
+      type: AUTOFILL_FILL,
+      allowedHosts: [PAGE_HOST],
+      username: "alice",
+      password: "secret",
+    }, NO_WAIT);
+
+    expect(byName("security_code").value).toBe("secret");
+    expect(byName("cvv").value).toBe("");
+  });
+
+  it("allow: the same claim-stealing page without a card number keeps today's choice", async () => {
+    setupForm(`
+      <div id="login">
+        <input type="text" name="username" />
+        <input type="password" name="security_code" />
+      </div>
+      <div id="card">
+        <input type="password" name="cvv" />
+      </div>
+    `);
+
+    await performAutofill({
+      type: AUTOFILL_FILL,
+      allowedHosts: [PAGE_HOST],
+      username: "alice",
+      password: "secret",
+    }, NO_WAIT);
+
+    expect(byName("cvv").value).toBe("secret");
+    expect(byName("security_code").value).toBe("");
+  });
+
+  it("split OTP security-code-0..5 fill in the login form; the card form's セキュリティコード CVV elsewhere is not the target", async () => {
+    setupForm(`
+      <div id="login">
+        <input type="text" name="username" />
+        <input type="password" name="password" />
+        <section>
+          <input type="text" name="security-code-0" />
+          <input type="text" name="security-code-1" />
+          <input type="text" name="security-code-2" />
+          <input type="text" name="security-code-3" />
+          <input type="text" name="security-code-4" />
+          <input type="text" name="security-code-5" />
+        </section>
+      </div>
+      <div id="card">
+        <input name="cardNumber" />
+        <input type="text" name="cvv" placeholder="セキュリティコード" />
+      </div>
+    `);
+
+    await performAutofill({
+      type: AUTOFILL_FILL,
+      allowedHosts: [PAGE_HOST],
+      username: "alice",
+      password: "secret",
+      totpCode: "314159",
+    }, NO_WAIT);
+
+    expect(byName("username").value).toBe("alice");
+    expect(byName("password").value).toBe("secret");
+    expect(byName("security-code-0").value).toBe("3");
+    expect(byName("security-code-1").value).toBe("1");
+    expect(byName("security-code-2").value).toBe("4");
+    expect(byName("security-code-3").value).toBe("1");
+    expect(byName("security-code-4").value).toBe("5");
+    expect(byName("security-code-5").value).toBe("9");
+    expect(byName("cvv").value).toBe("");
+  });
+
+  it("three password fields: last eligible (the unrelated field) over the card CVV", async () => {
+    setupForm(`
+      <input type="text" name="username" />
+      <input type="password" name="password" />
+      <input type="password" name="other-masked" />
+      <div id="card">
+        <input name="cardNumber" />
+        <input type="password" name="cvv" />
+      </div>
+    `);
+
+    await performAutofill({
+      type: AUTOFILL_FILL,
+      allowedHosts: [PAGE_HOST],
+      username: "alice",
+      password: "secret",
+    }, NO_WAIT);
+
+    expect(byName("other-masked").value).toBe("secret");
+    expect(byName("password").value).toBe("");
+    expect(byName("cvv").value).toBe("");
+  });
+});
+
+// ── NF3: ccFormFields is called once at T0 and at most once per tick ──
+
+describe("performAutofill — NF3 ccFormFields call count", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    vi.mocked(ccFormFields).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = "";
+  });
+
+  function byId(id: string): HTMLInputElement {
+    const el = document.getElementById(id);
+    if (!(el instanceof HTMLInputElement)) throw new Error(`fixture missing #${id}`);
+    return el;
+  }
+
+  function addPassword(parent: Element, id: string): HTMLInputElement {
+    const el = document.createElement("input");
+    el.type = "password";
+    el.id = id;
+    parent.appendChild(el);
+    return el;
+  }
+
+  it("a multi-relocate fill calls ccFormFields once at T0 and at most once per relocate tick", async () => {
+    setupForm(`<div id="login"><input id="user" type="text" /></div>`);
+    byId("user").focus();
+
+    const fill = performAutofill({
+      type: AUTOFILL_FILL,
+      allowedHosts: [PAGE_HOST],
+      username: "",
+      password: "secret",
+    });
+
+    // Tick 1: the password step is deferred (no password field yet). Its
+    // relocate fails, but still scans the root through the per-tick memo.
+    await vi.advanceTimersByTimeAsync(5);
+
+    const pw = addPassword(document.getElementById("login") as HTMLElement, "pw");
+
+    // Tick 2: relocate now succeeds and writes pw — the memo is cleared
+    // between ticks (queueMicrotask), so this is a fresh call, not a reuse
+    // of tick 1's cached set.
+    await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
+    await fill;
+
+    expect(pw.value).toBe("secret");
+    // 1 (T0) + 1 (tick 1, failed relocate) + 1 (tick 2, successful relocate).
+    // A positive, bounded count: not zero (the scan did run on both ticks
+    // that needed it), and not growing with the 3-then-4 candidate inputs
+    // each tick examined (the per-tick-memo-removed mutation would instead
+    // call it once per candidate input per tick).
+    expect(vi.mocked(ccFormFields)).toHaveBeenCalledTimes(3);
   });
 });
