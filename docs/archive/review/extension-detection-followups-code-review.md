@@ -274,4 +274,4 @@ This round reviews `7432efb62..9b9ef7896` incrementally.
 ### R5-F1 and R5-F2
 - **Action:** the DOB row now separates its options with whitespace; it turns red when month names are passed to `loose` / `names`. A "Credit date (MM)" deny row was added; it turns red without the `credit` qualification.
 
-Full suite: 1588 passed under seeds 1 and 2. tsc is clean.
+Full suite: 1581 passed under seeds 1 and 2. tsc is clean.
