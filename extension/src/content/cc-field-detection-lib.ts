@@ -315,27 +315,22 @@ function describeCandidate(field: FormField, index: number): ExpiryCandidate {
 // Card-flow prefixes on a card field's own name ("billing_exp_month").
 const CARD_FLOW_WORDS = new Set(["billing", "payment", "checkout", "order"]);
 
-/** Own attributes with camelCase boundaries kept ("ccExpMonth" → "cc_exp_month"). */
-function ownWordsOf(field: FormField): string[] {
+function rawOwnAttributes(field: FormField): string[] {
   return [
     field.name,
     field.id,
     field instanceof HTMLInputElement ? field.placeholder : "",
     field.getAttribute("aria-label") ?? "",
-  ]
-    .filter(Boolean)
-    .map((value) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase());
+  ].filter(Boolean);
 }
 
 function ownAttributes(field: FormField): string[] {
-  return [
-    field.name,
-    field.id,
-    field instanceof HTMLInputElement ? field.placeholder : "",
-    field.getAttribute("aria-label") ?? "",
-  ]
-    .filter(Boolean)
-    .map((value) => value.toLowerCase());
+  return rawOwnAttributes(field).map((value) => value.toLowerCase());
+}
+
+/** Own attributes with camelCase boundaries kept ("ccExpMonth" → "cc_exp_month"). */
+function ownWordsOf(field: FormField): string[] {
+  return rawOwnAttributes(field).map((value) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase());
 }
 
 /**

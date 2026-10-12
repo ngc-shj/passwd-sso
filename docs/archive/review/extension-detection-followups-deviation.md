@@ -23,3 +23,24 @@
 
 ## Carried-Forward Plan Findings disposition
 - **TR6 (testing round 6, not delivered):** M1–M17, and M7, were re-run against the real code (scratch copy `c1real`). Each mutation turns its named fixtures red. The review itself is carried to Phase 3's testing expert.
+
+## D7: C1 rules added during code review
+Code review rounds 1–7 added the following rules to `pickExpiry`.
+
+- **Adjacency:** judged over every `input, select, textarea` in the document, not over the pool.
+- **Own attributes:** `ownSinglePart` (English patterns only), gated by `labelIsExpiryVocabulary`.
+- **Label vocabulary:**
+  - card wording;
+  - month names, for the label check only;
+  - カード / クレジットカード / デビットカード / 必須 / 任意.
+- **credit/debit/until:** count only alongside "card", or when the field's own name is card-expiry vocabulary. For that check, camelCase is split and card-flow prefixes are accepted.
+- **No-partner fallback to combined:**
+  - applies to inputs only;
+  - not when the part was decided by autocomplete;
+  - not when `maxLength` is 1–2.
+
+Each rule is pinned by the CR1–CR8 rows in `cc-expiry-picks.test.ts`, and each row was red-proven against the HEAD before its fix.
+
+## SC3 residuals (best-effort, recorded during code review)
+- A label with an unlisted decoration word loses its month.
+- A passport month/year pair under a subject-less "Expiry (MM/YY)" label is split across both fields. Main does the same.

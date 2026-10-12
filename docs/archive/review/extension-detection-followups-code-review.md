@@ -318,3 +318,34 @@ Incremental review of `82a996602..61a125a55`.
   - It accepts `CARD_FLOW_WORDS` (billing, payment, checkout, order) as extra words.
   - `member` / `passport` / `licence` are still rejected.
 - **Tests:** CR8 rows `expMonth`, `billing_exp_month`, `ccExpMonth` and `cardExpiryMonth`. Each fails on the pre-fix HEAD. The CR7 `member_exp_month` deny row still passes.
+
+---
+
+# Round 8 (termination)
+Date: 2026-10-12
+
+## Changes from Previous Round
+Round 8 is an incremental review of `61a125a55..39675b4e1`.
+
+- **Security:** no findings.
+  - All five security findings are resolved: F1, F2, N1, N2 and N3.
+  - The camelCase subject variants (`memberExpMonth`, `passportExpMonth`) are still denied.
+- **Functionality:** no findings.
+  - All 56 probe rows match the F12 prototype.
+  - Every difference from main is either an improvement or an accepted item.
+- **Minor follow-up:** the security reviewer noted that `ownWordsOf` duplicates the attribute list in `ownAttributes`.
+  - Both now read a shared `rawOwnAttributes`.
+  - This is a refactor with no change in behaviour. The full suite passes: 1586 tests.
+
+## Termination
+- **Functionality and security:** rounds 7 and 8 found nothing new.
+- **Testing:** the reviewer last reported in round 5.
+  - All of its findings are resolved, and a seed sweep over seeds 1–20 was clean.
+  - The user stopped this reviewer during round 6, so rounds 6–8 had no separate testing review.
+  - Instead, every change in those rounds carries its own pinning row, and each row was red-proven against the HEAD before the fix.
+
+## Environment Verification Report
+- **VE1 (plan):** `blocked-deferred`. It is run manually on tailscale-served pages before merge.
+  - It covers real-browser fill into expiry fields, the rendered context menu, and the reveal followed by the dropdown.
+  - The constraint and its cost-justification are in plan VE1.
+- **Unit:** `cd extension && npx vitest run` passes all 1586 tests. tsc and the build pass.
