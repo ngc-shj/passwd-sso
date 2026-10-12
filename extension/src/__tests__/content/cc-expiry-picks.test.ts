@@ -4,7 +4,7 @@
 // match, and no role is taken from a non-card date field. Each row's comment
 // names the review finding it pins; the mutation table in
 // docs/archive/review/extension-detection-followups-plan.md maps rules to rows.
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeAll, afterAll } from "vitest";
 import { detectCreditCardFields } from "../../content/cc-field-detection-lib";
 
 type Want = { month?: string | null; year?: string | null; combined?: string | null };
@@ -81,11 +81,34 @@ const CASES: [string, string, Want][] = [
   ["R6-F1 Please enter expire MM/YY", `<form><input name="card_number"><label>Please enter expire MM/YY <input name="e"></label></form>`, { combined: "e", month: null, year: null }],
   ["R6-F2 bracket-namespaced split", `<form><input name="card_number"><input name="order[payment][expiry_mm]"><input name="order[payment][expiry_yy]"></form>`, { month: "order[payment][expiry_mm]", year: "order[payment][expiry_yy]", combined: null }],
   ["R6-F2 Expiry date (required) [MM][YY]", `<form><input name="card_number"><label>Expiry date (required) <input name="m" placeholder="MM"></label><input name="y" placeholder="YY"></form>`, { month: "m", year: "y", combined: null }],
+  // Code review round 1.
+  ["CR1 label[for] (MM/YY) over exp_month/exp_year selects", `<form><input name="card_number"><label for="em">Expiration date (MM/YY)</label><select id="em" name="exp_month">${o("1")}</select> / <select name="exp_year">${o("2030")}</select></form>`, { month: "exp_month", year: "exp_year", combined: null }],
+  ["CR1 label[for] (MM / YYYY) over exp_month/exp_year inputs", `<form><input name="card_number"><label for="em">Expiry (MM / YYYY)</label><input id="em" name="exp_month"> <input name="exp_year"></form>`, { month: "exp_month", year: "exp_year", combined: null }],
+  ["CR1 Valid thru (month/year) over ccmonth/ccyear selects", `<form><input name="card_number"><label for="cm">Valid thru (month/year)</label><select id="cm" name="ccmonth">${o("1")}</select><select name="ccyear">${o("2030")}</select></form>`, { month: "ccmonth", year: "ccyear", combined: null }],
+  ["CR1 wrapping label with Month/Year option text", `<form><input name="card_number"><label>Expiration date <select name="exp_month"><option>Month</option>${o("01")}</select><select name="exp_year"><option>Year</option>${o("2030")}</select></label></form>`, { month: "exp_month", year: "exp_year", combined: null }],
+  ["CR1 autocomplete month + exp_year in one wrapping label", `<form><input name="card_number"><label>Expiry <select name="m" autocomplete="cc-exp-month">${o("1")}</select><select name="exp_year">${o("2030")}</select></label></form>`, { month: "m", year: "exp_year", combined: null }],
+  ["CR1 JA wrapping label 月/年 selects", `<form><label>カード番号<input name="cn"></label><label>有効期限 <select name="card_exp_month">${o("1")}</select>月 / <select name="card_exp_year">${o("2030")}</select>年</label></form>`, { month: "card_exp_month", year: "card_exp_year", combined: null }],
+  ["CR1 form-less card: Year across another form is not the partner", `<div><input name="card_number"><label>Expiry month <select name="em">${o("1")}</select></label></div><form><input name="newsletter"></form><section><fieldset><legend>Date of birth</legend><label>Year <input name="year"></label></fieldset></section>`, { month: "em", year: null }],
+  ["CR1 same form: Year behind skipped controls is not the partner", `<form><input name="card_number"><label>Expiry month <select name="em">${o("1")}</select></label><input type="checkbox" name="c"><input type="hidden" name="h"><textarea name="t"></textarea><label>Year <select name="year">${o("1990")}</select></label></form>`, { month: "em", year: null }],
 ];
 
 const name = (el: Element | null) => (el ? el.getAttribute("name") : null);
 
 describe("detectCreditCardFields expiry picks", () => {
+  // jsdom has no CSS.escape, so getHintString would skip <label for> text that
+  // real browsers include; give it one for the label[for] rows.
+  const hadCss = typeof CSS !== "undefined";
+  beforeAll(() => {
+    if (!hadCss) {
+      (globalThis as { CSS?: { escape(v: string): string } }).CSS = {
+        escape: (v: string) => v.replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`),
+      };
+    }
+  });
+  afterAll(() => {
+    if (!hadCss) delete (globalThis as { CSS?: unknown }).CSS;
+  });
+
   afterEach(() => {
     document.body.innerHTML = "";
   });

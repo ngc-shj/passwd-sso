@@ -825,6 +825,62 @@ describe("context-menu", () => {
       await vi.advanceTimersByTimeAsync(10);
 
       expect(idsCreated().some((id) => id.startsWith("psso-login-e"))).toBe(false);
+      // ...and the menu is not left as a bare parent: the locked item is there.
+      expect(idsCreated()).toContain("psso-login-locked");
+    });
+
+    it("skips same-host refreshes of a locked menu while the cache version is unchanged", async () => {
+      // A version no other test uses: lastMenuCacheVersion is module state.
+      deps = createDeps({ isVaultUnlocked: vi.fn().mockReturnValue(false), getCacheVersion: vi.fn().mockReturnValue(9001) });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(idsCreated()).toContain("psso-login-locked");
+      chromeMock.contextMenus.removeAll.mockClear();
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+
+      expect(chromeMock.contextMenus.removeAll).not.toHaveBeenCalled();
+    });
+
+    it("rebuilds a locked menu on the same host once the cache version moves", async () => {
+      const getCacheVersion = vi.fn().mockReturnValue(2);
+      deps = createDeps({ isVaultUnlocked: vi.fn().mockReturnValue(false), getCacheVersion });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      chromeMock.contextMenus.removeAll.mockClear();
+
+      getCacheVersion.mockReturnValue(3);
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+
+      expect(chromeMock.contextMenus.removeAll).toHaveBeenCalled();
+    });
+
+    it.each([
+      ["resolves to no tab", () => chromeMock.tabs.query.mockResolvedValue([])],
+      ["rejects", () => chromeMock.tabs.query.mockRejectedValue(new Error("no window"))],
+    ])("clears entry items on invalidate when tabs.query %s", async (_label, arrange) => {
+      deps = createDeps();
+      initContextMenu(deps);
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(idsCreated()).toContain("psso-login-e1");
+      chromeMock.contextMenus.removeAll.mockClear();
+      chromeMock.contextMenus.create.mockClear();
+
+      arrange();
+      invalidateContextMenu();
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+
+      expect(chromeMock.contextMenus.removeAll).toHaveBeenCalled();
+      expect(idsCreated().some((id) => id.startsWith("psso-login-e"))).toBe(false);
     });
 
     it("abandons a build when invalidateContextMenu claims a newer generation while the vault stays unlocked (generation claim in isolation, R3-T4)", async () => {

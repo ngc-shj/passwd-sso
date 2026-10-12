@@ -162,7 +162,7 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
     cvv = findConfNumCvvInForm(visibleFields, cardNumber);
   }
   if (cardNumber && !expiryCombined && !(expiryMonth && expiryYear)) {
-    const picked = pickExpiry(visibleFields, cardNumber, { month: expiryMonth, year: expiryYear });
+    const picked = pickExpiry(root, visibleFields, cardNumber, { month: expiryMonth, year: expiryYear });
     expiryMonth = picked.month;
     expiryYear = picked.year;
     expiryCombined = picked.combined;
@@ -259,7 +259,12 @@ interface ExpiryCandidate {
   loose: PartFlags;
   /** Loose, with the token counted only alongside expiry context. */
   names: PartFlags;
-  /** Strict, or any token: whether the hint mentions the part at all. */
+  /**
+   * Strict, or any token: whether the field mentions the part at all. When the
+   * field's own attributes name exactly one part, a label describing the pair's
+   * format ("Expiration date (MM/YY)", a wrapping label's option text) does not
+   * count against it.
+   */
   mentions: PartFlags;
 }
 
@@ -277,8 +282,25 @@ function describeCandidate(field: FormField, index: number): ExpiryCandidate {
     strict,
     loose: flags((part) => strict[part] || (token[part] && vocabulary)),
     names: flags((part) => strict[part] || (token[part] && vocabulary && context)),
-    mentions: flags((part) => strict[part] || token[part]),
+    mentions: ownSinglePart(field) ?? flags((part) => strict[part] || token[part]),
   };
+}
+
+/** The one part a field's own name/id/placeholder/aria-label names, as flags; else null. */
+function ownSinglePart(field: FormField): PartFlags | null {
+  const own = [
+    field.name,
+    field.id,
+    field instanceof HTMLInputElement ? field.placeholder : "",
+    field.getAttribute("aria-label") ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  // English patterns only: a bare 月/年 in an own attribute is usually an
+  // example value ("2025年"), not the field's role.
+  const month = CC_DETECT_RE.expiryMonth.test(own) || rawTokenPart(own, "month");
+  const year = CC_DETECT_RE.expiryYear.test(own) || rawTokenPart(own, "year");
+  return month !== year ? { month, year } : null;
 }
 
 function commonAncestorDepth(a: Element, b: Element): number {
@@ -315,6 +337,7 @@ interface ExpiryPicks {
  * A field mentioning both parts (生年月日, YYYY/MM/DD) is never a single part.
  */
 function pickExpiry(
+  root: ParentNode,
   fields: FormField[],
   cardNumber: HTMLInputElement,
   decided: { month: FormField | null; year: FormField | null },
@@ -376,17 +399,15 @@ function pickExpiry(
 
   const anchor = (month ?? year) as FormField;
   const missing: ExpiryPart = month ? "year" : "month";
-  // An anchor outside the card number's form has no neighbour in the pool.
-  const anchorIndex = indexOf.get(anchor);
-  const sides =
-    anchorIndex === undefined
-      ? []
-      : missing === "year"
-        ? [anchorIndex + 1, anchorIndex - 1]
-        : [anchorIndex - 1, anchorIndex + 1];
+  // "Beside" is judged over every control in the document, not over the pool:
+  // a hidden, unusable or other-form control in between breaks adjacency. An
+  // anchor outside the card number's form has no neighbour.
+  const controls = Array.from(root.querySelectorAll<HTMLElement>("input, select, textarea"));
+  const at = indexOf.has(anchor) ? controls.indexOf(anchor) : -1;
+  const sides = at < 0 ? [] : missing === "year" ? [at + 1, at - 1] : [at - 1, at + 1];
   const partner =
     sides
-      .map((index) => pool.find((c) => c.index === index))
+      .map((index) => pool.find((c) => c.field === controls[index]))
       .find((c) => c !== undefined && c.loose[missing] && !c.mentions[otherPart(missing)])?.field ?? null;
   if (missing === "year") year = partner;
   else month = partner;

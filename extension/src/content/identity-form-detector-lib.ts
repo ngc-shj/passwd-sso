@@ -504,9 +504,14 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
       scheduler.runNow();
       return;
     }
+    // A batch often carries many records for one element (style + class);
+    // each target is inspected once.
+    const seen = new Set<Node>();
     if (
       mutations.some((m) => {
         const target = m.target;
+        if (seen.has(target)) return false;
+        seen.add(target);
         return (
           target instanceof Element &&
           (target.matches?.("input,select") || target.querySelector?.("input,select"))

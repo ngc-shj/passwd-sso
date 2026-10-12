@@ -163,6 +163,16 @@ export function updateContextMenuForTab(
   }, DEBOUNCE_MS);
 }
 
+function createLockedItem(): Promise<void> {
+  return createMenuItem({
+    id: `${ITEM_PREFIX}locked`,
+    parentId: PARENT_ID,
+    title: t("contextMenu.vaultLocked"),
+    contexts: ["editable"],
+    enabled: false,
+  });
+}
+
 async function doUpdateMenu(
   url: string | undefined,
   generation: number,
@@ -184,7 +194,8 @@ async function doUpdateMenu(
 
   // Skip rebuild if same host AND the cache has not moved on since the last
   // build — a version bump must rebuild even without a host change.
-  if (host === lastMenuHost && deps.getCacheVersion() === lastMenuCacheVersion) return;
+  const version = deps.getCacheVersion();
+  if (host === lastMenuHost && version === lastMenuCacheVersion) return;
 
   // Read the toggle here as well as in resetMenuWithParent: with it off, the
   // parent is never created, and creating children against a missing parent is
@@ -194,7 +205,11 @@ async function doUpdateMenu(
 
   await resetMenuWithParent(generation);
   if (!isCurrent(generation)) return;
+  // Recorded for every menu built here, not only the entry list: a locked,
+  // disconnected or disabled menu must also skip same-host refreshes until the
+  // cache moves on. The entry path re-records the snapshot's own version.
   lastMenuHost = host;
+  lastMenuCacheVersion = version;
   if (!enabled) return;
 
   if (!deps.isConnected()) {
@@ -209,13 +224,7 @@ async function doUpdateMenu(
   }
 
   if (!deps.isVaultUnlocked()) {
-    await createMenuItem({
-      id: `${ITEM_PREFIX}locked`,
-      parentId: PARENT_ID,
-      title: t("contextMenu.vaultLocked"),
-      contexts: ["editable"],
-      enabled: false,
-    });
+    await createLockedItem();
     return;
   }
 
@@ -229,6 +238,7 @@ async function doUpdateMenu(
     // same-host match against this abandoned build.
     if (!deps.isVaultUnlocked()) {
       lastMenuHost = null;
+      await createLockedItem();
       return;
     }
     lastMenuCacheVersion = snapshot.version;
@@ -447,11 +457,14 @@ function parseMenuEntryId(suffix: string): { entryId: string | null; teamId?: st
  * invalidateContextMenu both go through to get a rebuild on the active tab.
  */
 export function refreshContextMenu(): void {
+  // With no active tab (or a failed query) the rebuild still runs, URL-less, so
+  // it resets the menu to the bare parent: entry items built before a lock must
+  // not outlive it just because no tab could be resolved.
   chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-    if (tab?.id) {
-      updateContextMenuForTab(tab.id, tab.url);
-    }
-  }).catch(() => {});
+    updateContextMenuForTab(tab?.id ?? -1, tab?.url);
+  }).catch(() => {
+    updateContextMenuForTab(-1, undefined);
+  });
 }
 
 /**
