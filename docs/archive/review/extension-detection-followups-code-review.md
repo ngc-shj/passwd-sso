@@ -152,3 +152,41 @@ Round 2 is an incremental review of `23dbc6bb9..ad799f960`. All round-1 findings
 - **Verification:** each row or test is red under its own mutation: drop placeholder, drop id, drop aria-label, drop textarea, and first-target-only dedupe.
 
 Full suite: 1555 passed, twice. tsc is clean.
+
+---
+
+# Round 3
+Date: 2026-10-12
+
+## Changes from Previous Round
+Round 3 is an incremental review of `ad799f960..c93e040b7`.
+- **Security:** no findings. The F6 fallback adds no element that round 2 did not already claim, and the N1 widening is gone.
+- **Functionality:** F5 and F6 resolved; two new findings (F7, F8).
+- **Testing:** the round-3 run terminated on an authentication error before reporting, so it was relaunched against the round-3 fixes.
+
+## Findings
+- **F7 [Major, functionality]** `labelIsExpiryVocabulary` rejected ordinary card wording. As a result, the split month was dropped again; main split these correctly. The rejected wording:
+  - "Credit card expiration date";
+  - "… as shown on card";
+  - "Good thru";
+  - month-name option text inside a wrapping label;
+  - カード有効期限;
+  - 必須.
+- **F8 [Minor, functionality]** The no-partner fallback fired on an input with `maxlength=2`, which would write `MM/YY` into a two-character field.
+
+## Resolution Status
+### F7: card wording in the label
+- **Action:** the label vocabulary is still an allow-list, with these additions:
+  - `EXPIRY_WORDS` gains `credit debit good until shown printed` and the English month names (full and three-letter forms).
+  - `JA_EXPIRY_VOCABULARY_RE` gains カード / 必須 / 任意.
+- **What still fails the label check:** passport, birth, ポイント, マイナンバー and any other subject word.
+- **Residual (SC3):** a label with an unlisted decoration word loses its month, as in round 2.
+- **Tests:** CR4 rows. Five are red on the pre-fix HEAD: credit card, カード有効期限, 必須, as shown on card, Good thru. The month-name option row passes on HEAD in jsdom and is kept as a guard.
+- **Modified file:** `extension/src/content/cc-field-detection-lib.ts`
+
+### F8: fallback on a two-character input
+- **Action:** the fallback is skipped when `maxLength` is 1 or 2. An unset `maxLength` (0 or less) still falls back.
+- **Tests:** CR4 `maxlength=2` row, red on the pre-fix HEAD.
+- **Modified file:** `extension/src/content/cc-field-detection-lib.ts`
+
+Full suite: 1562 passed. tsc is clean.

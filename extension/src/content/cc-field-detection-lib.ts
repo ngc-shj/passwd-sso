@@ -210,12 +210,18 @@ const CC_EXP_NAME_RE = /cc.?exp/;
 const EXPIRY_WORDS = new Set([
   "exp", "expiry", "expire", "expires", "expiration", "card", "valid", "thru", "date",
   "month", "year", "years", "yyyy",
+  // Card wording that names no other subject.
+  "credit", "debit", "good", "until", "shown", "printed",
   // Decoration that names no subject.
   "required", "optional", "please", "enter", "select", "your", "the",
+  // Month names: option text inside a wrapping label.
+  "january", "february", "march", "april", "may", "june", "july", "august", "september",
+  "october", "november", "december",
+  "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
 ]);
 // A bracketed field name ("order[payment][expiry_mm]") is judged by its last segment.
 const BRACKET_NAME_RE = /[a-z0-9_-]+(?:\[[^\]\s]*\])*\[([^\]\s]*)\]/g;
-const JA_EXPIRY_VOCABULARY_RE = /有効期限|[月年（）()]/g;
+const JA_EXPIRY_VOCABULARY_RE = /有効期限|カード|必須|任意|[月年（）()]/g;
 const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff]/;
 
 function isExpiryVocabulary(hint: string): boolean {
@@ -435,6 +441,8 @@ function pickExpiry(
   if (
     !partner &&
     anchor instanceof HTMLInputElement &&
+    // An input sized for two characters is one part, whatever its label says.
+    !(anchor.maxLength > 0 && anchor.maxLength <= 2) &&
     decided.month === null &&
     decided.year === null &&
     anchorCandidate?.hintMentionsBoth
