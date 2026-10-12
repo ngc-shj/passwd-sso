@@ -21,6 +21,7 @@ Removing one of these sites on its own leaves the tests green, because a second 
 - `getCachedSnapshot`'s `!encryptionKey` throw.
 - `decryptOverviews`' throw-on-locked.
 - `fetchAllTeamEntries`' throw-on-locked.
+- The `encryptionKey !== null` half of `abandonCommittedUnlock`'s check. When a lock has already cleared the vault, the extra `clearVault()` it skips only re-nulls null state and bumps the epoch again, so no test can observe it.
 
 Every caller checks `encryptionKey` synchronously before calling these. They are kept so that a future caller that skips that check still gets "locked" rather than `[]`.
 

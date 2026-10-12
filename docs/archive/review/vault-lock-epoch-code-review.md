@@ -1,6 +1,6 @@
 # Code Review: vault-lock-epoch
 Date: 2026-10-13
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 Initial review of `206e223db`. Three fresh expert sub-agents did a full-diff review, running the code in scratch copies.
@@ -56,6 +56,16 @@ Initial review of `206e223db`. Three fresh expert sub-agents did a full-diff rev
 - R29: D2 line drift; fixed in T5.
 - All others: OK or n/a.
 
+## Round 2
+Re-review of `71d06e336` by the same three experts.
+
+| ID | Severity | Finding | Resolution |
+|----|----------|---------|------------|
+| N1 / R2-F1 | Minor | `recordUnlockPresence` logged a lock before the send as `vault-unlock-verify-network-error`. Nothing was sent, so the warning was false. | The catch returns silently on `VaultLockedError`. |
+| R2-1 | Major | The hydrate keepalive predicate had no test: replacing it with `startKeepalive()` left the suite green. | A test holds the keepalive's offscreen-document creation during hydrate, locks, and expects no `start-keepalive`; a positive control releases without a lock. Red-proved on a scratch copy by dropping the predicate. |
+
+The security reviewer confirmed every round-1 fix held and nothing widened. The `encryptionKey !== null` half of `abandonCommittedUnlock`'s check is recorded in deviation D2 as defence in depth.
+
 ## Environment Verification Report
 - VE1 (Chrome manual: unlock → lock → unlock quickly; normal fill, copy, save and passkey flows): `blocked-deferred` to the user before merge, per plan VE1.
-- Unit tests: 1734 passed under seeds 1, 2, 7, 13 and 42. tsc and the build pass.
+- Unit tests: 1736 passed (round 2). Round 1: 1734 passed under seeds 1, 2, 7, 13 and 42. tsc and the build pass.

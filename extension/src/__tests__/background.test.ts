@@ -5525,6 +5525,11 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
     (chromeMock!.runtime.sendMessage.mock.calls as unknown[][]).filter(
       (c) => (c[0] as { type?: string })?.type === "start-keepalive",
     );
+  // startKeepalive runs fire-and-forget (after the unlock answered, or at the
+  // hydrate tail); the offscreen document it creates first is its last await.
+  const holdKeepaliveOffscreen = () =>
+    holdNextCall(chromeMock!.offscreen.createDocument, (params: { justification?: string }) =>
+      params?.justification === "Clipboard access and SW keepalive");
   const persistedSecretKeys = () =>
     sessionStorageMocks.persistSession.mock.calls
       .map((c: unknown[]) => (c[0] as SessionState).vaultSecretKey)
@@ -6177,12 +6182,6 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       expect(fetchCalls(EXT_API_PATH.VAULT_UNLOCK_VERIFY, "POST")).toBe(1);
     });
 
-    // startKeepalive runs fire-and-forget after the unlock answered; the
-    // offscreen document it creates first is its last await.
-    const holdKeepaliveOffscreen = () =>
-      holdNextCall(chromeMock!.offscreen.createDocument, (params: { justification?: string }) =>
-        params?.justification === "Clipboard access and SW keepalive");
-
     it("keepalive: a lock while the offscreen document is created starts no keepalive", async () => {
       const hold = holdKeepaliveOffscreen();
       expect(await unlock()).toEqual({ type: "UNLOCK_VAULT", ok: true });
@@ -6377,6 +6376,29 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       await flush();
 
       expect(vaultLockAlarms()).toEqual([[ALARM_VAULT_LOCK, { delayInMinutes: 15 }]]);
+    });
+
+    it("hydrate keepalive: a lock while the offscreen document is created starts no keepalive", async () => {
+      const tail = await hydrateToTail();
+      const hold = holdKeepaliveOffscreen();
+      tail.release();
+      await hold.reached;
+      await commandHandlers[0](CMD_LOCK_VAULT);
+      hold.release();
+      await flush();
+
+      expect(keepaliveStarts()).toEqual([]);
+    });
+
+    it("hydrate keepalive positive control: released without a lock it starts the keepalive", async () => {
+      const tail = await hydrateToTail();
+      const hold = holdKeepaliveOffscreen();
+      tail.release();
+      await hold.reached;
+      hold.release();
+      await flush();
+
+      expect(keepaliveStarts()).toHaveLength(1);
     });
   });
 

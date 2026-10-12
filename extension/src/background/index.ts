@@ -1467,6 +1467,8 @@ async function recordUnlockPresence(authHash: string, epoch: number): Promise<vo
       warnBackground("vault-unlock-verify-failed", "unknown");
     }
   } catch (err) {
+    // A lock before the send is not a network failure; nothing was sent.
+    if (err instanceof VaultLockedError) return;
     warnBackground("vault-unlock-verify-network-error", classifyError(err));
   }
 }
