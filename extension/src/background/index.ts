@@ -135,6 +135,8 @@ let tenantAutoLockMinutes: number | null = null;
 // in-flight request tell "my token was rotated" from "a different connection
 // (possibly another account) replaced mine".
 let connectionGeneration = 0;
+/** Bumped on every UNLOCK_VAULT commit, so an abandoned unlock rolls back only its own. */
+let unlockCommitSeq = 0;
 // Tenant policy override forcing "logout" as the vault-timeout action (C10).
 // null = tenant has not stated a preference (or vault never unlocked yet) —
 // the local vaultTimeoutAction setting applies.
@@ -309,8 +311,11 @@ async function ensureOffscreen(): Promise<void> {
   }
 }
 
-async function startKeepalive(): Promise<void> {
+async function startKeepalive(isStillWanted: () => boolean = () => true): Promise<void> {
   await ensureOffscreen();
+  // A lock while the offscreen document was being created already sent
+  // stop-keepalive; starting now would keep the worker alive for a locked vault.
+  if (!isStillWanted()) return;
   try {
     await chrome.runtime.sendMessage({ target: "offscreen", type: "start-keepalive" });
   } catch {
@@ -573,7 +578,11 @@ async function updateBadgeForTab(tabId: number, url: string | undefined): Promis
       return;
     }
     const host = extractHost(url);
-    if (!host || await isOwnAppPage(url)) {
+    const ownAppPage = host ? await isOwnAppPage(url) : false;
+    // A lock during isOwnAppPage: clearVault is clearing the badges; no write
+    // below (not even "", which hides the global locked badge) may follow it.
+    if (!isVaultEpochCurrent(epoch)) return;
+    if (!host || ownAppPage) {
       await chrome.action.setBadgeText({ text: "", tabId });
       return;
     }
@@ -590,9 +599,6 @@ async function updateBadgeForTab(tabId: number, url: string | undefined): Promis
       return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, host));
     }).length;
     const text = count === 0 ? "" : count > 99 ? "99+" : count.toString();
-    // A lock during isOwnAppPage: clearVault is clearing the badges; do not
-    // write a per-host count back over it.
-    if (!isVaultEpochCurrent(epoch)) return;
     await chrome.action.setBadgeText({ text, tabId });
     if (count > 0) {
       await chrome.action.setBadgeBackgroundColor({ color: "#3B82F6", tabId });
@@ -790,7 +796,7 @@ async function hydrateFromSession(): Promise<void> {
     if (effectiveLock > 0) {
       chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: effectiveLock });
     }
-    void startKeepalive();
+    void startKeepalive(() => !hydrationSuperseded && encryptionKey !== null);
   }
 
   void updateBadge();
@@ -1377,7 +1383,7 @@ async function swFetch(
   assertFresh();
   const tokenUsed = currentToken;
   const generationUsed = connectionGeneration;
-  const res = await swFetchAuthenticated(path, init, serverUrl, tokenUsed);
+  const res = await swFetchAuthenticated(path, init, serverUrl, tokenUsed, assertFresh);
 
   // 401 retry (C5 extension technical approach): the token may have expired
   // between issuance and this call. Attempt a single-flight refresh and, on
@@ -1398,14 +1404,14 @@ async function swFetch(
     // in flight: the 401 is for the old token, so retry with the current one.
     if (currentToken !== null && currentToken !== tokenUsed) {
       assertFresh();
-      return swFetchAuthenticated(path, init, serverUrl, currentToken);
+      return swFetchAuthenticated(path, init, serverUrl, currentToken, assertFresh);
     }
     const nearExpiry = tokenExpiresAt !== null && Date.now() >= tokenExpiresAt - REFRESH_BUFFER_MS;
     if (nearExpiry) {
       const refreshed = await refreshTokenSingleFlight();
       if (refreshed && currentToken && connectionGeneration === generationUsed) {
         assertFresh();
-        return swFetchAuthenticated(path, init, serverUrl, currentToken);
+        return swFetchAuthenticated(path, init, serverUrl, currentToken, assertFresh);
       }
     }
   }
@@ -1435,6 +1441,7 @@ async function recordUnlockPresence(authHash: string, epoch: number): Promise<vo
       { method: "POST", body: JSON.stringify({ authHash }) },
       serverUrl,
       currentToken,
+      () => assertVaultEpoch(epoch),
     );
     if (res.ok) {
       // Presence moved forward, so a refresh can now extend the token's
@@ -1657,6 +1664,10 @@ async function decryptTeamOverviews(
   );
   const userId = currentUserId;
   const epoch = currentVaultEpoch();
+  // A stale cached team key is refetched once per key version per call — not
+  // once per undecryptable entry, which would cost a member-key round trip for
+  // every corrupt entry on every refill.
+  const invalidatedKeys = new Set<string>();
 
   async function decryptSingleEntry(item: RawTeamEntry): Promise<DecryptedEntry | null> {
     const itemKeyVersion = item.itemKeyVersion ?? 0;
@@ -1719,7 +1730,8 @@ async function decryptTeamOverviews(
       // Invalidate the cached team key (the key getTeamEncryptionKey stored)
       // and retry once.
       const cacheKey = userId ? teamKeyCacheKey(userId, teamId, item.teamKeyVersion) : null;
-      if (cacheKey && teamKeyCache.has(cacheKey)) {
+      if (cacheKey && teamKeyCache.has(cacheKey) && !invalidatedKeys.has(cacheKey)) {
+        invalidatedKeys.add(cacheKey);
         teamKeyCache.delete(cacheKey);
         try {
           const result = await decryptSingleEntry(item);
@@ -1808,6 +1820,8 @@ async function fetchAndDecryptTeamBlob(
   if (itemKeyVersion >= 1) {
     if (!data.encryptedItemKey || !data.itemKeyIv || !data.itemKeyAuthTag) return null;
     const teamEncKey = await getTeamEncryptionKey(teamId, data.teamKeyVersion);
+    // No team key because the vault locked meanwhile is "locked", not "not found".
+    assertVaultEpoch(epoch);
     if (!teamEncKey) return null;
     const itemKeyWrapAAD = buildItemKeyWrapAAD(teamId, data.id, data.teamKeyVersion);
     const itemKeyBytes = await unwrapItemKey(
@@ -1821,6 +1835,7 @@ async function fetchAndDecryptTeamBlob(
     decryptionKey = await getTeamEncryptionKey(teamId, data.teamKeyVersion);
   }
 
+  assertVaultEpoch(epoch);
   if (!decryptionKey) return null;
 
   const blobAAD = buildTeamEntryAAD(teamId, data.id, "blob", itemKeyVersion);
@@ -1920,7 +1935,13 @@ async function performAutofillForEntry(
 
   if (teamId) {
     // Team entry — use team API + team crypto
-    const result = await fetchAndDecryptTeamBlob(teamId, entryId);
+    let result: Awaited<ReturnType<typeof fetchAndDecryptTeamBlob>>;
+    try {
+      result = await fetchAndDecryptTeamBlob(teamId, entryId);
+    } catch (err) {
+      if (err instanceof VaultLockedError) return lockedResult;
+      throw err;
+    }
     if (!result) return { ok: false, error: "FETCH_FAILED" };
     blobPlain = JSON.stringify(result.blob);
     overviewPlain = JSON.stringify(result.overview);
@@ -2667,6 +2688,15 @@ async function handleMessage(
         hydrationSuperseded = true;
         currentVaultSecretKeyHex = secretKeyHex;
         encryptionKey = encKey;
+        const commitSeq = ++unlockCommitSeq;
+        // After this commit, an epoch change means the state above belongs to a
+        // vault that has moved on. Every bump today also clears the vault; this
+        // makes that structural instead of relying on it — but only while no
+        // later unlock has committed over it.
+        const abandonCommittedUnlock = () => {
+          if (unlockCommitSeq === commitSeq && encryptionKey !== null) clearVault();
+          respondLocked();
+        };
         currentUserId = data.userId || null;
         personalKeyVersion = typeof data.keyVersion === "number" ? data.keyVersion : 1;
         // Store tenant policy auto-lock override from server
@@ -2697,7 +2727,7 @@ async function handleMessage(
             const unwrapped = await unwrapEcdhPrivateKey(ecdhEnc, ecdhWrappingKey);
             if (!isVaultEpochCurrent(unlockEpoch)) {
               unwrapped.fill(0);
-              respondLocked();
+              abandonCommittedUnlock();
               return;
             }
             ecdhPrivateKeyBytes = unwrapped;
@@ -2705,7 +2735,7 @@ async function handleMessage(
           } catch {
             // A lock meanwhile: the state is no longer this unlock's to clear.
             if (!isVaultEpochCurrent(unlockEpoch)) {
-              respondLocked();
+              abandonCommittedUnlock();
               return;
             }
             // ECDH key not available — team features silently unavailable
@@ -2719,7 +2749,7 @@ async function handleMessage(
         // Locked while reading the policy: no lock alarm or keepalive for a
         // vault that is no longer unlocked, and no "ok".
         if (!isVaultEpochCurrent(unlockEpoch)) {
-          respondLocked();
+          abandonCommittedUnlock();
           return;
         }
         if (effectiveLock > 0) {
@@ -2727,7 +2757,7 @@ async function handleMessage(
             delayInMinutes: effectiveLock,
           });
         }
-        void startKeepalive();
+        void startKeepalive(() => isVaultEpochCurrent(unlockEpoch));
 
         sendResponse({ type: EXT_MSG.UNLOCK_VAULT, ok: true });
         invalidateContextMenu();
