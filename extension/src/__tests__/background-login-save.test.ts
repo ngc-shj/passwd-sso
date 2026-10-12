@@ -53,6 +53,7 @@ function createDeps(overrides?: Partial<LoginSaveDeps>): LoginSaveDeps {
     }),
     swFetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
     invalidateCache: vi.fn(),
+    getVaultEpoch: () => 0,
     ...overrides,
   };
 }
@@ -205,6 +206,7 @@ describe("login-save", () => {
       expect(mockFetch).toHaveBeenCalledWith(
         "/api/passwords",
         expect.objectContaining({ method: "POST" }),
+        { epoch: 0 },
       );
       // Verify the POST body contains expected fields
       const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);

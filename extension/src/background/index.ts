@@ -98,6 +98,13 @@ import {
   refreshContextMenu,
 } from "./context-menu";
 import {
+  assertVaultEpoch,
+  bumpVaultEpoch,
+  currentVaultEpoch,
+  isVaultEpochCurrent,
+  VaultLockedError,
+} from "./vault-epoch";
+import {
   initLoginSave,
   handleLoginDetected,
   handleSaveLogin,
@@ -229,10 +236,14 @@ const ACTIVITY_DEBOUNCE_MS = 30 * MS_PER_SECOND;
  */
 async function registerActivity(): Promise<void> {
   if (!encryptionKey) return;
+  const epoch = currentVaultEpoch();
   const now = Date.now();
   if (now - lastActivityAt < ACTIVITY_DEBOUNCE_MS) return;
   lastActivityAt = now;
   const effectiveLock = await getEffectiveAutoLockMinutes();
+  // A lock during the await cleared the alarm; re-arming it would later run
+  // the vault-timeout path (and a tenant's logout) against a locked vault.
+  if (!isVaultEpochCurrent(epoch)) return;
   if (effectiveLock > 0) {
     chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: effectiveLock });
   }
@@ -365,10 +376,12 @@ function invalidateCache(): void {
   setCachedEntries(null);
 }
 
-async function getCachedSnapshot(): Promise<{ entries: DecryptedEntry[]; version: number }> {
-  if (cachedEntries && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
-    return { entries: cachedEntries, version: cacheVersion };
-  }
+/**
+ * Fetch and decrypt personal + team overviews for the vault state `epoch`
+ * belongs to. Throws VaultLockedError when that state has ended — a lock that
+ * lands mid-fetch must surface as "locked", never as an empty or partial list.
+ */
+async function fetchFreshEntries(epoch: number): Promise<DecryptedEntry[]> {
   const [personalResult, teamResult] = await Promise.allSettled([
     (async () => {
       const res = await swFetch(EXT_API_PATH.PASSWORDS);
@@ -378,9 +391,23 @@ async function getCachedSnapshot(): Promise<{ entries: DecryptedEntry[]; version
     })(),
     fetchAllTeamEntries(),
   ]);
+  for (const result of [personalResult, teamResult]) {
+    if (result.status === "rejected" && result.reason instanceof VaultLockedError) {
+      throw result.reason;
+    }
+  }
+  assertVaultEpoch(epoch);
   const personal = personalResult.status === "fulfilled" ? personalResult.value : [];
   const team = teamResult.status === "fulfilled" ? teamResult.value : [];
-  const entries = [...personal, ...team];
+  return [...personal, ...team];
+}
+
+async function getCachedSnapshot(): Promise<{ entries: DecryptedEntry[]; version: number }> {
+  if (!encryptionKey) throw new VaultLockedError();
+  if (cachedEntries && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
+    return { entries: cachedEntries, version: cacheVersion };
+  }
+  const entries = await fetchFreshEntries(currentVaultEpoch());
   const version = setCachedEntries(entries);
   return { entries, version };
 }
@@ -434,6 +461,7 @@ async function refreshTenantPolicy(): Promise<void> {
 
 function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
   connectionGeneration += 1;
+  bumpVaultEpoch();
   currentToken = null;
   tokenExpiresAt = null;
   currentCnfJkt = null;
@@ -466,6 +494,7 @@ export function applyToken(
 ): void {
   hydrationSuperseded = true;
   connectionGeneration += 1;
+  bumpVaultEpoch();
   const tokenChanged = currentToken !== null && currentToken !== token;
   if (tokenChanged) {
     // A new token may represent a different auth session/user.
@@ -495,6 +524,7 @@ export function applyToken(
 
 function clearVault(): void {
   hydrationSuperseded = true;
+  bumpVaultEpoch();
   encryptionKey = null;
   currentUserId = null;
   currentVaultSecretKeyHex = null;
@@ -532,6 +562,7 @@ async function clearAllTabBadges(): Promise<void> {
 
 async function updateBadgeForTab(tabId: number, url: string | undefined): Promise<void> {
   if (!currentToken || !encryptionKey) return;
+  const epoch = currentVaultEpoch();
   if (!cachedShowBadgeCount) {
     await chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
     return;
@@ -559,6 +590,9 @@ async function updateBadgeForTab(tabId: number, url: string | undefined): Promis
       return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, host));
     }).length;
     const text = count === 0 ? "" : count > 99 ? "99+" : count.toString();
+    // A lock during isOwnAppPage: clearVault is clearing the badges; do not
+    // write a per-host count back over it.
+    if (!isVaultEpochCurrent(epoch)) return;
     await chrome.action.setBadgeText({ text, tabId });
     if (count > 0) {
       await chrome.action.setBadgeBackgroundColor({ color: "#3B82F6", tabId });
@@ -641,6 +675,7 @@ function persistState(): void {
 // The in-memory fields hydrate assigned before it found the stored session
 // unusable; clearing only storage would leave them for the SW's lifetime.
 function discardRestoredSession(): void {
+  bumpVaultEpoch();
   currentToken = null;
   tokenExpiresAt = null;
   currentUserId = null;
@@ -691,6 +726,8 @@ async function hydrateFromSession(): Promise<void> {
     }
     currentCnfJkt = state.tokenCnfJkt;
   } catch {
+    // A mutator that ran meanwhile owns the state now; do not clear it.
+    if (hydrationSuperseded) return;
     // If DPoP key retrieval fails, clear state to be safe.
     discardRestoredSession();
     await clearSession();
@@ -714,6 +751,7 @@ async function hydrateFromSession(): Promise<void> {
       if (hydrationSuperseded) return;
       encryptionKey = derived;
     } catch {
+      if (hydrationSuperseded) return;
       encryptionKey = null;
       currentVaultSecretKeyHex = null;
       persistState();
@@ -733,6 +771,7 @@ async function hydrateFromSession(): Promise<void> {
         ecdhPrivateKeyBytes = unwrapped;
         ecdhEncryptedData = state.ecdhEncrypted;
       } catch {
+        if (hydrationSuperseded) return;
         ecdhPrivateKeyBytes = null;
         ecdhEncryptedData = null;
       }
@@ -747,6 +786,7 @@ async function hydrateFromSession(): Promise<void> {
   // Restore vault auto-lock alarm and keepalive if vault is unlocked
   if (encryptionKey) {
     const effectiveLock = await getEffectiveAutoLockMinutes();
+    if (hydrationSuperseded) return;
     if (effectiveLock > 0) {
       chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: effectiveLock });
     }
@@ -923,6 +963,7 @@ initLoginSave({
   extractHost,
   swFetch,
   invalidateCache,
+  getVaultEpoch: currentVaultEpoch,
 });
 
 initPasskeyProvider({
@@ -932,6 +973,7 @@ initPasskeyProvider({
   getCachedEntries,
   swFetch,
   invalidateCache,
+  getVaultEpoch: currentVaultEpoch,
 });
 
 // Register MAIN world WebAuthn interceptor via scripting API.
@@ -1019,6 +1061,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             // (CHECK_PENDING_SAVE), which checks the asking document's host.
             return;
           }
+          // A lock (clearVault empties the map) or a newer login during the
+          // probe: this prompt — the typed password and a vault title — is no
+          // longer one to deliver.
+          if (pendingSavePrompts.get(tabId) !== pending) return;
           const probedHost = extractHost(probed.origin);
           if (!probedHost || !isHostMatch(pending.host, probedHost)) {
             pendingSavePrompts.delete(tabId);
@@ -1221,6 +1267,9 @@ chrome.commands.onCommand.addListener(async (command) => {
     if (!currentToken || !encryptionKey || !currentUserId) {
       return;
     }
+    const key = encryptionKey;
+    const userId = currentUserId;
+    const epoch = currentVaultEpoch();
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.url) {
@@ -1263,9 +1312,9 @@ chrome.commands.onCommand.addListener(async (command) => {
 
         const aad =
           (data.aadVersion ?? 0) >= 1
-            ? buildPersonalEntryAAD(currentUserId!, data.id, VAULT_TYPE.BLOB)
+            ? buildPersonalEntryAAD(userId, data.id, VAULT_TYPE.BLOB)
             : undefined;
-        const plaintext = await decryptData(data.encryptedBlob, encryptionKey!, aad);
+        const plaintext = await decryptData(data.encryptedBlob, key, aad);
         // Narrow: V8 embeds a window of the INPUT in a JSON.parse SyntaxError, and
         // the input here is decrypted vault plaintext. GCM authenticates the
         // plaintext; it does not make it JSON.
@@ -1284,16 +1333,32 @@ chrome.commands.onCommand.addListener(async (command) => {
       if (!value) return;
 
       // Copy via offscreen document (no page DOM manipulation, no focus stealing)
-      await copyToClipboard(value);
+      await copyToClipboard(value, () => assertVaultEpoch(epoch));
 
       await scheduleClipboardClear(cachedClipboardClearSeconds);
     } catch (err) {
+      // Locked while the command ran: nothing was copied, nothing to report.
+      if (err instanceof VaultLockedError) return;
       warnBackground("copy-command-failed", classifyError(err));
     }
   }
 });
 
-async function swFetch(path: string, init?: RequestInit): Promise<Response> {
+/**
+ * `opts.epoch`: the vault epoch the caller's request belongs to. Asserted after
+ * this function's own awaits, immediately before each send — the body of a
+ * write is encrypted for the vault state it was built in, so it must never go
+ * out after a lock or under another connection. Every member that writes passes
+ * one.
+ */
+async function swFetch(
+  path: string,
+  init?: RequestInit,
+  opts: { epoch?: number } = {},
+): Promise<Response> {
+  const assertFresh = () => {
+    if (opts.epoch !== undefined) assertVaultEpoch(opts.epoch);
+  };
   if (!currentToken) {
     throw new Error("NO_TOKEN");
   }
@@ -1311,6 +1376,7 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     throw new Error("PERMISSION_DENIED");
   }
 
+  assertFresh();
   const tokenUsed = currentToken;
   const generationUsed = connectionGeneration;
   const res = await swFetchAuthenticated(path, init, serverUrl, tokenUsed);
@@ -1333,12 +1399,14 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     // Rotated by a concurrent refresh (e.g. the alarm) while this request was
     // in flight: the 401 is for the old token, so retry with the current one.
     if (currentToken !== null && currentToken !== tokenUsed) {
+      assertFresh();
       return swFetchAuthenticated(path, init, serverUrl, currentToken);
     }
     const nearExpiry = tokenExpiresAt !== null && Date.now() >= tokenExpiresAt - REFRESH_BUFFER_MS;
     if (nearExpiry) {
       const refreshed = await refreshTokenSingleFlight();
       if (refreshed && currentToken && connectionGeneration === generationUsed) {
+        assertFresh();
         return swFetchAuthenticated(path, init, serverUrl, currentToken);
       }
     }
@@ -1357,10 +1425,13 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
  * C2 every outcome is distinguishable by status alone, and a 401 on THIS
  * route always means a token/DPoP-layer failure, never a wrong passphrase.
  */
-async function recordUnlockPresence(authHash: string): Promise<void> {
+async function recordUnlockPresence(authHash: string, epoch: number): Promise<void> {
   if (!currentToken) return;
   try {
     const { serverUrl } = await getSettings();
+    // The hash proves the unlock this epoch committed; after a lock or a
+    // reconnect it would be posted under a token it does not belong to.
+    if (!isVaultEpochCurrent(epoch) || !currentToken) return;
     const res = await swFetchAuthenticated(
       EXT_API_PATH.VAULT_UNLOCK_VERIFY,
       { method: "POST", body: JSON.stringify({ authHash }) },
@@ -1406,18 +1477,23 @@ type RawEntry = {
 };
 
 async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
-  if (!encryptionKey || !currentUserId) return [];
+  if (!encryptionKey || !currentUserId) throw new VaultLockedError();
+  // Decrypt with the key and user this call started under, not whatever the
+  // globals hold after the next await.
+  const key = encryptionKey;
+  const userId = currentUserId;
+  const epoch = currentVaultEpoch();
   const active = raw.filter((item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType));
   const entries: DecryptedEntry[] = [];
   for (const item of active) {
     const aad =
       (item.aadVersion ?? 0) >= 1
-        ? buildPersonalEntryAAD(currentUserId, item.id, VAULT_TYPE.OVERVIEW)
+        ? buildPersonalEntryAAD(userId, item.id, VAULT_TYPE.OVERVIEW)
         : undefined;
     try {
       const plaintext = await decryptData(
         item.encryptedOverview,
-        encryptionKey,
+        key,
         aad
       );
       const overview = JSON.parse(plaintext) as {
@@ -1453,6 +1529,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
       // Skip entries that fail to decrypt/parse
     }
   }
+  assertVaultEpoch(epoch);
   return entries;
 }
 
@@ -1476,16 +1553,25 @@ type RawTeamEntry = {
 
 // ── Team key management ─────────────────────────────────────────
 
+/** The teamKeyCache key. userId keeps one user's team keys from another's. */
+function teamKeyCacheKey(userId: string, teamId: string, keyVersion: number | undefined): string {
+  return `${userId}:${teamId}:${keyVersion}`;
+}
+
 async function getTeamEncryptionKey(
   teamId: string,
   keyVersion?: number,
 ): Promise<CryptoKey | null> {
   if (!ecdhPrivateKeyBytes || !currentUserId) return null;
+  // The user, ECDH key and vault state this call started under; the cache
+  // write and the return are checked against them after the awaits below.
+  const userId = currentUserId;
+  const ecdhKeyBytes = ecdhPrivateKeyBytes;
+  const epoch = currentVaultEpoch();
 
   // Check cache first when keyVersion is known (avoids redundant network request)
-  // Include userId in cache key to prevent cross-user cache reuse
   if (keyVersion != null) {
-    const earlyKey = `${currentUserId}:${teamId}:${keyVersion}`;
+    const earlyKey = teamKeyCacheKey(userId, teamId, keyVersion);
     const earlyCached = teamKeyCache.get(earlyKey);
     if (earlyCached && Date.now() - earlyCached.cachedAt < TEAM_KEY_CACHE_TTL_MS) {
       return earlyCached.key;
@@ -1507,7 +1593,7 @@ async function getTeamEncryptionKey(
     wrapVersion: number;
   };
 
-  const cacheKey = `${currentUserId}:${teamId}:${memberKey.keyVersion}`;
+  const cacheKey = teamKeyCacheKey(userId, teamId, memberKey.keyVersion);
 
   // Check cache
   const cached = teamKeyCache.get(cacheKey);
@@ -1516,11 +1602,11 @@ async function getTeamEncryptionKey(
   }
 
   // Import ECDH private key and unwrap team key
-  const memberPrivateKey = await importEcdhPrivateKey(ecdhPrivateKeyBytes);
+  const memberPrivateKey = await importEcdhPrivateKey(ecdhKeyBytes);
 
   const ctx: TeamKeyWrapContext = {
     teamId,
-    toUserId: currentUserId,
+    toUserId: userId,
     keyVersion: memberKey.keyVersion,
     wrapVersion: memberKey.wrapVersion,
   };
@@ -1541,6 +1627,8 @@ async function getTeamEncryptionKey(
 
   const teamEncKey = await deriveTeamEncryptionKey(teamKeyBytes);
   teamKeyBytes.fill(0);
+  // A lock during the awaits above: neither cache nor return the key.
+  assertVaultEpoch(epoch);
 
   // LRU eviction if cache is full
   if (teamKeyCache.size >= MAX_TEAM_KEY_CACHE) {
@@ -1569,6 +1657,8 @@ async function decryptTeamOverviews(
   const active = raw.filter(
     (item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType),
   );
+  const userId = currentUserId;
+  const epoch = currentVaultEpoch();
 
   async function decryptSingleEntry(item: RawTeamEntry): Promise<DecryptedEntry | null> {
     const itemKeyVersion = item.itemKeyVersion ?? 0;
@@ -1626,27 +1716,34 @@ async function decryptTeamOverviews(
     try {
       const result = await decryptSingleEntry(item);
       if (result) entries.push(result);
-    } catch {
-      // Invalidate cache and retry once
-      const cacheKey = `${teamId}:${item.teamKeyVersion}`;
-      if (teamKeyCache.has(cacheKey)) {
+    } catch (err) {
+      if (err instanceof VaultLockedError) throw err;
+      // Invalidate the cached team key (the key getTeamEncryptionKey stored)
+      // and retry once.
+      const cacheKey = userId ? teamKeyCacheKey(userId, teamId, item.teamKeyVersion) : null;
+      if (cacheKey && teamKeyCache.has(cacheKey)) {
         teamKeyCache.delete(cacheKey);
         try {
           const result = await decryptSingleEntry(item);
           if (result) entries.push(result);
-        } catch {
+        } catch (retryErr) {
+          if (retryErr instanceof VaultLockedError) throw retryErr;
           // Second attempt failed — skip this entry
         }
       }
     }
   }
+  assertVaultEpoch(epoch);
   return entries;
 }
 
 // ── Fetch all team entries ──────────────────────────────────────
 
 async function fetchAllTeamEntries(): Promise<DecryptedEntry[]> {
+  if (!encryptionKey) throw new VaultLockedError();
+  // Unlocked without an ECDH key (no team membership set up): no team entries.
   if (!ecdhPrivateKeyBytes || !currentUserId) return [];
+  const epoch = currentVaultEpoch();
 
   try {
     const teamsRes = await swFetch(EXT_API_PATH.TEAMS);
@@ -1668,10 +1765,14 @@ async function fetchAllTeamEntries(): Promise<DecryptedEntry[]> {
     for (const result of results) {
       if (result.status === "fulfilled") {
         entries.push(...result.value);
+      } else if (result.reason instanceof VaultLockedError) {
+        throw result.reason;
       }
     }
+    assertVaultEpoch(epoch);
     return entries;
-  } catch {
+  } catch (err) {
+    if (err instanceof VaultLockedError) throw err;
     return [];
   }
 }
@@ -1682,6 +1783,7 @@ async function fetchAndDecryptTeamBlob(
   teamId: string,
   entryId: string,
 ): Promise<{ blob: Record<string, unknown>; overview: Record<string, unknown>; entryType: string } | null> {
+  const epoch = currentVaultEpoch();
   const res = await swFetch(extApiPath.teamPasswordById(teamId, entryId));
   if (!res.ok) return null;
 
@@ -1741,6 +1843,8 @@ async function fetchAndDecryptTeamBlob(
   // of decrypted team plaintext, and these errors reach both the copy-command catch
   // and — via normalizeErrorCode → humanizeError — a rendered popup toast. null is
   // already this function's documented failure return and every caller branches on it.
+  // A lock during the decrypts above: the plaintext belongs to a vault that is gone.
+  assertVaultEpoch(epoch);
   try {
     return {
       blob: JSON.parse(blobPlain) as Record<string, unknown>,
@@ -1762,6 +1866,13 @@ async function performAutofillForEntry(
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
+  // The vault state this fill belongs to. Every delivery below asserts it right
+  // before the payload leaves: a lock during a probe, an inject or a resend
+  // sleep must stop the credential, not just the next fetch.
+  const epoch = currentVaultEpoch();
+  const vaultKey = encryptionKey;
+  const vaultUserId = currentUserId;
+  const lockedResult = { ok: false, error: "VAULT_LOCKED" } as const;
 
   // Every delivery of the decrypted payload goes to one document whose host was
   // checked, addressed by documentId so a navigation in between cannot receive
@@ -1800,8 +1911,10 @@ async function performAutofillForEntry(
       return null;
     }
   };
-  const sendToDocument = (payload: unknown, documentId: string): Promise<unknown> =>
-    chrome.tabs.sendMessage(tabId, payload, { documentId });
+  const sendToDocument = (payload: unknown, documentId: string): Promise<unknown> => {
+    assertVaultEpoch(epoch);
+    return chrome.tabs.sendMessage(tabId, payload, { documentId });
+  };
 
   let blobPlain: string;
   let overviewPlain: string;
@@ -1833,15 +1946,15 @@ async function performAutofillForEntry(
     // OVERVIEW) — never share one, or the app-written overview won't decrypt.
     const useAad = (data.aadVersion ?? 0) >= 1;
     const blobAad = useAad
-      ? buildPersonalEntryAAD(currentUserId, data.id, VAULT_TYPE.BLOB)
+      ? buildPersonalEntryAAD(vaultUserId, data.id, VAULT_TYPE.BLOB)
       : undefined;
     const overviewAad = useAad
-      ? buildPersonalEntryAAD(currentUserId, data.id, VAULT_TYPE.OVERVIEW)
+      ? buildPersonalEntryAAD(vaultUserId, data.id, VAULT_TYPE.OVERVIEW)
       : undefined;
-    blobPlain = await decryptData(data.encryptedBlob, encryptionKey, blobAad);
+    blobPlain = await decryptData(data.encryptedBlob, vaultKey, blobAad);
     overviewPlain = await decryptData(
       data.encryptedOverview,
-      encryptionKey,
+      vaultKey,
       overviewAad,
     );
     entryType = data.entryType;
@@ -1969,6 +2082,7 @@ async function performAutofillForEntry(
       await sendToDocument(payload, documentId);
       return { ok: true };
     } catch {
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
       // No listener in that document yet (the manifest content script never
       // ran): inject the bundle into the same document and resend.
     }
@@ -1980,6 +2094,7 @@ async function performAutofillForEntry(
       await injectContentBundleInto(tabId, target);
       await resendUntilReceived(() => sendToDocument(payload, target.documentId));
     } catch {
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
       return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
     }
     return { ok: true };
@@ -2113,9 +2228,12 @@ async function performAutofillForEntry(
   try {
     // The popup broadcasts (no documentId); every other request goes to its
     // one document.
-    await (firstSendDocumentId
-      ? sendToDocument(loginPayload, firstSendDocumentId)
-      : chrome.tabs.sendMessage(tabId, loginPayload));
+    if (firstSendDocumentId) {
+      await sendToDocument(loginPayload, firstSendDocumentId);
+    } else {
+      assertVaultEpoch(epoch);
+      await chrome.tabs.sendMessage(tabId, loginPayload);
+    }
     messageFillSucceeded = true;
   } catch {
     // No listener in the document: pin it (if not already), inject the bundle
@@ -2131,6 +2249,7 @@ async function performAutofillForEntry(
       await resendUntilReceived(() => sendToDocument(loginPayload, target.documentId));
       messageFillSucceeded = true;
     } catch {
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
       // Continue to the pinned direct fallback below.
     }
   }
@@ -2144,8 +2263,9 @@ async function performAutofillForEntry(
   };
   const injectDirectAutofill = async (
     hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
-  ) =>
-    chrome.scripting.executeScript({
+  ) => {
+    assertVaultEpoch(epoch);
+    return chrome.scripting.executeScript({
       target: directTarget,
       // The card-form patterns and LOGIN autocomplete tokens are always passed:
       // without them directAutofill runs no card-form exclusion.
@@ -2159,6 +2279,7 @@ async function performAutofillForEntry(
       ],
       func: directAutofill,
     });
+  };
 
   // Only run direct fallback when message-based autofill failed.
   // The direct fallback doesn't support TOTP and would overwrite OTP fields
@@ -2170,8 +2291,10 @@ async function performAutofillForEntry(
     try {
       await injectDirectAutofill(serializableTargetHint);
     } catch (err) {
+      if (err instanceof VaultLockedError) return lockedResult;
       const message = err instanceof Error ? err.message : String(err);
       if (!/unserializable/i.test(message)) throw err;
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
       await injectDirectAutofill(null);
     }
   }
@@ -2179,8 +2302,13 @@ async function performAutofillForEntry(
   // Auto-copy TOTP to clipboard after successful LOGIN autofill
   if (totpCode && entryType === EXT_ENTRY_TYPE.LOGIN) {
     if (cachedAutoCopyTotp) {
-      await copyToClipboard(totpCode);
-      await scheduleClipboardClear(cachedClipboardClearSeconds);
+      try {
+        await copyToClipboard(totpCode, () => assertVaultEpoch(epoch));
+        await scheduleClipboardClear(cachedClipboardClearSeconds);
+      } catch (err) {
+        // The fill already landed; a lock since then only cancels the copy.
+        if (!(err instanceof VaultLockedError)) throw err;
+      }
     }
   }
 
@@ -2261,6 +2389,18 @@ async function resolveInlineMatches(
   if (!encryptionKey || !currentUserId) {
     return { entries: [], vaultLocked: true, suppressInline: false };
   }
+  const locked: InlineMatchResult = { entries: [], vaultLocked: true, suppressInline: false };
+  const epoch = currentVaultEpoch();
+  // The entries this vault state can see, or null once it has ended.
+  const entriesForThisVault = async (): Promise<DecryptedEntry[] | null> => {
+    try {
+      const entries = await getCachedEntries();
+      return isVaultEpochCurrent(epoch) ? entries : null;
+    } catch (err) {
+      if (err instanceof VaultLockedError) return null;
+      throw err;
+    }
+  };
 
   if (kind === "login") {
     const tabHost = extractHost(effectiveUrl);
@@ -2268,7 +2408,8 @@ async function resolveInlineMatches(
     if (!tabHost) {
       return { entries: [], vaultLocked: false, suppressInline: false };
     }
-    const entries = await getCachedEntries();
+    const entries = await entriesForThisVault();
+    if (!entries) return locked;
     const matches = entries.filter((e) => {
       if (e.entryType !== EXT_ENTRY_TYPE.LOGIN) return false;
       if (e.urlHost && isHostMatch(e.urlHost, tabHost)) return true;
@@ -2280,7 +2421,8 @@ async function resolveInlineMatches(
   // CC / IDENTITY: URL-independent — no host match, no `!tabHost` early-return.
   const targetType =
     kind === "credit_card" ? EXT_ENTRY_TYPE.CREDIT_CARD : EXT_ENTRY_TYPE.IDENTITY;
-  const entries = await getCachedEntries();
+  const entries = await entriesForThisVault();
+  if (!entries) return locked;
   const matches = entries.filter((e) => e.entryType === targetType);
   return { entries: matches, vaultLocked: false, suppressInline: false };
 }
@@ -2446,6 +2588,12 @@ async function handleMessage(
         return;
       }
 
+      // The vault/connection state this unlock started in. Nothing below is
+      // committed if a lock, reconnect or token change happened meanwhile —
+      // otherwise one account's key could be installed under another's token.
+      const unlockEpoch = currentVaultEpoch();
+      const respondLocked = () =>
+        sendResponse({ type: EXT_MSG.UNLOCK_VAULT, ok: false, error: "VAULT_LOCKED" });
       try {
         const res = await swFetch(EXT_API_PATH.VAULT_UNLOCK_DATA);
         if (!res.ok) {
@@ -2484,7 +2632,8 @@ async function handleMessage(
         }
 
         const encKey = await deriveEncryptionKey(secretKey);
-        currentVaultSecretKeyHex = Array.from(secretKey)
+        // Held locally until the passphrase is verified and the commit below.
+        const secretKeyHex = Array.from(secretKey)
           .map((b) => b.toString(16).padStart(2, "0"))
           .join("");
 
@@ -2511,9 +2660,14 @@ async function handleMessage(
           }
         }
 
+        if (!isVaultEpochCurrent(unlockEpoch)) {
+          respondLocked();
+          return;
+        }
         // Authoritative unlock state — a slow startup hydration must not
         // overwrite it (or relock by racing in its own null write).
         hydrationSuperseded = true;
+        currentVaultSecretKeyHex = secretKeyHex;
         encryptionKey = encKey;
         currentUserId = data.userId || null;
         personalKeyVersion = typeof data.keyVersion === "number" ? data.keyVersion : 1;
@@ -2529,12 +2683,12 @@ async function handleMessage(
         // Local unlock is now authoritative (GCM/artifact check passed).
         // Record presence server-side — fire-and-forget, never blocks or
         // fails the local unlock (S1).
-        void recordUnlockPresence(authHash);
+        void recordUnlockPresence(authHash, unlockEpoch);
 
         // Unwrap ECDH private key for team key derivation (if available)
         if (data.encryptedEcdhPrivateKey && data.ecdhPrivateKeyIv && data.ecdhPrivateKeyAuthTag) {
           try {
-            const secretKeyForEcdh = hexDecode(currentVaultSecretKeyHex!);
+            const secretKeyForEcdh = hexDecode(secretKeyHex);
             const ecdhWrappingKey = await deriveEcdhWrappingKey(secretKeyForEcdh);
             secretKeyForEcdh.fill(0);
             const ecdhEnc = {
@@ -2542,9 +2696,20 @@ async function handleMessage(
               iv: data.ecdhPrivateKeyIv,
               authTag: data.ecdhPrivateKeyAuthTag,
             };
-            ecdhPrivateKeyBytes = await unwrapEcdhPrivateKey(ecdhEnc, ecdhWrappingKey);
+            const unwrapped = await unwrapEcdhPrivateKey(ecdhEnc, ecdhWrappingKey);
+            if (!isVaultEpochCurrent(unlockEpoch)) {
+              unwrapped.fill(0);
+              respondLocked();
+              return;
+            }
+            ecdhPrivateKeyBytes = unwrapped;
             ecdhEncryptedData = ecdhEnc;
           } catch {
+            // A lock meanwhile: the state is no longer this unlock's to clear.
+            if (!isVaultEpochCurrent(unlockEpoch)) {
+              respondLocked();
+              return;
+            }
             // ECDH key not available — team features silently unavailable
             ecdhPrivateKeyBytes = null;
             ecdhEncryptedData = null;
@@ -2553,6 +2718,12 @@ async function handleMessage(
 
         persistState();
         const effectiveLock = await getEffectiveAutoLockMinutes();
+        // Locked while reading the policy: no lock alarm or keepalive for a
+        // vault that is no longer unlocked, and no "ok".
+        if (!isVaultEpochCurrent(unlockEpoch)) {
+          respondLocked();
+          return;
+        }
         if (effectiveLock > 0) {
           chrome.alarms.create(ALARM_VAULT_LOCK, {
             delayInMinutes: effectiveLock,
@@ -2590,20 +2761,8 @@ async function handleMessage(
       }
 
       try {
-        // Fetch personal and team entries in parallel
-        const [personalResult, teamResult] = await Promise.allSettled([
-          (async () => {
-            const res = await swFetch(EXT_API_PATH.PASSWORDS);
-            if (!res.ok) return [];
-            const raw = (await res.json()) as RawEntry[];
-            return decryptOverviews(raw);
-          })(),
-          fetchAllTeamEntries(),
-        ]);
-
-        const personal = personalResult.status === "fulfilled" ? personalResult.value : [];
-        const team = teamResult.status === "fulfilled" ? teamResult.value : [];
-        const entries = [...personal, ...team];
+        // VaultLockedError → "VAULT_LOCKED" through normalizeErrorCode below.
+        const entries = await fetchFreshEntries(currentVaultEpoch());
 
         // Update cache so inline suggestions stay in sync with popup.
         setCachedEntries(entries);
@@ -2631,6 +2790,9 @@ async function handleMessage(
         });
         return;
       }
+      const copyKey = encryptionKey;
+      const copyUserId = currentUserId;
+      const copyEpoch = currentVaultEpoch();
 
       try {
         let password: string | null = null;
@@ -2664,11 +2826,11 @@ async function handleMessage(
 
           const aad =
             (data.aadVersion ?? 0) >= 1
-              ? buildPersonalEntryAAD(currentUserId, data.id, VAULT_TYPE.BLOB)
+              ? buildPersonalEntryAAD(copyUserId, data.id, VAULT_TYPE.BLOB)
               : undefined;
           const plaintext = await decryptData(
             data.encryptedBlob,
-            encryptionKey,
+            copyKey,
             aad
           );
           try {
@@ -2688,6 +2850,7 @@ async function handleMessage(
           return;
         }
 
+        assertVaultEpoch(copyEpoch);
         sendResponse({ type: EXT_MSG.COPY_PASSWORD, password });
       } catch (err) {
         sendResponse({
@@ -2708,6 +2871,9 @@ async function handleMessage(
         });
         return;
       }
+      const copyKey = encryptionKey;
+      const copyUserId = currentUserId;
+      const copyEpoch = currentVaultEpoch();
 
       try {
         let totp: { secret: string; algorithm?: string; digits?: number; period?: number } | null = null;
@@ -2742,11 +2908,11 @@ async function handleMessage(
 
           const aad =
             (data.aadVersion ?? 0) >= 1
-              ? buildPersonalEntryAAD(currentUserId, data.id, VAULT_TYPE.BLOB)
+              ? buildPersonalEntryAAD(copyUserId, data.id, VAULT_TYPE.BLOB)
               : undefined;
           const plaintext = await decryptData(
             data.encryptedBlob,
-            encryptionKey,
+            copyKey,
             aad,
           );
           try {
@@ -2779,12 +2945,13 @@ async function handleMessage(
           });
           return;
         }
+        assertVaultEpoch(copyEpoch);
         sendResponse({ type: EXT_MSG.COPY_TOTP, code });
-      } catch {
+      } catch (err) {
         sendResponse({
           type: EXT_MSG.COPY_TOTP,
           code: null,
-          error: "FETCH_FAILED",
+          error: err instanceof VaultLockedError ? "VAULT_LOCKED" : "FETCH_FAILED",
         });
       }
       return;

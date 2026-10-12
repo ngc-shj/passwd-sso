@@ -90,6 +90,7 @@ function createDeps(overrides?: Partial<PasskeyProviderDeps>): PasskeyProviderDe
     ]),
     swFetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
     invalidateCache: vi.fn(),
+    getVaultEpoch: () => 0,
     ...overrides,
   };
 }
