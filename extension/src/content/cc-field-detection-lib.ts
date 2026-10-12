@@ -210,27 +210,37 @@ const CC_EXP_NAME_RE = /cc.?exp/;
 const EXPIRY_WORDS = new Set([
   "exp", "expiry", "expire", "expires", "expiration", "card", "valid", "thru", "date",
   "month", "year", "years", "yyyy",
-  // Card wording that names no other subject.
+  // Card wording ("Good thru", "as shown on card"); credit/debit/until also
+  // describe other subjects ("Debit date", "Valid until") and count only
+  // alongside "card" (CARD_QUALIFIED_WORDS).
   "credit", "debit", "good", "until", "shown", "printed",
   // Decoration that names no subject.
   "required", "optional", "please", "enter", "select", "your", "the",
-  // Month names: option text inside a wrapping label.
+]);
+// Month names: option text a wrapping label carries. Only the label check
+// accepts them; a context-free field labelled with month names is not thereby
+// a card part.
+const MONTH_NAME_WORDS = new Set([
   "january", "february", "march", "april", "may", "june", "july", "august", "september",
   "october", "november", "december",
   "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
 ]);
+const CARD_QUALIFIED_WORDS = new Set(["credit", "debit", "until"]);
 // A bracketed field name ("order[payment][expiry_mm]") is judged by its last segment.
 const BRACKET_NAME_RE = /[a-z0-9_-]+(?:\[[^\]\s]*\])*\[([^\]\s]*)\]/g;
 const JA_EXPIRY_VOCABULARY_RE = /有効期限|カード|必須|任意|[月年（）()]/g;
 const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff]/;
 
-function isExpiryVocabulary(hint: string): boolean {
+function isExpiryVocabulary(hint: string, extraWords?: ReadonlySet<string>): boolean {
   const rest = hint.replace(BRACKET_NAME_RE, "$1").replace(JA_EXPIRY_VOCABULARY_RE, "");
   if (CJK_RE.test(rest)) return false;
-  return rest
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length > 2 && !/\d/.test(word))
-    .every((word) => EXPIRY_WORDS.has(word));
+  const words = rest.split(/[^a-z0-9]+/).filter((word) => word.length > 2 && !/\d/.test(word));
+  const mentionsCard = words.includes("card");
+  return words.every(
+    (word) =>
+      (EXPIRY_WORDS.has(word) || (extraWords?.has(word) ?? false)) &&
+      (mentionsCard || !CARD_QUALIFIED_WORDS.has(word)),
+  );
 }
 
 function strictPart(hint: string, part: ExpiryPart): boolean {
@@ -316,7 +326,7 @@ function ownAttributes(field: FormField): string[] {
 function labelIsExpiryVocabulary(field: FormField, hint: string): boolean {
   let label = hint;
   for (const value of ownAttributes(field)) label = label.replace(value, " ");
-  return isExpiryVocabulary(label);
+  return isExpiryVocabulary(label, MONTH_NAME_WORDS);
 }
 
 /** The one part a field's own name/id/placeholder/aria-label names, as flags; else null. */

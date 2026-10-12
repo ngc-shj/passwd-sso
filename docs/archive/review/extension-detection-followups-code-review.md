@@ -190,3 +190,57 @@ Round 3 is an incremental review of `ad799f960..c93e040b7`.
 - **Modified file:** `extension/src/content/cc-field-detection-lib.ts`
 
 Full suite: 1562 passed. tsc is clean.
+
+---
+
+# Round 4
+Date: 2026-10-12
+
+## Changes from Previous Round
+This round reviews `c93e040b7..7432efb62` incrementally. The testing review also covers the round-3 range that its interrupted run had not reported. All earlier findings stay resolved.
+
+## Findings
+- **N2 [Minor, security, R43 vs round 3]** `credit`, `debit` and `until` counted as vocabulary on their own. A field labelled "Debit date", "Good until" or "Valid until" next to the card's expiry could therefore become the tier-2 partner.
+- **F9 [Minor, functionality]** Month names were added to the shared `EXPIRY_WORDS`. That also widened the tier-2 token claim: a DOB "Month" select with month-name options would qualify.
+- **R3-F1 [Major, testing; regression from c93e040b7]** Removing the start-of-test settle exposed a pending menu debounce left by an earlier test's module instance. Under shuffle seeds 2, 13 and 16 it fired into the next test and satisfied the open-popup gate early.
+- **R3-F2 to R3-F7 [Minor, testing]** The following were unpinned:
+  - the fallback's input-only condition;
+  - the autocomplete exclusion, on both sides;
+  - the month side of `hintMentionsBoth`;
+  - the allow side of the maxLength boundary;
+  - the month-name group (the existing row was vacuous: jsdom fuses the option text, and the label named only one part);
+  - the words `debit`, `until`, `printed`, `任意` and `optional`.
+
+## Resolution Status
+### N2: subject-ambiguous card words
+- **Action:** `CARD_QUALIFIED_WORDS` (credit/debit/until) count as vocabulary only when the hint also contains `card`.
+- **Tests:**
+  - CR5 "Debit date (MM)" beside the expiry year, and "Valid until (YYYY)" beside the expiry month. Both are red on the pre-fix HEAD.
+  - The allow side is "Debit card valid until (MM)", which is still claimed.
+
+### F9: month names only for the label check
+- **Action:** month names move to `MONTH_NAME_WORDS`, which only `labelIsExpiryVocabulary` passes in. `loose` and `names` are as in round 3.
+- **Tests:** the CR4 rows with full and abbreviated month-name options, separated by whitespace under an `(MM/YY)` label.
+  - Each row is red when its month-name group is removed.
+  - The DOB-Month guard row passes on HEAD in jsdom, because the option text fuses there.
+
+### R3-F1: cross-test debounce leak
+- **Action:** a file-level `afterEach` in `background.test.ts` calls the current instance's `disableContextMenu()`.
+- **Verification:**
+  - `background.test.ts` passes under seeds 2, 13 and 16.
+  - The full suite passes under seeds 1, 2 and 13: 1575 tests.
+  - The synchronous-gate and T-F5 mutations keep their red results, per the testing reviewer's scratch validation of the same remedy.
+
+### R3-F2 to R3-F7
+- **Action:** CR5 rows were added.
+- **Verification:** each row is red under its own mutation:
+  - input-only;
+  - the autocomplete month exclusion;
+  - the autocomplete year exclusion;
+  - the month side of `hintMentionsBoth`;
+  - `<= 4`;
+  - full month names;
+  - month-name abbreviations;
+  - `debit`, `until`, `printed`, `任意` and `optional`.
+
+Full suite: 1575 passed under seeds 1, 2 and 13. tsc is clean.

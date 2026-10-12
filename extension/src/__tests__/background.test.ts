@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ALARM_VAULT_LOCK,
   ALARM_TOKEN_REFRESH,
@@ -314,6 +314,15 @@ function sendMessageWithSender(message: unknown, sender: unknown): Promise<unkno
 // updates") deterministically wins over this default.
 beforeEach(() => {
   keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
+});
+
+// Each test loads a fresh background module; an earlier instance's pending
+// menu debounce would otherwise fire into the next test's chrome mock. Tear
+// the current instance's menu down so no test starts with one in flight.
+afterEach(async () => {
+  if (!bgModule) return;
+  const contextMenu = await import("../background/context-menu");
+  await contextMenu.disableContextMenu();
 });
 
 
