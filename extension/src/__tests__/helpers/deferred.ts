@@ -1,3 +1,6 @@
+import { getCurrentTest } from "vitest/suite";
+import { onTestFinished } from "vitest";
+
 export type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
@@ -35,12 +38,14 @@ type HoldableMock = {
 
 /**
  * Hold the next call of `mock` whose arguments satisfy `match`, skipping the
- * first `skip` matching calls. Every other call — including every call after
- * the held one — goes straight to the implementation the mock had when the hold
- * was armed; `result`, when given, answers the held call instead. Arm a hold
- * only once the background work that could also make a matching call (the
- * unlock's context-menu rebuild, keepalive) has settled, and give the held call
- * an input no other caller uses.
+ * first `skip` matching calls. Every other call goes straight to the
+ * implementation the mock had when the hold was armed; `result`, when given,
+ * answers the held call instead. Once the hold fires, that implementation is
+ * put back, and a hold that never fired is removed when the test finishes — a
+ * failing test cannot leave an armed hold on a shared (hoisted) mock for the
+ * next one. Arm a hold only once the background work that could also make a
+ * matching call (the unlock's context-menu rebuild, keepalive) has settled, and
+ * give the held call an input no other caller uses.
  */
 export function holdNextCall<A extends unknown[] = unknown[]>(
   mock: HoldableMock,
@@ -52,17 +57,30 @@ export function holdNextCall<A extends unknown[] = unknown[]>(
   const gate = deferred<void>();
   let remaining = skip;
   let armed = true;
-  mock.mockImplementation((...args: unknown[]) => {
+  const holding = (...args: unknown[]) => {
     const passThrough = () => previous?.(...args);
     if (!armed || !match(...(args as A))) return passThrough();
     if (remaining > 0) {
       remaining -= 1;
       return passThrough();
     }
-    armed = false;
+    disarm();
     reached.resolve();
     return gate.promise.then(result ?? passThrough);
-  });
+  };
+  // Put `previous` back only while this hold is still the mock's
+  // implementation: a hold armed later on the same mock wraps this one, and
+  // restoring here would drop it.
+  const disarm = () => {
+    armed = false;
+    if (mock.getMockImplementation() === holding) {
+      mock.mockImplementation(previous ?? (() => undefined));
+    }
+  };
+  mock.mockImplementation(holding);
+  // Outside a running test (no current test to attach to) there is no
+  // teardown to register; the hold still disarms itself when it fires.
+  if (getCurrentTest()) onTestFinished(disarm);
   return {
     reached: reached.promise,
     release: () => gate.resolve(),

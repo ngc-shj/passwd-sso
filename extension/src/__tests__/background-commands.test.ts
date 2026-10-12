@@ -7,7 +7,6 @@ import {
   EXT_ENTRY_TYPE,
 } from "../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
-import { DEBOUNCE_MS } from "../background/context-menu";
 import { holdNextCall } from "./helpers/deferred";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
@@ -477,46 +476,71 @@ describe("X-4 keyboard shortcut commands", () => {
   // #885 A9: the copy commands assert the vault epoch inside copyToClipboard,
   // after the offscreen document is ready — the last await before the write.
   describe("copy commands across a lock (#885 A9)", () => {
-    const settled = async () => {
-      // The unlock's context-menu rebuild decrypts the overview; let it finish
-      // so the command's blob decrypt is the second decryptData call.
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS * 2));
-    };
+    // Keyed on the ciphertext, not the call order: whichever of the command
+    // and the unlock's context-menu rebuild decrypts first, the overview ("11")
+    // and the blob ("aa") each get their own plaintext — no settling needed.
+    beforeEach(() => {
+      cryptoMocks.decryptData.mockImplementation(async ({ ciphertext }: { ciphertext: string }) =>
+        JSON.stringify(
+          ciphertext === "aa"
+            ? { title: "Example", username: "alice", password: "s3cret", url: "https://example.com" }
+            : { title: "Example", username: "alice", urlHost: "example.com" },
+        ),
+      );
+    });
+
+    // copyToClipboard's offscreen check is the only getContexts caller; the
+    // match names its query so no other call could take the hold.
+    const holdOffscreenCheck = () =>
+      holdNextCall(chromeMock.runtime.getContexts, (query: { contextTypes?: string[] }) =>
+        query?.contextTypes?.includes("OFFSCREEN_DOCUMENT") === true);
     const writesOf = (text: string) =>
       (chromeMock.runtime.sendMessage.mock.calls as unknown[][]).filter(
         ([msg]) => (msg as { type?: string; text?: string }).type === "clipboard-write" &&
           (msg as { text?: string }).text === text,
       );
 
-    it.each([
+    // A lock, or a lock and a fresh unlock: only the second tells the epoch
+    // check from an "is the vault unlocked now?" check.
+    const INTERRUPTIONS: Array<[string, () => Promise<void>]> = [
+      ["a lock", async () => {
+        await sendMessage({ type: "LOCK_VAULT" });
+      }],
+      ["a lock and re-unlock", async () => {
+        await sendMessage({ type: "LOCK_VAULT" });
+        expect(await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({
+          type: "UNLOCK_VAULT",
+          ok: true,
+        });
+      }],
+    ];
+
+    describe.each([
       [CMD_COPY_PASSWORD, "s3cret"],
       [CMD_COPY_USERNAME, "alice"],
-    ])("%s: a lock while the offscreen document is readied writes nothing", async (command, text) => {
-      await unlockVault(chromeMock);
-      await settled();
-      const hold = holdNextCall(chromeMock.runtime.getContexts);
-      const pending = commandHandlers[0](command);
-      await hold.reached;
-      await sendMessage({ type: "LOCK_VAULT" });
-      hold.release();
-      await pending;
+    ])("%s", (command, text) => {
+      it.each(INTERRUPTIONS)("%s while the offscreen document is readied writes nothing", async (_name, interrupt) => {
+        await unlockVault(chromeMock);
+        const hold = holdOffscreenCheck();
+        const pending = commandHandlers[0](command);
+        await hold.reached;
+        await interrupt();
+        hold.release();
+        await pending;
 
-      expect(writesOf(text)).toEqual([]);
-    });
+        expect(writesOf(text)).toEqual([]);
+      });
 
-    it.each([
-      [CMD_COPY_PASSWORD, "s3cret"],
-      [CMD_COPY_USERNAME, "alice"],
-    ])("%s positive control: released without a lock it writes the value", async (command, text) => {
-      await unlockVault(chromeMock);
-      await settled();
-      const hold = holdNextCall(chromeMock.runtime.getContexts);
-      const pending = commandHandlers[0](command);
-      await hold.reached;
-      hold.release();
-      await pending;
+      it("positive control: released without a lock it writes the value", async () => {
+        await unlockVault(chromeMock);
+        const hold = holdOffscreenCheck();
+        const pending = commandHandlers[0](command);
+        await hold.reached;
+        hold.release();
+        await pending;
 
-      expect(writesOf(text)).toHaveLength(1);
+        expect(writesOf(text)).toHaveLength(1);
+      });
     });
   });
 });

@@ -5375,6 +5375,9 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
   type Fixture = { id: string; blob: string; overview: string; entryType: string };
   let fixture: Fixture;
   let fetchMock: ReturnType<typeof vi.fn>;
+  // The account unlock-data answers for; a re-unlock as another user makes a
+  // stale result distinguishable from the current vault's.
+  let unlockUserId: string;
 
   const cipher = (ciphertext: string) => ({ ciphertext, iv: "22", authTag: "33" });
   const LOGIN_OVERVIEW = { title: "Example", username: "alice", urlHost: "example.com" };
@@ -5399,6 +5402,7 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
     // scheduleClipboardClear chains .catch on alarms.clear (the TOTP auto-copy).
     chromeMock.alarms.clear.mockResolvedValue(true);
     fixture = { id: "pw-0", blob: "e0-blob", overview: "e0-ov", entryType: EXT_ENTRY_TYPE.LOGIN };
+    unlockUserId = "user-1";
     // Every refresh rotates to a new token value.
     let refreshes = 0;
     fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -5420,7 +5424,7 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
         return {
           ok: true,
           json: async () => ({
-            userId: "user-1",
+            userId: unlockUserId,
             accountSalt: "00",
             encryptedSecretKey: "aa",
             secretKeyIv: "bb",
@@ -5467,6 +5471,20 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
   const unlock = () => sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
   const lock = () => sendMessage({ type: "LOCK_VAULT" });
   const flush = () => new Promise((r) => setTimeout(r, 20));
+  // What interrupts a parked operation: a lock, or a lock and a fresh unlock
+  // (as another user) before the operation resumes. Only the second tells an
+  // epoch check from an "is the vault unlocked now?" check — after the
+  // re-unlock the vault is unlocked again, just not for this operation.
+  const INTERRUPTIONS: Array<[string, () => Promise<void>]> = [
+    ["a lock", async () => {
+      await lock();
+    }],
+    ["a lock and re-unlock", async () => {
+      await lock();
+      unlockUserId = "user-2";
+      expect(await unlock()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+    }],
+  ];
   const fetchCalls = (pathPart: string, method?: string) =>
     fetchMock.mock.calls.filter(
       ([url, init]) =>
@@ -5587,12 +5605,12 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       );
     });
 
-    it("answers vaultLocked: true, not an empty unlocked list, when the vault locks mid-lookup", async () => {
+    it.each(INTERRUPTIONS)("answers vaultLocked: true, not an empty unlocked list, after %s mid-lookup", async (_name, interrupt) => {
       await unlockAndSettle();
       const hold = holdDecrypt(cryptoMocks.decryptData, `a10-ov-${type}`);
       const pending = sendMessageWithSender({ type }, contentSender(0));
       await hold.reached;
-      await lock();
+      await interrupt();
       hold.release();
 
       expect(await pending).toEqual({ type, entries: [], vaultLocked: true, suppressInline: false });
@@ -5635,12 +5653,12 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       );
     });
 
-    it("answers VAULT_LOCKED with no secret when the vault locks during the blob decrypt", async () => {
+    it.each(INTERRUPTIONS)("answers VAULT_LOCKED with no secret after %s during the blob decrypt", async (_name, interrupt) => {
       await unlockAndSettle();
       const hold = holdDecrypt(cryptoMocks.decryptData, `a7-blob-${type}`);
       const pending = sendMessage({ type, entryId: "pw-a7" });
       await hold.reached;
-      await lock();
+      await interrupt();
       hold.release();
 
       expect(await pending).toEqual(locked);
@@ -5677,12 +5695,12 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       { name: "content (documentId first send)", fill: () => fillFromContent(), type: "AUTOFILL_FROM_CONTENT" },
       { name: "popup (tab-wide first send)", fill: fillFromPopup, type: "AUTOFILL" },
     ])("first send: $name", ({ fill, type }) => {
-      it("sends no page message carrying the password when the vault locks during the last decrypt", async () => {
+      it.each(INTERRUPTIONS)("sends no page message carrying the password after %s during the last decrypt", async (_name, interrupt) => {
         await unlockAndSettle();
         const hold = holdDecrypt(cryptoMocks.decryptData, "a6-ov");
         const pending = fill();
         await hold.reached;
-        await lock();
+        await interrupt();
         hold.release();
 
         expect(await pending).toEqual({ type, ok: false, error: "VAULT_LOCKED" });
@@ -5702,13 +5720,13 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       });
     });
 
-    it("resend loop: a lock during the bundle injection stops the resend", async () => {
+    it.each(INTERRUPTIONS)("resend loop: %s during the bundle injection stops the resend", async (_name, interrupt) => {
       await unlockAndSettle();
       chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
       const hold = holdBundleInjection(chromeMock!.scripting.executeScript);
       const pending = fillFromContent();
       await hold.reached;
-      await lock();
+      await interrupt();
       hold.release();
 
       expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "VAULT_LOCKED" });
@@ -5738,13 +5756,13 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
         );
       });
 
-      it("a lock during the bundle injection answers VAULT_LOCKED and sends no card", async () => {
+      it.each(INTERRUPTIONS)("%s during the bundle injection answers VAULT_LOCKED and sends no card", async (_name, interrupt) => {
         await unlockAndSettle();
         chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
         const hold = holdBundleInjection(chromeMock!.scripting.executeScript);
         const pending = fillFromContent();
         await hold.reached;
-        await lock();
+        await interrupt();
         hold.release();
 
         expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "VAULT_LOCKED" });
@@ -5769,14 +5787,14 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
     describe("direct executeScript fallback", () => {
       const OUT_OF_SCOPE = "http://example.com/login";
 
-      it("a lock during the fallback's document probe injects no func", async () => {
+      it.each(INTERRUPTIONS)("%s during the fallback's document probe injects no func", async (_name, interrupt) => {
         probeUrls = { 7: OUT_OF_SCOPE };
         await unlockAndSettle();
         chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
         const hold = holdProbe(chromeMock!.scripting.executeScript);
         const pending = fillFromContent(7, OUT_OF_SCOPE);
         await hold.reached;
-        await lock();
+        await interrupt();
         hold.release();
 
         expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "VAULT_LOCKED" });
@@ -5796,14 +5814,14 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
         expect(directInjections().map((i) => i.args?.[1])).toEqual(["a6-secret"]);
       });
 
-      it("a lock during an unserializable first injection makes no retry injection", async () => {
+      it.each(INTERRUPTIONS)("%s during an unserializable first injection makes no retry injection", async (_name, interrupt) => {
         probeUrls = { 7: OUT_OF_SCOPE };
         await unlockAndSettle();
         chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
         const hold = holdDirectInjection(chromeMock!.scripting.executeScript);
         const pending = fillFromContent(7, OUT_OF_SCOPE);
         await hold.reached;
-        await lock();
+        await interrupt();
         hold.fail(new Error("Value is unserializable"));
 
         expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "VAULT_LOCKED" });
@@ -5837,12 +5855,12 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       const sentTotp = () =>
         (chromeMock!.tabs.sendMessage.mock.calls[0]?.[1] as { totpCode?: string } | undefined)?.totpCode;
 
-      it("a lock while the offscreen document is being readied copies nothing; the fill still answers ok", async () => {
+      it.each(INTERRUPTIONS)("%s while the offscreen document is being readied copies nothing; the fill still answers ok", async (_name, interrupt) => {
         await unlockAndSettle();
         const hold = holdNextCall(chromeMock!.runtime.getContexts);
         const pending = fillFromContent();
         await hold.reached;
-        await lock();
+        await interrupt();
         hold.release();
 
         expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
@@ -5881,12 +5899,12 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       );
     });
 
-    it("a lock during the stored password's decrypt leaves no update prompt to pull", async () => {
+    it.each(INTERRUPTIONS)("%s during the stored password's decrypt leaves no update prompt to pull", async (_name, interrupt) => {
       await unlockAndSettle();
       const hold = holdDecrypt(cryptoMocks.decryptData, "a11-blob");
       const pending = detect();
       await hold.reached;
-      await lock();
+      await interrupt();
       hold.release();
 
       expect(await pending).toEqual({ type: "LOGIN_DETECTED", action: "none" });
@@ -5932,7 +5950,7 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       tabUpdatedHandlers[0](77, { status: "complete" }, { id: 77, url: "https://nomatch.test/dashboard" });
     }
 
-    it("a lock during the delivery-time probe pushes no banner", async () => {
+    it.each(INTERRUPTIONS)("%s during the delivery-time probe pushes no banner", async (_name, interrupt) => {
       await unlockAndSettle();
       vi.useFakeTimers();
       try {
@@ -5940,7 +5958,7 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
         const hold = holdProbe(chromeMock!.scripting.executeScript);
         await vi.advanceTimersByTimeAsync(500);
         await hold.reached;
-        await lock();
+        await interrupt();
         hold.release();
         await vi.advanceTimersByTimeAsync(0);
 
@@ -6131,6 +6149,163 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
 
       expect(fetchCalls(EXT_API_PATH.VAULT_UNLOCK_VERIFY, "POST")).toBe(1);
     });
+
+    // The unlock-verify POST's last await is its DPoP proof; the epoch is
+    // checked after it, immediately before the request leaves.
+    const holdVerifyProof = () =>
+      holdNextCall(dpopKeyMocks.signDpopProof, ({ route, method }: { route: string; method: string }) =>
+        route === EXT_API_PATH.VAULT_UNLOCK_VERIFY && method === "POST");
+
+    it("recordUnlockPresence: a lock while the unlock-verify proof is signed sends no unlock-verify", async () => {
+      const hold = holdVerifyProof();
+      expect(await unlock()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      await hold.reached;
+      await lock();
+      hold.release();
+      await flush();
+
+      expect(fetchCalls(EXT_API_PATH.VAULT_UNLOCK_VERIFY)).toBe(0);
+    });
+
+    it("recordUnlockPresence positive control: the held proof released without a lock posts unlock-verify", async () => {
+      const hold = holdVerifyProof();
+      expect(await unlock()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      await hold.reached;
+      hold.release();
+      await flush();
+
+      expect(fetchCalls(EXT_API_PATH.VAULT_UNLOCK_VERIFY, "POST")).toBe(1);
+    });
+
+    // startKeepalive runs fire-and-forget after the unlock answered; the
+    // offscreen document it creates first is its last await.
+    const holdKeepaliveOffscreen = () =>
+      holdNextCall(chromeMock!.offscreen.createDocument, (params: { justification?: string }) =>
+        params?.justification === "Clipboard access and SW keepalive");
+
+    it("keepalive: a lock while the offscreen document is created starts no keepalive", async () => {
+      const hold = holdKeepaliveOffscreen();
+      expect(await unlock()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      await hold.reached;
+      await lock();
+      hold.release();
+      await flush();
+
+      expect(keepaliveStarts()).toEqual([]);
+    });
+
+    it("keepalive positive control: released without a lock it starts the keepalive", async () => {
+      const hold = holdKeepaliveOffscreen();
+      expect(await unlock()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      await hold.reached;
+      hold.release();
+      await flush();
+
+      expect(keepaliveStarts()).toHaveLength(1);
+    });
+
+    // An unlock that committed and then finds its epoch moved rolls back its
+    // own commit, and only its own.
+    it("a reconnect that keeps the vault, during the tail, rolls the stale unlock's commit back", async () => {
+      // No presence refresh: re-applying the same token must not be a token change.
+      const base = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>;
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+        url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)
+          ? { ok: false, status: 500, json: async () => ({}) }
+          : base(url, init),
+      );
+      const held = armSettingsHoldAfterVerify(1);
+      const pending = unlock();
+      await vi.waitFor(() => expect(cryptoMocks.verifyKey).toHaveBeenCalled());
+      await held().reached;
+      // Same token: the epoch moves, the committed key stays.
+      connect(STATIC_TEST_JKT);
+      held().release();
+
+      expect(await pending).toEqual({ type: "UNLOCK_VAULT", ok: false, error: "VAULT_LOCKED" });
+      expect(await sendMessage({ type: "GET_STATUS" })).toEqual(
+        expect.objectContaining({ hasToken: true, vaultUnlocked: false }),
+      );
+    });
+
+    it("a stale unlock rolling back does not clear a later unlock that committed over it", async () => {
+      const held = armSettingsHoldAfterVerify(1);
+      const stale = unlock();
+      await vi.waitFor(() => expect(cryptoMocks.verifyKey).toHaveBeenCalled());
+      await held().reached;
+      await lock();
+      expect(await unlock()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      held().release();
+
+      expect(await stale).toEqual({ type: "UNLOCK_VAULT", ok: false, error: "VAULT_LOCKED" });
+      expect(await sendMessage({ type: "GET_STATUS" })).toEqual(
+        expect.objectContaining({ hasToken: true, vaultUnlocked: true }),
+      );
+    });
+  });
+
+  // ── discardRestoredSession: a discarded restore moves the epoch (D2) ──
+
+  describe("discarded restored session", () => {
+    // A restored session whose DPoP binding check is parked at
+    // getDpopThumbprint; the unlock proceeds after the bounded hydration wait
+    // under the restored token.
+    async function restoreWithHeldThumbprint(tokenCnfJkt: string): Promise<ReturnType<typeof holdNextCall>> {
+      vi.resetModules();
+      chromeMock = installChromeMock();
+      chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: undefined }]);
+      sessionStorageMocks.loadSession.mockResolvedValueOnce({
+        token: "restored-tok",
+        expiresAt: Date.now() + 3_600_000,
+        userId: "user-1",
+        tokenCnfJkt,
+        tenantAutoLockMinutes: 0,
+        requireVaultTimeoutLogout: false,
+        personalKeyVersion: 1,
+      } as unknown as SessionState);
+      const thumbprint = holdNextCall(dpopKeyMocks.getDpopThumbprint);
+      await loadBackground();
+      await thumbprint.reached;
+      return thumbprint;
+    }
+
+    async function unlockAcrossHydration(thumbprint: ReturnType<typeof holdNextCall>): Promise<unknown> {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const verify = holdNextCall(cryptoMocks.verifyKey);
+        const pending = unlock();
+        await vi.advanceTimersByTimeAsync(5_000);
+        await verify.reached;
+        thumbprint.release();
+        await vi.advanceTimersByTimeAsync(0);
+        verify.release();
+        return await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    it("an unlock parked while the restored session is discarded commits no key", async () => {
+      const thumbprint = await restoreWithHeldThumbprint("a-different-dpop-key-thumbprint");
+
+      expect(await unlockAcrossHydration(thumbprint)).toEqual({
+        type: "UNLOCK_VAULT",
+        ok: false,
+        error: "VAULT_LOCKED",
+      });
+      expect(await sendMessage({ type: "GET_STATUS" })).toEqual(
+        expect.objectContaining({ hasToken: false, vaultUnlocked: false }),
+      );
+    });
+
+    it("positive control: with a matching binding the restored session stays and the unlock commits", async () => {
+      const thumbprint = await restoreWithHeldThumbprint(STATIC_TEST_JKT);
+
+      expect(await unlockAcrossHydration(thumbprint)).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      expect(await sendMessage({ type: "GET_STATUS" })).toEqual(
+        expect.objectContaining({ hasToken: true, vaultUnlocked: true }),
+      );
+    });
   });
 
   // ── registerActivity / hydrate tail: the vault-lock alarm is a sink ──
@@ -6219,18 +6394,46 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       );
     });
 
-    async function holdBadgeUpdate() {
+    // serverUrl is https://localhost:3000, so this is the app's own page.
+    const OWN_APP_PAGE = "https://localhost:3000/dashboard";
+
+    async function holdBadgeUpdate(url = PAGE) {
       await unlockAndSettle();
       await sendMessage({ type: "FETCH_PASSWORDS" });
       const hold = holdNextCall(chromeMock!.storage.local.get, (key: unknown) => key === "serverUrl");
-      tabUpdatedHandlers[0](TAB, { status: "complete" }, { id: TAB, url: PAGE });
+      tabUpdatedHandlers[0](TAB, { status: "complete" }, { id: TAB, url });
       await hold.reached;
       return hold;
     }
-    const countWrites = () =>
-      (chromeMock!.action.setBadgeText.mock.calls as unknown[][]).filter(
-        ([arg]) => (arg as { tabId?: number; text?: string }).tabId === TAB && (arg as { text?: string }).text === "1",
-      );
+    const tabWrites = () =>
+      (chromeMock!.action.setBadgeText.mock.calls as unknown[][])
+        .map(([arg]) => arg as { tabId?: number; text?: string })
+        .filter((arg) => arg.tabId === TAB);
+    const countWrites = () => tabWrites().filter((arg) => arg.text === "1");
+
+    // clearVault clears the per-tab badges so the global locked badge shows;
+    // even an empty per-tab text written after it would hide that badge again.
+    it.each([
+      ["a page with a match", PAGE],
+      ["the app's own page", OWN_APP_PAGE],
+    ])("a lock during isOwnAppPage writes nothing to the tab's badge for %s, not even an empty text", async (_name, url) => {
+      const hold = await holdBadgeUpdate(url);
+      await lock();
+      chromeMock!.action.setBadgeText.mockClear();
+      hold.release();
+      await flush();
+
+      expect(tabWrites()).toEqual([]);
+    });
+
+    it("positive control: released without a lock the app's own page gets the empty per-tab text", async () => {
+      const hold = await holdBadgeUpdate(OWN_APP_PAGE);
+      chromeMock!.action.setBadgeText.mockClear();
+      hold.release();
+      await flush();
+
+      expect(tabWrites()).toEqual([{ text: "", tabId: TAB }]);
+    });
 
     it("a lock (and re-unlock) during isOwnAppPage writes no count from the stale update", async () => {
       const hold = await holdBadgeUpdate();
@@ -6301,6 +6504,67 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       await flush();
     };
 
+    // The send's last await is its DPoP proof: swFetchAuthenticated checks the
+    // epoch after signing, immediately before fetch. A check made before the
+    // signing call would let a lock during it through.
+    const holdPasswordsPostProof = () =>
+      holdNextCall(dpopKeyMocks.signDpopProof, ({ route, method }: { route: string; method: string }) =>
+        route === EXT_API_PATH.PASSWORDS && method === "POST");
+
+    it("swFetch: a lock while the POST's proof is signed sends no POST", async () => {
+      await unlockAndSettle();
+      const proof = holdPasswordsPostProof();
+      const pending = saveLogin();
+      await proof.reached;
+      await lock();
+      proof.release();
+
+      expect(await pending).toEqual({ type: "SAVE_LOGIN", ok: false, error: "VAULT_LOCKED" });
+      expect(fetchCalls(EXT_API_PATH.PASSWORDS, "POST")).toBe(0);
+    });
+
+    it("swFetch positive control: the held proof released without a lock sends the POST", async () => {
+      await unlockAndSettle();
+      const proof = holdPasswordsPostProof();
+      const pending = saveLogin();
+      await proof.reached;
+      proof.release();
+
+      expect(await pending).toEqual({ type: "SAVE_LOGIN", ok: true, error: undefined });
+      expect(fetchCalls(EXT_API_PATH.PASSWORDS, "POST")).toBe(1);
+    });
+
+    // The rotated-token retry: the first POST is answered 401 after a refresh
+    // rotated the token; the retry's proof is then held.
+    async function parkRotatedTokenRetryAtProof() {
+      await unlockAndSettle();
+      const post = holdNextCall(fetchMock, isPasswordsPost, { result: unauthorized });
+      const pending = saveLogin();
+      await post.reached;
+      await refreshViaAlarm();
+      const retryProof = holdPasswordsPostProof();
+      post.release();
+      await retryProof.reached;
+      return { pending, retryProof };
+    }
+
+    it("swFetch: a lock while the rotated-token retry's proof is signed sends no retry", async () => {
+      const { pending, retryProof } = await parkRotatedTokenRetryAtProof();
+      await lock();
+      retryProof.release();
+
+      expect(await pending).toEqual({ type: "SAVE_LOGIN", ok: false, error: "VAULT_LOCKED" });
+      expect(fetchCalls(EXT_API_PATH.PASSWORDS, "POST")).toBe(1);
+    });
+
+    it("swFetch positive control: the rotated-token retry's held proof released without a lock is sent", async () => {
+      const { pending, retryProof } = await parkRotatedTokenRetryAtProof();
+      retryProof.release();
+
+      expect(await pending).toEqual({ type: "SAVE_LOGIN", ok: true, error: undefined });
+      expect(fetchCalls(EXT_API_PATH.PASSWORDS, "POST")).toBe(2);
+    });
+
     it("swFetch: the retry after a concurrent token rotation is not sent across a lock", async () => {
       await unlockAndSettle();
       const hold = holdNextCall(fetchMock, isPasswordsPost, { result: unauthorized });
@@ -6358,6 +6622,38 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
         await hold.reached;
         nearExpiry();
         hold.release();
+
+        expect(await pending).toEqual({ type: "SAVE_LOGIN", ok: true, error: undefined });
+        expect(fetchCalls(EXT_API_PATH.PASSWORDS, "POST")).toBe(2);
+      });
+
+      // The first POST is answered 401 near expiry; the refresh runs, and the
+      // retry's proof is held.
+      async function parkNearExpiryRetryAtProof() {
+        await unlockAndSettle();
+        const post = holdNextCall(fetchMock, isPasswordsPost, { result: unauthorized });
+        const pending = saveLogin();
+        await post.reached;
+        nearExpiry();
+        const retryProof = holdPasswordsPostProof();
+        post.release();
+        await retryProof.reached;
+        return { pending, retryProof };
+      }
+
+      it("swFetch: a lock while the near-expiry retry's proof is signed sends no retry", async () => {
+        const { pending, retryProof } = await parkNearExpiryRetryAtProof();
+        await lock();
+        retryProof.release();
+
+        expect(await pending).toEqual({ type: "SAVE_LOGIN", ok: false, error: "VAULT_LOCKED" });
+        expect(fetchCalls(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)).toBe(2);
+        expect(fetchCalls(EXT_API_PATH.PASSWORDS, "POST")).toBe(1);
+      });
+
+      it("swFetch positive control: the near-expiry retry's held proof released without a lock is sent", async () => {
+        const { pending, retryProof } = await parkNearExpiryRetryAtProof();
+        retryProof.release();
 
         expect(await pending).toEqual({ type: "SAVE_LOGIN", ok: true, error: undefined });
         expect(fetchCalls(EXT_API_PATH.PASSWORDS, "POST")).toBe(2);
