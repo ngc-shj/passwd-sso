@@ -275,3 +275,25 @@ This round reviews `7432efb62..9b9ef7896` incrementally.
 - **Action:** the DOB row now separates its options with whitespace; it turns red when month names are passed to `loose` / `names`. A "Credit date (MM)" deny row was added; it turns red without the `credit` qualification.
 
 Full suite: 1581 passed under seeds 1 and 2. tsc is clean.
+
+---
+
+# Round 6
+Date: 2026-10-12
+
+## Changes from Previous Round
+Incremental review of `9b9ef7896..82a996602`.
+- **Functionality:** No findings. 48 probe rows were compared against main: 12 are improvements, 3 are accepted narrowings or residuals, and the rest are unchanged.
+- **Security:** one Minor (N3).
+- **Testing:** not run this round, because the user stopped the testing reviewer.
+
+## Findings
+- **N3 [Minor, security, R43 vs round 5]** `ownNamesCardExpiry` trusted a strict substring of the own name, so `member_exp_month` / `passport_exp_month` / `licence_exp_month` under "Valid until (MM/YY)" qualified `until`. As a result, `member_exp_month` became a new card recipient.
+
+## Resolution Status
+### N3: own name must itself be expiry vocabulary
+- **Action:** the qualification also requires every own attribute to pass `isExpiryVocabulary`, with a leading `cc` allowed (`cc_exp_month`, `ccmonth`). A subject word in the name withholds it.
+- **Tests:** the CR7 row with `member_exp_month` beside the expiry year is red on the pre-fix HEAD. The allow side is the CR6 `exp_month` / `card_exp_*` / wrapping-label / クレジットカード rows, which still pass.
+- **Recorded residual (security, not a finding):** `passport_exp_month` / `passport_exp_year` under a subject-less "Expiry (MM/YY)" label split into both passport fields. Main does the same, so this is unchanged from main. Tightening the whole `ownSinglePart` override would instead make `birth_month` under that label combined (a regression), so it is left as an SC3 residual.
+
+Full suite: see commit. tsc clean.

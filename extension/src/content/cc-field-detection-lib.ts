@@ -225,6 +225,7 @@ const MONTH_NAME_WORDS = new Set([
   "october", "november", "december",
   "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
 ]);
+const LEADING_CC_RE = /^cc(?=[^a-z0-9]|exp|month|year)/;
 const CARD_QUALIFIED_WORDS = new Set(["credit", "debit", "until"]);
 // A bracketed field name ("order[payment][expiry_mm]") is judged by its last segment.
 const BRACKET_NAME_RE = /[a-z0-9_-]+(?:\[[^\]\s]*\])*\[([^\]\s]*)\]/g;
@@ -334,10 +335,13 @@ function labelIsExpiryVocabulary(field: FormField, hint: string): boolean {
   // A field whose own name says card expiry ("exp_month") qualifies
   // credit/debit/until in its label as card wording ("Valid until (MM/YY)").
   const ownText = own.join(" ");
+  // The name itself must be expiry vocabulary (a leading "cc" allowed), so a
+  // subject in it ("member_exp_month", "passport_exp_month") does not qualify.
   const ownNamesCardExpiry =
-    CC_DETECT_RE.expiryMonth.test(ownText) ||
-    CC_DETECT_RE.expiryYear.test(ownText) ||
-    CC_EXP_NAME_RE.test(ownText);
+    (CC_DETECT_RE.expiryMonth.test(ownText) ||
+      CC_DETECT_RE.expiryYear.test(ownText) ||
+      CC_EXP_NAME_RE.test(ownText)) &&
+    own.every((value) => isExpiryVocabulary(value.replace(LEADING_CC_RE, "")));
   return isExpiryVocabulary(label, MONTH_NAME_WORDS, ownNamesCardExpiry);
 }
 
