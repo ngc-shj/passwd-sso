@@ -228,14 +228,18 @@ const MONTH_NAME_WORDS = new Set([
 const CARD_QUALIFIED_WORDS = new Set(["credit", "debit", "until"]);
 // A bracketed field name ("order[payment][expiry_mm]") is judged by its last segment.
 const BRACKET_NAME_RE = /[a-z0-9_-]+(?:\[[^\]\s]*\])*\[([^\]\s]*)\]/g;
-const JA_EXPIRY_VOCABULARY_RE = /有効期限|カード|必須|任意|[月年（）()]/g;
+const JA_EXPIRY_VOCABULARY_RE = /有効期限|(?:クレジット|デビット)?カード|必須|任意|[月年（）()]/g;
 const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff]/;
 
-function isExpiryVocabulary(hint: string, extraWords?: ReadonlySet<string>): boolean {
+function isExpiryVocabulary(
+  hint: string,
+  extraWords?: ReadonlySet<string>,
+  cardQualified = false,
+): boolean {
   const rest = hint.replace(BRACKET_NAME_RE, "$1").replace(JA_EXPIRY_VOCABULARY_RE, "");
   if (CJK_RE.test(rest)) return false;
   const words = rest.split(/[^a-z0-9]+/).filter((word) => word.length > 2 && !/\d/.test(word));
-  const mentionsCard = words.includes("card");
+  const mentionsCard = cardQualified || words.includes("card");
   return words.every(
     (word) =>
       (EXPIRY_WORDS.has(word) || (extraWords?.has(word) ?? false)) &&
@@ -325,8 +329,16 @@ function ownAttributes(field: FormField): string[] {
  */
 function labelIsExpiryVocabulary(field: FormField, hint: string): boolean {
   let label = hint;
-  for (const value of ownAttributes(field)) label = label.replace(value, " ");
-  return isExpiryVocabulary(label, MONTH_NAME_WORDS);
+  const own = ownAttributes(field);
+  for (const value of own) label = label.replace(value, " ");
+  // A field whose own name says card expiry ("exp_month") qualifies
+  // credit/debit/until in its label as card wording ("Valid until (MM/YY)").
+  const ownText = own.join(" ");
+  const ownNamesCardExpiry =
+    CC_DETECT_RE.expiryMonth.test(ownText) ||
+    CC_DETECT_RE.expiryYear.test(ownText) ||
+    CC_EXP_NAME_RE.test(ownText);
+  return isExpiryVocabulary(label, MONTH_NAME_WORDS, ownNamesCardExpiry);
 }
 
 /** The one part a field's own name/id/placeholder/aria-label names, as flags; else null. */

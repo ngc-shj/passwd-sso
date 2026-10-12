@@ -244,3 +244,34 @@ This round reviews `c93e040b7..7432efb62` incrementally. The testing review also
   - `debit`, `until`, `printed`, `任意` and `optional`.
 
 Full suite: 1575 passed under seeds 1, 2 and 13. tsc is clean.
+
+---
+
+# Round 5
+Date: 2026-10-12
+
+## Changes from Previous Round
+This round reviews `7432efb62..9b9ef7896` incrementally.
+- **Security:** no findings. Both vocabulary predicates are strict subsets of round 4's.
+- **Testing:** R3-F1 is resolved. A seed sweep over seeds 1–20 found 0 failures across `background.test.ts` and `context-menu.test.ts`. The sweep found two Minor unpinned rules.
+- **Functionality:** two new findings, F10 and F11.
+
+## Findings
+- **F10 [Major, functionality].** `until` counted only when the label text contained "card", so "Valid until (MM/YY)" on the card's own `exp_month` / `card_exp_month` selects lost the month, or both parts. Main split these correctly.
+- **F11 [Minor, functionality].** The JA labels クレジットカード有効期限 and デビットカード有効期限 failed the gate, because クレジット / デビット remained as CJK text.
+- **R5-F1 [Minor, testing].** The DOB month-name guard row was vacuous: its fused option text formed no word.
+- **R5-F2 [Minor, testing].** The card qualification of `credit` had no pinning test.
+
+## Resolution Status
+### F10: a card-expiry own name qualifies the label
+- **Action:** `labelIsExpiryVocabulary` passes `cardQualified` when the field's own attributes strictly name a card-expiry part (`CC_DETECT_RE.expiry*` or `cc.?exp`). Fields named for another subject (`member_month`, `debit_month`) still need "card" in the label.
+- **Tests:** CR6 rows for `exp_month` / `card_exp_month` and a wrapping "Valid until" label, each red on the pre-fix HEAD and red without the qualification. The `member_month` deny row stays unclaimed.
+
+### F11: JA credit and debit card nouns
+- **Action:** `JA_EXPIRY_VOCABULARY_RE` strips `(?:クレジット|デビット)?カード`. ポイントカード and マイナンバーカード still fail.
+- **Tests:** the CR6 クレジットカード有効期限 row, red on the pre-fix HEAD and red under the old regex.
+
+### R5-F1 and R5-F2
+- **Action:** the DOB row now separates its options with whitespace; it turns red when month names are passed to `loose` / `names`. A "Credit date (MM)" deny row was added; it turns red without the `credit` qualification.
+
+Full suite: 1588 passed under seeds 1 and 2. tsc is clean.
