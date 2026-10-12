@@ -85,6 +85,7 @@ type MessageHandler = (
 ) => boolean | void;
 
 let messageHandlers: MessageHandler[] = [];
+let chromeMock: ReturnType<typeof installChromeMock> | null = null;
 
 function installChromeMock() {
   messageHandlers = [];
@@ -259,7 +260,7 @@ describe("team entries in background", () => {
     vi.resetModules();
     vi.clearAllMocks();
     installKeyedDecryptData();
-    installChromeMock();
+    chromeMock = installChromeMock();
 
     fetchMock = vi.fn(async (url: string) => {
       if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
@@ -606,6 +607,59 @@ describe("team entries in background", () => {
       // No team entries (no ECDH key)
       const team = res.entries.filter((e) => e.teamId);
       expect(team).toHaveLength(0);
+    });
+
+    // teamId is part of the menu view compared by
+    // setCachedEntries, but the parametrized case for the other fields lives
+    // in background.test.ts (no team harness there) — this is the one case
+    // that needs this file's team fetch chain.
+    it("rebuilds the context menu when the same entry's teamId changes", async () => {
+      // Clear first, then wait for the UNLOCK rebuild's last item: a gate that
+      // the earlier calls already satisfy would wait for nothing.
+      chromeMock!.contextMenus.create.mockClear();
+      await unlockVault();
+      await vi.waitFor(() => {
+        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+        expect(ids).toContain("psso-open-popup");
+      });
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      // Same team-pw-1 entry, same team passwords list, but the teams list
+      // now reports it under a different team id — id/title/username/urlHost
+      // unchanged, teamId alone differs.
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
+        if (url.includes("/member-key")) {
+          return { ok: true, json: async () => MEMBER_KEY_RESPONSE };
+        }
+        if (url.match(/\/teams\/[^/]+\/passwords$/)) {
+          return { ok: true, json: async () => [makeTeamEntry("team-pw-1", EXT_ENTRY_TYPE.LOGIN)] };
+        }
+        if (url.endsWith(EXT_API_PATH.TEAMS)) {
+          return { ok: true, json: async () => [{ id: "team-2", name: "Engineering" }] };
+        }
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
+          return { ok: true, json: async () => [PERSONAL_ENTRY] };
+        }
+        return { ok: false, json: async () => ({}) };
+      });
+
+      const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as {
+        entries: Array<{ id: string; teamId?: string }>;
+      };
+      expect(res.entries.find((e) => e.id === "team-pw-1")?.teamId).toBe("team-2");
+
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
     });
   });
 

@@ -16,9 +16,14 @@ export const DEBOUNCE_MS = 200;
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastMenuHost: string | null = null;
+// Version of the entries the currently-rendered menu was built from.
+// Lets the same-host skip tell "the cache moved on since I last rebuilt" from
+// "nothing changed" without diffing entries here.
+let lastMenuCacheVersion: number | null = null;
 
 export interface ContextMenuDeps {
-  getCachedEntries: () => Promise<DecryptedEntry[]>;
+  getCachedSnapshot: () => Promise<{ entries: DecryptedEntry[]; version: number }>;
+  getCacheVersion: () => number;
   isHostMatch: (entryHost: string, tabHost: string) => boolean;
   extractHost: (url: string) => string | null;
   isConnected: () => boolean;
@@ -147,8 +152,25 @@ export function updateContextMenuForTab(
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     const generation = nextGeneration();
-    void serializeMenuTask(() => doUpdateMenu(url, generation));
+    void serializeMenuTask(async () => {
+      await doUpdateMenu(url, generation);
+      // The task may have been superseded (e.g. invalidateContextMenu claimed a
+      // newer generation) while it awaited something. Tasks are serialized, so
+      // the next one has not started yet — clear the host here rather than
+      // leaving it set to whatever doUpdateMenu last recorded before abandoning.
+      if (!isCurrent(generation)) lastMenuHost = null;
+    });
   }, DEBOUNCE_MS);
+}
+
+function createLockedItem(): Promise<void> {
+  return createMenuItem({
+    id: `${ITEM_PREFIX}locked`,
+    parentId: PARENT_ID,
+    title: t("contextMenu.vaultLocked"),
+    contexts: ["editable"],
+    enabled: false,
+  });
 }
 
 async function doUpdateMenu(
@@ -170,8 +192,10 @@ async function doUpdateMenu(
     return;
   }
 
-  // Skip rebuild if same host
-  if (host === lastMenuHost) return;
+  // Skip rebuild if same host AND the cache has not moved on since the last
+  // build — a version bump must rebuild even without a host change.
+  const version = deps.getCacheVersion();
+  if (host === lastMenuHost && version === lastMenuCacheVersion) return;
 
   // Read the toggle here as well as in resetMenuWithParent: with it off, the
   // parent is never created, and creating children against a missing parent is
@@ -181,7 +205,11 @@ async function doUpdateMenu(
 
   await resetMenuWithParent(generation);
   if (!isCurrent(generation)) return;
+  // Recorded for every menu built here, not only the entry list: a locked,
+  // disconnected or disabled menu must also skip same-host refreshes until the
+  // cache moves on. The entry path re-records the snapshot's own version.
   lastMenuHost = host;
+  lastMenuCacheVersion = version;
   if (!enabled) return;
 
   if (!deps.isConnected()) {
@@ -196,19 +224,25 @@ async function doUpdateMenu(
   }
 
   if (!deps.isVaultUnlocked()) {
-    await createMenuItem({
-      id: `${ITEM_PREFIX}locked`,
-      parentId: PARENT_ID,
-      title: t("contextMenu.vaultLocked"),
-      contexts: ["editable"],
-      enabled: false,
-    });
+    await createLockedItem();
     return;
   }
 
   try {
-    const entries = await deps.getCachedEntries();
+    const snapshot = await deps.getCachedSnapshot();
     if (!isCurrent(generation)) return;
+    // The vault may have locked while the snapshot was in flight — re-check
+    // rather than trusting the isVaultUnlocked() read from before the await.
+    // No entry item is created after the vault is seen locked; the null
+    // host forces the next refresh to rebuild in full rather than skip on a
+    // same-host match against this abandoned build.
+    if (!deps.isVaultUnlocked()) {
+      lastMenuHost = null;
+      await createLockedItem();
+      return;
+    }
+    lastMenuCacheVersion = snapshot.version;
+    const entries = snapshot.entries;
     const loginMatches = entries.filter(
       (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && (
         (e.urlHost && deps!.isHostMatch(e.urlHost, host)) ||
@@ -418,17 +452,31 @@ function parseMenuEntryId(suffix: string): { entryId: string | null; teamId?: st
 }
 
 /**
- * Force a menu rebuild (e.g. after vault unlock/lock). Nulling lastMenuHost
- * synchronously is what defeats the same-host early return for a rebuild that is
- * already in flight — the reason this path participates in the race rather than
- * being serialized away by the debounce.
+ * Rebuild the menu for the active tab through the normal debounce, without
+ * clearing lastMenuHost. The single path setCachedEntries and
+ * invalidateContextMenu both go through to get a rebuild on the active tab.
+ */
+export function refreshContextMenu(): void {
+  // With no active tab (or a failed query) the rebuild still runs, URL-less, so
+  // it resets the menu to the bare parent: entry items built before a lock must
+  // not outlive it just because no tab could be resolved.
+  chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+    updateContextMenuForTab(tab?.id ?? -1, tab?.url);
+  }).catch(() => {
+    updateContextMenuForTab(-1, undefined);
+  });
+}
+
+/**
+ * Force a menu rebuild (e.g. after vault unlock/lock). Claims the next
+ * generation synchronously so a build already awaiting its snapshot
+ * abandons rather than resurrecting state this call is about to replace.
+ * Nulling lastMenuHost synchronously is what defeats the same-host early
+ * return for a rebuild that is already in flight — the reason this path
+ * participates in the race rather than being serialized away by the debounce.
  */
 export function invalidateContextMenu(): void {
+  nextGeneration();
   lastMenuHost = null;
-  // Immediately rebuild menu for the active tab
-  chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-    if (tab?.id) {
-      updateContextMenuForTab(tab.id, tab.url);
-    }
-  }).catch(() => {});
+  refreshContextMenu();
 }

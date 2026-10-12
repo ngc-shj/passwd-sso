@@ -95,6 +95,7 @@ import {
   handleContextMenuClick,
   invalidateContextMenu,
   disableContextMenu,
+  refreshContextMenu,
 } from "./context-menu";
 import {
   initLoginSave,
@@ -262,6 +263,10 @@ const pendingSavePrompts = new Map<number, PendingSavePrompt>();
 
 let cachedEntries: DecryptedEntry[] | null = null;
 let cacheTimestamp = 0;
+// Bumped by setCachedEntries whenever the menu-relevant view of the cache
+// changes (or is cleared). Lets the context menu tell "my build is still
+// fresh" from "the cache moved on under me" without diffing entries itself.
+let cacheVersion = 0;
 
 async function configureSessionStorageAccess(): Promise<void> {
   try {
@@ -310,14 +315,59 @@ async function stopKeepalive(): Promise<void> {
   }
 }
 
-function invalidateCache(): void {
-  cachedEntries = null;
-  cacheTimestamp = 0;
+function sameHosts(a: string[] | undefined, b: string[] | undefined): boolean {
+  const aa = a ?? [];
+  const bb = b ?? [];
+  if (aa.length !== bb.length) return false;
+  return aa.every((host, i) => host === bb[i]);
 }
 
-async function getCachedEntries(): Promise<DecryptedEntry[]> {
+/** The fields that change what the context menu renders for an entry. */
+function sameMenuView(a: DecryptedEntry, b: DecryptedEntry): boolean {
+  return (
+    a.id === b.id &&
+    a.teamId === b.teamId &&
+    a.entryType === b.entryType &&
+    a.title === b.title &&
+    a.username === b.username &&
+    a.urlHost === b.urlHost &&
+    sameHosts(a.additionalUrlHosts, b.additionalUrlHosts)
+  );
+}
+
+function menuViewChanged(prev: DecryptedEntry[] | null, next: DecryptedEntry[]): boolean {
+  if (!prev) return true;
+  if (prev.length !== next.length) return true;
+  return prev.some((entry, i) => !sameMenuView(entry, next[i]));
+}
+
+/**
+ * The single writer to `cachedEntries`. Compares the incoming value
+ * against the current cache over the menu-relevant view (no copy is kept —
+ * the outgoing `cachedEntries` IS the previous value) before overwriting it.
+ * A null value or a changed view bumps `cacheVersion` and rebuilds the
+ * context menu, even on the same host; the debounce it goes through
+ * absorbs a run of calls into one rebuild. Returns the version the
+ * value was stored under.
+ */
+function setCachedEntries(entries: DecryptedEntry[] | null): number {
+  const changed = entries === null || menuViewChanged(cachedEntries, entries);
+  cachedEntries = entries;
+  cacheTimestamp = entries === null ? 0 : Date.now();
+  if (changed) {
+    cacheVersion += 1;
+    refreshContextMenu();
+  }
+  return cacheVersion;
+}
+
+function invalidateCache(): void {
+  setCachedEntries(null);
+}
+
+async function getCachedSnapshot(): Promise<{ entries: DecryptedEntry[]; version: number }> {
   if (cachedEntries && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
-    return cachedEntries;
+    return { entries: cachedEntries, version: cacheVersion };
   }
   const [personalResult, teamResult] = await Promise.allSettled([
     (async () => {
@@ -331,9 +381,12 @@ async function getCachedEntries(): Promise<DecryptedEntry[]> {
   const personal = personalResult.status === "fulfilled" ? personalResult.value : [];
   const team = teamResult.status === "fulfilled" ? teamResult.value : [];
   const entries = [...personal, ...team];
-  cachedEntries = entries;
-  cacheTimestamp = Date.now();
-  return entries;
+  const version = setCachedEntries(entries);
+  return { entries, version };
+}
+
+async function getCachedEntries(): Promise<DecryptedEntry[]> {
+  return (await getCachedSnapshot()).entries;
 }
 
 /**
@@ -845,7 +898,8 @@ getSettings().then((s) => {
 // ── Context menu ─────────────────────────────────────────────
 
 initContextMenu({
-  getCachedEntries,
+  getCachedSnapshot,
+  getCacheVersion: () => cacheVersion,
   isHostMatch,
   extractHost,
   isConnected: () => currentToken !== null,
@@ -2552,8 +2606,7 @@ async function handleMessage(
         const entries = [...personal, ...team];
 
         // Update cache so inline suggestions stay in sync with popup.
-        cachedEntries = entries;
-        cacheTimestamp = Date.now();
+        setCachedEntries(entries);
         sendResponse({ type: EXT_MSG.FETCH_PASSWORDS, entries });
         // Update badge count now that cache is populated
         void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {

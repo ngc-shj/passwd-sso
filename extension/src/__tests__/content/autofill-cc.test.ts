@@ -778,3 +778,45 @@ describe("performCreditCardAutofill — dynamic forms (#654)", () => {
   });
 });
 
+
+describe("performCreditCardAutofill expiry fields (#883)", () => {
+  const fill = (html: string) => {
+    setupForm(html);
+    return performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "02",
+      expiryYear: "2030",
+      cvv: "",
+    }, NO_WAIT);
+  };
+  const value = (name: string) => (document.querySelector(`[name="${name}"]`) as HTMLInputElement).value;
+
+  it("fills split inputs labelled Expiry month / Expiry year separately", async () => {
+    await fill(`<form><input name="card_number"><label>Expiry month <input name="em"></label><label>Expiry year <input name="ey"></label></form>`);
+    expect(value("em")).toBe("02");
+    expect(value("ey")).toBe("2030");
+  });
+
+  it("writes two digits into a [YY] year input", async () => {
+    await fill(`<form><input name="card_number"><label>Expiry date <input name="m" placeholder="MM"></label><input name="y" placeholder="YY"></form>`);
+    expect(value("m")).toBe("02");
+    expect(value("y")).toBe("30");
+  });
+
+  it("writes two digits into a maxlength=2 year input", async () => {
+    await fill(`<form><input name="card_number"><label>Expiry month <input name="em"></label><label>Expiry year <input name="ey" maxlength="2"></label></form>`);
+    expect(value("ey")).toBe("30");
+  });
+
+  it("writes four digits into a [YYYY] year input", async () => {
+    await fill(`<form><input name="card_number"><label>Expiry month <input name="em"></label><input name="y" placeholder="YYYY"></form>`);
+    expect(value("y")).toBe("2030");
+  });
+
+  it("keeps writing MM/YY into a combined expire field", async () => {
+    await fill(`<form><input name="card_number"><input name="expire" placeholder="MM/YY"></form>`);
+    expect(value("expire")).toBe("02/30");
+  });
+});

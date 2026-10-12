@@ -24,6 +24,7 @@ import {
   SELECT_DIAG_FIELD,
   type SelectDiagField,
 } from "./select-diag-lib";
+import { getHintString } from "./field-query-lib";
 
 // ── Visibility check ──
 
@@ -120,6 +121,16 @@ function setSelectValue(
   }
   select.dispatchEvent(new Event("input", { bubbles: true }));
   select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// A year input asking for two digits (a "YY" hint, maxlength 2) gets the last
+// two; elsewhere the payload is written as it is. Delimiter-aware, so "YYYY"
+// does not count as "YY".
+const YY_TOKEN_RE = /(?:^|[^a-z0-9])yy(?![a-z0-9])/;
+
+function yearForInput(input: HTMLInputElement, year: string): string {
+  const wantsTwoDigits = input.maxLength === 2 || YY_TOKEN_RE.test(getHintString(input));
+  return wantsTwoDigits ? normalizeYearValue(year).slice(-2) : year;
 }
 
 // ── Main autofill function ──
@@ -222,7 +233,12 @@ export async function performCreditCardAutofill(
       relocate: relocateCcField("expiryYear"),
       accepts: isCreditCardFillable,
       write: (el) =>
-        writeExpiryPart(el, payload.expiryYear, normalizeYearValue, SELECT_DIAG_FIELD.CC_EXPIRY_YEAR),
+        writeExpiryPart(
+          el,
+          el instanceof HTMLInputElement ? yearForInput(el, payload.expiryYear) : payload.expiryYear,
+          normalizeYearValue,
+          SELECT_DIAG_FIELD.CC_EXPIRY_YEAR,
+        ),
       release: noRelease,
     });
   }

@@ -27,7 +27,8 @@ import {
   isDropdownVisible,
   handleDropdownKeydown,
 } from "./ui/suggestion-dropdown";
-import { isFillActive } from "./fill-sequence-lib";
+import { isFillActive, OBSERVED_ATTRIBUTES } from "./fill-sequence-lib";
+import { createRescanScheduler, ATTR_RESCAN_DELAY_MS, ATTR_RECENT_MS } from "./rescan-scheduler";
 
 // ── Types ──
 
@@ -355,6 +356,13 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
     identityFields = next;
   };
 
+  // Coalesces attribute-only mutation bursts so a reveal made
+  // without adding nodes still gets picked up, without scanning per mutation.
+  const scheduler = createRescanScheduler(rescan, {
+    delayMs: ATTR_RESCAN_DELAY_MS,
+    recentMs: ATTR_RECENT_MS,
+  });
+
   const requestMatches = (input: HTMLInputElement) => {
     if (!isContextValid()) {
       destroy();
@@ -460,7 +468,14 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
     const input = e.target;
     if (!(input instanceof HTMLInputElement)) return;
     if (!isUsableInput(input)) return;
-    if (!identityFields.has(input)) return;
+    if (!identityFields.has(input)) {
+      // A member focus never scans. A non-member gets one last chance —
+      // drain any mutation not yet delivered, then flush a pending or recent
+      // rescan — before giving up on it.
+      handleMutations(observer.takeRecords());
+      scheduler.flushForFocus();
+      if (!identityFields.has(input)) return;
+    }
     requestMatches(input);
   };
 
@@ -482,10 +497,32 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
     }
   };
 
-  const observer = new MutationObserver((mutations) => {
+  // Named so the focus path can feed it observer.takeRecords() directly.
+  const handleMutations = (mutations: MutationRecord[]): void => {
     if (destroyed) return;
-    if (mutations.some((m) => m.addedNodes.length > 0)) rescan();
-  });
+    if (mutations.some((m) => m.addedNodes.length > 0)) {
+      scheduler.runNow();
+      return;
+    }
+    // A batch often carries many records for one element (style + class);
+    // each target is inspected once.
+    const seen = new Set<Node>();
+    if (
+      mutations.some((m) => {
+        const target = m.target;
+        if (seen.has(target)) return false;
+        seen.add(target);
+        return (
+          target instanceof Element &&
+          (target.matches?.("input,select") || target.querySelector?.("input,select"))
+        );
+      })
+    ) {
+      scheduler.noteAttributeChange();
+    }
+  };
+
+  const observer = new MutationObserver(handleMutations);
 
   const runtimeMessageHandler = (message: { type?: string }) => {
     if (destroyed) return;
@@ -513,7 +550,12 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
   document.addEventListener("keydown", keydownHandler, true);
   rescan();
   if (document.body) {
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: [...OBSERVED_ATTRIBUTES],
+    });
   }
 
   const navigationHandler = () => {
@@ -539,6 +581,7 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
     document.removeEventListener("focusout", blurHandler, true);
     document.removeEventListener("keydown", keydownHandler, true);
     observer.disconnect();
+    scheduler.cancel();
     if (typeof navigation !== "undefined") {
       navigation.removeEventListener("navigate", navigationHandler);
     }

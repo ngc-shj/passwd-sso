@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ALARM_VAULT_LOCK,
   ALARM_TOKEN_REFRESH,
@@ -13,6 +13,7 @@ import {
 import { DISCONNECT_REASON } from "../lib/disconnect-reason";
 import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../lib/cc-patterns";
 import { BUNDLE_RESEND_ATTEMPTS } from "../background/content-bundle";
+import { DEBOUNCE_MS } from "../background/context-menu";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
 import {
@@ -57,6 +58,10 @@ const cryptoMocks = vi.hoisted(() => ({
   decryptData: vi.fn().mockResolvedValue(
     JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" })
   ),
+  // Only login-save.ts / passkey-provider.ts call this (SAVE_LOGIN,
+  // UPDATE_LOGIN, passkey registration) — the return shape just needs to
+  // look like an EncryptedData blob.
+  encryptData: vi.fn().mockResolvedValue({ ciphertext: "enc", iv: "iv", authTag: "tag" }),
   buildPersonalEntryAAD: vi.fn().mockReturnValue(new Uint8Array([1, 2])),
   hexDecode: vi.fn().mockReturnValue(new Uint8Array([0, 1])),
   VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
@@ -311,6 +316,18 @@ beforeEach(() => {
   keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
 });
 
+// Each test loads a fresh background module; an earlier instance's pending
+// menu debounce would otherwise fire into the next test's chrome mock. Tear
+// the current instance's menu down so no test starts with one in flight.
+afterEach(async () => {
+  if (!bgModule) return;
+  const contextMenu = await import("../background/context-menu");
+  await contextMenu.disableContextMenu();
+});
+
+
+// Long enough for the context menu's debounced rebuild and its async chain to run.
+const settleMenu = () => new Promise((r) => setTimeout(r, DEBOUNCE_MS * 2));
 describe("background message flow", () => {
   beforeEach(async () => {
     vi.resetModules();
@@ -782,6 +799,238 @@ describe("background message flow", () => {
       "pw-1",
       "overview"
     );
+  });
+
+  // ── #881 C2 acceptance 7-9: setCachedEntries rebuilds on a menu-view change ──
+  describe("context menu rebuild on cache change (#881 C2)", () => {
+    const CHANGED_OVERVIEW_CIPHERTEXT = "22";
+    const BASE_RAW_ENTRY = {
+      id: "pw-1",
+      encryptedOverview: { ciphertext: CHANGED_OVERVIEW_CIPHERTEXT, iv: "22", authTag: "33" },
+      entryType: EXT_ENTRY_TYPE.LOGIN,
+      aadVersion: 1,
+    };
+    const BASE_OVERVIEW = { title: "Example", username: "alice", urlHost: "example.com" };
+
+    function stubPasswordsFetch(rawEntry: typeof BASE_RAW_ENTRY): void {
+      stubPasswordsFetchMany([rawEntry]);
+    }
+
+    function stubPasswordsFetchMany(rawEntries: (typeof BASE_RAW_ENTRY)[]): void {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.includes(EXT_API_PATH.PASSWORDS)) {
+            return { ok: true, json: async () => rawEntries };
+          }
+          return { ok: false, json: async () => ({}) };
+        }),
+      );
+    }
+
+    const SECOND_RAW_ENTRY = {
+      id: "pw-2",
+      encryptedOverview: { ciphertext: "44", iv: "22", authTag: "33" },
+      entryType: EXT_ENTRY_TYPE.LOGIN,
+      aadVersion: 1,
+    };
+
+    // Genuinely identical to the entry the default fetch stub (ciphertext
+    // "11") produced: same id, same ciphertext, which the file-level
+    // beforeEach keys to DEFAULT_OVERVIEW_PLAINTEXT. Reusing BASE_RAW_ENTRY
+    // (ciphertext "22", unregistered here) would make pw-1 fail to decrypt
+    // and get silently dropped (decryptOverviews swallows decrypt errors),
+    // which would turn an intended append/shrink into an accidental replace.
+    const IDENTICAL_PW1_RAW_ENTRY = {
+      id: "pw-1",
+      encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+      entryType: EXT_ENTRY_TYPE.LOGIN,
+      aadVersion: 1,
+    };
+
+    // Clears the menu mocks before UNLOCK and waits for that rebuild's last
+    // item, so a following mockClear() starts from a settled menu rather than
+    // from whatever a fixed sleep happened to cover. The first FETCH_PASSWORDS
+    // returns what UNLOCK already cached, so it rebuilds nothing.
+    async function unlockAndSettleMenu(): Promise<void> {
+      applyToken("t", Date.now() + 60_000, "");
+      chromeMock!.contextMenus.create.mockClear();
+      chromeMock!.contextMenus.removeAll.mockClear();
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+      await vi.waitFor(() => {
+        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+        expect(ids).toContain("psso-open-popup");
+      });
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+    }
+
+    it("does not rebuild on an identical FETCH_PASSWORDS response", async () => {
+      await unlockAndSettleMenu();
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await settleMenu();
+
+      expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
+    });
+
+    // Paired positive control for the negative test above: the identical
+    // harness and sequence, but with the title actually changed, so the
+    // absence of a rebuild above is a real signal and not an artifact of
+    // this harness never detecting a change at all.
+    it("rebuilds on a changed FETCH_PASSWORDS response, in the same harness as the identical-response test above (CR2)", async () => {
+      await unlockAndSettleMenu();
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      setDecryptedPlaintext(CHANGED_OVERVIEW_CIPHERTEXT, JSON.stringify({ ...BASE_OVERVIEW, title: "Example 2" }));
+      stubPasswordsFetch(BASE_RAW_ENTRY);
+
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+    });
+
+    it("rebuilds when FETCH_PASSWORDS appends a new entry to an otherwise identical prefix (CR2)", async () => {
+      await unlockAndSettleMenu();
+      chromeMock!.contextMenus.create.mockClear();
+
+      setDecryptedPlaintext("44", JSON.stringify({ title: "New Site", username: "carol", urlHost: "newsite.example" }));
+      chromeMock!.tabs.query.mockResolvedValue([{ id: 1, url: "https://newsite.example" }]);
+      stubPasswordsFetchMany([IDENTICAL_PW1_RAW_ENTRY, SECOND_RAW_ENTRY]);
+
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+
+      await vi.waitFor(() => {
+        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+        expect(ids).toContain("psso-login-pw-2");
+      });
+    });
+
+    it("rebuilds when FETCH_PASSWORDS drops an entry from an otherwise identical prefix (CR2)", async () => {
+      await unlockAndSettleMenu();
+
+      setDecryptedPlaintext("44", JSON.stringify({ title: "New Site", username: "carol", urlHost: "newsite.example" }));
+      chromeMock!.tabs.query.mockResolvedValue([{ id: 1, url: "https://newsite.example" }]);
+      stubPasswordsFetchMany([IDENTICAL_PW1_RAW_ENTRY, SECOND_RAW_ENTRY]);
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      // pw-2 is actually rendered first, so its absence below is observable.
+      await vi.waitFor(() => {
+        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+        expect(ids).toContain("psso-login-pw-2");
+      });
+      chromeMock!.contextMenus.create.mockClear();
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      stubPasswordsFetch(IDENTICAL_PW1_RAW_ENTRY);
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+      const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+      expect(ids).not.toContain("psso-login-pw-2");
+    });
+
+    it.each([
+      ["id", { ...BASE_RAW_ENTRY, id: "pw-2" }, BASE_OVERVIEW],
+      ["entryType", { ...BASE_RAW_ENTRY, entryType: EXT_ENTRY_TYPE.CREDIT_CARD }, BASE_OVERVIEW],
+      ["title", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, title: "Example 2" }],
+      ["username", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, username: "bob" }],
+      ["urlHost", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, urlHost: "example.org" }],
+      ["additionalUrlHosts", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, additionalUrlHosts: ["alt.example.com"] }],
+    ])("rebuilds when %s changes", async (_field, rawEntry, overview) => {
+      await unlockAndSettleMenu();
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      setDecryptedPlaintext(CHANGED_OVERVIEW_CIPHERTEXT, JSON.stringify(overview));
+      stubPasswordsFetch(rawEntry);
+
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+    });
+
+    it("creates a menu item for a new entry returned by FETCH_PASSWORDS, after the UNLOCK cascade settles", async () => {
+      await unlockAndSettleMenu();
+      chromeMock!.contextMenus.create.mockClear();
+
+      setDecryptedPlaintext("44", JSON.stringify({ title: "New Site", username: "carol", urlHost: "newsite.example" }));
+      chromeMock!.tabs.query.mockResolvedValue([{ id: 1, url: "https://newsite.example" }]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.includes(EXT_API_PATH.PASSWORDS)) {
+            return {
+              ok: true,
+              json: async () => [
+                BASE_RAW_ENTRY,
+                { id: "pw-2", encryptedOverview: { ciphertext: "44", iv: "22", authTag: "33" }, entryType: EXT_ENTRY_TYPE.LOGIN, aadVersion: 1 },
+              ],
+            };
+          }
+          return { ok: false, json: async () => ({}) };
+        }),
+      );
+
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+
+      await vi.waitFor(() => {
+        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+        expect(ids).toContain("psso-login-pw-2");
+      });
+    });
+
+    it("schedules a rebuild through invalidateCache from a successful SAVE_LOGIN, not the lock path", async () => {
+      await unlockAndSettleMenu();
+      chromeMock!.contextMenus.removeAll.mockClear();
+      chromeMock!.contextMenus.create.mockClear();
+
+      const res = await sendMessageWithSender(
+        { type: "SAVE_LOGIN", username: "dave", password: "secret" },
+        { tab: { id: 1, url: "https://example.org/login" } },
+      );
+      expect(res).toEqual({ type: "SAVE_LOGIN", ok: true, error: undefined });
+
+      // A rebuild was scheduled...
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+      // ...and it is the normal rebuild, not the "vault locked" teardown —
+      // invalidateCache alone must not touch encryptionKey.
+      const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+      expect(ids).not.toContain("psso-login-locked");
+    });
+
+    it("a second same-host refresh within the cache TTL makes no removeAll (CR2)", async () => {
+      await unlockAndSettleMenu();
+      // UNLOCK_VAULT's own fire-and-forget refresh already hit
+      // getCachedSnapshot's cache-MISS branch (this mutation does not touch
+      // that branch) and recorded lastMenuHost="github.com" (default
+      // tabs.query/tabs.get) with the correct lastMenuCacheVersion.
+
+      // A tab activation with no URL takes the url-less reset path in
+      // doUpdateMenu, which nulls lastMenuHost but leaves lastMenuCacheVersion
+      // untouched — forcing the NEXT same-host refresh to actually reach
+      // getCachedSnapshot instead of being skipped by the host check.
+      chromeMock!.tabs.get.mockResolvedValueOnce({ id: 1, url: undefined });
+      tabActivatedHandlers[0]({ tabId: 1, windowId: 1 });
+      await settleMenu();
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      // First refresh back onto github.com: lastMenuHost is null, so this
+      // reaches getCachedSnapshot. The cache is still warm (well within
+      // CACHE_TTL_MS), so this is the cache-hit branch the mutation corrupts
+      // — it records whatever version getCachedSnapshot reports.
+      tabActivatedHandlers[0]({ tabId: 1, windowId: 1 });
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      // Second same-host refresh within the TTL: nothing changed, so this
+      // must skip via the host+version check — using the version
+      // getCachedSnapshot reported above, not the real cacheVersion directly.
+      tabActivatedHandlers[0]({ tabId: 1, windowId: 1 });
+      await settleMenu();
+
+      expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
+    });
   });
 
   it("returns error when COPY_PASSWORD called while vault locked", async () => {

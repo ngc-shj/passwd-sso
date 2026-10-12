@@ -46,7 +46,17 @@ export const WAITING_POLL_MS = 100;
 
 const SUPERSEDING_INPUT_EVENTS = ["keydown", "pointerdown", "paste"] as const;
 
-const OBSERVED_ATTRIBUTES = ["disabled", "readonly", "hidden", "style", "class"];
+// Exported: the CC and identity detectors' attribute-rescan observers filter
+// on the same set, so a reveal via any of these attributes is caught
+// everywhere a field's membership can change.
+export const OBSERVED_ATTRIBUTES: readonly string[] = [
+  "disabled",
+  "readonly",
+  "hidden",
+  "style",
+  "class",
+  "type",
+];
 
 type StepState = "pending" | "waiting" | "written" | "abandoned";
 
@@ -68,7 +78,7 @@ function supersedeActiveRun(): void {
 
 /**
  * Supersedes the active run without starting one. A fill request whose T0
- * detection finds nothing to fill still ends the earlier run (FR4), so no
+ * detection finds nothing to fill still ends the earlier run, so no
  * earlier step can write after a newer request.
  */
 export function supersedeActiveFill(): void {
@@ -296,7 +306,7 @@ export function runFillSequence(
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: OBSERVED_ATTRIBUTES,
+        attributeFilter: [...OBSERVED_ATTRIBUTES],
       });
     }
     scheduleTick();
