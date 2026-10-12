@@ -7,6 +7,8 @@ import {
   EXT_ENTRY_TYPE,
 } from "../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import { DEBOUNCE_MS } from "../background/context-menu";
+import { holdNextCall } from "./helpers/deferred";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
 
@@ -471,5 +473,50 @@ describe("X-4 keyboard shortcut commands", () => {
     });
 
     vi.restoreAllMocks();
+  });
+  // #885 A9: the copy commands assert the vault epoch inside copyToClipboard,
+  // after the offscreen document is ready — the last await before the write.
+  describe("copy commands across a lock (#885 A9)", () => {
+    const settled = async () => {
+      // The unlock's context-menu rebuild decrypts the overview; let it finish
+      // so the command's blob decrypt is the second decryptData call.
+      await new Promise((r) => setTimeout(r, DEBOUNCE_MS * 2));
+    };
+    const writesOf = (text: string) =>
+      (chromeMock.runtime.sendMessage.mock.calls as unknown[][]).filter(
+        ([msg]) => (msg as { type?: string; text?: string }).type === "clipboard-write" &&
+          (msg as { text?: string }).text === text,
+      );
+
+    it.each([
+      [CMD_COPY_PASSWORD, "s3cret"],
+      [CMD_COPY_USERNAME, "alice"],
+    ])("%s: a lock while the offscreen document is readied writes nothing", async (command, text) => {
+      await unlockVault(chromeMock);
+      await settled();
+      const hold = holdNextCall(chromeMock.runtime.getContexts);
+      const pending = commandHandlers[0](command);
+      await hold.reached;
+      await sendMessage({ type: "LOCK_VAULT" });
+      hold.release();
+      await pending;
+
+      expect(writesOf(text)).toEqual([]);
+    });
+
+    it.each([
+      [CMD_COPY_PASSWORD, "s3cret"],
+      [CMD_COPY_USERNAME, "alice"],
+    ])("%s positive control: released without a lock it writes the value", async (command, text) => {
+      await unlockVault(chromeMock);
+      await settled();
+      const hold = holdNextCall(chromeMock.runtime.getContexts);
+      const pending = commandHandlers[0](command);
+      await hold.reached;
+      hold.release();
+      await pending;
+
+      expect(writesOf(text)).toHaveLength(1);
+    });
   });
 });

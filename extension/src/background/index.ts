@@ -963,7 +963,6 @@ initLoginSave({
   extractHost,
   swFetch,
   invalidateCache,
-  getVaultEpoch: currentVaultEpoch,
 });
 
 initPasskeyProvider({
@@ -973,7 +972,6 @@ initPasskeyProvider({
   getCachedEntries,
   swFetch,
   invalidateCache,
-  getVaultEpoch: currentVaultEpoch,
 });
 
 // Register MAIN world WebAuthn interceptor via scripting API.

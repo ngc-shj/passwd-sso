@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DecryptedEntry } from "../types/messages";
+import { deferred, holdNextCall } from "./helpers/deferred";
+import { assertVaultEpoch, bumpVaultEpoch, currentVaultEpoch } from "../background/vault-epoch";
+
+// encryptData stays the real implementation; wrapping it lets a test hold one
+// call (#885) while the vault epoch moves.
+vi.mock("../lib/crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/crypto")>();
+  return { ...actual, encryptData: vi.fn(actual.encryptData) };
+});
 import {
   encryptData,
   decryptData,
@@ -53,7 +62,6 @@ function createDeps(overrides?: Partial<LoginSaveDeps>): LoginSaveDeps {
     }),
     swFetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
     invalidateCache: vi.fn(),
-    getVaultEpoch: () => 0,
     ...overrides,
   };
 }
@@ -206,7 +214,7 @@ describe("login-save", () => {
       expect(mockFetch).toHaveBeenCalledWith(
         "/api/passwords",
         expect.objectContaining({ method: "POST" }),
-        { epoch: 0 },
+        { epoch: currentVaultEpoch() },
       );
       // Verify the POST body contains expected fields
       const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
@@ -517,6 +525,158 @@ describe("login-save", () => {
 
       const result = await handleLoginDetected("https://github.com", "alice", "pw");
       expect(result.action).toBe("none");
+    });
+  });
+  // ── #885: the vault epoch ──
+  // The modules read the real vault-epoch module, and a "lock" is
+  // bumpVaultEpoch() while one await is held. The swFetch below stands in for
+  // index.ts's: it asserts the epoch it is handed right before the request goes
+  // out, and only then records it as sent — so a write that passes no epoch, or
+  // the epoch of the wrong moment, is sent across the lock.
+  describe("vault epoch (#885)", () => {
+    function epochCheckingSwFetch(respond: (path: string, init?: RequestInit) => Response) {
+      const sent: Array<{ path: string; method: string }> = [];
+      const swFetch = vi.fn(async (path: string, init?: RequestInit, opts?: { epoch?: number }) => {
+        if (opts?.epoch !== undefined) assertVaultEpoch(opts.epoch);
+        sent.push({ path, method: init?.method ?? "GET" });
+        return respond(path, init);
+      });
+      return { swFetch, sent };
+    }
+    const isOverviewPlaintext = (plaintext: string) => plaintext.includes('"urlHost"');
+
+    describe("handleLoginDetected (A11)", () => {
+      it("a lock during the cache read offers no save", async () => {
+        const entries = deferred<DecryptedEntry[]>();
+        initLoginSave(createDeps({
+          getEncryptionKey: vi.fn().mockReturnValue(testKey),
+          getCachedEntries: vi.fn().mockReturnValue(entries.promise),
+        }));
+        const pending = handleLoginDetected("https://nomatch.example.com", "alice", "pw");
+        bumpVaultEpoch();
+        entries.resolve(mockEntries);
+
+        expect(await pending).toEqual({ action: "none" });
+      });
+
+      it("positive control: the same held cache read without a lock offers the save", async () => {
+        const entries = deferred<DecryptedEntry[]>();
+        initLoginSave(createDeps({
+          getEncryptionKey: vi.fn().mockReturnValue(testKey),
+          getCachedEntries: vi.fn().mockReturnValue(entries.promise),
+        }));
+        const pending = handleLoginDetected("https://nomatch.example.com", "alice", "pw");
+        entries.resolve(mockEntries);
+
+        expect(await pending).toEqual({ action: "save" });
+      });
+
+      async function heldEntryFetch() {
+        const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
+        const encBlob = await encryptData(JSON.stringify({ password: "old-pw" }), testKey, aad);
+        const res = deferred<Response>();
+        initLoginSave(createDeps({
+          getEncryptionKey: vi.fn().mockReturnValue(testKey),
+          swFetch: vi.fn().mockReturnValue(res.promise),
+        }));
+        const respond = () =>
+          res.resolve(new Response(JSON.stringify({ id: TEST_UUID_1, encryptedBlob: encBlob, aadVersion: 1 })));
+        return { respond };
+      }
+
+      it("a lock during the stored entry's fetch offers no update (and no vault title)", async () => {
+        const held = await heldEntryFetch();
+        const pending = handleLoginDetected("https://github.com", "alice", "new-pw");
+        bumpVaultEpoch();
+        held.respond();
+
+        expect(await pending).toEqual({ action: "none" });
+      });
+
+      it("positive control: the same held fetch without a lock offers the update", async () => {
+        const held = await heldEntryFetch();
+        const pending = handleLoginDetected("https://github.com", "alice", "new-pw");
+        held.respond();
+
+        expect(await pending).toEqual({ action: "update", existingEntryId: TEST_UUID_1, existingTitle: "GitHub" });
+      });
+    });
+
+    describe("handleSaveLogin (A12)", () => {
+      function setUp() {
+        const fake = epochCheckingSwFetch(() => new Response(JSON.stringify({ id: "new-uuid-1234" }), { status: 201 }));
+        initLoginSave(createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey), swFetch: fake.swFetch }));
+        const hold = holdNextCall(vi.mocked(encryptData), isOverviewPlaintext);
+        return { ...fake, hold };
+      }
+
+      it("passes the epoch it started under, so a lock during the encrypt sends no POST", async () => {
+        const { sent, hold } = setUp();
+        const pending = handleSaveLogin("https://example.com/login", "example.com", "alice", "pw");
+        await hold.reached;
+        bumpVaultEpoch();
+        hold.release();
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+        expect(sent).toEqual([]);
+      });
+
+      it("positive control: released without a lock the POST is sent with that epoch", async () => {
+        const { swFetch, sent, hold } = setUp();
+        const epoch = currentVaultEpoch();
+        const pending = handleSaveLogin("https://example.com/login", "example.com", "alice", "pw");
+        await hold.reached;
+        hold.release();
+
+        expect(await pending).toEqual({ ok: true });
+        expect(sent).toEqual([{ path: "/api/passwords", method: "POST" }]);
+        expect(swFetch.mock.calls[0][2]).toEqual({ epoch });
+      });
+    });
+
+    describe("handleUpdateLogin (A13)", () => {
+      async function setUp() {
+        const blobAad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
+        const overviewAad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.OVERVIEW);
+        const encryptedBlob = await encryptData(JSON.stringify({ password: "old-pw" }), testKey, blobAad);
+        const encryptedOverview = await encryptData(
+          JSON.stringify({ title: "GitHub", urlHost: "github.com" }),
+          testKey,
+          overviewAad,
+        );
+        const fake = epochCheckingSwFetch((_path, init) =>
+          init?.method === "PUT"
+            ? new Response("{}", { status: 200 })
+            : new Response(JSON.stringify({ id: TEST_UUID_1, encryptedBlob, encryptedOverview, aadVersion: 1 })),
+        );
+        initLoginSave(createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey), swFetch: fake.swFetch }));
+        const hold = holdNextCall(vi.mocked(encryptData), isOverviewPlaintext);
+        return { ...fake, hold };
+      }
+
+      it("passes the epoch it started under, so a lock during the re-encrypt sends no PUT", async () => {
+        const { sent, hold } = await setUp();
+        const pending = handleUpdateLogin(TEST_UUID_1, "new-pw");
+        await hold.reached;
+        bumpVaultEpoch();
+        hold.release();
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+        expect(sent.filter((r) => r.method === "PUT")).toEqual([]);
+      });
+
+      it("positive control: released without a lock the PUT is sent with that epoch", async () => {
+        const { swFetch, sent, hold } = await setUp();
+        const epoch = currentVaultEpoch();
+        const pending = handleUpdateLogin(TEST_UUID_1, "new-pw");
+        await hold.reached;
+        hold.release();
+
+        expect(await pending).toEqual({ ok: true });
+        expect(sent.filter((r) => r.method === "PUT")).toHaveLength(1);
+        const putCall = swFetch.mock.calls.find((c) => c[1]?.method === "PUT");
+        expect(putCall?.[2]).toEqual({ epoch });
+      });
     });
   });
 });

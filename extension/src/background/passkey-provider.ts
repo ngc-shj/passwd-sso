@@ -25,7 +25,7 @@ import {
   base64urlEncode,
 } from "../lib/webauthn-crypto";
 import { isRpIdAllowedForHostname } from "../lib/webauthn-rp-id";
-import { assertVaultEpoch, isVaultEpochCurrent, VaultLockedError } from "./vault-epoch";
+import { assertVaultEpoch, currentVaultEpoch, isVaultEpochCurrent, VaultLockedError } from "./vault-epoch";
 
 export interface PasskeyProviderDeps {
   getEncryptionKey: () => CryptoKey | null;
@@ -35,7 +35,6 @@ export interface PasskeyProviderDeps {
   /** `opts.epoch`: asserted by swFetch immediately before each send. */
   swFetch: (path: string, init?: RequestInit, opts?: { epoch?: number }) => Promise<Response>;
   invalidateCache: () => void;
-  getVaultEpoch: () => number;
 }
 
 let deps: PasskeyProviderDeps | null = null;
@@ -108,7 +107,7 @@ export async function handlePasskeyGetMatches(
   if (!encKey || !deps.getCurrentUserId()) {
     return { entries: [], vaultLocked: true };
   }
-  const epoch = deps.getVaultEpoch();
+  const epoch = currentVaultEpoch();
 
   try {
     const allEntries = await deps.getCachedEntries();
@@ -150,7 +149,7 @@ export async function handlePasskeyCheckDuplicate(
   if (!deps) return { entries: [], vaultLocked: true };
   const encKey = deps.getEncryptionKey();
   if (!encKey) return { entries: [], vaultLocked: true };
-  const epoch = deps.getVaultEpoch();
+  const epoch = currentVaultEpoch();
 
   try {
     const allEntries = await deps.getCachedEntries();
@@ -211,7 +210,7 @@ async function doSignAssertion(
   if (!encKey || !userId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
-  const epoch = deps.getVaultEpoch();
+  const epoch = currentVaultEpoch();
   const keyVersion = deps.getKeyVersion();
 
   if (teamId) {
@@ -375,7 +374,7 @@ export async function handlePasskeyCreateCredential(
   if (!encKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
-  const epoch = deps.getVaultEpoch();
+  const epoch = currentVaultEpoch();
   const keyVersion = deps.getKeyVersion();
 
   const {

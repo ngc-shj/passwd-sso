@@ -13,7 +13,7 @@ import { readApiErrorBody } from "../lib/api-error-body";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { EXT_ENTRY_TYPE } from "../lib/constants";
 import type { DecryptedEntry } from "../types/messages";
-import { assertVaultEpoch } from "./vault-epoch";
+import { assertVaultEpoch, currentVaultEpoch } from "./vault-epoch";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -29,7 +29,6 @@ export interface LoginSaveDeps {
   /** `opts.epoch`: asserted by swFetch immediately before each send. */
   swFetch: (path: string, init?: RequestInit, opts?: { epoch?: number }) => Promise<Response>;
   invalidateCache: () => void;
-  getVaultEpoch: () => number;
 }
 
 let deps: LoginSaveDeps | null = null;
@@ -59,7 +58,7 @@ export async function handleLoginDetected(
     // Vault locked — can't compare
     return { action: "none" };
   }
-  const epoch = deps.getVaultEpoch();
+  const epoch = currentVaultEpoch();
 
   const host = deps.extractHost(url);
   if (!host) return { action: "none" };
@@ -137,7 +136,7 @@ export async function handleSaveLogin(
   if (!encKey || !userId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
-  const epoch = deps.getVaultEpoch();
+  const epoch = currentVaultEpoch();
   const keyVersion = deps.getKeyVersion();
 
   let host: string;
@@ -215,7 +214,7 @@ export async function handleUpdateLogin(
   if (!encKey || !userId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
-  const epoch = deps.getVaultEpoch();
+  const epoch = currentVaultEpoch();
   const keyVersion = deps.getKeyVersion();
 
   try {

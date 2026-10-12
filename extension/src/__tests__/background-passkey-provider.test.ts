@@ -1,5 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DecryptedEntry } from "../types/messages";
+import { deferred, holdNextCall } from "./helpers/deferred";
+import {
+  assertVaultEpoch,
+  bumpVaultEpoch,
+  currentVaultEpoch,
+  VaultLockedError,
+} from "../background/vault-epoch";
+import { buildAssertionAuthData, signAssertion } from "../lib/webauthn-crypto";
+
+// Real implementations, wrapped so a test can hold one call (#885) while the
+// vault epoch moves.
+vi.mock("../lib/crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/crypto")>();
+  return { ...actual, encryptData: vi.fn(actual.encryptData) };
+});
+vi.mock("../lib/webauthn-crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/webauthn-crypto")>();
+  return {
+    ...actual,
+    buildAssertionAuthData: vi.fn(actual.buildAssertionAuthData),
+    signAssertion: vi.fn(actual.signAssertion),
+  };
+});
 import {
   encryptData,
   buildPersonalEntryAAD,
@@ -90,7 +113,6 @@ function createDeps(overrides?: Partial<PasskeyProviderDeps>): PasskeyProviderDe
     ]),
     swFetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
     invalidateCache: vi.fn(),
-    getVaultEpoch: () => 0,
     ...overrides,
   };
 }
@@ -1077,6 +1099,266 @@ describe("passkey-provider", () => {
         .filter(([, init]) => init?.method === "DELETE");
       expect(deleteCalls).toHaveLength(0);
       expect(swFetch).toHaveBeenCalledTimes(2); // POST + GET only
+    });
+  });
+  // ── #885: the vault epoch ──
+  // The modules read the real vault-epoch module, and a "lock" is
+  // bumpVaultEpoch() while one await is held. The swFetch below stands in for
+  // index.ts's: it asserts the epoch it is handed right before the request goes
+  // out, and only then records it as sent.
+  describe("vault epoch (#885)", () => {
+    type Sent = { path: string; method: string };
+    function epochCheckingSwFetch(respond: (path: string, init?: RequestInit) => Response | Promise<Response>) {
+      const sent: Sent[] = [];
+      const swFetch = vi.fn(async (path: string, init?: RequestInit, opts?: { epoch?: number }) => {
+        if (opts?.epoch !== undefined) assertVaultEpoch(opts.epoch);
+        sent.push({ path, method: init?.method ?? "GET" });
+        return respond(path, init);
+      });
+      return { swFetch, sent };
+    }
+
+    describe.each([
+      ["handlePasskeyGetMatches (A16)", () => handlePasskeyGetMatches(TEST_RP_ID, "https://example.com")],
+      ["handlePasskeyCheckDuplicate (A16)", () => handlePasskeyCheckDuplicate(TEST_RP_ID, "alice", "https://example.com")],
+    ])("%s", (_name, run) => {
+      it("a lock during the cache read answers vaultLocked, not 'no passkeys'", async () => {
+        const entries = deferred<DecryptedEntry[]>();
+        initPasskeyProvider(createDeps({
+          getEncryptionKey: vi.fn().mockReturnValue(testKey),
+          getCachedEntries: vi.fn().mockReturnValue(entries.promise),
+        }));
+        const pending = run();
+        bumpVaultEpoch();
+        entries.resolve([mockPasskeyEntry]);
+
+        expect(await pending).toEqual({ entries: [], vaultLocked: true });
+      });
+
+      it("a cache read that fails with VaultLockedError answers vaultLocked", async () => {
+        initPasskeyProvider(createDeps({
+          getEncryptionKey: vi.fn().mockReturnValue(testKey),
+          getCachedEntries: vi.fn().mockRejectedValue(new VaultLockedError()),
+        }));
+
+        expect(await run()).toEqual({ entries: [], vaultLocked: true });
+      });
+
+      it("positive control: the same held cache read without a lock answers the passkey", async () => {
+        const entries = deferred<DecryptedEntry[]>();
+        initPasskeyProvider(createDeps({
+          getEncryptionKey: vi.fn().mockReturnValue(testKey),
+          getCachedEntries: vi.fn().mockReturnValue(entries.promise),
+        }));
+        const pending = run();
+        entries.resolve([mockPasskeyEntry]);
+
+        const res = await pending;
+        expect(res.entries.map((e) => e.id)).toEqual([TEST_ENTRY_ID]);
+        expect(res.vaultLocked ?? false).toBe(false);
+      });
+    });
+
+    describe("handlePasskeySignAssertion (A14)", () => {
+      const clientDataJSON = JSON.stringify({
+        type: "webauthn.get",
+        challenge: "dGVzdC1jaGFsbGVuZ2U",
+        origin: "https://example.com",
+      });
+
+      async function setUp(putResponse: () => Response | Promise<Response> = () => new Response("{}", { status: 200 })) {
+        const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
+        const { privateKeyJwk } = await generatePasskeyKeypair();
+        const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID, VAULT_TYPE.BLOB);
+        const encryptedBlob = await encryptData(
+          JSON.stringify({
+            credentialId: TEST_CRED_ID,
+            relyingPartyId: TEST_RP_ID,
+            passkeyPrivateKeyJwk: JSON.stringify(privateKeyJwk),
+            passkeySignCount: 0,
+          }),
+          testKey,
+          aad,
+        );
+        const fake = epochCheckingSwFetch((_path, init) =>
+          init?.method === "PUT"
+            ? putResponse()
+            : new Response(
+                JSON.stringify({ id: TEST_ENTRY_ID, encryptedBlob, encryptedOverview: { ciphertext: "", iv: "", authTag: "" }, aadVersion: 1 }),
+                { status: 200 },
+              ),
+        );
+        initPasskeyProvider(createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey), swFetch: fake.swFetch }));
+        return fake;
+      }
+      const sign = () => handlePasskeySignAssertion(TEST_ENTRY_ID, clientDataJSON, undefined, "https://example.com/auth");
+      const puts = (sent: Sent[]) => sent.filter((r) => r.method === "PUT");
+
+      it("a lock before signing produces no signature", async () => {
+        await setUp();
+        const hold = holdNextCall(vi.mocked(buildAssertionAuthData));
+        const pending = sign();
+        await hold.reached;
+        bumpVaultEpoch();
+        hold.release();
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+        expect(signAssertion).not.toHaveBeenCalled();
+      });
+
+      it("positive control: released without a lock it signs and returns the signature", async () => {
+        await setUp();
+        const hold = holdNextCall(vi.mocked(buildAssertionAuthData));
+        const pending = sign();
+        await hold.reached;
+        hold.release();
+
+        const res = await pending;
+        expect(res.ok).toBe(true);
+        expect(res.response?.signature.length).toBeGreaterThan(0);
+        expect(signAssertion).toHaveBeenCalledTimes(1);
+      });
+
+      it("a lock during signing sends no counter PUT (swFetch is handed the starting epoch)", async () => {
+        const { sent } = await setUp();
+        const hold = holdNextCall(vi.mocked(signAssertion));
+        const pending = sign();
+        await hold.reached;
+        bumpVaultEpoch();
+        hold.release();
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+        expect(puts(sent)).toEqual([]);
+      });
+
+      it("positive control: released without a lock the counter PUT is sent with that epoch", async () => {
+        const { swFetch, sent } = await setUp();
+        const epoch = currentVaultEpoch();
+        const hold = holdNextCall(vi.mocked(signAssertion));
+        const pending = sign();
+        await hold.reached;
+        hold.release();
+
+        expect((await pending).ok).toBe(true);
+        expect(puts(sent)).toHaveLength(1);
+        expect(swFetch.mock.calls.find((c) => c[1]?.method === "PUT")?.[2]).toEqual({ epoch });
+      });
+
+      it("a lock while the counter PUT is in flight returns no signature", async () => {
+        const putResponse = deferred<Response>();
+        const { sent } = await setUp(() => putResponse.promise);
+        const pending = sign();
+        await vi.waitFor(() => expect(puts(sent)).toHaveLength(1));
+        bumpVaultEpoch();
+        putResponse.resolve(new Response("{}", { status: 200 }));
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+      });
+
+      it("positive control: the same in-flight PUT without a lock returns the signature", async () => {
+        const putResponse = deferred<Response>();
+        const { sent } = await setUp(() => putResponse.promise);
+        const pending = sign();
+        await vi.waitFor(() => expect(puts(sent)).toHaveLength(1));
+        putResponse.resolve(new Response("{}", { status: 200 }));
+
+        const res = await pending;
+        expect(res.ok).toBe(true);
+        expect(res.response?.signature.length).toBeGreaterThan(0);
+      });
+    });
+
+    describe("handlePasskeyCreateCredential (A15)", () => {
+      const params = {
+        rpId: TEST_RP_ID,
+        rpName: "Example Corp",
+        userId: "user-handle-abc",
+        userName: "alice@example.com",
+        userDisplayName: "Alice",
+        excludeCredentialIds: [],
+        clientDataJSON: JSON.stringify({
+          type: "webauthn.create",
+          challenge: "Y3JlYXRlLWNoYWxsZW5nZQ",
+          origin: "https://example.com",
+        }),
+        senderUrl: "https://example.com/register",
+      };
+      const isOverviewPlaintext = (plaintext: string) =>
+        plaintext.includes('"relyingPartyId"') && !plaintext.includes("passkeyPrivateKeyJwk");
+      const posts = (sent: Sent[]) => sent.filter((r) => r.method === "POST");
+      const deletes = (sent: Sent[]) => sent.filter((r) => r.method === "DELETE");
+
+      function setUpCreate() {
+        const fake = epochCheckingSwFetch(() => new Response("{}", { status: 200 }));
+        initPasskeyProvider(createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey), swFetch: fake.swFetch }));
+        return fake;
+      }
+
+      it("passes the epoch it started under, so a lock during the encrypt sends no POST", async () => {
+        const { sent } = setUpCreate();
+        const hold = holdNextCall(vi.mocked(encryptData), isOverviewPlaintext);
+        const pending = handlePasskeyCreateCredential(params);
+        await hold.reached;
+        bumpVaultEpoch();
+        hold.release();
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+        expect(posts(sent)).toEqual([]);
+      });
+
+      it("positive control: released without a lock the POST is sent with that epoch", async () => {
+        const { swFetch, sent } = setUpCreate();
+        const epoch = currentVaultEpoch();
+        const hold = holdNextCall(vi.mocked(encryptData), isOverviewPlaintext);
+        const pending = handlePasskeyCreateCredential(params);
+        await hold.reached;
+        hold.release();
+
+        expect((await pending).ok).toBe(true);
+        expect(posts(sent)).toHaveLength(1);
+        expect(swFetch.mock.calls.find((c) => c[1]?.method === "POST")?.[2]).toEqual({ epoch });
+      });
+
+      // D5: once the POST committed, the new credential is still returned; only
+      // the replace-DELETE that would follow is skipped.
+      async function setUpReplace() {
+        const replaceId = "entry-to-replace";
+        const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId, VAULT_TYPE.BLOB);
+        const encryptedReplaceBlob = await encryptData(
+          JSON.stringify({ entryType: "PASSKEY", relyingPartyId: TEST_RP_ID, username: "alice@example.com" }),
+          testKey,
+          replaceAad,
+        );
+        const postResponse = deferred<Response>();
+        const fake = epochCheckingSwFetch((_path, init) => {
+          if (init?.method === "POST") return postResponse.promise;
+          if (init?.method === "DELETE") return new Response("{}", { status: 200 });
+          return new Response(JSON.stringify({ id: replaceId, encryptedBlob: encryptedReplaceBlob, aadVersion: 1 }));
+        });
+        initPasskeyProvider(createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey), swFetch: fake.swFetch }));
+        const pending = handlePasskeyCreateCredential({ ...params, replaceEntryId: replaceId });
+        await vi.waitFor(() => expect(posts(fake.sent)).toHaveLength(1));
+        return { ...fake, pending, commitPost: () => postResponse.resolve(new Response("{}", { status: 200 })) };
+      }
+
+      it("a lock while the committed POST is in flight returns the attestation but sends no replace-DELETE", async () => {
+        const { sent, pending, commitPost } = await setUpReplace();
+        bumpVaultEpoch();
+        commitPost();
+
+        const res = await pending;
+        expect(res.ok).toBe(true);
+        expect(typeof res.response?.attestationObject).toBe("string");
+        expect(deletes(sent)).toEqual([]);
+      });
+
+      it("positive control: the same in-flight POST without a lock sends the replace-DELETE", async () => {
+        const { sent, pending, commitPost } = await setUpReplace();
+        commitPost();
+
+        expect((await pending).ok).toBe(true);
+        expect(deletes(sent)).toEqual([{ path: expect.stringContaining("entry-to-replace"), method: "DELETE" }]);
+      });
     });
   });
 });
