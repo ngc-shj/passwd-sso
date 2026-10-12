@@ -741,6 +741,21 @@ describe("context-menu", () => {
     });
 
     it("completes a build superseded by a same-host refreshContextMenu, with the full item set (R2-T3, R3-T4)", async () => {
+      // Precondition made explicit rather than inherited from test order:
+      // lastMenuCacheVersion is module state that outlives a test, so a
+      // real, completed build on this host at version 1 pins it here. The
+      // host is then cleared with a url-less call, which leaves that
+      // version untouched, so the gated build below starts from a known
+      // lastMenuHost === null / lastMenuCacheVersion === 1, not whatever an
+      // earlier test happened to leave.
+      deps = createDeps({ getCacheVersion: vi.fn().mockReturnValue(1) });
+      initContextMenu(deps);
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      updateContextMenuForTab(1, undefined);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      chromeMock.contextMenus.create.mockClear();
+
       let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
       const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
       let call = 0;
@@ -826,6 +841,47 @@ describe("context-menu", () => {
 
       expect(idsCreated().some((id) => id.startsWith("psso-login-e"))).toBe(false);
       // ...and the menu is not left as a bare parent: the locked item is there.
+      expect(idsCreated()).toContain("psso-login-locked");
+    });
+
+    it("nulls lastMenuHost on the post-snapshot lock re-check so a same-host follow-up rebuilds (CR2)", async () => {
+      deps = createDeps({ getCacheVersion: vi.fn().mockReturnValue(1) });
+      initContextMenu(deps);
+
+      // Full build on github.com at version 1.
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(idsCreated()).toContain("psso-login-e1");
+
+      // Gated build on gitlab.com at version 1, parked on the snapshot while
+      // still unlocked.
+      let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
+      const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
+      const isVaultUnlocked = vi.fn().mockReturnValue(true);
+      deps = createDeps({
+        getCachedSnapshot: vi.fn(() => gate),
+        getCacheVersion: vi.fn().mockReturnValue(1),
+        isVaultUnlocked,
+      });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://gitlab.com/x");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+
+      // The vault locks while the snapshot is in flight, then the gate releases.
+      isVaultUnlocked.mockReturnValue(false);
+      release({ entries: mockEntries, version: 1 });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(idsCreated()).toContain("psso-login-locked");
+
+      chromeMock.contextMenus.create.mockClear();
+
+      // Same host and version as the gated build above: this must still
+      // rebuild rather than skip, because the lock re-check nulled
+      // lastMenuHost.
+      updateContextMenuForTab(1, "https://gitlab.com/x");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+
       expect(idsCreated()).toContain("psso-login-locked");
     });
 

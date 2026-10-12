@@ -74,14 +74,29 @@ function matchRequests(type: string) {
   return sentMessages.filter((m) => m.msg.type === type);
 }
 
+// File-level cleanup registry (#CR2): every test that inits a detector
+// routes it through registerDestroy instead of calling destroy() itself at
+// the end of the test body. A destroy() placed only at the end of a test
+// never runs when an earlier assertion in that test throws, leaking a live
+// MutationObserver + document-level listeners that outlive the test and can
+// affect whichever test runs next against the same jsdom `document`.
+let cleanups: Array<{ destroy: () => void }> = [];
+function registerDestroy<T extends { destroy: () => void }>(detector: T): T {
+  cleanups.push(detector);
+  return detector;
+}
+
 beforeEach(() => {
   showDropdownMock.mockReset();
   hideDropdownMock.mockReset();
   showInlineNoticeMock.mockReset();
   document.body.innerHTML = "";
+  cleanups = [];
 });
 
 afterEach(() => {
+  for (const d of cleanups) d.destroy();
+  cleanups = [];
   document.body.innerHTML = "";
 });
 
@@ -97,7 +112,7 @@ describe("initCreditCardDetector", () => {
       },
     });
     const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
-    const { destroy } = initCreditCardDetector();
+    registerDestroy(initCreditCardDetector());
 
     const input = document.getElementById("ccnum") as HTMLInputElement;
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
@@ -109,7 +124,6 @@ describe("initCreditCardDetector", () => {
     expect(ccRequests[0].msg).toEqual({ type: EXT_MSG.GET_CC_MATCHES_FOR_URL });
     expect(showDropdownMock).toHaveBeenCalledTimes(1);
     expect(showDropdownMock.mock.calls[0][0].entryType).toBe("CREDIT_CARD");
-    destroy();
   });
 
   it("does not request matches when an unrelated field is focused", async () => {
@@ -119,13 +133,12 @@ describe("initCreditCardDetector", () => {
     `;
     installChrome({});
     const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
-    const { destroy } = initCreditCardDetector();
+    registerDestroy(initCreditCardDetector());
 
     const search = document.getElementById("search") as HTMLInputElement;
     search.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
 
     expect(matchRequests(EXT_MSG.GET_CC_MATCHES_FOR_URL)).toHaveLength(0);
-    destroy();
   });
 
   it("T5: selecting an entry sends AUTOFILL_FROM_CONTENT with the entryId", async () => {
@@ -139,7 +152,7 @@ describe("initCreditCardDetector", () => {
       },
     });
     const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
-    const { destroy } = initCreditCardDetector();
+    registerDestroy(initCreditCardDetector());
 
     const input = document.getElementById("ccnum") as HTMLInputElement;
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
@@ -152,7 +165,6 @@ describe("initCreditCardDetector", () => {
     const fills = matchRequests(EXT_MSG.AUTOFILL_FROM_CONTENT);
     expect(fills).toHaveLength(1);
     expect((fills[0].msg as { entryId?: string }).entryId).toBe("cc-1");
-    destroy();
   });
 
   it("M6: onSelect with NO_CARD_NUMBER response calls showInlineNotice with noCardNumber key", async () => {
@@ -167,7 +179,7 @@ describe("initCreditCardDetector", () => {
       [EXT_MSG.AUTOFILL_FROM_CONTENT]: { ok: false, error: "NO_CARD_NUMBER" },
     });
     const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
-    const { destroy } = initCreditCardDetector();
+    registerDestroy(initCreditCardDetector());
 
     const input = document.getElementById("ccnum") as HTMLInputElement;
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
@@ -181,7 +193,6 @@ describe("initCreditCardDetector", () => {
     // showInlineNotice must have been called with the noCardNumber i18n key.
     expect(showInlineNoticeMock).toHaveBeenCalledOnce();
     expect(showInlineNoticeMock).toHaveBeenCalledWith(input, "errors.noCardNumber");
-    destroy();
   });
 
   it("T8: destroy() removes the focus listener (no further requests)", async () => {
@@ -192,7 +203,10 @@ describe("initCreditCardDetector", () => {
       },
     });
     const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
-    const { destroy } = initCreditCardDetector();
+    // destroy() under test is called explicitly here; also registering it
+    // means the file-level afterEach's own destroy() is a harmless no-op
+    // if an assertion below throws before this point is reached.
+    const { destroy } = registerDestroy(initCreditCardDetector());
     destroy();
 
     const input = document.getElementById("ccnum") as HTMLInputElement;
@@ -216,11 +230,10 @@ describe("initCreditCardDetector", () => {
     Object.defineProperty(window, "top", { value: crossOriginTop, configurable: true });
     try {
       const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
-      const { destroy } = initCreditCardDetector();
+      registerDestroy(initCreditCardDetector());
       const input = document.getElementById("ccnum") as HTMLInputElement;
       input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
       expect(matchRequests(EXT_MSG.GET_CC_MATCHES_FOR_URL)).toHaveLength(0);
-      destroy();
     } finally {
       Object.defineProperty(window, "top", { value: realTop, configurable: true });
     }
@@ -248,11 +261,10 @@ describe("initIdentityDetector", () => {
     Object.defineProperty(window, "top", { value: crossOriginTop, configurable: true });
     try {
       const { initIdentityDetector } = await import("../../content/identity-form-detector-lib");
-      const { destroy } = initIdentityDetector();
+      registerDestroy(initIdentityDetector());
       const input = document.getElementById("name") as HTMLInputElement;
       input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
       expect(matchRequests(EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL)).toHaveLength(0);
-      destroy();
     } finally {
       Object.defineProperty(window, "top", { value: realTop, configurable: true });
     }
@@ -274,7 +286,7 @@ describe("initIdentityDetector", () => {
       },
     });
     const { initIdentityDetector } = await import("../../content/identity-form-detector-lib");
-    const { destroy } = initIdentityDetector();
+    registerDestroy(initIdentityDetector());
 
     const input = document.getElementById("name") as HTMLInputElement;
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
@@ -285,7 +297,6 @@ describe("initIdentityDetector", () => {
     // this message — url/topUrl must not be sent.
     expect(identityRequests[0].msg).toEqual({ type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL });
     expect(showDropdownMock.mock.calls[0][0].entryType).toBe("IDENTITY");
-    destroy();
   });
 });
 
@@ -310,8 +321,8 @@ describe("T7: both forms on one page do not cross-trigger", () => {
     });
     const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
     const { initIdentityDetector } = await import("../../content/identity-form-detector-lib");
-    const cc = initCreditCardDetector();
-    const id = initIdentityDetector();
+    registerDestroy(initCreditCardDetector());
+    registerDestroy(initIdentityDetector());
 
     (document.getElementById("ccnum") as HTMLInputElement).dispatchEvent(
       new FocusEvent("focusin", { bubbles: true }),
@@ -322,8 +333,6 @@ describe("T7: both forms on one page do not cross-trigger", () => {
 
     expect(matchRequests(EXT_MSG.GET_CC_MATCHES_FOR_URL)).toHaveLength(1);
     expect(matchRequests(EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL)).toHaveLength(1);
-    cc.destroy();
-    id.destroy();
   });
 });
 
@@ -353,8 +362,8 @@ describe("T7-extension: CC-claimed overlap field never triggers identity", () =>
     });
     const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
     const { initIdentityDetector } = await import("../../content/identity-form-detector-lib");
-    const cc = initCreditCardDetector();
-    const id = initIdentityDetector();
+    registerDestroy(initCreditCardDetector());
+    registerDestroy(initIdentityDetector());
 
     (document.getElementById("holder") as HTMLInputElement).dispatchEvent(
       new FocusEvent("focusin", { bubbles: true }),
@@ -367,9 +376,6 @@ describe("T7-extension: CC-claimed overlap field never triggers identity", () =>
       new FocusEvent("focusin", { bubbles: true }),
     );
     expect(matchRequests(EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL)).toHaveLength(1);
-
-    cc.destroy();
-    id.destroy();
   });
 });
 
@@ -442,16 +448,13 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
-  let cleanups: Array<{ destroy: () => void }> = [];
-
-  function registerDestroy<T extends { destroy: () => void }>(detector: T): T {
-    cleanups.push(detector);
-    return detector;
-  }
-
+  // cleanups/registerDestroy come from the file-level registry above; this
+  // describe destroys WHILE fake timers are still active (scheduler.cancel()
+  // clears a timer id the fake clock minted) and only then restores real
+  // timers — the file-level afterEach's own destroy pass, which runs after
+  // this one, is then a harmless no-op over the same (idempotent) detectors.
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    cleanups = [];
     ccClaimedFieldsMock.mockClear();
   });
 
@@ -713,6 +716,60 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
 
           expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
+        });
+      });
+    }
+  });
+
+  describe("added nodes run the scan immediately; attribute-only changes wait for the debounce (CR2)", () => {
+    for (const profile of detectorProfiles) {
+      describe(profile.label, () => {
+        it("inserting a field scans before any timer fires; an attribute-only change on it still waits", async () => {
+          document.body.innerHTML = profile.extraMarkup;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          const input = document.createElement("input");
+          input.setAttribute("autocomplete", profile.autocomplete);
+          document.body.appendChild(input);
+          await flushMicrotasks();
+          vi.advanceTimersByTime(0);
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
+
+          const afterInsert = ccClaimedFieldsMock.mock.calls.length;
+          input.classList.add("marker");
+          await flushMicrotasks();
+          expect(ccClaimedFieldsMock.mock.calls.length - afterInsert).toBe(0);
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS - 1);
+          expect(ccClaimedFieldsMock.mock.calls.length - afterInsert).toBe(0);
+          vi.advanceTimersByTime(1);
+          expect(ccClaimedFieldsMock.mock.calls.length - afterInsert).toBe(1);
+        });
+      });
+    }
+  });
+
+  describe("attributeFilter excludes attributes outside OBSERVED_ATTRIBUTES (CR2)", () => {
+    for (const profile of detectorProfiles) {
+      describe(profile.label, () => {
+        it("a data-x attribute mutation makes 0 scans; a class mutation on the same field still makes 1", async () => {
+          document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          input.setAttribute("data-x", "1");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(0);
+
+          const afterDataX = ccClaimedFieldsMock.mock.calls.length;
+          input.classList.add("marker");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+          expect(ccClaimedFieldsMock.mock.calls.length - afterDataX).toBe(1);
         });
       });
     }

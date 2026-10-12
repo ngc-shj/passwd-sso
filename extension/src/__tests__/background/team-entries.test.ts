@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
-import { DEBOUNCE_MS } from "../../background/context-menu";
 
 const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
@@ -617,7 +616,7 @@ describe("team entries in background", () => {
     it("rebuilds the context menu when the same entry's teamId changes", async () => {
       await unlockVault();
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS * 2));
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
       chromeMock!.contextMenus.removeAll.mockClear();
 
       // Same team-pw-1 entry, same team passwords list, but the teams list

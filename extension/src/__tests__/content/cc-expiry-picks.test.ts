@@ -90,6 +90,10 @@ const CASES: [string, string, Want][] = [
   ["CR1 JA wrapping label 月/年 selects", `<form><label>カード番号<input name="cn"></label><label>有効期限 <select name="card_exp_month">${o("1")}</select>月 / <select name="card_exp_year">${o("2030")}</select>年</label></form>`, { month: "card_exp_month", year: "card_exp_year", combined: null }],
   ["CR1 form-less card: Year across another form is not the partner", `<div><input name="card_number"><label>Expiry month <select name="em">${o("1")}</select></label></div><form><input name="newsletter"></form><section><fieldset><legend>Date of birth</legend><label>Year <input name="year"></label></fieldset></section>`, { month: "em", year: null }],
   ["CR1 same form: Year behind skipped controls is not the partner", `<form><input name="card_number"><label>Expiry month <select name="em">${o("1")}</select></label><input type="checkbox" name="c"><input type="hidden" name="h"><textarea name="t"></textarea><label>Year <select name="year">${o("1990")}</select></label></form>`, { month: "em", year: null }],
+  // Code review round 2.
+  ["CR2 fromAutocomplete suppresses a nearer combined candidate", `<form><input name="card_number"><input name="expiry" placeholder="MM/YY"><select name="acm" autocomplete="cc-exp-month">${o("1")}</select><label>Expiry year <select name="ey">${o("2030")}</select></label></form>`, { month: "acm", year: "ey", combined: null }],
+  ["CR2 CJK check keeps a passport label out of vocabulary", `<form><input name="card_number"><label>Month <select name="m">${o("1")}</select></label><label>Year <select name="y">${o("2030")}</select></label><label>パスポート有効期限 (MM) <select name="pm">${o("1")}</select></label></form>`, { month: null, year: null, combined: null }],
+  ["CR2 month-only mentions excludes a combined claim", `<form><input name="card_number"><label>Passport expiry (MM) <input name="pm"></label></form>`, { month: null, year: null, combined: null }],
 ];
 
 const name = (el: Element | null) => (el ? el.getAttribute("name") : null);
