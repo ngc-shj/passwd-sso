@@ -612,6 +612,22 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
 
           expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
         });
+
+        it("a batch whose first target has no input still counts a later field target", async () => {
+          document.body.innerHTML = `<div id="d"></div><input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const div = document.getElementById("d") as HTMLDivElement;
+          const target = document.getElementById("target") as HTMLInputElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          div.classList.add("x");
+          target.classList.add("y");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
+        });
       });
     }
   });

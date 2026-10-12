@@ -102,10 +102,53 @@ Production code is unchanged. Each new test is green on the current code and red
 | T-F2 | `context-menu.test.ts`: post-snapshot lock re-check then a same-host follow-up | Drop `lastMenuHost = null` |
 | T-F3 | `background.test.ts`: append and shrink cases. They need an identical-prefix entry keyed to the registered ciphertext, because an unregistered one silently became a replace | Drop the length check |
 | T-F4 | Acceptance-3 now establishes `lastMenuCacheVersion === 1` itself | Drop the wrapper host reset: red under seeds 1–5, green under 1–5, 11 and 42 |
-| T-F5 | Sleeps before `mockClear` replaced by `vi.waitFor` quiescence gates; a positive control added beside the identical-response negative | `changed = true` reddens only the negative |
+| T-F5 | A positive control beside the identical-response negative. The round-1 `vi.waitFor` gates were vacuous (R2-F1) and were replaced in round 2 | `changed = true` reddens only the negative |
 | T-F6 | Insert a field: 1 scan before any timer; an attribute-only change: 0 | `runNow` replaced by `noteAttributeChange`, each detector separately |
 | T-F7 | `data-x` mutation: 0 scans; `class`: 1 | Drop `attributeFilter`, each detector separately |
 | T-F8 | Second same-host refresh within the TTL: no `removeAll` | TTL-hit `version: 0` |
 | T-F9 | Every detector init goes through a file-level destroy registry | — |
 
 Full suite: 1543 passed, twice. tsc is clean.
+
+---
+
+# Round 2
+Date: 2026-10-12
+
+## Changes from Previous Round
+Round 2 is an incremental review of `23dbc6bb9..ad799f960`. All round-1 findings were verified as resolved. The exception is T-F5, which was only partly resolved (R2-F1). Three findings are new against the round-1 F-F1 fix (N1, F5, F6), and four test pins were missing.
+
+## Findings
+- **N1 [Minor, security, R43 vs round 1].** `ownSinglePart` let a strict own name override a label that names another subject. As a result, `passport_exp_month`/`passport_exp_year` under "Passport expiry (MM/YY)" both became single-part picks.
+- **F5 [Major, functionality].** `ownSinglePart` re-admitted date-of-birth selects (`birth_year`/`birth_month` under 生年月日, and 生年月日（年） beside 有効期限（月）) as expiry parts.
+- **F6 [Major, functionality].** A combined MM/YY input whose own name or id names one part (`exp_month`, `cc-exp-month`) became split month-only.
+- **R2-F1 [Major, testing].** The round-1 `vi.waitFor` gates were already satisfied by the UNLOCK cascade, so they waited for nothing.
+- **R2-F2 / R2-F3 / R2-F4 [Minor, testing].** Mutations that leave the suite green:
+  - removing `ownSinglePart`'s placeholder, id or aria-label;
+  - removing `textarea` from the adjacency set;
+  - deduplicating only the first target of a batch.
+
+## Resolution Status
+### N1 and F5: a label naming another subject keeps its veto
+- **Action:** `ownSinglePart` overrides `mentions` only when the hint, with the field's own attributes removed, is expiry vocabulary (`labelIsExpiryVocabulary`). 生年月日 / Passport / Date of birth labels therefore keep excluding the field.
+- **Tests:** CR3 rows: the passport pair, `id=card_month` under Date of birth, the 生年月日 selects, and 生年月日（年） beside 有効期限（月）.
+  - Red on the pre-fix HEAD.
+  - The passport row and both 生年月日 rows are red when the gate is removed.
+  - The `id=card_month` row is not red when the gate is removed. Without the gate it becomes combined rather than a month pick; it is claimed either way, as on main. It pins only "not a month".
+- **Modified file:** `extension/src/content/cc-field-detection-lib.ts` (`ownAttributes`, `labelIsExpiryVocabulary`, `describeCandidate`).
+
+### F6: a combined input named after its first half
+- **Action:** when tier 2 finds no partner, an input anchor whose whole hint mentions both parts becomes the combined field. This does not apply when autocomplete decided a part.
+- **Tests:** CR3 rows: `Expiry date (MM/YY)` on `exp_month`, and `Expiration (MM/YY)` on `id=cc-exp-month`. Both are red without the fallback and on the pre-fix HEAD.
+- **Modified file:** `extension/src/content/cc-field-detection-lib.ts` (`hintMentionsBoth`, the tier-2 tail).
+
+### R2-F1: vacuous quiescence gates
+- **Action:** `unlockAndSettleMenu()` clears the menu mocks before UNLOCK and waits for that rebuild's `psso-open-popup`. The team-entries test gets the same treatment.
+- **Verification:** with the gate made synchronous, six tests go red, so the gate is not vacuous. `changed = true` still turns only the negative red, and `changed = entries === null` still turns the positives red.
+- **Modified files:** `extension/src/__tests__/background.test.ts`, `extension/src/__tests__/background/team-entries.test.ts`.
+
+### R2-F2 / R2-F3 / R2-F4
+- **Action:** added CR3 rows for an own placeholder, an own id and an own aria-label, plus a textarea between month and Year. Also added a multi-target batch test (first target has no input), run for both detector profiles.
+- **Verification:** each row or test is red under its own mutation: drop placeholder, drop id, drop aria-label, drop textarea, and first-target-only dedupe.
+
+Full suite: 1555 passed, twice. tsc is clean.

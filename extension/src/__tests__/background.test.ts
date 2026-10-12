@@ -839,12 +839,24 @@ describe("background message flow", () => {
       aadVersion: 1,
     };
 
-    it("does not rebuild on an identical FETCH_PASSWORDS response", async () => {
+    // Clears the menu mocks before UNLOCK and waits for that rebuild's last
+    // item, so a following mockClear() starts from a settled menu rather than
+    // from whatever a fixed sleep happened to cover. The first FETCH_PASSWORDS
+    // returns what UNLOCK already cached, so it rebuilds nothing.
+    async function unlockAndSettleMenu(): Promise<void> {
       applyToken("t", Date.now() + 60_000, "");
+      chromeMock!.contextMenus.create.mockClear();
+      chromeMock!.contextMenus.removeAll.mockClear();
       await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await settleMenu();
+      await vi.waitFor(() => {
+        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+        expect(ids).toContain("psso-open-popup");
+      });
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+    }
+
+    it("does not rebuild on an identical FETCH_PASSWORDS response", async () => {
+      await unlockAndSettleMenu();
       chromeMock!.contextMenus.removeAll.mockClear();
 
       await sendMessage({ type: "FETCH_PASSWORDS" });
@@ -859,11 +871,7 @@ describe("background message flow", () => {
     // absence of a rebuild above is a real signal and not an artifact of
     // this harness never detecting a change at all.
     it("rebuilds on a changed FETCH_PASSWORDS response, in the same harness as the identical-response test above (CR2)", async () => {
-      applyToken("t", Date.now() + 60_000, "");
-      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await settleMenu();
-      await sendMessage({ type: "FETCH_PASSWORDS" });
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+      await unlockAndSettleMenu();
       chromeMock!.contextMenus.removeAll.mockClear();
 
       setDecryptedPlaintext(CHANGED_OVERVIEW_CIPHERTEXT, JSON.stringify({ ...BASE_OVERVIEW, title: "Example 2" }));
@@ -876,11 +884,7 @@ describe("background message flow", () => {
     });
 
     it("rebuilds when FETCH_PASSWORDS appends a new entry to an otherwise identical prefix (CR2)", async () => {
-      applyToken("t", Date.now() + 60_000, "");
-      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await settleMenu();
-      await sendMessage({ type: "FETCH_PASSWORDS" });
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.create).toHaveBeenCalled());
+      await unlockAndSettleMenu();
       chromeMock!.contextMenus.create.mockClear();
 
       setDecryptedPlaintext("44", JSON.stringify({ title: "New Site", username: "carol", urlHost: "newsite.example" }));
@@ -896,9 +900,7 @@ describe("background message flow", () => {
     });
 
     it("rebuilds when FETCH_PASSWORDS drops an entry from an otherwise identical prefix (CR2)", async () => {
-      applyToken("t", Date.now() + 60_000, "");
-      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await settleMenu();
+      await unlockAndSettleMenu();
 
       setDecryptedPlaintext("44", JSON.stringify({ title: "New Site", username: "carol", urlHost: "newsite.example" }));
       chromeMock!.tabs.query.mockResolvedValue([{ id: 1, url: "https://newsite.example" }]);
@@ -928,11 +930,7 @@ describe("background message flow", () => {
       ["urlHost", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, urlHost: "example.org" }],
       ["additionalUrlHosts", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, additionalUrlHosts: ["alt.example.com"] }],
     ])("rebuilds when %s changes", async (_field, rawEntry, overview) => {
-      applyToken("t", Date.now() + 60_000, "");
-      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await settleMenu();
-      await sendMessage({ type: "FETCH_PASSWORDS" });
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+      await unlockAndSettleMenu();
       chromeMock!.contextMenus.removeAll.mockClear();
 
       setDecryptedPlaintext(CHANGED_OVERVIEW_CIPHERTEXT, JSON.stringify(overview));
@@ -944,11 +942,7 @@ describe("background message flow", () => {
     });
 
     it("creates a menu item for a new entry returned by FETCH_PASSWORDS, after the UNLOCK cascade settles", async () => {
-      applyToken("t", Date.now() + 60_000, "");
-      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await settleMenu();
-      await sendMessage({ type: "FETCH_PASSWORDS" });
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.create).toHaveBeenCalled());
+      await unlockAndSettleMenu();
       chromeMock!.contextMenus.create.mockClear();
 
       setDecryptedPlaintext("44", JSON.stringify({ title: "New Site", username: "carol", urlHost: "newsite.example" }));
@@ -978,11 +972,7 @@ describe("background message flow", () => {
     });
 
     it("schedules a rebuild through invalidateCache from a successful SAVE_LOGIN, not the lock path", async () => {
-      applyToken("t", Date.now() + 60_000, "");
-      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await settleMenu();
-      await sendMessage({ type: "FETCH_PASSWORDS" });
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+      await unlockAndSettleMenu();
       chromeMock!.contextMenus.removeAll.mockClear();
       chromeMock!.contextMenus.create.mockClear();
 
@@ -1001,9 +991,7 @@ describe("background message flow", () => {
     });
 
     it("a second same-host refresh within the cache TTL makes no removeAll (CR2)", async () => {
-      applyToken("t", Date.now() + 60_000, "");
-      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await settleMenu();
+      await unlockAndSettleMenu();
       // UNLOCK_VAULT's own fire-and-forget refresh already hit
       // getCachedSnapshot's cache-MISS branch (this mutation does not touch
       // that branch) and recorded lastMenuHost="github.com" (default

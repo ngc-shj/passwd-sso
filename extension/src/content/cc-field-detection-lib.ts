@@ -266,6 +266,8 @@ interface ExpiryCandidate {
    * count against it.
    */
   mentions: PartFlags;
+  /** Whether the whole hint mentions both parts, own attributes notwithstanding. */
+  hintMentionsBoth: boolean;
 }
 
 function describeCandidate(field: FormField, index: number): ExpiryCandidate {
@@ -282,20 +284,38 @@ function describeCandidate(field: FormField, index: number): ExpiryCandidate {
     strict,
     loose: flags((part) => strict[part] || (token[part] && vocabulary)),
     names: flags((part) => strict[part] || (token[part] && vocabulary && context)),
-    mentions: ownSinglePart(field) ?? flags((part) => strict[part] || token[part]),
+    mentions:
+      (labelIsExpiryVocabulary(field, hint) ? ownSinglePart(field) : null) ??
+      flags((part) => strict[part] || token[part]),
+    hintMentionsBoth: (strict.month || token.month) && (strict.year || token.year),
   };
 }
 
-/** The one part a field's own name/id/placeholder/aria-label names, as flags; else null. */
-function ownSinglePart(field: FormField): PartFlags | null {
-  const own = [
+function ownAttributes(field: FormField): string[] {
+  return [
     field.name,
     field.id,
     field instanceof HTMLInputElement ? field.placeholder : "",
     field.getAttribute("aria-label") ?? "",
   ]
-    .join(" ")
-    .toLowerCase();
+    .filter(Boolean)
+    .map((value) => value.toLowerCase());
+}
+
+/**
+ * Whether the hint, with the field's own attributes taken out, is expiry
+ * vocabulary: the label only describes a format ("(MM/YY)"). A label naming
+ * another subject ("Passport expiry", "Date of birth") keeps its veto.
+ */
+function labelIsExpiryVocabulary(field: FormField, hint: string): boolean {
+  let label = hint;
+  for (const value of ownAttributes(field)) label = label.replace(value, " ");
+  return isExpiryVocabulary(label);
+}
+
+/** The one part a field's own name/id/placeholder/aria-label names, as flags; else null. */
+function ownSinglePart(field: FormField): PartFlags | null {
+  const own = ownAttributes(field).join(" ");
   // English patterns only: a bare 月/年 in an own attribute is usually an
   // example value ("2025年"), not the field's role.
   const month = CC_DETECT_RE.expiryMonth.test(own) || rawTokenPart(own, "month");
@@ -409,6 +429,18 @@ function pickExpiry(
     sides
       .map((index) => pool.find((c) => c.field === controls[index]))
       .find((c) => c !== undefined && c.loose[missing] && !c.mentions[otherPart(missing)])?.field ?? null;
+  // No partner for a field whose own name says one part but whose label says
+  // "MM/YY": it is a combined field named after its first half (exp_month).
+  const anchorCandidate = pool.find((c) => c.field === anchor);
+  if (
+    !partner &&
+    anchor instanceof HTMLInputElement &&
+    decided.month === null &&
+    decided.year === null &&
+    anchorCandidate?.hintMentionsBoth
+  ) {
+    return { month: null, year: null, combined: anchor };
+  }
   if (missing === "year") year = partner;
   else month = partner;
   return { month, year, combined: null };

@@ -94,6 +94,18 @@ const CASES: [string, string, Want][] = [
   ["CR2 fromAutocomplete suppresses a nearer combined candidate", `<form><input name="card_number"><input name="expiry" placeholder="MM/YY"><select name="acm" autocomplete="cc-exp-month">${o("1")}</select><label>Expiry year <select name="ey">${o("2030")}</select></label></form>`, { month: "acm", year: "ey", combined: null }],
   ["CR2 CJK check keeps a passport label out of vocabulary", `<form><input name="card_number"><label>Month <select name="m">${o("1")}</select></label><label>Year <select name="y">${o("2030")}</select></label><label>パスポート有効期限 (MM) <select name="pm">${o("1")}</select></label></form>`, { month: null, year: null, combined: null }],
   ["CR2 month-only mentions excludes a combined claim", `<form><input name="card_number"><label>Passport expiry (MM) <input name="pm"></label></form>`, { month: null, year: null, combined: null }],
+  // Code review round 2: a label naming another subject keeps its veto.
+  ["CR3 passport pair labelled (MM/YY), no card expiry", `<form><input name="card_number"><label>Passport expiry (MM/YY) <input name="passport_exp_month"></label><label>Passport expiry (MM/YY) <input name="passport_exp_year"></label></form>`, { month: null, year: null }],
+  ["CR3 id=card_month under Date of birth (MM/YYYY)", `<form><input name="card_number"><label>Date of birth (MM/YYYY) <input name="dob" id="card_month"></label></form>`, { month: null }],
+  ["CR3 生年月日 selects with own birth_year/birth_month names", `<form><input name="card_number"><label>生年月日 <select name="birth_year">${o("1990")}</select>年<select name="birth_month">${o("1")}</select>月</label></form>`, { month: null, year: null }],
+  ["CR3 有効期限（月） beside 生年月日（年） birth_year", `<form><label>カード番号<input name="cn"></label><label>有効期限（月）<select name="em">${o("1")}</select></label><label>生年月日（年）<select name="birth_year">${o("1990")}</select></label></form>`, { month: "em", year: null }],
+  ["CR3 Expiry date (MM/YY) on exp_month input stays combined", `<form><input name="card_number"><label>Expiry date (MM/YY) <input name="exp_month"></label><label>CVV <input name="cvv"></label></form>`, { combined: "exp_month", month: null, year: null }],
+  ["CR3 id cc-exp-month name expiry under Expiration (MM/YY) stays combined", `<form><input name="card_number"><label>Expiration (MM/YY) <input id="cc-exp-month" name="expiry"></label></form>`, { combined: "expiry", month: null, year: null }],
+  // Each own attribute ownSinglePart reads, pinned on its own.
+  ["CR3 own placeholder MM/YY under a (MM/YY) label", `<form><input name="card_number"><label for="em">Expiration date (MM/YY)</label><input id="em" name="a1" placeholder="MM"> <input name="a2" placeholder="YY"></form>`, { month: "a1", year: "a2", combined: null }],
+  ["CR3 own id exp_month under a (MM/YY) label", `<form><input name="card_number"><label for="exp_month">Expiration date (MM/YY)</label><select id="exp_month" name="a1">${o("1")}</select> <select name="exp_year">${o("2030")}</select></form>`, { month: "a1", year: "exp_year", combined: null }],
+  ["CR3 own aria-label Month under a (MM/YY) label", `<form><input name="card_number"><label for="x1">Expiration date (MM/YY)</label><select id="x1" name="a1" aria-label="Month">${o("1")}</select> <select name="exp_year">${o("2030")}</select></form>`, { month: "a1", year: "exp_year", combined: null }],
+  ["CR3 a textarea between month and Year breaks adjacency", `<form><input name="card_number"><label>Expiry month <select name="em">${o("1")}</select></label><textarea name="t"></textarea><label>Year <select name="year">${o("2030")}</select></label></form>`, { month: "em", year: null }],
 ];
 
 const name = (el: Element | null) => (el ? el.getAttribute("name") : null);

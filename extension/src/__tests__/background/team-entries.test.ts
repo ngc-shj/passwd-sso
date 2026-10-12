@@ -614,9 +614,15 @@ describe("team entries in background", () => {
     // in background.test.ts (no team harness there) — this is the one case
     // that needs this file's team fetch chain.
     it("rebuilds the context menu when the same entry's teamId changes", async () => {
+      // Clear first, then wait for the UNLOCK rebuild's last item: a gate that
+      // the earlier calls already satisfy would wait for nothing.
+      chromeMock!.contextMenus.create.mockClear();
       await unlockVault();
+      await vi.waitFor(() => {
+        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+        expect(ids).toContain("psso-open-popup");
+      });
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
       chromeMock!.contextMenus.removeAll.mockClear();
 
       // Same team-pw-1 entry, same team passwords list, but the teams list
