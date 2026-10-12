@@ -139,6 +139,11 @@ const CASES: [string, string, Want][] = [
   ["CR6 Valid until (MM/YY) on member_month is not claimed", `<form><input name="card_number"><label>Valid until (MM/YY) <select name="member_month">${o("1")}</select></label><label>Valid until (MM/YY) <select name="member_year">${o("2030")}</select></label></form>`, { month: null, year: null, combined: null }],
   ["CR6 Credit date (MM) beside Expiry year is not the month", `<form><input name="card_number"><label>Credit date (MM) <input name="cd"></label><label>Expiry year <select name="ey">${o("2030")}</select></label></form>`, { month: null, year: "ey" }],
   ["CR7 Valid until (MM/YY) on member_exp_month beside Expiry year is not the month", `<form><input name="card_number"><label>Valid until (MM/YY) <select name="member_exp_month">${o("1")}</select></label><label>Expiry year <select name="ey">${o("2030")}</select></label></form>`, { month: null, year: "ey" }],
+  // Functionality round 7: real card own names keep the until qualification.
+  ["CR8 Valid until (MM/YY) over expMonth/expYear", `<form><input name="card_number"><label for="em">Valid until (MM/YY)</label><select id="em" name="expMonth">${o("1")}</select> <select name="expYear">${o("2030")}</select></form>`, { month: "expMonth", year: "expYear", combined: null }],
+  ["CR8 Valid until (MM/YY) over billing_exp_month/billing_exp_year", `<form><input name="card_number"><label for="em">Valid until (MM/YY)</label><select id="em" name="billing_exp_month">${o("1")}</select> <select name="billing_exp_year">${o("2030")}</select></form>`, { month: "billing_exp_month", year: "billing_exp_year", combined: null }],
+  ["CR8 Valid until (MM/YY) over ccExpMonth/ccExpYear", `<form><input name="card_number"><label for="em">Valid until (MM/YY)</label><select id="em" name="ccExpMonth">${o("1")}</select> <select name="ccExpYear">${o("2030")}</select></form>`, { month: "ccExpMonth", year: "ccExpYear", combined: null }],
+  ["CR8 Valid until (MM/YY) over cardExpiryMonth/cardExpiryYear", `<form><input name="card_number"><label for="em">Valid until (MM/YY)</label><select id="em" name="cardExpiryMonth">${o("1")}</select> <select name="cardExpiryYear">${o("2030")}</select></form>`, { month: "cardExpiryMonth", year: "cardExpiryYear", combined: null }],
 ];
 
 const name = (el: Element | null) => (el ? el.getAttribute("name") : null);

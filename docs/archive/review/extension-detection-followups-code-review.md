@@ -297,3 +297,24 @@ Incremental review of `9b9ef7896..82a996602`.
 - **Recorded residual (security, not a finding):** `passport_exp_month` / `passport_exp_year` under a subject-less "Expiry (MM/YY)" label split into both passport fields. Main does the same, so this is unchanged from main. Tightening the whole `ownSinglePart` override would instead make `birth_month` under that label combined (a regression), so it is left as an SC3 residual.
 
 Full suite: see commit. tsc clean.
+
+---
+
+# Round 7
+Date: 2026-10-12
+
+## Changes from Previous Round
+Incremental review of `82a996602..61a125a55`.
+- **Security:** no findings. N3 is resolved, and the added conjunct can only narrow what is accepted.
+- **Functionality:** one new Major (F12).
+
+## Findings
+- **F12 [Major, functionality]** The N3 own-name check lowercased the names before splitting them into words, so camelCase names fused into a single word (`expMonth`, `ccExpMonth`, `expirationMonth`, `cardExpiryMonth`). Names with a card-flow prefix (`billing_`, `payment_`) also failed the check. As a result, "Valid until (MM/YY)" lost the month, which main and round 6 kept.
+
+## Resolution Status
+### F12: camelCase and card-flow prefixes in the own-name check
+- **Action:**
+  - The check now reads `ownWordsOf`, which splits camelCase before lowercasing.
+  - It accepts `CARD_FLOW_WORDS` (billing, payment, checkout, order) as extra words.
+  - `member` / `passport` / `licence` are still rejected.
+- **Tests:** CR8 rows `expMonth`, `billing_exp_month`, `ccExpMonth` and `cardExpiryMonth`. Each fails on the pre-fix HEAD. The CR7 `member_exp_month` deny row still passes.

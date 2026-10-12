@@ -312,6 +312,21 @@ function describeCandidate(field: FormField, index: number): ExpiryCandidate {
   };
 }
 
+// Card-flow prefixes on a card field's own name ("billing_exp_month").
+const CARD_FLOW_WORDS = new Set(["billing", "payment", "checkout", "order"]);
+
+/** Own attributes with camelCase boundaries kept ("ccExpMonth" → "cc_exp_month"). */
+function ownWordsOf(field: FormField): string[] {
+  return [
+    field.name,
+    field.id,
+    field instanceof HTMLInputElement ? field.placeholder : "",
+    field.getAttribute("aria-label") ?? "",
+  ]
+    .filter(Boolean)
+    .map((value) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase());
+}
+
 function ownAttributes(field: FormField): string[] {
   return [
     field.name,
@@ -341,7 +356,9 @@ function labelIsExpiryVocabulary(field: FormField, hint: string): boolean {
     (CC_DETECT_RE.expiryMonth.test(ownText) ||
       CC_DETECT_RE.expiryYear.test(ownText) ||
       CC_EXP_NAME_RE.test(ownText)) &&
-    own.every((value) => isExpiryVocabulary(value.replace(LEADING_CC_RE, "")));
+    ownWordsOf(field).every((value) =>
+      isExpiryVocabulary(value.replace(LEADING_CC_RE, ""), CARD_FLOW_WORDS),
+    );
   return isExpiryVocabulary(label, MONTH_NAME_WORDS, ownNamesCardExpiry);
 }
 
