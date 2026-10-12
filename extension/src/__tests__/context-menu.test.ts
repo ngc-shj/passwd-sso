@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { DecryptedEntry } from "../types/messages";
 import { extractHost } from "../lib/url-matching";
 
@@ -36,6 +36,7 @@ import {
   updateContextMenuForTab,
   handleContextMenuClick,
   invalidateContextMenu,
+  refreshContextMenu,
   disableContextMenu,
   DEBOUNCE_MS,
   type ContextMenuDeps,
@@ -48,7 +49,8 @@ const mockEntries: DecryptedEntry[] = [
 
 function createDeps(overrides?: Partial<ContextMenuDeps>): ContextMenuDeps {
   return {
-    getCachedEntries: vi.fn().mockResolvedValue(mockEntries),
+    getCachedSnapshot: vi.fn().mockResolvedValue({ entries: mockEntries, version: 1 }),
+    getCacheVersion: vi.fn().mockReturnValue(1),
     isHostMatch: vi.fn((entryHost: string, tabHost: string) => entryHost === tabHost),
     // The production predicate, not a lookalike: a fixture that accepted
     // chrome:// URLs or skipped www.-stripping would let the deny-path tests
@@ -63,10 +65,40 @@ function createDeps(overrides?: Partial<ContextMenuDeps>): ContextMenuDeps {
   };
 }
 
+function idsCreated(): string[] {
+  return chromeMock.contextMenus.create.mock.calls.map(
+    (c: unknown[]) => (c[0] as { id: string }).id,
+  );
+}
+
+/**
+ * Split the create log into per-rebuild segments using the interleaved
+ * removeAll calls as boundaries. Chrome's duplicate-id rejection is scoped to
+ * currently-registered items, so this is the segmentation that matches it.
+ */
+function idsCreatedPerRebuild(): string[][] {
+  const events: Array<{ kind: "create" | "reset"; order: number; id?: string }> = [];
+  chromeMock.contextMenus.create.mock.invocationCallOrder.forEach((order: number, i: number) => {
+    const props = chromeMock.contextMenus.create.mock.calls[i][0] as { id: string };
+    events.push({ kind: "create", order, id: props.id });
+  });
+  chromeMock.contextMenus.removeAll.mock.invocationCallOrder.forEach((order: number) => {
+    events.push({ kind: "reset", order });
+  });
+  events.sort((a, b) => a.order - b.order);
+  const segments: string[][] = [[]];
+  for (const e of events) {
+    if (e.kind === "reset") segments.push([]);
+    else segments[segments.length - 1].push(e.id!);
+  }
+  return segments;
+}
+
 describe("context-menu", () => {
   let deps: ContextMenuDeps;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     // Re-arm both callback-taking stubs symmetrically. createMenuItem awaits
     // create's callback, so a stub that never invokes it leaves the menu chain
@@ -82,6 +114,11 @@ describe("context-menu", () => {
     deps = createDeps();
     initContextMenu(deps);
     invalidateContextMenu();
+  });
+
+  afterEach(async () => {
+    await disableContextMenu();
+    vi.useRealTimers();
   });
 
   describe("setupContextMenu", () => {
@@ -105,7 +142,7 @@ describe("context-menu", () => {
       updateContextMenuForTab(1, "https://github.com/login");
 
       // Wait for debounce + async
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
       // Should have: removeAll + parent + entry item + separator + open popup
       const createCalls = chromeMock.contextMenus.create.mock.calls;
@@ -122,7 +159,7 @@ describe("context-menu", () => {
 
       updateContextMenuForTab(1, "https://github.com");
 
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
       const createCalls = chromeMock.contextMenus.create.mock.calls;
       const disconnectedCall = createCalls.find(
@@ -138,7 +175,7 @@ describe("context-menu", () => {
 
       updateContextMenuForTab(1, "https://github.com");
 
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
       const createCalls = chromeMock.contextMenus.create.mock.calls;
       const lockedCall = createCalls.find(
@@ -151,7 +188,7 @@ describe("context-menu", () => {
     it("shows 'No matches' when no entries match host", async () => {
       updateContextMenuForTab(1, "https://nomatch.example.com");
 
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
       const createCalls = chromeMock.contextMenus.create.mock.calls;
       const noMatchCall = createCalls.find(
@@ -167,12 +204,12 @@ describe("context-menu", () => {
       ];
 
       deps = createDeps({
-        getCachedEntries: vi.fn().mockResolvedValue(teamEntries),
+        getCachedSnapshot: vi.fn().mockResolvedValue({ entries: teamEntries, version: 1 }),
       });
       initContextMenu(deps);
 
       updateContextMenuForTab(1, "https://github.com");
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
       const createCalls = chromeMock.contextMenus.create.mock.calls;
       const teamEntryCall = createCalls.find(
@@ -191,13 +228,13 @@ describe("context-menu", () => {
       }));
 
       deps = createDeps({
-        getCachedEntries: vi.fn().mockResolvedValue(manyEntries),
+        getCachedSnapshot: vi.fn().mockResolvedValue({ entries: manyEntries, version: 1 }),
       });
       initContextMenu(deps);
 
       updateContextMenuForTab(1, "https://example.com");
 
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
       const createCalls = chromeMock.contextMenus.create.mock.calls;
       const entryCalls = createCalls.filter(
@@ -212,12 +249,12 @@ describe("context-menu", () => {
     it("removes child items when url is undefined", async () => {
       updateContextMenuForTab(1, undefined);
 
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
       // removeAll should be called to clear child items
       expect(chromeMock.contextMenus.removeAll).toHaveBeenCalled();
-      // getCachedEntries should NOT be called
-      expect(deps.getCachedEntries).not.toHaveBeenCalled();
+      // getCachedSnapshot should NOT be called
+      expect(deps.getCachedSnapshot).not.toHaveBeenCalled();
     });
 
     it("debounces rapid calls", async () => {
@@ -225,10 +262,10 @@ describe("context-menu", () => {
       updateContextMenuForTab(1, "https://gitlab.com");
       updateContextMenuForTab(1, "https://example.com");
 
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
-      // getCachedEntries should only be called once (last debounced call)
-      expect(deps.getCachedEntries).toHaveBeenCalledTimes(1);
+      // getCachedSnapshot should only be called once (last debounced call)
+      expect(deps.getCachedSnapshot).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -237,14 +274,14 @@ describe("context-menu", () => {
       chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: "https://github.com" }]);
 
       updateContextMenuForTab(1, "https://github.com/login");
-      await new Promise((r) => setTimeout(r, 300));
-      const callsBefore = (deps.getCachedEntries as ReturnType<typeof vi.fn>).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(300);
+      const callsBefore = (deps.getCachedSnapshot as ReturnType<typeof vi.fn>).mock.calls.length;
 
       // Calling invalidateContextMenu should reset lastMenuHost and rebuild
       invalidateContextMenu();
-      await new Promise((r) => setTimeout(r, 300));
+      await vi.advanceTimersByTimeAsync(300);
 
-      expect((deps.getCachedEntries as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(callsBefore);
+      expect((deps.getCachedSnapshot as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(callsBefore);
     });
   });
 
@@ -469,7 +506,7 @@ describe("context-menu", () => {
         } as chrome.contextMenus.OnClickData,
         { id: 1 } as chrome.tabs.Tab,
       );
-      await new Promise((r) => setTimeout(r, 10));
+      await vi.advanceTimersByTimeAsync(10);
 
       expect(deps.notifyFillFailure).toHaveBeenCalledWith("ORIGIN_MISMATCH");
     });
@@ -482,7 +519,7 @@ describe("context-menu", () => {
         } as chrome.contextMenus.OnClickData,
         { id: 1 } as chrome.tabs.Tab,
       );
-      await new Promise((r) => setTimeout(r, 10));
+      await vi.advanceTimersByTimeAsync(10);
 
       expect(deps.notifyFillFailure).not.toHaveBeenCalled();
     });
@@ -496,58 +533,29 @@ describe("context-menu", () => {
       { id: "I1", title: "Ident", entryType: "IDENTITY" } as DecryptedEntry,
     ];
 
-    function idsCreated(): string[] {
-      return chromeMock.contextMenus.create.mock.calls.map(
-        (c: unknown[]) => (c[0] as { id: string }).id,
-      );
-    }
-
-    /**
-     * Split the create log into per-rebuild segments using the interleaved
-     * removeAll calls as boundaries. Chrome's duplicate-id rejection is scoped to
-     * currently-registered items, so this is the segmentation that matches it.
-     */
-    function idsCreatedPerRebuild(): string[][] {
-      const events: Array<{ kind: "create" | "reset"; order: number; id?: string }> = [];
-      chromeMock.contextMenus.create.mock.invocationCallOrder.forEach((order: number, i: number) => {
-        const props = chromeMock.contextMenus.create.mock.calls[i][0] as { id: string };
-        events.push({ kind: "create", order, id: props.id });
-      });
-      chromeMock.contextMenus.removeAll.mock.invocationCallOrder.forEach((order: number) => {
-        events.push({ kind: "reset", order });
-      });
-      events.sort((a, b) => a.order - b.order);
-      const segments: string[][] = [[]];
-      for (const e of events) {
-        if (e.kind === "reset") segments.push([]);
-        else segments[segments.length - 1].push(e.id!);
-      }
-      return segments;
-    }
-
     it("runs both rebuilds to completion without interleaving their create batches", async () => {
-      let release: (v: DecryptedEntry[]) => void = () => {};
-      const gate = new Promise<DecryptedEntry[]>((r) => { release = r; });
+      let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
+      const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
       let call = 0;
-      const getCachedEntries = vi.fn(() => {
+      const getCachedSnapshot = vi.fn(() => {
         call += 1;
-        return call === 1 ? gate : Promise.resolve(mockEntries);
+        return call === 1 ? gate : Promise.resolve({ entries: mockEntries, version: 1 });
       });
-      deps = createDeps({ getCachedEntries });
+      deps = createDeps({ getCachedSnapshot });
       initContextMenu(deps);
 
       // A: past its debounce and suspended inside doUpdateMenu.
       updateContextMenuForTab(1, "https://github.com/login");
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
-      expect(getCachedEntries).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60);
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(1);
 
       // B: a second, concurrent request while A is still suspended.
       chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: "https://gitlab.com/x" }]);
       invalidateContextMenu();
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60);
 
-      release(mockEntries);
-      await new Promise((r) => setTimeout(r, 60));
+      release({ entries: mockEntries, version: 1 });
+      await vi.advanceTimersByTimeAsync(60);
 
       // Cardinality floor: without this, "no duplicates" holds vacuously over
       // an empty or single-rebuild call log.
@@ -562,35 +570,39 @@ describe("context-menu", () => {
       // pins that both rebuilds ran and neither emitted a self-duplicate. The
       // supersession behaviour that the generation token actually provides is
       // pinned by the next test, which does redden when the guard is disabled.
-      expect(getCachedEntries.mock.calls.length).toBe(2);
+      expect(getCachedSnapshot.mock.calls.length).toBe(2);
       const segments = idsCreatedPerRebuild();
       expect(segments.some((seg) => seg.length > 0)).toBe(true);
       for (const seg of segments) {
         expect(new Set(seg).size).toBe(seg.length);
       }
+      // The abandoned first build (#881): it got as far as creating the
+      // parent before gating, then resumed to find itself no longer current
+      // and returned without creating any entry item.
+      expect(segments[1]).toEqual(["psso-parent"]);
     });
 
     it("keeps the newest host's items when an older rebuild resolves last", async () => {
-      let release: (v: DecryptedEntry[]) => void = () => {};
-      const gate = new Promise<DecryptedEntry[]>((r) => { release = r; });
+      let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
+      const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
       let call = 0;
-      const getCachedEntries = vi.fn(() => {
+      const getCachedSnapshot = vi.fn(() => {
         call += 1;
-        return call === 1 ? gate : Promise.resolve(mockEntries);
+        return call === 1 ? gate : Promise.resolve({ entries: mockEntries, version: 1 });
       });
-      deps = createDeps({ getCachedEntries });
+      deps = createDeps({ getCachedSnapshot });
       initContextMenu(deps);
 
       updateContextMenuForTab(1, "https://github.com/login");
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60);
       chromeMock.contextMenus.create.mockClear();
 
       chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: "https://gitlab.com/x" }]);
       invalidateContextMenu();
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60);
 
-      release(mockEntries);
-      await new Promise((r) => setTimeout(r, 60));
+      release({ entries: mockEntries, version: 1 });
+      await vi.advanceTimersByTimeAsync(60);
 
       const ids = idsCreated();
       // gitlab.com is the newest request; github.com's stale item must not survive.
@@ -604,13 +616,13 @@ describe("context-menu", () => {
       });
       initContextMenu(deps);
       updateContextMenuForTab(1, "https://github.com/login");
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60);
 
       deps = createDeps();
       initContextMenu(deps);
       chromeMock.contextMenus.create.mockClear();
       updateContextMenuForTab(1, "https://gitlab.com/x");
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60);
 
       // The guarded side effect, not merely a settled promise.
       //
@@ -624,13 +636,13 @@ describe("context-menu", () => {
     });
 
     it("creates the full item set in order for the non-racing case", async () => {
-      deps = createDeps({ getCachedEntries: vi.fn().mockResolvedValue(mixed) });
+      deps = createDeps({ getCachedSnapshot: vi.fn().mockResolvedValue({ entries: mixed, version: 1 }) });
       initContextMenu(deps);
       await setupContextMenu();
       chromeMock.contextMenus.create.mockClear();
 
       updateContextMenuForTab(1, "https://example.com/x");
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60);
 
       const ids = idsCreated();
       expect(ids.length).toBeGreaterThan(0);
@@ -648,13 +660,13 @@ describe("context-menu", () => {
 
     it("creates no child items when the context menu is disabled", async () => {
       deps = createDeps({
-        getCachedEntries: vi.fn().mockResolvedValue(mixed),
+        getCachedSnapshot: vi.fn().mockResolvedValue({ entries: mixed, version: 1 }),
         isContextMenuEnabled: vi.fn().mockResolvedValue(false),
       });
       initContextMenu(deps);
 
       updateContextMenuForTab(1, "https://example.com/x");
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60);
 
       expect(idsCreated()).toEqual([]);
       // removeAll still runs: Chrome retains registrations across SW restarts,
@@ -670,10 +682,186 @@ describe("context-menu", () => {
 
       updateContextMenuForTab(1, "https://github.com/login");
       await disableContextMenu();
-      await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 80));
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 80);
 
       expect(chromeMock.contextMenus.removeAll).toHaveBeenCalled();
       expect(idsCreated()).toEqual([]);
+    });
+  });
+
+  // ── C2: versioned cache and generation-safe menu rebuild (#881) ──
+  describe("versioned cache rebuild (C2)", () => {
+    it("rebuilds on a version bump with the same host, and skips again once unchanged", async () => {
+      const entriesV2: DecryptedEntry[] = [...mockEntries, {
+        id: "e3", title: "New Site", username: "carol", urlHost: "github.com", entryType: "LOGIN",
+      }];
+      const getCacheVersion = vi.fn().mockReturnValue(1);
+      const getCachedSnapshot = vi.fn()
+        .mockResolvedValueOnce({ entries: mockEntries, version: 1 })
+        .mockResolvedValueOnce({ entries: entriesV2, version: 2 });
+      deps = createDeps({ getCachedSnapshot, getCacheVersion });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(1);
+
+      // Same host; the cache moved on (version bumped) — must rebuild, and
+      // the new entry must appear.
+      getCacheVersion.mockReturnValue(2);
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(2);
+      expect(idsCreated()).toContain("psso-login-e3");
+
+      // Paired: same host, unchanged version — must skip.
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(2);
+    });
+
+    it("a snapshot that bumps the version and calls refreshContextMenu makes exactly one removeAll", async () => {
+      let version = 1;
+      const getCachedSnapshot = vi.fn(async () => {
+        version = 2;
+        // Mirrors setCachedEntries (index.ts): the version bump synchronously
+        // schedules another rebuild on the active tab before this snapshot
+        // even returns.
+        refreshContextMenu();
+        return { entries: mockEntries, version };
+      });
+      deps = createDeps({ getCachedSnapshot, getCacheVersion: vi.fn(() => version) });
+      initContextMenu(deps);
+      chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: "https://github.com/login" }]);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 2 + 50);
+
+      expect(chromeMock.contextMenus.removeAll).toHaveBeenCalledTimes(1);
+    });
+
+    it("completes a build superseded by a same-host refreshContextMenu, with the full item set (R2-T3, R3-T4)", async () => {
+      let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
+      const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
+      let call = 0;
+      const getCachedSnapshot = vi.fn(() => {
+        call += 1;
+        return call === 1 ? gate : Promise.resolve({ entries: mockEntries, version: 1 });
+      });
+      deps = createDeps({ getCachedSnapshot, getCacheVersion: vi.fn().mockReturnValue(1) });
+      initContextMenu(deps);
+      chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: "https://github.com/login" }]);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(1);
+
+      // Same host, unchanged version — still schedules a successor, because
+      // the gated build has not recorded lastMenuCacheVersion yet.
+      refreshContextMenu();
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+
+      // The gate releases only after the successor has already been queued.
+      release({ entries: mockEntries, version: 1 });
+      await vi.advanceTimersByTimeAsync(10);
+
+      const ids = idsCreated();
+      expect(ids).toContain("psso-parent");
+      expect(ids).toContain("psso-login-e1");
+      expect(ids).toContain("psso-open-popup");
+    });
+
+    it("rebuilds in full after a build superseded mid-way through creating items, on the same host and version", async () => {
+      deps = createDeps({ getCacheVersion: vi.fn().mockReturnValue(1) });
+      initContextMenu(deps);
+      chromeMock.tabs.query.mockResolvedValue([{ id: 1, url: "https://github.com/login" }]);
+
+      // Hold the first entry item's create: by then the build has recorded the
+      // host and the snapshot's version, so only the abandon path can clear them.
+      let releaseCreate: () => void = () => {};
+      let held = false;
+      chromeMock.contextMenus.create.mockImplementation((props: unknown, cb?: () => void) => {
+        if (!held && (props as { id: string }).id === "psso-login-e1") {
+          held = true;
+          releaseCreate = () => cb?.();
+          return;
+        }
+        cb?.();
+      });
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(held).toBe(true);
+
+      refreshContextMenu();
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      releaseCreate();
+      await vi.advanceTimersByTimeAsync(10);
+
+      const rebuilds = idsCreatedPerRebuild();
+      const last = rebuilds[rebuilds.length - 1];
+      expect(last).toContain("psso-parent");
+      expect(last).toContain("psso-login-e1");
+      expect(last).toContain("psso-open-popup");
+    });
+
+    it("re-checks the lock after the snapshot resolves and creates no entry item (lock re-check in isolation)", async () => {
+      let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
+      const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
+      const isVaultUnlocked = vi.fn().mockReturnValue(true);
+      deps = createDeps({ getCachedSnapshot: vi.fn(() => gate), isVaultUnlocked });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+
+      // The vault locks while the snapshot is still in flight — no
+      // invalidateContextMenu() call, so this is the lock re-check alone.
+      isVaultUnlocked.mockReturnValue(false);
+      release({ entries: mockEntries, version: 1 });
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(idsCreated().some((id) => id.startsWith("psso-login-e"))).toBe(false);
+    });
+
+    it("abandons a build when invalidateContextMenu claims a newer generation while the vault stays unlocked (generation claim in isolation, R3-T4)", async () => {
+      let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
+      const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
+      deps = createDeps({ getCachedSnapshot: vi.fn(() => gate), getCacheVersion: vi.fn().mockReturnValue(1) });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+
+      // tabs.query resolving to [] means invalidateContextMenu's own
+      // refreshContextMenu schedules nothing further — this isolates the
+      // generation bump itself as the thing that abandons the gated build.
+      chromeMock.tabs.query.mockResolvedValue([]);
+      invalidateContextMenu();
+
+      release({ entries: [mockEntries[0]], version: 1 });
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(idsCreated()).not.toContain("psso-login-e1");
+    });
+
+    it("records the snapshot's own version, not getCacheVersion(), so a later mismatch still rebuilds", async () => {
+      const getCacheVersion = vi.fn().mockReturnValue(2);
+      const getCachedSnapshot = vi.fn()
+        .mockResolvedValueOnce({ entries: mockEntries, version: 1 })
+        .mockResolvedValueOnce({ entries: mockEntries, version: 2 });
+      deps = createDeps({ getCachedSnapshot, getCacheVersion });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(1);
+
+      // Same host; getCacheVersion() (2) still disagrees with the version the
+      // menu was actually built from (1, from the snapshot) — must not skip.
+      updateContextMenuForTab(1, "https://github.com/login");
+      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(2);
     });
   });
 

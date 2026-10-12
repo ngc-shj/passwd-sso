@@ -57,6 +57,10 @@ const cryptoMocks = vi.hoisted(() => ({
   decryptData: vi.fn().mockResolvedValue(
     JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" })
   ),
+  // Only login-save.ts / passkey-provider.ts call this (SAVE_LOGIN,
+  // UPDATE_LOGIN, passkey registration) — the return shape just needs to
+  // look like an EncryptedData blob.
+  encryptData: vi.fn().mockResolvedValue({ ciphertext: "enc", iv: "iv", authTag: "tag" }),
   buildPersonalEntryAAD: vi.fn().mockReturnValue(new Uint8Array([1, 2])),
   hexDecode: vi.fn().mockReturnValue(new Uint8Array([0, 1])),
   VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
@@ -782,6 +786,127 @@ describe("background message flow", () => {
       "pw-1",
       "overview"
     );
+  });
+
+  // ── #881 C2 acceptance 7-9: setCachedEntries rebuilds on a menu-view change ──
+  describe("context menu rebuild on cache change (#881 C2)", () => {
+    const CHANGED_OVERVIEW_CIPHERTEXT = "22";
+    const BASE_RAW_ENTRY = {
+      id: "pw-1",
+      encryptedOverview: { ciphertext: CHANGED_OVERVIEW_CIPHERTEXT, iv: "22", authTag: "33" },
+      entryType: EXT_ENTRY_TYPE.LOGIN,
+      aadVersion: 1,
+    };
+    const BASE_OVERVIEW = { title: "Example", username: "alice", urlHost: "example.com" };
+
+    function stubPasswordsFetch(rawEntry: typeof BASE_RAW_ENTRY): void {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.includes(EXT_API_PATH.PASSWORDS)) {
+            return { ok: true, json: async () => [rawEntry] };
+          }
+          return { ok: false, json: async () => ({}) };
+        }),
+      );
+    }
+
+    it("does not rebuild on an identical FETCH_PASSWORDS response", async () => {
+      applyToken("t", Date.now() + 60_000, "");
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+      await new Promise((r) => setTimeout(r, 300));
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await new Promise((r) => setTimeout(r, 300));
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await new Promise((r) => setTimeout(r, 300));
+
+      expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["id", { ...BASE_RAW_ENTRY, id: "pw-2" }, BASE_OVERVIEW],
+      ["entryType", { ...BASE_RAW_ENTRY, entryType: EXT_ENTRY_TYPE.CREDIT_CARD }, BASE_OVERVIEW],
+      ["title", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, title: "Example 2" }],
+      ["username", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, username: "bob" }],
+      ["urlHost", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, urlHost: "example.org" }],
+      ["additionalUrlHosts", BASE_RAW_ENTRY, { ...BASE_OVERVIEW, additionalUrlHosts: ["alt.example.com"] }],
+    ])("rebuilds when %s changes", async (_field, rawEntry, overview) => {
+      applyToken("t", Date.now() + 60_000, "");
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+      await new Promise((r) => setTimeout(r, 300));
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await new Promise((r) => setTimeout(r, 300));
+      chromeMock!.contextMenus.removeAll.mockClear();
+
+      setDecryptedPlaintext(CHANGED_OVERVIEW_CIPHERTEXT, JSON.stringify(overview));
+      stubPasswordsFetch(rawEntry);
+
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await new Promise((r) => setTimeout(r, 300));
+
+      expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled();
+    });
+
+    it("creates a menu item for a new entry returned by FETCH_PASSWORDS, after the UNLOCK cascade settles", async () => {
+      applyToken("t", Date.now() + 60_000, "");
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+      await new Promise((r) => setTimeout(r, 300));
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await new Promise((r) => setTimeout(r, 300));
+      chromeMock!.contextMenus.create.mockClear();
+
+      setDecryptedPlaintext("44", JSON.stringify({ title: "New Site", username: "carol", urlHost: "newsite.example" }));
+      chromeMock!.tabs.query.mockResolvedValue([{ id: 1, url: "https://newsite.example" }]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url.includes(EXT_API_PATH.PASSWORDS)) {
+            return {
+              ok: true,
+              json: async () => [
+                BASE_RAW_ENTRY,
+                { id: "pw-2", encryptedOverview: { ciphertext: "44", iv: "22", authTag: "33" }, entryType: EXT_ENTRY_TYPE.LOGIN, aadVersion: 1 },
+              ],
+            };
+          }
+          return { ok: false, json: async () => ({}) };
+        }),
+      );
+
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await new Promise((r) => setTimeout(r, 300));
+
+      const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+      expect(ids).toContain("psso-login-pw-2");
+    });
+
+    it("schedules a rebuild through invalidateCache from a successful SAVE_LOGIN, not the lock path", async () => {
+      applyToken("t", Date.now() + 60_000, "");
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+      await new Promise((r) => setTimeout(r, 300));
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      await new Promise((r) => setTimeout(r, 300));
+      chromeMock!.contextMenus.removeAll.mockClear();
+      chromeMock!.contextMenus.create.mockClear();
+
+      const res = await sendMessageWithSender(
+        { type: "SAVE_LOGIN", username: "dave", password: "secret" },
+        { tab: { id: 1, url: "https://example.org/login" } },
+      );
+      expect(res).toEqual({ type: "SAVE_LOGIN", ok: true, error: undefined });
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      // A rebuild was scheduled (FR4/#881)...
+      expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled();
+      // ...and it is the normal rebuild, not the "vault locked" teardown —
+      // invalidateCache alone must not touch encryptionKey.
+      const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+      expect(ids).not.toContain("psso-login-locked");
+    });
   });
 
   it("returns error when COPY_PASSWORD called while vault locked", async () => {

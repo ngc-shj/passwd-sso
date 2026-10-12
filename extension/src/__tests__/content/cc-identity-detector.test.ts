@@ -3,6 +3,7 @@
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { EXT_MSG } from "../../lib/constants";
+import { ATTR_RESCAN_DELAY_MS, ATTR_RECENT_MS } from "../../content/rescan-scheduler";
 
 // Capture showDropdown options so we can drive onSelect.
 const showDropdownMock = vi.fn();
@@ -17,6 +18,17 @@ vi.mock("../../content/ui/suggestion-dropdown", () => ({
 }));
 
 vi.mock("../../lib/i18n", () => ({ t: (key: string) => key }));
+
+// C3 (#875): wraps the real ccClaimedFields so the rate/filter/focus-matrix
+// tests below can count detector scans without faking detection itself —
+// identity's own rescan calls through to the same function, so only one live
+// detector is created per counting test (see "C3" describe block).
+const ccClaimedFieldsMock = vi.hoisted(() => vi.fn());
+vi.mock("../../content/cc-field-detection-lib", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../content/cc-field-detection-lib")>();
+  ccClaimedFieldsMock.mockImplementation(actual.ccClaimedFields);
+  return { ...actual, ccClaimedFields: ccClaimedFieldsMock };
+});
 
 // M6: spy on showInlineNotice; stub the guard helpers with jsdom-safe defaults
 // (no layout in jsdom → hit-test always passes, elements always visible).
@@ -375,5 +387,352 @@ describe("C4: fieldCount-boundary fixture", () => {
     `;
     const { detectIdentityFields } = await import("../../content/identity-form-detector-lib");
     expect(detectIdentityFields(document)).toBeNull();
+  });
+});
+
+// ── C3 (#875): filtered, rate-bounded attribute rescan ──────────
+//
+// Both the CC and identity detectors wire the same rescan-scheduler pattern
+// (NF1/NF2), so every mechanism below is red-proofed in BOTH files by running
+// the same case against both detector profiles. Scans are counted through
+// ccClaimedFieldsMock — identity's own rescan calls through to it too (see the
+// mock above), so only one live detector exists per counting test.
+
+type DetectorProfile = {
+  label: string;
+  autocomplete: string;
+  messageType: string;
+  // A second field some detectors need to clear their own "is this really a
+  // form" floor (identity needs fieldCount >= 2); empty for CC.
+  extraMarkup: string;
+  init: () => Promise<{ destroy: () => void }>;
+};
+
+const detectorProfiles: DetectorProfile[] = [
+  {
+    label: "CC",
+    autocomplete: "cc-number",
+    messageType: EXT_MSG.GET_CC_MATCHES_FOR_URL,
+    extraMarkup: "",
+    init: async () => (await import("../../content/cc-form-detector-lib")).initCreditCardDetector(),
+  },
+  {
+    label: "identity",
+    autocomplete: "name",
+    messageType: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
+    extraMarkup: '<input autocomplete="address-line1" />',
+    init: async () => (await import("../../content/identity-form-detector-lib")).initIdentityDetector(),
+  },
+];
+
+function installProfileChrome(profile: DetectorProfile, extra: Record<string, unknown> = {}) {
+  installChrome({
+    [profile.messageType]: {
+      type: profile.messageType,
+      entries: [],
+      vaultLocked: false,
+      suppressInline: false,
+    },
+    ...extra,
+  });
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
+  let cleanups: Array<{ destroy: () => void }> = [];
+
+  function registerDestroy<T extends { destroy: () => void }>(detector: T): T {
+    cleanups.push(detector);
+    return detector;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    cleanups = [];
+    ccClaimedFieldsMock.mockClear();
+  });
+
+  afterEach(() => {
+    for (const d of cleanups) d.destroy();
+    vi.useRealTimers();
+  });
+
+  describe("reveal: a field revealed by an attribute change alone gets the dropdown on focus", () => {
+    type RevealCase = {
+      name: string;
+      attrs: string;
+      styleTag?: string;
+      reveal: (el: HTMLInputElement) => void;
+    };
+
+    const cases: RevealCase[] = [
+      { name: "hidden attribute", attrs: "hidden", reveal: (el) => el.removeAttribute("hidden") },
+      {
+        name: 'style="display:none"',
+        attrs: 'style="display:none"',
+        reveal: (el) => el.removeAttribute("style"),
+      },
+      {
+        name: "class with a <style> rule",
+        attrs: 'class="psso-hidden"',
+        styleTag: "<style>.psso-hidden { display: none; }</style>",
+        reveal: (el) => el.classList.remove("psso-hidden"),
+      },
+      { name: "disabled", attrs: "disabled", reveal: (el) => el.removeAttribute("disabled") },
+      { name: "readonly", attrs: "readonly", reveal: (el) => el.removeAttribute("readonly") },
+      {
+        name: 'type="hidden"',
+        attrs: 'type="hidden"',
+        reveal: (el) => {
+          el.type = "text";
+        },
+      },
+    ];
+
+    for (const profile of detectorProfiles) {
+      describe(profile.label, () => {
+        it.each(cases)("$name: 0 requests before reveal, 1 after reveal + delay", async ({ attrs, styleTag, reveal }) => {
+          document.body.innerHTML = `${styleTag ?? ""}<input id="target" autocomplete="${profile.autocomplete}" ${attrs} />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+          expect(matchRequests(profile.messageType)).toHaveLength(0);
+
+          reveal(input);
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+
+          input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+          expect(matchRequests(profile.messageType)).toHaveLength(1);
+        });
+
+        it("reveal, then focus after one microtask but before the delay: 1 request", async () => {
+          document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" hidden />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          input.removeAttribute("hidden");
+          await flushMicrotasks(); // arms the trailing timer; delay not yet elapsed
+          input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+          expect(matchRequests(profile.messageType)).toHaveLength(1);
+        });
+
+        it("same task: reveal + .focus(), field hidden in the initial markup, no earlier attribute change: 1 request", async () => {
+          document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" hidden />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          input.removeAttribute("hidden");
+          input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+          expect(matchRequests(profile.messageType)).toHaveLength(1);
+        });
+      });
+    }
+  });
+
+  describe("focus matrix", () => {
+    for (const profile of detectorProfiles) {
+      describe(profile.label, () => {
+        function fixture() {
+          document.body.innerHTML = `<input id="member" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}<input id="other" type="text" name="other" />`;
+        }
+
+        it("member with a rescan pending: 0 scans, and the timer stays armed", async () => {
+          fixture();
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const member = document.getElementById("member") as HTMLInputElement;
+
+          member.classList.add("marker"); // qualifying attribute mutation, no visibility change
+          await flushMicrotasks();
+          expect(vi.getTimerCount()).toBe(1);
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          member.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(0);
+          expect(vi.getTimerCount()).toBe(1);
+        });
+
+        it("non-member with a rescan pending: 1 scan", async () => {
+          fixture();
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const member = document.getElementById("member") as HTMLInputElement;
+          const other = document.getElementById("other") as HTMLInputElement;
+
+          member.classList.add("marker");
+          await flushMicrotasks();
+          expect(vi.getTimerCount()).toBe(1);
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          other.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
+        });
+
+        it("non-member with nothing pending or recent: 0 scans", async () => {
+          fixture();
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const other = document.getElementById("other") as HTMLInputElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          other.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(0);
+        });
+
+        it("non-member within ATTR_RECENT_MS after the timer fired: 1 scan", async () => {
+          fixture();
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const member = document.getElementById("member") as HTMLInputElement;
+          const other = document.getElementById("other") as HTMLInputElement;
+
+          member.classList.add("marker");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS); // trailing rescan fires; timer clears
+          vi.advanceTimersByTime(ATTR_RECENT_MS - ATTR_RESCAN_DELAY_MS - 1); // still inside the recent window
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          other.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
+        });
+      });
+    }
+  });
+
+  describe("rate: at most one trailing rescan per ATTR_RESCAN_DELAY_MS window", () => {
+    for (const profile of detectorProfiles) {
+      describe(profile.label, () => {
+        it("mutations spread over several microtasks in one window give exactly 1 scan", async () => {
+          document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          for (let i = 0; i < 5; i++) {
+            input.classList.toggle(`m${i}`);
+            await flushMicrotasks();
+          }
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
+        });
+
+        it("two windows give 2 scans", async () => {
+          document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          input.classList.toggle("w1");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+          input.classList.toggle("w2");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(2);
+        });
+
+        it("one mutation every 50ms for 500ms gives at least 4 scans", async () => {
+          document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          for (let i = 0; i < 10; i++) {
+            input.classList.toggle(`r${i}`);
+            await flushMicrotasks();
+            vi.advanceTimersByTime(50);
+          }
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBeGreaterThanOrEqual(4);
+        });
+
+        it("99ms gives 0 scans, 1ms more gives 1", async () => {
+          document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          input.classList.toggle("boundary");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(99);
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(0);
+
+          vi.advanceTimersByTime(1);
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
+        });
+      });
+    }
+  });
+
+  describe("filter: attribute-only mutations only count when their target is, or contains, an input/select", () => {
+    for (const profile of detectorProfiles) {
+      describe(profile.label, () => {
+        it("a class mutation on an element with no input inside makes 0 scans", async () => {
+          document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}<div id="empty"></div>`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const empty = document.getElementById("empty") as HTMLDivElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          empty.classList.add("marker");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(0);
+        });
+
+        it("the same mutation on a form container (containing an input) makes 1 scan", async () => {
+          document.body.innerHTML = `<form id="form"><input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}</form>`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const form = document.getElementById("form") as HTMLFormElement;
+
+          const before = ccClaimedFieldsMock.mock.calls.length;
+          form.classList.add("marker");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+
+          expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(1);
+        });
+      });
+    }
+  });
+
+  describe("destroy", () => {
+    for (const profile of detectorProfiles) {
+      it(`${profile.label}: 1 timer before destroy(), 0 after`, async () => {
+        document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}`;
+        installProfileChrome(profile);
+        const detector = await profile.init();
+        const input = document.getElementById("target") as HTMLInputElement;
+
+        input.classList.add("marker");
+        await flushMicrotasks();
+        expect(vi.getTimerCount()).toBe(1);
+
+        detector.destroy();
+        expect(vi.getTimerCount()).toBe(0);
+      });
+    }
   });
 });

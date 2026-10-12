@@ -20,7 +20,8 @@ import {
   isDropdownVisible,
   handleDropdownKeydown,
 } from "./ui/suggestion-dropdown";
-import { isFillActive } from "./fill-sequence-lib";
+import { isFillActive, OBSERVED_ATTRIBUTES } from "./fill-sequence-lib";
+import { createRescanScheduler, ATTR_RESCAN_DELAY_MS, ATTR_RECENT_MS } from "./rescan-scheduler";
 
 // ── Combined expiry format detection ──
 
@@ -111,6 +112,13 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
     for (const el of ccClaimedFields(document)) next.add(el);
     ccFields = next;
   };
+
+  // Coalesces attribute-only mutation bursts so a reveal made
+  // without adding nodes still gets picked up, without scanning per mutation.
+  const scheduler = createRescanScheduler(rescan, {
+    delayMs: ATTR_RESCAN_DELAY_MS,
+    recentMs: ATTR_RECENT_MS,
+  });
 
   const requestMatches = (input: HTMLInputElement) => {
     if (!isContextValid()) {
@@ -219,7 +227,14 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
     const input = e.target;
     if (!(input instanceof HTMLInputElement)) return;
     if (!isUsableInput(input)) return;
-    if (!ccFields.has(input)) return;
+    if (!ccFields.has(input)) {
+      // A member focus never scans. A non-member gets one last chance —
+      // drain any mutation not yet delivered, then flush a pending or recent
+      // rescan — before giving up on it.
+      handleMutations(observer.takeRecords());
+      scheduler.flushForFocus();
+      if (!ccFields.has(input)) return;
+    }
     requestMatches(input);
   };
 
@@ -241,10 +256,27 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
     }
   };
 
-  const observer = new MutationObserver((mutations) => {
+  // Named so the focus path can feed it observer.takeRecords() directly.
+  const handleMutations = (mutations: MutationRecord[]): void => {
     if (destroyed) return;
-    if (mutations.some((m) => m.addedNodes.length > 0)) rescan();
-  });
+    if (mutations.some((m) => m.addedNodes.length > 0)) {
+      scheduler.runNow();
+      return;
+    }
+    if (
+      mutations.some((m) => {
+        const target = m.target;
+        return (
+          target instanceof Element &&
+          (target.matches?.("input,select") || target.querySelector?.("input,select"))
+        );
+      })
+    ) {
+      scheduler.noteAttributeChange();
+    }
+  };
+
+  const observer = new MutationObserver(handleMutations);
 
   // F7: re-evaluate the active element after vault unlock / explicit trigger.
   const runtimeMessageHandler = (message: { type?: string }) => {
@@ -273,7 +305,12 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
   document.addEventListener("keydown", keydownHandler, true);
   rescan();
   if (document.body) {
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: [...OBSERVED_ATTRIBUTES],
+    });
   }
 
   const navigationHandler = () => {
@@ -299,6 +336,7 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
     document.removeEventListener("focusout", blurHandler, true);
     document.removeEventListener("keydown", keydownHandler, true);
     observer.disconnect();
+    scheduler.cancel();
     if (typeof navigation !== "undefined") {
       navigation.removeEventListener("navigate", navigationHandler);
     }

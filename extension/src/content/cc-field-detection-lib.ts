@@ -161,17 +161,11 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
   if (!cvv && cardNumber) {
     cvv = findConfNumCvvInForm(visibleFields, cardNumber);
   }
-  if (!expiryMonth && !expiryCombined) {
-    // Check for combined expiry first
-    const combined = findFieldByRegex(visibleFields, CC_EXPIRY_RE, CC_EXPIRY_JA_RE, isUsableField);
-    if (combined && combined instanceof HTMLInputElement) {
-      expiryCombined = combined;
-    } else {
-      expiryMonth = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryMonth, CC_EXPIRY_MONTH_JA_RE, isUsableField);
-    }
-  }
-  if (!expiryYear && !expiryCombined) {
-    expiryYear = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryYear, CC_EXPIRY_YEAR_JA_RE, isUsableField);
+  if (cardNumber && !expiryCombined && !(expiryMonth && expiryYear)) {
+    const picked = pickExpiry(visibleFields, cardNumber, { month: expiryMonth, year: expiryYear });
+    expiryMonth = picked.month;
+    expiryYear = picked.year;
+    expiryCombined = picked.combined;
   }
 
   // Must have at least card number to consider this a CC form
@@ -188,6 +182,213 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
     cvv,
     expiryFormat: hasCombined ? "combined" : "split",
   };
+}
+
+// ── Expiry picks ──
+//
+// Every expiry role comes from the card number's own form (or, for a form-less
+// card number, from form-less fields), ranked by proximity to the field it pairs
+// with rather than taken as the page's first match: a passport, birth-date or
+// coupon field elsewhere in the page or form must not receive the card's expiry.
+
+type ExpiryPart = "month" | "year";
+
+const otherPart = (part: ExpiryPart): ExpiryPart => (part === "month" ? "year" : "month");
+
+// Bare month/year tokens, delimiter-aware because "_" is a word character
+// ("expiry_mm" must match, "exp_mmyy" must not).
+const MONTH_TOKEN_RE = /(?:^|[^a-z0-9])(?:month|mm)(?![a-z0-9])/;
+const YEAR_TOKEN_RE = /(?:^|[^a-z0-9])(?:years?|yy|yyyy|yr)(?![a-z0-9])/;
+const CC_EXP_NAME_RE = /cc.?exp/;
+
+// A token alone claims a part only on a hint made of expiry vocabulary, so a
+// dated field about something else (birth, arrival, start...) never takes a card
+// part through a token. Words of two characters or fewer and words with digits
+// are neutral ("ey", "y2"); the strict patterns are exempt.
+const EXPIRY_WORDS = new Set([
+  "exp", "expiry", "expire", "expires", "expiration", "card", "valid", "thru", "date",
+  "month", "year", "years", "yyyy",
+  // Decoration that names no subject.
+  "required", "optional", "please", "enter", "select", "your", "the",
+]);
+// A bracketed field name ("order[payment][expiry_mm]") is judged by its last segment.
+const BRACKET_NAME_RE = /[a-z0-9_-]+(?:\[[^\]\s]*\])*\[([^\]\s]*)\]/g;
+const JA_EXPIRY_VOCABULARY_RE = /有効期限|[月年（）()]/g;
+const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff]/;
+
+function isExpiryVocabulary(hint: string): boolean {
+  const rest = hint.replace(BRACKET_NAME_RE, "$1").replace(JA_EXPIRY_VOCABULARY_RE, "");
+  if (CJK_RE.test(rest)) return false;
+  return rest
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2 && !/\d/.test(word))
+    .every((word) => EXPIRY_WORDS.has(word));
+}
+
+function strictPart(hint: string, part: ExpiryPart): boolean {
+  return part === "month"
+    ? CC_DETECT_RE.expiryMonth.test(hint) || CC_EXPIRY_MONTH_JA_RE.test(hint)
+    : CC_DETECT_RE.expiryYear.test(hint) || CC_EXPIRY_YEAR_JA_RE.test(hint);
+}
+
+function rawTokenPart(hint: string, part: ExpiryPart): boolean {
+  return (part === "month" ? MONTH_TOKEN_RE : YEAR_TOKEN_RE).test(hint);
+}
+
+function hasExpiryContext(hint: string): boolean {
+  return (
+    CC_EXPIRY_RE.test(hint) ||
+    CC_EXPIRY_JA_RE.test(hint) ||
+    CC_EXP_NAME_RE.test(hint) ||
+    CC_DETECT_RE.expiryMonth.test(hint) ||
+    CC_DETECT_RE.expiryYear.test(hint)
+  );
+}
+
+type PartFlags = Record<ExpiryPart, boolean>;
+
+interface ExpiryCandidate {
+  field: FormField;
+  index: number;
+  context: boolean;
+  /** Today's patterns. */
+  strict: PartFlags;
+  /** Strict, or a token on an expiry-vocabulary hint. */
+  loose: PartFlags;
+  /** Loose, with the token counted only alongside expiry context. */
+  names: PartFlags;
+  /** Strict, or any token: whether the hint mentions the part at all. */
+  mentions: PartFlags;
+}
+
+function describeCandidate(field: FormField, index: number): ExpiryCandidate {
+  const hint = getHintString(field);
+  const context = hasExpiryContext(hint);
+  const vocabulary = isExpiryVocabulary(hint);
+  const flags = (fn: (part: ExpiryPart) => boolean): PartFlags => ({ month: fn("month"), year: fn("year") });
+  const strict = flags((part) => strictPart(hint, part));
+  const token = flags((part) => rawTokenPart(hint, part));
+  return {
+    field,
+    index,
+    context,
+    strict,
+    loose: flags((part) => strict[part] || (token[part] && vocabulary)),
+    names: flags((part) => strict[part] || (token[part] && vocabulary && context)),
+    mentions: flags((part) => strict[part] || token[part]),
+  };
+}
+
+function commonAncestorDepth(a: Element, b: Element): number {
+  for (let ancestor: Element | null = a; ancestor; ancestor = ancestor.parentElement) {
+    if (!ancestor.contains(b)) continue;
+    let depth = 0;
+    for (let el: Element | null = ancestor; el; el = el.parentElement) depth++;
+    return depth;
+  }
+  return 0;
+}
+
+function compareKeys(a: number[], b: number[]): number {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+interface ExpiryPicks {
+  month: FormField | null;
+  year: FormField | null;
+  combined: HTMLInputElement | null;
+}
+
+/**
+ * Pick the expiry roles autocomplete left open. In order:
+ * 1. the context month and year nearest the card number (split), unless a
+ *    combined input sits nearer than the pair;
+ * 2. the context input naming both parts or neither (combined);
+ * 3. for one found part, its missing partner only from the field right beside
+ *    it, usual side first (a year after its month);
+ * 4. with nothing found, today's patterns, nearest the card number.
+ * A field mentioning both parts (生年月日, YYYY/MM/DD) is never a single part.
+ */
+function pickExpiry(
+  fields: FormField[],
+  cardNumber: HTMLInputElement,
+  decided: { month: FormField | null; year: FormField | null },
+): ExpiryPicks {
+  // `fields` lists inputs before selects; the neighbour rule needs document order.
+  const ordered = fields
+    .filter((f) => f === cardNumber || (f.form === cardNumber.form && isUsableField(f)))
+    .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  const indexOf = new Map(ordered.map((f, i) => [f, i]));
+  const pool = ordered
+    .map((f, i) => [f, i] as const)
+    .filter(([f]) => f !== cardNumber)
+    .map(([f, i]) => describeCandidate(f, i));
+
+  const proximity = (anchor: FormField, field: FormField): number[] => {
+    const anchorIndex = indexOf.get(anchor) ?? 0;
+    const fieldIndex = indexOf.get(field) ?? 0;
+    return [
+      -commonAncestorDepth(anchor, field),
+      fieldIndex > anchorIndex ? 0 : 1,
+      Math.abs(fieldIndex - anchorIndex),
+    ];
+  };
+  const nearest = (anchor: FormField, candidates: ExpiryCandidate[]): FormField | null => {
+    let best: ExpiryCandidate | null = null;
+    for (const c of candidates) {
+      if (!best || compareKeys(proximity(anchor, c.field), proximity(anchor, best.field)) < 0) best = c;
+    }
+    return best?.field ?? null;
+  };
+  const singlePart = (part: ExpiryPart, by: "strict" | "loose" | "names") =>
+    pool.filter((c) => c[by][part] && !c.mentions[otherPart(part)]);
+
+  let month = decided.month ?? nearest(cardNumber, singlePart("month", "names").filter((c) => c.context));
+  let year = decided.year ?? nearest(cardNumber, singlePart("year", "names").filter((c) => c.context));
+  const combined = nearest(
+    cardNumber,
+    pool.filter((c) => c.field instanceof HTMLInputElement && c.context && c.mentions.month === c.mentions.year),
+  ) as HTMLInputElement | null;
+
+  if (month && year) {
+    // A passport month/year later in the form must not beat the card's own
+    // combined field next to the card number.
+    const pairKey = [proximity(cardNumber, month), proximity(cardNumber, year)].sort(compareKeys)[0];
+    const fromAutocomplete = decided.month !== null || decided.year !== null;
+    if (combined && !fromAutocomplete && compareKeys(proximity(cardNumber, combined), pairKey) < 0) {
+      return { month: null, year: null, combined };
+    }
+    return { month, year, combined: null };
+  }
+  if (!month && !year) {
+    if (combined) return { month: null, year: null, combined };
+    return {
+      month: nearest(cardNumber, singlePart("month", "strict")),
+      year: nearest(cardNumber, singlePart("year", "strict")),
+      combined: null,
+    };
+  }
+
+  const anchor = (month ?? year) as FormField;
+  const missing: ExpiryPart = month ? "year" : "month";
+  // An anchor outside the card number's form has no neighbour in the pool.
+  const anchorIndex = indexOf.get(anchor);
+  const sides =
+    anchorIndex === undefined
+      ? []
+      : missing === "year"
+        ? [anchorIndex + 1, anchorIndex - 1]
+        : [anchorIndex - 1, anchorIndex + 1];
+  const partner =
+    sides
+      .map((index) => pool.find((c) => c.index === index))
+      .find((c) => c !== undefined && c.loose[missing] && !c.mentions[otherPart(missing)])?.field ?? null;
+  if (missing === "year") year = partner;
+  else month = partner;
+  return { month, year, combined: null };
 }
 
 /** Every field detectCreditCardFields claims, as a membership set. */
