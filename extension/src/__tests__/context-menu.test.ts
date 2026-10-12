@@ -533,7 +533,7 @@ describe("context-menu", () => {
       { id: "I1", title: "Ident", entryType: "IDENTITY" } as DecryptedEntry,
     ];
 
-    it("runs both rebuilds to completion without interleaving their create batches", async () => {
+    it("abandons the first rebuild and completes the second without interleaving their create batches", async () => {
       let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
       const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
       let call = 0;
@@ -809,11 +809,14 @@ describe("context-menu", () => {
       let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
       const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
       const isVaultUnlocked = vi.fn().mockReturnValue(true);
-      deps = createDeps({ getCachedSnapshot: vi.fn(() => gate), isVaultUnlocked });
+      const getCachedSnapshot = vi.fn(() => gate);
+      deps = createDeps({ getCachedSnapshot, isVaultUnlocked });
       initContextMenu(deps);
 
       updateContextMenuForTab(1, "https://github.com/login");
       await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      // The build is parked on the snapshot, so the lock lands inside the await.
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(1);
 
       // The vault locks while the snapshot is still in flight — no
       // invalidateContextMenu() call, so this is the lock re-check alone.
@@ -827,11 +830,13 @@ describe("context-menu", () => {
     it("abandons a build when invalidateContextMenu claims a newer generation while the vault stays unlocked (generation claim in isolation, R3-T4)", async () => {
       let release: (v: { entries: DecryptedEntry[]; version: number }) => void = () => {};
       const gate = new Promise<{ entries: DecryptedEntry[]; version: number }>((r) => { release = r; });
-      deps = createDeps({ getCachedSnapshot: vi.fn(() => gate), getCacheVersion: vi.fn().mockReturnValue(1) });
+      const getCachedSnapshot = vi.fn(() => gate);
+      deps = createDeps({ getCachedSnapshot, getCacheVersion: vi.fn().mockReturnValue(1) });
       initContextMenu(deps);
 
       updateContextMenuForTab(1, "https://github.com/login");
       await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 10);
+      expect(getCachedSnapshot).toHaveBeenCalledTimes(1);
 
       // tabs.query resolving to [] means invalidateContextMenu's own
       // refreshContextMenu schedules nothing further — this isolates the

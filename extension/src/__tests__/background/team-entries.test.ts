@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
+import { DEBOUNCE_MS } from "../../background/context-menu";
 
 const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
@@ -609,14 +610,14 @@ describe("team entries in background", () => {
       expect(team).toHaveLength(0);
     });
 
-    // #881 C2 acceptance 7: teamId is part of the menu view compared by
+    // teamId is part of the menu view compared by
     // setCachedEntries, but the parametrized case for the other fields lives
     // in background.test.ts (no team harness there) — this is the one case
     // that needs this file's team fetch chain.
     it("rebuilds the context menu when the same entry's teamId changes", async () => {
       await unlockVault();
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, DEBOUNCE_MS * 2));
       chromeMock!.contextMenus.removeAll.mockClear();
 
       // Same team-pw-1 entry, same team passwords list, but the teams list
@@ -652,9 +653,8 @@ describe("team entries in background", () => {
         entries: Array<{ id: string; teamId?: string }>;
       };
       expect(res.entries.find((e) => e.id === "team-pw-1")?.teamId).toBe("team-2");
-      await new Promise((r) => setTimeout(r, 300));
 
-      expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled();
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
     });
   });
 

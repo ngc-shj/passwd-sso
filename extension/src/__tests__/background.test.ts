@@ -13,6 +13,7 @@ import {
 import { DISCONNECT_REASON } from "../lib/disconnect-reason";
 import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../lib/cc-patterns";
 import { BUNDLE_RESEND_ATTEMPTS } from "../background/content-bundle";
+import { DEBOUNCE_MS } from "../background/context-menu";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
 import {
@@ -315,6 +316,9 @@ beforeEach(() => {
   keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
 });
 
+
+// Long enough for the context menu's debounced rebuild and its async chain to run.
+const settleMenu = () => new Promise((r) => setTimeout(r, DEBOUNCE_MS * 2));
 describe("background message flow", () => {
   beforeEach(async () => {
     vi.resetModules();
@@ -814,14 +818,14 @@ describe("background message flow", () => {
     it("does not rebuild on an identical FETCH_PASSWORDS response", async () => {
       applyToken("t", Date.now() + 60_000, "");
       await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
       chromeMock!.contextMenus.removeAll.mockClear();
 
       await sendMessage({ type: "FETCH_PASSWORDS" });
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
 
       expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
     });
@@ -836,26 +840,25 @@ describe("background message flow", () => {
     ])("rebuilds when %s changes", async (_field, rawEntry, overview) => {
       applyToken("t", Date.now() + 60_000, "");
       await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
       chromeMock!.contextMenus.removeAll.mockClear();
 
       setDecryptedPlaintext(CHANGED_OVERVIEW_CIPHERTEXT, JSON.stringify(overview));
       stubPasswordsFetch(rawEntry);
 
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, 300));
 
-      expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled();
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
     });
 
     it("creates a menu item for a new entry returned by FETCH_PASSWORDS, after the UNLOCK cascade settles", async () => {
       applyToken("t", Date.now() + 60_000, "");
       await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
       chromeMock!.contextMenus.create.mockClear();
 
       setDecryptedPlaintext("44", JSON.stringify({ title: "New Site", username: "carol", urlHost: "newsite.example" }));
@@ -877,18 +880,19 @@ describe("background message flow", () => {
       );
 
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, 300));
 
-      const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
-      expect(ids).toContain("psso-login-pw-2");
+      await vi.waitFor(() => {
+        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+        expect(ids).toContain("psso-login-pw-2");
+      });
     });
 
     it("schedules a rebuild through invalidateCache from a successful SAVE_LOGIN, not the lock path", async () => {
       applyToken("t", Date.now() + 60_000, "");
       await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
       await sendMessage({ type: "FETCH_PASSWORDS" });
-      await new Promise((r) => setTimeout(r, 300));
+      await settleMenu();
       chromeMock!.contextMenus.removeAll.mockClear();
       chromeMock!.contextMenus.create.mockClear();
 
@@ -898,10 +902,8 @@ describe("background message flow", () => {
       );
       expect(res).toEqual({ type: "SAVE_LOGIN", ok: true, error: undefined });
 
-      await new Promise((r) => setTimeout(r, 300));
-
-      // A rebuild was scheduled (FR4/#881)...
-      expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled();
+      // A rebuild was scheduled...
+      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
       // ...and it is the normal rebuild, not the "vault locked" teardown —
       // invalidateCache alone must not touch encryptionKey.
       const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);

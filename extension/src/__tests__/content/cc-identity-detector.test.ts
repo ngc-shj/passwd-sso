@@ -723,7 +723,7 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
       it(`${profile.label}: 1 timer before destroy(), 0 after`, async () => {
         document.body.innerHTML = `<input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}`;
         installProfileChrome(profile);
-        const detector = await profile.init();
+        const detector = registerDestroy(await profile.init());
         const input = document.getElementById("target") as HTMLInputElement;
 
         input.classList.add("marker");

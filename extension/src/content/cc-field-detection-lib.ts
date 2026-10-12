@@ -188,8 +188,10 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
 //
 // Every expiry role comes from the card number's own form (or, for a form-less
 // card number, from form-less fields), ranked by proximity to the field it pairs
-// with rather than taken as the page's first match: a passport, birth-date or
-// coupon field elsewhere in the page or form must not receive the card's expiry.
+// with rather than taken as the page's first match, so a dated field elsewhere in
+// the page does not receive the card's expiry. Within the form, a bare month/year
+// token claims nothing on a non-expiry hint; the strict patterns match as before
+// (a "Passport expiry month" in the card's own form is still a candidate).
 
 type ExpiryPart = "month" | "year";
 
