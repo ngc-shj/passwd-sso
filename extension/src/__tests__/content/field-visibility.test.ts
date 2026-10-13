@@ -492,6 +492,77 @@ describe("isFieldVisible — R4: the containing-block chain", () => {
     ).toBe(false);
   });
 
+  // Fail-safe: any containing-block trigger off its initial value keeps the
+  // ancestor's clip, for an absolute and for a fixed field.
+  it.each([
+    ["translate", "translate:1px 0px"],
+    ["rotate", "rotate:1deg"],
+    ["scale", "scale:2"],
+    ["transform-style", "transform-style:preserve-3d"],
+    ["container-type", "container-type:inline-size"],
+    ["content-visibility", "content-visibility:auto"],
+    ["will-change (any value)", "will-change:opacity"],
+  ])("denies an absolute field under a static zero-size clip that %s makes its containing block", (_label, extra) => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="${CLIP}; position:static; ${extra}" data-rect="0,0,0,0"><input id="f" style="position:absolute"></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    ["translate", "translate:1px 0px"],
+    ["container-type", "container-type:inline-size"],
+  ])("denies a fixed field under a zero-size clip that %s makes its containing block", (_label, extra) => {
+    expect(
+      isFieldVisible(
+        field(`<div style="${CLIP}; ${extra}" data-rect="0,0,0,0"><input id="f" style="position:fixed"></div>`),
+      ),
+    ).toBe(false);
+  });
+
+  // An inline box is skipped for clipping, never for the containing-block
+  // transition: a positioned span still ends an absolute field's escape.
+  it("denies an absolute field whose containing block is an inline position:relative span under a static clip", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="${CLIP}" data-rect="0,0,0,0"><span style="position:relative"><input id="f" style="position:absolute"></span></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows an absolute field under a static span and a static zero-size clip", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="${CLIP}" data-rect="0,0,0,0"><span><input id="f" style="position:absolute"></span></div>`,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("denies a fixed field whose containing block is an inline span with a filter under a clip", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="${CLIP}" data-rect="0,0,0,0"><span style="filter:blur(0px)"><input id="f" style="position:fixed"></span></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows a fixed field under a plain inline span and a zero-size clip", () => {
+    expect(
+      isFieldVisible(
+        field(`<div style="${CLIP}" data-rect="0,0,0,0"><span><input id="f" style="position:fixed"></span></div>`),
+      ),
+    ).toBe(true);
+  });
+
   it("denies an in-flow field under the static zero-size clip", () => {
     expect(
       isFieldVisible(

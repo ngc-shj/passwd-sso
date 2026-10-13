@@ -545,6 +545,11 @@ describe("directAutofill twin: field visibility (C1)", () => {
     { name: "R4 deny: fixed field under a zero-size clip with a transform", last: `<div style="${CLIP}; transform:translateX(0px)" data-rect="0,0,0,0">${pwLast('style="position:fixed"')}</div>`, allowed: false },
     { name: "R4 deny: fixed field under a zero-size clip with contain:paint", last: `<div style="${CLIP}; contain:paint" data-rect="0,0,0,0">${pwLast('style="position:fixed"')}</div>`, allowed: false },
     { name: "R4 allow: absolute field under a static zero-size clip", last: `<div style="${CLIP}; position:static" data-rect="0,0,0,0">${pwLast('style="position:absolute"')}</div>`, allowed: true },
+    { name: "R4 deny: absolute field under a static clip with translate (containing block)", last: `<div style="${CLIP}; position:static; translate:1px 0px" data-rect="0,0,0,0">${pwLast('style="position:absolute"')}</div>`, allowed: false },
+    { name: "R4 deny: absolute field under a static clip with container-type", last: `<div style="${CLIP}; position:static; container-type:inline-size" data-rect="0,0,0,0">${pwLast('style="position:absolute"')}</div>`, allowed: false },
+    { name: "R4 deny: fixed field under a clip with will-change (any value)", last: `<div style="${CLIP}; will-change:opacity" data-rect="0,0,0,0">${pwLast('style="position:fixed"')}</div>`, allowed: false },
+    { name: "R4 deny: absolute field in an inline position:relative span under a static clip", last: `<div style="${CLIP}" data-rect="0,0,0,0"><span style="position:relative">${pwLast('style="position:absolute"')}</span></div>`, allowed: false },
+    { name: "R4 allow: absolute field in a static span under a static clip", last: `<div style="${CLIP}" data-rect="0,0,0,0"><span>${pwLast('style="position:absolute"')}</span></div>`, allowed: true },
     { name: "R4 deny: absolute field under a position:relative zero-size clip", last: `<div style="${CLIP}; position:relative" data-rect="0,0,0,0">${pwLast('style="position:absolute"')}</div>`, allowed: false },
     // an inline ancestor clips nothing
     { name: "R4 allow: inline <label> with overflow-y:auto and a zero client size", last: `<label style="overflow-y:auto" data-rect="0,0,0,0">${pwLast()}</label>`, allowed: true },

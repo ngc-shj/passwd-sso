@@ -96,7 +96,6 @@ function parentOf(el: Element): Element | null {
   return root instanceof ShadowRoot ? root.host : null;
 }
 
-const isSet = (value: string) => value !== "" && value !== "none";
 
 const FLOW = 0;
 const ABSOLUTE = 1;
@@ -108,16 +107,39 @@ function positionMode(style: CSSStyleDeclaration): number {
   return FLOW;
 }
 
-/** Whether an ancestor is the containing block of its fixed-position descendants. */
+/**
+ * Whether an ancestor may be the containing block of its fixed-position (and
+ * so also absolute) descendants. Fail-safe: any of these properties off its
+ * initial value counts, including values the list does not know, because
+ * counting an ancestor as a containing block only keeps its clip applied.
+ */
 function containsFixed(style: CSSStyleDeclaration): boolean {
+  const offInitial = (property: string, ...initial: string[]) => {
+    const value = style.getPropertyValue(property).trim();
+    return value !== "" && !initial.includes(value);
+  };
   return (
-    isSet(style.getPropertyValue("transform")) ||
-    isSet(style.getPropertyValue("perspective")) ||
-    isSet(style.getPropertyValue("filter")) ||
-    isSet(style.getPropertyValue("backdrop-filter")) ||
-    /\b(paint|layout|strict|content)\b/.test(style.getPropertyValue("contain")) ||
-    /\b(transform|perspective|filter)\b/.test(style.getPropertyValue("will-change"))
+    offInitial("transform", "none") ||
+    offInitial("translate", "none") ||
+    offInitial("rotate", "none") ||
+    offInitial("scale", "none") ||
+    offInitial("perspective", "none") ||
+    offInitial("filter", "none") ||
+    offInitial("backdrop-filter", "none") ||
+    offInitial("offset-path", "none") ||
+    offInitial("transform-style", "flat") ||
+    offInitial("contain", "none") ||
+    offInitial("content-visibility", "visible") ||
+    offInitial("container-type", "normal") ||
+    offInitial("will-change", "auto")
   );
+}
+
+/** Whether an ancestor ends the current escape: it is the escaping box's containing block. */
+function endsEscape(mode: number, style: CSSStyleDeclaration): boolean {
+  if (mode === FIXED) return containsFixed(style);
+  if (mode === ABSOLUTE) return style.position !== "static" || containsFixed(style);
+  return true;
 }
 
 /**
@@ -195,9 +217,14 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
     const style = styleOf(node, cache);
     // A box-less ancestor, or an inline one (overflow does not apply to inline
     // boxes, and their client size is 0), clips nothing.
-    if (style.display === "contents" || style.display === "inline") continue;
-    if (mode === FIXED && !containsFixed(style)) continue;
-    if (mode === ABSOLUTE && style.position === "static" && !containsFixed(style)) continue;
+    // display:contents has no box: it neither clips nor contains.
+    if (style.display === "contents") continue;
+    // Not the escaping box's containing block: its clip does not apply.
+    if (!endsEscape(mode, style)) continue;
+    mode = positionMode(style);
+    // An inline box can still be a containing block (above), but overflow does
+    // not apply to it, and its client size is 0: it clips nothing.
+    if (style.display === "inline") continue;
     const box = rectOf(node, cache);
 
     const x = axisClip(style, "x");
@@ -235,7 +262,6 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
       bottom = top + span;
     }
     if (right - left < MIN_VISIBLE_PX || bottom - top < MIN_VISIBLE_PX) return false;
-    mode = positionMode(style);
   }
 
   const view = doc.defaultView;

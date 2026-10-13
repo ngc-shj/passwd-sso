@@ -93,14 +93,29 @@ export async function directAutofill(
     if (overflow === "scroll" || overflow === "auto") return 2;
     return 0;
   };
-  const isSet = (value: string) => value !== "" && value !== "none";
-  const containsFixed = (style: CSSStyleDeclaration) =>
-    isSet(style.getPropertyValue("transform")) ||
-    isSet(style.getPropertyValue("perspective")) ||
-    isSet(style.getPropertyValue("filter")) ||
-    isSet(style.getPropertyValue("backdrop-filter")) ||
-    /\b(paint|layout|strict|content)\b/.test(style.getPropertyValue("contain")) ||
-    /\b(transform|perspective|filter)\b/.test(style.getPropertyValue("will-change"));
+  // Mirror of content containsFixed: fail-safe, any listed property off its
+  // initial value counts as a containing block.
+  const containsFixed = (style: CSSStyleDeclaration) => {
+    const offInitial = (property: string, ...initial: string[]) => {
+      const value = style.getPropertyValue(property).trim();
+      return value !== "" && !initial.includes(value);
+    };
+    return (
+      offInitial("transform", "none") ||
+      offInitial("translate", "none") ||
+      offInitial("rotate", "none") ||
+      offInitial("scale", "none") ||
+      offInitial("perspective", "none") ||
+      offInitial("filter", "none") ||
+      offInitial("backdrop-filter", "none") ||
+      offInitial("offset-path", "none") ||
+      offInitial("transform-style", "flat") ||
+      offInitial("contain", "none") ||
+      offInitial("content-visibility", "visible") ||
+      offInitial("container-type", "normal") ||
+      offInitial("will-change", "auto")
+    );
+  };
   // 0 in flow, 1 absolute, 2 fixed
   const positionMode = (style: CSSStyleDeclaration) =>
     style.position === "fixed" ? 2 : style.position === "absolute" ? 1 : 0;
@@ -115,9 +130,16 @@ export async function directAutofill(
     for (let node = parentOf(el); node; node = parentOf(node)) {
       if (node === document.body || node === document.documentElement) break;
       const style = getComputedStyle(node);
-      if (style.display === "contents" || style.display === "inline") continue;
-      if (mode === 2 && !containsFixed(style)) continue;
-      if (mode === 1 && style.position === "static" && !containsFixed(style)) continue;
+      if (style.display === "contents") continue;
+      const endsEscape =
+        mode === 2
+          ? containsFixed(style)
+          : mode === 1
+            ? style.position !== "static" || containsFixed(style)
+            : true;
+      if (!endsEscape) continue;
+      mode = positionMode(style);
+      if (style.display === "inline") continue;
       const box = node.getBoundingClientRect();
       const x = axisClip(style, "x");
       if (x === 1) {
@@ -152,7 +174,6 @@ export async function directAutofill(
         bottom = top + span;
       }
       if (right - left < MIN_VISIBLE_PX || bottom - top < MIN_VISIBLE_PX) return false;
-      mode = positionMode(style);
     }
     if (mode === 2) {
       return right > 0 && bottom > 0 && left < window.innerWidth && top < window.innerHeight;
