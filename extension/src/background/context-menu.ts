@@ -418,7 +418,11 @@ export function handleContextMenuClick(
             { kind: AUTOFILL_REQUEST_KIND.CONTEXT_MENU, frameId: info.frameId ?? 0, senderHost: host },
             teamId,
           );
-          if (!result.ok) deps!.notifyFillFailure(result.error ?? "FILL_FAILED");
+          // A lock during the fill is shown by the locked badge already; a
+          // per-tab failure badge would cover it and outlive the lock.
+          if (!result.ok && result.error !== "VAULT_LOCKED") {
+            deps!.notifyFillFailure(result.error ?? "FILL_FAILED");
+          }
         } catch {
           deps!.notifyFillFailure("FILL_FAILED");
         }

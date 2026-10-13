@@ -13,6 +13,7 @@ import { readApiErrorBody } from "../lib/api-error-body";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { EXT_ENTRY_TYPE } from "../lib/constants";
 import type { DecryptedEntry } from "../types/messages";
+import { assertVaultEpoch, currentVaultEpoch } from "./vault-epoch";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -25,7 +26,8 @@ export interface LoginSaveDeps {
   getCachedEntries: () => Promise<DecryptedEntry[]>;
   isHostMatch: (entryHost: string, tabHost: string) => boolean;
   extractHost: (url: string) => string | null;
-  swFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  /** `opts.epoch`: asserted by swFetch immediately before each send. */
+  swFetch: (path: string, init?: RequestInit, opts?: { epoch?: number }) => Promise<Response>;
   invalidateCache: () => void;
 }
 
@@ -56,6 +58,7 @@ export async function handleLoginDetected(
     // Vault locked — can't compare
     return { action: "none" };
   }
+  const epoch = currentVaultEpoch();
 
   const host = deps.extractHost(url);
   if (!host) return { action: "none" };
@@ -76,6 +79,9 @@ export async function handleLoginDetected(
     );
 
     if (!match) {
+      // A save offer from a vault that has since locked would compare against
+      // nothing; offer nothing.
+      assertVaultEpoch(epoch);
       return { action: "save" };
     }
 
@@ -102,7 +108,9 @@ export async function handleLoginDetected(
       return { action: "none" };
     }
 
-    // Different password — offer update
+    // Different password — offer update. The title is vault data: only for the
+    // vault state the comparison ran in.
+    assertVaultEpoch(epoch);
     return {
       action: "update",
       existingEntryId: match.id,
@@ -128,6 +136,8 @@ export async function handleSaveLogin(
   if (!encKey || !userId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
+  const epoch = currentVaultEpoch();
+  const keyVersion = deps.getKeyVersion();
 
   let host: string;
   try {
@@ -157,17 +167,23 @@ export async function handleSaveLogin(
     const encryptedBlob = await encryptData(fullBlob, encKey, blobAad);
     const encryptedOverview = await encryptData(overviewBlob, encKey, overviewAad);
 
-    const res = await deps.swFetch(EXT_API_PATH.PASSWORDS, {
-      method: "POST",
-      body: JSON.stringify({
-        id: entryId,
-        encryptedBlob,
-        encryptedOverview,
-        aadVersion: 1,
-        keyVersion: deps.getKeyVersion(),
-        entryType: EXT_ENTRY_TYPE.LOGIN,
-      }),
-    });
+    // The body is encrypted for this vault state; swFetch refuses to send it
+    // after a lock or under another connection.
+    const res = await deps.swFetch(
+      EXT_API_PATH.PASSWORDS,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          id: entryId,
+          encryptedBlob,
+          encryptedOverview,
+          aadVersion: 1,
+          keyVersion,
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        }),
+      },
+      { epoch },
+    );
 
     if (!res.ok) {
       const body = await readApiErrorBody(res);
@@ -198,6 +214,8 @@ export async function handleUpdateLogin(
   if (!encKey || !userId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
+  const epoch = currentVaultEpoch();
+  const keyVersion = deps.getKeyVersion();
 
   try {
     // Fetch existing entry
@@ -236,15 +254,19 @@ export async function handleUpdateLogin(
     const encryptedBlob = await encryptData(JSON.stringify(blob), encKey, blobAad);
     const encryptedOverview = await encryptData(overviewPlain, encKey, overviewAad);
 
-    const putRes = await deps.swFetch(extApiPath.passwordById(entryId), {
-      method: "PUT",
-      body: JSON.stringify({
-        encryptedBlob,
-        encryptedOverview,
-        aadVersion: data.aadVersion ?? 1,
-        keyVersion: deps.getKeyVersion(),
-      }),
-    });
+    const putRes = await deps.swFetch(
+      extApiPath.passwordById(entryId),
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          encryptedBlob,
+          encryptedOverview,
+          aadVersion: data.aadVersion ?? 1,
+          keyVersion,
+        }),
+      },
+      { epoch },
+    );
 
     if (!putRes.ok) {
       const body = await readApiErrorBody(putRes);

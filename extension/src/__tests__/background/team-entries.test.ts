@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
+import { holdDecrypt, holdFetch, holdNextCall } from "../helpers/deferred";
+import { DEBOUNCE_MS } from "../../background/context-menu";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
 
@@ -882,6 +884,335 @@ describe("team entries in background", () => {
       expect(ids).toContain("pw-login");
       expect(ids).toContain("pw-card");
       expect(ids).toContain("pw-id");
+    });
+  });
+  // ── #885: team keys and team entries across a lock ──
+  // Holds are one-shot and armed after the unlock settled. The active tab is
+  // URL-less here, so no context-menu rebuild reads entries (or caches a team
+  // key) behind a test's back.
+  describe("vault epoch (#885)", () => {
+    beforeEach(() => {
+      chromeMock!.tabs.query.mockResolvedValue([{ id: 1, url: undefined }]);
+    });
+
+    const settle = () => new Promise((r) => setTimeout(r, DEBOUNCE_MS * 2));
+    const fetchCalls = (pathPart: string) =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes(pathPart)).length;
+    const memberKeyFetches = () => fetchCalls("/member-key");
+    const unlockAgain = () => sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    const lock = () => sendMessage({ type: "LOCK_VAULT" });
+    const teamEntryIds = (res: unknown) =>
+      ((res as { entries: Array<{ id: string; teamId?: string }> | null }).entries ?? [])
+        .filter((e) => e.teamId)
+        .map((e) => e.id);
+
+    async function unlockAndSettle(): Promise<void> {
+      await unlockVault();
+      await vi.waitFor(() => expect(fetchCalls(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)).toBeGreaterThan(0));
+      await settle();
+    }
+
+    // Serve unlock data without the ECDH fields from now on.
+    function serveUnlockWithoutEcdh(): void {
+      const base = fetchMock.getMockImplementation() as (url: string) => Promise<unknown>;
+      fetchMock.mockImplementation(async (url: string) =>
+        url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)
+          ? { ok: true, json: async () => VAULT_UNLOCK_DATA_NO_ECDH }
+          : base(url),
+      );
+    }
+
+    // A lock, or a lock and a fresh unlock, before the parked operation
+    // resumes. Only the second tells an epoch check from an "is the vault
+    // unlocked now?" check: after it the vault is unlocked, just not for this
+    // operation.
+    const INTERRUPTIONS: Array<[string, () => Promise<void>]> = [
+      ["a lock", async () => {
+        await lock();
+      }],
+      ["a lock and re-unlock", async () => {
+        await lock();
+        expect(await unlockAgain()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      }],
+    ];
+
+    // A2: fetchAllTeamEntries
+    it.each(INTERRUPTIONS)("FETCH_PASSWORDS answers VAULT_LOCKED after %s during a team overview decrypt (A2)", async (_name, interrupt) => {
+      await unlockAndSettle();
+      const hold = holdDecrypt(cryptoMocks.decryptData, "enc-overview");
+      const pending = sendMessage({ type: "FETCH_PASSWORDS" });
+      await hold.reached;
+      await interrupt();
+      hold.release();
+
+      expect(await pending).toEqual({ type: "FETCH_PASSWORDS", entries: null, error: "VAULT_LOCKED" });
+    });
+
+    it("positive control (A2): released without a lock it answers the team entry", async () => {
+      await unlockAndSettle();
+      const hold = holdDecrypt(cryptoMocks.decryptData, "enc-overview");
+      const pending = sendMessage({ type: "FETCH_PASSWORDS" });
+      await hold.reached;
+      hold.release();
+
+      expect(teamEntryIds(await pending)).toEqual(["team-pw-1"]);
+    });
+
+    // A3: getTeamEncryptionKey. A key derived across a lock and re-unlock must
+    // not land in the cache: the next fetch would reuse it without asking the
+    // server for the member key.
+    it("a lock during the team-key derive caches no key the next unlock reuses (A3)", async () => {
+      await unlockAndSettle();
+      const hold = holdNextCall(teamCryptoMocks.deriveTeamEncryptionKey);
+      const pending = sendMessage({ type: "FETCH_PASSWORDS" });
+      await hold.reached;
+      await lock();
+      expect(await unlockAgain()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      hold.release();
+      expect(await pending).toEqual({ type: "FETCH_PASSWORDS", entries: null, error: "VAULT_LOCKED" });
+      const before = memberKeyFetches();
+
+      const res = await sendMessage({ type: "FETCH_PASSWORDS" });
+
+      expect(teamEntryIds(res)).toEqual(["team-pw-1"]);
+      expect(memberKeyFetches() - before).toBe(1);
+    });
+
+    it("positive control (A3): a key derived without a lock is cached and reused", async () => {
+      await unlockAndSettle();
+      const hold = holdNextCall(teamCryptoMocks.deriveTeamEncryptionKey);
+      const pending = sendMessage({ type: "FETCH_PASSWORDS" });
+      await hold.reached;
+      hold.release();
+      expect(teamEntryIds(await pending)).toEqual(["team-pw-1"]);
+      const before = memberKeyFetches();
+
+      const res = await sendMessage({ type: "FETCH_PASSWORDS" });
+
+      expect(teamEntryIds(res)).toEqual(["team-pw-1"]);
+      expect(memberKeyFetches() - before).toBe(0);
+    });
+
+    // C3 / FR4: the retry after a failed team decrypt drops the key that
+    // getTeamEncryptionKey stored, so the retry asks for the member key again.
+    it("a failed team decrypt drops the cached team key and the retry refetches it (C3)", async () => {
+      await unlockAndSettle();
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      const hold = holdDecrypt(cryptoMocks.decryptData, "enc-overview");
+      const before = memberKeyFetches();
+      const pending = sendMessage({ type: "FETCH_PASSWORDS" });
+      await hold.reached;
+      hold.fail(new Error("OperationError"));
+
+      expect(teamEntryIds(await pending)).toEqual(["team-pw-1"]);
+      expect(memberKeyFetches() - before).toBe(1);
+    });
+
+    it("positive control (C3): without a failed decrypt the cached team key is reused", async () => {
+      await unlockAndSettle();
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      const hold = holdDecrypt(cryptoMocks.decryptData, "enc-overview");
+      const before = memberKeyFetches();
+      const pending = sendMessage({ type: "FETCH_PASSWORDS" });
+      await hold.reached;
+      hold.release();
+
+      expect(teamEntryIds(await pending)).toEqual(["team-pw-1"]);
+      expect(memberKeyFetches() - before).toBe(0);
+    });
+
+    // A5: fetchAndDecryptTeamBlob
+    it.each(INTERRUPTIONS)("team COPY_PASSWORD answers VAULT_LOCKED with no password after %s during the decrypt (A5)", async (_name, interrupt) => {
+      await unlockAndSettle();
+      setDecryptedPlaintext("blob-cipher", JSON.stringify({ password: "team-secret" }));
+      const hold = holdDecrypt(cryptoMocks.decryptData, "ov-cipher");
+      const pending = sendMessage({ type: "COPY_PASSWORD", entryId: "team-pw-1", teamId: "team-1" });
+      await hold.reached;
+      await interrupt();
+      hold.release();
+
+      expect(await pending).toEqual({ type: "COPY_PASSWORD", password: null, error: "VAULT_LOCKED" });
+    });
+
+    it("positive control (A5): released without a lock it answers the team password", async () => {
+      await unlockAndSettle();
+      setDecryptedPlaintext("blob-cipher", JSON.stringify({ password: "team-secret" }));
+      const hold = holdDecrypt(cryptoMocks.decryptData, "ov-cipher");
+      const pending = sendMessage({ type: "COPY_PASSWORD", entryId: "team-pw-1", teamId: "team-1" });
+      await hold.reached;
+      hold.release();
+
+      expect(await pending).toEqual({ type: "COPY_PASSWORD", password: "team-secret" });
+    });
+
+    // A lock during the team blob fetch leaves no team key to find (clearVault
+    // dropped the ECDH key and the team-key cache). That is "locked", not
+    // "the entry could not be fetched".
+    const TEAM_BLOB_PATH = extApiPath.teamPasswordById("team-1", "team-pw-1");
+
+    // Serve the team entry by id as an item-key (itemKeyVersion 1) entry.
+    function serveItemKeyTeamBlob(): void {
+      const base = fetchMock.getMockImplementation() as (url: string) => Promise<{ json: () => Promise<unknown> }>;
+      fetchMock.mockImplementation(async (url: string) => {
+        if (!url.endsWith(TEAM_BLOB_PATH)) return base(url);
+        const res = await base(url);
+        const body = (await res.json()) as Record<string, unknown>;
+        return {
+          ok: true,
+          json: async () => ({
+            ...body,
+            itemKeyVersion: 1,
+            encryptedItemKey: "ik-cipher",
+            itemKeyIv: "ik-iv",
+            itemKeyAuthTag: "ik-tag",
+          }),
+        };
+      });
+    }
+
+    describe.each([
+      ["a team-key entry", () => {}],
+      ["an item-key entry", serveItemKeyTeamBlob],
+    ])("team COPY_PASSWORD, %s", (_name, serve) => {
+      it("answers VAULT_LOCKED, not FETCH_FAILED, when the vault locks during the team blob fetch", async () => {
+        serve();
+        await unlockAndSettle();
+        setDecryptedPlaintext("blob-cipher", JSON.stringify({ password: "team-secret" }));
+        const hold = holdFetch(fetchMock, TEAM_BLOB_PATH);
+        const pending = sendMessage({ type: "COPY_PASSWORD", entryId: "team-pw-1", teamId: "team-1" });
+        await hold.reached;
+        await lock();
+        hold.release();
+
+        expect(await pending).toEqual({ type: "COPY_PASSWORD", password: null, error: "VAULT_LOCKED" });
+      });
+
+      it("positive control: released without a lock it answers the team password", async () => {
+        serve();
+        await unlockAndSettle();
+        setDecryptedPlaintext("blob-cipher", JSON.stringify({ password: "team-secret" }));
+        const hold = holdFetch(fetchMock, TEAM_BLOB_PATH);
+        const pending = sendMessage({ type: "COPY_PASSWORD", entryId: "team-pw-1", teamId: "team-1" });
+        await hold.reached;
+        hold.release();
+
+        expect(await pending).toEqual({ type: "COPY_PASSWORD", password: "team-secret" });
+      });
+    });
+
+    // The context menu is the one fill path whose failure shows as a per-tab
+    // badge; a lock during a team fill must not raise one (the locked badge is
+    // already up, and the failure badge would cover it).
+    describe("context-menu team fill", () => {
+      const TEAM_UUID = "b0000000-0000-0000-0000-000000000001";
+      const ENTRY_UUID = "c0000000-0000-0000-0000-000000000001";
+      const menuBlobPath = extApiPath.teamPasswordById(TEAM_UUID, ENTRY_UUID);
+      const click = () => {
+        const [[onClicked]] = chromeMock!.contextMenus.onClicked.addListener.mock.calls as Array<
+          [(info: Record<string, unknown>, tab: Record<string, unknown>) => void]
+        >;
+        onClicked(
+          { menuItemId: `psso-login-${TEAM_UUID}:${ENTRY_UUID}`, frameUrl: "https://team.com/login", frameId: 0 },
+          { id: 1, url: "https://team.com/login" },
+        );
+      };
+      const failureBadges = () =>
+        (chromeMock!.action.setBadgeText.mock.calls as unknown[][]).filter(([arg]) => {
+          const { text, tabId } = arg as { text?: string; tabId?: number };
+          return text === "!" && tabId === 1;
+        });
+      const flush = () => new Promise((r) => setTimeout(r, 20));
+
+      it("a lock during the team blob fetch raises no failure badge", async () => {
+        await unlockAndSettle();
+        const hold = holdFetch(fetchMock, menuBlobPath);
+        click();
+        await hold.reached;
+        await lock();
+        hold.release();
+        await flush();
+
+        expect(failureBadges()).toEqual([]);
+      });
+
+      it("positive control: a failed team blob fetch at the same point raises the failure badge", async () => {
+        await unlockAndSettle();
+        const hold = holdNextCall(fetchMock, (url: string) => String(url).endsWith(menuBlobPath), {
+          result: () => ({ ok: false, json: async () => ({}) }),
+        });
+        click();
+        await hold.reached;
+        hold.release();
+        await flush();
+
+        expect(failureBadges()).toHaveLength(1);
+      });
+    });
+
+    // A stale cached team key is dropped and refetched once per key version,
+    // not once per entry that fails to decrypt under it.
+    it("two undecryptable entries under one cached team key refetch the member key once", async () => {
+      await unlockAndSettle();
+      await sendMessage({ type: "FETCH_PASSWORDS" });
+      const base = fetchMock.getMockImplementation() as (url: string) => Promise<unknown>;
+      // Unmapped ciphertexts: the keyed decrypt mock throws for both.
+      fetchMock.mockImplementation(async (url: string) =>
+        url.endsWith(extApiPath.teamPasswords("team-1"))
+          ? {
+              ok: true,
+              json: async () => [
+                { ...makeTeamEntry("team-bad-1", EXT_ENTRY_TYPE.LOGIN), encryptedOverview: "bad-ov-1" },
+                { ...makeTeamEntry("team-bad-2", EXT_ENTRY_TYPE.LOGIN), encryptedOverview: "bad-ov-2" },
+              ],
+            }
+          : base(url),
+      );
+      const before = memberKeyFetches();
+
+      const res = await sendMessage({ type: "FETCH_PASSWORDS" });
+
+      expect(teamEntryIds(res)).toEqual([]);
+      expect(memberKeyFetches() - before).toBe(1);
+    });
+
+    // A18 (C2): the ECDH unwrap is the unlock's last key-state commit.
+    it("an unlock locked during its ECDH unwrap leaves no ECDH key for a later unlock without one (A18)", async () => {
+      applyToken("t", Date.now() + 60_000, "");
+      const hold = holdNextCall(teamCryptoMocks.unwrapEcdhPrivateKey);
+      const pending = unlockAgain();
+      await hold.reached;
+      await lock();
+      hold.release();
+      expect(await pending).toEqual({ type: "UNLOCK_VAULT", ok: false, error: "VAULT_LOCKED" });
+
+      serveUnlockWithoutEcdh();
+      expect(await unlockAgain()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+
+      expect(teamEntryIds(await sendMessage({ type: "FETCH_PASSWORDS" }))).toEqual([]);
+    });
+
+    it("an unlock whose ECDH unwrap fails after a lock does not clear the next unlock's ECDH key (A18)", async () => {
+      applyToken("t", Date.now() + 60_000, "");
+      const hold = holdNextCall(teamCryptoMocks.unwrapEcdhPrivateKey);
+      const stale = unlockAgain();
+      await hold.reached;
+      await lock();
+      expect(await unlockAgain()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+      hold.fail(new Error("OperationError"));
+      expect(await stale).toEqual({ type: "UNLOCK_VAULT", ok: false, error: "VAULT_LOCKED" });
+
+      expect(teamEntryIds(await sendMessage({ type: "FETCH_PASSWORDS" }))).toEqual(["team-pw-1"]);
+    });
+
+    it("positive control (A18): an ECDH unwrap released without a lock gives team entries", async () => {
+      applyToken("t", Date.now() + 60_000, "");
+      const hold = holdNextCall(teamCryptoMocks.unwrapEcdhPrivateKey);
+      const pending = unlockAgain();
+      await hold.reached;
+      hold.release();
+      expect(await pending).toEqual({ type: "UNLOCK_VAULT", ok: true });
+
+      expect(teamEntryIds(await sendMessage({ type: "FETCH_PASSWORDS" }))).toEqual(["team-pw-1"]);
     });
   });
 });

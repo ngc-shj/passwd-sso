@@ -25,13 +25,15 @@ import {
   base64urlEncode,
 } from "../lib/webauthn-crypto";
 import { isRpIdAllowedForHostname } from "../lib/webauthn-rp-id";
+import { assertVaultEpoch, currentVaultEpoch, isVaultEpochCurrent, VaultLockedError } from "./vault-epoch";
 
 export interface PasskeyProviderDeps {
   getEncryptionKey: () => CryptoKey | null;
   getCurrentUserId: () => string | null;
   getKeyVersion: () => number;
   getCachedEntries: () => Promise<DecryptedEntry[]>;
-  swFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  /** `opts.epoch`: asserted by swFetch immediately before each send. */
+  swFetch: (path: string, init?: RequestInit, opts?: { epoch?: number }) => Promise<Response>;
   invalidateCache: () => void;
 }
 
@@ -105,9 +107,11 @@ export async function handlePasskeyGetMatches(
   if (!encKey || !deps.getCurrentUserId()) {
     return { entries: [], vaultLocked: true };
   }
+  const epoch = currentVaultEpoch();
 
   try {
     const allEntries = await deps.getCachedEntries();
+    if (!isVaultEpochCurrent(epoch)) return { entries: [], vaultLocked: true };
     const matches = allEntries
       .filter(
         (e) =>
@@ -125,8 +129,9 @@ export async function handlePasskeyGetMatches(
         ...(e.teamId && { teamId: e.teamId }),
       }));
     return { entries: matches, vaultLocked: false };
-  } catch {
-    return { entries: [], vaultLocked: false };
+  } catch (err) {
+    // Locked mid-lookup is "locked", not "no passkeys".
+    return { entries: [], vaultLocked: err instanceof VaultLockedError };
   }
 }
 
@@ -144,9 +149,11 @@ export async function handlePasskeyCheckDuplicate(
   if (!deps) return { entries: [], vaultLocked: true };
   const encKey = deps.getEncryptionKey();
   if (!encKey) return { entries: [], vaultLocked: true };
+  const epoch = currentVaultEpoch();
 
   try {
     const allEntries = await deps.getCachedEntries();
+    if (!isVaultEpochCurrent(epoch)) return { entries: [], vaultLocked: true };
     const entries = allEntries
       .filter(
         (e) =>
@@ -164,7 +171,9 @@ export async function handlePasskeyCheckDuplicate(
         ...(e.creationDate && { creationDate: e.creationDate }),
       }));
     return { entries };
-  } catch {
+  } catch (err) {
+    // Locked mid-lookup must not read as "no duplicate".
+    if (err instanceof VaultLockedError) return { entries: [], vaultLocked: true };
     return { entries: [] };
   }
 }
@@ -201,6 +210,8 @@ async function doSignAssertion(
   if (!encKey || !userId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
+  const epoch = currentVaultEpoch();
+  const keyVersion = deps.getKeyVersion();
 
   if (teamId) {
     return { ok: false, error: "TEAM_PASSKEY_NOT_SUPPORTED" };
@@ -275,6 +286,8 @@ async function doSignAssertion(
     signCount += 1;
 
     const authenticatorData = await buildAssertionAuthData(rpId, signCount);
+    // A signature is a credential: never produce one for a vault that has locked.
+    assertVaultEpoch(epoch);
     const signature = await signAssertion(
       privateKeyJwk,
       authenticatorData,
@@ -289,14 +302,18 @@ async function doSignAssertion(
       aad,
     );
 
-    const putRes = await deps.swFetch(path, {
-      method: "PUT",
-      body: JSON.stringify({
-        encryptedBlob,
-        aadVersion: data.aadVersion ?? 1,
-        keyVersion: deps.getKeyVersion(),
-      }),
-    });
+    const putRes = await deps.swFetch(
+      path,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          encryptedBlob,
+          aadVersion: data.aadVersion ?? 1,
+          keyVersion,
+        }),
+      },
+      { epoch },
+    );
 
     if (putRes.ok) {
       deps.invalidateCache();
@@ -311,6 +328,7 @@ async function doSignAssertion(
     // assertion as a possible clone. This self-heals as soon as one PUT succeeds.
     // passwd-sso's own RP tolerates this; external RPs vary.
 
+    assertVaultEpoch(epoch);
     return {
       ok: true,
       response: {
@@ -356,6 +374,8 @@ export async function handlePasskeyCreateCredential(
   if (!encKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
+  const epoch = currentVaultEpoch();
+  const keyVersion = deps.getKeyVersion();
 
   const {
     rpId, rpName, userId, userName, userDisplayName,
@@ -421,17 +441,21 @@ export async function handlePasskeyCreateCredential(
     const encryptedBlob = await encryptData(fullBlob, encKey, blobAad);
     const encryptedOverview = await encryptData(overviewBlob, encKey, overviewAad);
 
-    const res = await deps.swFetch(EXT_API_PATH.PASSWORDS, {
-      method: "POST",
-      body: JSON.stringify({
-        id: entryId,
-        encryptedBlob,
-        encryptedOverview,
-        aadVersion: 1,
-        keyVersion: deps.getKeyVersion(),
-        entryType: EXT_ENTRY_TYPE.PASSKEY,
-      }),
-    });
+    const res = await deps.swFetch(
+      EXT_API_PATH.PASSWORDS,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          id: entryId,
+          encryptedBlob,
+          encryptedOverview,
+          aadVersion: 1,
+          keyVersion,
+          entryType: EXT_ENTRY_TYPE.PASSKEY,
+        }),
+      },
+      { epoch },
+    );
 
     if (!res.ok) {
       const body = await readApiErrorBody(res);
@@ -459,9 +483,13 @@ export async function handlePasskeyCreateCredential(
             targetBlob?.relyingPartyId === rpId &&
             targetBlob?.username === userName
           ) {
-            await deps.swFetch(extApiPath.passwordById(params.replaceEntryId), {
-              method: "DELETE",
-            }).catch(() => {});
+            // A lock since the create skips the delete (swFetch refuses it);
+            // the committed credential below is still returned.
+            await deps.swFetch(
+              extApiPath.passwordById(params.replaceEntryId),
+              { method: "DELETE" },
+              { epoch },
+            ).catch(() => {});
           }
         }
       }

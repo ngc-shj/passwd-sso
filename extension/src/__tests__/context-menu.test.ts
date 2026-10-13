@@ -511,6 +511,29 @@ describe("context-menu", () => {
       expect(deps.notifyFillFailure).toHaveBeenCalledWith("ORIGIN_MISMATCH");
     });
 
+    // A fill stopped by a vault lock: the locked badge already says so, and a
+    // per-tab failure badge would cover it and outlive the lock.
+    it.each([
+      ["VAULT_LOCKED", false],
+      ["FILL_FAILED", true],
+    ])("a fill answering %s reports a failure: %s", async (error, reported) => {
+      deps = createDeps({
+        performAutofill: vi.fn().mockResolvedValue({ ok: false, error }),
+      });
+      initContextMenu(deps);
+
+      handleContextMenuClick(
+        {
+          menuItemId: `psso-login-${entryUuid}`,
+          frameUrl: "https://github.com/login",
+        } as chrome.contextMenus.OnClickData,
+        { id: 1 } as chrome.tabs.Tab,
+      );
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(vi.mocked(deps.notifyFillFailure).mock.calls).toEqual(reported ? [[error]] : []);
+    });
+
     it("reports nothing when the fill succeeds", async () => {
       handleContextMenuClick(
         {

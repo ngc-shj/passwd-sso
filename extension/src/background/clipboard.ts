@@ -33,8 +33,14 @@ async function ensureOffscreen(): Promise<void> {
   }
 }
 
-export async function copyToClipboard(text: string): Promise<void> {
+/**
+ * `assertFresh` runs after the offscreen document is ready, immediately before
+ * the write: a secret copied for one vault state must not land on the clipboard
+ * after a lock that happened while the document was being created.
+ */
+export async function copyToClipboard(text: string, assertFresh?: () => void): Promise<void> {
   await ensureOffscreen();
+  assertFresh?.();
   await chrome.runtime.sendMessage({
     target: "offscreen",
     type: "clipboard-write",

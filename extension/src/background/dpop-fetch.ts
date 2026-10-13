@@ -30,6 +30,10 @@ export async function swFetchAuthenticated(
   init: RequestInit | undefined,
   serverUrl: string,
   token: string,
+  // Runs after the proof is signed, immediately before the request leaves:
+  // signing awaits, so a caller-side check made before this call is not
+  // "immediately before the send".
+  beforeSend?: () => void,
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${token}`);
@@ -58,6 +62,7 @@ export async function swFetchAuthenticated(
   }
 
   headers.set("DPoP", proof);
+  beforeSend?.();
   // credentials: "omit" — extension authenticates via Bearer + DPoP, never
   // via web-app session cookies. Without this, Chrome includes the
   // web-app's session cookie on cross-origin fetch (because the extension
