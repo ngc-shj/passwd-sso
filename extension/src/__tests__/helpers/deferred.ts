@@ -1,5 +1,4 @@
-import { getCurrentTest } from "vitest/suite";
-import { onTestFinished } from "vitest";
+import { TestRunner, onTestFinished } from "vitest";
 
 export type Deferred<T> = {
   promise: Promise<T>;
@@ -80,7 +79,7 @@ export function holdNextCall<A extends unknown[] = unknown[]>(
   mock.mockImplementation(holding);
   // Outside a running test (no current test to attach to) there is no
   // teardown to register; the hold still disarms itself when it fires.
-  if (getCurrentTest()) onTestFinished(disarm);
+  if (TestRunner.getCurrentTest()) onTestFinished(disarm);
   return {
     reached: reached.promise,
     release: () => gate.resolve(),
