@@ -148,3 +148,9 @@ Scenarios 2 and 6 left the combined full-name field empty. This was pre-existing
 - **Cause:** when the entry had structured given/family names, the identity fill never created a fullName step, even on a page with no split name field.
 - **Fix:** the fill now writes the entry's own fullName when the page has no split name field. It is never composed from given/family, because the order differs by locale.
 - **Tests:** two new tests cover a combined-only form (filled) and split plus combined fields (structured names only). Both directions are red-proved.
+
+After the fix, the user re-ran scenarios 2 and 6, and the full name filled.
+
+In scenario 6 the country select also filled, once the test page offered an option matching the entry's free-text country (`日本`). The match is exact on option value or text, as on `main`. Mapping a country name to an ISO code is out of this PR's scope.
+
+VE1 status: **verified** (Chrome, the user's machine).
