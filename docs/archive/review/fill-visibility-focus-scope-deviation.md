@@ -75,3 +75,12 @@
 - **Change:** `meetsScrollBand` bounds the field by the union of the forward and the reversed band, computed from the engine's own `scrollLeft` / `scrollTop` and `scrollWidth` / `scrollHeight`. There is no direction classification.
 - **Why:** each hand-derived direction rule left a member out. Code review rounds 2 and 3 each found one: first reversed flex and writing modes, then `sideways-lr`. Every miss was a widening or a false denial in a security tripwire. The engine's scroll extent excludes content it cannot scroll to, whichever way the axis runs, so no member list is needed.
 - **Cost:** the union over-approximates by the pane's own scrollable slack (`scrollSize − clientSize`) on the far side of a forward axis, or the near side of a reversed one. To use that slack to hide a field, a page must create real scrollable overflow of that size, which is bypass class (iv): a field placed where the user never scrolls.
+
+## D13: the fail-safe containing-block test also counts some non-trigger values (code review round 3, func R3-1)
+
+- **Behaviour:** `containsFixed` counts any `will-change`, `contain` or `container-type` off its initial value as a containing block. Chrome does not do this for values such as `will-change: opacity`, `contain: size|style` and `container-type: inline-size`.
+- **Effect:** a non-portal fixed modal or an escaping absolute popover drawn outside a clipping ancestor that has one of those values reads as hidden, and is not filled. This is a false denial.
+- **Accepted, not fixed:** splitting these values into triggers and non-triggers is a hand-maintained member list of the kind that widened the tripwire in rounds 2 and 3. A missing trigger there fails open. As it stands, the error falls only on the deny side.
+- **Worst case:** on such a page the user fills the field from the popup after closing and reopening the overlay, or types the value by hand. No secret is exposed.
+- **Likelihood:** low. The reviewer's own assessment is that a container-query card with `overflow:hidden` around a non-portal fixed or absolute field is the likeliest case, and it is uncommon. The common cases (`will-change: transform`, `contain: strict|content`) are real containing blocks.
+- **Cost to fix later:** small, if a real page shows the false denial. Add the value to a non-trigger allowlist, with a test.
