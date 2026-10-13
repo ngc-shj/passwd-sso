@@ -1,6 +1,6 @@
 # Code Review: fill-visibility-focus-scope
 Date: 2026-10-13
-Review round: 3
+Review round: 4
 
 ## Changes from Previous Round
 Initial review of `0404df58f`. Three fresh expert sub-agents reviewed the full diff and ran jsdom probes and mutations in scratch copies. The Phase 2 self R-check had already resolved R47 (clip-path insets), R3 (the twin's hinted password scope) and RT7 (the x scroll window).
@@ -103,6 +103,14 @@ Each fix was red-proved on a scratch copy by reverting it in content and in the 
 |----|--------|----------|---------|------------|
 | R3-S1 | Sec | Major | Round 2's direction classification read `writing-mode: sideways-lr`'s inline axis backwards, so a field before a forward scroll origin was admitted. | The mechanism changed (D12): the scroll axis is bounded by the engine's scroll extent (`meetsScrollBand`), with no direction classification. A field the engine cannot scroll to is denied whatever the writing mode, direction or flex direction. Content and twin; the band edges, the forward extent and a non-finite extent are red-proved. |
 | test N1–N4 | Test | Major/Minor | Twin and content arms that survived deletion; an unpinned reversed-axis boundary; a stale comment. | `fd7650db1`; each mutation red-proved. |
+
+## Round 4
+
+| ID | Expert | Severity | Finding | Resolution |
+|----|--------|----------|---------|------------|
+| R3-S1 (verify) | Sec | — | Closed: the band never reads writing-mode, direction or flex, and `sideways-lr` with either direction is denied. | — |
+| R4-S1 | Sec | Minor | The union band admits the unreachable strip before a forward pane's origin, sized by slack that invisible content inflates; D12 understated the cost. | The band follows the engine's offset sign: forward when positive, reversed when negative, the union only at rest. D12's cost paragraph is rewritten. Content and twin; both arms red-proved. |
+| func R3-1 | Func | Minor | The fail-safe `containsFixed` counts some non-trigger values, so a few fixed or absolute fields are falsely denied. | Accepted cost, recorded as D13: a non-trigger allowlist is a hand-maintained member list that fails open when a trigger is missing. |
 
 ## Environment Verification Report
 - **VE1** (real Chrome rendering: plan scenarios 1–8): `blocked-deferred` to the user's manual check before merge, per plan VE1.

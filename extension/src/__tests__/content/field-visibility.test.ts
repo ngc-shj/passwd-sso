@@ -406,6 +406,13 @@ describe("isFieldVisible — R4: the scroll origin of a scroll container", () =>
     ["vertical-rl (x)", "writing-mode:vertical-rl; overflow-x:auto", "-300,0", "600,200", "100,20,400,10", true],
     ["column-reverse (y)", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "300,600", "100,20,10,400", true],
     ["column-reverse (y), wholly before the band", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "300,600", "100,20,10,-150", false],
+    // The offset's sign picks the band: scrolled forward (> 0) the pre-origin
+    // strip is gone; scrolled reversed (< 0) the post-window strip is gone; at
+    // rest (0) the union still admits them (the accepted cost, D12).
+    ["forward (x) scrolled to 1, a field before the origin", "overflow-x:auto", "1,0", "11100,200", "100,20,-9999,10", false],
+    ["forward (x) at rest, the same field inside the union (accepted cost)", "overflow-x:auto", "0,0", "11100,200", "100,20,-9999,10", true],
+    ["RTL (x) scrolled to -1, a field past the window end", "direction:rtl; overflow-x:auto", "-1,0", "600,200", "100,20,310,10", false],
+    ["RTL (x) at rest, the same field inside the union (accepted cost)", "direction:rtl; overflow-x:auto", "0,0", "600,200", "100,20,310,10", true],
     // Forward pane at offset 0 with scroll size 600: its band ends at 600.
     ["forward (y), wholly past the scroll extent", "overflow-y:auto", "0,0", "300,600", "100,20,10,600", false],
     ["forward (y), top 1px before the scroll extent ends", "overflow-y:auto", "0,0", "300,600", "100,20,10,599", true],

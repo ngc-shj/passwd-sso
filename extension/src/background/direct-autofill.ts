@@ -119,8 +119,8 @@ export async function directAutofill(
   // 0 in flow, 1 absolute, 2 fixed
   const positionMode = (style: CSSStyleDeclaration) =>
     style.position === "fixed" ? 2 : style.position === "absolute" ? 1 : 0;
-  // Mirror of content meetsScrollBand: the union of the forward and the
-  // reversed scroll band, from the engine's offset and extent.
+  // Mirror of content meetsScrollBand: the band the engine's offset sign
+  // implies (forward, reversed, or their union at rest), from its extent.
   const meetsScrollBand = (
     start: number,
     end: number,
@@ -132,7 +132,9 @@ export async function directAutofill(
     if (!Number.isFinite(offset) || !Number.isFinite(extent)) return false;
     const origin = windowStart - offset;
     const slack = Math.max(0, extent - client);
-    return end > origin - slack && start < origin + Math.max(extent, client);
+    const bandStart = offset > 0 ? origin : origin - slack;
+    const bandEnd = offset < 0 ? origin + client : origin + Math.max(extent, client);
+    return end > bandStart && start < bandEnd;
   };
   const hasVisibleBox = (el: Element) => {
     const rect = el.getBoundingClientRect();

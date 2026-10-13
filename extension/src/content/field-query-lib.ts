@@ -187,9 +187,11 @@ function hasPaintContainment(style: CSSStyleDeclaration): boolean {
  * window, read from the engine's own scroll offset and extent rather than from
  * a hand-derived scroll direction. Overflow runs one way, and content the
  * engine cannot scroll to is not part of scrollWidth / scrollHeight. The band
- * is the union of the forward placement (offset 0 … extent − client) and the
- * reversed one (offset −(extent − client) … 0), so it holds whichever way the
- * axis runs: an RTL, row-reverse, column-reverse or vertical-rl pane alike.
+ * follows the sign of the engine's offset, which a forward axis keeps in
+ * [0, extent − client] and a reversed one in [−(extent − client), 0]: a
+ * positive offset takes the forward band, a negative one the reversed band, and
+ * an offset at rest (0, where either is possible) their union. So it holds
+ * whichever way the axis runs, with no direction derived from CSS.
  */
 function meetsScrollBand(
   start: number,
@@ -202,7 +204,9 @@ function meetsScrollBand(
   if (!Number.isFinite(offset) || !Number.isFinite(extent)) return false;
   const origin = windowStart - offset;
   const slack = Math.max(0, extent - client);
-  return end > origin - slack && start < origin + Math.max(extent, client);
+  const bandStart = offset > 0 ? origin : origin - slack;
+  const bandEnd = offset < 0 ? origin + client : origin + Math.max(extent, client);
+  return end > bandStart && start < bandEnd;
 }
 
 /** How an ancestor clips one axis. Reads the longhands only. */
