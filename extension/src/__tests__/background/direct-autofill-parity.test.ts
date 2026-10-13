@@ -487,6 +487,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
     { name: "R4 deny: overflow-y:auto window of 2px", last: `<div style="overflow-y:auto" data-rect="300,2,0,0">${pwLast()}</div>`, allowed: false },
     { name: "R4 deny: overflow-x:scroll window of 3px", last: `<div style="overflow-x:scroll" data-rect="3,200,0,0">${pwLast()}</div>`, allowed: false },
     { name: "R4 allow: below the fold of an auto pane under an overflow:hidden wrapper", last: `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="300,200,0,0"><div style="overflow-y:auto" data-rect="300,200,0,0">${pwLast('data-rect="100,20,10,5000"')}</div></div>`, allowed: true },
+    { name: "R4 allow: right of the fold of a scroll pane under an overflow:hidden wrapper", last: `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="300,200,0,0"><div style="overflow-x:scroll" data-rect="300,200,0,0">${pwLast('data-rect="100,20,5000,10"')}</div></div>`, allowed: true },
     { name: "R4 deny: below the fold of an overflow:hidden wrapper", last: `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="300,200,0,0">${pwLast('data-rect="100,20,10,5000"')}</div>`, allowed: false },
     { name: "R5 deny: right edge at 0", last: pwLast('data-rect="100,20,-100,10"'), allowed: false },
     { name: "R5 allow: right edge at 1", last: pwLast('data-rect="100,20,-99,10"'), allowed: true },

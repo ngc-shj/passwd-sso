@@ -35,11 +35,11 @@
 - **Change:** it is still there.
 - **Why:** removing it is a cleanup unrelated to this change and alters nothing observable. It is left to a separate chore.
 
-## D7: the cache-lifetime red-proof is carried by a different test
+## D7: the cache-lifetime red-proof
 
 - **Plan:** making the visibility cache module-level should turn the C2 `<details>` test red.
-- **Result:** that test stayed green, because the focus rescan reads the same stale cache.
-- **Coverage:** the mutation is caught by the `fillAdmission` test "a new admission sees a style change" in `field-visibility.test.ts`.
+- **Result:** it does. The Phase 2 testing R-check shared one module-level cache across every `fillAdmission` call, and 17 tests went red. They include the C2 `<details>` and CSS-only reveal tests, and `field-visibility.test.ts` "a new admission sees a style change".
+- **Correction:** an earlier note here said the `<details>` test stayed green. That came from a different mutation, which cached inside the focus rescan only, and it does not describe the module-level cache.
 
 ## D8: mutations no test can distinguish
 

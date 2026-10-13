@@ -283,6 +283,18 @@ describe("isFieldVisible — R4: the rect clipped per axis by its ancestors", ()
     ).toBe(false);
   });
 
+  it("allows a field right of the fold of an inner scroll pane under an outer overflow:hidden wrapper", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="300,200,0,0">` +
+            `<div style="overflow-x:scroll" data-rect="300,200,0,0"><input id="f" data-rect="100,20,5000,10"></div>` +
+            `</div>`,
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("allows a field right of the fold of a normal overflow-x:scroll pane", () => {
     expect(
       isFieldVisible(
