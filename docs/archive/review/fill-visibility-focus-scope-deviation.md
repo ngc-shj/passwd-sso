@@ -68,3 +68,10 @@
 - **Change (code review round 1, func F7):** `transparentOk` lifts the opacity rule only, so a single-input OTP widget that hides its real input with `left:-9999px` or a 1px box (a key catcher) is not filled. Widgets that overlay an `opacity:0` input are still filled.
 - **Accepted cost:** exempting OTP from geometry would let a page hide an input anywhere and receive the code.
 - **Worst case:** the user types the code by hand on such a widget.
+
+## D12: the scroll axis is bounded by the engine's scroll extent, not by a derived direction
+
+- **Plan:** C1 R4, as settled in plan round 3, maps a field into the scroll window. Code review then derived each axis's scroll direction by hand: first from RTL only, then from direction, writing-mode and flex-direction.
+- **Change:** `meetsScrollBand` bounds the field by the union of the forward and the reversed band, computed from the engine's own `scrollLeft` / `scrollTop` and `scrollWidth` / `scrollHeight`. There is no direction classification.
+- **Why:** each hand-derived direction rule left a member out. Code review rounds 2 and 3 each found one: first reversed flex and writing modes, then `sideways-lr`. Every miss was a widening or a false denial in a security tripwire. The engine's scroll extent excludes content it cannot scroll to, whichever way the axis runs, so no member list is needed.
+- **Cost:** the union over-approximates by the pane's own scrollable slack (`scrollSize − clientSize`) on the far side of a forward axis, or the near side of a reversed one. To use that slack to hide a field, a page must create real scrollable overflow of that size, which is bypass class (iv): a field placed where the user never scrolls.

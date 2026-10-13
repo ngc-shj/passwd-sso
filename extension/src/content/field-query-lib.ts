@@ -183,22 +183,26 @@ function hasPaintContainment(style: CSSStyleDeclaration): boolean {
 }
 
 /**
- * Whether a scroll container's overflow on an axis runs toward the start, so
- * its scroll offset goes negative: RTL inline direction, a vertical-rl block
- * direction, or a flex container's *-reverse direction (chat panes use
- * column-reverse). The inline axis is x in horizontal writing modes, y in
- * vertical ones.
+ * Whether [start, end) meets the band a scroll container can bring into its
+ * window, read from the engine's own scroll offset and extent rather than from
+ * a hand-derived scroll direction. Overflow runs one way, and content the
+ * engine cannot scroll to is not part of scrollWidth / scrollHeight. The band
+ * is the union of the forward placement (offset 0 … extent − client) and the
+ * reversed one (offset −(extent − client) … 0), so it holds whichever way the
+ * axis runs: an RTL, row-reverse, column-reverse or vertical-rl pane alike.
  */
-function overflowReversed(style: CSSStyleDeclaration, axis: "x" | "y"): boolean {
-  const writingMode = style.getPropertyValue("writing-mode").trim();
-  const vertical = writingMode.startsWith("vertical") || writingMode.startsWith("sideways");
-  const inlineAxis = vertical ? "y" : "x";
-  const flexDirection = style.display.includes("flex")
-    ? style.getPropertyValue("flex-direction").trim()
-    : "";
-  if (axis === inlineAxis) return (style.direction === "rtl") !== (flexDirection === "row-reverse");
-  const blockReversed = writingMode === "vertical-rl" || writingMode === "sideways-rl";
-  return blockReversed !== (flexDirection === "column-reverse");
+function meetsScrollBand(
+  start: number,
+  end: number,
+  windowStart: number,
+  client: number,
+  offset: number,
+  extent: number,
+): boolean {
+  if (!Number.isFinite(offset) || !Number.isFinite(extent)) return false;
+  const origin = windowStart - offset;
+  const slack = Math.max(0, extent - client);
+  return end > origin - slack && start < origin + Math.max(extent, client);
 }
 
 /** How an ancestor clips one axis. Reads the longhands only. */
@@ -252,14 +256,9 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
       const client = node.clientWidth;
       if (client < MIN_VISIBLE_PX) return false;
       const windowLeft = box.left + node.clientLeft;
-      // Overflow runs one way: content wholly before the scroll origin (the
-      // start side, or the end side of a reversed axis, where the offset is
-      // ≤ 0) can never be scrolled to.
-      const unreachable =
-        overflowReversed(style, "x")
-          ? left >= windowLeft + client - node.scrollLeft
-          : right <= windowLeft - node.scrollLeft;
-      if (!Number.isFinite(windowLeft - node.scrollLeft) || unreachable) return false;
+      if (!meetsScrollBand(left, right, windowLeft, client, node.scrollLeft, node.scrollWidth)) {
+        return false;
+      }
       const span = Math.min(right - left, client);
       left = windowLeft;
       right = left + span;
@@ -272,10 +271,9 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
       const client = node.clientHeight;
       if (client < MIN_VISIBLE_PX) return false;
       const windowTop = box.top + node.clientTop;
-      const unreachable = overflowReversed(style, "y")
-        ? top >= windowTop + client - node.scrollTop
-        : bottom <= windowTop - node.scrollTop;
-      if (!Number.isFinite(windowTop - node.scrollTop) || unreachable) return false;
+      if (!meetsScrollBand(top, bottom, windowTop, client, node.scrollTop, node.scrollHeight)) {
+        return false;
+      }
       const span = Math.min(bottom - top, client);
       top = windowTop;
       bottom = top + span;

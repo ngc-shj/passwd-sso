@@ -393,56 +393,46 @@ describe("isFieldVisible — R4: the scroll origin of a scroll container", () =>
     ).toBe(false);
   });
 
-  it("RTL: allows content left of the window (overflow runs left)", () => {
-    expect(
-      isFieldVisible(
-        field(
-          `<div style="overflow-x:auto; direction:rtl" data-rect="300,200,0,0" data-scroll="-200,0"><input id="f" data-rect="100,20,-500,10"></div>`,
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  it("RTL: denies content wholly right of the scroll origin", () => {
-    expect(
-      isFieldVisible(
-        field(
-          `<div style="overflow-x:auto; direction:rtl" data-rect="300,200,0,0" data-scroll="-200,0"><input id="f" data-rect="100,20,500,10"></div>`,
-        ),
-      ),
-    ).toBe(false);
-  });
-
-  it("RTL: allows content whose left edge is 1px before the scroll origin", () => {
-    expect(
-      isFieldVisible(
-        field(
-          `<div style="overflow-x:auto; direction:rtl" data-rect="300,200,0,0" data-scroll="-200,0"><input id="f" data-rect="100,20,499,10"></div>`,
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  // A reversed axis overflows toward the start, with a scroll offset ≤ 0:
-  // a column-reverse chat pane, a row-reverse row, a vertical-rl block axis.
-  // Pane 300×200 at (0, 0); the content end is at window end − offset.
+  // The band comes from the engine's scroll offset and extent, not from a
+  // derived direction: the union of the forward and the reversed placement.
+  // A reversed pane 300×200 at (0, 0), scrolled to −300 with a scroll size of
+  // 600, holds its content in [0, 600) on that axis.
   it.each([
-    ["column-reverse (y)", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,-250", true],
-    ["column-reverse (y), past the content end", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,600", false],
-    ["column-reverse (y), top exactly at the content end", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,500", false],
-    ["column-reverse (y), top 1px before the content end", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,499", true],
-    ["row-reverse (x)", "display:flex; flex-direction:row-reverse; overflow-x:auto", "-300,0", "100,20,-350,10", true],
-    ["row-reverse (x), past the content end", "display:flex; flex-direction:row-reverse; overflow-x:auto", "-300,0", "100,20,700,10", false],
-    ["vertical-rl (x)", "writing-mode:vertical-rl; overflow-x:auto", "-300,0", "100,20,-350,10", true],
-    ["RTL row-reverse runs forward again (x)", "direction:rtl; display:flex; flex-direction:row-reverse; overflow-x:auto", "0,0", "100,20,-350,10", false],
-  ])("scroll origin on a reversed axis: %s", (_label, style, scroll, rect, expected) => {
+    ["RTL (x)", "direction:rtl; overflow-x:auto", "-300,0", "600,200", "100,20,400,10", true],
+    ["RTL (x), wholly before the band", "direction:rtl; overflow-x:auto", "-300,0", "600,200", "100,20,-150,10", false],
+    ["RTL (x), right edge exactly at the band start", "direction:rtl; overflow-x:auto", "-300,0", "600,200", "100,20,-100,10", false],
+    ["RTL (x), right edge 1px into the band", "direction:rtl; overflow-x:auto", "-300,0", "600,200", "100,20,-99,10", true],
+    ["row-reverse (x)", "display:flex; flex-direction:row-reverse; overflow-x:auto", "-300,0", "600,200", "100,20,400,10", true],
+    ["vertical-rl (x)", "writing-mode:vertical-rl; overflow-x:auto", "-300,0", "600,200", "100,20,400,10", true],
+    ["column-reverse (y)", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "300,600", "100,20,10,400", true],
+    ["column-reverse (y), wholly before the band", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "300,600", "100,20,10,-150", false],
+    // Forward pane at offset 0 with scroll size 600: its band ends at 600.
+    ["forward (y), wholly past the scroll extent", "overflow-y:auto", "0,0", "300,600", "100,20,10,600", false],
+    ["forward (y), top 1px before the scroll extent ends", "overflow-y:auto", "0,0", "300,600", "100,20,10,599", true],
+    ["forward (y), a non-finite scroll extent", "overflow-y:auto", "0,0", "300,Infinity", "100,20,10,50", false],
+  ])("scroll band on a reversed pane: %s", (_label, style, scroll, size, rect, expected) => {
     expect(
       isFieldVisible(
         field(
-          `<div style="${style}" data-rect="300,200,0,0" data-scroll="${scroll}"><input id="f" data-rect="${rect}"></div>`,
+          `<div style="${style}" data-rect="300,200,0,0" data-scroll="${scroll}" data-scroll-size="${size}"><input id="f" data-rect="${rect}"></div>`,
         ),
       ),
     ).toBe(expected);
+  });
+
+  // Whatever the writing mode or direction, a field the engine cannot scroll
+  // to (outside the pane's scroll extent) is denied: no direction to misread.
+  it.each([
+    ["sideways-lr + rtl", "writing-mode:sideways-lr; direction:rtl"],
+    ["sideways-lr", "writing-mode:sideways-lr"],
+    ["vertical-rl", "writing-mode:vertical-rl"],
+    ["rtl", "direction:rtl"],
+    ["row-reverse", "display:flex; flex-direction:row-reverse"],
+    ["column-reverse", "display:flex; flex-direction:column-reverse"],
+  ])("denies a field far before a scroll pane whatever its direction: %s", (_label, style) => {
+    const pane = `style="overflow-x:auto; overflow-y:auto; ${style}" data-rect="800,600,0,0"`;
+    expect(isFieldVisible(field(`<div ${pane}><input id="f" data-rect="100,20,10,-9999"></div>`))).toBe(false);
+    expect(isFieldVisible(field(`<div ${pane}><input id="f" data-rect="100,20,-9999,10"></div>`))).toBe(false);
   });
 
   // Pane top 100, scrollTop 50: the content origin is at y = 50.

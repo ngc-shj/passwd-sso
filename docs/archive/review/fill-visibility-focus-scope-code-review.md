@@ -1,6 +1,6 @@
 # Code Review: fill-visibility-focus-scope
 Date: 2026-10-13
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
 Initial review of `0404df58f`. Three fresh expert sub-agents reviewed the full diff and ran jsdom probes and mutations in scratch copies. The Phase 2 self R-check had already resolved R47 (clip-path insets), R3 (the twin's hinted password scope) and RT7 (the x scroll window).
@@ -96,6 +96,13 @@ Initial review of `0404df58f`. Three fresh expert sub-agents reviewed the full d
 | Q2 | Func | Minor | The scroll-origin rule ignored reversed axes (column-reverse, row-reverse, vertical-rl), denying reachable fields. | The axis direction is read from direction, writing-mode and flex-direction. Content and twin, with tests. |
 
 Each fix was red-proved on a scratch copy by reverting it in content and in the twin.
+
+## Round 3
+
+| ID | Expert | Severity | Finding | Resolution |
+|----|--------|----------|---------|------------|
+| R3-S1 | Sec | Major | Round 2's direction classification read `writing-mode: sideways-lr`'s inline axis backwards, so a field before a forward scroll origin was admitted. | The mechanism changed (D12): the scroll axis is bounded by the engine's scroll extent (`meetsScrollBand`), with no direction classification. A field the engine cannot scroll to is denied whatever the writing mode, direction or flex direction. Content and twin; the band edges, the forward extent and a non-finite extent are red-proved. |
+| test N1–N4 | Test | Major/Minor | Twin and content arms that survived deletion; an unpinned reversed-axis boundary; a stale comment. | `fd7650db1`; each mutation red-proved. |
 
 ## Environment Verification Report
 - **VE1** (real Chrome rendering: plan scenarios 1–8): `blocked-deferred` to the user's manual check before merge, per plan VE1.

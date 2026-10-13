@@ -119,17 +119,20 @@ export async function directAutofill(
   // 0 in flow, 1 absolute, 2 fixed
   const positionMode = (style: CSSStyleDeclaration) =>
     style.position === "fixed" ? 2 : style.position === "absolute" ? 1 : 0;
-  // Mirror of content overflowReversed.
-  const overflowReversed = (style: CSSStyleDeclaration, axis: "x" | "y") => {
-    const writingMode = style.getPropertyValue("writing-mode").trim();
-    const vertical = writingMode.startsWith("vertical") || writingMode.startsWith("sideways");
-    const inlineAxis = vertical ? "y" : "x";
-    const flexDirection = style.display.includes("flex")
-      ? style.getPropertyValue("flex-direction").trim()
-      : "";
-    if (axis === inlineAxis) return (style.direction === "rtl") !== (flexDirection === "row-reverse");
-    const blockReversed = writingMode === "vertical-rl" || writingMode === "sideways-rl";
-    return blockReversed !== (flexDirection === "column-reverse");
+  // Mirror of content meetsScrollBand: the union of the forward and the
+  // reversed scroll band, from the engine's offset and extent.
+  const meetsScrollBand = (
+    start: number,
+    end: number,
+    windowStart: number,
+    client: number,
+    offset: number,
+    extent: number,
+  ) => {
+    if (!Number.isFinite(offset) || !Number.isFinite(extent)) return false;
+    const origin = windowStart - offset;
+    const slack = Math.max(0, extent - client);
+    return end > origin - slack && start < origin + Math.max(extent, client);
   };
   const hasVisibleBox = (el: Element) => {
     const rect = el.getBoundingClientRect();
@@ -161,11 +164,9 @@ export async function directAutofill(
         const client = node.clientWidth;
         if (client < MIN_VISIBLE_PX) return false;
         const windowLeft = box.left + node.clientLeft;
-        const unreachable =
-          overflowReversed(style, "x")
-            ? left >= windowLeft + client - node.scrollLeft
-            : right <= windowLeft - node.scrollLeft;
-        if (!Number.isFinite(windowLeft - node.scrollLeft) || unreachable) return false;
+        if (!meetsScrollBand(left, right, windowLeft, client, node.scrollLeft, node.scrollWidth)) {
+          return false;
+        }
         const span = Math.min(right - left, client);
         left = windowLeft;
         right = left + span;
@@ -178,10 +179,9 @@ export async function directAutofill(
         const client = node.clientHeight;
         if (client < MIN_VISIBLE_PX) return false;
         const windowTop = box.top + node.clientTop;
-        const unreachable = overflowReversed(style, "y")
-          ? top >= windowTop + client - node.scrollTop
-          : bottom <= windowTop - node.scrollTop;
-        if (!Number.isFinite(windowTop - node.scrollTop) || unreachable) return false;
+        if (!meetsScrollBand(top, bottom, windowTop, client, node.scrollTop, node.scrollHeight)) {
+          return false;
+        }
         const span = Math.min(bottom - top, client);
         top = windowTop;
         bottom = top + span;
