@@ -139,3 +139,12 @@ Equivalent mutants reported and left as they are:
   - **F5:** the vacuous cardholder Select2 test was deleted. Only the expiry roles accept a geometry-exempt select in CC; the identity date-of-birth pair covers a non-exempt role.
 - **Full suite:** 2030 passed; tsc passes.
 - **Pre-existing, not changed here:** on the twin's fallback username walk, a non-username text field preceding the password (for example `expiry`) can be taken as the username, where content's hint-checked walk takes `username`. Both pick the same password. The parity test already documented this as reported-not-fixed before this branch.
+
+## Manual verification (VE1)
+
+The user ran plan scenarios 1–8 in Chrome. Scenarios 1, 3a/3b, 4, 5, 7 and 8 passed.
+
+Scenarios 2 and 6 left the combined full-name field empty. This was pre-existing on `main`, not a regression:
+- **Cause:** when the entry had structured given/family names, the identity fill never created a fullName step, even on a page with no split name field.
+- **Fix:** the fill now writes the entry's own fullName when the page has no split name field. It is never composed from given/family, because the order differs by locale.
+- **Tests:** two new tests cover a combined-only form (filled) and split plus combined fields (structured names only). Both directions are red-proved.

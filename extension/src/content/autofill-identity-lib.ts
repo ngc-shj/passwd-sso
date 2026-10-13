@@ -161,10 +161,14 @@ export async function performIdentityAutofill(
   // ── Name ──
   // Prefer structured given/family; fall back to the monolithic fullName ONLY for
   // a combined `name` field. NEVER split fullName into the split fields (forbidden).
+  // A page with no split name field still gets the entry's own fullName, even
+  // when the entry also has structured names (never composed from them: the
+  // given/family order differs by locale).
   const hasStructuredName = Boolean(payload.givenName || payload.familyName);
+  const pageHasSplitName = fields.givenName !== null || fields.familyName !== null;
   addStep("givenName", () => payload.givenName, SELECT_DIAG_FIELD.IDENTITY_GIVEN_NAME);
   addStep("familyName", () => payload.familyName, SELECT_DIAG_FIELD.IDENTITY_FAMILY_NAME);
-  if (!hasStructuredName) {
+  if (!hasStructuredName || !pageHasSplitName) {
     addStep("fullName", () => payload.fullName, SELECT_DIAG_FIELD.IDENTITY_FULL_NAME);
   }
 
