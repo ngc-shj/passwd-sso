@@ -1,6 +1,6 @@
 # Code Review: fill-visibility-focus-scope
 Date: 2026-10-13
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 Initial review of `0404df58f`. Three fresh expert sub-agents reviewed the full diff and ran jsdom probes and mutations in scratch copies. The Phase 2 self R-check had already resolved R47 (clip-path insets), R3 (the twin's hinted password scope) and RT7 (the x scroll window).
@@ -43,15 +43,12 @@ Initial review of `0404df58f`. Three fresh expert sub-agents reviewed the full d
 | F12 | Minor (Adjacent) | Extension tests are typechecked nowhere; 52 pre-existing errors in 16 files. | Out of this PR's scope: see the Anti-Deferral entry below. |
 | F13 | Minor (Adjacent) | The `focusScopedFields` signature deviated from the plan without a deviation-log entry. | Recorded as D9. |
 
-## Anti-Deferral: testing F12
+## Testing F12: resolved in this branch (the user asked to fix it here)
 
-- **Finding:** extension test files are excluded from `tsconfig.json`, and CI runs only `npm test` and `npm run build`, so a type error in a test never fails a gate.
-- **Why not here:**
-  - Fixing it means correcting 52 type errors in 16 test files this branch does not touch, then adding a CI step.
-  - The new and changed test files on this branch typecheck clean under a scratch tsconfig that includes them.
-- **Worst case:** a test that typechecks wrongly still runs under vitest (esbuild strips types), so the gap hides type drift in tests, not behaviour.
-- **Cost to fix:** about half a day, as a separate chore.
-- **Tracking:** a follow-up issue is proposed to the user.
+- **Config:** `extension/tsconfig.test.json` extends `tsconfig.json`, adds the vitest globals types, and includes `src/__tests__` and `vitest.config.ts`.
+- **Gate:** `npm run typecheck:test` runs in CI (Extension job, after the tests) and in `scripts/pre-pr.sh` ("Extension: Typecheck tests").
+- **Errors fixed:** the 40 existing type errors in 13 test files, by typing mocks against the real signatures, narrowing nulls, and similar. No `any`, no suppression comments, and no assertion changed. The dead `environmentMatchGlobs` key was the 41st error (D6).
+- **Red-proof:** a type error added to a test file on a scratch copy fails `tsc -p tsconfig.test.json`.
 
 ## Recurring Issue Check
 
@@ -89,6 +86,16 @@ Initial review of `0404df58f`. Three fresh expert sub-agents reviewed the full d
 - RT10: F2
 - RT11: F11
 - Others: OK or n/a
+
+## Round 2
+
+| ID | Expert | Severity | Finding | Resolution |
+|----|--------|----------|---------|------------|
+| R2-S1 / Q1 | Sec, Func | Major | Round 1 skipped inline ancestors before the containing-block transition, so an absolute field inside an inline `position:relative` span escaped the static clips above it. | An inline box skips only the clip; the transition always runs. Content and twin, with deny/allow tests. |
+| R2-S2 | Sec | Major | `containsFixed` listed only some containing-block triggers, so the ABSOLUTE skip let fields escape clips that round 1 had applied. | Fail-safe: any listed trigger off its initial value (including unknown values) counts as a containing block. Content and twin, with per-trigger tests. |
+| Q2 | Func | Minor | The scroll-origin rule ignored reversed axes (column-reverse, row-reverse, vertical-rl), denying reachable fields. | The axis direction is read from direction, writing-mode and flex-direction. Content and twin, with tests. |
+
+Each fix was red-proved on a scratch copy by reverting it in content and in the twin.
 
 ## Environment Verification Report
 - **VE1** (real Chrome rendering: plan scenarios 1–8): `blocked-deferred` to the user's manual check before merge, per plan VE1.

@@ -33,7 +33,7 @@ interface Registered { target: EventTarget; type: string; listener: EventListene
 function captureListeners(fn: () => void): Registered[] {
   const registered: Registered[] = [];
   const original = EventTarget.prototype.addEventListener;
-  EventTarget.prototype.addEventListener = function (type: string, listener: EventListenerOrEventListenerObject | null, opts?: unknown) {
+  EventTarget.prototype.addEventListener = function (this: EventTarget, type: string, listener: EventListenerOrEventListenerObject | null, opts?: unknown) {
     if (typeof listener === "function") registered.push({ target: this, type, listener: listener as EventListener });
     return original.call(this, type, listener as EventListener, opts as boolean);
   } as typeof EventTarget.prototype.addEventListener;

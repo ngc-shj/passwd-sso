@@ -29,6 +29,10 @@ function frameIdOfDocument(documentId: string): number | null {
 
 export type ProbeAnswer = { documentId: string; href: string; origin: string };
 
+// `result` is unknown, as in Chrome's own InjectionResult: tests queue
+// malformed probe results (null, a bare string) to pin the shape check.
+type InjectionResult = { frameId: number; documentId: string; result: unknown };
+
 /**
  * chrome.scripting.executeScript as the content-bundle probe sees it: a `func`
  * call without `args` (the location probe; the direct-autofill func always
@@ -72,11 +76,11 @@ export function createExecuteScriptMock(
     return { documentId: documentIdFor(frameId), href: urlFor(frameId), origin: originFor(frameId) };
   }
 
-  function toResult(frameId: number, answer: ProbeAnswer | null) {
+  function toResult(frameId: number, answer: ProbeAnswer | null): InjectionResult[] {
     return answer ? [{ frameId, documentId: answer.documentId, result: { href: answer.href, origin: answer.origin } }] : [];
   }
 
-  function answerForDocument(documentId: string) {
+  function answerForDocument(documentId: string): InjectionResult[] {
     const frameId = frameIdOfDocument(documentId);
     if (frameId === null) return [];
     const answer = answerForFrame(frameId);
@@ -86,7 +90,7 @@ export function createExecuteScriptMock(
     return toResult(frameId, answer);
   }
 
-  const mock = vi.fn(async (injection: Injection) => {
+  const mock = vi.fn(async (injection: Injection): Promise<InjectionResult[]> => {
     if (injection.func && !injection.args) {
       if (injection.target.documentIds) {
         return injection.target.documentIds.flatMap((documentId) => answerForDocument(documentId));

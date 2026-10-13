@@ -396,6 +396,8 @@ jobs:
 
       - run: npm ci
       - run: npm test
+      # tsconfig.json excludes src/__tests__, so the build never types the tests.
+      - run: npm run typecheck:test
       - run: npm run build
 
       - name: Verify built manifest version matches root

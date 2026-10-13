@@ -964,6 +964,9 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   else
     ext_ok=1
     queue_step "Extension: Test"  bash -c 'cd extension && npm test'
+    # tsconfig.json excludes src/__tests__ (the build must not type tests), so
+    # the tests are typed only here and by the CI step of the same name.
+    queue_step "Extension: Typecheck tests"  bash -c 'cd extension && npm run typecheck:test'
   fi
 
   run_batch

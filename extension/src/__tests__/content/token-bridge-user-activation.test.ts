@@ -56,7 +56,7 @@ describe("token-bridge userActivation gate", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.postMessage = originalPostMessage;
-    delete (navigator as Navigator & { userActivation?: unknown }).userActivation;
+    Reflect.deleteProperty(navigator, "userActivation");
     if (originalUserActivationDescriptor) {
       Object.defineProperty(
         Object.getPrototypeOf(navigator) as object,

@@ -29,11 +29,11 @@
 - **Change:** the twin's union of card blocks finds the card number with its inline `isVisible`, with no `geometryExempt` for a `<select>`.
 - **Why:** on the content side, the exemption matters only for expiry and region selects. A card number is never a select, so this cannot change which card number the twin anchors on. The twin also writes no selects.
 
-## D6: `environmentMatchGlobs` left in `vitest.config.ts`
+## D6: `environmentMatchGlobs` removed with the test typecheck
 
-- **Plan:** the testing round-1 review called it dead config and asked for its removal.
-- **Change:** it is still there.
-- **Why:** removing it is a cleanup unrelated to this change and alters nothing observable. It is left to a separate chore.
+- **Plan:** remove the dead `environmentMatchGlobs` block.
+- **Change:** removed together with the F12 test typecheck. The new typecheck rejects the key, which vitest 5 no longer accepts.
+- **Files it named:** `webauthn-bridge-lib.test.ts` already has a jsdom docblock. `dpop-key.test.ts` was already running in the default node environment, and its comment now says so.
 
 ## D7: the cache-lifetime red-proof
 

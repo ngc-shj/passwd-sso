@@ -21,6 +21,12 @@ function byName(name: string): HTMLInputElement {
   return el;
 }
 
+function bySelector(selector: string): HTMLElement {
+  const el = document.querySelector(selector);
+  if (!(el instanceof HTMLElement)) throw new Error(`fixture missing ${selector}`);
+  return el;
+}
+
 function input(autocomplete: string | undefined): HTMLInputElement {
   const el = document.createElement("input");
   if (autocomplete !== undefined) el.setAttribute("autocomplete", autocomplete);
@@ -100,7 +106,7 @@ describe("ccFormFields", () => {
       <input autocomplete="cc-exp-month" id="standalone-exp" />
     `);
     const fields = ccFormFields(document);
-    expect(fields.has(document.getElementById("standalone-exp"))).toBe(true);
+    expect(fields.has(bySelector("#standalone-exp"))).toBe(true);
   });
 
   it("<div>-only card block: includes its CVV, excludes a sibling-form security_code (F-S10)", () => {
@@ -187,7 +193,7 @@ describe("ccFormFields", () => {
     `);
     const fields = ccFormFields(document);
     expect(fields.has(byName("cardNumber"))).toBe(true);
-    expect(fields.has(document.querySelector('[name="expMonth"]'))).toBe(true);
+    expect(fields.has(bySelector('[name="expMonth"]'))).toBe(true);
   });
 
   it("a neighbour in a different form, reachable only via a shared page ancestor, is not swept into the block", () => {

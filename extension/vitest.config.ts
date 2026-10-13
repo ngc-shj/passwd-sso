@@ -15,9 +15,5 @@ export default defineConfig({
     // failure the seed line ("Running tests with seed ...") reproduces it via
     // `npx vitest run --sequence.shuffle --sequence.seed=N`.
     sequence: { shuffle: true },
-    environmentMatchGlobs: [
-      ["**/__tests__/webauthn-bridge-lib.test.ts", "jsdom"],
-      ["**/__tests__/dpop-key.test.ts", "jsdom"],
-    ],
   },
 });

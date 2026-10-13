@@ -1,8 +1,8 @@
 /**
  * Tests for extension/src/lib/dpop-key.ts — C6 acceptance criteria.
  *
- * Uses fake-indexeddb so IDB APIs are available in jsdom.
- * (vitest.config.ts maps **\/dpop-key.test.ts → jsdom environment)
+ * Runs in vitest's default node environment, which provides crypto.subtle;
+ * fake-indexeddb supplies the IDB APIs.
  */
 import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach } from "vitest";

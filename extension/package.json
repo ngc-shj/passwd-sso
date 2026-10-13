@@ -8,6 +8,7 @@
     "build": "tsc && vite build && node scripts/check-dist-hygiene.mjs",
     "preview": "vite preview",
     "test": "vitest run",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "test:watch": "vitest"
   },
   "dependencies": {

@@ -15,7 +15,7 @@ import {
 
 /** Encrypt plaintext with AES-256-GCM, returning hex-encoded EncryptedData. */
 async function aesEncrypt(
-  plaintext: Uint8Array,
+  plaintext: Uint8Array<ArrayBuffer>,
   key: CryptoKey,
   aad?: Uint8Array,
 ): Promise<EncryptedData> {

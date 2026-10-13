@@ -8,7 +8,7 @@ const FAKE_ENCRYPTED: EncryptedField = { ciphertext: "enc", iv: "iv1", authTag: 
 // Hoisted mock definitions so they are available before module import
 const { mockEncryptField, mockDecryptField } = vi.hoisted(() => {
   const mockEncryptField = vi.fn(async (_plaintext: string) => FAKE_ENCRYPTED);
-  const mockDecryptField = vi.fn(async (_blob: EncryptedField) => "decrypted-value");
+  const mockDecryptField = vi.fn(async (_blob: EncryptedField): Promise<string | null> => "decrypted-value");
   return { mockEncryptField, mockDecryptField };
 });
 
