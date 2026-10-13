@@ -495,6 +495,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
     { name: "R6 allow: static + the same clip", last: pwLast('style="position:static; clip:rect(0px, 0px, 0px, 0px)"'), allowed: true },
     { name: "R6 deny: clip-path inset(100%) ancestor", last: `<div style="clip-path:inset(100%)">${pwLast()}</div>`, allowed: false },
     { name: "R6 deny: clip-path inset(50%) ancestor", last: `<div style="clip-path:inset(50%)">${pwLast()}</div>`, allowed: false },
+    { name: "R6 allow: clip-path inset(50% 0 0) ancestor (bottom half painted)", last: `<div style="clip-path:inset(50% 0px 0px)">${pwLast()}</div>`, allowed: true },
     {
       name: "R7 deny: checkVisibility false for the field",
       last: pwLast(),
@@ -573,6 +574,29 @@ describe("directAutofill twin: field visibility (C1)", () => {
     const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
     expect(direct).toEqual(content);
     expect(direct).toEqual({ username: "username", password: "pw" });
+  });
+
+  it("a hinted hidden field does not scope the password search to its form", async () => {
+    const html = `
+      <form>
+        <div style="display:none"><input id="hinted" type="text" name="email"></div>
+        <input id="pwA" type="password" name="password">
+      </form>
+      <input id="pwB" type="password" name="password">
+    `;
+    const hint = { id: "hinted" };
+    document.body.innerHTML = html;
+    await directAutofill(USERNAME, PASSWORD, hint, [], CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
+    const direct = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
+    __resetFillSequenceForTests();
+    document.body.innerHTML = html;
+    await performAutofill(
+      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: USERNAME, password: PASSWORD, targetHint: hint },
+      NO_WAIT,
+    );
+    const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
+    expect(direct).toEqual(content);
+    expect(direct).toEqual({ username: null, password: "pwB" });
   });
 
   it("an opacity:0 input matching a custom-field label is not written; the visible match is", async () => {

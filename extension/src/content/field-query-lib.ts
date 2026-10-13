@@ -91,7 +91,23 @@ function parentOf(el: Element): Element | null {
   return root instanceof ShadowRoot ? root.host : null;
 }
 
-const CLIP_PATH_ZERO_PREFIXES = ["inset(100%", "inset(50%", "circle(0"];
+/**
+ * Whether a computed `clip-path` leaves nothing painted: an `inset()` whose
+ * opposite percentage insets meet (`inset(50%)`, `inset(100% 0 0)`), or a
+ * zero-radius `circle()`. Length insets are not resolved against the box, so
+ * an `inset()` in px that covers it is a known gap (plan C1, bypass vi).
+ */
+function clipPathPaintsNothing(clipPath: string): boolean {
+  if (/^circle\(0(px|%)?[\s)]/.test(clipPath)) return true;
+  const inset = /^inset\(([^)]*)\)/.exec(clipPath);
+  if (!inset) return false;
+  const parts = inset[1].split(/\s+round\s+/)[0].trim().split(/\s+/);
+  const pct = (token: string | undefined) =>
+    token?.endsWith("%") ? Number.parseFloat(token) || 0 : 0;
+  // CSS box shorthand: top, right, bottom, left.
+  const [top, right = top, bottom = top, left = right] = parts;
+  return pct(top) + pct(bottom) >= 100 || pct(left) + pct(right) >= 100;
+}
 
 /** A `clip` or `clip-path` that leaves nothing of the element painted. */
 function isClippedAway(style: CSSStyleDeclaration): boolean {
@@ -100,7 +116,7 @@ function isClippedAway(style: CSSStyleDeclaration): boolean {
     return true;
   }
   const clipPath = style.getPropertyValue("clip-path").trim().toLowerCase();
-  return CLIP_PATH_ZERO_PREFIXES.some((prefix) => clipPath.startsWith(prefix));
+  return clipPathPaintsNothing(clipPath);
 }
 
 const CLIP_NONE = 0;

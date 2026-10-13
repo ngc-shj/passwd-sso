@@ -385,6 +385,18 @@ describe("isFieldVisible — R6: clip / clip-path that paints nothing", () => {
     ).toBe(false);
   });
 
+  it("denies a field whose ancestor has clip-path: inset(100% 0 0) (top inset covers it)", () => {
+    expect(
+      isFieldVisible(field(`<div style="clip-path:inset(100% 0px 0px)"><input id="f"></div>`)),
+    ).toBe(false);
+  });
+
+  it("allows a field whose ancestor has clip-path: inset(50% 0 0) (bottom half painted)", () => {
+    expect(
+      isFieldVisible(field(`<div style="clip-path:inset(50% 0px 0px)"><input id="f"></div>`)),
+    ).toBe(true);
+  });
+
   it("allows a field whose ancestor has clip-path: inset(10%)", () => {
     expect(
       isFieldVisible(field(`<div style="clip-path:inset(10%)"><input id="f"></div>`)),

@@ -68,7 +68,15 @@ export async function directAutofill(
       return true;
     }
     const clipPath = style.getPropertyValue("clip-path").trim().toLowerCase();
-    return ["inset(100%", "inset(50%", "circle(0"].some((p) => clipPath.startsWith(p));
+    // Mirror of content clipPathPaintsNothing.
+    if (/^circle\(0(px|%)?[\s)]/.test(clipPath)) return true;
+    const inset = /^inset\(([^)]*)\)/.exec(clipPath);
+    if (!inset) return false;
+    const parts = inset[1].split(/\s+round\s+/)[0].trim().split(/\s+/);
+    const pct = (token: string | undefined) =>
+      token?.endsWith("%") ? Number.parseFloat(token) || 0 : 0;
+    const [top, right = top, bottom = top, left = right] = parts;
+    return pct(top) + pct(bottom) >= 100 || pct(left) + pct(right) >= 100;
   };
   // 0 none, 1 strict clip, 2 scroll window
   const axisClip = (style: CSSStyleDeclaration, axis: "x" | "y") => {
@@ -303,9 +311,12 @@ export async function directAutofill(
     return pwInputs.length ? pwInputs[pwInputs.length - 1] : null;
   };
 
-  // A hinted field of the card form does not scope the search, as on the content side.
+  // A hinted field of the card form, or a hidden one, does not scope the search,
+  // as on the content side.
   const hintedScope =
-    hintedInput instanceof HTMLInputElement && isLoginEligible(hintedInput) ? hintedInput : null;
+    hintedInput instanceof HTMLInputElement && isLoginEligible(hintedInput) && isVisible(hintedInput)
+      ? hintedInput
+      : null;
   const scopeForm = (usernameInput ?? hintedScope)?.form ?? null;
   const scopedInputs = scopeForm
     ? (Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[])
