@@ -19,7 +19,7 @@ import { isFillActive } from "./fill-sequence-lib";
 import { labelledByText } from "./labelled-by";
 import {
   isUsableInput,
-  isFieldVisible,
+  isDropdownFieldVisible,
   resolveOpacity,
 } from "./field-query-lib";
 import { ccFormFields } from "./cc-field-detection-lib";
@@ -437,7 +437,7 @@ export function initFormDetector(): FormDetectorCleanup {
   // an unrelated field never costs a card scan. A field of the card form (a
   // masked CVV is a password input) gets the CC dropdown, not this one.
   const shouldTriggerForInput = (input: HTMLInputElement, ccForm: CcFormSource): boolean => {
-    if (!isFieldVisible(input)) return false;
+    if (!isDropdownFieldVisible(input)) return false;
     const wouldTrigger =
       input.type === "password" ||
       isLikelyUsernameInput(input) ||
@@ -527,7 +527,7 @@ export function initFormDetector(): FormDetectorCleanup {
     }
     if (
       !isPageVisuallySafe() ||
-      !isFieldVisible(input) ||
+      !isDropdownFieldVisible(input) ||
       !isInputHitTestSafe(input) ||
       hasVisiblePopoverOverlayNear(input)
     ) {

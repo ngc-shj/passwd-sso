@@ -11,7 +11,7 @@ import {
   hasVisiblePopoverOverlayNear,
   showInlineNotice,
 } from "./form-detector-lib";
-import { isUsableInput, isFieldVisible, fillAdmission } from "./field-query-lib";
+import { isUsableInput, isDropdownFieldVisible, memberAdmission } from "./field-query-lib";
 import { ccClaimedFields } from "./cc-field-detection-lib";
 import {
   showDropdown,
@@ -111,7 +111,12 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
     if (destroyed) return;
     const next = new WeakSet<HTMLElement>();
     const hidden = new WeakSet<Element>();
-    for (const el of ccClaimedFields(document, fillAdmission(hidden))) next.add(el);
+    const admit = memberAdmission(hidden);
+    // Each form's own detection too: a page-wide detection claims one field
+    // per role, so a second card form would otherwise get no dropdown.
+    for (const root of [document, ...Array.from(document.forms)]) {
+      for (const el of ccClaimedFields(root, admit)) next.add(el);
+    }
     ccFields = next;
     hiddenAtScan = hidden;
   };
@@ -130,7 +135,7 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
     }
     if (
       !isPageVisuallySafe() ||
-      !isFieldVisible(input) ||
+      !isDropdownFieldVisible(input) ||
       !isInputHitTestSafe(input) ||
       hasVisiblePopoverOverlayNear(input)
     ) {
@@ -240,7 +245,7 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
       // a transition, an <html> class, a media query): a field the last scan
       // saw hidden is rendered now, so one scan admits it. A field that was
       // never hidden costs no scan.
-      if (!ccFields.has(input) && hiddenAtScan.has(input) && isFieldVisible(input)) rescan();
+      if (!ccFields.has(input) && hiddenAtScan.has(input) && isDropdownFieldVisible(input)) rescan();
       if (!ccFields.has(input)) return;
     }
     requestMatches(input);

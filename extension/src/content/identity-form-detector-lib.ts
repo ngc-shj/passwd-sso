@@ -11,6 +11,8 @@ import {
   isFieldVisible,
   isNotSelfHidden,
   fillAdmission,
+  isDropdownFieldVisible,
+  memberAdmission,
   type FieldAdmit,
   getHintString,
   findFieldByAutocomplete,
@@ -199,9 +201,9 @@ export function detectIdentityFields(
   // C4: a field already claimed by CC detection must never also be claimed by
   // identity detection — otherwise the identity focus handler races the CC
   // dropdown and can overwrite it on a card field.
-  const ccClaimed = ccClaimedFields(root);
-
   const isAdmitted = admit ?? fillAdmission();
+  const ccClaimed = ccClaimedFields(root, isAdmitted);
+
   const visibleFields = allFields.filter(
     (f) => isAdmitted(f) && isUsableField(f) && !ccClaimed.has(f),
   );
@@ -377,8 +379,13 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
     if (destroyed) return;
     const next = new WeakSet<HTMLElement>();
     const hidden = new WeakSet<Element>();
-    const fields = detectIdentityFields(document, fillAdmission(hidden));
-    if (fields) collectIdentityFields(fields, next);
+    const admit = memberAdmission(hidden);
+    // Each form's own detection too: a page-wide detection claims one field
+    // per role, so a second identity form would otherwise get no dropdown.
+    for (const root of [document, ...Array.from(document.forms)]) {
+      const fields = detectIdentityFields(root, admit);
+      if (fields) collectIdentityFields(fields, next);
+    }
     identityFields = next;
     hiddenAtScan = hidden;
   };
@@ -397,7 +404,7 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
     }
     if (
       !isPageVisuallySafe() ||
-      !isFieldVisible(input) ||
+      !isDropdownFieldVisible(input) ||
       !isInputHitTestSafe(input) ||
       hasVisiblePopoverOverlayNear(input)
     ) {
@@ -505,7 +512,7 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
       // a transition, an <html> class, a media query): a field the last scan
       // saw hidden is rendered now, so one scan admits it. A field that was
       // never hidden costs no scan.
-      if (!identityFields.has(input) && hiddenAtScan.has(input) && isFieldVisible(input)) {
+      if (!identityFields.has(input) && hiddenAtScan.has(input) && isDropdownFieldVisible(input)) {
         rescan();
       }
       if (!identityFields.has(input)) return;

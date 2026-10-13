@@ -27,7 +27,7 @@ import {
   SELECT_DIAG_FIELD,
   type SelectDiagField,
 } from "./select-diag-lib";
-import { getHintString } from "./field-query-lib";
+import { fillAdmission, getHintString } from "./field-query-lib";
 
 // ── Value setters ──
 
@@ -158,8 +158,11 @@ export async function performCreditCardAutofill(
 ): Promise<void> {
   // T0: the detector's result, scoped to the block the user is in, is every
   // step's initial target.
+  const admit = fillAdmission();
   const fields = focusScopedFields<CreditCardFormFields>({
-    detect: (root) => detectCreditCardFields(root),
+    // One admission (and so one visibility cache) for every detection the
+    // scope runs: it climbs ancestors and checks their siblings.
+    detect: (root) => detectCreditCardFields(root, admit),
     roles: ccRoles,
     anchors: (f) => f.cardNumber !== null,
     // A second card number with any other card role is another card form; a

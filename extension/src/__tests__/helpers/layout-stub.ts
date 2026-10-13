@@ -6,7 +6,8 @@
 // - Every element's rect defaults to 100×20 at (10, 10). An element overrides
 //   it with `data-rect="w,h,x,y"`, resolved at call time so it survives an
 //   `innerHTML` rebuild and reaches the injected direct-autofill twin.
-// - clientWidth / clientHeight follow the rect.
+// - clientWidth / clientHeight follow the rect; scrollLeft / scrollTop come from
+//   `data-scroll="x,y"` (default 0).
 // - Content of a closed <details> (other than its <summary>) is unrendered in a
 //   browser: a zero rect, and checkVisibility() false.
 // - checkVisibility({ opacityProperty }) is also false when the element or an
@@ -78,6 +79,22 @@ if (typeof Element !== "undefined") {
     configurable: true,
     get(this: Element) {
       return layoutOf(this).height;
+    },
+  });
+  const scrollOf = (el: Element, axis: 0 | 1): number => {
+    const spec = el.getAttribute("data-scroll");
+    return spec ? Number(spec.split(",")[axis]?.trim() ?? 0) : 0;
+  };
+  Object.defineProperty(Element.prototype, "scrollLeft", {
+    configurable: true,
+    get(this: Element) {
+      return scrollOf(this, 0);
+    },
+  });
+  Object.defineProperty(Element.prototype, "scrollTop", {
+    configurable: true,
+    get(this: Element) {
+      return scrollOf(this, 1);
     },
   });
   Object.defineProperty(HTMLElement.prototype, "checkVisibility", {

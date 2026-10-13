@@ -57,7 +57,9 @@ export async function directAutofill(
   // Mirror of content isFieldVisible (field-query-lib.ts) without its options:
   // this fill writes no selects and no OTP. A pure AND; a zero rect denies.
   const MIN_VISIBLE_PX = 4;
+  // The flat (rendered) tree: a slotted element's slot first.
   const parentOf = (el: Element): Element | null => {
+    if (el.assignedSlot) return el.assignedSlot;
     if (el.parentElement) return el.parentElement;
     const root = el.getRootNode();
     return root instanceof ShadowRoot ? root.host : null;
@@ -91,6 +93,17 @@ export async function directAutofill(
     if (overflow === "scroll" || overflow === "auto") return 2;
     return 0;
   };
+  const isSet = (value: string) => value !== "" && value !== "none";
+  const containsFixed = (style: CSSStyleDeclaration) =>
+    isSet(style.getPropertyValue("transform")) ||
+    isSet(style.getPropertyValue("perspective")) ||
+    isSet(style.getPropertyValue("filter")) ||
+    isSet(style.getPropertyValue("backdrop-filter")) ||
+    /\b(paint|layout|strict|content)\b/.test(style.getPropertyValue("contain")) ||
+    /\b(transform|perspective|filter)\b/.test(style.getPropertyValue("will-change"));
+  // 0 in flow, 1 absolute, 2 fixed
+  const positionMode = (style: CSSStyleDeclaration) =>
+    style.position === "fixed" ? 2 : style.position === "absolute" ? 1 : 0;
   const hasVisibleBox = (el: Element) => {
     const rect = el.getBoundingClientRect();
     let left = rect.left;
@@ -98,20 +111,29 @@ export async function directAutofill(
     let top = rect.top;
     let bottom = rect.bottom;
     if (right - left < MIN_VISIBLE_PX || bottom - top < MIN_VISIBLE_PX) return false;
-    let fixed = getComputedStyle(el).position === "fixed";
-    for (let node = parentOf(el); node && !fixed; node = parentOf(node)) {
+    let mode = positionMode(getComputedStyle(el));
+    for (let node = parentOf(el); node; node = parentOf(node)) {
       if (node === document.body || node === document.documentElement) break;
       const style = getComputedStyle(node);
       if (style.display === "contents") continue;
+      if (mode === 2 && !containsFixed(style)) continue;
+      if (mode === 1 && style.position === "static" && !containsFixed(style)) continue;
       const box = node.getBoundingClientRect();
       const x = axisClip(style, "x");
       if (x === 1) {
         left = Math.max(left, box.left);
         right = Math.min(right, box.right);
       } else if (x === 2) {
-        if (node.clientWidth < MIN_VISIBLE_PX) return false;
-        const span = Math.min(right - left, node.clientWidth);
-        left = box.left + node.clientLeft;
+        const client = node.clientWidth;
+        if (client < MIN_VISIBLE_PX) return false;
+        const windowLeft = box.left + node.clientLeft;
+        const unreachable =
+          style.direction === "rtl"
+            ? left >= windowLeft + client - node.scrollLeft
+            : right <= windowLeft - node.scrollLeft;
+        if (!Number.isFinite(windowLeft - node.scrollLeft) || unreachable) return false;
+        const span = Math.min(right - left, client);
+        left = windowLeft;
         right = left + span;
       }
       const y = axisClip(style, "y");
@@ -119,15 +141,20 @@ export async function directAutofill(
         top = Math.max(top, box.top);
         bottom = Math.min(bottom, box.bottom);
       } else if (y === 2) {
-        if (node.clientHeight < MIN_VISIBLE_PX) return false;
-        const span = Math.min(bottom - top, node.clientHeight);
-        top = box.top + node.clientTop;
+        const client = node.clientHeight;
+        if (client < MIN_VISIBLE_PX) return false;
+        const windowTop = box.top + node.clientTop;
+        if (!Number.isFinite(windowTop - node.scrollTop) || bottom <= windowTop - node.scrollTop) {
+          return false;
+        }
+        const span = Math.min(bottom - top, client);
+        top = windowTop;
         bottom = top + span;
       }
       if (right - left < MIN_VISIBLE_PX || bottom - top < MIN_VISIBLE_PX) return false;
-      if (style.position === "fixed") fixed = true;
+      mode = positionMode(style);
     }
-    if (fixed) {
+    if (mode === 2) {
       return right > 0 && bottom > 0 && left < window.innerWidth && top < window.innerHeight;
     }
     return right + window.scrollX > 0 && bottom + window.scrollY > 0;
@@ -210,23 +237,15 @@ export async function directAutofill(
   ];
   const cardForm = new Set<Field>(ccPatternsArg ? allFields.filter(hasCcToken) : []);
   if (ccPatternsArg) {
-    // Mirror of ccCardBlockFields: the union of the blocks around the card
-    // number each rule detects (own-style, and the fill's visibility rule).
-    const findCardNumber = (admit: (el: Field) => boolean) => {
-      const candidates = allFields.filter((el) => admit(el) && isCardUsable(el));
-      return (
-        candidates.find(
-          (el) => (el.getAttribute("autocomplete") ?? "").toLowerCase().trim() === "cc-number",
-        ) ??
-        candidates.find((el) => numberPatterns.some((re) => re.test(hintOf(el)))) ??
-        null
-      );
-    };
-    const anchors = new Set<Field>();
-    for (const admit of [isNotSelfHidden, isVisible]) {
-      const found = findCardNumber(admit);
-      if (found) anchors.add(found);
-    }
+    // Mirror of ccCardBlockFields: the union of the blocks around every
+    // card-number candidate under the own-style rule.
+    const anchors = allFields.filter(
+      (el) =>
+        el instanceof HTMLInputElement &&
+        isCardFillable(el) &&
+        ((el.getAttribute("autocomplete") ?? "").toLowerCase().trim() === "cc-number" ||
+          numberPatterns.some((re) => re.test(hintOf(el)))),
+    );
     for (const cardNumber of anchors) {
       const neighbours = allFields.filter(
         (el) =>

@@ -15,6 +15,7 @@ import {
   CC_EXPIRY_YEAR_JA_RE,
   CC_CVV_JA_RE,
   CARD_NEIGHBOUR_PATTERNS,
+  CARD_NUMBER_PATTERNS,
   CARD_FILLABLE_INPUT_TYPES,
 } from "../lib/cc-patterns";
 import {
@@ -610,16 +611,12 @@ export function ccFormFields(root: ParentNode): Set<HTMLElement> {
  */
 export function ccCardBlockFields(root: ParentNode): Set<HTMLElement> {
   const members = new Set<HTMLElement>();
-  // The union of the blocks around the card number each rule detects: the
-  // own-style one keeps a card block hidden by an ancestor excluded, and the
-  // fill's one keeps a visible card form excluded when a hidden one precedes it.
-  const anchors = new Set<HTMLInputElement>();
-  for (const fields of [detectCreditCardFields(root, isCreditCardCandidate), detectCreditCardFields(root)]) {
-    if (fields?.cardNumber) anchors.add(fields.cardNumber);
-  }
-  if (anchors.size === 0) return members;
+  // The union of the blocks around every card-number candidate under the
+  // own-style rule — not only the first one detection would pick — so a card
+  // block hidden by an ancestor stays excluded, and so does every visible card
+  // form after the first, or after a hidden one.
   const fields = formFieldsIn(root);
-  for (const cardNumber of anchors) {
+  for (const cardNumber of cardNumberCandidates(fields)) {
     const neighbours = fields.filter((el) => el !== cardNumber && isCardNeighbour(el));
     const inBlock = cardBlock(cardNumber, neighbours);
     if (!inBlock) continue;
@@ -629,6 +626,17 @@ export function ccCardBlockFields(root: ParentNode): Set<HTMLElement> {
     }
   }
   return members;
+}
+
+/** Every not-self-hidden, usable input that detection could take as a card number. */
+function cardNumberCandidates(fields: FormField[]): HTMLInputElement[] {
+  return fields.filter(
+    (el): el is HTMLInputElement =>
+      el instanceof HTMLInputElement &&
+      isCreditCardCandidate(el) &&
+      ((el.getAttribute("autocomplete") ?? "").toLowerCase().trim() === AC_CC_NUMBER ||
+        CARD_NUMBER_PATTERNS.some((re) => re.test(getHintString(el)))),
+  );
 }
 
 function formFieldsIn(root: ParentNode): FormField[] {

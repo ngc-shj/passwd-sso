@@ -10,6 +10,7 @@ import {
   isIdentityRegionFillable,
   type IdentityFormFields,
 } from "./identity-form-detector-lib";
+import { fillAdmission } from "./field-query-lib";
 import {
   focusScopedFields,
   resolveFillRoot,
@@ -121,8 +122,11 @@ export async function performIdentityAutofill(
 ): Promise<void> {
   // T0: the detector's result, scoped to the block the user is in, is every
   // step's initial target.
+  const admit = fillAdmission();
   const fields = focusScopedFields<IdentityFormFields>({
-    detect: detectIdentityFields,
+    // One admission (and so one visibility cache) for every detection the
+    // scope runs: it climbs ancestors and checks their siblings.
+    detect: (root) => detectIdentityFields(root, admit),
     roles: (f) => IDENTITY_ROLES.map((role) => f[role]),
     anchors: () => true,
     // A sibling holding two of the roles already held is another block

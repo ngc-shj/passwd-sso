@@ -84,11 +84,40 @@ function rectOf(el: Element, cache: VisibilityCache | undefined): DOMRect {
   return rect;
 }
 
-/** The next element up, crossing a shadow root to its host. */
+/**
+ * The next element up the flat (rendered) tree: a slotted element's slot, else
+ * its parent, else across a shadow root to its host. A slotted field is
+ * clipped by the shadow tree around its slot, not by its light-DOM parent.
+ */
 function parentOf(el: Element): Element | null {
+  if (el.assignedSlot) return el.assignedSlot;
   if (el.parentElement) return el.parentElement;
   const root = el.getRootNode();
   return root instanceof ShadowRoot ? root.host : null;
+}
+
+const isSet = (value: string) => value !== "" && value !== "none";
+
+const FLOW = 0;
+const ABSOLUTE = 1;
+const FIXED = 2;
+
+function positionMode(style: CSSStyleDeclaration): number {
+  if (style.position === "fixed") return FIXED;
+  if (style.position === "absolute") return ABSOLUTE;
+  return FLOW;
+}
+
+/** Whether an ancestor is the containing block of its fixed-position descendants. */
+function containsFixed(style: CSSStyleDeclaration): boolean {
+  return (
+    isSet(style.getPropertyValue("transform")) ||
+    isSet(style.getPropertyValue("perspective")) ||
+    isSet(style.getPropertyValue("filter")) ||
+    isSet(style.getPropertyValue("backdrop-filter")) ||
+    /\b(paint|layout|strict|content)\b/.test(style.getPropertyValue("contain")) ||
+    /\b(transform|perspective|filter)\b/.test(style.getPropertyValue("will-change"))
+  );
 }
 
 /**
@@ -155,11 +184,18 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
   if (right - left < MIN_VISIBLE_PX || bottom - top < MIN_VISIBLE_PX) return false;
 
   const doc = el.ownerDocument;
-  let fixed = styleOf(el, cache).position === "fixed";
-  for (let node = parentOf(el); node && !fixed; node = parentOf(node)) {
+  // Which ancestors clip the box follows the containing-block chain: an in-flow
+  // box is clipped by every clipping ancestor; an absolutely positioned one
+  // skips static ancestors up to its containing block; a fixed one skips every
+  // ancestor up to one that a transform, filter or containment makes its
+  // containing block. A box still fixed at the top never scrolls.
+  let mode = positionMode(styleOf(el, cache));
+  for (let node = parentOf(el); node; node = parentOf(node)) {
     if (node === doc.body || node === doc.documentElement) break;
     const style = styleOf(node, cache);
     if (style.display === "contents") continue;
+    if (mode === FIXED && !containsFixed(style)) continue;
+    if (mode === ABSOLUTE && style.position === "static" && !containsFixed(style)) continue;
     const box = rectOf(node, cache);
 
     const x = axisClip(style, "x");
@@ -169,8 +205,16 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
     } else if (x === CLIP_SCROLL) {
       const client = node.clientWidth;
       if (client < MIN_VISIBLE_PX) return false;
+      const windowLeft = box.left + node.clientLeft;
+      // Overflow runs one way: content wholly before the scroll origin (left
+      // in LTR, right in RTL, where scrollLeft is ≤ 0) can never be scrolled to.
+      const unreachable =
+        style.direction === "rtl"
+          ? left >= windowLeft + client - node.scrollLeft
+          : right <= windowLeft - node.scrollLeft;
+      if (!Number.isFinite(windowLeft - node.scrollLeft) || unreachable) return false;
       const span = Math.min(right - left, client);
-      left = box.left + node.clientLeft;
+      left = windowLeft;
       right = left + span;
     }
     const y = axisClip(style, "y");
@@ -180,17 +224,20 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
     } else if (y === CLIP_SCROLL) {
       const client = node.clientHeight;
       if (client < MIN_VISIBLE_PX) return false;
+      const windowTop = box.top + node.clientTop;
+      if (!Number.isFinite(windowTop - node.scrollTop) || bottom <= windowTop - node.scrollTop) {
+        return false;
+      }
       const span = Math.min(bottom - top, client);
-      top = box.top + node.clientTop;
+      top = windowTop;
       bottom = top + span;
     }
     if (right - left < MIN_VISIBLE_PX || bottom - top < MIN_VISIBLE_PX) return false;
-    // A fixed element escapes the clipping of everything above it.
-    if (style.position === "fixed") fixed = true;
+    mode = positionMode(style);
   }
 
   const view = doc.defaultView;
-  if (fixed) {
+  if (mode === FIXED) {
     // Never scrolls into view: the viewport is the bound.
     return (
       right > 0 &&
@@ -247,6 +294,33 @@ export function fillAdmission(hidden?: WeakSet<Element>): FieldAdmit {
   const cache = createVisibilityCache();
   return (el) => {
     const admitted = isFieldVisible(el, { geometryExempt: el instanceof HTMLSelectElement, cache });
+    if (!admitted) hidden?.add(el);
+    return admitted;
+  };
+}
+
+/**
+ * The inline dropdown's rule for the focused field and for dropdown
+ * membership: the field's own opacity, as before, but not its ancestors'. A
+ * fade-in modal focuses its first field while the content is still near
+ * opacity 0, and the end of a transition fires no mutation to rescan on. The
+ * fill re-checks the full rule (ancestor opacity included) at write time.
+ */
+export function isDropdownFieldVisible(el: HTMLElement, cache?: VisibilityCache): boolean {
+  return isNotSelfHidden(el) && isFieldVisible(el, { transparentOk: true, cache });
+}
+
+/** fillAdmission's counterpart for dropdown membership (isDropdownFieldVisible). */
+export function memberAdmission(hidden?: WeakSet<Element>): FieldAdmit {
+  const cache = createVisibilityCache();
+  return (el) => {
+    const admitted =
+      isNotSelfHidden(el) &&
+      isFieldVisible(el, {
+        transparentOk: true,
+        geometryExempt: el instanceof HTMLSelectElement,
+        cache,
+      });
     if (!admitted) hidden?.add(el);
     return admitted;
   };
