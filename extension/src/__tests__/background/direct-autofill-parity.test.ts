@@ -14,6 +14,7 @@ import { performAutofill } from "../../content/autofill-lib";
 import { __resetFillSequenceForTests } from "../../content/fill-sequence-lib";
 import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../../lib/cc-patterns";
 import { AUTOFILL_FILL } from "../../lib/constants";
+import { setCheckVisibility } from "../helpers/layout-stub";
 
 // Polyfill CSS.escape for jsdom (label[for] lookups), as the sibling CC/identity
 // detector tests do.
@@ -449,5 +450,230 @@ describe("directAutofill / performAutofill parity (C6)", () => {
     const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
     expect(direct).toEqual(content);
     expect(direct.password).toBe("loginpw");
+  });
+});
+
+// ── C1 twin (#884): directAutofill's inline isFieldVisible copy ──
+//
+// Each case puts a second password LAST in the page, after a visible one, so
+// the last-password rule would pick it if visibility let it through. Deny rows
+// assert the visible "pw" is filled and "pwLast" is not; allow rows (the same
+// markup differing on one axis) assert "pwLast" is filled. Every row also pins
+// twin = content.
+describe("directAutofill twin: field visibility (C1)", () => {
+  type Row = { name: string; last: string; allowed: boolean; checkVisibility?: () => void };
+  const pwLast = (attrs = "") => `<input id="pwLast" type="password" ${attrs}>`;
+  const rows: Row[] = [
+    { name: "R1 deny: display:none ancestor", last: `<div style="display:none">${pwLast()}</div>`, allowed: false },
+    { name: "R1 allow: display:block ancestor", last: `<div style="display:block">${pwLast()}</div>`, allowed: true },
+    { name: "R1 deny: content-visibility:hidden ancestor", last: `<div style="content-visibility:hidden">${pwLast()}</div>`, allowed: false },
+    { name: "R2 deny: inherits visibility:hidden", last: `<div style="visibility:hidden">${pwLast()}</div>`, allowed: false },
+    { name: "R2 allow: visibility:visible child of a hidden parent", last: `<div style="visibility:hidden">${pwLast('style="visibility:visible"')}</div>`, allowed: true },
+    { name: "R3 deny: opacity 0.2 × 0.2", last: `<div style="opacity:0.2">${pwLast('style="opacity:0.2"')}</div>`, allowed: false },
+    { name: "R3 allow: opacity 0.5 × 0.5", last: `<div style="opacity:0.5">${pwLast('style="opacity:0.5"')}</div>`, allowed: true },
+    { name: "R4 deny: 0×0", last: pwLast('data-rect="0,0,10,10"'), allowed: false },
+    { name: "R4 deny: 3×20", last: pwLast('data-rect="3,20,10,10"'), allowed: false },
+    { name: "R4 allow: 4×4", last: pwLast('data-rect="4,4,10,10"'), allowed: true },
+    { name: "R4 deny: zero-width overflow-x:hidden ancestor", last: `<div style="overflow-x:hidden" data-rect="0,200,0,0">${pwLast()}</div>`, allowed: false },
+    { name: "R4 deny: zero-height overflow-y:hidden ancestor", last: `<div style="overflow-y:hidden" data-rect="300,0,0,0">${pwLast()}</div>`, allowed: false },
+    { name: "R4 deny: left of an overflow-x:hidden ancestor's box", last: `<div style="overflow-x:hidden" data-rect="300,200,200,0">${pwLast('data-rect="100,20,50,10"')}</div>`, allowed: false },
+    { name: "R4 deny: above an overflow-y:hidden ancestor's box", last: `<div style="overflow-y:hidden" data-rect="300,200,0,200">${pwLast('data-rect="100,20,10,50"')}</div>`, allowed: false },
+    { name: "R4 allow: inside an overflow:hidden ancestor's box", last: `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="300,200,0,0">${pwLast('data-rect="100,20,50,50"')}</div>`, allowed: true },
+    { name: "R4 allow: zero-size ancestor with visible overflow", last: `<div data-rect="0,0,0,0">${pwLast()}</div>`, allowed: true },
+    { name: "R4 deny: zero-size contain:paint ancestor", last: `<div style="contain:paint" data-rect="0,0,0,0">${pwLast()}</div>`, allowed: false },
+    { name: "R4 allow: display:contents ancestor is skipped", last: `<div style="display:contents; overflow-x:hidden; overflow-y:hidden" data-rect="0,0,0,0">${pwLast()}</div>`, allowed: true },
+    { name: "R4 allow: a fixed field escapes the clip", last: `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="0,0,0,0">${pwLast('style="position:fixed"')}</div>`, allowed: true },
+    { name: "R4 allow: a fixed wrapper stops the walk below an outer clip", last: `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="0,0,0,0"><div style="position:fixed">${pwLast()}</div></div>`, allowed: true },
+    { name: "R4 deny: overflow-y:auto window of 2px", last: `<div style="overflow-y:auto" data-rect="300,2,0,0">${pwLast()}</div>`, allowed: false },
+    { name: "R4 deny: overflow-x:scroll window of 3px", last: `<div style="overflow-x:scroll" data-rect="3,200,0,0">${pwLast()}</div>`, allowed: false },
+    { name: "R4 allow: below the fold of an auto pane under an overflow:hidden wrapper", last: `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="300,200,0,0"><div style="overflow-y:auto" data-rect="300,200,0,0">${pwLast('data-rect="100,20,10,5000"')}</div></div>`, allowed: true },
+    { name: "R4 deny: below the fold of an overflow:hidden wrapper", last: `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="300,200,0,0">${pwLast('data-rect="100,20,10,5000"')}</div>`, allowed: false },
+    { name: "R5 deny: right edge at 0", last: pwLast('data-rect="100,20,-100,10"'), allowed: false },
+    { name: "R5 allow: right edge at 1", last: pwLast('data-rect="100,20,-99,10"'), allowed: true },
+    { name: "R5 deny: fixed beyond the viewport", last: pwLast(`style="position:fixed" data-rect="100,20,${window.innerWidth},10"`), allowed: false },
+    { name: "R6 deny: absolute + clip rect(0px, 0px, 0px, 0px)", last: pwLast('style="position:absolute; clip:rect(0px, 0px, 0px, 0px)"'), allowed: false },
+    { name: "R6 allow: static + the same clip", last: pwLast('style="position:static; clip:rect(0px, 0px, 0px, 0px)"'), allowed: true },
+    { name: "R6 deny: clip-path inset(100%) ancestor", last: `<div style="clip-path:inset(100%)">${pwLast()}</div>`, allowed: false },
+    { name: "R6 deny: clip-path inset(50%) ancestor", last: `<div style="clip-path:inset(50%)">${pwLast()}</div>`, allowed: false },
+    {
+      name: "R7 deny: checkVisibility false for the field",
+      last: pwLast(),
+      allowed: false,
+      checkVisibility: () =>
+        setCheckVisibility(function (this: HTMLElement) {
+          return this.id !== "pwLast";
+        }),
+    },
+    {
+      name: "R7 deny: closed <details> with checkVisibility undefined",
+      last: `<details><summary>more</summary>${pwLast()}</details>`,
+      allowed: false,
+      checkVisibility: () => setCheckVisibility(undefined),
+    },
+    { name: "R7 deny: opacity:0 (checkVisibility opacityProperty)", last: pwLast('style="opacity:0"'), allowed: false },
+  ];
+
+  it.each(rows)("$name", async ({ last, allowed, checkVisibility }) => {
+    checkVisibility?.();
+    const html = `
+      <input id="username" type="text" name="username">
+      <input id="pw" type="password" name="password">
+      ${last}
+    `;
+    const result = await expectParity(html);
+    expect(result).toEqual({ username: "username", password: allowed ? "pwLast" : "pw" });
+  });
+
+  it("skips a hidden autocomplete=current-password placed before the visible one", async () => {
+    const html = `
+      <input id="username" type="text" name="username">
+      <div style="display:none"><input id="pwHidden" type="password" autocomplete="current-password"></div>
+      <input id="pw" type="password" autocomplete="current-password">
+    `;
+    const result = await expectParity(html);
+    expect(result).toEqual({ username: "username", password: "pw" });
+  });
+
+  it("the username walk skips a zero-rect text field between the username and the password", async () => {
+    const html = `
+      <input id="username" type="text" name="username">
+      <input id="loginHidden" type="text" name="login" data-rect="0,0,0,0">
+      <input id="pw" type="password" name="password">
+    `;
+    const result = await expectParity(html);
+    expect(result).toEqual({ username: "username", password: "pw" });
+  });
+
+  it("a focused zero-rect text field is not the username; the visible one is", async () => {
+    const html = `
+      <input id="username" type="text" name="username">
+      <input id="focused" type="email" name="email" data-rect="0,0,0,0">
+      <input id="pw" type="password" name="password">
+    `;
+    const result = await expectParity(html, "focused");
+    expect(result).toEqual({ username: "username", password: "pw" });
+  });
+
+  it("a hinted hidden field is not the username; the visible one is", async () => {
+    const html = `
+      <input id="username" type="text" name="username">
+      <div style="display:none"><input id="hinted" type="text" name="email"></div>
+      <input id="pw" type="password" name="password">
+    `;
+    const hint = { id: "hinted" };
+    document.body.innerHTML = html;
+    await directAutofill(USERNAME, PASSWORD, hint, [], CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
+    const direct = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
+    __resetFillSequenceForTests();
+    document.body.innerHTML = html;
+    await performAutofill(
+      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: USERNAME, password: PASSWORD, targetHint: hint },
+      NO_WAIT,
+    );
+    const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
+    expect(direct).toEqual(content);
+    expect(direct).toEqual({ username: "username", password: "pw" });
+  });
+
+  it("an opacity:0 input matching a custom-field label is not written; the visible match is", async () => {
+    const html = `
+      <input id="memoHidden" type="text" name="memo" style="opacity:0">
+      <input id="memo" type="text" name="memo">
+    `;
+    const custom = [{ label: "memo", value: "m1" }];
+    document.body.innerHTML = html;
+    await directAutofill("", "", null, custom, CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
+    const direct = valueOwnerId("m1");
+    __resetFillSequenceForTests();
+    document.body.innerHTML = html;
+    await performAutofill(
+      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: "", password: "", customFields: custom },
+      NO_WAIT,
+    );
+    const content = valueOwnerId("m1");
+    expect(direct).toBe(content);
+    expect(direct).toBe("memo");
+  });
+
+  it("a password the page hides before its write is not written", async () => {
+    const html = `
+      <input id="username" type="text" name="username">
+      <input id="pw" type="password" name="password">
+    `;
+    // The username write's input handler hides the password; each fill
+    // re-checks the target in the task of its write.
+    const hideOnUsernameInput = () =>
+      document.getElementById("username")?.addEventListener("input", () => {
+        (document.getElementById("pw") as HTMLInputElement).style.display = "none";
+      });
+    document.body.innerHTML = html;
+    hideOnUsernameInput();
+    await directAutofill(USERNAME, PASSWORD, null, [], CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
+    const direct = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
+    __resetFillSequenceForTests();
+    document.body.innerHTML = html;
+    hideOnUsernameInput();
+    await performAutofill(
+      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: USERNAME, password: PASSWORD },
+      NO_WAIT,
+    );
+    const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
+    expect(direct).toEqual(content);
+    expect(direct).toEqual({ username: "username", password: null });
+  });
+
+  it("a card number hidden by an ancestor still excludes its CVV", async () => {
+    const html = `
+      <input id="username" type="text" name="username">
+      <input id="loginpw" type="password" name="password">
+      <form>
+        <div style="display:none"><input id="ccnum" type="text" name="card_number"></div>
+        <input id="cvv" type="password" name="cvv">
+      </form>
+    `;
+    const result = await expectParity(html);
+    expect(result).toEqual({ username: "username", password: "loginpw" });
+  });
+
+  it("a zero-rect card number still excludes its CVV", async () => {
+    const html = `
+      <input id="username" type="text" name="username">
+      <input id="loginpw" type="password" name="password">
+      <form>
+        <input id="ccnum" type="text" name="card_number" data-rect="0,0,0,0">
+        <input id="cvv" type="password" name="cvv">
+      </form>
+    `;
+    const result = await expectParity(html);
+    expect(result).toEqual({ username: "username", password: "loginpw" });
+  });
+
+  it("a card number whose only card neighbour is hidden by an ancestor is still excluded", async () => {
+    const html = `
+      <form>
+        <input id="ccnum" type="text" name="card_number">
+        <div style="display:none"><input id="exp" type="text" name="exp_month"></div>
+      </form>
+      <input id="loginpw" type="password" name="password">
+    `;
+    const result = await expectParity(html);
+    expect(result).toEqual({ username: null, password: "loginpw" });
+  });
+
+  it("a hidden card form before a visible one leaves the visible CVV LOGIN-ineligible", async () => {
+    const html = `
+      <input id="username" type="text" name="username">
+      <input id="loginpw" type="password" name="password">
+      <div style="display:none"><form>
+        <input id="ccnum1" type="text" name="card_number">
+        <input id="cvv1" type="password" name="cvv">
+      </form></div>
+      <form>
+        <input id="ccnum2" type="text" name="card_number">
+        <input id="cvv2" type="password" name="cvv">
+      </form>
+    `;
+    const result = await expectParity(html);
+    expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 });
