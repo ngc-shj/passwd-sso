@@ -182,6 +182,25 @@ function hasPaintContainment(style: CSSStyleDeclaration): boolean {
   );
 }
 
+/**
+ * Whether a scroll container's overflow on an axis runs toward the start, so
+ * its scroll offset goes negative: RTL inline direction, a vertical-rl block
+ * direction, or a flex container's *-reverse direction (chat panes use
+ * column-reverse). The inline axis is x in horizontal writing modes, y in
+ * vertical ones.
+ */
+function overflowReversed(style: CSSStyleDeclaration, axis: "x" | "y"): boolean {
+  const writingMode = style.getPropertyValue("writing-mode").trim();
+  const vertical = writingMode.startsWith("vertical") || writingMode.startsWith("sideways");
+  const inlineAxis = vertical ? "y" : "x";
+  const flexDirection = style.display.includes("flex")
+    ? style.getPropertyValue("flex-direction").trim()
+    : "";
+  if (axis === inlineAxis) return (style.direction === "rtl") !== (flexDirection === "row-reverse");
+  const blockReversed = writingMode === "vertical-rl" || writingMode === "sideways-rl";
+  return blockReversed !== (flexDirection === "column-reverse");
+}
+
 /** How an ancestor clips one axis. Reads the longhands only. */
 function axisClip(style: CSSStyleDeclaration, axis: "x" | "y"): number {
   if (hasPaintContainment(style)) return CLIP_STRICT;
@@ -235,10 +254,11 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
       const client = node.clientWidth;
       if (client < MIN_VISIBLE_PX) return false;
       const windowLeft = box.left + node.clientLeft;
-      // Overflow runs one way: content wholly before the scroll origin (left
-      // in LTR, right in RTL, where scrollLeft is ≤ 0) can never be scrolled to.
+      // Overflow runs one way: content wholly before the scroll origin (the
+      // start side, or the end side of a reversed axis, where the offset is
+      // ≤ 0) can never be scrolled to.
       const unreachable =
-        style.direction === "rtl"
+        overflowReversed(style, "x")
           ? left >= windowLeft + client - node.scrollLeft
           : right <= windowLeft - node.scrollLeft;
       if (!Number.isFinite(windowLeft - node.scrollLeft) || unreachable) return false;
@@ -254,9 +274,10 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
       const client = node.clientHeight;
       if (client < MIN_VISIBLE_PX) return false;
       const windowTop = box.top + node.clientTop;
-      if (!Number.isFinite(windowTop - node.scrollTop) || bottom <= windowTop - node.scrollTop) {
-        return false;
-      }
+      const unreachable = overflowReversed(style, "y")
+        ? top >= windowTop + client - node.scrollTop
+        : bottom <= windowTop - node.scrollTop;
+      if (!Number.isFinite(windowTop - node.scrollTop) || unreachable) return false;
       const span = Math.min(bottom - top, client);
       top = windowTop;
       bottom = top + span;

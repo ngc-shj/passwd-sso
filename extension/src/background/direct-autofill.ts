@@ -119,6 +119,18 @@ export async function directAutofill(
   // 0 in flow, 1 absolute, 2 fixed
   const positionMode = (style: CSSStyleDeclaration) =>
     style.position === "fixed" ? 2 : style.position === "absolute" ? 1 : 0;
+  // Mirror of content overflowReversed.
+  const overflowReversed = (style: CSSStyleDeclaration, axis: "x" | "y") => {
+    const writingMode = style.getPropertyValue("writing-mode").trim();
+    const vertical = writingMode.startsWith("vertical") || writingMode.startsWith("sideways");
+    const inlineAxis = vertical ? "y" : "x";
+    const flexDirection = style.display.includes("flex")
+      ? style.getPropertyValue("flex-direction").trim()
+      : "";
+    if (axis === inlineAxis) return (style.direction === "rtl") !== (flexDirection === "row-reverse");
+    const blockReversed = writingMode === "vertical-rl" || writingMode === "sideways-rl";
+    return blockReversed !== (flexDirection === "column-reverse");
+  };
   const hasVisibleBox = (el: Element) => {
     const rect = el.getBoundingClientRect();
     let left = rect.left;
@@ -150,7 +162,7 @@ export async function directAutofill(
         if (client < MIN_VISIBLE_PX) return false;
         const windowLeft = box.left + node.clientLeft;
         const unreachable =
-          style.direction === "rtl"
+          overflowReversed(style, "x")
             ? left >= windowLeft + client - node.scrollLeft
             : right <= windowLeft - node.scrollLeft;
         if (!Number.isFinite(windowLeft - node.scrollLeft) || unreachable) return false;
@@ -166,9 +178,10 @@ export async function directAutofill(
         const client = node.clientHeight;
         if (client < MIN_VISIBLE_PX) return false;
         const windowTop = box.top + node.clientTop;
-        if (!Number.isFinite(windowTop - node.scrollTop) || bottom <= windowTop - node.scrollTop) {
-          return false;
-        }
+        const unreachable = overflowReversed(style, "y")
+          ? top >= windowTop + client - node.scrollTop
+          : bottom <= windowTop - node.scrollTop;
+        if (!Number.isFinite(windowTop - node.scrollTop) || unreachable) return false;
         const span = Math.min(bottom - top, client);
         top = windowTop;
         bottom = top + span;

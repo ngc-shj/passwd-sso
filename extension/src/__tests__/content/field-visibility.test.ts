@@ -423,6 +423,26 @@ describe("isFieldVisible — R4: the scroll origin of a scroll container", () =>
     ).toBe(true);
   });
 
+  // A reversed axis overflows toward the start, with a scroll offset ≤ 0:
+  // a column-reverse chat pane, a row-reverse row, a vertical-rl block axis.
+  // Pane 300×200 at (0, 0); the content end is at window end − offset.
+  it.each([
+    ["column-reverse (y)", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,-250", true],
+    ["column-reverse (y), past the content end", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,600", false],
+    ["row-reverse (x)", "display:flex; flex-direction:row-reverse; overflow-x:auto", "-300,0", "100,20,-350,10", true],
+    ["row-reverse (x), past the content end", "display:flex; flex-direction:row-reverse; overflow-x:auto", "-300,0", "100,20,700,10", false],
+    ["vertical-rl (x)", "writing-mode:vertical-rl; overflow-x:auto", "-300,0", "100,20,-350,10", true],
+    ["RTL row-reverse runs forward again (x)", "direction:rtl; display:flex; flex-direction:row-reverse; overflow-x:auto", "0,0", "100,20,-350,10", false],
+  ])("scroll origin on a reversed axis: %s", (_label, style, scroll, rect, expected) => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="${style}" data-rect="300,200,0,0" data-scroll="${scroll}"><input id="f" data-rect="${rect}"></div>`,
+        ),
+      ),
+    ).toBe(expected);
+  });
+
   // Pane top 100, scrollTop 50: the content origin is at y = 50.
   it("denies a field whose bottom edge is at a scrolled pane's content origin", () => {
     expect(
