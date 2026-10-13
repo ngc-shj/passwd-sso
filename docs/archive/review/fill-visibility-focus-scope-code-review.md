@@ -112,9 +112,23 @@ Each fix was red-proved on a scratch copy by reverting it in content and in the 
 | R4-S1 | Sec | Minor | The union band admits the unreachable strip before a forward pane's origin, sized by slack that invisible content inflates; D12 understated the cost. | The band follows the engine's offset sign: forward when positive, reversed when negative, the union only at rest. D12's cost paragraph is rewritten. Content and twin; both arms red-proved. |
 | func R3-1 | Func | Minor | The fail-safe `containsFixed` counts some non-trigger values, so a few fixed or absolute fields are falsely denied. | Accepted cost, recorded as D13: a non-trigger allowlist is a hand-maintained member list that fails open when a trigger is missing. |
 
+## Round 4 testing, and the termination call
+
+| ID | Severity | Finding | Resolution |
+|----|----------|---------|------------|
+| M1 | Major | The twin had no at-rest union row, so its `offset > 0` → `offset >= 0` mutation survived. | Two at-rest twin rows. The mutation is now red. |
+| M2 | Major | Four of the twin's `containsFixed` triggers (scale, filter, backdrop-filter, transform-style) were unpinned. | Twin rows added; each removal is now red. |
+| M3 | Minor | The stub's default scroll size could describe a pane scrolled past its own extent. | The default scroll size is at least client size + \|offset\|. |
+
+Equivalent mutants reported and left as they are:
+- Removing `isFinite(offset)`: NaN fails every comparison, and ±Infinity collapses the band.
+- `Math.max(extent, client)` → `extent`: the scroll size is never below the client size.
+
+**Tightening-only skip after round 4.** Round 4's remaining findings change test code and the test stub only. They touch no production predicate, and the last production change (`898211799`) only narrows the band. No round 5 is run. Round 4 also accepted two Minors as recorded costs: func R3-1 (D13) and the at-rest slack (D12).
+
 ## Environment Verification Report
 - **VE1** (real Chrome rendering: plan scenarios 1–8): `blocked-deferred` to the user's manual check before merge, per plan VE1.
-- **Unit tests:** 1931 passed at `2327fa0c3` before the delegated test additions. tsc passes.
+- **Unit tests:** 2088 passed at the final commit. tsc, `npm run typecheck:test` and the extension build pass.
 
 ## Resolution Status
 

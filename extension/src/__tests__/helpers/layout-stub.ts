@@ -8,10 +8,12 @@
 //   `innerHTML` rebuild and reaches the injected direct-autofill twin.
 // - clientWidth / clientHeight follow the rect; scrollLeft / scrollTop come from
 //   `data-scroll="x,y"` (default 0); scrollWidth / scrollHeight come from
-//   `data-scroll-size="w,h"`, defaulting to the client size or, if larger, the
-//   forward extent of the element's descendants from its scroll origin (as a
-//   browser counts a forward-running pane: content before the origin is not
-//   scrollable). A reversed pane's fixtures set data-scroll-size explicitly.
+//   `data-scroll-size="w,h"`, defaulting to the largest of the client size, the
+//   client size plus the scroll offset (a pane cannot be scrolled past its own
+//   extent), and the forward extent of the element's descendants from its
+//   scroll origin (as a browser counts a forward-running pane: content before
+//   the origin is not scrollable). A reversed pane's fixtures set
+//   data-scroll-size explicitly.
 // - Content of a closed <details> (other than its <summary>) is unrendered in a
 //   browser: a zero rect, and checkVisibility() false.
 // - checkVisibility({ opacityProperty }) is also false when the element or an
@@ -128,7 +130,7 @@ if (typeof Element !== "undefined") {
     if (spec) return Number(spec.split(",")[axis]?.trim() ?? 0);
     const own = layoutOf(el);
     const origin = (axis === 0 ? own.x : own.y) - scrollOf(el, axis);
-    let extent = axis === 0 ? own.width : own.height;
+    let extent = (axis === 0 ? own.width : own.height) + Math.abs(scrollOf(el, axis));
     for (const child of Array.from(el.querySelectorAll("*"))) {
       const r = layoutOf(child);
       extent = Math.max(extent, (axis === 0 ? r.x + r.width : r.y + r.height) - origin);
