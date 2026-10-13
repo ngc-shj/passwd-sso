@@ -10,7 +10,7 @@ import {
   isNotSelfHidden,
   fillAdmission,
 } from "../../content/field-query-lib";
-import { setCheckVisibility } from "../helpers/layout-stub";
+import { setCheckVisibility, setWindowScroll } from "../helpers/layout-stub";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -304,6 +304,251 @@ describe("isFieldVisible — R4: the rect clipped per axis by its ancestors", ()
       ),
     ).toBe(true);
   });
+
+  it("denies a field in an overflow-x:auto pane of width 0", () => {
+    expect(
+      isFieldVisible(
+        field(`<div style="overflow-x:auto" data-rect="0,200,0,0"><input id="f"></div>`),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isFieldVisible — R4: overflow:clip and paint containment clip strictly", () => {
+  it.each([
+    ["overflow-x:clip", "300,200,0,0", `data-rect="100,20,5000,10"`],
+    ["overflow-y:clip", "300,200,0,0", `data-rect="100,20,10,5000"`],
+    ["contain:strict", "0,0,0,0", ""],
+    ["contain:content", "0,0,0,0", ""],
+    ["content-visibility:auto", "0,0,0,0", ""],
+  ])("denies a field clipped away by an ancestor with %s", (style, rect, fieldAttrs) => {
+    expect(
+      isFieldVisible(field(`<div style="${style}" data-rect="${rect}"><input id="f" ${fieldAttrs}></div>`)),
+    ).toBe(false);
+  });
+
+  it.each([
+    ["overflow-x:visible", "300,200,0,0", `data-rect="100,20,5000,10"`],
+    ["overflow-y:visible", "300,200,0,0", `data-rect="100,20,10,5000"`],
+    ["contain:size", "0,0,0,0", ""],
+    ["contain:none", "0,0,0,0", ""],
+    ["content-visibility:visible", "0,0,0,0", ""],
+  ])("allows the same field under an ancestor with %s", (style, rect, fieldAttrs) => {
+    expect(
+      isFieldVisible(field(`<div style="${style}" data-rect="${rect}"><input id="f" ${fieldAttrs}></div>`)),
+    ).toBe(true);
+  });
+});
+
+// A field wholly before a scroll container's scroll origin can never be
+// scrolled to: overflow runs right (LTR) or left (RTL) and down only.
+describe("isFieldVisible — R4: the scroll origin of a scroll container", () => {
+  it("denies a field placed at left:-9999px inside an overflow-x:auto pane", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:auto" data-rect="300,200,0,0"><input id="f" data-rect="100,20,-9999,10"></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("denies a field whose right edge is at the pane's scroll origin", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:auto" data-rect="300,200,0,0"><input id="f" data-rect="100,20,-100,10"></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows a field whose right edge is 1px past the pane's scroll origin", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:auto" data-rect="300,200,0,0"><input id="f" data-rect="100,20,-99,10"></div>`,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("allows a scrolled carousel's first slide (content offset 0, scrollLeft 300)", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:auto" data-rect="300,200,10,0" data-scroll="300,0"><input id="f" data-rect="100,20,-290,10"></div>`,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("denies a field wholly before a scrolled carousel's content origin", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:auto" data-rect="300,200,10,0" data-scroll="300,0"><input id="f" data-rect="100,20,-390,10"></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("RTL: allows content left of the window (overflow runs left)", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:auto; direction:rtl" data-rect="300,200,0,0" data-scroll="-200,0"><input id="f" data-rect="100,20,-500,10"></div>`,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("RTL: denies content wholly right of the scroll origin", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:auto; direction:rtl" data-rect="300,200,0,0" data-scroll="-200,0"><input id="f" data-rect="100,20,500,10"></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("RTL: allows content whose left edge is 1px before the scroll origin", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-x:auto; direction:rtl" data-rect="300,200,0,0" data-scroll="-200,0"><input id="f" data-rect="100,20,499,10"></div>`,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  // Pane top 100, scrollTop 50: the content origin is at y = 50.
+  it("denies a field whose bottom edge is at a scrolled pane's content origin", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-y:auto" data-rect="300,200,0,100" data-scroll="0,50"><input id="f" data-rect="100,20,10,30"></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows a field whose bottom edge is 1px past a scrolled pane's content origin", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="overflow-y:auto" data-rect="300,200,0,100" data-scroll="0,50"><input id="f" data-rect="100,20,10,31"></div>`,
+        ),
+      ),
+    ).toBe(true);
+  });
+});
+
+// Which ancestors clip a positioned box follows its containing-block chain.
+describe("isFieldVisible — R4: the containing-block chain", () => {
+  const CLIP = "overflow-x:hidden; overflow-y:hidden";
+
+  it.each([
+    ["transform", "transform:translateX(0px)"],
+    ["contain:paint", "contain:paint"],
+    ["filter", "filter:blur(0px)"],
+    ["will-change:transform", "will-change:transform"],
+  ])("denies a fixed field under a zero-size clip that %s makes its containing block", (_label, extra) => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="${CLIP}; ${extra}" data-rect="0,0,0,0"><input id="f" style="position:fixed"></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows the same fixed field under the same clip without a transform", () => {
+    expect(
+      isFieldVisible(
+        field(`<div style="${CLIP}" data-rect="0,0,0,0"><input id="f" style="position:fixed"></div>`),
+      ),
+    ).toBe(true);
+  });
+
+  it("allows an absolute field under a static zero-size clip (not its containing block)", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="${CLIP}; position:static" data-rect="0,0,0,0"><input id="f" style="position:absolute"></div>`,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("denies an absolute field under a position:relative zero-size clip", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<div style="${CLIP}; position:relative" data-rect="0,0,0,0"><input id="f" style="position:absolute"></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("denies an in-flow field under the static zero-size clip", () => {
+    expect(
+      isFieldVisible(
+        field(`<div style="${CLIP}; position:static" data-rect="0,0,0,0"><input id="f"></div>`),
+      ),
+    ).toBe(false);
+  });
+});
+
+// The walk follows the flat tree: a slotted field is clipped by the shadow tree
+// around its slot. jsdom ignores shadow stylesheets, so the wrapper is styled
+// inline.
+describe("isFieldVisible — R4: a slotted field", () => {
+  function slotted(shadowHtml: string): HTMLElement {
+    document.body.innerHTML = `<div id="host"><input id="f"></div>`;
+    (document.getElementById("host") as HTMLElement).attachShadow({ mode: "open" }).innerHTML =
+      shadowHtml;
+    const el = document.getElementById("f") as HTMLElement;
+    expect(el.assignedSlot).not.toBeNull();
+    return el;
+  }
+
+  it("denies a field slotted into a zero-size clipping wrapper", () => {
+    expect(
+      isFieldVisible(
+        slotted(
+          `<div style="overflow-x:hidden; overflow-y:hidden" data-rect="0,0,0,0"><slot></slot></div>`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows the same field slotted with no wrapper around the slot", () => {
+    expect(isFieldVisible(slotted(`<slot></slot>`))).toBe(true);
+  });
+});
+
+// Overflow does not apply to an inline box, and Chrome reports its client size
+// as 0, so an inline ancestor with a computed overflow clips nothing.
+describe("isFieldVisible — R4: an inline ancestor", () => {
+  it("allows a field inside an inline <label> with overflow-y:auto", () => {
+    expect(
+      isFieldVisible(
+        field(`<label style="overflow-y:auto" data-rect="0,0,0,0">Card <input id="f"></label>`),
+      ),
+    ).toBe(true);
+  });
+
+  it("denies the same field when the <label> is display:block", () => {
+    expect(
+      isFieldVisible(
+        field(
+          `<label style="display:block; overflow-y:auto" data-rect="0,0,0,0">Card <input id="f"></label>`,
+        ),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("isFieldVisible — R5: wholly before the document origin", () => {
@@ -349,10 +594,66 @@ describe("isFieldVisible — R5: wholly before the document origin", () => {
     ).toBe(true);
   });
 
+  it("denies a position:fixed field whose right edge is at 0", () => {
+    expect(
+      isFieldVisible(field(`<input id="f" style="position:fixed" data-rect="100,20,-100,10">`)),
+    ).toBe(false);
+  });
+
+  it("allows a position:fixed field whose right edge is at 1", () => {
+    expect(
+      isFieldVisible(field(`<input id="f" style="position:fixed" data-rect="100,20,-99,10">`)),
+    ).toBe(true);
+  });
+
+  it("denies a position:fixed field whose bottom edge is at 0", () => {
+    expect(
+      isFieldVisible(field(`<input id="f" style="position:fixed" data-rect="100,20,10,-20">`)),
+    ).toBe(false);
+  });
+
+  it("allows a position:fixed field whose bottom edge is at 1", () => {
+    expect(
+      isFieldVisible(field(`<input id="f" style="position:fixed" data-rect="100,20,10,-19">`)),
+    ).toBe(true);
+  });
+
   it("a non-fixed field far right of the viewport stays allowed (it can be scrolled to)", () => {
     expect(
       isFieldVisible(field(`<input id="f" data-rect="100,20,${window.innerWidth + 500},10">`)),
     ).toBe(true);
+  });
+});
+
+// The document origin is at -scrollX / -scrollY in viewport coordinates.
+describe("isFieldVisible — R5: the page's scroll offset", () => {
+  it("allows a field 500px above the viewport when the page is scrolled down 1000px", () => {
+    setWindowScroll(0, 1000);
+    expect(isFieldVisible(field(`<input id="f" data-rect="100,20,10,-500">`))).toBe(true);
+  });
+
+  it("denies the same field when the page is not scrolled", () => {
+    expect(isFieldVisible(field(`<input id="f" data-rect="100,20,10,-500">`))).toBe(false);
+  });
+
+  it("denies a field whose bottom edge is at the scrolled document origin", () => {
+    setWindowScroll(0, 1000);
+    expect(isFieldVisible(field(`<input id="f" data-rect="100,20,10,-1020">`))).toBe(false);
+  });
+
+  it("allows a field whose bottom edge is 1px past the scrolled document origin", () => {
+    setWindowScroll(0, 1000);
+    expect(isFieldVisible(field(`<input id="f" data-rect="100,20,10,-1019">`))).toBe(true);
+  });
+
+  it("denies a field whose right edge is at the horizontally scrolled document origin", () => {
+    setWindowScroll(1000, 0);
+    expect(isFieldVisible(field(`<input id="f" data-rect="100,20,-1100,10">`))).toBe(false);
+  });
+
+  it("allows a field whose right edge is 1px past the horizontally scrolled document origin", () => {
+    setWindowScroll(1000, 0);
+    expect(isFieldVisible(field(`<input id="f" data-rect="100,20,-1099,10">`))).toBe(true);
   });
 });
 

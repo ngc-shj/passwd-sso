@@ -14,6 +14,8 @@
 //   ancestor has computed opacity 0, as Chrome's is.
 // - setCheckVisibility() replaces or removes checkVisibility for one test; it is
 //   restored after each test.
+// - setWindowScroll() sets window.scrollX / scrollY for one test; they are
+//   restored after each test.
 import { afterEach } from "vitest";
 
 const DEFAULT_RECT = { width: 100, height: 20, x: 10, y: 10 };
@@ -50,6 +52,26 @@ let checkVisibility: CheckVisibility | undefined = defaultCheckVisibility;
 /** Replace (or, with undefined, remove) checkVisibility for the current test. */
 export function setCheckVisibility(fn: CheckVisibility | undefined): void {
   checkVisibility = fn;
+}
+
+const SCROLL_KEYS = ["scrollX", "scrollY"] as const;
+const savedScroll = new Map<string, PropertyDescriptor | undefined>();
+
+/** Set window.scrollX / scrollY for the current test. */
+export function setWindowScroll(x: number, y: number): void {
+  [x, y].forEach((value, i) => {
+    const key = SCROLL_KEYS[i];
+    if (!savedScroll.has(key)) savedScroll.set(key, Object.getOwnPropertyDescriptor(window, key));
+    Object.defineProperty(window, key, { configurable: true, get: () => value });
+  });
+}
+
+function restoreWindowScroll(): void {
+  for (const [key, descriptor] of savedScroll) {
+    if (descriptor) Object.defineProperty(window, key, descriptor);
+    else delete (window as unknown as Record<string, unknown>)[key];
+  }
+  savedScroll.clear();
 }
 
 if (typeof Element !== "undefined") {
@@ -105,5 +127,6 @@ if (typeof Element !== "undefined") {
   });
   afterEach(() => {
     checkVisibility = defaultCheckVisibility;
+    restoreWindowScroll();
   });
 }

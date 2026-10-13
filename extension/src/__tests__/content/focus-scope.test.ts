@@ -63,7 +63,7 @@ function identity(overrides: Partial<IdentityAutofillPayload>): IdentityAutofill
 }
 
 function focus(id: string): void {
-  const el = document.getElementById(id) as HTMLInputElement | null;
+  const el = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
   if (!el) throw new Error(`no #${id}`);
   el.focus();
   expect(document.activeElement).toBe(el);
@@ -72,7 +72,7 @@ function focus(id: string): void {
 /** Values of the given ids, in order. */
 function values(...ids: string[]): string[] {
   return ids.map((id) => {
-    const el = document.getElementById(id) as HTMLInputElement | null;
+    const el = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
     if (!el) throw new Error(`no #${id}`);
     return el.value;
   });
@@ -118,6 +118,23 @@ describe("performCreditCardAutofill — focus scope", () => {
   it("focusing form 2's expiry field (not its card number) still fills form 2", async () => {
     document.body.innerHTML = ISSUE_886_WRAPPED;
     focus("y2");
+    await performCreditCardAutofill(card(), NO_WAIT);
+    expect(values("n2", "m2", "y2")).toEqual(["4111111111111111", "12", "2027"]);
+    expect(values("n1", "m1", "y1")).toEqual(["", "", ""]);
+  });
+
+  it("focusing form 2's expiry <select> fills form 2 and none of form 1", async () => {
+    const months = `<option value="">MM</option><option value="12">12</option>`;
+    const years = `<option value="">YYYY</option><option value="2027">2027</option>`;
+    const form = (n: number) => `
+      <form id="f${n}">
+        <div><input id="n${n}" autocomplete="cc-number"></div>
+        <div><select id="m${n}" autocomplete="cc-exp-month">${months}</select></div>
+        <div><select id="y${n}" autocomplete="cc-exp-year">${years}</select></div>
+      </form>
+    `;
+    document.body.innerHTML = `${form(1)}${form(2)}`;
+    focus("m2");
     await performCreditCardAutofill(card(), NO_WAIT);
     expect(values("n2", "m2", "y2")).toEqual(["4111111111111111", "12", "2027"]);
     expect(values("n1", "m1", "y1")).toEqual(["", "", ""]);

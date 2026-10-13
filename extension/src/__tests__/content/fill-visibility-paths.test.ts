@@ -159,13 +159,17 @@ describe("performCreditCardAutofill — hidden fields", () => {
     expect([value("num"), value("month")]).toEqual(["4111111111111111", ""]);
   });
 
-  it("a Select2-geometry cardholder <select> stays unwritten (only expiry roles are exempt)", async () => {
+  // The dropdown admits a field under a transparent ancestor (a fade-in modal);
+  // the fill's own rule still denies it (visibility-detectors.test.ts).
+  it.each([
+    ["opacity:0", ["", ""]],
+    ["opacity:1", ["4111111111111111", "123"]],
+  ])("a card form under an ancestor with %s: written only when rendered", async (opacity, expected) => {
     document.body.innerHTML = `
-      <input id="num" autocomplete="cc-number">
-      <select id="name" autocomplete="cc-name" ${SELECT2}><option value=""></option><option value="Jane Doe">Jane Doe</option></select>
+      <div style="${opacity}"><input id="num" autocomplete="cc-number"><input id="cvv" autocomplete="cc-csc"></div>
     `;
-    await performCreditCardAutofill(cc({ cardholderName: "Jane Doe" }), NO_WAIT);
-    expect(value("name")).toBe("");
+    await performCreditCardAutofill(cc(), NO_WAIT);
+    expect([value("num"), value("cvv")]).toEqual(expected);
   });
 });
 
@@ -338,6 +342,18 @@ describe("performAutofill — password", () => {
     `;
     await performAutofill(login({ username: "alice", password: "pw1" }), NO_WAIT);
     expect([value("pw"), value("pwHidden")]).toEqual(["pw1", ""]);
+  });
+
+  it.each([
+    ["opacity:0", ""],
+    ["opacity:1", "pw1"],
+  ])("a password under an ancestor with %s: written only when rendered", async (opacity, expected) => {
+    document.body.innerHTML = `
+      <input id="user" type="text" name="username">
+      <div style="${opacity}"><input id="pw" type="password"></div>
+    `;
+    await performAutofill(login({ username: "alice", password: "pw1" }), NO_WAIT);
+    expect(value("pw")).toBe(expected);
   });
 
   it("does not write a password placed off the document origin (left:-9999px)", async () => {
@@ -605,7 +621,7 @@ describe("card and identity fill — a hidden foreign control still bounds the f
     vi.useRealTimers();
   });
 
-  const LAYOUT = (block: string, slot: string) => `
+  const LAYOUT = (block: string) => `
     <div id="app">
       <section id="mine"><div>${block}</div><div id="slot"></div></section>
       <section id="other"><div style="display:none"><input id="search" type="text"></div><div id="far"></div></section>
@@ -630,7 +646,7 @@ describe("card and identity fill — a hidden foreign control still bounds the f
 
   for (const [slot, expected] of [["far", ""], ["slot", "123"]] as const) {
     it(`CC: a late CVV in #${slot} is ${expected ? "written" : "not written"}`, async () => {
-      document.body.innerHTML = LAYOUT(`<input id="num" autocomplete="cc-number">`, slot);
+      document.body.innerHTML = LAYOUT(`<input id="num" autocomplete="cc-number">`);
       const late = await withLateField(
         () => performCreditCardAutofill(cc()),
         slot,
@@ -644,7 +660,6 @@ describe("card and identity fill — a hidden foreign control still bounds the f
     it(`identity: a late phone in #${slot} is ${expected ? "written" : "not written"}`, async () => {
       document.body.innerHTML = LAYOUT(
         `<input id="name" autocomplete="name"><input id="email" autocomplete="email">`,
-        slot,
       );
       const late = await withLateField(
         () =>

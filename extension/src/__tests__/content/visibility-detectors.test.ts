@@ -7,6 +7,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { EXT_MSG } from "../../lib/constants";
 import { ATTR_RESCAN_DELAY_MS } from "../../content/rescan-scheduler";
+import { documentScans } from "../helpers/scan-count";
 
 const showDropdownMock = vi.fn();
 
@@ -171,6 +172,66 @@ describe("dropdown gate: a zero-rect field gets no dropdown", () => {
   });
 });
 
+// The dropdown keeps the field's own opacity rule but not its ancestors': a
+// fade-in modal focuses its field while an ancestor is still transparent. The
+// fill still denies that field (fill-visibility-paths.test.ts).
+describe("dropdown gate: ancestor opacity vs the field's own opacity", () => {
+  for (const profile of profiles) {
+    describe(profile.label, () => {
+      it("a field under an opacity:0 ancestor gets the dropdown", async () => {
+        document.body.innerHTML = `<div style="opacity:0">${profile.form("t")}</div>`;
+        registerDestroy(await profile.init());
+        focusIn("ta");
+        expect(requests(profile.messageType)).toBe(1);
+        expect(showDropdownMock).toHaveBeenCalledTimes(1);
+      });
+
+      it("a field with its own opacity:0 gets none", async () => {
+        document.body.innerHTML = profile.form("o", 'style="opacity:0"');
+        registerDestroy(await profile.init());
+        focusIn("oa");
+        expect(requests(profile.messageType)).toBe(0);
+        expect(showDropdownMock).not.toHaveBeenCalled();
+      });
+    });
+  }
+
+  describe("LOGIN", () => {
+    it("a password under an opacity:0 ancestor gets a match request", async () => {
+      document.body.innerHTML = `<div style="opacity:0"><input id="pw" type="password"></div>`;
+      const { initFormDetector } = await import("../../content/form-detector-lib");
+      registerDestroy(initFormDetector());
+      focusIn("pw");
+      await Promise.resolve();
+      expect(requests("GET_MATCHES_FOR_URL")).toBe(1);
+    });
+  });
+});
+
+// A page-wide detection claims one field per role; each <form> is detected on
+// its own too, so a second form's fields are dropdown members.
+describe("dropdown membership: every <form>", () => {
+  for (const profile of profiles) {
+    describe(profile.label, () => {
+      const TWO_FORMS = () => `<form>${profile.form("a")}</form><form>${profile.form("b")}</form>`;
+
+      it("the first form's field gets a match request on focus (control)", async () => {
+        document.body.innerHTML = TWO_FORMS();
+        registerDestroy(await profile.init());
+        focusIn("aa");
+        expect(requests(profile.messageType)).toBe(1);
+      });
+
+      it("the second form's field gets a match request on focus", async () => {
+        document.body.innerHTML = TWO_FORMS();
+        registerDestroy(await profile.init());
+        focusIn("ba");
+        expect(requests(profile.messageType)).toBe(1);
+      });
+    });
+  }
+});
+
 describe("C2: a revealed container's fields are admitted", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
@@ -191,9 +252,9 @@ describe("C2: a revealed container's fields are admitted", () => {
         vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
 
         // A member focus costs no scan: the open itself admitted the field.
-        const before = ccClaimedFieldsMock.mock.calls.length;
+        const before = documentScans(ccClaimedFieldsMock);
         focusIn("da");
-        expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(0);
+        expect(documentScans(ccClaimedFieldsMock) - before).toBe(0);
         expect(requests(profile.messageType)).toBe(1);
       });
 
@@ -221,9 +282,9 @@ describe("C2: a revealed container's fields are admitted", () => {
         document.body.innerHTML = `<div class="panel">${profile.form("c")}</div>`;
         registerDestroy(await profile.init());
 
-        const before = ccClaimedFieldsMock.mock.calls.length;
+        const before = documentScans(ccClaimedFieldsMock);
         focusIn("ca");
-        expect(ccClaimedFieldsMock.mock.calls.length - before).toBe(0);
+        expect(documentScans(ccClaimedFieldsMock) - before).toBe(0);
         expect(requests(profile.messageType)).toBe(0);
       });
     });

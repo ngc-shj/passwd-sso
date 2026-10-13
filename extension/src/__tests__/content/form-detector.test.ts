@@ -89,12 +89,15 @@ describe("clickjacking hardening guards", () => {
       writable: true,
       value: () => overlay,
     });
-    expect(isInputHitTestSafe(input)).toBe(false);
-    Object.defineProperty(document, "elementFromPoint", {
-      configurable: true,
-      writable: true,
-      value: original,
-    });
+    try {
+      expect(isInputHitTestSafe(input)).toBe(false);
+    } finally {
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        writable: true,
+        value: original,
+      });
+    }
   });
 
   it("detects visible popover overlapping input center", () => {

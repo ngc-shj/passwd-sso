@@ -4,6 +4,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { EXT_MSG } from "../../lib/constants";
 import { ATTR_RESCAN_DELAY_MS, ATTR_RECENT_MS } from "../../content/rescan-scheduler";
+import { documentScans } from "../helpers/scan-count";
 
 // Capture showDropdown options so we can drive onSelect.
 const showDropdownMock = vi.fn();
@@ -30,10 +31,6 @@ vi.mock("../../content/cc-field-detection-lib", async (importOriginal) => {
   return { ...actual, ccClaimedFields: ccClaimedFieldsMock };
 });
 
-// One scan is one page-wide detection: a scan also detects each <form> on its
-// own (so a second form's fields get a dropdown), so count the document calls.
-const documentScans = () =>
-  ccClaimedFieldsMock.mock.calls.filter(([root]) => root === document).length;
 
 // M6: spy on showInlineNotice; stub the guard helpers with jsdom-safe defaults
 // (no layout in jsdom → hit-test always passes, elements always visible).
@@ -564,10 +561,10 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           await flushMicrotasks();
           expect(vi.getTimerCount()).toBe(1);
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           member.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
 
-          expect(documentScans() - before).toBe(0);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(0);
           expect(vi.getTimerCount()).toBe(1);
         });
 
@@ -582,10 +579,10 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           await flushMicrotasks();
           expect(vi.getTimerCount()).toBe(1);
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           other.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
 
-          expect(documentScans() - before).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(1);
         });
 
         it("non-member with nothing pending or recent: 0 scans", async () => {
@@ -594,10 +591,10 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           registerDestroy(await profile.init());
           const other = document.getElementById("other") as HTMLInputElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           other.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
 
-          expect(documentScans() - before).toBe(0);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(0);
         });
 
         it("non-member within ATTR_RECENT_MS after the timer fired: 1 scan", async () => {
@@ -612,10 +609,10 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS); // trailing rescan fires; timer clears
           vi.advanceTimersByTime(ATTR_RECENT_MS - ATTR_RESCAN_DELAY_MS - 1); // still inside the recent window
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           other.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
 
-          expect(documentScans() - before).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(1);
         });
 
         it("a batch whose first target has no input still counts a later field target", async () => {
@@ -625,13 +622,13 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           const div = document.getElementById("d") as HTMLDivElement;
           const target = document.getElementById("target") as HTMLInputElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           div.classList.add("x");
           target.classList.add("y");
           await flushMicrotasks();
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
 
-          expect(documentScans() - before).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(1);
         });
       });
     }
@@ -646,14 +643,30 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           registerDestroy(await profile.init());
           const input = document.getElementById("target") as HTMLInputElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           for (let i = 0; i < 5; i++) {
             input.classList.toggle(`m${i}`);
             await flushMicrotasks();
           }
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
 
-          expect(documentScans() - before).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(1);
+        });
+
+        it("one scan is 1 + document.forms.length ccClaimedFields calls", async () => {
+          document.body.innerHTML = `<form><input id="target" autocomplete="${profile.autocomplete}" />${profile.extraMarkup}</form><form><input autocomplete="${profile.autocomplete}" />${profile.extraMarkup}</form>`;
+          installProfileChrome(profile);
+          registerDestroy(await profile.init());
+          const input = document.getElementById("target") as HTMLInputElement;
+
+          const scansBefore = documentScans(ccClaimedFieldsMock);
+          const callsBefore = ccClaimedFieldsMock.mock.calls.length;
+          input.classList.toggle("multiplier");
+          await flushMicrotasks();
+          vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
+
+          expect(documentScans(ccClaimedFieldsMock) - scansBefore).toBe(1);
+          expect(ccClaimedFieldsMock.mock.calls.length - callsBefore).toBe(1 + document.forms.length);
         });
 
         it("two windows give 2 scans", async () => {
@@ -662,7 +675,7 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           registerDestroy(await profile.init());
           const input = document.getElementById("target") as HTMLInputElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           input.classList.toggle("w1");
           await flushMicrotasks();
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
@@ -670,7 +683,7 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           await flushMicrotasks();
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
 
-          expect(documentScans() - before).toBe(2);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(2);
         });
 
         it("one mutation every 50ms for 500ms gives at least 4 scans", async () => {
@@ -679,14 +692,14 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           registerDestroy(await profile.init());
           const input = document.getElementById("target") as HTMLInputElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           for (let i = 0; i < 10; i++) {
             input.classList.toggle(`r${i}`);
             await flushMicrotasks();
             vi.advanceTimersByTime(50);
           }
 
-          expect(documentScans() - before).toBeGreaterThanOrEqual(4);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBeGreaterThanOrEqual(4);
         });
 
         it("99ms gives 0 scans, 1ms more gives 1", async () => {
@@ -695,14 +708,14 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           registerDestroy(await profile.init());
           const input = document.getElementById("target") as HTMLInputElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           input.classList.toggle("boundary");
           await flushMicrotasks();
           vi.advanceTimersByTime(99);
-          expect(documentScans() - before).toBe(0);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(0);
 
           vi.advanceTimersByTime(1);
-          expect(documentScans() - before).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(1);
         });
       });
     }
@@ -717,12 +730,12 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           registerDestroy(await profile.init());
           const empty = document.getElementById("empty") as HTMLDivElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           empty.classList.add("marker");
           await flushMicrotasks();
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
 
-          expect(documentScans() - before).toBe(0);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(0);
         });
 
         it("the same mutation on a form container (containing an input) makes 1 scan", async () => {
@@ -731,12 +744,12 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           registerDestroy(await profile.init());
           const form = document.getElementById("form") as HTMLFormElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           form.classList.add("marker");
           await flushMicrotasks();
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
 
-          expect(documentScans() - before).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(1);
         });
       });
     }
@@ -750,22 +763,22 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           installProfileChrome(profile);
           registerDestroy(await profile.init());
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           const input = document.createElement("input");
           input.setAttribute("autocomplete", profile.autocomplete);
           document.body.appendChild(input);
           await flushMicrotasks();
           vi.advanceTimersByTime(0);
-          expect(documentScans() - before).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(1);
 
-          const afterInsert = documentScans();
+          const afterInsert = documentScans(ccClaimedFieldsMock);
           input.classList.add("marker");
           await flushMicrotasks();
-          expect(documentScans() - afterInsert).toBe(0);
+          expect(documentScans(ccClaimedFieldsMock) - afterInsert).toBe(0);
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS - 1);
-          expect(documentScans() - afterInsert).toBe(0);
+          expect(documentScans(ccClaimedFieldsMock) - afterInsert).toBe(0);
           vi.advanceTimersByTime(1);
-          expect(documentScans() - afterInsert).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - afterInsert).toBe(1);
         });
       });
     }
@@ -780,17 +793,17 @@ describe("C3: filtered, rate-bounded attribute rescan (#875)", () => {
           registerDestroy(await profile.init());
           const input = document.getElementById("target") as HTMLInputElement;
 
-          const before = documentScans();
+          const before = documentScans(ccClaimedFieldsMock);
           input.setAttribute("data-x", "1");
           await flushMicrotasks();
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
-          expect(documentScans() - before).toBe(0);
+          expect(documentScans(ccClaimedFieldsMock) - before).toBe(0);
 
-          const afterDataX = documentScans();
+          const afterDataX = documentScans(ccClaimedFieldsMock);
           input.classList.add("marker");
           await flushMicrotasks();
           vi.advanceTimersByTime(ATTR_RESCAN_DELAY_MS);
-          expect(documentScans() - afterDataX).toBe(1);
+          expect(documentScans(ccClaimedFieldsMock) - afterDataX).toBe(1);
         });
       });
     }
