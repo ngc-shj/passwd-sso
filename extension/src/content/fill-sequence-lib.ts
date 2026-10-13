@@ -56,6 +56,8 @@ export const OBSERVED_ATTRIBUTES: readonly string[] = [
   "style",
   "class",
   "type",
+  // <dialog> / <details> reveal their content by toggling `open`.
+  "open",
 ];
 
 type StepState = "pending" | "waiting" | "written" | "abandoned";
@@ -392,4 +394,70 @@ export function __resetFillSequenceForTests(): void {
   supersedeActiveRun();
   activeRun = null;
   currentGeneration = 0;
+}
+
+// ── Focus scope (card and identity fill) ──
+
+export interface FocusScope<T> {
+  detect: (root: ParentNode) => T | null;
+  /** Role elements in a fixed role order, so two detections compare by index. */
+  roles: (fields: T) => readonly (Element | null)[];
+  /** Whether a detection is enough to start from (the CC fill needs a card number). */
+  anchors: (fields: T) => boolean;
+  /** Whether a detection beside the held one is a second block, not a duplicate field. */
+  competes: (other: T, held: T) => boolean;
+}
+
+function holdsSameRoles(held: readonly (Element | null)[], next: readonly (Element | null)[]): boolean {
+  return held.every((el, i) => el === null || next[i] === el);
+}
+
+/**
+ * The detection for the block the user is in: the focused field's lowest
+ * ancestor whose detection anchors, widened while no role it holds moves to
+ * another element and no sibling branch holds a competing block. Capped at the
+ * focused field's form and kept below <body>. Without a focused field, or with
+ * none that anchors, the whole document — the fill's behaviour before focus
+ * scoping. The popup and the inline dropdown leave the page's focus in place,
+ * and a right-click focuses the field, so activeElement is the requester.
+ */
+export function focusScopedFields<T>(scope: FocusScope<T>): T | null {
+  const doc = document;
+  const active = doc.activeElement;
+  if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement)) {
+    return scope.detect(doc);
+  }
+  const cap = active.form;
+  const isTop = (el: Element) => el === doc.body || el === doc.documentElement;
+
+  let root: Element | null = null;
+  let held: T | null = null;
+  for (let node = active.parentElement; node && !isTop(node); node = node.parentElement) {
+    const fields = scope.detect(node);
+    if (fields && scope.anchors(fields)) {
+      root = node;
+      held = fields;
+      break;
+    }
+    if (node === cap) break;
+  }
+  if (!root || !held) return scope.detect(doc);
+
+  while (root !== cap) {
+    const parent: Element | null = root.parentElement;
+    if (!parent || isTop(parent)) break;
+    const next = scope.detect(parent);
+    if (!next || !holdsSameRoles(scope.roles(held), scope.roles(next))) break;
+    const current: T = held;
+    const path: Element = root;
+    const competitor = Array.from(parent.children).some((child) => {
+      if (child === path) return false;
+      const other = scope.detect(child);
+      return other !== null && scope.competes(other, current);
+    });
+    if (competitor) break;
+    root = parent;
+    held = next;
+  }
+  return held;
 }

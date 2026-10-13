@@ -8,13 +8,15 @@ import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } fr
 import {
   isUsableInput,
   isUsableFieldOfType,
-  isElementVisible,
+  isFieldVisible,
+  isNotSelfHidden,
+  fillAdmission,
+  type FieldAdmit,
   getHintString,
   findFieldByAutocomplete,
   findFieldByRegex,
 } from "./field-query-lib";
 import {
-  isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
   hasVisiblePopoverOverlayNear,
@@ -68,9 +70,25 @@ const FILLABLE_INPUT_TYPES = new Set([
 const isUsableField = (el: HTMLInputElement | HTMLSelectElement): boolean =>
   isUsableFieldOfType(el, FILLABLE_INPUT_TYPES);
 
-/** Visible + usable + allowlisted: the detector's own admission rule for a field. */
+/** Visible + usable + allowlisted: an identity field the fill may write. */
 export const isIdentityFillable = (el: HTMLInputElement | HTMLSelectElement): boolean =>
-  isElementVisible(el) && isUsableField(el);
+  isFieldVisible(el) && isUsableField(el);
+
+/**
+ * The country and region roles' write rule: a select may be geometry-hidden
+ * (Select2 / selectWoo keep the native select in a clipped 1px box and mirror
+ * it). Every other role — date of birth, postal code, city included — gets the
+ * full rule: option enumeration on a hidden select would read the value back.
+ */
+export const isIdentityRegionFillable = (el: HTMLInputElement | HTMLSelectElement): boolean =>
+  isFieldVisible(el, { geometryExempt: el instanceof HTMLSelectElement }) && isUsableField(el);
+
+/**
+ * Today's own-style rule, for the fill-root boundary, where a stricter
+ * "hidden" would let the root climb past a control.
+ */
+export const isIdentityCandidate = (el: HTMLInputElement | HTMLSelectElement): boolean =>
+  isNotSelfHidden(el) && isUsableField(el);
 
 // ── Regex patterns ──
 
@@ -169,7 +187,11 @@ function findPlainNameField(
 
 // ── Main detection function ──
 
-export function detectIdentityFields(root: ParentNode): IdentityFormFields | null {
+/** `admit` as in detectCreditCardFields; the default is the fill's admission rule. */
+export function detectIdentityFields(
+  root: ParentNode,
+  admit?: FieldAdmit,
+): IdentityFormFields | null {
   const inputs = Array.from(root.querySelectorAll<HTMLInputElement>("input"));
   const selects = Array.from(root.querySelectorAll<HTMLSelectElement>("select"));
   const allFields: (HTMLInputElement | HTMLSelectElement)[] = [...inputs, ...selects];
@@ -179,8 +201,9 @@ export function detectIdentityFields(root: ParentNode): IdentityFormFields | nul
   // dropdown and can overwrite it on a card field.
   const ccClaimed = ccClaimedFields(root);
 
+  const isAdmitted = admit ?? fillAdmission();
   const visibleFields = allFields.filter(
-    (f) => isElementVisible(f) && isUsableField(f) && !ccClaimed.has(f),
+    (f) => isAdmitted(f) && isUsableField(f) && !ccClaimed.has(f),
   );
 
   if (visibleFields.length === 0) return null;
@@ -345,15 +368,19 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
   }
 
   let identityFields = new WeakSet<HTMLElement>();
+  // Fields the last scan rejected as hidden (see fillAdmission).
+  let hiddenAtScan = new WeakSet<Element>();
   let autofillSuppressUntil = 0;
   let activeInput: HTMLInputElement | null = null;
 
   const rescan = () => {
     if (destroyed) return;
     const next = new WeakSet<HTMLElement>();
-    const fields = detectIdentityFields(document);
+    const hidden = new WeakSet<Element>();
+    const fields = detectIdentityFields(document, fillAdmission(hidden));
     if (fields) collectIdentityFields(fields, next);
     identityFields = next;
+    hiddenAtScan = hidden;
   };
 
   // Coalesces attribute-only mutation bursts so a reveal made
@@ -370,7 +397,7 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
     }
     if (
       !isPageVisuallySafe() ||
-      !isElementVisuallySafe(input) ||
+      !isFieldVisible(input) ||
       !isInputHitTestSafe(input) ||
       hasVisiblePopoverOverlayNear(input)
     ) {
@@ -474,6 +501,13 @@ export function initIdentityDetector(): IdentityDetectorCleanup {
       // rescan — before giving up on it.
       handleMutations(observer.takeRecords());
       scheduler.flushForFocus();
+      // A reveal no observed mutation shows (a CSS-only :checked/:target rule,
+      // a transition, an <html> class, a media query): a field the last scan
+      // saw hidden is rendered now, so one scan admits it. A field that was
+      // never hidden costs no scan.
+      if (!identityFields.has(input) && hiddenAtScan.has(input) && isFieldVisible(input)) {
+        rescan();
+      }
       if (!identityFields.has(input)) return;
     }
     requestMatches(input);

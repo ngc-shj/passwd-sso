@@ -237,16 +237,10 @@ describe("directAutofill / performAutofill parity (C6)", () => {
 
   // ── 8: hidden card number — nothing excluded ──
   //
-  // DIVERGENCE (reported, not fixed — see the final report): directAutofill's
-  // username fallback walk accepts the nearest preceding usable text field with
-  // no hint check; performAutofill's findUsernameInput additionally requires the
-  // hint to look username-like. The hidden card-number field here is not a card
-  // candidate (invisible, so no exclusion applies to it either) and sits between
-  // the password and the real "username" field: directAutofill's walk stops on
-  // it (then its own write-time visibility check silently drops the write, so
-  // nothing is filled), while performAutofill's hint filter skips it and reaches
-  // "username". Both still agree that nothing is EXCLUDED (FR3/C2's point for
-  // this fixture); they disagree on the fallback username target.
+  // The hidden card-number field is not a card candidate (so no exclusion
+  // applies) and sits between the password and the real "username" field. Both
+  // username walks skip a hidden field, so both reach "username"; before the
+  // shared visibility rule, directAutofill's walk stopped on it and filled none.
   it("a hidden (display:none) card number is not detected; nothing is excluded", async () => {
     const html = `
       <input id="username" type="text" name="username">
@@ -255,14 +249,8 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="cvv" type="password" name="cvv">
       </form>
     `;
-    const direct = await runDirect(html);
-    const content = await runContent(html);
-    expect(direct.password).toBe("cvv");
-    expect(content.password).toBe("cvv");
-    // Pinned divergence, not parity: directAutofill fills no username (the
-    // hidden ccnum blocks its naive walk); performAutofill fills "username".
-    expect(direct.username).toBeNull();
-    expect(content.username).toBe("username");
+    const result = await expectParity(html);
+    expect(result).toEqual({ username: "username", password: "cvv" });
   });
 
   // ── 9: focused card-number field — username is not written there ──

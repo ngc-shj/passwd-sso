@@ -5,10 +5,13 @@ import { EXT_MSG } from "../lib/constants";
 import type { IdentityAutofillPayload } from "../types/messages";
 import {
   detectIdentityFields,
+  isIdentityCandidate,
   isIdentityFillable,
+  isIdentityRegionFillable,
   type IdentityFormFields,
 } from "./identity-form-detector-lib";
 import {
+  focusScopedFields,
   resolveFillRoot,
   runFillSequence,
   supersedeActiveFill,
@@ -23,17 +26,11 @@ import {
   type SelectDiagField,
 } from "./select-diag-lib";
 
-// ── Visibility check ──
-
-function isFieldVisible(el: HTMLElement): boolean {
-  const style = getComputedStyle(el);
-  return style.display !== "none" && style.visibility !== "hidden";
-}
-
 // ── Value setters ──
+// Every write runs in the task where its step's `accepts` has just passed
+// (runFillSequence), so the setters do not re-check visibility.
 
 function setInputValue(input: HTMLInputElement, value: string): void {
-  if (!isFieldVisible(input)) return;
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -55,8 +52,6 @@ function setSelectValue(
   targetValue: string,
   diagField: SelectDiagField,
 ): void {
-  if (!isFieldVisible(select)) return;
-
   const normalizedTarget = targetValue.trim().toLowerCase();
 
   // Exact match by value first, then by text content
@@ -91,6 +86,27 @@ function setSelectValue(
 
 // ── Main autofill function ──
 
+const IDENTITY_ROLES = [
+  "fullName",
+  "givenName",
+  "familyName",
+  "familyNameKana",
+  "givenNameKana",
+  "address",
+  "addressLine2",
+  "city",
+  "postalCode",
+  "phone",
+  "email",
+  "dateOfBirth",
+  "region",
+  "country",
+] as const satisfies readonly (keyof IdentityFormFields)[];
+
+// The roles whose select may be geometry-hidden (Select2 / selectWoo). Every
+// other role, date of birth and postal code included, gets the full rule.
+const GEOMETRY_EXEMPT_ROLES: ReadonlySet<keyof IdentityFormFields> = new Set(["country", "region"]);
+
 function writeField(el: FillTarget, value: string, diagField: SelectDiagField): void {
   if (el instanceof HTMLSelectElement) {
     setSelectValue(el, value, diagField);
@@ -103,8 +119,18 @@ export async function performIdentityAutofill(
   payload: IdentityAutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
 ): Promise<void> {
-  // T0: the detector's result is every step's initial target.
-  const fields = detectIdentityFields(document);
+  // T0: the detector's result, scoped to the block the user is in, is every
+  // step's initial target.
+  const fields = focusScopedFields<IdentityFormFields>({
+    detect: detectIdentityFields,
+    roles: (f) => IDENTITY_ROLES.map((role) => f[role]),
+    anchors: () => true,
+    // A sibling holding two of the roles already held is another block
+    // (shipping beside billing); a confirm-email row or a split phone is one
+    // duplicate field and is not.
+    competes: (other, held) =>
+      IDENTITY_ROLES.filter((role) => other[role] !== null && held[role] !== null).length >= 2,
+  });
   if (!fields) {
     supersedeActiveFill();
     return;
@@ -122,7 +148,7 @@ export async function performIdentityAutofill(
       key: field,
       initial: fields[field],
       relocate: (root) => detectIdentityFields(root)?.[field] ?? null,
-      accepts: isIdentityFillable,
+      accepts: GEOMETRY_EXEMPT_ROLES.has(field) ? isIdentityRegionFillable : isIdentityFillable,
       write: (el) => writeField(el, value(), diagField),
       release: () => {},
     });
@@ -189,7 +215,7 @@ export async function performIdentityAutofill(
   );
   const anchor = steps.map((step) => step.initial).find((el) => el !== null) ?? null;
   const { root, reanchor } = anchor
-    ? resolveFillRoot(anchor, t0Targets, isIdentityFillable)
+    ? resolveFillRoot(anchor, t0Targets, isIdentityCandidate)
     : { root: null, reanchor: () => null };
 
   return runFillSequence(root, steps, { ...opts, reanchor });

@@ -13,6 +13,7 @@ import { FILL_DIAG_CODE, logFillError } from "./select-diag-lib";
 import { labelledByText } from "./labelled-by";
 import { ccFormFields } from "./cc-field-detection-lib";
 import { isLoginEligible } from "./login-field-eligibility";
+import { isFieldVisible, isNotSelfHidden } from "./field-query-lib";
 
 /**
  * Whether this frame is allowed to receive the decrypted credential. The SW
@@ -71,24 +72,17 @@ function escapeSelectorValue(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
 }
 
-function isVisible(input: HTMLInputElement) {
-  return (
-    getComputedStyle(input).display !== "none" &&
-    getComputedStyle(input).visibility !== "hidden"
-  );
-}
-
 function findPasswordInput(inputs: HTMLInputElement[]) {
   const byAutocomplete = inputs.find(
     (i) =>
       isUsableInput(i) &&
       i.type === "password" &&
-      isVisible(i) &&
+      isFieldVisible(i) &&
       i.autocomplete === "current-password"
   );
   if (byAutocomplete) return byAutocomplete;
   const passwordInputs = inputs.filter(
-    (i) => isUsableInput(i) && i.type === "password" && isVisible(i)
+    (i) => isUsableInput(i) && i.type === "password" && isFieldVisible(i)
   );
   return passwordInputs.length > 0
     ? passwordInputs[passwordInputs.length - 1]
@@ -102,6 +96,7 @@ function findUsernameInput(
   const isUsernameLike = (candidate: HTMLInputElement): boolean => {
     if (!isUsableInput(candidate)) return false;
     if (!USERNAME_TYPES.includes(candidate.type)) return false;
+    if (!isFieldVisible(candidate)) return false;
 
     const ac = (candidate.autocomplete || "").toLowerCase().trim();
     if (ac === "username" || ac === "email") return true;
@@ -148,7 +143,8 @@ function findUsernameInput(
     (i) =>
       isUsableInput(i) &&
       (i.type === "text" || i.type === "email" || i.type === "tel") &&
-      i.autocomplete === "username"
+      i.autocomplete === "username" &&
+      isFieldVisible(i)
   );
   if (byAutocomplete) return byAutocomplete;
 
@@ -171,6 +167,7 @@ function findFocusedTextInput(): HTMLInputElement | null {
   if (!(active instanceof HTMLInputElement)) return null;
   if (!isUsableInput(active)) return null;
   if (!USERNAME_TYPES.includes(active.type)) return null;
+  if (!isFieldVisible(active)) return null;
   return active;
 }
 
@@ -196,6 +193,7 @@ const indexedOtpNameRe =
 function isSingleDigitOtp(input: HTMLInputElement): boolean {
   if (!isUsableInput(input)) return false;
   if (!["text", "tel"].includes(input.type)) return false;
+  if (!isFieldVisible(input, { transparentOk: true })) return false;
   if (input.maxLength === 1) return true;
   // Detect by indexed name (e.g. "otp-code-0" … "otp-code-5")
   return indexedOtpNameRe.test(input.name);
@@ -242,7 +240,10 @@ function findSplitOtpInputs(
 
 function findOtpInput(inputs: HTMLInputElement[]): HTMLInputElement | null {
   const byAutocomplete = inputs.find(
-    (i) => isUsableInput(i) && i.autocomplete === "one-time-code",
+    (i) =>
+      isUsableInput(i) &&
+      i.autocomplete === "one-time-code" &&
+      isFieldVisible(i, { transparentOk: true }),
   );
   if (byAutocomplete) return byAutocomplete;
 
@@ -254,6 +255,7 @@ function findOtpInput(inputs: HTMLInputElement[]): HTMLInputElement | null {
     inputs.find((i) => {
       if (!isUsableInput(i)) return false;
       if (!["text", "tel", "number"].includes(i.type)) return false;
+      if (!isFieldVisible(i, { transparentOk: true })) return false;
       // The page's own declaration wins over a substring hint ("hotpepper_id"
       // contains "otp"), as it does for findUsernameInput.
       const ac = (i.autocomplete || "").toLowerCase().trim();
@@ -274,26 +276,42 @@ function isTextLikeTarget(el: FillTarget): boolean {
     el instanceof HTMLInputElement &&
     isUsableInput(el) &&
     TEXT_LIKE_TYPES.includes(el.type) &&
-    isVisible(el)
+    isFieldVisible(el)
+  );
+}
+
+// OTP targets only: a single-input OTP widget overlays an opacity:0 input on
+// drawn boxes. Custom fields keep isTextLikeTarget's full rule.
+function isOtpTarget(el: FillTarget): boolean {
+  return (
+    el instanceof HTMLInputElement &&
+    isUsableInput(el) &&
+    TEXT_LIKE_TYPES.includes(el.type) &&
+    isFieldVisible(el, { transparentOk: true })
   );
 }
 
 function isPasswordTarget(el: FillTarget): boolean {
-  return el instanceof HTMLInputElement && isUsableInput(el) && el.type === "password" && isVisible(el);
+  return el instanceof HTMLInputElement && isUsableInput(el) && el.type === "password" && isFieldVisible(el);
 }
 
 function isUsernameTarget(el: FillTarget): boolean {
   return (
-    el instanceof HTMLInputElement && isUsableInput(el) && USERNAME_TYPES.includes(el.type)
+    el instanceof HTMLInputElement &&
+    isUsableInput(el) &&
+    USERNAME_TYPES.includes(el.type) &&
+    isFieldVisible(el)
   );
 }
 
+// A boundary for the fill root: a stricter "hidden" here would let the root
+// climb past a control and widen what a waiting step can relocate into.
 function isLoginForeignCandidate(el: FillTarget): boolean {
   return (
     el instanceof HTMLInputElement &&
     isUsableInput(el) &&
     LOGIN_FILLABLE_TYPES.includes(el.type) &&
-    isVisible(el)
+    isNotSelfHidden(el)
   );
 }
 
@@ -351,7 +369,8 @@ export async function performAutofill(
     hintedInput &&
     isEligible(hintedInput) &&
     isUsableInput(hintedInput) &&
-    USERNAME_TYPES.includes(hintedInput.type)
+    USERNAME_TYPES.includes(hintedInput.type) &&
+    isFieldVisible(hintedInput)
       ? hintedInput
       : null;
 
@@ -495,7 +514,7 @@ export async function performAutofill(
           key: `totp-${i}`,
           initial: splitOtpInputs[i],
           relocate: (root) => findSplitOtpInputs(eligibleInputsIn(root), codeLen)?.[i] ?? null,
-          accepts: isTextLikeTarget,
+          accepts: isOtpTarget,
           write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? ""),
           release: releaseTotp,
         });
@@ -505,7 +524,7 @@ export async function performAutofill(
         key: "totp",
         initial: singleOtpInput,
         relocate: (root) => findOtpInput(eligibleInputsIn(root)),
-        accepts: isTextLikeTarget,
+        accepts: isOtpTarget,
         write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode ?? ""),
         release: releaseTotp,
       });

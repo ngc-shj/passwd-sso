@@ -35,12 +35,12 @@ vi.mock("../../content/cc-field-detection-lib", async (importOriginal) => {
 const showInlineNoticeMock = vi.hoisted(() => vi.fn());
 // The real field predicates (isUsableInput / isUsableFieldOfType, now in
 // field-query-lib, which is not mocked) still run, so the fillable-type gate is
-// exercised as production does — only the layout-dependent visibility/hit-test
-// helpers below are stubbed to pass under jsdom (no layout).
+// exercised as production does — field visibility runs for real against the
+// global layout stub (helpers/layout-stub.ts); only the page-level and hit-test
+// helpers below are stubbed to pass.
 vi.mock("../../content/form-detector-lib", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../content/form-detector-lib")>()),
   showInlineNotice: showInlineNoticeMock,
-  isElementVisuallySafe: () => true,
   isPageVisuallySafe: () => true,
   isInputHitTestSafe: () => true,
   hasVisiblePopoverOverlayNear: () => false,

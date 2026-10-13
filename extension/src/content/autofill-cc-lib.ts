@@ -6,10 +6,13 @@ import type { CreditCardAutofillPayload } from "../types/messages";
 import { detectExpiryFormat, formatCombinedExpiry } from "./cc-form-detector-lib";
 import {
   detectCreditCardFields,
+  isCreditCardCandidate,
+  isCreditCardExpiryFillable,
   isCreditCardFillable,
   type CreditCardFormFields,
 } from "./cc-field-detection-lib";
 import {
+  focusScopedFields,
   resolveFillRoot,
   runFillSequence,
   supersedeActiveFill,
@@ -26,17 +29,11 @@ import {
 } from "./select-diag-lib";
 import { getHintString } from "./field-query-lib";
 
-// ── Visibility check ──
-
-function isFieldVisible(el: HTMLElement): boolean {
-  const style = getComputedStyle(el);
-  return style.display !== "none" && style.visibility !== "hidden";
-}
-
 // ── Value setters ──
 
+// Every write runs in the task where its step's `accepts` has just passed
+// (runFillSequence), so the setters do not re-check visibility.
 function setInputValue(input: HTMLInputElement, value: string): void {
-  if (!isFieldVisible(input)) return;
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -88,8 +85,6 @@ function setSelectValue(
   normalizer: (v: string) => string,
   diagField: SelectDiagField,
 ): void {
-  if (!isFieldVisible(select)) return;
-
   const normalizedTarget = normalizer(targetValue);
 
   // Find exact match after normalization
@@ -137,6 +132,9 @@ function yearForInput(input: HTMLInputElement, year: string): string {
 
 type CcField = keyof Omit<CreditCardFormFields, "expiryFormat">;
 
+const ccRoles = (f: CreditCardFormFields) =>
+  [f.cardholderName, f.cardNumber, f.expiryMonth, f.expiryYear, f.expiryCombined, f.cvv] as const;
+
 function relocateCcField(field: CcField): (root: FillRoot) => FillTarget | null {
   return (root) => detectCreditCardFields(root)?.[field] ?? null;
 }
@@ -158,8 +156,20 @@ export async function performCreditCardAutofill(
   payload: CreditCardAutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
 ): Promise<void> {
-  // T0: the detector's result is every step's initial target.
-  const fields = detectCreditCardFields(document);
+  // T0: the detector's result, scoped to the block the user is in, is every
+  // step's initial target.
+  const fields = focusScopedFields<CreditCardFormFields>({
+    detect: (root) => detectCreditCardFields(root),
+    roles: ccRoles,
+    anchors: (f) => f.cardNumber !== null,
+    // A second card number with any other card role is another card form; a
+    // split number or a lone duplicate field is not.
+    competes: (other) =>
+      other.cardNumber !== null &&
+      [other.cardholderName, other.expiryMonth, other.expiryYear, other.expiryCombined, other.cvv].some(
+        (el) => el !== null,
+      ),
+  });
   if (!fields?.cardNumber) {
     supersedeActiveFill();
     return;
@@ -220,7 +230,7 @@ export async function performCreditCardAutofill(
       key: "expiryMonth",
       initial: fields.expiryMonth,
       relocate: relocateCcField("expiryMonth"),
-      accepts: isCreditCardFillable,
+      accepts: isCreditCardExpiryFillable,
       write: (el) =>
         writeExpiryPart(el, payload.expiryMonth, normalizeMonthValue, SELECT_DIAG_FIELD.CC_EXPIRY_MONTH),
       release: noRelease,
@@ -231,7 +241,7 @@ export async function performCreditCardAutofill(
       key: "expiryYear",
       initial: fields.expiryYear,
       relocate: relocateCcField("expiryYear"),
-      accepts: isCreditCardFillable,
+      accepts: isCreditCardExpiryFillable,
       write: (el) =>
         writeExpiryPart(
           el,
@@ -268,7 +278,7 @@ export async function performCreditCardAutofill(
     fields.expiryCombined,
     fields.cvv,
   ].filter((el): el is HTMLInputElement | HTMLSelectElement => el !== null);
-  const { root, reanchor } = resolveFillRoot(cardNumber, t0Targets, isCreditCardFillable);
+  const { root, reanchor } = resolveFillRoot(cardNumber, t0Targets, isCreditCardCandidate);
 
   return runFillSequence(root, steps, { ...opts, reanchor });
 }
