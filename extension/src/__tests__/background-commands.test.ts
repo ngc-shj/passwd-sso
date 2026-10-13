@@ -8,6 +8,7 @@ import {
 } from "../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { holdNextCall } from "./helpers/deferred";
+import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
 
@@ -25,6 +26,9 @@ const cryptoMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../lib/crypto", () => cryptoMocks);
+
+const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
+const OVERVIEW_PLAINTEXT = JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" });
 
 type MessageHandler = (
   message: unknown,
@@ -177,25 +181,17 @@ describe("X-4 keyboard shortcut commands", () => {
     vi.clearAllMocks();
     chromeMock = installChromeMock();
 
-    // Default decryptData mock: returns overview for list, full blob for individual
-    let decryptCallCount = 0;
-    cryptoMocks.decryptData.mockImplementation(async () => {
-      decryptCallCount++;
-      // First calls are for overview decryption (getCachedEntries)
-      // Later calls are for full blob
-      if (decryptCallCount <= 1) {
-        return JSON.stringify({
-          title: "Example",
-          username: "alice",
-          urlHost: "example.com",
-        });
-      }
-      return JSON.stringify({
+    // Keyed on the ciphertext (#784): the unlock's fire-and-forget context-menu
+    // rebuild also decrypts the overview, so a call-order queue let it take the
+    // overview's slot under load and hand the command the blob instead.
+    keyedDecrypt.install({
+      "11": OVERVIEW_PLAINTEXT,
+      aa: JSON.stringify({
         title: "Example",
         username: "alice",
         password: "s3cret",
         url: "https://example.com",
-      });
+      }),
     });
 
     vi.stubGlobal(
@@ -290,20 +286,8 @@ describe("X-4 keyboard shortcut commands", () => {
   it("does not print decrypted plaintext when the blob is not valid JSON", async () => {
     await unlockVault(chromeMock);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // The first decryptData call is the list overview (see the default mock); the
-    // individual blob is decrypted afterwards, and that is the one to corrupt.
-    let call = 0;
-    cryptoMocks.decryptData.mockImplementation(async () => {
-      call++;
-      if (call <= 1) {
-        return JSON.stringify({
-          title: "Example",
-          username: "alice",
-          urlHost: "example.com",
-        });
-      }
-      return '{"username":"bob","password":S3cr3t-Passw0rd-VeryLong}';
-    });
+    // Corrupt the individual blob ("aa"); the list overview ("11") stays valid.
+    keyedDecrypt.set("aa", '{"username":"bob","password":S3cr3t-Passw0rd-VeryLong}');
 
     const handler = commandHandlers[0];
     await handler(CMD_COPY_PASSWORD);
