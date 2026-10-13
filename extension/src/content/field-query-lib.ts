@@ -234,8 +234,6 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
   for (let node = parentOf(el); node; node = parentOf(node)) {
     if (node === doc.body || node === doc.documentElement) break;
     const style = styleOf(node, cache);
-    // A box-less ancestor, or an inline one (overflow does not apply to inline
-    // boxes, and their client size is 0), clips nothing.
     // display:contents has no box: it neither clips nor contains.
     if (style.display === "contents") continue;
     // Not the escaping box's containing block: its clip does not apply.

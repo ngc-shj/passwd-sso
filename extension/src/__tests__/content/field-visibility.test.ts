@@ -429,6 +429,8 @@ describe("isFieldVisible — R4: the scroll origin of a scroll container", () =>
   it.each([
     ["column-reverse (y)", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,-250", true],
     ["column-reverse (y), past the content end", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,600", false],
+    ["column-reverse (y), top exactly at the content end", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,500", false],
+    ["column-reverse (y), top 1px before the content end", "display:flex; flex-direction:column-reverse; overflow-y:auto", "0,-300", "100,20,10,499", true],
     ["row-reverse (x)", "display:flex; flex-direction:row-reverse; overflow-x:auto", "-300,0", "100,20,-350,10", true],
     ["row-reverse (x), past the content end", "display:flex; flex-direction:row-reverse; overflow-x:auto", "-300,0", "100,20,700,10", false],
     ["vertical-rl (x)", "writing-mode:vertical-rl; overflow-x:auto", "-300,0", "100,20,-350,10", true],
@@ -519,6 +521,9 @@ describe("isFieldVisible — R4: the containing-block chain", () => {
     ["rotate", "rotate:1deg"],
     ["scale", "scale:2"],
     ["transform-style", "transform-style:preserve-3d"],
+    ["perspective", "perspective:10px"],
+    ["backdrop-filter", "backdrop-filter:blur(0px)"],
+    ["offset-path", "offset-path:path('M0 0')"],
     ["container-type", "container-type:inline-size"],
     ["content-visibility", "content-visibility:auto"],
     ["will-change (any value)", "will-change:opacity"],
