@@ -115,7 +115,7 @@ export async function directAutofill(
     for (let node = parentOf(el); node; node = parentOf(node)) {
       if (node === document.body || node === document.documentElement) break;
       const style = getComputedStyle(node);
-      if (style.display === "contents") continue;
+      if (style.display === "contents" || style.display === "inline") continue;
       if (mode === 2 && !containsFixed(style)) continue;
       if (mode === 1 && style.position === "static" && !containsFixed(style)) continue;
       const box = node.getBoundingClientRect();

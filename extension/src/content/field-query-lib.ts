@@ -193,7 +193,9 @@ function hasVisibleBox(el: Element, cache: VisibilityCache | undefined): boolean
   for (let node = parentOf(el); node; node = parentOf(node)) {
     if (node === doc.body || node === doc.documentElement) break;
     const style = styleOf(node, cache);
-    if (style.display === "contents") continue;
+    // A box-less ancestor, or an inline one (overflow does not apply to inline
+    // boxes, and their client size is 0), clips nothing.
+    if (style.display === "contents" || style.display === "inline") continue;
     if (mode === FIXED && !containsFixed(style)) continue;
     if (mode === ABSOLUTE && style.position === "static" && !containsFixed(style)) continue;
     const box = rectOf(node, cache);

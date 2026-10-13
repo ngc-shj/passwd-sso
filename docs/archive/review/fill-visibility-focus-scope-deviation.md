@@ -46,3 +46,25 @@
 - **The scroll window's `client < 4` early return:** an equivalent mutant. Without it, the carried span is `min(size, client) < 4`, and the per-ancestor size check right after it denies.
 - **The twin's shadow-host step (`parentOf`):** unreachable in the twin. Its candidates come from `document.querySelectorAll("input")`, which never returns a shadow-root input. The content copy is pinned by the predicate tests.
 - **`focusScopedFields`' `node === cap` stop in the first loop:** every markup built to reach past the cap falls back to the same result as `detect(document)`.
+
+## D9: `focusScopedFields` takes a `FocusScope` object
+
+- **Plan:** C3's signature is `focusScopedFields(detect, roles)`.
+- **Change:** it takes `{ detect, roles, anchors, competes }`.
+- **Why:** plan round 3 (func M1) made the climb stop on a competing *block*, and the threshold differs per kind (CC: a card number plus one more role; identity: two shared roles). The start condition also differs: CC needs a card number. Both are per-caller, so they are passed in alongside `detect` and `roles`.
+
+## D10: dropdown membership covers each `<form>`, not every block
+
+- **Change (code review round 1, func F3):** each scan also runs detection on every `<form>`, so a second card or identity form's fields get a dropdown.
+- **Still not covered:**
+  - a second block inside one `<form>`, such as billing and shipping in the same form;
+  - form-less multi-block pages.
+
+  These were not covered before this branch either. They still fill correctly from the popup and the context menu (C3).
+- **Why stop there:** covering them needs block detection over every candidate at every scan, or a focus-time scan of every non-member. The first costs a full scan per candidate on every page; the second breaks the #875 rate bound.
+
+## D11: an OTP input hidden off-screen or at 1px is no longer filled
+
+- **Change (code review round 1, func F7):** `transparentOk` lifts the opacity rule only, so a single-input OTP widget that hides its real input with `left:-9999px` or a 1px box (a key catcher) is not filled. Widgets that overlay an `opacity:0` input are still filled.
+- **Accepted cost:** exempting OTP from geometry would let a page hide an input anywhere and receive the code.
+- **Worst case:** the user types the code by hand on such a widget.
