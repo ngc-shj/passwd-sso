@@ -34,11 +34,11 @@ interface FakeTxState {
   bypass: string | null;
 }
 
-function makeDispatchPrisma(opts: { failDeleteOn?: string } = {}) {
+function makeDispatchPrisma(opts: { failDeleteOn?: string; inheritedBypass?: string } = {}) {
   const txs: FakeTxState[] = [];
 
   function makeTx() {
-    const state: FakeTxState = { calls: [], bypass: null };
+    const state: FakeTxState = { calls: [], bypass: opts.inheritedBypass ?? null };
     txs.push(state);
     const record =
       <A extends unknown[], R>(name: string, impl: (...args: A) => Promise<R>) =>
@@ -159,6 +159,24 @@ describe("sweepOnce dispatch sets the bypass each entry declares (C1)", () => {
 
     expect(counts.sessions).toBe(ROWS_PER_WRITE);
     expect(counts.mcp_access_tokens).toBe(ROWS_PER_WRITE);
+  });
+
+  it("an entry without globalDelete refuses an inherited bypass, logged with its own code", async () => {
+    // Every transaction starts with app.bypass_rls already 'on', as if a
+    // caller's bypass had reached it.
+    const { workerPrisma } = makeDispatchPrisma({ inheritedBypass: "on" });
+    const counts = await sweepOnce(workerPrisma, 100, { intervalMs: 1, emitHeartbeatAudit: false });
+
+    expect(counts.verification_tokens).toBe(-1);
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        table: "verification_tokens",
+        code: "RETENTION_GC_BYPASS_STATE",
+        _logType: "retention-gc.entry_failed",
+      }),
+      "retention-gc.entry_failed",
+    );
+    expect(logError).toHaveBeenCalledTimes(1);
   });
 
   it("a sweep's rejection propagates out of its transaction as -1 plus entry_failed", async () => {

@@ -1,13 +1,17 @@
 /**
  * Sweep logic for the retention-GC worker.
  *
- * Three exported functions:
- *   sweepExpiryEntry  — batch-bounded DELETE for EXPIRY entries
- *   sweepAuditLogs    — per-tenant audit log purge via SECURITY DEFINER fn
- *   sweepOnce         — orchestrates one full registry sweep + heartbeat audit
+ * Exports one sweep per registry kind (sweepExpiryEntry, sweepGuardedExpiryEntry,
+ * sweepAuditProvenanceEntry, sweepAuditLogs, sweepPerTenantAge, sweepTrashEntry),
+ * the access-request status sweep (sweepExpiredAccessRequests), the worker-side
+ * audit enqueue (enqueueAuditInWorkerTx), and sweepOnce, which orchestrates one
+ * full registry sweep plus the heartbeat audit.
  *
- * Each EXPIRY entry runs in its own transaction. The PER_TENANT_FN entry runs
- * in its own transaction. The heartbeat runs in a final separate transaction
+ * The RLS bypass is set only by the module-private inSweepTx, which opens each
+ * sweep's transaction; every sweep that takes a tx asserts the bypass state its
+ * entry declares instead of setting it (#874 — see "The RLS bypass" below).
+ *
+ * Each entry runs in its own transaction. The heartbeat runs in a final separate transaction
  * after all per-entry counts are collected (INV-C4a). A per-entry failure is
  * caught, logged {table, code} (the authoritative error record — F7), and the
  * sweep continues (INV-C4b).
@@ -175,6 +179,8 @@ async function inSweepTx<T>(
   });
 }
 
+const RETENTION_GC_BYPASS_STATE_CODE = "RETENTION_GC_BYPASS_STATE";
+
 /**
  * Fail closed unless the transaction's RLS bypass is in the state the sweep's
  * entry declares: `on` when `expected`, anything but `on` otherwise (so an
@@ -186,7 +192,13 @@ async function assertSweepBypass(tx: Prisma.TransactionClient, expected: boolean
     SELECT current_setting('app.bypass_rls', true) AS bypass_rls`;
   const row = rows[0];
   if (!row || (row.bypass_rls === "on") !== expected) {
-    throw new Error("retention-gc sweep requires the RLS bypass state its entry declares");
+    // The code is what sweepOnce's entry_failed record carries (it logs {table,
+    // code} only), so a dispatcher or registry regression is distinguishable
+    // from any other uncoded error.
+    throw Object.assign(
+      new Error("retention-gc sweep requires the RLS bypass state its entry declares"),
+      { code: RETENTION_GC_BYPASS_STATE_CODE },
+    );
   }
 }
 
@@ -446,7 +458,7 @@ export async function sweepAuditLogs(
  * configured retention. Unlike sweepAuditLogs (definer fn for immutability),
  * these tables (entry history) are trimmed with a direct batch-bounded DELETE.
  *
- * Takes a `tx` (dispatched via workerPrisma.$transaction, like sweepAuditLogs).
+ * Takes a `tx` (dispatched via inSweepTx with the bypass set, like sweepAuditLogs).
  * Asserts bypass_rls first; enumerates tenants with the retention column NOT NULL;
  * per tenant deletes `<table>` rows where `<cutoffColumn> < now() - retention`.
  * Emits a per-tenant audit (entry.auditAction) when a tenant has rows trimmed.
