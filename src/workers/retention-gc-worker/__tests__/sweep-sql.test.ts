@@ -17,16 +17,22 @@ import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { sweepExpiryEntry, sweepGuardedExpiryEntry, sweepAuditProvenanceEntry } from "../sweep";
 import type { ExpiryEntry, GuardedExpiryEntry, AuditProvenanceEntry } from "../registry";
+import { declaredBypass, makeQueryRaw } from "@/__tests__/workers/retention-gc-tx-fakes";
 
-/** A fake TransactionClient capturing the bypass_rls set_config and the DELETE. */
-function makeFakeTx() {
-  const executeRaw = vi.fn().mockResolvedValue(undefined); // set_config(...)
+/**
+ * A fake TransactionClient capturing the DELETE. Its bypass_rls read answers
+ * with the state the entry declares, as the dispatcher would have set it.
+ */
+function makeFakeTx(entry: { globalDelete?: true }) {
+  const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config(...)
   const executeRawUnsafe = vi.fn().mockResolvedValue(7); // DELETE → rows affected
+  const queryRaw = makeQueryRaw({ bypass: declaredBypass(entry) });
   const tx = {
     $executeRaw: executeRaw,
     $executeRawUnsafe: executeRawUnsafe,
+    $queryRaw: queryRaw,
   } as unknown as Prisma.TransactionClient;
-  return { tx, executeRaw, executeRawUnsafe };
+  return { tx, executeRaw, executeRawUnsafe, queryRaw };
 }
 
 describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
@@ -38,7 +44,7 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
       keyColumns: ["id"],
       globalDelete: true,
     };
-    const { tx, executeRawUnsafe } = makeFakeTx();
+    const { tx, executeRawUnsafe } = makeFakeTx(entry);
 
     const deleted = await sweepExpiryEntry(tx, entry, 100);
 
@@ -74,7 +80,7 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
       cutoffColumn: "expires",
       keyColumns: ["identifier", "token"],
     };
-    const { tx, executeRawUnsafe } = makeFakeTx();
+    const { tx, executeRawUnsafe } = makeFakeTx(entry);
 
     await sweepExpiryEntry(tx, entry, 500);
 
@@ -103,7 +109,7 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
       ],
       globalDelete: true,
     };
-    const { tx, executeRawUnsafe } = makeFakeTx();
+    const { tx, executeRawUnsafe } = makeFakeTx(entry);
 
     await sweepExpiryEntry(tx, entry, 1000);
 
@@ -122,7 +128,7 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
     expect(sql).not.toContain("${");
   });
 
-  it("globalDelete entry sets the bypass_rls GUC in-tx before deleting (INV-C2b)", async () => {
+  it("globalDelete entry issues no set_config — the dispatcher owns the bypass (INV-C2b, #874)", async () => {
     const entry: ExpiryEntry = {
       kind: "EXPIRY",
       table: "sessions",
@@ -130,12 +136,16 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
       keyColumns: ["id"],
       globalDelete: true,
     };
-    const { tx, executeRaw } = makeFakeTx();
+    const { tx, executeRaw, queryRaw, executeRawUnsafe } = makeFakeTx(entry);
 
     await sweepExpiryEntry(tx, entry, 100);
 
-    // set_config('app.bypass_rls', 'on', true) issued via the tagged-template $executeRaw.
-    expect(executeRaw).toHaveBeenCalled();
+    // The member only reads the bypass state (before the DELETE); it never sets it.
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      executeRawUnsafe.mock.invocationCallOrder[0],
+    );
   });
 });
 
@@ -149,13 +159,13 @@ describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
       guard: "MCP_TOKEN_FAMILY_DEAD",
       globalDelete: true,
     };
-    const { tx, executeRaw, executeRawUnsafe } = makeFakeTx();
+    const { tx, executeRaw, executeRawUnsafe } = makeFakeTx(entry);
 
     const deleted = await sweepGuardedExpiryEntry(tx, entry, 250);
 
     expect(deleted).toBe(7);
-    // bypass_rls GUC set in-tx (globalDelete).
-    expect(executeRaw).toHaveBeenCalled();
+    // The member issues no set_config; the dispatcher sets the bypass (#874).
+    expect(executeRaw).not.toHaveBeenCalled();
 
     const [sql, ...params] = executeRawUnsafe.mock.calls[0];
     // Only batchSize is bound — no extra param, never inlined.
@@ -189,17 +199,18 @@ describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
 });
 
 describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)", () => {
-  function makeProvenanceTx(rows: Record<string, unknown>[]) {
-    const executeRaw = vi.fn().mockResolvedValue(undefined); // set_config
+  function makeProvenanceTx(
+    rows: Record<string, unknown>[],
+    reads: { bypass: string | null; enqueueBypass?: string | null } = { bypass: "on" },
+  ) {
+    const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config
     // The DELETE ... RETURNING goes through $queryRawUnsafe (needs row results).
     const queryRawUnsafe = vi.fn().mockResolvedValue(rows);
     const executeRawUnsafe = vi.fn().mockResolvedValue(undefined); // unused by this fn
     const auditOutbox = { create: vi.fn().mockResolvedValue(undefined) };
-    const queryRaw = vi.fn().mockResolvedValue([{ bypass_rls: "on", tenant_id: "" }]);
-    // enqueueAuditInWorkerTx does two $queryRaw reads (ctx + tenant exists)
-    queryRaw
-      .mockResolvedValueOnce([{ bypass_rls: "on", tenant_id: "" }])
-      .mockResolvedValue([{ ok: true }]);
+    // The assert's read, enqueueAuditInWorkerTx's ctx read and its tenant-exists
+    // read, each answered by its SQL text.
+    const queryRaw = makeQueryRaw(reads);
     const tx = {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
@@ -413,11 +424,13 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
       tenant_id: "22222222-2222-4222-8222-222222222222",
       user_id: "33333333-3333-4333-8333-333333333333",
     };
-    const { tx, queryRaw, queryRawUnsafe } = makeProvenanceTx([deletedRow]);
-    // Override the GUC context read: bypass_rls is "off" and tenant_id does not
-    // match the row's tenant — enqueueAuditInWorkerTx must throw rather than
-    // silently proceed to write the outbox row.
-    queryRaw.mockReset().mockResolvedValueOnce([{ bypass_rls: "off", tenant_id: "" }]);
+    // The sweep's own assert reads "on" (so it passes); enqueueAuditInWorkerTx's
+    // GUC context read sees "off" and a tenant_id that does not match the row's
+    // tenant — it must throw rather than silently write the outbox row.
+    const { tx, queryRawUnsafe, auditOutbox } = makeProvenanceTx([deletedRow], {
+      bypass: "on",
+      enqueueBypass: "off",
+    });
 
     await expect(sweepAuditProvenanceEntry(tx, entry, 100)).rejects.toThrow(
       /bypass_rls scope/,
@@ -427,5 +440,6 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     // the same tx) — the guard failure surfaces via a rejected promise, and
     // callers run this inside $transaction so the DELETE is rolled back.
     expect(queryRawUnsafe).toHaveBeenCalledTimes(1);
+    expect(auditOutbox.create).not.toHaveBeenCalled();
   });
 });

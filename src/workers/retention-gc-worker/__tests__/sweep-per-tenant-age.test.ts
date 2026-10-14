@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { sweepPerTenantAge } from "../sweep";
 import type { PerTenantAgeEntry } from "../registry";
+import { makeQueryRaw } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 const ENTRY: PerTenantAgeEntry = {
   kind: "PER_TENANT_AGE",
@@ -29,14 +30,12 @@ function makeTx(
   tenants: Array<Record<string, string | number | null>>,
   deletedPerTenant: number,
 ) {
-  const executeRaw = vi.fn().mockResolvedValue(undefined); // set_config
+  const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config
   const executeRawUnsafe = vi.fn().mockResolvedValue(deletedPerTenant); // DELETE
   const findMany = vi.fn().mockResolvedValue(tenants);
   const auditOutbox = { create: vi.fn().mockResolvedValue(undefined) };
-  const queryRaw = vi
-    .fn()
-    .mockResolvedValueOnce([{ bypass_rls: "on", tenant_id: "" }])
-    .mockResolvedValue([{ ok: true }]);
+  // PER_TENANT_AGE always runs under the dispatcher's bypass.
+  const queryRaw = makeQueryRaw({ bypass: "on" });
   const tx = {
     $executeRaw: executeRaw,
     $executeRawUnsafe: executeRawUnsafe,
@@ -44,7 +43,7 @@ function makeTx(
     tenant: { findMany },
     auditOutbox,
   } as unknown as Prisma.TransactionClient;
-  return { tx, executeRawUnsafe, findMany, auditOutbox };
+  return { tx, executeRaw, executeRawUnsafe, findMany, auditOutbox };
 }
 
 describe("sweepPerTenantAge (SC3)", () => {
@@ -109,6 +108,16 @@ describe("sweepPerTenantAge (SC3)", () => {
     expect(payload.action).toBe("HISTORY_RETENTION_PURGED");
     expect(payload.metadata.purgedCount).toBe(3);
     expect(payload.metadata.table).toBe("password_entry_histories");
+  });
+
+  it("issues no set_config — the dispatcher owns the bypass (#874)", async () => {
+    const { tx, executeRaw, executeRawUnsafe } = makeTx(
+      [{ id: "55555555-5555-4555-8555-555555555555", historyRetentionDays: 30 }],
+      1,
+    );
+    await sweepPerTenantAge(tx, ENTRY, 100);
+    expect(executeRawUnsafe).toHaveBeenCalledOnce();
+    expect(executeRaw).not.toHaveBeenCalled();
   });
 
   it("emits NO audit when a tenant has zero rows to trim", async () => {

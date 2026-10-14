@@ -20,7 +20,7 @@ import {
   afterEach,
 } from "vitest";
 import { randomUUID } from "node:crypto";
-import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { createTestContext, inRetentionSweepTx, setBypassRlsGucs, type TestContext } from "./helpers";
 import {
   sweepExpiredAccessRequests,
   sweepAuditProvenanceEntry,
@@ -112,7 +112,7 @@ describe("retention-gc sweepExpiredAccessRequests: PENDING -> EXPIRED (C7)", () 
   }
 
   async function runSweep(): Promise<number> {
-    return ctx.retentionWorker.prisma.$transaction((tx) =>
+    return inRetentionSweepTx(ctx.retentionWorker.prisma, (tx) =>
       sweepExpiredAccessRequests(tx, 100),
     );
   }
