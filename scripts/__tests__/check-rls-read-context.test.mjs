@@ -208,6 +208,8 @@ describe("check-rls-read-context", () => {
     ["parenthesized", "prisma.$transaction((async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({})))"],
     ["cast", "prisma.$transaction((async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({})) as any)"],
     ["passed to new", "new W(async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({}))"],
+    ["satisfies-cast", "prisma.$transaction((async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({})) satisfies unknown)"],
+    ["invoked immediately", "(async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({}))(prisma)"],
   ])("FAILS an annotated callback argument spelled %s", (_label, expr) => {
     const r = runGate(`
       import type { Prisma } from "@prisma/client";
@@ -218,6 +220,29 @@ describe("check-rls-read-context", () => {
     `);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("audit_outbox");
+  });
+
+  it("FAILS an annotated callback hoisted into a const before it is passed", () => {
+    const r = runGate(`
+      import type { Prisma } from "@prisma/client";
+      export async function f(prisma: any) {
+        const cb = async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({});
+        return prisma.$transaction(cb);
+      }
+    `);
+    expect(r.status).not.toBe(0);
+  });
+
+  it("FAILS an inner callback whose tx only shares its name with an outer typed parameter", () => {
+    // The innermost binding decides: the outer tx is a different value.
+    const r = runGate(`
+      import type { Prisma } from "@prisma/client";
+      export async function f(tx: Prisma.TransactionClient, prisma: any) {
+        void tx;
+        return prisma.$transaction(async (tx: any) => tx.auditOutbox.findMany({}));
+      }
+    `);
+    expect(r.status).not.toBe(0);
   });
 
   it("PASSES the same annotated callback when its $transaction sets the GUC", () => {

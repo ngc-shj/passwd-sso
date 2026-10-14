@@ -40,11 +40,12 @@
  *            (`const { findMany } = prisma.auditOutbox`, `const { auditOutbox }
  *            = prisma`, and the renamed form `{ findMany: fm }`)
  *   PASSES   context helpers; `$transaction` + setBypassRlsGucs; a parameter
- *            typed TransactionClient/TxClient/RawExecutor on a function that
- *            is not itself passed as an argument to a call (a callback is
- *            judged by the call it is passed to, never by its own annotation —
- *            #874); every indirect spelling above when the chain ends at a
- *            context binding
+ *            typed TransactionClient/TxClient/RawExecutor on a function or
+ *            method DECLARATION (a function value — arrow or function
+ *            expression — never takes that shortcut, and is accepted only when
+ *            passed straight to a context helper or a GUC-setting $transaction;
+ *            the innermost binding of the name decides — #874); every indirect
+ *            spelling above when the chain ends at a context binding
  *   MISSED   a client reached through a data structure, a computed key
  *            (`prisma[name]`), or a returned closure; a GUC established through
  *            an element-access raw call (`tx["$executeRaw"]`) — fail-CLOSED, it
@@ -452,14 +453,6 @@ function resolveInvocation(expr, node) {
  * either the parameter of a callback passed to a context-establishing call, or
  * a parameter annotated as a transaction client and threaded in by its caller.
  */
-const CALLBACK_WRAPPER_KINDS = new Set([
-  SyntaxKind.ParenthesizedExpression,
-  SyntaxKind.AsExpression,
-  SyntaxKind.SatisfiesExpression,
-  SyntaxKind.NonNullExpression,
-  SyntaxKind.TypeAssertionExpression,
-]);
-
 function hasRlsContext(node, recvText, seen = new Set()) {
   let cur = node.getParent();
   while (cur) {
@@ -469,35 +462,27 @@ function hasRlsContext(node, recvText, seen = new Set()) {
       cur.getKind() === SyntaxKind.FunctionDeclaration ||
       cur.getKind() === SyntaxKind.MethodDeclaration
     ) {
-      // The annotation shortcut ("a transaction client threaded in by its
-      // caller") holds only for a function that IS called by someone else's
-      // code path — a declaration, or a function value not handed straight to
-      // a call. A callback passed as an argument is judged by the call it is
-      // passed to (below): its annotation alone says nothing about whether
-      // that call established a context.
-      // Spellings that leave the value a call argument — parentheses, a type
-      // cast, a non-null assertion, `satisfies` — are unwrapped first, and a
-      // `new` expression counts as a call.
-      let argNode = cur;
-      while (CALLBACK_WRAPPER_KINDS.has(argNode.getParent()?.getKind())) {
-        argNode = argNode.getParent();
-      }
-      const argParent = argNode.getParent();
-      const isCallbackArgument =
-        (argParent?.getKind() === SyntaxKind.CallExpression ||
-          argParent?.getKind() === SyntaxKind.NewExpression) &&
-        (argParent.getArguments() ?? []).includes(argNode);
-      if (!isCallbackArgument) {
-        for (const param of cur.getParameters()) {
-          if (param.getName() !== recvText) continue;
-          const typeText = param.getTypeNode()?.getText() ?? "";
-          if (TX_TYPE_RE.test(typeText)) return true;
+      const binding = cur.getParameters().find((p) => p.getName() === recvText);
+      if (binding) {
+        // The INNERMOST binding of the name decides. An outer parameter with the
+        // same name is a different value, so climbing past this one would let
+        // an outer `tx: TransactionClient` vouch for an inner callback's
+        // unrelated `tx` (#874 code review, S2-F2).
+        const isDeclaration =
+          cur.getKind() === SyntaxKind.FunctionDeclaration ||
+          cur.getKind() === SyntaxKind.MethodDeclaration;
+        if (isDeclaration) {
+          // A declaration is called by someone else's code path: a parameter
+          // typed as a transaction client is the caller's responsibility.
+          return TX_TYPE_RE.test(binding.getTypeNode()?.getText() ?? "");
         }
-      }
-      const params = cur.getParameters().map((p) => p.getName());
-      if (params.includes(recvText)) {
+        // A function VALUE (arrow or function expression) never takes the
+        // annotation shortcut, however it is spelled or reached — wrapped,
+        // cast, hoisted into a const, invoked immediately, or passed to `new`.
+        // It is accepted only when passed straight to a call that establishes
+        // a context (#874 code review, S-F1 / S2-F1).
         const call = cur.getParent();
-        if (call && call.getKind() === SyntaxKind.CallExpression) {
+        if (call && call.getKind() === SyntaxKind.CallExpression && call.getArguments().includes(cur)) {
           const expr = call.getExpression();
           const name =
             expr.getKind() === SyntaxKind.PropertyAccessExpression
@@ -505,18 +490,14 @@ function hasRlsContext(node, recvText, seen = new Set()) {
               : expr.getText();
           if (CONTEXT_HELPERS.has(name)) return true;
           // Bare $transaction: accept only if the callback actually sets the
-          // GUC on THIS binding, before this statement.
+          // GUC on THIS binding, before this statement. "unresolved" refuses
+          // rather than accepts: the failure mode is "someone annotates this",
+          // not "a defect ships".
           if (name === TX_OPENING) {
-            const verdict = gucEstablishedOn(cur, recvText, node);
-            if (verdict === "established") return true;
-            if (verdict === "unresolved") {
-              // Cannot decide: refuse rather than accept. Surfaced at the call
-              // site as an UNRESOLVED violation so the failure mode is "someone
-              // annotates this" rather than "a defect ships".
-              return false;
-            }
+            return gucEstablishedOn(cur, recvText, node) === "established";
           }
         }
+        return false;
       }
     }
     cur = cur.getParent();

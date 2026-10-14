@@ -1,6 +1,6 @@
 # Code Review: retention-gc-bypass-assert
 Date: 2026-10-14
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 Initial review of `c0cd49ebd`. Three fresh experts reviewed it. The functionality and security experts read the code and ran unit tests and gates. The testing expert also ran 13 mutations on a scratch copy, and all of them went red.
@@ -40,8 +40,24 @@ The user asked for this to be fixed here rather than deferred.
   - an annotated callback that only threads its tx into a typed declaration passes.
 - **Red-proof:** the two FAIL cases went red against the pre-change gate on a scratch copy.
 
+## Round 2
+
+| ID | Expert | Severity | Finding | Resolution |
+|----|--------|----------|---------|------------|
+| R2-T1 / S2-F1 | Test, Sec | Major | The callback rule matched only a callback that is a direct argument of a call. A parenthesised, cast, hoisted, immediately invoked, or `new`-passed callback still took the annotation shortcut. | The mechanism changed, rather than adding spellings (`81ebb7003` first unwrapped spellings; then this): the shortcut applies only to function and method declarations. A function value is accepted only when passed straight to a context helper or to a GUC-setting `$transaction`. |
+| S2-F2 | Sec | Major (pre-existing) | The walk climbed past the innermost binding of the name, so an outer same-named typed parameter vouched for an inner callback. | The innermost binding decides; the walk stops there. |
+
+**Verification:**
+- The real repo still passes the gate (32 files).
+- The new FAIL fixtures (hoisted const, IIFE, shadowed name) go red against the previous gate. The earlier spelling fixtures (parenthesised, as, satisfies, new) stay red.
+- The allow fixtures (a GUC-setting `$transaction`; a callback threading into a typed declaration) stay green.
+
+R43: every change is a tightening. No shape that failed before passes now.
+
+The round-2 test review also confirmed T-1 and T-2, the faithful `sweepTrashTenant` move, and that CI's `ci-integration` (which triggers on `src/workers/**` and `scripts/**`) covers the trash path. No local re-run is needed.
+
 ## Termination
-All findings are Minor and resolved, S-F1 included. The round's fixes are comments, an error code, and test-only checks, and none touches a security predicate. Tightening-only skip: no round 2.
+Round 1: all Minor, resolved (S-F1 included, at the user's request). Round 2: two Majors in the gate, both resolved by tightening the mechanism. The round-2 fixes are gate-only tightenings with red-proved fixtures. Tightening-only skip: no round 3.
 
 ## Recurring Issue Check
 - **Functionality:** R29 F1/F2. Others OK or n/a.
