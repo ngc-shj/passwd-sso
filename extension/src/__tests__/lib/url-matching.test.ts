@@ -35,14 +35,14 @@ describe("parseHttpOrigin", () => {
     expect(parseHttpOrigin(value)).toBe(value);
   });
 
-  it.each([
+  it.each<[unknown, string]>([
     ["https://example.com/", "trailing slash is not a bare origin"],
     ["https://example.com/login", "a path means it is a full URL, not an origin"],
     ["ftp://x", "non-http(s) scheme"],
     ["", "empty string"],
     [123, "non-string"],
     ["null", "the literal string null is not an origin"],
-  ] as const)("refuses %s (%s)", (value) => {
+  ])("refuses %s (%s)", (value) => {
     expect(parseHttpOrigin(value)).toBeNull();
   });
 });

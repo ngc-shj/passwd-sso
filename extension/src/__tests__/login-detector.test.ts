@@ -5,10 +5,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock chrome API
 const messageListeners: Array<(message: unknown) => void> = [];
+// Typed as the (message, callback) form the detector calls, not chrome's
+// overload set, so tests can drive the response callback.
+const mockSendMessage = vi.fn<(message: unknown, callback?: (resp: unknown) => void) => void>();
 vi.stubGlobal("chrome", {
   runtime: {
     id: "test-id",
-    sendMessage: vi.fn(),
+    sendMessage: mockSendMessage,
     lastError: null,
     onMessage: {
       addListener: vi.fn((fn: (message: unknown) => void) => {
@@ -57,7 +60,7 @@ function createForm(opts?: {
     type: string;
     name?: string;
     value?: string;
-    autocomplete?: string;
+    autocomplete?: AutoFill;
   }>;
 }): HTMLFormElement {
   const form = document.createElement("form");
@@ -313,7 +316,6 @@ describe("login-detector-lib", () => {
   });
 
   describe("initLoginDetector", () => {
-    const mockSendMessage = vi.mocked(chrome.runtime.sendMessage);
     const mockShowSaveBanner = vi.mocked(showSaveBanner);
 
     // Root-cause fix: mockSendMessage.mockImplementation(...) is set by several

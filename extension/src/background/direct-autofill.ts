@@ -17,6 +17,9 @@
 // from lib/cc-patterns.ts, so only the matching code is duplicated; a parity test
 // pins the two implementations to the same targets. Without the pattern args
 // (older callers) no exclusion runs.
+//
+// Its field-visibility rule mirrors content isFieldVisible (field-query-lib.ts)
+// the same way, pinned by the same parity tests.
 
 export async function directAutofill(
   usernameArg: string,
@@ -40,12 +43,178 @@ export async function directAutofill(
   const PASSWORD_TYPES = ["password"];
   const isUsableInput = (input: HTMLInputElement) =>
     !input.disabled && !input.readOnly;
-  // Same rule as the content side's isElementVisible: hidden, or near-transparent.
-  const isVisible = (el: HTMLElement) => {
+  const resolveOpacity = (value: string) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 1;
+  };
+  // Mirror of content isNotSelfHidden: the element's own style only. For the
+  // card-form exclusion, where a stricter "hidden" would un-exclude a CVV.
+  const isNotSelfHidden = (el: HTMLElement) => {
     const style = getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden") return false;
-    const opacity = Number.parseFloat(style.opacity);
-    return !(Number.isFinite(opacity) && opacity <= 0.05);
+    return resolveOpacity(style.opacity) > 0.05;
+  };
+  // Mirror of content isFieldVisible (field-query-lib.ts) without its options:
+  // this fill writes no selects and no OTP. A pure AND; a zero rect denies.
+  const MIN_VISIBLE_PX = 4;
+  // The flat (rendered) tree: a slotted element's slot first.
+  const parentOf = (el: Element): Element | null => {
+    if (el.assignedSlot) return el.assignedSlot;
+    if (el.parentElement) return el.parentElement;
+    const root = el.getRootNode();
+    return root instanceof ShadowRoot ? root.host : null;
+  };
+  const isClippedAway = (style: CSSStyleDeclaration) => {
+    const clip = style.getPropertyValue("clip").trim();
+    if (clip && clip !== "auto" && (style.position === "absolute" || style.position === "fixed")) {
+      return true;
+    }
+    const clipPath = style.getPropertyValue("clip-path").trim().toLowerCase();
+    // Mirror of content clipPathPaintsNothing.
+    if (/^circle\(0(px|%)?[\s)]/.test(clipPath)) return true;
+    const inset = /^inset\(([^)]*)\)/.exec(clipPath);
+    if (!inset) return false;
+    const parts = inset[1].split(/\s+round\s+/)[0].trim().split(/\s+/);
+    const pct = (token: string | undefined) =>
+      token?.endsWith("%") ? Number.parseFloat(token) || 0 : 0;
+    const [top, right = top, bottom = top, left = right] = parts;
+    return pct(top) + pct(bottom) >= 100 || pct(left) + pct(right) >= 100;
+  };
+  // 0 none, 1 strict clip, 2 scroll window
+  const axisClip = (style: CSSStyleDeclaration, axis: "x" | "y") => {
+    if (
+      /\b(paint|strict|content)\b/.test(style.getPropertyValue("contain")) ||
+      style.getPropertyValue("content-visibility").trim() === "auto"
+    ) {
+      return 1;
+    }
+    const overflow = style.getPropertyValue(axis === "x" ? "overflow-x" : "overflow-y").trim();
+    if (overflow === "hidden" || overflow === "clip") return 1;
+    if (overflow === "scroll" || overflow === "auto") return 2;
+    return 0;
+  };
+  // Mirror of content containsFixed: fail-safe, any listed property off its
+  // initial value counts as a containing block.
+  const containsFixed = (style: CSSStyleDeclaration) => {
+    const offInitial = (property: string, ...initial: string[]) => {
+      const value = style.getPropertyValue(property).trim();
+      return value !== "" && !initial.includes(value);
+    };
+    return (
+      offInitial("transform", "none") ||
+      offInitial("translate", "none") ||
+      offInitial("rotate", "none") ||
+      offInitial("scale", "none") ||
+      offInitial("perspective", "none") ||
+      offInitial("filter", "none") ||
+      offInitial("backdrop-filter", "none") ||
+      offInitial("offset-path", "none") ||
+      offInitial("transform-style", "flat") ||
+      offInitial("contain", "none") ||
+      offInitial("content-visibility", "visible") ||
+      offInitial("container-type", "normal") ||
+      offInitial("will-change", "auto")
+    );
+  };
+  // 0 in flow, 1 absolute, 2 fixed
+  const positionMode = (style: CSSStyleDeclaration) =>
+    style.position === "fixed" ? 2 : style.position === "absolute" ? 1 : 0;
+  // Mirror of content meetsScrollBand: the band the engine's offset sign
+  // implies (forward, reversed, or their union at rest), from its extent.
+  const meetsScrollBand = (
+    start: number,
+    end: number,
+    windowStart: number,
+    client: number,
+    offset: number,
+    extent: number,
+  ) => {
+    if (!Number.isFinite(offset) || !Number.isFinite(extent)) return false;
+    const origin = windowStart - offset;
+    const slack = Math.max(0, extent - client);
+    const bandStart = offset > 0 ? origin : origin - slack;
+    const bandEnd = offset < 0 ? origin + client : origin + Math.max(extent, client);
+    return end > bandStart && start < bandEnd;
+  };
+  const hasVisibleBox = (el: Element) => {
+    const rect = el.getBoundingClientRect();
+    let left = rect.left;
+    let right = rect.right;
+    let top = rect.top;
+    let bottom = rect.bottom;
+    if (right - left < MIN_VISIBLE_PX || bottom - top < MIN_VISIBLE_PX) return false;
+    let mode = positionMode(getComputedStyle(el));
+    for (let node = parentOf(el); node; node = parentOf(node)) {
+      if (node === document.body || node === document.documentElement) break;
+      const style = getComputedStyle(node);
+      if (style.display === "contents") continue;
+      const endsEscape =
+        mode === 2
+          ? containsFixed(style)
+          : mode === 1
+            ? style.position !== "static" || containsFixed(style)
+            : true;
+      if (!endsEscape) continue;
+      mode = positionMode(style);
+      if (style.display === "inline") continue;
+      const box = node.getBoundingClientRect();
+      const x = axisClip(style, "x");
+      if (x === 1) {
+        left = Math.max(left, box.left);
+        right = Math.min(right, box.right);
+      } else if (x === 2) {
+        const client = node.clientWidth;
+        if (client < MIN_VISIBLE_PX) return false;
+        const windowLeft = box.left + node.clientLeft;
+        if (!meetsScrollBand(left, right, windowLeft, client, node.scrollLeft, node.scrollWidth)) {
+          return false;
+        }
+        const span = Math.min(right - left, client);
+        left = windowLeft;
+        right = left + span;
+      }
+      const y = axisClip(style, "y");
+      if (y === 1) {
+        top = Math.max(top, box.top);
+        bottom = Math.min(bottom, box.bottom);
+      } else if (y === 2) {
+        const client = node.clientHeight;
+        if (client < MIN_VISIBLE_PX) return false;
+        const windowTop = box.top + node.clientTop;
+        if (!meetsScrollBand(top, bottom, windowTop, client, node.scrollTop, node.scrollHeight)) {
+          return false;
+        }
+        const span = Math.min(bottom - top, client);
+        top = windowTop;
+        bottom = top + span;
+      }
+      if (right - left < MIN_VISIBLE_PX || bottom - top < MIN_VISIBLE_PX) return false;
+    }
+    if (mode === 2) {
+      return right > 0 && bottom > 0 && left < window.innerWidth && top < window.innerHeight;
+    }
+    return right + window.scrollX > 0 && bottom + window.scrollY > 0;
+  };
+  const isVisible = (el: HTMLElement) => {
+    if (getComputedStyle(el).visibility !== "visible") return false;
+    let opacity = 1;
+    for (let node: Element | null = el; node; node = parentOf(node)) {
+      const style = getComputedStyle(node);
+      if (style.display === "none") return false;
+      if (style.getPropertyValue("content-visibility").trim() === "hidden") return false;
+      opacity *= resolveOpacity(style.opacity);
+      if (isClippedAway(style)) return false;
+    }
+    if (opacity <= 0.05) return false;
+    if (!hasVisibleBox(el)) return false;
+    const checkVisibility = (el as { checkVisibility?: (o: object) => boolean }).checkVisibility;
+    if (
+      typeof checkVisibility === "function" &&
+      checkVisibility.call(el, { opacityProperty: true, visibilityProperty: true }) === false
+    ) {
+      return false;
+    }
+    return true;
   };
 
   const setInputValue = (input: HTMLInputElement, value: string) => {
@@ -91,11 +260,12 @@ export async function directAutofill(
     if (parentLabel?.textContent) parts.push(parentLabel.textContent);
     return parts.join(" ").toLowerCase();
   };
-  const isCardFillable = (el: Field) =>
-    isVisible(el) &&
-    (el instanceof HTMLInputElement
+  const isCardUsable = (el: Field) =>
+    el instanceof HTMLInputElement
       ? (ccPatternsArg?.fillableTypes ?? []).includes(el.type) && !el.disabled && !el.readOnly
-      : !el.disabled);
+      : !el.disabled;
+  // Mirror of content isCreditCardCandidate: the own-style rule.
+  const isCardFillable = (el: Field) => isNotSelfHidden(el) && isCardUsable(el);
   const hasCcToken = (el: Field) => autocompleteTokens(el).some((t) => t.startsWith("cc-"));
   const allFields: Field[] = [
     ...inputs,
@@ -103,14 +273,16 @@ export async function directAutofill(
   ];
   const cardForm = new Set<Field>(ccPatternsArg ? allFields.filter(hasCcToken) : []);
   if (ccPatternsArg) {
-    const candidates = allFields.filter(isCardFillable);
-    const cardNumber =
-      candidates.find(
-        (el) => (el.getAttribute("autocomplete") ?? "").toLowerCase().trim() === "cc-number",
-      ) ??
-      candidates.find((el) => numberPatterns.some((re) => re.test(hintOf(el)))) ??
-      null;
-    if (cardNumber) {
+    // Mirror of ccCardBlockFields: the union of the blocks around every
+    // card-number candidate under the own-style rule.
+    const anchors = allFields.filter(
+      (el) =>
+        el instanceof HTMLInputElement &&
+        isCardFillable(el) &&
+        ((el.getAttribute("autocomplete") ?? "").toLowerCase().trim() === "cc-number" ||
+          numberPatterns.some((re) => re.test(hintOf(el)))),
+    );
+    for (const cardNumber of anchors) {
       const neighbours = allFields.filter(
         (el) =>
           el !== cardNumber &&
@@ -167,12 +339,14 @@ export async function directAutofill(
     hintedInput instanceof HTMLInputElement &&
     isUsableInput(hintedInput) &&
     USERNAME_TYPES.includes(hintedInput.type) &&
-    isLoginEligible(hintedInput)
+    isLoginEligible(hintedInput) &&
+    isVisible(hintedInput)
       ? hintedInput
       : active instanceof HTMLInputElement &&
           isUsableInput(active) &&
           USERNAME_TYPES.includes(active.type) &&
-          isLoginEligible(active)
+          isLoginEligible(active) &&
+          isVisible(active)
         ? active
         : null;
 
@@ -192,9 +366,12 @@ export async function directAutofill(
     return pwInputs.length ? pwInputs[pwInputs.length - 1] : null;
   };
 
-  // A hinted field of the card form does not scope the search, as on the content side.
+  // A hinted field of the card form, or a hidden one, does not scope the search,
+  // as on the content side.
   const hintedScope =
-    hintedInput instanceof HTMLInputElement && isLoginEligible(hintedInput) ? hintedInput : null;
+    hintedInput instanceof HTMLInputElement && isLoginEligible(hintedInput) && isVisible(hintedInput)
+      ? hintedInput
+      : null;
   const scopeForm = (usernameInput ?? hintedScope)?.form ?? null;
   const scopedInputs = scopeForm
     ? (Array.from(scopeForm.querySelectorAll("input")) as HTMLInputElement[])
@@ -210,7 +387,8 @@ export async function directAutofill(
       if (
         isUsableInput(c) &&
         USERNAME_TYPES.includes(c.type) &&
-        isLoginEligible(c)
+        isLoginEligible(c) &&
+        isVisible(c)
       ) {
         fallbackUsername = c;
         break;

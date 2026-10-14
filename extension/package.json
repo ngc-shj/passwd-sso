@@ -8,6 +8,7 @@
     "build": "tsc && vite build && node scripts/check-dist-hygiene.mjs",
     "preview": "vite preview",
     "test": "vitest run",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -30,6 +31,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@types/chrome": "^0.3.4",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",

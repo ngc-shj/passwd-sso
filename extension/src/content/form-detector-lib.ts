@@ -19,6 +19,7 @@ import { isFillActive } from "./fill-sequence-lib";
 import { labelledByText } from "./labelled-by";
 import {
   isUsableInput,
+  isDropdownFieldVisible,
   resolveOpacity,
 } from "./field-query-lib";
 import { ccFormFields } from "./cc-field-detection-lib";
@@ -36,18 +37,6 @@ function isContextValid(): boolean {
 // ── Form field detection ────────────────────────────────────
 
 const trackedInputs = new WeakSet<HTMLInputElement>();
-
-export function isElementVisuallySafe(element: HTMLElement): boolean {
-  const style = getComputedStyle(element);
-  if (style.display === "none" || style.visibility === "hidden") return false;
-  // Block only near-invisible elements to reduce false positives on heavily styled forms.
-  if (resolveOpacity(style.opacity) <= 0.05) return false;
-  const clipPath = (style.clipPath || "").toLowerCase();
-  if (clipPath.includes("inset(100%") || clipPath.includes("circle(0")) return false;
-  const transform = (style.transform || "").toLowerCase();
-  if (transform.includes("scale(0")) return false;
-  return true;
-}
 
 export function isPageVisuallySafe(): boolean {
   const htmlStyle = getComputedStyle(document.documentElement);
@@ -448,7 +437,7 @@ export function initFormDetector(): FormDetectorCleanup {
   // an unrelated field never costs a card scan. A field of the card form (a
   // masked CVV is a password input) gets the CC dropdown, not this one.
   const shouldTriggerForInput = (input: HTMLInputElement, ccForm: CcFormSource): boolean => {
-    if (!isElementVisuallySafe(input)) return false;
+    if (!isDropdownFieldVisible(input)) return false;
     const wouldTrigger =
       input.type === "password" ||
       isLikelyUsernameInput(input) ||
@@ -538,7 +527,7 @@ export function initFormDetector(): FormDetectorCleanup {
     }
     if (
       !isPageVisuallySafe() ||
-      !isElementVisuallySafe(input) ||
+      !isDropdownFieldVisible(input) ||
       !isInputHitTestSafe(input) ||
       hasVisiblePopoverOverlayNear(input)
     ) {

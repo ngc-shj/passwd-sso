@@ -339,6 +339,37 @@ describe("performIdentityAutofill", () => {
     expect((document.querySelector('[autocomplete="name"]') as HTMLInputElement).value).toBe("Jane Doe");
   });
 
+  it("fills a combined-only name field from fullName for an entry that also has structured names", async () => {
+    setupForm(`
+      <input autocomplete="name" />
+      <input autocomplete="email" />
+    `);
+
+    await performIdentityAutofill(
+      payload({ fullName: "Jane Doe", givenName: "Jane", familyName: "Doe", email: "jane@example.com" }),
+      NO_WAIT,
+    );
+
+    expect((document.querySelector('[autocomplete="name"]') as HTMLInputElement).value).toBe("Jane Doe");
+  });
+
+  it("keeps the structured names, not fullName, when the page has split name fields too", async () => {
+    setupForm(`
+      <input autocomplete="name" />
+      <input autocomplete="given-name" />
+      <input autocomplete="family-name" />
+    `);
+
+    await performIdentityAutofill(
+      payload({ fullName: "Jane Doe", givenName: "Jane", familyName: "Doe" }),
+      NO_WAIT,
+    );
+
+    expect((document.querySelector('[autocomplete="given-name"]') as HTMLInputElement).value).toBe("Jane");
+    expect((document.querySelector('[autocomplete="family-name"]') as HTMLInputElement).value).toBe("Doe");
+    expect((document.querySelector('[autocomplete="name"]') as HTMLInputElement).value).toBe("");
+  });
+
   // Regression for the reported bug: a 2FA-method radio whose id="Email" matches
   // EMAIL_RE sits on a form with real identity fields. The email value must land
   // in the real text field, and the radio's value must be untouched. Exercises

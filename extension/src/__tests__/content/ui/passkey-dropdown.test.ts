@@ -43,7 +43,7 @@ function captureListeners(fn: () => void): Registered[] {
   const targets = [EventTarget.prototype];
   const originals = targets.map((t) => t.addEventListener);
   targets.forEach((t) => {
-    t.addEventListener = function (type: string, listener: EventListenerOrEventListenerObject | null, opts?: unknown) {
+    t.addEventListener = function (this: EventTarget, type: string, listener: EventListenerOrEventListenerObject | null, opts?: unknown) {
       if (typeof listener === "function") registered.push({ target: this, type, listener: listener as EventListener });
       return (originals[0] as typeof t.addEventListener).call(this, type, listener as EventListener, opts as boolean);
     } as typeof t.addEventListener;

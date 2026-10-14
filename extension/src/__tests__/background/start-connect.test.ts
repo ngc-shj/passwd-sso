@@ -7,13 +7,13 @@
  *   4. Network error mid-flow → no setToken; errorCode = GENERIC_FAILURE.
  *   5. DPoP signer throws → no setToken; errorCode = GENERIC_FAILURE.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 vi.mock("../../lib/storage", () => ({
   getSettings: vi.fn().mockResolvedValue({ serverUrl: "https://example.com" }),
 }));
 
-import { startConnect } from "../../background/token-handler";
+import { startConnect, type StartConnectCallbacks } from "../../background/token-handler";
 import { DpopSignError } from "../../background/dpop-fetch";
 
 const SERVER = "https://example.com";
@@ -29,12 +29,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("startConnect (C6)", () => {
-  let setToken: ReturnType<typeof vi.fn>;
-  let signDpopProof: ReturnType<typeof vi.fn>;
+  let setToken: Mock<StartConnectCallbacks["setToken"]>;
+  let signDpopProof: Mock<NonNullable<StartConnectCallbacks["signDpopProofImpl"]>>;
 
   beforeEach(() => {
-    setToken = vi.fn();
-    signDpopProof = vi.fn().mockResolvedValue("dpop.proof.jws");
+    setToken = vi.fn<StartConnectCallbacks["setToken"]>();
+    signDpopProof = vi
+      .fn<NonNullable<StartConnectCallbacks["signDpopProofImpl"]>>()
+      .mockResolvedValue("dpop.proof.jws");
   });
 
   it("happy path: bridge-code + exchange both 2xx → setToken called once", async () => {
@@ -171,7 +173,7 @@ describe("startConnect (C6)", () => {
 
   it("DPoP signer throws (e.g., IDB unavailable) → no setToken; errorCode = GENERIC_FAILURE", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
-    signDpopProof.mockRejectedValueOnce(new DpopSignError("IDB unavailable"));
+    signDpopProof.mockRejectedValueOnce(new DpopSignError("DPoP_SIGN_FAILED"));
 
     const result = await startConnect({ setToken, fetchImpl, signDpopProofImpl: signDpopProof });
 

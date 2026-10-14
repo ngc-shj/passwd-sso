@@ -6,7 +6,6 @@ import {
   findPasswordInputs,
   findUsernameInput,
   isLikelyUsernameInput,
-  isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
   hasVisiblePopoverOverlayNear,
@@ -51,14 +50,6 @@ describe("isUsableInput", () => {
 });
 
 describe("clickjacking hardening guards", () => {
-  it("treats opacity:0 input as visually unsafe", () => {
-    const input = document.createElement("input");
-    input.type = "password";
-    input.style.opacity = "0";
-    document.body.appendChild(input);
-    expect(isElementVisuallySafe(input)).toBe(false);
-  });
-
   it("treats page as unsafe when body opacity is reduced", () => {
     const original = document.body.style.opacity;
     document.body.style.opacity = "0";
@@ -98,12 +89,15 @@ describe("clickjacking hardening guards", () => {
       writable: true,
       value: () => overlay,
     });
-    expect(isInputHitTestSafe(input)).toBe(false);
-    Object.defineProperty(document, "elementFromPoint", {
-      configurable: true,
-      writable: true,
-      value: original,
-    });
+    try {
+      expect(isInputHitTestSafe(input)).toBe(false);
+    } finally {
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        writable: true,
+        value: original,
+      });
+    }
   });
 
   it("detects visible popover overlapping input center", () => {

@@ -814,7 +814,13 @@ describe("background message flow", () => {
   // ── #881 C2 acceptance 7-9: setCachedEntries rebuilds on a menu-view change ──
   describe("context menu rebuild on cache change (#881 C2)", () => {
     const CHANGED_OVERVIEW_CIPHERTEXT = "22";
-    const BASE_RAW_ENTRY = {
+    type RawEntry = {
+      id: string;
+      encryptedOverview: { ciphertext: string; iv: string; authTag: string };
+      entryType: (typeof EXT_ENTRY_TYPE)[keyof typeof EXT_ENTRY_TYPE];
+      aadVersion: number;
+    };
+    const BASE_RAW_ENTRY: RawEntry = {
       id: "pw-1",
       encryptedOverview: { ciphertext: CHANGED_OVERVIEW_CIPHERTEXT, iv: "22", authTag: "33" },
       entryType: EXT_ENTRY_TYPE.LOGIN,
@@ -822,11 +828,11 @@ describe("background message flow", () => {
     };
     const BASE_OVERVIEW = { title: "Example", username: "alice", urlHost: "example.com" };
 
-    function stubPasswordsFetch(rawEntry: typeof BASE_RAW_ENTRY): void {
+    function stubPasswordsFetch(rawEntry: RawEntry): void {
       stubPasswordsFetchMany([rawEntry]);
     }
 
-    function stubPasswordsFetchMany(rawEntries: (typeof BASE_RAW_ENTRY)[]): void {
+    function stubPasswordsFetchMany(rawEntries: RawEntry[]): void {
       vi.stubGlobal(
         "fetch",
         vi.fn(async (url: string) => {
@@ -3379,7 +3385,7 @@ describe("session hydration", () => {
       tenantAutoLockMinutes: 1440,
       requireVaultTimeoutLogout: false,
     });
-    const fetchMock = vi.fn(async () => ({ ok: false, json: async () => ({}) }));
+    const fetchMock = vi.fn(async (_url: string) => ({ ok: false, json: async () => ({}) }));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadBackground();

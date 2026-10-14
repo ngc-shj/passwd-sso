@@ -413,11 +413,11 @@ describe("passkey-provider", () => {
       expect(typeof result.response?.clientDataJSON).toBe("string");
       expect(result.response?.credentialId).toBe(TEST_CRED_ID);
       // Verify counter-update PUT was issued
-      const putCalls = (deps.swFetch as ReturnType<typeof vi.fn>).mock.calls
-        .filter(([, init]: [string, RequestInit?]) => init?.method === "PUT");
+      const putCalls = vi.mocked(deps.swFetch).mock.calls
+        .filter(([, init]) => init?.method === "PUT");
       expect(putCalls).toHaveLength(1);
       // Verify the PUT body contains the incremented counter
-      const putBody = JSON.parse(putCalls[0][1].body as string) as { encryptedBlob: { ciphertext: string; iv: string; authTag: string }; aadVersion: number };
+      const putBody = JSON.parse(putCalls[0][1]?.body as string) as { encryptedBlob: { ciphertext: string; iv: string; authTag: string }; aadVersion: number };
       const { decryptData } = await import("../lib/crypto");
       const decryptedBlobStr = await decryptData(putBody.encryptedBlob, testKey, aad);
       const decryptedBlob = JSON.parse(decryptedBlobStr) as { passkeySignCount: number };
@@ -467,9 +467,9 @@ describe("passkey-provider", () => {
         "https://example.com/auth",
       );
       expect(result.ok).toBe(true);
-      const putCalls = (deps.swFetch as ReturnType<typeof vi.fn>).mock.calls
-        .filter(([, init]: [string, RequestInit?]) => init?.method === "PUT");
-      const putBody = JSON.parse(putCalls[0][1].body as string) as { keyVersion: number };
+      const putCalls = vi.mocked(deps.swFetch).mock.calls
+        .filter(([, init]) => init?.method === "PUT");
+      const putBody = JSON.parse(putCalls[0][1]?.body as string) as { keyVersion: number };
       expect(putBody.keyVersion).toBe(3);
     });
 
@@ -589,7 +589,7 @@ describe("passkey-provider", () => {
       );
       expect(result).toEqual({ ok: false, error: "INVALID_ENTRY" });
       // No PUT should be issued
-      expect((deps.swFetch as ReturnType<typeof vi.fn>).mock.calls.filter(([, init]: [string, RequestInit?]) => init?.method === "PUT")).toHaveLength(0);
+      expect(vi.mocked(deps.swFetch).mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
     });
 
     it("returns INVALID_ENTRY when server responds without aadVersion (PASSKEY entry)", async () => {

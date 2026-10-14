@@ -15,11 +15,15 @@ import {
   CC_EXPIRY_YEAR_JA_RE,
   CC_CVV_JA_RE,
   CARD_NEIGHBOUR_PATTERNS,
+  CARD_NUMBER_PATTERNS,
   CARD_FILLABLE_INPUT_TYPES,
 } from "../lib/cc-patterns";
 import {
   isUsableFieldOfType,
-  isElementVisible,
+  isFieldVisible,
+  isNotSelfHidden,
+  fillAdmission,
+  type FieldAdmit,
   getHintString,
   findFieldByAutocomplete,
   findFieldByRegex,
@@ -48,9 +52,23 @@ const FILLABLE_INPUT_TYPES: ReadonlySet<string> = new Set(CARD_FILLABLE_INPUT_TY
 const isUsableField = (el: HTMLInputElement | HTMLSelectElement): boolean =>
   isUsableFieldOfType(el, FILLABLE_INPUT_TYPES);
 
-/** Visible + usable + allowlisted: the detector's own admission rule for a field. */
+/** Visible + usable + allowlisted: a card field the fill may write. */
 export const isCreditCardFillable = (el: HTMLInputElement | HTMLSelectElement): boolean =>
-  isElementVisible(el) && isUsableField(el);
+  isFieldVisible(el) && isUsableField(el);
+
+/**
+ * The expiry roles' write rule: a select may be geometry-hidden (Select2 /
+ * selectWoo keep the native select in a clipped 1px box and mirror it).
+ */
+export const isCreditCardExpiryFillable = (el: HTMLInputElement | HTMLSelectElement): boolean =>
+  isFieldVisible(el, { geometryExempt: el instanceof HTMLSelectElement }) && isUsableField(el);
+
+/**
+ * Today's own-style rule, for the callers where "hidden" removes a protection:
+ * the card-form exclusion and the fill-root boundary.
+ */
+export const isCreditCardCandidate = (el: HTMLInputElement | HTMLSelectElement): boolean =>
+  isNotSelfHidden(el) && isUsableField(el);
 
 // ── Autocomplete attributes (standard) ──
 
@@ -114,15 +132,22 @@ function findConfNumCvvInForm(
 
 // ── Main detection function ──
 
-export function detectCreditCardFields(root: ParentNode): CreditCardFormFields | null {
+/**
+ * `admit` decides which fields detection sees. The default is the fill's own
+ * rule, with every select geometry-exempt because roles are not known yet (the
+ * steps' `accepts` narrow the exemption to the expiry roles). The card-form
+ * exclusion passes the own-style rule instead.
+ */
+export function detectCreditCardFields(
+  root: ParentNode,
+  admit?: FieldAdmit,
+): CreditCardFormFields | null {
   const inputs = Array.from(root.querySelectorAll<HTMLInputElement>("input"));
   const selects = Array.from(root.querySelectorAll<HTMLSelectElement>("select"));
   const allFields: (HTMLInputElement | HTMLSelectElement)[] = [...inputs, ...selects];
 
-  // Only consider visible fields
-  const visibleFields = allFields.filter(
-    (f) => isElementVisible(f) && isUsableField(f),
-  );
+  const isAdmitted = admit ?? fillAdmission();
+  const visibleFields = allFields.filter((f) => isAdmitted(f) && isUsableField(f));
 
   if (visibleFields.length === 0) return null;
 
@@ -493,9 +518,9 @@ function pickExpiry(
 }
 
 /** Every field detectCreditCardFields claims, as a membership set. */
-export function ccClaimedFields(root: ParentNode): Set<HTMLElement> {
+export function ccClaimedFields(root: ParentNode, admit?: FieldAdmit): Set<HTMLElement> {
   const claimed = new Set<HTMLElement>();
-  const fields = detectCreditCardFields(root);
+  const fields = detectCreditCardFields(root, admit);
   if (!fields) return claimed;
   for (const el of [
     fields.cardholderName,
@@ -521,9 +546,9 @@ function hasCcAutocompleteToken(el: FormField): boolean {
     .some((token) => token.startsWith("cc-"));
 }
 
-/** A visible, fillable field whose hints or autocomplete say "card", other than the number. */
+/** A not-self-hidden, fillable field whose hints or autocomplete say "card", other than the number. */
 function isCardNeighbour(el: FormField): boolean {
-  if (!isCreditCardFillable(el)) return false;
+  if (!isCreditCardCandidate(el)) return false;
   if (hasCcAutocompleteToken(el)) return true;
   const hint = getHintString(el);
   return CARD_NEIGHBOUR_PATTERNS.some((re) => re.test(hint));
@@ -586,16 +611,32 @@ export function ccFormFields(root: ParentNode): Set<HTMLElement> {
  */
 export function ccCardBlockFields(root: ParentNode): Set<HTMLElement> {
   const members = new Set<HTMLElement>();
-  const cardNumber = detectCreditCardFields(root)?.cardNumber ?? null;
-  if (!cardNumber) return members;
-  const neighbours = formFieldsIn(root).filter((el) => el !== cardNumber && isCardNeighbour(el));
-  const inBlock = cardBlock(cardNumber, neighbours);
-  if (!inBlock) return members;
-  members.add(cardNumber);
-  for (const el of neighbours) {
-    if (inBlock(el)) members.add(el);
+  // The union of the blocks around every card-number candidate under the
+  // own-style rule — not only the first one detection would pick — so a card
+  // block hidden by an ancestor stays excluded, and so does every visible card
+  // form after the first, or after a hidden one.
+  const fields = formFieldsIn(root);
+  for (const cardNumber of cardNumberCandidates(fields)) {
+    const neighbours = fields.filter((el) => el !== cardNumber && isCardNeighbour(el));
+    const inBlock = cardBlock(cardNumber, neighbours);
+    if (!inBlock) continue;
+    members.add(cardNumber);
+    for (const el of neighbours) {
+      if (inBlock(el)) members.add(el);
+    }
   }
   return members;
+}
+
+/** Every not-self-hidden, usable input that detection could take as a card number. */
+function cardNumberCandidates(fields: FormField[]): HTMLInputElement[] {
+  return fields.filter(
+    (el): el is HTMLInputElement =>
+      el instanceof HTMLInputElement &&
+      isCreditCardCandidate(el) &&
+      ((el.getAttribute("autocomplete") ?? "").toLowerCase().trim() === AC_CC_NUMBER ||
+        CARD_NUMBER_PATTERNS.some((re) => re.test(getHintString(el)))),
+  );
 }
 
 function formFieldsIn(root: ParentNode): FormField[] {

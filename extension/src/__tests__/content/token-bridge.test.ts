@@ -47,7 +47,7 @@ describe("token bridge (postMessage) — EXT_CONNECT_REQUEST relay", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.postMessage = originalPostMessage;
-    delete (navigator as Navigator & { userActivation?: unknown }).userActivation;
+    Reflect.deleteProperty(navigator, "userActivation");
   });
 
   function makeEvent(

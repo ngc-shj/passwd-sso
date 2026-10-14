@@ -6,13 +6,12 @@ import type { DecryptedEntry } from "../types/messages";
 import { t } from "../lib/i18n";
 import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } from "../lib/constants";
 import {
-  isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
   hasVisiblePopoverOverlayNear,
   showInlineNotice,
 } from "./form-detector-lib";
-import { isUsableInput } from "./field-query-lib";
+import { isUsableInput, isDropdownFieldVisible, memberAdmission } from "./field-query-lib";
 import { ccClaimedFields } from "./cc-field-detection-lib";
 import {
   showDropdown,
@@ -102,6 +101,8 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
 
   // F2: membership set rebuilt by scan + MutationObserver, not per-focus scan.
   let ccFields = new WeakSet<HTMLElement>();
+  // Fields the last scan rejected as hidden (see fillAdmission).
+  let hiddenAtScan = new WeakSet<Element>();
   // F1: detector-local suppression — never shared with the LOGIN module.
   let autofillSuppressUntil = 0;
   let activeInput: HTMLInputElement | null = null;
@@ -109,8 +110,15 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
   const rescan = () => {
     if (destroyed) return;
     const next = new WeakSet<HTMLElement>();
-    for (const el of ccClaimedFields(document)) next.add(el);
+    const hidden = new WeakSet<Element>();
+    const admit = memberAdmission(hidden);
+    // Each form's own detection too: a page-wide detection claims one field
+    // per role, so a second card form would otherwise get no dropdown.
+    for (const root of [document, ...Array.from(document.forms)]) {
+      for (const el of ccClaimedFields(root, admit)) next.add(el);
+    }
     ccFields = next;
+    hiddenAtScan = hidden;
   };
 
   // Coalesces attribute-only mutation bursts so a reveal made
@@ -127,7 +135,7 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
     }
     if (
       !isPageVisuallySafe() ||
-      !isElementVisuallySafe(input) ||
+      !isDropdownFieldVisible(input) ||
       !isInputHitTestSafe(input) ||
       hasVisiblePopoverOverlayNear(input)
     ) {
@@ -233,6 +241,11 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
       // rescan — before giving up on it.
       handleMutations(observer.takeRecords());
       scheduler.flushForFocus();
+      // A reveal no observed mutation shows (a CSS-only :checked/:target rule,
+      // a transition, an <html> class, a media query): a field the last scan
+      // saw hidden is rendered now, so one scan admits it. A field that was
+      // never hidden costs no scan.
+      if (!ccFields.has(input) && hiddenAtScan.has(input) && isDropdownFieldVisible(input)) rescan();
       if (!ccFields.has(input)) return;
     }
     requestMatches(input);

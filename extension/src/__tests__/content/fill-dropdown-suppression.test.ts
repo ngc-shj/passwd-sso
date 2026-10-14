@@ -19,10 +19,10 @@ vi.mock("../../content/ui/suggestion-dropdown", () => ({
 
 vi.mock("../../lib/i18n", () => ({ t: (key: string) => key }));
 
-// jsdom has no layout: the layout-dependent guards pass, the field predicates stay real.
+// Field visibility runs for real against the global layout stub; the page-level
+// and hit-test guards pass, and the field predicates stay real.
 vi.mock("../../content/form-detector-lib", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../content/form-detector-lib")>()),
-  isElementVisuallySafe: () => true,
   isPageVisuallySafe: () => true,
   isInputHitTestSafe: () => true,
   hasVisiblePopoverOverlayNear: () => false,
