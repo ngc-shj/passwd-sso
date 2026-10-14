@@ -198,10 +198,10 @@ exit 0`);
 }
 
 /** Run the script with an explicit environment allowlist. */
-function run(env = {}, { tocEntries } = {}) {
+function run(env = {}, { tocEntries, timeout = 8000 } = {}) {
   return spawnSync("bash", [SCRIPT], {
     encoding: "utf8",
-    timeout: 8000,
+    timeout,
     cwd: REPO_ROOT,
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
@@ -1212,14 +1212,21 @@ done
 exit 0`);
   };
 
-  it("publishes a VALID archive through the script's own reader invocation", () => {
+  // The delegating cases run the real reader, which on a host without
+  // pg_restore is `docker compose exec` — 0.3-0.5 s idle, but past run()'s
+  // default 8 s under a full parallel pre-pr run. A kill there leaves no
+  // BACKUP_ERR line, so the failure reads as a wrong verdict, not a timeout.
+  // Same budget as the reader.list() calls above.
+  const DELEGATED_RUN_TIMEOUT_MS = 20000;
+
+  it("publishes a VALID archive through the script's own reader invocation", { timeout: 30000 }, () => {
     // This is the case that reds on a regressed invocation. Naming /dev/stdin
     // as pg_restore's file argument makes it seek a non-seekable descriptor and
     // fail on every valid archive — and a truncated-archive case cannot see
     // that, because it fails either way.
     expect(reader, "a real archive reader is required — the delegating stub needs one").not.toBeNull();
     delegatingStub(join(FIXTURES, "valid.pgdump"));
-    const r = run();
+    const r = run({}, { timeout: DELEGATED_RUN_TIMEOUT_MS });
     expect(r.status, r.stderr).toBe(0);
     expect(readLog(), "the real reader must have been reached").toContain("DELEGATED");
     expect(generations()).toHaveLength(1);
@@ -1227,7 +1234,7 @@ exit 0`);
     expect(manifest, "the entry count must come from the real archive").toMatch(/entries=[1-9]/);
   });
 
-  it("routes a truncated archive to VALIDATE_FAILED through the script's own reader", () => {
+  it("routes a truncated archive to VALIDATE_FAILED through the script's own reader", { timeout: 30000 }, () => {
     // The other Group B cases call pg_restore directly, which proves the oracle
     // but not that the script reaches it: reintroducing `--list /dev/stdin`
     // into the script — the footgun that fails on every valid archive — left
@@ -1241,7 +1248,7 @@ exit 0`);
     // landed on the sibling case above and not on this twin.
     expect(reader, "a real archive reader is required — the delegating stub needs one").not.toBeNull();
     delegatingStub(join(FIXTURES, "truncated.pgdump"));
-    const r = run({}, {});
+    const r = run({}, { timeout: DELEGATED_RUN_TIMEOUT_MS });
     expect(err(r)).toBe("VALIDATE_FAILED");
     expect(readLog(), "the real reader must have been reached").toContain("DELEGATED");
     expect(readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"))).toHaveLength(1);
