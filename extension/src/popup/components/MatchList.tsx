@@ -25,7 +25,11 @@ export function MatchList({ tabUrl }: Props) {
   const [filling, setFilling] = useState(false);
   const [query, setQuery] = useState("");
   const [pendingFill, setPendingFill] = useState<DecryptedEntry | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error";
+    autoDismiss?: boolean;
+  } | null>(null);
   const hasTabUrl = Boolean(tabUrl);
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
   // The origin the user sees in this popup. The SW fills a top document only on
@@ -58,10 +62,17 @@ export function MatchList({ tabUrl }: Props) {
     });
   }, []);
 
+  // Keyed on the toast itself, so the timer dies with the popup and a newer
+  // toast is never dismissed by an older one's timer.
+  useEffect(() => {
+    if (!toast?.autoDismiss) return;
+    const timer = setTimeout(() => setToast(null), 2000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
   const copyAndScheduleClear = async (value: string, successMsg: string) => {
     await navigator.clipboard.writeText(value);
-    setToast({ message: successMsg, type: "success" });
-    setTimeout(() => setToast(null), 2000);
+    setToast({ message: successMsg, type: "success", autoDismiss: true });
     // Divergence from the web app is deliberate: there the interval is fixed
     // (src/lib/clipboard/copy-secret.ts, 30s); here the user sets it.
     const { clipboardClearSeconds } = await getSettings();
