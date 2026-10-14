@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { type PolicyViolation } from "@/lib/security/password-policy-validation";
@@ -88,7 +88,7 @@ export function useTeamBaseFormModel({
     editData?.teamFolderId ?? defaultFolderId ?? null,
   );
   const [requireReprompt, setRequireReprompt] = useState(
-    editData?.requireReprompt ?? teamPolicy?.requireRepromptForAll ?? false,
+    teamPolicy.requireRepromptForAll || (editData?.requireReprompt ?? false),
   );
   const [travelSafe, setTravelSafe] = useState(
     editData?.travelSafe ?? true,
@@ -97,10 +97,13 @@ export function useTeamBaseFormModel({
     editData?.expiresAt ?? null,
   );
 
-  useEffect(() => {
-    if (!teamPolicy.requireRepromptForAll) return;
-    setRequireReprompt(true);
-  }, [teamPolicy.requireRepromptForAll]);
+  const [prevRequireRepromptForAll, setPrevRequireRepromptForAll] = useState(
+    teamPolicy.requireRepromptForAll,
+  );
+  if (teamPolicy.requireRepromptForAll !== prevRequireRepromptForAll) {
+    setPrevRequireRepromptForAll(teamPolicy.requireRepromptForAll);
+    if (teamPolicy.requireRepromptForAll) setRequireReprompt(true);
+  }
 
   /**
    * Submit an entry. Each form builds the BuildTeamEntryPayloadInput

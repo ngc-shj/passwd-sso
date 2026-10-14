@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -113,25 +113,30 @@ export function PasskeyCredentialsCard() {
   // step-up-gated. The retry arg (owned by the hook) carries the credential id
   // so the post-reauth retry replays the same delete. (Rename/PATCH is not
   // step-up-gated, so only delete needs this recovery path.)
-  const inlineReauth = useInlineReauth<string>((id) => handleDelete(id));
+  const handleDeleteRetryRef = useRef<(id: string) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<string>((id) => handleDeleteRetryRef.current(id));
 
   const vaultUnlocked = status === VAULT_STATUS.UNLOCKED;
   const webAuthnAvailable = isWebAuthnSupported();
 
-  const fetchCredentials = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.WEBAUTHN_CREDENTIALS);
-      if (res.ok) {
-        setCredentials(await res.json());
-      } else {
-        toast.error(t("fetchError"));
-      }
-    } catch {
-      toast.error(t("fetchError"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const fetchCredentials = useCallback(
+    () =>
+      fetchApi(API_PATH.WEBAUTHN_CREDENTIALS)
+        .then(async (res) => {
+          if (res.ok) {
+            setCredentials(await res.json());
+          } else {
+            toast.error(t("fetchError"));
+          }
+        })
+        .catch(() => {
+          toast.error(t("fetchError"));
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [t],
+  );
 
   useEffect(() => {
     fetchCredentials();
@@ -294,6 +299,10 @@ export function PasskeyCredentialsCard() {
       toast.error(t("deleteError"));
     }
   };
+
+  useEffect(() => {
+    handleDeleteRetryRef.current = (id) => handleDelete(id);
+  });
 
   const handleRename = async (id: string) => {
     try {

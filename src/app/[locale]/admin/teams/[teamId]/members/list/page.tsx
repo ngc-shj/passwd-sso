@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
 import { TeamAddFromTenantSection } from "@/components/team/members/team-add-from-tenant-section";
@@ -70,6 +70,12 @@ export default function TeamMembersPage({
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [prevTeamId, setPrevTeamId] = useState(teamId);
+  if (teamId !== prevTeamId) {
+    setPrevTeamId(teamId);
+    setTeam(null);
+    setLoadError(false);
+  }
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -133,8 +139,6 @@ export default function TeamMembersPage({
   };
 
   useEffect(() => {
-    setTeam(null);
-    setLoadError(false);
     fetchAll();
   }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -147,10 +151,8 @@ export default function TeamMembersPage({
   type ReauthRetry =
     | { type: "role"; memberId: string; role: string }
     | { type: "remove"; memberId: string };
-  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
-    if (retry.type === "role") await handleChangeRole(retry.memberId, retry.role);
-    else if (retry.type === "remove") await handleRemoveMember(retry.memberId);
-  });
+  const handleRetryRef = useRef<(arg: ReauthRetry) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetry>((arg) => handleRetryRef.current(arg));
 
   const handleChangeRole = async (memberId: string, role: string) => {
     try {
@@ -187,6 +189,13 @@ export default function TeamMembersPage({
       toast.error(t("networkError"));
     }
   };
+
+  useEffect(() => {
+    handleRetryRef.current = async (retry) => {
+      if (retry.type === "role") await handleChangeRole(retry.memberId, retry.role);
+      else if (retry.type === "remove") await handleRemoveMember(retry.memberId);
+    };
+  });
 
   if (!team) {
     if (loadError) {

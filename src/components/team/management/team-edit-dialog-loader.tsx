@@ -38,13 +38,17 @@ export function TeamEditDialogLoader({
   const { getEntryDecryptionKey } = useTeamVault();
   const [data, setData] = useState<TeamEntryFormEditData | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (!open) {
       setData(null);
       setError(null);
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!open) return;
 
     let cancelled = false;
 

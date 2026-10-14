@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -118,6 +118,7 @@ export function ServiceAccountCard() {
   const [tokenName, setTokenName] = useState("");
   const [tokenSelectedScopes, setTokenSelectedScopes] = useState<Set<string>>(new Set());
   const [tokenExpiresAt, setTokenExpiresAt] = useState("");
+  const [tokenMinExpiresAt, setTokenMinExpiresAt] = useState("");
   const [tokenNameError, setTokenNameError] = useState("");
   const [tokenScopeError, setTokenScopeError] = useState("");
   const [newTokenSecret, setNewTokenSecret] = useState<string | null>(null);
@@ -129,26 +130,26 @@ export function ServiceAccountCard() {
     | { type: "delete"; saId: string }
     | { type: "createToken" }
     | { type: "revokeToken"; saId: string; tokenId: string };
-  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
-    if (retry.type === "edit") await handleEdit();
-    else if (retry.type === "delete") await handleDelete(retry.saId);
-    else if (retry.type === "createToken") await handleCreateToken();
-    else if (retry.type === "revokeToken") await handleRevokeToken(retry.saId, retry.tokenId);
-  });
+  const handleRetryRef = useRef<(retry: ReauthRetry) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetry>((retry) => handleRetryRef.current(retry));
 
-  const fetchAccounts = useCallback(async () => {
-    try {
-      const res = await fetchApi(apiPath.tenantServiceAccounts());
-      if (res.ok) {
-        const data = await res.json();
-        setAccounts(Array.isArray(data) ? data : data.serviceAccounts ?? []);
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchAccounts = useCallback(
+    () =>
+      fetchApi(apiPath.tenantServiceAccounts())
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setAccounts(Array.isArray(data) ? data : data.serviceAccounts ?? []);
+          }
+        })
+        .catch(() => {
+          // silently fail
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [],
+  );
 
   useEffect(() => {
     fetchAccounts();
@@ -314,6 +315,7 @@ export function ServiceAccountCard() {
     setTokenName("");
     setTokenSelectedScopes(new Set());
     setTokenExpiresAt("");
+    setTokenMinExpiresAt(new Date(Date.now() + MS_PER_DAY).toISOString().split("T")[0]);
     setTokenNameError("");
     setTokenScopeError("");
     setNewTokenSecret(null);
@@ -401,6 +403,15 @@ export function ServiceAccountCard() {
       toast.error(t("tokenRevokeFailed"));
     }
   };
+
+  useEffect(() => {
+    handleRetryRef.current = async (retry) => {
+      if (retry.type === "edit") await handleEdit();
+      else if (retry.type === "delete") await handleDelete(retry.saId);
+      else if (retry.type === "createToken") await handleCreateToken();
+      else if (retry.type === "revokeToken") await handleRevokeToken(retry.saId, retry.tokenId);
+    };
+  });
 
   const toggleScope = (scope: string, checked: boolean) => {
     setTokenSelectedScopes((prev) => {
@@ -1020,7 +1031,7 @@ export function ServiceAccountCard() {
                     type="date"
                     value={tokenExpiresAt}
                     onChange={(e) => setTokenExpiresAt(e.target.value)}
-                    min={new Date(Date.now() + MS_PER_DAY).toISOString().split("T")[0]}
+                    min={tokenMinExpiresAt}
                   />
                 </div>
               </div>

@@ -374,7 +374,9 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     },
     onStepUpRequired: () => inlineReauth.triggerOnStaleError({ type: "bulkPurge" }),
   });
-  executeActionRef.current = executeAction;
+  useEffect(() => {
+    executeActionRef.current = executeAction;
+  }, [executeAction]);
 
   // ── Single-entry mutation handlers (INV-C1.4) ──────────────────────────────
   // Each: (1) optimistic remove, (2) adapter call, (3) rollback on reject, (4) notify on success.

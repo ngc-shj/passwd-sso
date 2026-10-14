@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -50,13 +50,18 @@ export function TagDialog({ open, onOpenChange, editTag, allTags = [], onSubmit 
   const [loading, setLoading] = useState(false);
   const isEdit = !!editTag;
 
-  useEffect(() => {
-    if (!open) return;
-    setName(editTag?.name ?? "");
-    setColor(editTag?.color ?? "#4f46e5");
-    setColorChanged(false);
-    setParentId(editTag?.parentId ?? null);
-  }, [open, editTag]);
+  const [prevOpen, setPrevOpen] = useState<boolean | null>(null);
+  const [prevEditTag, setPrevEditTag] = useState(editTag);
+  if (open !== prevOpen || editTag !== prevEditTag) {
+    setPrevOpen(open);
+    setPrevEditTag(editTag);
+    if (open) {
+      setName(editTag?.name ?? "");
+      setColor(editTag?.color ?? "#4f46e5");
+      setColorChanged(false);
+      setParentId(editTag?.parentId ?? null);
+    }
+  }
 
   // Build parent options: exclude self and descendants for edit, limit depth
   const parentOptions = (() => {

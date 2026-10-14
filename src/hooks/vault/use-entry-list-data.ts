@@ -37,21 +37,27 @@ export function useEntryListData<E extends PasswordRowEntry & PasswordDetailPane
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  useEffect(() => {
+  const fetchInputs = [adapter, view, query.tagId, query.folderId, query.entryType, sort, sortBy, refreshKey, reloadKey];
+  const [prevFetchInputs, setPrevFetchInputs] = useState<unknown[] | null>(null);
+  if (prevFetchInputs === null || fetchInputs.some((input, i) => !Object.is(input, prevFetchInputs[i]))) {
+    setPrevFetchInputs(fetchInputs);
     // INV-C4.3: skip fetch when the adapter's vault is not ready.
     if (!adapter.availability.ready) {
       setAllEntries([]);
       setLoading(false);
-      setError(null);
-      return;
+    } else {
+      setLoading(true);
     }
+    setError(null);
+  }
+
+  useEffect(() => {
+    // INV-C4.3: skip fetch when the adapter's vault is not ready.
+    if (!adapter.availability.ready) return;
 
     // INV-C4.1: abort the in-flight request when args change.
     const controller = new AbortController();
     const { signal } = controller;
-
-    setLoading(true);
-    setError(null);
 
     adapter.fetchOverviewEntries(view, query, signal)
       .then((fetched) => {

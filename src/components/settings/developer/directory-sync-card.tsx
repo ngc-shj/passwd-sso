@@ -154,18 +154,22 @@ export function DirectorySyncCard() {
 
   // ─── Fetch configs ──────────────────────────────────────────
 
-  const fetchConfigs = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.DIRECTORY_SYNC);
-      if (res.ok) {
-        setConfigs(await res.json());
-      }
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchConfigs = useCallback(
+    () =>
+      fetchApi(API_PATH.DIRECTORY_SYNC)
+        .then(async (res) => {
+          if (res.ok) {
+            setConfigs(await res.json());
+          }
+        })
+        .catch(() => {
+          // silent
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [],
+  );
 
   useEffect(() => {
     fetchConfigs();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVaultOptional } from "@/lib/team/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
@@ -146,6 +146,18 @@ function toWatchtowerEntryRef(entry: DecryptedEntry): WatchtowerEntryRef {
 
 // ─── Hook ────────────────────────────────────────────────────
 
+const subscribeToNothing = () => () => {};
+
+function readStoredLastAnalyzedAt(): string | null {
+  return window.localStorage.getItem(LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT);
+}
+
+function parseStoredLastAnalyzedAt(stored: string | null): number | null {
+  if (!stored) return null;
+  const parsed = Number(stored);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export interface WatchtowerPolicy {
   passwordMaxAgeDays: number | null;
   passwordExpiryWarningDays: number;
@@ -161,7 +173,13 @@ export function useWatchtower(
   const [loading, setLoading] = useState(false);
   const [unavailableReason, setUnavailableReason] =
     useState<WatchtowerAnalysisUnavailableReason | null>(null);
-  const [lastAnalyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
+  const [analyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
+  const storedLastAnalyzedAt = useSyncExternalStore(
+    subscribeToNothing,
+    readStoredLastAnalyzedAt,
+    () => null,
+  );
+  const lastAnalyzedAt = analyzedAt ?? parseStoredLastAnalyzedAt(storedLastAnalyzedAt);
   const [now, setNow] = useState(() => Date.now());
   // Policy values for password age checks — either from prop or fetched from vault status
   const [passwordMaxAgeDays, setPasswordMaxAgeDays] = useState<number | null>(policy?.passwordMaxAgeDays ?? null);
@@ -171,15 +189,6 @@ export function useWatchtower(
     total: 0,
     step: "",
   });
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(
-      LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT
-    );
-    if (!stored) return;
-    const parsed = Number(stored);
-    if (Number.isFinite(parsed)) setLastAnalyzedAt(parsed);
-  }, []);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), MS_PER_SECOND);

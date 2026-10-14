@@ -69,21 +69,6 @@ export function TeamPasskeyForm({
       travelSafe: base.travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      base.notes,
-      relyingPartyId,
-      relyingPartyName,
-      username,
-      credentialId,
-      creationDate,
-      deviceInfo,
-      base.selectedTags,
-      base.teamFolderId,
-      base.requireReprompt,
-      base.travelSafe,
-      base.expiresAt,
-    ],
   );
   const submitDisabled = !base.title.trim() || !relyingPartyId.trim();
 

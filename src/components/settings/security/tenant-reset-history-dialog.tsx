@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -103,7 +103,8 @@ export function TenantResetHistoryDialog({
   // Inline step-up reauth, mirroring the developer-settings credential cards.
   // The approve dialog stays open across the reauth ceremony; on success the
   // hook re-runs the approve handler, which re-submits the current target.
-  const inlineReauth = useInlineReauth(() => handleApproveSubmit());
+  const handleApproveSubmitRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleApproveSubmitRetryRef.current());
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
@@ -120,10 +121,10 @@ export function TenantResetHistoryDialog({
     }
   }, [userId]);
 
-  useEffect(() => {
-    if (!open) return;
-    fetchHistory();
-  }, [open, fetchHistory]);
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) fetchHistory();
+  };
 
   const handleRevoke = async (resetId: string) => {
     setRevokingId(resetId);
@@ -206,8 +207,12 @@ export function TenantResetHistoryDialog({
     }
   };
 
+  useEffect(() => {
+    handleApproveSubmitRetryRef.current = () => handleApproveSubmit();
+  });
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button variant="ghost" size="sm" className="h-7 gap-1 px-2">
           <History className="h-3.5 w-3.5" />

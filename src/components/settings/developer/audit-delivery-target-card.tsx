@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -102,24 +102,26 @@ export function AuditDeliveryTargetCard() {
   // which mutation the admin was attempting so the post-reauth retry replays
   // the same one.
   type ReauthRetry = { type: "create" } | { type: "toggle"; target: TargetItem };
-  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
-    if (retry.type === "create") await handleCreate();
-    else if (retry.type === "toggle") await handleToggleActive(retry.target);
-  });
+  const handleRetryRef = useRef<(retry: ReauthRetry) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetry>((retry) => handleRetryRef.current(retry));
 
-  const fetchTargets = useCallback(async () => {
-    try {
-      const res = await fetchApi(apiPath.tenantAuditDeliveryTargets());
-      if (res.ok) {
-        const data = await res.json();
-        setTargets(data.targets ?? []);
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchTargets = useCallback(
+    () =>
+      fetchApi(apiPath.tenantAuditDeliveryTargets())
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setTargets(data.targets ?? []);
+          }
+        })
+        .catch(() => {
+          // silently fail
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [],
+  );
 
   useEffect(() => {
     fetchTargets();
@@ -246,6 +248,13 @@ export function AuditDeliveryTargetCard() {
       toast.error(t("updateFailed"));
     }
   };
+
+  useEffect(() => {
+    handleRetryRef.current = async (retry) => {
+      if (retry.type === "create") await handleCreate();
+      else if (retry.type === "toggle") await handleToggleActive(retry.target);
+    };
+  });
 
   const setConfigField = (field: keyof ConfigState, value: string) => {
     setConfig((prev) => ({ ...prev, [field]: value }));

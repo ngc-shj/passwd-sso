@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
@@ -15,26 +15,35 @@ import { fetchApi, hardNavigate } from "@/lib/url-helpers";
 
 const CONFIRMATION_TOKEN = VAULT_CONFIRMATION_PHRASE.DELETE_VAULT;
 
+function readTokenFromHash(): string | null {
+  if (typeof window === "undefined") return null;
+  const match = window.location.hash.match(/token=([a-f0-9]{64})(?:$|&)/);
+  return match ? match[1] : null;
+}
+
+const subscribeNoop = () => () => {};
+
 export default function AdminVaultResetPage() {
   const locale = useLocale();
   const t = useTranslations("VaultReset");
   const tApi = useTranslations("ApiErrors");
 
-  const [token, setToken] = useState<string | null>(null);
+  // Captured once on the client: the effect below strips it from the URL, so
+  // it cannot be re-read later. Exposed only after hydration so the first
+  // client render matches the server render (which has no URL fragment).
+  const [hashToken] = useState(readTokenFromHash);
+  const isHydrated = useSyncExternalStore(subscribeNoop, () => true, () => false);
+  const token = isHydrated ? hashToken : null;
   const [confirmation, setConfirmation] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Extract token from URL fragment and immediately remove it
   useEffect(() => {
-    const hash = window.location.hash;
-    const match = hash.match(/token=([a-f0-9]{64})(?:$|&)/);
-    if (match) {
-      setToken(match[1]);
+    if (hashToken) {
       // Remove token from URL and browser history
       history.replaceState(null, "", window.location.pathname);
     }
-  }, []);
+  }, [hashToken]);
 
   const isValid = confirmation === CONFIRMATION_TOKEN;
 

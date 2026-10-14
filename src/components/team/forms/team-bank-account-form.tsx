@@ -74,23 +74,6 @@ export function TeamBankAccountForm({
       travelSafe: base.travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      base.notes,
-      bankName,
-      accountType,
-      accountHolderName,
-      accountNumber,
-      routingNumber,
-      swiftBic,
-      iban,
-      branchName,
-      base.selectedTags,
-      base.teamFolderId,
-      base.requireReprompt,
-      base.travelSafe,
-      base.expiresAt,
-    ],
   );
   const submitDisabled = !base.title.trim();
 

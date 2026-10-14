@@ -7,7 +7,7 @@ import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
 describe("useEntryHasChanges", () => {
   it("returns false on first render (baseline equals current)", () => {
     const { result } = renderHook(() =>
-      useEntryHasChanges(() => ({ title: "alpha", notes: "" }), ["alpha", ""]),
+      useEntryHasChanges(() => ({ title: "alpha", notes: "" })),
     );
     expect(result.current).toBe(false);
   });
@@ -15,7 +15,7 @@ describe("useEntryHasChanges", () => {
   it("returns true when a field differs from the captured baseline", () => {
     let title = "alpha";
     const { result, rerender } = renderHook(() =>
-      useEntryHasChanges(() => ({ title, notes: "" }), [title]),
+      useEntryHasChanges(() => ({ title, notes: "" })),
     );
 
     expect(result.current).toBe(false);
@@ -29,7 +29,7 @@ describe("useEntryHasChanges", () => {
   it("returns true for a nested field change", () => {
     let folder = { id: "f1", name: "old" };
     const { result, rerender } = renderHook(() =>
-      useEntryHasChanges(() => ({ folder }), [folder]),
+      useEntryHasChanges(() => ({ folder })),
     );
 
     expect(result.current).toBe(false);
@@ -43,7 +43,7 @@ describe("useEntryHasChanges", () => {
   it("returns true when array order changes (JSON.stringify is order-sensitive)", () => {
     let tags = ["a", "b"];
     const { result, rerender } = renderHook(() =>
-      useEntryHasChanges(() => ({ tags }), [tags]),
+      useEntryHasChanges(() => ({ tags })),
     );
 
     expect(result.current).toBe(false);
@@ -57,7 +57,7 @@ describe("useEntryHasChanges", () => {
   it("returns false when state is reverted back to the baseline value", () => {
     let title = "alpha";
     const { result, rerender } = renderHook(() =>
-      useEntryHasChanges(() => ({ title }), [title]),
+      useEntryHasChanges(() => ({ title })),
     );
 
     title = "beta";
@@ -72,7 +72,7 @@ describe("useEntryHasChanges", () => {
   it("captures the baseline only once (initial render's value, not the latest)", () => {
     let title = "alpha";
     const { result, rerender } = renderHook(() =>
-      useEntryHasChanges(() => ({ title }), [title]),
+      useEntryHasChanges(() => ({ title })),
     );
 
     title = "beta";

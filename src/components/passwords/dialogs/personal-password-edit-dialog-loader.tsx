@@ -115,13 +115,14 @@ export function PasswordEditDialogLoader({
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
 
+  if ((!open || !encryptionKey) && (data !== null || error !== null || attachments.length > 0)) {
+    setData(null);
+    setError(null);
+    setAttachments([]);
+  }
+
   useEffect(() => {
-    if (!open || !encryptionKey) {
-      setData(null);
-      setError(null);
-      setAttachments([]);
-      return;
-    }
+    if (!open || !encryptionKey) return;
 
     let cancelled = false;
 

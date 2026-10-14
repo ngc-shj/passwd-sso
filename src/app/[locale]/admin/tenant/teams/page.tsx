@@ -37,7 +37,6 @@ export default function AdminTenantTeamsPage() {
   const [loading, setLoading] = useState(true);
 
   const fetchTeams = () => {
-    setLoading(true);
     void (async () => {
       try {
         const res = await fetchApi(API_PATH.TEAMS);
@@ -53,6 +52,7 @@ export default function AdminTenantTeamsPage() {
   };
 
   const handleCreated = () => {
+    setLoading(true);
     fetchTeams();
     notifyTeamDataChanged();
   };

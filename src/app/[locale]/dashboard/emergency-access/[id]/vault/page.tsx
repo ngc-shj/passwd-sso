@@ -88,137 +88,137 @@ export default function EmergencyVaultPage() {
   const ownerEncKeyRef = useRef<CryptoKey | null>(null);
   const ownerIdRef = useRef<string>("");
 
-  const decryptEntries = useCallback(async () => {
-    if (!encryptionKey) {
-      setError(t("vaultUnlockRequired"));
-      setLoading(false);
-      return;
-    }
-
-    try {
-      // 1. Fetch ECDH data
-      const vaultRes = await fetchApi(apiPath.emergencyGrantVault(grantId));
-      if (!vaultRes.ok) {
-        const body = await readApiErrorBody(vaultRes);
-        setError(t(eaErrorToI18nKey(body?.error)));
-        setLoading(false);
-        return;
-      }
-      const vaultData = await vaultRes.json();
-      setOwnerName(vaultData.owner?.name || vaultData.owner?.email || "");
-      ownerIdRef.current = vaultData.ownerId;
-
-      // 2. Decrypt grantee's ECDH private key
-      const granteePrivKeyBytes = await decryptPrivateKey(
-        {
-          ciphertext: vaultData.granteeKeyPair.encryptedPrivateKey,
-          iv: vaultData.granteeKeyPair.privateKeyIv,
-          authTag: vaultData.granteeKeyPair.privateKeyAuthTag,
-        },
-        encryptionKey
-      );
-      const granteePrivKey = await importPrivateKey(granteePrivKeyBytes);
-
-      // 3. Unwrap owner's secretKey
-      const hkdfSalt = hexDecode(vaultData.hkdfSalt);
-      const wrapCtx = {
-        grantId: vaultData.grantId,
-        ownerId: vaultData.ownerId,
-        granteeId: vaultData.granteeId,
-        keyVersion: vaultData.keyVersion ?? 1,
-        wrapVersion: vaultData.wrapVersion ?? 1,
-      };
-      const ownerSecretKey = await unwrapSecretKeyAsGrantee(
-        {
-          ciphertext: vaultData.encryptedSecretKey,
-          iv: vaultData.secretKeyIv,
-          authTag: vaultData.secretKeyAuthTag,
-        },
-        vaultData.ownerEphemeralPublicKey,
-        granteePrivKey,
-        hkdfSalt,
-        wrapCtx
-      );
-
-      // 4. Derive owner's encryption key
-      const ownerEncKey = await deriveEncryptionKey(ownerSecretKey);
-      ownerSecretKey.fill(0);
-      ownerEncKeyRef.current = ownerEncKey;
-
-      // 5. Fetch encrypted entries
-      const entriesRes = await fetchApi(apiPath.emergencyGrantVaultEntries(grantId));
-      if (!entriesRes.ok) {
-        setError(t("networkError"));
-        setLoading(false);
-        return;
-      }
-      const rawEntries: RawVaultEntry[] = await entriesRes.json();
-
-      // 6. Decrypt overviews for list display
-      const decrypted: DisplayEntry[] = [];
-      let failCount = 0;
-      for (const entry of rawEntries) {
-        try {
-          const aad = entry.aadVersion >= 1
-            ? buildPersonalEntryAAD(vaultData.ownerId, entry.id, VAULT_TYPE.OVERVIEW)
-            : undefined;
-          const overviewEncrypted: EncryptedData = {
-            ciphertext: entry.encryptedOverview,
-            iv: entry.overviewIv,
-            authTag: entry.overviewAuthTag,
-          };
-          const overviewPlain = await decryptData(overviewEncrypted, ownerEncKey, aad);
-          const overview: DecryptedOverview = JSON.parse(overviewPlain);
-
-          decrypted.push({
-            card: {
-              id: entry.id,
-              // Deliberate: the grantee cannot satisfy the grantor's passphrase,
-              // so a re-prompt here would be unsatisfiable rather than
-              // protective. Mirrors the InlineDetailData literal below.
-              requireReprompt: false,
-              entryType: (entry.entryType as EntryTypeValue) ?? ENTRY_TYPE.LOGIN,
-              title: overview.title || "Untitled",
-              username: overview.username ?? null,
-              urlHost: overview.urlHost ?? null,
-              snippet: overview.snippet ?? null,
-              brand: overview.brand ?? null,
-              lastFour: overview.lastFour ?? null,
-              cardholderName: overview.cardholderName ?? null,
-              fullName: overview.fullName ?? null,
-              idNumberLast4: overview.idNumberLast4 ?? null,
-              relyingPartyId: overview.relyingPartyId ?? null,
-              bankName: overview.bankName ?? null,
-              accountNumberLast4: overview.accountNumberLast4 ?? null,
-              softwareName: overview.softwareName ?? null,
-              licensee: overview.licensee ?? null,
-              keyType: overview.keyType ?? null,
-              fingerprint: overview.fingerprint ?? null,
-              tags: overview.tags ?? [],
-              isFavorite: entry.isFavorite,
-              isArchived: entry.isArchived,
-            },
-            raw: entry,
-          });
-        } catch {
-          failCount++;
-        }
-      }
-
-      setDecryptFailCount(failCount);
-      setEntries(decrypted);
-    } catch {
-      setError(t("networkError"));
-    } finally {
-      setLoading(false);
-    }
-  }, [encryptionKey, grantId, t]);
+  // Defensive: the vault context sets the key and UNLOCKED together, but if
+  // the key is ever missing while unlocked, surface it instead of decrypting.
+  const keyMissing = vaultStatus === VAULT_STATUS.UNLOCKED && !encryptionKey;
+  const isLoading = loading && !keyMissing;
+  const displayError = error ?? (keyMissing ? t("vaultUnlockRequired") : null);
 
   useEffect(() => {
-    if (vaultStatus === VAULT_STATUS.UNLOCKED) {
-      decryptEntries();
-    }
-  }, [vaultStatus, decryptEntries]);
+    if (vaultStatus !== VAULT_STATUS.UNLOCKED || !encryptionKey) return;
+
+    const decryptEntries = async () => {
+      try {
+        // 1. Fetch ECDH data
+        const vaultRes = await fetchApi(apiPath.emergencyGrantVault(grantId));
+        if (!vaultRes.ok) {
+          const body = await readApiErrorBody(vaultRes);
+          setError(t(eaErrorToI18nKey(body?.error)));
+          setLoading(false);
+          return;
+        }
+        const vaultData = await vaultRes.json();
+        setOwnerName(vaultData.owner?.name || vaultData.owner?.email || "");
+        ownerIdRef.current = vaultData.ownerId;
+
+        // 2. Decrypt grantee's ECDH private key
+        const granteePrivKeyBytes = await decryptPrivateKey(
+          {
+            ciphertext: vaultData.granteeKeyPair.encryptedPrivateKey,
+            iv: vaultData.granteeKeyPair.privateKeyIv,
+            authTag: vaultData.granteeKeyPair.privateKeyAuthTag,
+          },
+          encryptionKey
+        );
+        const granteePrivKey = await importPrivateKey(granteePrivKeyBytes);
+
+        // 3. Unwrap owner's secretKey
+        const hkdfSalt = hexDecode(vaultData.hkdfSalt);
+        const wrapCtx = {
+          grantId: vaultData.grantId,
+          ownerId: vaultData.ownerId,
+          granteeId: vaultData.granteeId,
+          keyVersion: vaultData.keyVersion ?? 1,
+          wrapVersion: vaultData.wrapVersion ?? 1,
+        };
+        const ownerSecretKey = await unwrapSecretKeyAsGrantee(
+          {
+            ciphertext: vaultData.encryptedSecretKey,
+            iv: vaultData.secretKeyIv,
+            authTag: vaultData.secretKeyAuthTag,
+          },
+          vaultData.ownerEphemeralPublicKey,
+          granteePrivKey,
+          hkdfSalt,
+          wrapCtx
+        );
+
+        // 4. Derive owner's encryption key
+        const ownerEncKey = await deriveEncryptionKey(ownerSecretKey);
+        ownerSecretKey.fill(0);
+        ownerEncKeyRef.current = ownerEncKey;
+
+        // 5. Fetch encrypted entries
+        const entriesRes = await fetchApi(apiPath.emergencyGrantVaultEntries(grantId));
+        if (!entriesRes.ok) {
+          setError(t("networkError"));
+          setLoading(false);
+          return;
+        }
+        const rawEntries: RawVaultEntry[] = await entriesRes.json();
+
+        // 6. Decrypt overviews for list display
+        const decrypted: DisplayEntry[] = [];
+        let failCount = 0;
+        for (const entry of rawEntries) {
+          try {
+            const aad = entry.aadVersion >= 1
+              ? buildPersonalEntryAAD(vaultData.ownerId, entry.id, VAULT_TYPE.OVERVIEW)
+              : undefined;
+            const overviewEncrypted: EncryptedData = {
+              ciphertext: entry.encryptedOverview,
+              iv: entry.overviewIv,
+              authTag: entry.overviewAuthTag,
+            };
+            const overviewPlain = await decryptData(overviewEncrypted, ownerEncKey, aad);
+            const overview: DecryptedOverview = JSON.parse(overviewPlain);
+
+            decrypted.push({
+              card: {
+                id: entry.id,
+                // Deliberate: the grantee cannot satisfy the grantor's passphrase,
+                // so a re-prompt here would be unsatisfiable rather than
+                // protective. Mirrors the InlineDetailData literal below.
+                requireReprompt: false,
+                entryType: (entry.entryType as EntryTypeValue) ?? ENTRY_TYPE.LOGIN,
+                title: overview.title || "Untitled",
+                username: overview.username ?? null,
+                urlHost: overview.urlHost ?? null,
+                snippet: overview.snippet ?? null,
+                brand: overview.brand ?? null,
+                lastFour: overview.lastFour ?? null,
+                cardholderName: overview.cardholderName ?? null,
+                fullName: overview.fullName ?? null,
+                idNumberLast4: overview.idNumberLast4 ?? null,
+                relyingPartyId: overview.relyingPartyId ?? null,
+                bankName: overview.bankName ?? null,
+                accountNumberLast4: overview.accountNumberLast4 ?? null,
+                softwareName: overview.softwareName ?? null,
+                licensee: overview.licensee ?? null,
+                keyType: overview.keyType ?? null,
+                fingerprint: overview.fingerprint ?? null,
+                tags: overview.tags ?? [],
+                isFavorite: entry.isFavorite,
+                isArchived: entry.isArchived,
+              },
+              raw: entry,
+            });
+          } catch {
+            failCount++;
+          }
+        }
+
+        setDecryptFailCount(failCount);
+        setEntries(decrypted);
+      } catch {
+        setError(t("networkError"));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void decryptEntries();
+  }, [vaultStatus, encryptionKey, grantId, t]);
 
   // Clear crypto refs on unmount
   useEffect(() => {
@@ -328,25 +328,25 @@ export default function EmergencyVaultPage() {
           </div>
         </Card>
 
-        {loading && (
+        {isLoading && (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
-        {error && (
+        {displayError && (
           <Card className="rounded-xl border border-red-500/40 bg-red-500/5 p-4 text-center text-red-700 dark:text-red-400">
-            {error}
+            {displayError}
           </Card>
         )}
 
-        {!loading && decryptFailCount > 0 && (
+        {!isLoading && decryptFailCount > 0 && (
           <Card className="rounded-xl border border-yellow-500/40 bg-yellow-500/5 p-4 text-center text-yellow-700 dark:text-yellow-400">
             {t("decryptFailWarning", { count: String(decryptFailCount) })}
           </Card>
         )}
 
-        {!loading && !error && entries.length === 0 && (
+        {!isLoading && !displayError && entries.length === 0 && (
           <Card className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
             {t("noEntries")}
           </Card>

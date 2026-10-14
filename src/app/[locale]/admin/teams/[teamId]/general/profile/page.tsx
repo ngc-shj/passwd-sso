@@ -39,6 +39,12 @@ export default function TeamGeneralProfilePage({
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [prevTeamId, setPrevTeamId] = useState(teamId);
+  if (teamId !== prevTeamId) {
+    setPrevTeamId(teamId);
+    setTeam(null);
+    setLoadError(false);
+  }
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
@@ -48,26 +54,26 @@ export default function TeamGeneralProfilePage({
   const hasChanges = useFormDirty(currentGeneral, initialGeneral);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchTeam = async () => {
-    try {
-      const res = await fetchApi(apiPath.teamById(teamId));
-      if (!res.ok) throw new Error("Forbidden");
-      const d = await res.json();
-      const desc = d.description ?? "";
-      setTeam(d);
-      setName(d.name);
-      setDescription(desc);
-      setInitialGeneral({ name: d.name, description: desc });
-      setLoadError(false);
-    } catch {
-      setTeam(null);
-      setLoadError(true);
-    }
+  const fetchTeam = () => {
+    void (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamById(teamId));
+        if (!res.ok) throw new Error("Forbidden");
+        const d = await res.json();
+        const desc = d.description ?? "";
+        setTeam(d);
+        setName(d.name);
+        setDescription(desc);
+        setInitialGeneral({ name: d.name, description: desc });
+        setLoadError(false);
+      } catch {
+        setTeam(null);
+        setLoadError(true);
+      }
+    })();
   };
 
   useEffect(() => {
-    setTeam(null);
-    setLoadError(false);
     fetchTeam();
   }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 

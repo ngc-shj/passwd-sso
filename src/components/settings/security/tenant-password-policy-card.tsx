@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Lock, Loader2 } from "lucide-react";
@@ -63,55 +63,54 @@ export function TenantPasswordPolicyCard() {
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchPolicy = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.TENANT_POLICY);
-      if (res.ok) {
-        const data = await res.json();
-
-        const minLen = data.tenantMinPasswordLength !== null && data.tenantMinPasswordLength !== undefined ? String(data.tenantMinPasswordLength) : "";
-        const reqUpper = data.tenantRequireUppercase ?? false;
-        const reqLower = data.tenantRequireLowercase ?? false;
-        const reqNums = data.tenantRequireNumbers ?? false;
-        const reqSyms = data.tenantRequireSymbols ?? false;
-        const maxAge = data.passwordMaxAgeDays;
-        const maxAgeEnabled = maxAge !== null && maxAge !== undefined;
-        const maxAgeStr = maxAgeEnabled ? String(maxAge) : "";
-        const warningVal = data.passwordExpiryWarningDays;
-        const warningStr = warningVal !== null && warningVal !== undefined ? String(warningVal) : "";
-
-        setMinPasswordLength(minLen);
-        setRequireUppercase(reqUpper);
-        setRequireLowercase(reqLower);
-        setRequireNumbers(reqNums);
-        setRequireSymbols(reqSyms);
-        setPasswordMaxAgeEnabled(maxAgeEnabled);
-        setPasswordMaxAgeDays(maxAgeStr);
-        setPasswordExpiryWarningDays(warningStr);
-
-        setInitialPolicy({
-          minPasswordLength: minLen,
-          requireUppercase: reqUpper,
-          requireLowercase: reqLower,
-          requireNumbers: reqNums,
-          requireSymbols: reqSyms,
-          passwordMaxAgeEnabled: maxAgeEnabled,
-          passwordMaxAgeDays: maxAgeStr,
-          passwordExpiryWarningDays: warningStr,
-        });
-      } else {
-        toast.error(t("passwordPolicyLoadFailed"));
-      }
-    } catch {
-      toast.error(t("passwordPolicyLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
+    const fetchPolicy = async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_POLICY);
+        if (res.ok) {
+          const data = await res.json();
+
+          const minLen = data.tenantMinPasswordLength !== null && data.tenantMinPasswordLength !== undefined ? String(data.tenantMinPasswordLength) : "";
+          const reqUpper = data.tenantRequireUppercase ?? false;
+          const reqLower = data.tenantRequireLowercase ?? false;
+          const reqNums = data.tenantRequireNumbers ?? false;
+          const reqSyms = data.tenantRequireSymbols ?? false;
+          const maxAge = data.passwordMaxAgeDays;
+          const maxAgeEnabled = maxAge !== null && maxAge !== undefined;
+          const maxAgeStr = maxAgeEnabled ? String(maxAge) : "";
+          const warningVal = data.passwordExpiryWarningDays;
+          const warningStr = warningVal !== null && warningVal !== undefined ? String(warningVal) : "";
+
+          setMinPasswordLength(minLen);
+          setRequireUppercase(reqUpper);
+          setRequireLowercase(reqLower);
+          setRequireNumbers(reqNums);
+          setRequireSymbols(reqSyms);
+          setPasswordMaxAgeEnabled(maxAgeEnabled);
+          setPasswordMaxAgeDays(maxAgeStr);
+          setPasswordExpiryWarningDays(warningStr);
+
+          setInitialPolicy({
+            minPasswordLength: minLen,
+            requireUppercase: reqUpper,
+            requireLowercase: reqLower,
+            requireNumbers: reqNums,
+            requireSymbols: reqSyms,
+            passwordMaxAgeEnabled: maxAgeEnabled,
+            passwordMaxAgeDays: maxAgeStr,
+            passwordExpiryWarningDays: warningStr,
+          });
+        } else {
+          toast.error(t("passwordPolicyLoadFailed"));
+        }
+      } catch {
+        toast.error(t("passwordPolicyLoadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    };
     void fetchPolicy();
-  }, [fetchPolicy]);
+  }, [t]);
 
   const validate = (): string | null => {
     if (minPasswordLength !== "") {
@@ -133,7 +132,8 @@ export function TenantPasswordPolicyCard() {
     return null;
   };
 
-  const inlineReauth = useInlineReauth(() => handleSave());
+  const handleSaveRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleSaveRetryRef.current());
 
   const handleSave = async () => {
     const validationError = validate();
@@ -172,6 +172,10 @@ export function TenantPasswordPolicyCard() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    handleSaveRetryRef.current = () => handleSave();
+  });
 
   if (loading) {
     return (

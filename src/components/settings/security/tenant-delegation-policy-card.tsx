@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Handshake, Loader2 } from "lucide-react";
@@ -52,44 +52,43 @@ export function TenantDelegationPolicyCard() {
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchPolicy = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.TENANT_POLICY);
-      if (res.ok) {
-        const data = await res.json();
-
-        const delegDefault = data.delegationDefaultTtlSec;
-        const delegDefaultEnabled = delegDefault !== null && delegDefault !== undefined;
-        const delegDefaultStr = delegDefaultEnabled ? String(delegDefault) : "";
-
-        const delegMax = data.delegationMaxTtlSec;
-        const delegMaxEnabled = delegMax !== null && delegMax !== undefined;
-        const delegMaxStr = delegMaxEnabled ? String(delegMax) : "";
-
-        setDelegationDefaultEnabled(delegDefaultEnabled);
-        setDelegationDefaultTtlSec(delegDefaultStr);
-        setDelegationMaxEnabled(delegMaxEnabled);
-        setDelegationMaxTtlSec(delegMaxStr);
-
-        setInitialPolicy({
-          delegationDefaultEnabled: delegDefaultEnabled,
-          delegationDefaultTtlSec: delegDefaultStr,
-          delegationMaxEnabled: delegMaxEnabled,
-          delegationMaxTtlSec: delegMaxStr,
-        });
-      } else {
-        toast.error(t("delegationPolicyLoadFailed"));
-      }
-    } catch {
-      toast.error(t("delegationPolicyLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
+    const fetchPolicy = async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_POLICY);
+        if (res.ok) {
+          const data = await res.json();
+
+          const delegDefault = data.delegationDefaultTtlSec;
+          const delegDefaultEnabled = delegDefault !== null && delegDefault !== undefined;
+          const delegDefaultStr = delegDefaultEnabled ? String(delegDefault) : "";
+
+          const delegMax = data.delegationMaxTtlSec;
+          const delegMaxEnabled = delegMax !== null && delegMax !== undefined;
+          const delegMaxStr = delegMaxEnabled ? String(delegMax) : "";
+
+          setDelegationDefaultEnabled(delegDefaultEnabled);
+          setDelegationDefaultTtlSec(delegDefaultStr);
+          setDelegationMaxEnabled(delegMaxEnabled);
+          setDelegationMaxTtlSec(delegMaxStr);
+
+          setInitialPolicy({
+            delegationDefaultEnabled: delegDefaultEnabled,
+            delegationDefaultTtlSec: delegDefaultStr,
+            delegationMaxEnabled: delegMaxEnabled,
+            delegationMaxTtlSec: delegMaxStr,
+          });
+        } else {
+          toast.error(t("delegationPolicyLoadFailed"));
+        }
+      } catch {
+        toast.error(t("delegationPolicyLoadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    };
     void fetchPolicy();
-  }, [fetchPolicy]);
+  }, [t]);
 
   const validate = (): string | null => {
     if (delegationDefaultEnabled) {
@@ -112,7 +111,8 @@ export function TenantDelegationPolicyCard() {
     return null;
   };
 
-  const inlineReauth = useInlineReauth(() => handleSave());
+  const handleSaveRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleSaveRetryRef.current());
 
   const handleSave = async () => {
     const validationError = validate();
@@ -146,6 +146,10 @@ export function TenantDelegationPolicyCard() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    handleSaveRetryRef.current = () => handleSave();
+  });
 
   if (loading) {
     return (

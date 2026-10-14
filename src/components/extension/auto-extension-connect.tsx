@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   APP_NAME,
@@ -32,6 +32,12 @@ export function isOverlayActive(): boolean {
   return !!document.querySelector("[data-overlay-active]");
 }
 
+const subscribeNoop = () => () => {};
+
+function readHasConnectParam(): boolean {
+  return new URLSearchParams(window.location.search).has(EXT_CONNECT_PARAM);
+}
+
 /**
  * Automatically connects the browser extension after vault unlock
  * when the page was opened from the extension (indicated by ?ext_connect=1).
@@ -51,7 +57,8 @@ interface AutoExtensionConnectProps {
 export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectProps = {}) {
   const t = useTranslations("Extension");
   const locale = useLocale();
-  const didRunRef = useRef(false);
+  const hasConnectParam = useSyncExternalStore(subscribeNoop, readHasConnectParam, () => false);
+  const [didRun, setDidRun] = useState(false);
   const [status, setStatus] = useState<ConnectStatus>(CONNECT_STATUS.IDLE);
   const [requiresReauth, setRequiresReauth] = useState(false);
   const [requiresRecentSession, setRequiresRecentSession] = useState(false);
@@ -110,27 +117,21 @@ export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectPro
     }
   }, []);
 
-  useEffect(() => {
-    if (didRunRef.current) return;
-
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has(EXT_CONNECT_PARAM)) return;
-
-    didRunRef.current = true;
-
-    // C15-v2: surface the AWAITING_CLICK confirmation card instead of auto-
-    // firing connect(). The user click on the Allow button satisfies
-    // navigator.userActivation.isActive at the moment of postMessage; the
-    // content-script gate then refuses XSS-issued postMessages that arrive
-    // without that activation. URL param removal is deferred to the click
-    // handler so reload reproduces the prompt.
+  // C15-v2: surface the AWAITING_CLICK confirmation card instead of auto-
+  // firing connect(). The user click on the Allow button satisfies
+  // navigator.userActivation.isActive at the moment of postMessage; the
+  // content-script gate then refuses XSS-issued postMessages that arrive
+  // without that activation. URL param removal is deferred to the click
+  // handler so reload reproduces the prompt.
+  if (hasConnectParam && !didRun) {
+    setDidRun(true);
     setStatus(CONNECT_STATUS.AWAITING_CLICK);
-  }, []);
+  }
 
   // Report active/idle to the parent gate so it can defer the vault lock screen
   // while the connect overlay is showing. Suppress the initial IDLE report: on a
-  // fresh ext_connect mount the status is briefly IDLE before the mount effect
-  // sets AWAITING_CLICK; reporting that transient IDLE would make the gate tear
+  // fresh ext_connect mount the status is briefly IDLE before AWAITING_CLICK
+  // is set; reporting that transient IDLE would make the gate tear
   // the overlay down before it ever shows. Only report idle AFTER we've gone
   // active at least once (the genuine dismissal/done transition).
   const wasActiveRef = useRef(false);

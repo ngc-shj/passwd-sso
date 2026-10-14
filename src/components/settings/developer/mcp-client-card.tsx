@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -121,11 +121,8 @@ export function McpClientCard() {
     | { type: "create" }
     | { type: "edit" }
     | { type: "delete"; clientId: string };
-  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
-    if (retry.type === "create") await handleCreate();
-    else if (retry.type === "edit") await handleEdit();
-    else if (retry.type === "delete") await handleDelete(retry.clientId);
-  });
+  const handleRetryRef = useRef<(retry: ReauthRetry) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetry>((retry) => handleRetryRef.current(retry));
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
@@ -149,19 +146,23 @@ export function McpClientCard() {
 
   const editHasChanges = useFormDirty(editCurrent, editInitial);
 
-  const fetchClients = useCallback(async () => {
-    try {
-      const res = await fetchApi(apiPath.tenantMcpClients());
-      if (res.ok) {
-        const data = await res.json();
-        setClients(data.clients ?? []);
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchClients = useCallback(
+    () =>
+      fetchApi(apiPath.tenantMcpClients())
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setClients(data.clients ?? []);
+          }
+        })
+        .catch(() => {
+          // silently fail
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [],
+  );
 
   useEffect(() => {
     fetchClients();
@@ -383,6 +384,14 @@ const toastUpdateApiError = (errorCode: unknown) => {
       toast.error(t("mcpDeleteFailed"));
     }
   };
+
+  useEffect(() => {
+    handleRetryRef.current = async (retry) => {
+      if (retry.type === "create") await handleCreate();
+      else if (retry.type === "edit") await handleEdit();
+      else if (retry.type === "delete") await handleDelete(retry.clientId);
+    };
+  });
 
   const toggleCreateScope = (scope: string, checked: boolean) => {
     setCreateScopes((prev) => {

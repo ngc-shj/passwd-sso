@@ -95,6 +95,24 @@ export function SshKeyForm({
   const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
   const [privateKeyWarning, setPrivateKeyWarning] = useState("");
 
+  const applyParsedPrivateKey = useCallback((pem: string) =>
+    parseSshPrivateKey(pem)
+      .then((parsed) => {
+        if (parsed) {
+          setPublicKey(parsed.publicKey);
+          setKeyType(parsed.keyType);
+          setKeySize(parsed.keySize);
+          setFingerprint(parsed.fingerprint);
+          if (parsed.comment) setComment(parsed.comment);
+          setPrivateKeyWarning("");
+        } else {
+          setPrivateKeyWarning(t("privateKeyFormatWarning"));
+        }
+      })
+      .catch(() => {
+        setPrivateKeyWarning(t("privateKeyFormatWarning"));
+      }), [t]);
+
   // Auto-parse SSH key and show warning on failure
   const handlePrivateKeyChange = useCallback(async (pem: string) => {
     setPrivateKey(pem);
@@ -106,27 +124,13 @@ export function SshKeyForm({
       setPrivateKeyWarning("");
       return;
     }
-    try {
-      const parsed = await parseSshPrivateKey(pem);
-      if (parsed) {
-        setPublicKey(parsed.publicKey);
-        setKeyType(parsed.keyType);
-        setKeySize(parsed.keySize);
-        setFingerprint(parsed.fingerprint);
-        if (parsed.comment) setComment(parsed.comment);
-        setPrivateKeyWarning("");
-      } else {
-        setPrivateKeyWarning(t("privateKeyFormatWarning"));
-      }
-    } catch {
-      setPrivateKeyWarning(t("privateKeyFormatWarning"));
-    }
-  }, [t]);
+    await applyParsedPrivateKey(pem);
+  }, [applyParsedPrivateKey]);
 
   // Parse on initial load
   useEffect(() => {
-    if (initialData?.privateKey) {
-      void handlePrivateKeyChange(initialData.privateKey);
+    if (initialData?.privateKey?.trim()) {
+      void applyParsedPrivateKey(initialData.privateKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -145,19 +149,6 @@ export function SshKeyForm({
       travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      privateKey,
-      publicKey,
-      passphrase,
-      comment,
-      notes,
-      base.selectedTags,
-      base.folderId,
-      base.requireReprompt,
-      travelSafe,
-      base.expiresAt,
-    ],
   );
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant

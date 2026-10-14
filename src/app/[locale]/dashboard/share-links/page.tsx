@@ -98,10 +98,21 @@ export default function ShareLinksPage() {
   const [logNextCursor, setLogNextCursor] = useState<string | null>(null);
 
   // Sync typeFilter when navigating via sidebar links (?type=send / ?type=entry)
-  useEffect(() => {
-    const next = typeParam === "send" || typeParam === "entry" ? typeParam : "all";
-    setTypeFilter(next);
-  }, [typeParam]);
+  const [prevTypeParam, setPrevTypeParam] = useState(typeParam);
+  if (typeParam !== prevTypeParam) {
+    setPrevTypeParam(typeParam);
+    setTypeFilter(typeParam === "send" || typeParam === "entry" ? typeParam : "all");
+  }
+
+  const [prevFilters, setPrevFilters] = useState({ statusFilter, typeFilter, teamFilter });
+  if (
+    statusFilter !== prevFilters.statusFilter ||
+    typeFilter !== prevFilters.typeFilter ||
+    teamFilter !== prevFilters.teamFilter
+  ) {
+    setPrevFilters({ statusFilter, typeFilter, teamFilter });
+    setLoading(true);
+  }
 
   const fetchLinks = useCallback(
     async (cursor?: string) => {
@@ -119,7 +130,6 @@ export default function ShareLinksPage() {
   );
 
   useEffect(() => {
-    setLoading(true);
     fetchLinks().then((data) => {
       if (data) {
         setLinks(data.items);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
@@ -82,37 +82,44 @@ export function TenantMembersCard() {
     })();
   }, []);
 
-  const fetchMembers = useCallback(async () => {
+  const fetchMembers = useCallback(
+    () =>
+      fetchApi(API_PATH.TENANT_MEMBERS)
+        .then(async (r) => {
+          if (!r.ok) throw new Error();
+          const d = await r.json();
+          if (Array.isArray(d)) setMembers(d);
+        })
+        .catch(() => {
+          setMembers([]);
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [],
+  );
+
+  const reloadMembers = useCallback(() => {
     setLoading(true);
-    try {
-      const r = await fetchApi(API_PATH.TENANT_MEMBERS);
-      if (!r.ok) throw new Error();
-      const d = await r.json();
-      if (Array.isArray(d)) setMembers(d);
-    } catch {
-      setMembers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    return fetchMembers();
+  }, [fetchMembers]);
 
   useEffect(() => {
     if (isAdmin) {
-      fetchMembers();
-    } else {
-      setLoading(false);
+      void fetchMembers();
     }
   }, [isAdmin, fetchMembers]);
 
   // Retry target carries (userId, newRole) so a step-up interruption replays
   // the same role change after reauth.
+  const handleChangeRoleRef = useRef<(userId: string, newRole: string) => Promise<void>>(async () => {});
   const inlineReauth = useInlineReauth<{ userId: string; newRole: string }>(
     async ({ userId, newRole }): Promise<void> => {
-      await handleChangeRole(userId, newRole);
+      await handleChangeRoleRef.current(userId, newRole);
     },
   );
 
-  const handleChangeRole = useCallback(async (userId: string, newRole: string): Promise<void> => {
+  const handleChangeRole = async (userId: string, newRole: string): Promise<void> => {
     try {
       // @stepup id:tenant-member-put
       const res = await fetchApi(apiPath.tenantMemberById(userId), {
@@ -130,13 +137,17 @@ export function TenantMembersCard() {
         return;
       }
       toast.success(t("roleChanged"));
-      fetchMembers();
+      reloadMembers();
     } catch {
       toast.error(t("roleChangeFailed"));
     }
-  }, [t, fetchMembers, inlineReauth]);
+  };
 
-  if (roleLoading || loading) {
+  useEffect(() => {
+    handleChangeRoleRef.current = handleChangeRole;
+  });
+
+  if (roleLoading || (isAdmin && loading)) {
     return (
       <Card>
         <CardContent className="flex justify-center py-8">
@@ -234,19 +245,19 @@ export function TenantMembersCard() {
                       userId={m.userId}
                       memberName={m.name ?? m.email ?? "—"}
                       pendingResets={m.pendingResets}
-                      onRevoke={fetchMembers}
+                      onRevoke={reloadMembers}
                     />
                     <TenantVaultResetButton
                       userId={m.userId}
                       memberName={m.name ?? m.email ?? "—"}
                       disabled={!canReset}
-                      onSuccess={fetchMembers}
+                      onSuccess={reloadMembers}
                     />
                     <TenantClearLockoutButton
                       userId={m.userId}
                       memberName={m.name ?? m.email ?? "—"}
                       disabled={!canClearLockout}
-                      onSuccess={fetchMembers}
+                      onSuccess={reloadMembers}
                     />
                   </div>
                 </div>

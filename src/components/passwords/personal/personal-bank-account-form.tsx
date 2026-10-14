@@ -123,23 +123,6 @@ export function BankAccountForm({
       travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      bankName,
-      accountType,
-      accountHolderName,
-      accountNumber,
-      routingNumber,
-      swiftBic,
-      iban,
-      branchName,
-      notes,
-      base.selectedTags,
-      base.folderId,
-      base.requireReprompt,
-      travelSafe,
-      base.expiresAt,
-    ],
   );
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant

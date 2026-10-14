@@ -164,11 +164,21 @@ const VaultContext = createContext<VaultContextValue | null>(null);
 
 export function VaultProvider({ children }: { children: ReactNode }) {
   const { data: session, status: sessionStatus, update } = useSession();
+  const sessionUserId = session?.user?.id;
   const updateRef = useRef(update);
   useEffect(() => {
     updateRef.current = update;
   }, [update]);
-  const [vaultStatus, setVaultStatus] = useState<VaultStatus>(VAULT_STATUS.LOADING);
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus>(() =>
+    sessionStatus === "unauthenticated" ? VAULT_STATUS.LOCKED : VAULT_STATUS.LOADING,
+  );
+  const [prevSessionStatus, setPrevSessionStatus] = useState(sessionStatus);
+  if (sessionStatus !== prevSessionStatus) {
+    setPrevSessionStatus(sessionStatus);
+    if (sessionStatus === "unauthenticated") {
+      setVaultStatus(VAULT_STATUS.LOCKED);
+    }
+  }
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const [hasRecoveryKey, setHasRecoveryKey] = useState(false);
   const [recoveryKeyInvalidated, setRecoveryKeyInvalidated] = useState(false);
@@ -182,6 +192,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   });
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
+  const [keyVersion, setKeyVersion] = useState(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
   const wrappedKeyRef = useRef<{ ciphertext: string; iv: string; authTag: string } | null>(null);
   // ECDH key pair for team E2E encryption
@@ -191,12 +202,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── Fetch vault status on session load ───────────────────────
 
   useEffect(() => {
-    if (sessionStatus !== "authenticated" || !session?.user) {
-      if (sessionStatus === "unauthenticated") {
-        setVaultStatus(VAULT_STATUS.LOCKED);
-      }
-      return;
-    }
+    if (sessionStatus !== "authenticated" || !session?.user) return;
 
     async function checkVaultStatus() {
       try {
@@ -398,6 +404,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     ecdhPublicKeyJwkRef.current = ecdhPubJwk;
     ecdhPrivBytes.fill(0);
     secretKey.fill(0);
+    setKeyVersion(keyVersionRef.current);
     setEncryptionKey(encKey);
     setVaultStatus(VAULT_STATUS.UNLOCKED);
   }, []);
@@ -511,7 +518,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       secretKey.fill(0);
 
       // 7. Auto-confirm pending emergency access grants (async nonblocking)
-      const userId = session?.user?.id;
+      const userId = sessionUserId;
       if (userId && secretKeyRef.current) {
         const sk = new Uint8Array(secretKeyRef.current);
         confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
@@ -520,6 +527,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // 8. Store encryption key in memory
+      setKeyVersion(keyVersionRef.current);
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
 
@@ -528,7 +536,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (err instanceof VaultUnlockError) throw err;
       return false;
     }
-  }, [session?.user?.id]);
+  }, [sessionUserId]);
 
   // ─── Unlock with Passkey (PRF) ───────────────────────────────
 
@@ -666,7 +674,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       secretKey.fill(0);
 
       // 8. Auto-confirm pending emergency access grants
-      const userId = session?.user?.id;
+      const userId = sessionUserId;
       if (userId && secretKeyRef.current) {
         const sk = new Uint8Array(secretKeyRef.current);
         confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
@@ -675,6 +683,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // 9. Set unlocked
+      setKeyVersion(keyVersionRef.current);
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
 
@@ -687,7 +696,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
       return false;
     }
-  }, [session?.user?.id]);
+  }, [sessionUserId]);
 
   // ─── Unlock with stored PRF (single-ceremony sign-in flow) ──────
 
@@ -791,7 +800,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // Auto-confirm pending emergency access grants
-      const userId = session?.user?.id;
+      const userId = sessionUserId;
       if (userId && secretKeyRef.current) {
         const sk = new Uint8Array(secretKeyRef.current);
         confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
@@ -800,6 +809,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // Set unlocked
+      setKeyVersion(keyVersionRef.current);
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
 
@@ -811,7 +821,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       prfOutput.fill(0);
       secretKey?.fill(0);
     }
-  }, [session?.user?.id]);
+  }, [sessionUserId]);
 
   // ─── Change Passphrase ────────────────────────────────────────
 
@@ -1048,7 +1058,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const newKeyVersion = oldKeyVersion + 1;
 
       // 5. Re-encrypt entries: decrypt with OLD encryptionKey, re-encrypt with newEncKey
-      const userId = session?.user?.id;
+      const userId = sessionUserId;
       const totalEntries = entries.length;
       const reencryptedEntries = [];
       for (let i = 0; i < totalEntries; i++) {
@@ -1255,6 +1265,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       };
       // ecdhPrivateKeyBytesRef remains valid — private key bytes did not change.
       newSecretKey.fill(0);
+      setKeyVersion(keyVersionRef.current);
       setEncryptionKey(newEncKey);
       // The dialog uses these counts to surface operator banners.
       const effects = (result as { rotationEffects?: RotationEffects }).rotationEffects;
@@ -1263,7 +1274,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
       return null;
     },
-    [encryptionKey, session?.user?.id],
+    [encryptionKey, sessionUserId],
   );
 
   const verifyPassphrase = useCallback(async (passphrase: string): Promise<boolean> => {
@@ -1331,7 +1342,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         <EmergencyAccessProvider
           vaultStatus={vaultStatus}
           getSecretKey={getSecretKey}
-          keyVersion={keyVersionRef.current}
+          keyVersion={keyVersion}
           userId={session?.user?.id}
         >
           <TeamVaultProvider

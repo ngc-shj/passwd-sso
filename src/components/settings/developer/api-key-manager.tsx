@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -93,23 +93,25 @@ export function ApiKeyManager() {
   // server-side step-up-gated. The retry arg (owned by the hook) records
   // which mutation was in flight so the post-reauth retry replays the same one.
   type ReauthRetry = { type: "create" } | { type: "revoke"; keyId: string };
-  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
-    if (retry.type === "create") await handleCreate();
-    else if (retry.type === "revoke") await handleRevoke(retry.keyId);
-  });
+  const handleRetryRef = useRef<(retry: ReauthRetry) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetry>((retry) => handleRetryRef.current(retry));
 
-  const fetchKeys = useCallback(async () => {
-    try {
-      const res = await fetchApi("/api/api-keys");
-      if (res.ok) {
-        setKeys(await res.json());
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchKeys = useCallback(
+    () =>
+      fetchApi("/api/api-keys")
+        .then(async (res) => {
+          if (res.ok) {
+            setKeys(await res.json());
+          }
+        })
+        .catch(() => {
+          // ignore
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [],
+  );
 
   useEffect(() => {
     fetchKeys();
@@ -200,6 +202,13 @@ export function ApiKeyManager() {
       toast.error(t("revokeError"));
     }
   };
+
+  useEffect(() => {
+    handleRetryRef.current = async (retry) => {
+      if (retry.type === "create") await handleCreate();
+      else if (retry.type === "revoke") await handleRevoke(retry.keyId);
+    };
+  });
 
   const getStatus = (key: ApiKeyEntry) => {
     if (key.revokedAt) return "revoked";

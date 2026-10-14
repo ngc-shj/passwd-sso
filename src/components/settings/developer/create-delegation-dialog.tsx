@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
 import { API_PATH } from "@/lib/constants/auth/api-path";
@@ -83,70 +83,80 @@ export function CreateDelegationDialog({
   const [ttlSeconds, setTtlSeconds] = useState(900);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const loadedRef = useRef(false);
+  const [loaded, setLoaded] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   const decryptableTokens = availableTokens.filter((t) => t.hasDelegationScope);
 
   // Load and decrypt entries on open
-  const loadEntries = useCallback(async () => {
+  const loadEntries = useCallback(() => {
     if (!encryptionKey || !userId) return;
-    setLoading(true);
-    try {
-      const res = await fetchApi(API_PATH.PASSWORDS);
-      if (!res.ok) {
-        return;
-      }
-      const data = await res.json();
-
-      const decrypted: EntryItem[] = [];
-      for (const entry of data) {
-        try {
-          const aad =
-            entry.aadVersion >= 1
-              ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
-              : undefined;
-          const overview: DecryptedOverview = JSON.parse(
-            await decryptData(
-              entry.encryptedOverview as EncryptedData,
-              encryptionKey,
-              aad,
-            ),
-          );
-          decrypted.push({
-            id: entry.id,
-            title: overview.title,
-            username: overview.username ?? null,
-            urlHost: overview.urlHost ?? null,
-            aadVersion: entry.aadVersion,
-          });
-        } catch {
-          // Skip entries that fail to decrypt
+    return fetchApi(API_PATH.PASSWORDS)
+      .then(async (res) => {
+        if (!res.ok) {
+          return;
         }
-      }
-      setEntries(decrypted.sort((a, b) => a.title.localeCompare(b.title)));
-      loadedRef.current = true;
-    } finally {
-      setLoading(false);
-    }
+        const data = await res.json();
+
+        const decrypted: EntryItem[] = [];
+        for (const entry of data) {
+          try {
+            const aad =
+              entry.aadVersion >= 1
+                ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
+                : undefined;
+            const overview: DecryptedOverview = JSON.parse(
+              await decryptData(
+                entry.encryptedOverview as EncryptedData,
+                encryptionKey,
+                aad,
+              ),
+            );
+            decrypted.push({
+              id: entry.id,
+              title: overview.title,
+              username: overview.username ?? null,
+              urlHost: overview.urlHost ?? null,
+              aadVersion: entry.aadVersion,
+            });
+          } catch {
+            // Skip entries that fail to decrypt
+          }
+        }
+        setEntries(decrypted.sort((a, b) => a.title.localeCompare(b.title)));
+        setLoaded(true);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [encryptionKey, userId]);
 
   useEffect(() => {
-    if (open && selectedTokenId && !loadedRef.current) {
+    if (open && selectedTokenId && !loaded) {
       loadEntries();
     }
-  }, [open, selectedTokenId, loadEntries]);
+  }, [open, selectedTokenId, loaded, loadEntries]);
 
   // Reset state when dialog closes
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (!open) {
       setSelectedTokenId("");
       setEntries([]);
       setSelectedEntryIds(new Set());
       setTtlSeconds(900);
       setSearch("");
-      loadedRef.current = false;
+      setLoaded(false);
     }
-  }, [open]);
+  }
+
+  // Loading starts here rather than in the effect that runs loadEntries; the
+  // guard mirrors loadEntries' own early return.
+  const handleTokenChange = (tokenId: string) => {
+    setSelectedTokenId(tokenId);
+    if (open && !loaded && encryptionKey && userId) setLoading(true);
+  };
 
   const toggleEntry = (id: string) => {
     setSelectedEntryIds((prev) => {
@@ -255,7 +265,10 @@ export function CreateDelegationDialog({
               ) : (
                 <Select
                   value={selectedTokenId}
-                  onValueChange={setSelectedTokenId}
+                  onValueChange={handleTokenChange}
+                  onOpenChange={(selectOpen) => {
+                    if (selectOpen) setNow(Date.now());
+                  }}
                 >
                   <SelectTrigger className="h-9">
                     <SelectValue placeholder={t("selectMcpToken")} />
@@ -265,7 +278,7 @@ export function CreateDelegationDialog({
                       const remaining = Math.max(
                         0,
                         Math.floor(
-                          (new Date(token.expiresAt).getTime() - Date.now()) /
+                          (new Date(token.expiresAt).getTime() - now) /
                             MS_PER_MINUTE,
                         ),
                       );

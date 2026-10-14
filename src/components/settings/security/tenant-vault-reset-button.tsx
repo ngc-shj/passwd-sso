@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,7 +47,8 @@ export function TenantVaultResetButton({
   // Inline step-up reauth — initiate is server-side step-up-gated; on a stale
   // session the confirm dialog stays open and the hook re-runs initiate after
   // reauth.
-  const inlineReauth = useInlineReauth(() => handleReset());
+  const handleResetRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleResetRetryRef.current());
 
   const handleReset = async () => {
     setLoading(true);
@@ -84,6 +85,10 @@ export function TenantVaultResetButton({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    handleResetRetryRef.current = () => handleReset();
+  });
 
   return (
     <AlertDialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setConfirmInput(""); }}>

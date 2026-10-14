@@ -50,19 +50,23 @@ export function McpConnectionsCard() {
   const [revokeAllOpen, setRevokeAllOpen] = useState(false);
   const [revokingAll, setRevokingAll] = useState(false);
 
-  const fetchClients = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.USER_MCP_TOKENS);
-      if (res.ok) {
-        const data = await res.json();
-        setClients(data.clients);
-      }
-    } catch {
-      // Graceful failure — show empty state
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchClients = useCallback(
+    () =>
+      fetchApi(API_PATH.USER_MCP_TOKENS)
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setClients(data.clients);
+          }
+        })
+        .catch(() => {
+          // Graceful failure — show empty state
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [],
+  );
 
   useEffect(() => {
     fetchClients();

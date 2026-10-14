@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,12 @@ export default function TeamTransferOwnershipPage({
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [prevTeamId, setPrevTeamId] = useState(teamId);
+  if (teamId !== prevTeamId) {
+    setPrevTeamId(teamId);
+    setTeam(null);
+    setLoadError(false);
+  }
   const [members, setMembers] = useState<Member[]>([]);
   const [transferSearch, setTransferSearch] = useState("");
   const viewerTenantName = members.find((m) => m.role === TEAM_ROLE.OWNER)?.tenantName ?? null;
@@ -86,8 +92,6 @@ export default function TeamTransferOwnershipPage({
   };
 
   useEffect(() => {
-    setTeam(null);
-    setLoadError(false);
     fetchAll();
   }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -96,7 +100,8 @@ export default function TeamTransferOwnershipPage({
   // Inline step-up reauth — ownership transfer is server-side step-up-gated.
   // The retry arg records the target memberId so the post-reauth retry
   // replays the transfer for the same member.
-  const inlineReauth = useInlineReauth<string>((memberId) => handleTransferOwnership(memberId));
+  const transferRetryRef = useRef<(arg: string) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<string>((arg) => transferRetryRef.current(arg));
 
   const handleTransferOwnership = async (memberId: string) => {
     try {
@@ -116,6 +121,10 @@ export default function TeamTransferOwnershipPage({
       toast.error(t("networkError"));
     }
   };
+
+  useEffect(() => {
+    transferRetryRef.current = (memberId) => handleTransferOwnership(memberId);
+  });
 
   if (!team) {
     if (loadError) {

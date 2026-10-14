@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { KeyRound, Loader2 } from "lucide-react";
@@ -50,40 +50,39 @@ export function TenantPasskeyPolicyCard() {
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchPolicy = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.TENANT_POLICY);
-      if (res.ok) {
-        const data = await res.json();
-
-        const requirePasskeyVal = data.requirePasskey ?? false;
-        const graceVal = data.passkeyGracePeriodDays;
-        const gracePeriodVal = graceVal !== null && graceVal !== undefined ? String(graceVal) : "";
-        const pinVal = data.requireMinPinLength;
-        const pinLengthVal = pinVal !== null && pinVal !== undefined ? String(pinVal) : "";
-
-        setRequirePasskey(requirePasskeyVal);
-        setGracePeriodDays(gracePeriodVal);
-        setRequireMinPinLength(pinLengthVal);
-
-        setInitialPolicy({
-          requirePasskey: requirePasskeyVal,
-          gracePeriodDays: gracePeriodVal,
-          requireMinPinLength: pinLengthVal,
-        });
-      } else {
-        toast.error(t("passkeyPolicyLoadFailed"));
-      }
-    } catch {
-      toast.error(t("passkeyPolicyLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
+    const fetchPolicy = async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_POLICY);
+        if (res.ok) {
+          const data = await res.json();
+
+          const requirePasskeyVal = data.requirePasskey ?? false;
+          const graceVal = data.passkeyGracePeriodDays;
+          const gracePeriodVal = graceVal !== null && graceVal !== undefined ? String(graceVal) : "";
+          const pinVal = data.requireMinPinLength;
+          const pinLengthVal = pinVal !== null && pinVal !== undefined ? String(pinVal) : "";
+
+          setRequirePasskey(requirePasskeyVal);
+          setGracePeriodDays(gracePeriodVal);
+          setRequireMinPinLength(pinLengthVal);
+
+          setInitialPolicy({
+            requirePasskey: requirePasskeyVal,
+            gracePeriodDays: gracePeriodVal,
+            requireMinPinLength: pinLengthVal,
+          });
+        } else {
+          toast.error(t("passkeyPolicyLoadFailed"));
+        }
+      } catch {
+        toast.error(t("passkeyPolicyLoadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    };
     void fetchPolicy();
-  }, [fetchPolicy]);
+  }, [t]);
 
   const validate = (): string | null => {
     if (requirePasskey && gracePeriodDays !== "") {
@@ -99,7 +98,8 @@ export function TenantPasskeyPolicyCard() {
     return null;
   };
 
-  const inlineReauth = useInlineReauth(() => handleSave());
+  const handleSaveRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleSaveRetryRef.current());
 
   const handleSave = async () => {
     const validationError = validate();
@@ -134,6 +134,10 @@ export function TenantPasskeyPolicyCard() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    handleSaveRetryRef.current = () => handleSave();
+  });
 
   if (loading) {
     return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import Bowser from "bowser";
 import { toast } from "sonner";
@@ -65,25 +65,25 @@ export function SessionsCard() {
   const [revokeAllOpen, setRevokeAllOpen] = useState(false);
   const [revoking, setRevoking] = useState(false);
 
-  const fetchSessions = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.SESSIONS);
-      if (res.ok) {
-        const data = await res.json();
-        setSessions(Array.isArray(data) ? data : data.sessions ?? []);
-      } else {
-        toast.error(t("fetchError"));
-      }
-    } catch {
-      toast.error(t("fetchError"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
+    async function fetchSessions() {
+      try {
+        const res = await fetchApi(API_PATH.SESSIONS);
+        if (res.ok) {
+          const data = await res.json();
+          setSessions(Array.isArray(data) ? data : data.sessions ?? []);
+        } else {
+          toast.error(t("fetchError"));
+        }
+      } catch {
+        toast.error(t("fetchError"));
+      } finally {
+        setLoading(false);
+      }
+    }
+
     fetchSessions();
-  }, [fetchSessions]);
+  }, [t]);
 
   const handleRevoke = async (id: string) => {
     setRevoking(true);
