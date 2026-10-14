@@ -21,6 +21,7 @@ import {
   createTestContext,
   setBypassRlsGucs,
   type TestContext,
+  inRetentionSweepTx,
 } from "./helpers";
 import { sweepPerTenantAge } from "@/workers/retention-gc-worker/sweep";
 import { RETENTION_REGISTRY } from "@/workers/retention-gc-worker/registry";
@@ -128,7 +129,7 @@ describe("retention-gc directory-sync-log retention (SC7)", () => {
     await setRetention(30);
     const old = await insertSyncLog("now() - interval '31 days'");
 
-    await ctx.retentionWorker.prisma.$transaction(async (tx) => {
+    await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepPerTenantAge(tx, syncLogEntry, 100);
     });
     expect(await logExists(old)).toBe(false);

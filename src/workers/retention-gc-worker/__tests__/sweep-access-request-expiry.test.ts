@@ -1,6 +1,6 @@
 /**
  * Unit tests for sweepExpiredAccessRequests (external-review-2026-07
- * remediation, C7): SQL shape (bypass_rls set, batch-bounded UPDATE, static
+ * remediation, C7): SQL shape (bypass_rls asserted, batch-bounded UPDATE, static
  * template — no interpolated values) and SQL <-> MATRIX parity — a guard that
  * fails if MATRIX.PENDING.EXPIRED stops permitting AR_ACTOR.SYSTEM while this
  * SQL still runs.
@@ -10,35 +10,34 @@ import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { sweepExpiredAccessRequests } from "../sweep";
 import { MATRIX, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
+import { isAssertRead, makeQueryRaw, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 function makeTx(updatedCount: number) {
-  const executeRaw = vi.fn().mockResolvedValue(undefined); // set_config
+  const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config
   const executeRawUnsafe = vi.fn().mockResolvedValue(updatedCount); // UPDATE
+  // The status sweep always runs under the dispatcher's bypass.
+  const queryRaw = makeQueryRaw({ bypass: "on" });
   const tx = {
     $executeRaw: executeRaw,
     $executeRawUnsafe: executeRawUnsafe,
+    $queryRaw: queryRaw,
   } as unknown as Prisma.TransactionClient;
-  return { tx, executeRaw, executeRawUnsafe };
+  return { tx, executeRaw, executeRawUnsafe, queryRaw };
 }
 
 describe("sweepExpiredAccessRequests (C7)", () => {
-  it("sets bypass_rls before the UPDATE", async () => {
-    const { tx, executeRaw, executeRawUnsafe } = makeTx(0);
+  it("issues no set_config and reads the bypass state before the UPDATE (#874)", async () => {
+    const { tx, executeRaw, executeRawUnsafe, queryRaw } = makeTx(0);
     await sweepExpiredAccessRequests(tx, 100);
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    // Ordering, not just call count (T2): bypass_rls must be set BEFORE the
-    // UPDATE runs, or the RLS policy's uuid cast on app.tenant_id throws.
-    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+    // The dispatcher (inSweepTx) owns the bypass; the member never sets it.
+    expect(executeRaw).not.toHaveBeenCalled();
+    // Ordering, not just call count (T2): the bypass state is checked BEFORE
+    // the UPDATE runs.
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(isAssertRead(sqlText(queryRaw.mock.calls[0][0]))).toBe(true);
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       executeRawUnsafe.mock.invocationCallOrder[0],
     );
-    // The set_config call itself targets app.bypass_rls (not some other GUC).
-    const setConfigCall = executeRaw.mock.calls[0][0] as unknown as {
-      strings?: readonly string[];
-    };
-    const setConfigSql = Array.isArray(setConfigCall)
-      ? (setConfigCall as unknown as readonly string[]).join("")
-      : String(setConfigCall);
-    expect(setConfigSql).toContain("set_config('app.bypass_rls'");
   });
 
   it("runs a batch-bounded UPDATE with the batchSize as the only bound parameter, CAS'd on the outer WHERE (M1)", async () => {

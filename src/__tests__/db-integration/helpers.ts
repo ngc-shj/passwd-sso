@@ -13,6 +13,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { randomUUID, randomBytes } from "node:crypto";
@@ -136,6 +137,23 @@ export async function setBypassRlsGucs(client: any): Promise<void> {
   await client.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
   await client.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
   await client.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
+}
+
+/**
+ * Run `fn` in a transaction whose first statement sets the tx-local RLS
+ * bypass, as retention-gc's module-private inSweepTx does for a globalDelete
+ * or per-tenant entry (#874). The sweeps only assert the bypass, so a test
+ * calling one directly must set it the way the dispatcher does; inSweepTx
+ * itself stays unexported.
+ */
+export async function inRetentionSweepTx<T>(
+  client: PrismaClient,
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return client.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+    return fn(tx);
+  });
 }
 
 /**

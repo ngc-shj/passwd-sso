@@ -24,6 +24,7 @@ import {
   raceTwoClients,
   type TestContext,
   type PrismaWithPool,
+  inRetentionSweepTx,
 } from "./helpers";
 import { sweepAuditProvenanceEntry } from "@/workers/retention-gc-worker/sweep";
 import {
@@ -216,7 +217,7 @@ describe("retention-gc security-record GC (SC6)", () => {
     const teamId = await createTeam();
     const inviteId = await insertInvitation(teamId, "now() - interval '1 hour'");
 
-    await ctx.retentionWorker.prisma.$transaction(async (tx) => {
+    await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepAuditProvenanceEntry(tx, inviteEntry, 100);
     });
     expect(await rowExists("team_invitations", inviteId)).toBe(false);
@@ -268,7 +269,7 @@ describe("retention-gc security-record GC (SC6)", () => {
     const shareId = await insertShare("now() - interval '1 hour'");
     await insertShareAccessLog(shareId);
 
-    await ctx.retentionWorker.prisma.$transaction(async (tx) => {
+    await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepAuditProvenanceEntry(tx, shareEntry, 100);
     });
     expect(await rowExists("password_shares", shareId)).toBe(false);

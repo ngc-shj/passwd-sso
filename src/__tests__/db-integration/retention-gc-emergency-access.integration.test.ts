@@ -22,6 +22,7 @@ import {
   createTestContext,
   setBypassRlsGucs,
   type TestContext,
+  inRetentionSweepTx,
 } from "./helpers";
 import { sweepAuditProvenanceEntry } from "@/workers/retention-gc-worker/sweep";
 import { RETENTION_REGISTRY } from "@/workers/retention-gc-worker/registry";
@@ -204,7 +205,7 @@ describe("retention-gc emergency-access-grant GC (SC6b)", () => {
       tokenExpiresAt: "now() + interval '1 day'",
     });
 
-    await ctx.retentionWorker.prisma.$transaction(async (tx) => {
+    await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepAuditProvenanceEntry(tx, grantEntry, 100);
     });
     expect(await grantExists(revoked)).toBe(false);

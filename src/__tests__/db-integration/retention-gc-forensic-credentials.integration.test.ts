@@ -21,6 +21,7 @@ import {
   createTestContext,
   setBypassRlsGucs,
   type TestContext,
+  inRetentionSweepTx,
 } from "./helpers";
 import { sweepAuditProvenanceEntry } from "@/workers/retention-gc-worker/sweep";
 import {
@@ -161,7 +162,7 @@ describe("retention-gc forensic-credential GC (SC4/C6)", () => {
     const tok = await insertExtToken("now() - interval '1 hour'");
 
     // Positive: worker role runs the full capture→emit→delete.
-    await ctx.retentionWorker.prisma.$transaction(async (tx) => {
+    await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepAuditProvenanceEntry(tx, extEntry, 100);
     });
     expect(await extTokenExists(tok)).toBe(false);

@@ -17,4 +17,4 @@
 
 src/lib/auth/session/auth-adapter.ts#createCustomAdapter  # Auth.js adapter callback (deleteUser, via tx.user.delete) — invoked only by the Auth.js session-deletion lifecycle hook, not reachable from an application route handler; not classified by deleteSignal.
 
-src/workers/retention-gc-worker/sweep.ts#sweepTrashEntry  # retention-gc-worker sweep function (tx.teamPasswordEntry.deleteMany / tx.passwordEntry.deleteMany, trash-retention purge) — worker-only, not route-reachable; governed by scripts/checks/worker-policy-manifest.json (retention-gc-worker entry), not the route-level step-up guard.
+src/workers/retention-gc-worker/sweep.ts#sweepTrashTenant  # retention-gc-worker per-tenant trash sweep, called by sweepTrashEntry (tx.teamPasswordEntry.deleteMany / tx.passwordEntry.deleteMany, trash-retention purge) — worker-only, not route-reachable; governed by scripts/checks/worker-policy-manifest.json (retention-gc-worker entry), not the route-level step-up guard.
