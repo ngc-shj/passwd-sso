@@ -572,7 +572,9 @@ export async function sweepTrashEntry(
     const { deletedCount, refs } = await inSweepTx(
       workerPrisma,
       true,
-      async (tx) => {
+      async (tx: Prisma.TransactionClient) => {
+        await assertSweepBypass(tx, true);
+
         // Select trashed entries past the cutoff. team scope also needs team_id
         // so the refs can be partitioned by team (F4).
         const rows =

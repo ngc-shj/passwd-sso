@@ -69,6 +69,8 @@ function buildMockPrisma(opts: {
   tenants: Array<{ id: string; trashRetentionDays: number | null }>;
   selectRows: Record<string, unknown>[];
   attachmentFindMany: AttachmentFindManyMock;
+  /** What the transaction's bypass_rls reads as (default "on", as inSweepTx sets it). */
+  bypassRls?: string | null;
 }) {
   const teamDeleteMany = vi.fn(async () => ({ count: 0 }));
   const personalDeleteMany = vi.fn(async () => ({ count: 0 }));
@@ -77,7 +79,7 @@ function buildMockPrisma(opts: {
   const queryRaw = vi.fn(async (strings: TemplateStringsArray) => {
     const text = strings.join("");
     if (text.includes("current_setting")) {
-      return [{ bypass_rls: "on", tenant_id: "" }];
+      return [{ bypass_rls: opts.bypassRls === undefined ? "on" : opts.bypassRls, tenant_id: "" }];
     }
     if (text.includes("SELECT EXISTS")) {
       return [{ ok: true }];
@@ -121,6 +123,36 @@ beforeEach(() => {
   getAttachmentBlobStore.mockReturnValue({
     backend: BLOB_STORAGE.S3,
     deleteObject,
+  });
+});
+
+describe("sweepTrashEntry — the per-tenant transaction asserts its bypass (#874)", () => {
+  it("refuses a transaction whose bypass is off, before selecting or deleting anything", async () => {
+    const { workerPrisma, queryRaw, teamDeleteMany, personalDeleteMany, auditCreate } = buildMockPrisma({
+      tenants: [{ id: "11111111-1111-4111-8111-111111111111", trashRetentionDays: 30 }],
+      selectRows: [{ id: "e1" }],
+      attachmentFindMany: vi.fn(async () => []),
+      bypassRls: "off",
+    });
+
+    await expect(sweepTrashEntry(workerPrisma as unknown as Parameters<typeof sweepTrashEntry>[0], PERSONAL_ENTRY, 100)).rejects.toThrow(
+      "retention-gc sweep requires the RLS bypass state its entry declares",
+    );
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(personalDeleteMany).not.toHaveBeenCalled();
+    expect(teamDeleteMany).not.toHaveBeenCalled();
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the bypass is on", async () => {
+    const { workerPrisma, personalDeleteMany } = buildMockPrisma({
+      tenants: [{ id: "11111111-1111-4111-8111-111111111111", trashRetentionDays: 30 }],
+      selectRows: [{ id: "e1" }],
+      attachmentFindMany: vi.fn(async () => []),
+    });
+
+    await sweepTrashEntry(workerPrisma as unknown as Parameters<typeof sweepTrashEntry>[0], PERSONAL_ENTRY, 100);
+    expect(personalDeleteMany).toHaveBeenCalled();
   });
 });
 
