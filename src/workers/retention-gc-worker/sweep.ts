@@ -601,8 +601,13 @@ export async function sweepTrashEntry(
  * delete them (the cascade removes attachments), and audit. Asserts the bypass
  * first, like every sweep that takes a tx. Returns the refs for the caller to
  * delete AFTER the commit.
+ *
+ * Exported because it is the function that holds the destructive deleteMany:
+ * check-destructive-wrapper-derivation classifies exported direct wrappers, and
+ * a non-exported one would drop out of that check silently. It asserts the
+ * bypass and never sets it, so exporting it opens no bypass.
  */
-async function sweepTrashTenant(
+export async function sweepTrashTenant(
   tx: Prisma.TransactionClient,
   entry: PerTenantTrashEntry,
   tenantId: string,
