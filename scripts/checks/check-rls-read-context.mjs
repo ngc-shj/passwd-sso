@@ -452,6 +452,14 @@ function resolveInvocation(expr, node) {
  * either the parameter of a callback passed to a context-establishing call, or
  * a parameter annotated as a transaction client and threaded in by its caller.
  */
+const CALLBACK_WRAPPER_KINDS = new Set([
+  SyntaxKind.ParenthesizedExpression,
+  SyntaxKind.AsExpression,
+  SyntaxKind.SatisfiesExpression,
+  SyntaxKind.NonNullExpression,
+  SyntaxKind.TypeAssertionExpression,
+]);
+
 function hasRlsContext(node, recvText, seen = new Set()) {
   let cur = node.getParent();
   while (cur) {
@@ -467,9 +475,18 @@ function hasRlsContext(node, recvText, seen = new Set()) {
       // a call. A callback passed as an argument is judged by the call it is
       // passed to (below): its annotation alone says nothing about whether
       // that call established a context.
+      // Spellings that leave the value a call argument — parentheses, a type
+      // cast, a non-null assertion, `satisfies` — are unwrapped first, and a
+      // `new` expression counts as a call.
+      let argNode = cur;
+      while (CALLBACK_WRAPPER_KINDS.has(argNode.getParent()?.getKind())) {
+        argNode = argNode.getParent();
+      }
+      const argParent = argNode.getParent();
       const isCallbackArgument =
-        cur.getParent()?.getKind() === SyntaxKind.CallExpression &&
-        cur.getParent().getArguments().includes(cur);
+        (argParent?.getKind() === SyntaxKind.CallExpression ||
+          argParent?.getKind() === SyntaxKind.NewExpression) &&
+        (argParent.getArguments() ?? []).includes(argNode);
       if (!isCallbackArgument) {
         for (const param of cur.getParameters()) {
           if (param.getName() !== recvText) continue;

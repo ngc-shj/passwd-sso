@@ -204,6 +204,22 @@ describe("check-rls-read-context", () => {
     expect(r.status).not.toBe(0);
   });
 
+  it.each([
+    ["parenthesized", "prisma.$transaction((async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({})))"],
+    ["cast", "prisma.$transaction((async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({})) as any)"],
+    ["passed to new", "new W(async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({}))"],
+  ])("FAILS an annotated callback argument spelled %s", (_label, expr) => {
+    const r = runGate(`
+      import type { Prisma } from "@prisma/client";
+      declare class W { constructor(fn: (tx: Prisma.TransactionClient) => Promise<unknown>); }
+      export async function f(prisma: any) {
+        return ${expr};
+      }
+    `);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("audit_outbox");
+  });
+
   it("PASSES the same annotated callback when its $transaction sets the GUC", () => {
     const r = runGate(`
       import type { Prisma } from "@prisma/client";
