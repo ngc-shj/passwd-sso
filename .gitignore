@@ -131,6 +131,8 @@ infra/terraform/**/*.tfplan
 # Extension
 extension/dist/
 extension/node_modules/
+# vitest 5's run report (.vitest/json/output.json); regenerated on every run
+extension/.vitest/
 # Packaged extension archives (built from dist/, never committed)
 passwd-sso-extension*.zip
 extension/*.zip
