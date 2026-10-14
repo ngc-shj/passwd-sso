@@ -192,7 +192,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   });
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
+  // The ref serves callbacks; the state is what render passes down. Write
+  // both through commitKeyVersion so they cannot drift apart.
   const [keyVersion, setKeyVersion] = useState(0);
+  const commitKeyVersion = useCallback((version: number) => {
+    keyVersionRef.current = version;
+    setKeyVersion(version);
+  }, []);
   const accountSaltRef = useRef<Uint8Array | null>(null);
   const wrappedKeyRef = useRef<{ ciphertext: string; iv: string; authTag: string } | null>(null);
   // ECDH key pair for team E2E encryption
@@ -397,17 +403,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
     // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and encryption key in memory
     secretKeyRef.current = new Uint8Array(secretKey);
-    keyVersionRef.current = 1;
+    commitKeyVersion(1);
     accountSaltRef.current = accountSalt;
     wrappedKeyRef.current = { ciphertext: wrappedKey.ciphertext, iv: wrappedKey.iv, authTag: wrappedKey.authTag };
     ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivBytes);
     ecdhPublicKeyJwkRef.current = ecdhPubJwk;
     ecdhPrivBytes.fill(0);
     secretKey.fill(0);
-    setKeyVersion(keyVersionRef.current);
     setEncryptionKey(encKey);
     setVaultStatus(VAULT_STATUS.UNLOCKED);
-  }, []);
+  }, [commitKeyVersion]);
 
   // ─── Unlock ───────────────────────────────────────────────────
 
@@ -488,7 +493,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // 6. Store secretKey, keyVersion, accountSalt, wrappedKey for EA auto-confirm and changePassphrase
       secretKeyRef.current = new Uint8Array(secretKey);
-      keyVersionRef.current = vaultData.keyVersion ?? 1;
+      commitKeyVersion(vaultData.keyVersion ?? 1);
       accountSaltRef.current = accountSalt;
       wrappedKeyRef.current = {
         ciphertext: vaultData.encryptedSecretKey,
@@ -527,7 +532,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // 8. Store encryption key in memory
-      setKeyVersion(keyVersionRef.current);
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
 
@@ -536,7 +540,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (err instanceof VaultUnlockError) throw err;
       return false;
     }
-  }, [sessionUserId]);
+  }, [sessionUserId, commitKeyVersion]);
 
   // ─── Unlock with Passkey (PRF) ───────────────────────────────
 
@@ -644,7 +648,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // 7. Store refs (same as passphrase unlock)
       const accountSalt = hexDecode(vaultData.accountSalt);
       secretKeyRef.current = new Uint8Array(secretKey);
-      keyVersionRef.current = vaultData.keyVersion ?? 1;
+      commitKeyVersion(vaultData.keyVersion ?? 1);
       accountSaltRef.current = accountSalt;
       wrappedKeyRef.current = {
         ciphertext: vaultData.encryptedSecretKey,
@@ -683,7 +687,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // 9. Set unlocked
-      setKeyVersion(keyVersionRef.current);
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
 
@@ -696,7 +699,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
       return false;
     }
-  }, [sessionUserId]);
+  }, [sessionUserId, commitKeyVersion]);
 
   // ─── Unlock with stored PRF (single-ceremony sign-in flow) ──────
 
@@ -772,7 +775,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // Store refs (same as passkey unlock)
       const accountSalt = hexDecode(vaultData.accountSalt);
       secretKeyRef.current = new Uint8Array(secretKey);
-      keyVersionRef.current = vaultData.keyVersion ?? 1;
+      commitKeyVersion(vaultData.keyVersion ?? 1);
       accountSaltRef.current = accountSalt;
       wrappedKeyRef.current = {
         ciphertext: vaultData.encryptedSecretKey,
@@ -809,7 +812,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // Set unlocked
-      setKeyVersion(keyVersionRef.current);
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
 
@@ -821,7 +823,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       prfOutput.fill(0);
       secretKey?.fill(0);
     }
-  }, [sessionUserId]);
+  }, [sessionUserId, commitKeyVersion]);
 
   // ─── Change Passphrase ────────────────────────────────────────
 
@@ -1256,7 +1258,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // 12. Update in-memory state
       secretKeyRef.current = new Uint8Array(newSecretKey);
-      keyVersionRef.current = result.keyVersion ?? keyVersionRef.current + 1;
+      commitKeyVersion(result.keyVersion ?? keyVersionRef.current + 1);
       accountSaltRef.current = newAccountSalt;
       wrappedKeyRef.current = {
         ciphertext: newWrappedKey.ciphertext,
@@ -1265,7 +1267,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       };
       // ecdhPrivateKeyBytesRef remains valid — private key bytes did not change.
       newSecretKey.fill(0);
-      setKeyVersion(keyVersionRef.current);
       setEncryptionKey(newEncKey);
       // The dialog uses these counts to surface operator banners.
       const effects = (result as { rotationEffects?: RotationEffects }).rotationEffects;
@@ -1274,7 +1275,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
       return null;
     },
-    [encryptionKey, sessionUserId],
+    [encryptionKey, sessionUserId, commitKeyVersion],
   );
 
   const verifyPassphrase = useCallback(async (passphrase: string): Promise<boolean> => {

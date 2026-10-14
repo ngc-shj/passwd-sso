@@ -174,6 +174,7 @@ export function VaultLockScreen() {
 
   // Check if user has PRF-capable passkeys
   useEffect(() => {
+    let cancelled = false;
     const prfCheck = isWebAuthnSupported()
       ? fetchApi(API_PATH.WEBAUTHN_CREDENTIALS)
           .then(async (res) => {
@@ -184,7 +185,14 @@ export function VaultLockScreen() {
           })
           .catch(() => {})
       : Promise.resolve();
-    void prfCheck.finally(() => autoUnlockRef.current());
+    // An unmounted screen must not consume the one-shot sign-in flag: the
+    // remounted one would then have nothing to auto-unlock with.
+    void prfCheck.finally(() => {
+      if (!cancelled) autoUnlockRef.current();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (sessionExpired) {

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useClientSnapshot } from "@/hooks/use-client-snapshot";
 import { useLocale, useTranslations } from "next-intl";
 import {
   APP_NAME,
@@ -32,8 +33,6 @@ export function isOverlayActive(): boolean {
   return !!document.querySelector("[data-overlay-active]");
 }
 
-const subscribeNoop = () => () => {};
-
 function readHasConnectParam(): boolean {
   return new URLSearchParams(window.location.search).has(EXT_CONNECT_PARAM);
 }
@@ -57,7 +56,7 @@ interface AutoExtensionConnectProps {
 export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectProps = {}) {
   const t = useTranslations("Extension");
   const locale = useLocale();
-  const hasConnectParam = useSyncExternalStore(subscribeNoop, readHasConnectParam, () => false);
+  const hasConnectParam = useClientSnapshot(readHasConnectParam, false);
   const [didRun, setDidRun] = useState(false);
   const [status, setStatus] = useState<ConnectStatus>(CONNECT_STATUS.IDLE);
   const [requiresReauth, setRequiresReauth] = useState(false);

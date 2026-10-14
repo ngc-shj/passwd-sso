@@ -81,9 +81,11 @@ export function CreateDelegationDialog({
     new Set(),
   );
   const [ttlSeconds, setTtlSeconds] = useState(900);
-  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Set once a load attempt finishes either way; a failed load leaves
+  // `loaded` false, and this keeps the spinner from staying up after it.
+  const [settled, setSettled] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const decryptableTokens = availableTokens.filter((t) => t.hasDelegationScope);
@@ -127,7 +129,7 @@ export function CreateDelegationDialog({
         setLoaded(true);
       })
       .finally(() => {
-        setLoading(false);
+        setSettled(true);
       });
   }, [encryptionKey, userId]);
 
@@ -136,6 +138,9 @@ export function CreateDelegationDialog({
       loadEntries();
     }
   }, [open, selectedTokenId, loaded, loadEntries]);
+
+  const loading =
+    open && !!selectedTokenId && !!encryptionKey && !!userId && !loaded && !settled;
 
   // Reset state when dialog closes
   const [prevOpen, setPrevOpen] = useState(open);
@@ -148,14 +153,15 @@ export function CreateDelegationDialog({
       setTtlSeconds(900);
       setSearch("");
       setLoaded(false);
+      setSettled(false);
     }
   }
 
-  // Loading starts here rather than in the effect that runs loadEntries; the
-  // guard mirrors loadEntries' own early return.
+  // A new token after a failed load retries it (the effect re-runs on the
+  // token change), so the attempt is no longer settled.
   const handleTokenChange = (tokenId: string) => {
     setSelectedTokenId(tokenId);
-    if (open && !loaded && encryptionKey && userId) setLoading(true);
+    if (!loaded) setSettled(false);
   };
 
   const toggleEntry = (id: string) => {

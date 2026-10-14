@@ -104,16 +104,6 @@ export default function ShareLinksPage() {
     setTypeFilter(typeParam === "send" || typeParam === "entry" ? typeParam : "all");
   }
 
-  const [prevFilters, setPrevFilters] = useState({ statusFilter, typeFilter, teamFilter });
-  if (
-    statusFilter !== prevFilters.statusFilter ||
-    typeFilter !== prevFilters.typeFilter ||
-    teamFilter !== prevFilters.teamFilter
-  ) {
-    setPrevFilters({ statusFilter, typeFilter, teamFilter });
-    setLoading(true);
-  }
-
   const fetchLinks = useCallback(
     async (cursor?: string) => {
       const params = new URLSearchParams();
@@ -128,6 +118,13 @@ export default function ShareLinksPage() {
     },
     [statusFilter, typeFilter, teamFilter]
   );
+
+  // A new fetchLinks is exactly what re-runs the effect below.
+  const [prevFetchLinks, setPrevFetchLinks] = useState(() => fetchLinks);
+  if (fetchLinks !== prevFetchLinks) {
+    setPrevFetchLinks(() => fetchLinks);
+    setLoading(true);
+  }
 
   useEffect(() => {
     fetchLinks().then((data) => {

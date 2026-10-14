@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useClientSnapshot } from "@/hooks/use-client-snapshot";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVaultOptional } from "@/lib/team/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
@@ -146,8 +147,6 @@ function toWatchtowerEntryRef(entry: DecryptedEntry): WatchtowerEntryRef {
 
 // ─── Hook ────────────────────────────────────────────────────
 
-const subscribeToNothing = () => () => {};
-
 function readStoredLastAnalyzedAt(): string | null {
   return window.localStorage.getItem(LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT);
 }
@@ -174,11 +173,7 @@ export function useWatchtower(
   const [unavailableReason, setUnavailableReason] =
     useState<WatchtowerAnalysisUnavailableReason | null>(null);
   const [analyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
-  const storedLastAnalyzedAt = useSyncExternalStore(
-    subscribeToNothing,
-    readStoredLastAnalyzedAt,
-    () => null,
-  );
+  const storedLastAnalyzedAt = useClientSnapshot(readStoredLastAnalyzedAt, null);
   const lastAnalyzedAt = analyzedAt ?? parseStoredLastAnalyzedAt(storedLastAnalyzedAt);
   const [now, setNow] = useState(() => Date.now());
   // Policy values for password age checks — either from prop or fetched from vault status

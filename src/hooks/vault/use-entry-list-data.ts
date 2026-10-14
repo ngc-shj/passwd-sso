@@ -95,8 +95,9 @@ export function useEntryListData<E extends PasswordRowEntry & PasswordDetailPane
       controller.abort();
     };
   // searchQuery intentionally excluded — filtering is via useMemo below (INV-C4.2).
+  // fetchInputs is also what resets loading above, so the two cannot drift.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapter, view, query.tagId, query.folderId, query.entryType, sort, sortBy, refreshKey, reloadKey]);
+  }, fetchInputs);
 
   // INV-C4.2: apply client-side search filter without re-fetching or re-decrypting.
   const entries = useMemo(() => {

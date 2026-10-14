@@ -107,12 +107,6 @@ export function AccessRequestCard() {
   const [justification, setJustification] = useState("");
   const [expiresInMinutes, setExpiresInMinutes] = useState("60");
 
-  const [prevStatusFilter, setPrevStatusFilter] = useState(statusFilter);
-  if (statusFilter !== prevStatusFilter) {
-    setPrevStatusFilter(statusFilter);
-    setLoading(true);
-  }
-
   const fetchRequests = useCallback(() => {
     const params = new URLSearchParams();
     if (statusFilter !== "ALL") params.set("status", statusFilter);
@@ -132,6 +126,13 @@ export function AccessRequestCard() {
         setLoading(false);
       });
   }, [statusFilter]);
+
+  // A new fetchRequests is exactly what re-runs the effect below.
+  const [prevFetchRequests, setPrevFetchRequests] = useState(() => fetchRequests);
+  if (fetchRequests !== prevFetchRequests) {
+    setPrevFetchRequests(() => fetchRequests);
+    setLoading(true);
+  }
 
   useEffect(() => {
     fetchRequests();

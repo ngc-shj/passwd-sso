@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
+import { useClientSnapshot } from "@/hooks/use-client-snapshot";
 import { useLocale, useTranslations } from "next-intl";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
@@ -21,8 +22,6 @@ function readTokenFromHash(): string | null {
   return match ? match[1] : null;
 }
 
-const subscribeNoop = () => () => {};
-
 export default function AdminVaultResetPage() {
   const locale = useLocale();
   const t = useTranslations("VaultReset");
@@ -32,7 +31,7 @@ export default function AdminVaultResetPage() {
   // it cannot be re-read later. Exposed only after hydration so the first
   // client render matches the server render (which has no URL fragment).
   const [hashToken] = useState(readTokenFromHash);
-  const isHydrated = useSyncExternalStore(subscribeNoop, () => true, () => false);
+  const isHydrated = useClientSnapshot(() => true, false);
   const token = isHydrated ? hashToken : null;
   const [confirmation, setConfirmation] = useState("");
   const [loading, setLoading] = useState(false);
