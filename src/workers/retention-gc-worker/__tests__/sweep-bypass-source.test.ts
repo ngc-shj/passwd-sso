@@ -31,6 +31,7 @@ const EXPECTED_MEMBERS = [
   "sweepExpiryEntry",
   "sweepGuardedExpiryEntry",
   "sweepPerTenantAge",
+  "sweepTrashTenant",
 ];
 const ENTRY_GATED = new Set(["sweepExpiryEntry", "sweepGuardedExpiryEntry", "sweepAuditProvenanceEntry"]);
 const BYPASS_SET_CONFIG = /set_config\s*\(\s*'app\.bypass_rls'/;

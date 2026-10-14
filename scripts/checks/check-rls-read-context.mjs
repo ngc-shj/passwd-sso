@@ -40,8 +40,11 @@
  *            (`const { findMany } = prisma.auditOutbox`, `const { auditOutbox }
  *            = prisma`, and the renamed form `{ findMany: fm }`)
  *   PASSES   context helpers; `$transaction` + setBypassRlsGucs; a parameter
- *            typed TransactionClient/TxClient/RawExecutor; every indirect
- *            spelling above when the chain ends at a context binding
+ *            typed TransactionClient/TxClient/RawExecutor on a function that
+ *            is not itself passed as an argument to a call (a callback is
+ *            judged by the call it is passed to, never by its own annotation —
+ *            #874); every indirect spelling above when the chain ends at a
+ *            context binding
  *   MISSED   a client reached through a data structure, a computed key
  *            (`prisma[name]`), or a returned closure; a GUC established through
  *            an element-access raw call (`tx["$executeRaw"]`) — fail-CLOSED, it
@@ -458,10 +461,21 @@ function hasRlsContext(node, recvText, seen = new Set()) {
       cur.getKind() === SyntaxKind.FunctionDeclaration ||
       cur.getKind() === SyntaxKind.MethodDeclaration
     ) {
-      for (const param of cur.getParameters()) {
-        if (param.getName() !== recvText) continue;
-        const typeText = param.getTypeNode()?.getText() ?? "";
-        if (TX_TYPE_RE.test(typeText)) return true;
+      // The annotation shortcut ("a transaction client threaded in by its
+      // caller") holds only for a function that IS called by someone else's
+      // code path — a declaration, or a function value not handed straight to
+      // a call. A callback passed as an argument is judged by the call it is
+      // passed to (below): its annotation alone says nothing about whether
+      // that call established a context.
+      const isCallbackArgument =
+        cur.getParent()?.getKind() === SyntaxKind.CallExpression &&
+        cur.getParent().getArguments().includes(cur);
+      if (!isCallbackArgument) {
+        for (const param of cur.getParameters()) {
+          if (param.getName() !== recvText) continue;
+          const typeText = param.getTypeNode()?.getText() ?? "";
+          if (TX_TYPE_RE.test(typeText)) return true;
+        }
       }
       const params = cur.getParameters().map((p) => p.getName());
       if (params.includes(recvText)) {

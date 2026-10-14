@@ -17,7 +17,7 @@ No Critical or Major findings.
 | T-1 | Test | Minor | `inRetentionSweepTx` copies the wrapper's `set_config` with nothing keeping them in step. | A source test compares the two literals. |
 | T-2 | Test | Minor | The AST check accepted a conditional assert. | It now requires the assert to be an expression statement directly in the function body. |
 | S-F2 | Sec | Minor | The source invariants were spelling-bound: an exact annotation text, and only some export forms. | The annotation is matched with `check-rls-read-context`'s `TX_TYPE_RE`. Exports are read through `getExportedDeclarations()`, plus exported aliases. |
-| S-F1 | Sec | Minor (Adjacent) | `check-rls-read-context` accepts any callback parameter annotated as a transaction client, whatever call it is passed to. The trash callback now passes on that annotation (its runtime assert is real). | Pre-existing gate behaviour, not changed here (see Anti-Deferral). |
+| S-F1 | Sec | Minor (Adjacent) | `check-rls-read-context` accepts any callback parameter annotated as a transaction client, whatever call it is passed to. The trash callback now passes on that annotation (its runtime assert is real). | Fixed here, at the user's request. See "S-F1: fixed in this branch". |
 
 Each new check was red-proved on a scratch copy:
 - an assert behind an `if`;
@@ -26,16 +26,22 @@ Each new check was red-proved on a scratch copy:
 - `export default inSweepTx`;
 - the error code removed.
 
-## Anti-Deferral: S-F1
+## S-F1: fixed in this branch
 
-- **Finding:** `check-rls-read-context.mjs` takes the annotation shortcut (`TX_TYPE_RE`) before looking at the call the callback is passed to. So `prisma.$transaction(async (tx: Prisma.TransactionClient) => …)` with no GUC would pass.
-- **Why not here:** the shortcut predates this branch, and other worker code depends on it. Changing it means re-judging every annotated callback in the scan roots, which is a gate change with its own review. In this branch the one affected callback asserts the bypass at runtime, before any row is read.
-- **Worst case:** a future callback typed as a transaction client, passed to a raw `$transaction` with no GUC, passes the gate. It then reads zero rows or raises 22P02. That is an availability failure, not a widening.
-- **Likelihood:** low.
-- **Cost to fix:** moderate (a gate change plus fixtures). This is a follow-up issue candidate.
+The user asked for this to be fixed here rather than deferred.
+
+- **Gate:** `check-rls-read-context.mjs` takes the annotation shortcut only for a function that is not itself passed as an argument to a call. A callback argument is judged by the call it is passed to: a context helper, or `$transaction` plus a GUC set on that binding. Its own annotation no longer counts.
+- **Measured reach:** in the scan roots, only the retention-gc trash callback relied on the old shortcut (4 statements).
+- **Production change:** that callback's body became the declaration `sweepTrashTenant(tx: Prisma.TransactionClient, …)`. The declaration asserts the bypass first and is now one of the source-checked members (seven). The callback only threads `tx` into it.
+- **Gate tests:**
+  - an annotated callback passed to a `$transaction` with no GUC fails;
+  - an annotated callback passed to an unrecognised wrapper fails;
+  - the same callback with `setBypassRlsGucs` passes;
+  - an annotated callback that only threads its tx into a typed declaration passes.
+- **Red-proof:** the two FAIL cases went red against the pre-change gate on a scratch copy.
 
 ## Termination
-All findings are Minor and resolved, apart from S-F1, which is deferred above. The round's fixes are comments, an error code, and test-only checks, and none touches a security predicate. Tightening-only skip: no round 2.
+All findings are Minor and resolved, S-F1 included. The round's fixes are comments, an error code, and test-only checks, and none touches a security predicate. Tightening-only skip: no round 2.
 
 ## Recurring Issue Check
 - **Functionality:** R29 F1/F2. Others OK or n/a.

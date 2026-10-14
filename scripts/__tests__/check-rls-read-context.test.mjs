@@ -179,6 +179,61 @@ describe("check-rls-read-context", () => {
     expect(r.status).not.toBe(0);
   });
 
+  // A callback passed as an argument is judged by the call it is passed to: its
+  // own TransactionClient annotation says nothing about whether that call set a
+  // context (#874 code review, S-F1).
+  it("FAILS a TransactionClient-annotated callback passed to a $transaction that sets no GUC", () => {
+    const r = runGate(`
+      import type { Prisma } from "@prisma/client";
+      export async function f(prisma: any) {
+        return prisma.$transaction(async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({}));
+      }
+    `);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("audit_outbox");
+  });
+
+  it("FAILS a TransactionClient-annotated callback passed to an unrecognised wrapper", () => {
+    const r = runGate(`
+      import type { Prisma } from "@prisma/client";
+      declare function inSomeTx<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+      export async function f() {
+        return inSomeTx(async (tx: Prisma.TransactionClient) => tx.auditOutbox.findMany({}));
+      }
+    `);
+    expect(r.status).not.toBe(0);
+  });
+
+  it("PASSES the same annotated callback when its $transaction sets the GUC", () => {
+    const r = runGate(`
+      import type { Prisma } from "@prisma/client";
+      export async function f(prisma: any) {
+        return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+          await setBypassRlsGucs(tx);
+          return tx.auditOutbox.findMany({});
+        });
+      }
+      declare function setBypassRlsGucs(tx: any): Promise<void>;
+    `);
+    expect(r.status).toBe(0);
+  });
+
+  it("PASSES an annotated callback that only threads its tx into a typed declaration", () => {
+    // The retention-gc shape: inSweepTx(…, (tx) => sweepTrashTenant(tx, …)),
+    // where the declaration asserts the bypass and is accepted by its type.
+    const r = runGate(`
+      import type { Prisma } from "@prisma/client";
+      declare function inSomeTx<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+      async function member(tx: Prisma.TransactionClient) {
+        return tx.auditOutbox.findMany({});
+      }
+      export async function f() {
+        return inSomeTx((tx: Prisma.TransactionClient) => member(tx));
+      }
+    `);
+    expect(r.status).toBe(0);
+  });
+
   it("REPORTS raw SQL it cannot read instead of skipping it", () => {
     // "Unreadable" must not be spelled like "touches no RLS table".
     const r = runGate(`

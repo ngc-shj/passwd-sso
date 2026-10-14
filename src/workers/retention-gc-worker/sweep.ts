@@ -584,78 +584,7 @@ export async function sweepTrashEntry(
     const { deletedCount, refs } = await inSweepTx(
       workerPrisma,
       true,
-      async (tx: Prisma.TransactionClient) => {
-        await assertSweepBypass(tx, true);
-
-        // Select trashed entries past the cutoff. team scope also needs team_id
-        // so the refs can be partitioned by team (F4).
-        const rows =
-          entry.scopeKind === "team"
-            ? await tx.$queryRaw<Array<{ id: string; team_id: string }>>`
-                SELECT id, team_id FROM team_password_entries
-                WHERE tenant_id = ${tenant.id}::uuid
-                  AND deleted_at IS NOT NULL
-                  AND deleted_at < ${cutoff}
-                LIMIT ${batchSize}`
-            : await tx.$queryRaw<Array<{ id: string }>>`
-                SELECT id FROM password_entries
-                WHERE tenant_id = ${tenant.id}::uuid
-                  AND deleted_at IS NOT NULL
-                  AND deleted_at < ${cutoff}
-                LIMIT ${batchSize}`;
-
-        if (rows.length === 0) {
-          return { deletedCount: 0, refs: [] as AttachmentBlobRef[] };
-        }
-
-        const ids = rows.map((r) => r.id);
-
-        // Collect external blob refs BEFORE the cascade delete.
-        const collected: AttachmentBlobRef[] = [];
-        if (entry.scopeKind === "team") {
-          // Group ids by team_id; one collectEntryAttachmentRefs call per team.
-          const idsByTeam = new Map<string, string[]>();
-          for (const row of rows as Array<{ id: string; team_id: string }>) {
-            const list = idsByTeam.get(row.team_id) ?? [];
-            list.push(row.id);
-            idsByTeam.set(row.team_id, list);
-          }
-          for (const [teamId, teamEntryIds] of idsByTeam) {
-            collected.push(
-              ...(await collectEntryAttachmentRefs(tx, {
-                kind: "team",
-                teamId,
-                entryIds: teamEntryIds,
-              })),
-            );
-          }
-          await tx.teamPasswordEntry.deleteMany({ where: { id: { in: ids } } });
-        } else {
-          collected.push(
-            ...(await collectEntryAttachmentRefs(tx, {
-              kind: "personal",
-              entryIds: ids,
-            })),
-          );
-          await tx.passwordEntry.deleteMany({ where: { id: { in: ids } } });
-        }
-
-        await enqueueAuditInWorkerTx(tx, tenant.id, {
-          scope: AUDIT_SCOPE.TENANT,
-          action: AUDIT_ACTION.TRASH_RETENTION_PURGED,
-          userId: SYSTEM_ACTOR_ID,
-          actorType: ACTOR_TYPE.SYSTEM,
-          serviceAccountId: null,
-          teamId: null,
-          targetType: entry.table,
-          targetId: null,
-          metadata: { table: entry.table, purgedCount: ids.length },
-          ip: null,
-          userAgent: "retention-gc-worker",
-        });
-
-        return { deletedCount: ids.length, refs: collected };
-      },
+      (tx) => sweepTrashTenant(tx, entry, tenant.id, cutoff, batchSize),
     );
 
     // Best-effort external blob delete AFTER the tx commits (mirrors empty-trash).
@@ -664,6 +593,92 @@ export async function sweepTrashEntry(
   }
 
   return total;
+}
+
+/**
+ * One tenant's trash purge, on a transaction inSweepTx opened with the bypass
+ * set: select trashed entries past `cutoff`, collect their external blob refs,
+ * delete them (the cascade removes attachments), and audit. Asserts the bypass
+ * first, like every sweep that takes a tx. Returns the refs for the caller to
+ * delete AFTER the commit.
+ */
+async function sweepTrashTenant(
+  tx: Prisma.TransactionClient,
+  entry: PerTenantTrashEntry,
+  tenantId: string,
+  cutoff: Date,
+  batchSize: number,
+): Promise<{ deletedCount: number; refs: AttachmentBlobRef[] }> {
+  await assertSweepBypass(tx, true);
+
+  // Select trashed entries past the cutoff. team scope also needs team_id
+  // so the refs can be partitioned by team (F4).
+  const rows =
+    entry.scopeKind === "team"
+      ? await tx.$queryRaw<Array<{ id: string; team_id: string }>>`
+          SELECT id, team_id FROM team_password_entries
+          WHERE tenant_id = ${tenantId}::uuid
+            AND deleted_at IS NOT NULL
+            AND deleted_at < ${cutoff}
+          LIMIT ${batchSize}`
+      : await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM password_entries
+          WHERE tenant_id = ${tenantId}::uuid
+            AND deleted_at IS NOT NULL
+            AND deleted_at < ${cutoff}
+          LIMIT ${batchSize}`;
+
+  if (rows.length === 0) {
+    return { deletedCount: 0, refs: [] as AttachmentBlobRef[] };
+  }
+
+  const ids = rows.map((r) => r.id);
+
+  // Collect external blob refs BEFORE the cascade delete.
+  const collected: AttachmentBlobRef[] = [];
+  if (entry.scopeKind === "team") {
+    // Group ids by team_id; one collectEntryAttachmentRefs call per team.
+    const idsByTeam = new Map<string, string[]>();
+    for (const row of rows as Array<{ id: string; team_id: string }>) {
+      const list = idsByTeam.get(row.team_id) ?? [];
+      list.push(row.id);
+      idsByTeam.set(row.team_id, list);
+    }
+    for (const [teamId, teamEntryIds] of idsByTeam) {
+      collected.push(
+        ...(await collectEntryAttachmentRefs(tx, {
+          kind: "team",
+          teamId,
+          entryIds: teamEntryIds,
+        })),
+      );
+    }
+    await tx.teamPasswordEntry.deleteMany({ where: { id: { in: ids } } });
+  } else {
+    collected.push(
+      ...(await collectEntryAttachmentRefs(tx, {
+        kind: "personal",
+        entryIds: ids,
+      })),
+    );
+    await tx.passwordEntry.deleteMany({ where: { id: { in: ids } } });
+  }
+
+  await enqueueAuditInWorkerTx(tx, tenantId, {
+    scope: AUDIT_SCOPE.TENANT,
+    action: AUDIT_ACTION.TRASH_RETENTION_PURGED,
+    userId: SYSTEM_ACTOR_ID,
+    actorType: ACTOR_TYPE.SYSTEM,
+    serviceAccountId: null,
+    teamId: null,
+    targetType: entry.table,
+    targetId: null,
+    metadata: { table: entry.table, purgedCount: ids.length },
+    ip: null,
+    userAgent: "retention-gc-worker",
+  });
+
+  return { deletedCount: ids.length, refs: collected };
 }
 
 /**
