@@ -49,7 +49,8 @@ export interface WorkerConfig {
  * just "verification_tokens"): tables with no RLS policy and no tenant_id
  * column. The set is co-located with the registry so it cannot drift. All
  * other EXPIRY tables are
- * RLS-enabled; the worker must set bypass_rls to delete across tenants. Omitting
+ * RLS-enabled; the worker must set bypass_rls to delete across tenants, and the
+ * dispatcher sets it only for a globalDelete entry (sweep.ts inSweepTx). Omitting
  * globalDelete on an RLS-enabled table would silently yield 0 rows deleted
  * (the NOBYPASSRLS role triggers "invalid input syntax for type uuid" from the
  * RLS policy's uuid cast). The explicit flag forces the registry author to
@@ -117,13 +118,13 @@ export function validateRegistry(
       }
     } else if (entry.kind === "PER_TENANT_TRASH") {
       // `table` is the only free identifier; scopeKind and tenantRetentionColumn
-      // are literal-union types. The sweeper sets bypass_rls explicitly (like
-      // sweepAuditLogs), so there is no globalDelete flag to enforce.
+      // are literal-union types. Its transactions always run with bypass_rls
+      // (sweep.ts inSweepTx), so there is no globalDelete flag to enforce.
       sqlIdentifier(entry.table);
     } else if (entry.kind === "PER_TENANT_AGE") {
       // table + cutoffColumn are interpolated into the DELETE SQL → allowlist
       // both at boot (S1). tenantRetentionColumn is a literal-union type. The
-      // sweeper sets bypass_rls explicitly, so no globalDelete flag to enforce.
+      // dispatcher always runs it with bypass_rls, so no globalDelete flag to enforce.
       sqlIdentifier(entry.table);
       sqlIdentifier(entry.cutoffColumn);
     }

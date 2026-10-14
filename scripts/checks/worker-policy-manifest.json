@@ -60,7 +60,7 @@
       "dbRole": "passwd_retention_gc_worker",
       "tenantScoped": {
         "value": true,
-        "reason": "The NOBYPASSRLS passwd_retention_gc_worker role sets bypass_rls in-tx per sweep entry (sweep.ts, e.g. sweepExpiryEntry's set_config('app.bypass_rls', ...)) to span all tenants under existing RLS policies, but every EXPIRY_AUDIT_PROVENANCE / PER_TENANT_FN / PER_TENANT_TRASH / PER_TENANT_AGE entry enumerates or attributes rows by their own tenant_id (sweep.ts sweepAuditLogs, sweepPerTenantAge, sweepTrashEntry) -- a deliberate all-tenant blast radius (registry.ts, the globalDelete field doc), never a cross-tenant write of one tenant's data into another."
+        "reason": "The NOBYPASSRLS passwd_retention_gc_worker role runs each globalDelete / per-tenant sweep entry in a transaction whose bypass_rls is set by the module-private dispatcher (sweep.ts inSweepTx; each sweep asserts it) to span all tenants under existing RLS policies, but every EXPIRY_AUDIT_PROVENANCE / PER_TENANT_FN / PER_TENANT_TRASH / PER_TENANT_AGE entry enumerates or attributes rows by their own tenant_id (sweep.ts sweepAuditLogs, sweepPerTenantAge, sweepTrashEntry) -- a deliberate all-tenant blast radius (registry.ts, the globalDelete field doc), never a cross-tenant write of one tenant's data into another."
       },
       "usesSecurityDefiner": true,
       "rawSql": true,

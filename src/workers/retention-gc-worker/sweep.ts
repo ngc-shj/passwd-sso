@@ -145,13 +145,59 @@ export async function enqueueAuditInWorkerTx(
   });
 }
 
+// ── The RLS bypass: set by the dispatcher, asserted by each sweep ──
+//
+// `set_config(…, true)` is transaction-local, so a sweep that set the bypass on
+// a transaction its caller handed it would leave it on for the rest of that
+// caller's transaction. Instead the module-private inSweepTx — the only setter
+// in this file — opens the transaction and sets it, and each sweep that takes a
+// tx only asserts the state its entry declares (#874, the rule #873 applied to
+// the audit-outbox seams). Neither helper is exported: an exported "open a
+// bypass transaction and run this callback" would be a generic RLS bypass no
+// gate covers.
+
+/**
+ * Run `fn` in a new transaction, with the RLS bypass set first (tx-local) when
+ * `bypass` is true. A dispatch passes `entry.globalDelete === true` for the
+ * entry-gated kinds, so an entry that does not declare globalDelete runs
+ * without it.
+ */
+async function inSweepTx<T>(
+  workerPrisma: PrismaClient,
+  bypass: boolean,
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return workerPrisma.$transaction(async (tx) => {
+    if (bypass) {
+      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+    }
+    return fn(tx);
+  });
+}
+
+/**
+ * Fail closed unless the transaction's RLS bypass is in the state the sweep's
+ * entry declares: `on` when `expected`, anything but `on` otherwise (so an
+ * entry without globalDelete never runs under a caller's bypass). A missing
+ * row denies either way; a failed read propagates.
+ */
+async function assertSweepBypass(tx: Prisma.TransactionClient, expected: boolean): Promise<void> {
+  const rows = await tx.$queryRaw<{ bypass_rls: string | null }[]>`
+    SELECT current_setting('app.bypass_rls', true) AS bypass_rls`;
+  const row = rows[0];
+  if (!row || (row.bypass_rls === "on") !== expected) {
+    throw new Error("retention-gc sweep requires the RLS bypass state its entry declares");
+  }
+}
+
 /**
  * Delete up to `batchSize` expired rows for one EXPIRY registry entry.
  *
  * Security:
  * - Identifiers (table, cutoffColumn, keyColumns) are validated at worker boot
  *   via sqlIdentifier in createWorker; called here defensively too.
- * - bypass_rls GUC is set in-tx for every globalDelete entry (INV-C2b).
+ * - The dispatcher sets bypass_rls for every globalDelete entry (INV-C2b); this
+ *   asserts the state the entry declares before touching a row.
  * - DELETE is batch-bounded via a `WITH picked AS MATERIALIZED (... LIMIT $1)`
  *   key set, read once by `(keys) IN (SELECT keys FROM picked)` (C1 — the
  *   subquery is evaluated exactly once per statement, so a rescanning plan
@@ -171,11 +217,8 @@ export async function sweepExpiryEntry(
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
   const keyIdents = entry.keyColumns.map((c) => sqlIdentifier(c));
 
-  if (entry.globalDelete) {
-    // Set bypass_rls GUC to span all tenants under the existing RLS policies.
-    // Mirror dcr-cleanup-worker.ts:95.
-    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-  }
+  // globalDelete entries span all tenants under the existing RLS policies.
+  await assertSweepBypass(tx, entry.globalDelete === true);
 
   // Build the predicate fragment (may be empty if no predicate).
   const predicateSql =
@@ -207,8 +250,9 @@ export async function sweepExpiryEntry(
  * FROM picked)` shape as sweepExpiryEntry (C1), with the guard's WHERE clause
  * inside the materialized subquery. The guard's NOT EXISTS subqueries are
  * compile-time literals keyed by the closed GuardName enum — never registry
- * data (S1). bypass_rls is set (globalDelete) so the parent delete AND the
- * FK-cascade to child rows span all tenants under the existing RLS policies.
+ * data (S1). With globalDelete the dispatcher sets bypass_rls, so the parent
+ * delete AND the FK-cascade to child rows span all tenants under the existing
+ * RLS policies; this asserts the declared state first.
  * batchSize is the only bound param.
  */
 export async function sweepGuardedExpiryEntry(
@@ -220,9 +264,7 @@ export async function sweepGuardedExpiryEntry(
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
   const keyIdents = entry.keyColumns.map((c) => sqlIdentifier(c));
 
-  if (entry.globalDelete) {
-    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-  }
+  await assertSweepBypass(tx, entry.globalDelete === true);
 
   const guardSql = GUARD_SQL[entry.guard](tableIdent);
   const keyList = joinSql(keyIdents, trustedSql`, `);
@@ -278,13 +320,10 @@ export async function sweepAuditProvenanceEntry(
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
   const provenanceIdents = entry.provenanceColumns.map((c) => sqlIdentifier(c));
 
-  if (entry.globalDelete) {
-    // bypass_purpose/tenant_id GUCs are intentionally not set here (unlike
-    // audit-outbox-worker's setBypassRlsGucs) — they are observability-only
-    // today (not read by any RLS policy or trigger). TODO(route-policy-sql-security):
-    // extract a shared setBypassRlsGucsOnTx helper and set them consistently.
-    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-  }
+  // bypass_purpose/tenant_id are intentionally not set by inSweepTx (unlike
+  // audit-outbox-worker's setBypassRlsGucs): no RLS policy or trigger reads
+  // them, and inSweepTx is not reachable from outside this module.
+  await assertSweepBypass(tx, entry.globalDelete === true);
 
   // Optional "this row is dead" guard (SC6b) — a compile-time-literal SQL fragment
   // from GUARD_SQL, appended to the WHERE. Used when cutoffColumn alone cannot
@@ -376,8 +415,8 @@ export async function sweepAuditLogs(
   tx: Prisma.TransactionClient,
   _entry: PerTenantFnEntry,
 ): Promise<number> {
-  // bypass_rls required to enumerate tenants (no app.tenant_id set in the worker).
-  await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+  // bypass_rls is required to enumerate tenants (no app.tenant_id is set in the worker).
+  await assertSweepBypass(tx, true);
 
   // Enumerate only tenants that have explicit retention configured.
   // NULL → no auto-deletion (FR4).
@@ -408,7 +447,7 @@ export async function sweepAuditLogs(
  * these tables (entry history) are trimmed with a direct batch-bounded DELETE.
  *
  * Takes a `tx` (dispatched via workerPrisma.$transaction, like sweepAuditLogs).
- * Sets bypass_rls first; enumerates tenants with the retention column NOT NULL;
+ * Asserts bypass_rls first; enumerates tenants with the retention column NOT NULL;
  * per tenant deletes `<table>` rows where `<cutoffColumn> < now() - retention`.
  * Emits a per-tenant audit (entry.auditAction) when a tenant has rows trimmed.
  *
@@ -422,7 +461,7 @@ export async function sweepPerTenantAge(
   const tableIdent = sqlIdentifier(entry.table);
   const cutoffIdent = sqlIdentifier(entry.cutoffColumn);
 
-  await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+  await assertSweepBypass(tx, true);
 
   // Enumerate only tenants with the retention column configured (NULL → skip).
   // The retention column is a dynamic (but closed-union) Prisma field name, so
@@ -488,7 +527,7 @@ export async function sweepPerTenantAge(
  * grace period (SC2). One PER_TENANT_TRASH entry per entry table.
  *
  * Per tenant, in its own transaction:
- *   1. set bypass_rls FIRST (entry tables AND attachments are RLS-enabled).
+ *   1. inSweepTx sets bypass_rls FIRST (entry tables AND attachments are RLS-enabled).
  *   2. SELECT trashed entry ids past `now() - trashRetentionDays days` (LIMIT
  *      batchSize). For team_password_entries also select team_id.
  *   3. Collect external blob refs BEFORE the cascade destroys the Attachment
@@ -527,11 +566,13 @@ export async function sweepTrashEntry(
     const retention = tenant.trashRetentionDays!;
     const cutoff = new Date(Date.now() - retention * MS_PER_DAY);
 
-    const { deletedCount, refs } = await workerPrisma.$transaction(
+    // bypass_rls — both entry tables and attachments are RLS-enabled. The
+    // wrapper resolves after the commit, so the blob delete below still runs
+    // after it.
+    const { deletedCount, refs } = await inSweepTx(
+      workerPrisma,
+      true,
       async (tx) => {
-        // bypass_rls FIRST — both entry tables and attachments are RLS-enabled.
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-
         // Select trashed entries past the cutoff. team scope also needs team_id
         // so the refs can be partitioned by team (F4).
         const rows =
@@ -650,8 +691,8 @@ export async function sweepTrashEntry(
  * `(<keys>) IN (SELECT <keys> FROM <materialized cte>)` as a top-level AND
  * conjunct.
  *
- * Runs under the worker's bypass_rls GUC (RLS-enabled table, NOBYPASSRLS
- * role) — same pattern as sweepExpiryEntry's globalDelete branch. Requires
+ * Runs under the bypass_rls GUC the dispatcher sets (RLS-enabled table,
+ * NOBYPASSRLS role), which it asserts first. Requires
  * the migration 20260722000100 GRANT UPDATE (status) ON access_requests.
  *
  * @returns Number of rows flipped to EXPIRED this batch.
@@ -660,7 +701,7 @@ export async function sweepExpiredAccessRequests(
   tx: Prisma.TransactionClient,
   batchSize: number,
 ): Promise<number> {
-  await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+  await assertSweepBypass(tx, true);
 
   return tx.$executeRawUnsafe<number>(
     `WITH picked AS MATERIALIZED (
@@ -704,7 +745,7 @@ export async function sweepOnce(
   // status flip. Isolated in its own try/catch — same per-entry error
   // isolation contract as the registry loop (INV-C4b).
   try {
-    const expiredCount = await workerPrisma.$transaction((tx) =>
+    const expiredCount = await inSweepTx(workerPrisma, true, (tx) =>
       sweepExpiredAccessRequests(tx, batchSize),
     );
     if (expiredCount > 0) {
@@ -721,19 +762,19 @@ export async function sweepOnce(
       // Explicit per-kind dispatch (F1) — no elimination-else, so a future kind
       // cannot silently misroute into the wrong branch.
       if (entry.kind === "EXPIRY") {
-        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
+        counts[tableName] = await inSweepTx(workerPrisma, entry.globalDelete === true, (tx) =>
           sweepExpiryEntry(tx, entry, batchSize),
         );
       } else if (entry.kind === "EXPIRY_GUARDED") {
-        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
+        counts[tableName] = await inSweepTx(workerPrisma, entry.globalDelete === true, (tx) =>
           sweepGuardedExpiryEntry(tx, entry, batchSize),
         );
       } else if (entry.kind === "EXPIRY_AUDIT_PROVENANCE") {
-        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
+        counts[tableName] = await inSweepTx(workerPrisma, entry.globalDelete === true, (tx) =>
           sweepAuditProvenanceEntry(tx, entry, batchSize),
         );
       } else if (entry.kind === "PER_TENANT_FN") {
-        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
+        counts[tableName] = await inSweepTx(workerPrisma, true, (tx) =>
           sweepAuditLogs(tx, entry),
         );
       } else if (entry.kind === "PER_TENANT_TRASH") {
@@ -742,7 +783,7 @@ export async function sweepOnce(
         // because the external blob delete must run after each DB tx commits.
         counts[tableName] = await sweepTrashEntry(workerPrisma, entry, batchSize);
       } else if (entry.kind === "PER_TENANT_AGE") {
-        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
+        counts[tableName] = await inSweepTx(workerPrisma, true, (tx) =>
           sweepPerTenantAge(tx, entry, batchSize),
         );
       }
@@ -765,11 +806,10 @@ export async function sweepOnce(
 
     try {
       const emitFn = opts._emitFn ?? enqueueAuditInWorkerTx;
-      await workerPrisma.$transaction(async (tx) => {
-        // Heartbeat runs in its own bypass_rls context (SYSTEM_TENANT_ID exists
-        // by design; INV-C3c — the anchor is system-scoped, not subject to
-        // per-tenant purge).
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      // Heartbeat runs in its own bypass_rls context (SYSTEM_TENANT_ID exists
+      // by design; INV-C3c — the anchor is system-scoped, not subject to
+      // per-tenant purge).
+      await inSweepTx(workerPrisma, true, async (tx) => {
         await emitFn(tx, SYSTEM_TENANT_ID, {
           scope: AUDIT_SCOPE.TENANT,
           action: AUDIT_ACTION.RETENTION_GC_SWEEP,
