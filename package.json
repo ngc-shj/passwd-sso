@@ -95,7 +95,7 @@
     "react-hook-form": "^7.89.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "resend": "^6.32.0",
+    "resend": "^6.32.1",
     "sonner": "2.0.8",
     "tailwind-merge": "^3.7.0",
     "undici": "^7.30.0",
