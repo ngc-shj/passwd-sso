@@ -79,7 +79,6 @@ export default function AcceptInvitePage({
   // so this effect only fires after vault setup/unlock is complete.
   useEffect(() => {
     if (vaultStatus === VAULT_STATUS.UNLOCKED && !acceptedRef.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       handleAccept();
     }
   }, [vaultStatus]); // eslint-disable-line react-hooks/exhaustive-deps
