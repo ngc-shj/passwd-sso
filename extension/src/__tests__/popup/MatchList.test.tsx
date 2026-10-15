@@ -1,9 +1,9 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
 
 const mockSendMessage = vi.fn();
@@ -93,6 +93,59 @@ describe("MatchList", () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("secret");
     });
     expect(await screen.findByRole("status")).toHaveTextContent("Password copied");
+  });
+
+  describe("copy toast auto-dismiss", () => {
+    const entry = {
+      id: "pw-1",
+      title: "Example",
+      username: "alice",
+      urlHost: "example.com",
+      entryType: EXT_ENTRY_TYPE.LOGIN,
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function renderAndCopyOnce() {
+      mockSendMessage
+        .mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [entry] })
+        .mockResolvedValueOnce({ type: "COPY_PASSWORD", password: "secret" });
+      // shouldAdvanceTime keeps findBy* polling; the 2 s jumps are explicit.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      render(<MatchList tabUrl="https://example.com/login" />);
+      const copyButton = await screen.findByRole("button", { name: "Copy" });
+      fireEvent.click(copyButton);
+      expect(await screen.findByRole("status")).toHaveTextContent("Password copied");
+      return copyButton;
+    }
+
+    it("dismisses the success toast after 2 seconds", async () => {
+      await renderAndCopyOnce();
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    it("does not let the success toast's timer dismiss a later error toast", async () => {
+      const copyButton = await renderAndCopyOnce();
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+
+      mockSendMessage.mockResolvedValueOnce({
+        type: "COPY_PASSWORD",
+        password: null,
+        error: "COPY_FAILED",
+      });
+      fireEvent.click(copyButton);
+      await waitFor(() =>
+        expect(screen.getByRole("status")).not.toHaveTextContent("Password copied"),
+      );
+      const errorText = screen.getByRole("status").textContent;
+
+      // Past the success toast's original 2 s deadline.
+      await act(() => vi.advanceTimersByTimeAsync(1500));
+      expect(screen.getByRole("status")).toHaveTextContent(errorText ?? "");
+    });
   });
 
   it("copies username on button click", async () => {
