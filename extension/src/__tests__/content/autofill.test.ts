@@ -1169,9 +1169,12 @@ describe("performAutofill — sequential fill", () => {
     expect(password.value).toBe("");
   });
 
-  it("does not write a custom field into a hidden-type input that matches its label", async () => {
+  it.each([
+    ["does not write", "hidden", ""],
+    ["writes (control)", "text", "1234"],
+  ])("%s a custom field into a %s-type input that matches its label", async (_verb, type, expected) => {
     setupForm(`
-      <input id="pin" type="hidden" />
+      <input id="pin" type="${type}" />
       <input id="user" type="text" />
     `);
 
@@ -1179,7 +1182,7 @@ describe("performAutofill — sequential fill", () => {
       performAutofill(loginPayload({ password: "", customFields: [{ label: "pin", value: "1234" }] })),
     );
 
-    expect(byId("pin").value).toBe("");
+    expect(byId("pin").value).toBe(expected);
   });
 
   it("writes a custom field into the text input when a password input earlier shares its label", async () => {

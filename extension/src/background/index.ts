@@ -2093,6 +2093,7 @@ async function performAutofillForEntry(
       documentId = origin.documentId;
     } else {
       pinned = await pinDocument();
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
       if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
       documentId = pinned.documentId;
@@ -2108,6 +2109,7 @@ async function performAutofillForEntry(
     try {
       const target = pinned ?? (await pinDocument());
       if (!target || !acceptsDocument(target)) {
+        if (!isVaultEpochCurrent(epoch)) return lockedResult;
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       }
       await injectContentBundleInto(tabId, target);
@@ -2239,6 +2241,8 @@ async function performAutofillForEntry(
     firstSendDocumentId = origin.documentId;
   } else if (origin.kind === AUTOFILL_REQUEST_KIND.CONTEXT_MENU) {
     pinned = await pinDocument();
+    // A lock during the probe outranks what the probe found.
+    if (!isVaultEpochCurrent(epoch)) return lockedResult;
     if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
     if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
     firstSendDocumentId = pinned.documentId;
@@ -2259,6 +2263,7 @@ async function performAutofillForEntry(
     try {
       pinned ??= await pinDocument();
       if (!pinned || !acceptsDocument(pinned)) {
+        if (!isVaultEpochCurrent(epoch)) return lockedResult;
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       }
       const target = pinned;

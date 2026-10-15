@@ -2172,6 +2172,38 @@ describe("background message flow", () => {
     expect(injectionKinds()).toEqual(["probe"]);
   });
 
+  // The first probe runs before any send; a lock while it runs outranks what
+  // it then finds. A locked result sets no failure badge (the locked badge
+  // already shows it), so the lock arm has no outcome to wait for: both arms
+  // wait the same fixed time, and the control shows that time is enough for
+  // the failure badge to appear. clickMenuItem waits for an outcome, so the
+  // handler is driven directly to hold the probe.
+  it.each([
+    { name: "a lock during the first probe answers VAULT_LOCKED, so no failure badge", lockDuringProbe: true, titles: [] },
+    {
+      name: "positive control: the probe failing without a lock shows AUTOFILL_INJECT_FAILED",
+      lockDuringProbe: false,
+      titles: [humanizeError("AUTOFILL_INJECT_FAILED")],
+    },
+  ])("context menu: $name", async ({ lockDuringProbe, titles }) => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    const hold = holdProbe(chromeMock!.scripting.executeScript);
+
+    contextMenuClickHandlers[0](
+      { menuItemId: `psso-login-${MENU_ENTRY_UUID}`, frameUrl: "https://example.com/login", frameId: 0 },
+      { id: 1, url: "https://example.com/login" },
+    );
+    await hold.reached;
+    if (lockDuringProbe) await sendMessage({ type: "LOCK_VAULT" });
+    hold.fail(new Error("probe failed"));
+    await settleMenu();
+
+    expect(failureTitles()).toEqual(titles);
+    expect(fillMessages()).toEqual([]);
+  });
+
   // C5 invariant 6 (now C3): CC/Identity entries carry no host by design, so
   // the origin gate — scoped to LOGIN — cannot adjudicate them. C3 closes the
   // residual not with a host check on the entry, but by probing the clicked
@@ -5849,6 +5881,93 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
         expect(injectionsCarrying("a6-secret")).toEqual([]);
         // The first send carried the password and found no receiver; nothing followed.
         expect(pageMessagesCarrying("a6-secret")).toHaveLength(1);
+      });
+    });
+
+    // A probe that finds no usable document ends the fill early, outside the
+    // fallback's catch. A lock while the probe ran must still read as the lock.
+    describe("failed document probe", () => {
+      const PROBE_FAILURE = new Error("probe failed");
+
+      it.each(INTERRUPTIONS)("%s during a LOGIN fallback probe that then fails answers VAULT_LOCKED", async (_name, interrupt) => {
+        await unlockAndSettle();
+        chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
+        const hold = holdProbe(chromeMock!.scripting.executeScript);
+        const pending = fillFromContent();
+        await hold.reached;
+        await interrupt();
+        hold.fail(PROBE_FAILURE);
+
+        expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "VAULT_LOCKED" });
+        expect(pageMessagesCarrying("a6-secret")).toHaveLength(1);
+      });
+
+      it("positive control: the LOGIN fallback probe failing without a lock answers AUTOFILL_INJECT_FAILED", async () => {
+        await unlockAndSettle();
+        chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
+        const hold = holdProbe(chromeMock!.scripting.executeScript);
+        const pending = fillFromContent();
+        await hold.reached;
+        hold.fail(PROBE_FAILURE);
+
+        expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "AUTOFILL_INJECT_FAILED" });
+        expect(pageMessagesCarrying("a6-secret")).toHaveLength(1);
+      });
+
+      describe("CREDIT_CARD", () => {
+        beforeEach(() => {
+          serve(
+            { id: "pw-a6", blob: "a6-cc-blob", overview: "a6-cc-ov", entryType: EXT_ENTRY_TYPE.CREDIT_CARD },
+            { cardNumber: "4111111111111111", cardholderName: "Alice" },
+            { title: "Card", cardholderName: "Alice" },
+          );
+        });
+
+        it.each(INTERRUPTIONS)("%s during the resend's probe that then fails answers VAULT_LOCKED", async (_name, interrupt) => {
+          await unlockAndSettle();
+          chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
+          const hold = holdProbe(chromeMock!.scripting.executeScript);
+          const pending = fillFromContent();
+          await hold.reached;
+          await interrupt();
+          hold.fail(PROBE_FAILURE);
+
+          expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "VAULT_LOCKED" });
+        });
+
+        it("positive control: the resend's probe failing without a lock answers AUTOFILL_INJECT_FAILED", async () => {
+          await unlockAndSettle();
+          chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
+          const hold = holdProbe(chromeMock!.scripting.executeScript);
+          const pending = fillFromContent();
+          await hold.reached;
+          hold.fail(PROBE_FAILURE);
+
+          expect(await pending).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "AUTOFILL_INJECT_FAILED" });
+        });
+
+        it.each(INTERRUPTIONS)("%s during a popup fill's first probe that then fails answers VAULT_LOCKED", async (_name, interrupt) => {
+          await unlockAndSettle();
+          const hold = holdProbe(chromeMock!.scripting.executeScript);
+          const pending = fillFromPopup();
+          await hold.reached;
+          await interrupt();
+          hold.fail(PROBE_FAILURE);
+
+          expect(await pending).toEqual({ type: "AUTOFILL", ok: false, error: "VAULT_LOCKED" });
+          expect(pageMessagesCarrying("4111111111111111")).toEqual([]);
+        });
+
+        it("positive control: a popup fill's first probe failing without a lock answers AUTOFILL_INJECT_FAILED", async () => {
+          await unlockAndSettle();
+          const hold = holdProbe(chromeMock!.scripting.executeScript);
+          const pending = fillFromPopup();
+          await hold.reached;
+          hold.fail(PROBE_FAILURE);
+
+          expect(await pending).toEqual({ type: "AUTOFILL", ok: false, error: "AUTOFILL_INJECT_FAILED" });
+          expect(pageMessagesCarrying("4111111111111111")).toEqual([]);
+        });
       });
     });
 

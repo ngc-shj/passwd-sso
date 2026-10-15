@@ -519,7 +519,7 @@ on navigations.
 | `extension/src/content/webauthn-interceptor.js` | MAIN world override of `navigator.credentials.get/create` |
 | `extension/src/content/webauthn-bridge.ts` | Entry point: registers ISOLATED world message listener |
 | `extension/src/content/webauthn-bridge-lib.ts` | Bridge logic: routes postMessage → sendMessage and back |
-| `extension/src/content/webauthn-inject.ts` | Registers the MAIN world interceptor script via `registerContentScripts` |
+| `extension/src/background/index.ts` | Registers the MAIN world interceptor script via `registerContentScripts` (id `webauthn-interceptor`) |
 | `extension/src/content/ui/passkey-dropdown.ts` | Passkey selection dropdown UI (shown by bridge in ISOLATED world) |
 | `extension/src/content/ui/passkey-save-banner.ts` | Save/replace confirmation banner UI |
 | `extension/src/background/passkey-provider.ts` | SW handlers: get matches, check duplicate, sign assertion, create credential |
