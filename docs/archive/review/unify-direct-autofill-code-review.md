@@ -72,3 +72,17 @@ Every fix was red-proved on a scratch copy (19 reverts). The full suite exits 0 
 | X1 | Low | `filled` counted claimed fields, not writes: `written.add` came before `step.write`, and a select with no matching option changes nothing, so a form of only unmatched selects answered `{ filled: 2 }`; a throwing write was counted too. | `FillStep.write` returns whether the field took the value (the select setters return false on no match); the claim set stays for write-once, and a separate count increments only after a write that took. Tests: a write reporting false or throwing is not counted (each with a control); identity selects with no match answer 0 (control 2); a CC expiry select with no match is not counted (control 2). Each red when reverted on a scratch copy. |
 | X2 | Low | An input write always counted: a value the input's type rejects (a postcode in `type=number`, `01/15/1990` in `type=date`, a spaced card number in `type=number`) is sanitized to "" without an error. | `setInputValue` (LOGIN, CC, Identity) returns whether the value was taken, read right after the native setter and before any event: not taken only when a non-empty value left the field empty. Exact equality is not used, because the browser also normalizes accepted values. Tests: identity number/date inputs answer 0 (control 2); a spaced card number in `type=number` answers 0 (control 1); both red when the check is reverted. |
 | X3 | Low | X2's rule caught only a value emptied by sanitization; a lossy non-empty change passed. A password input strips line breaks, so `abc\ndef` became `abcdef`, a password that no longer matches, and still counted. | The field must hold exactly the value; only email and url inputs, which also trim surrounding whitespace, compare against the trimmed value. Tests: a password with a line break is not counted (control: without one); an email username with surrounding whitespace is counted. Each red under the reverted rule. |
+
+A further external pass over `c18b59cae` found no issues.
+
+## Manual verification (VE2)
+
+The user ran the plan's scenarios in Chrome, on a build of `c18b59cae`, and all passed:
+1. https login page: fill from the popup, the context menu and the inline dropdown.
+2. After an extension reload without reloading the page, a popup fill lands.
+3. In the same tab, the inline dropdown shows again.
+4. http page: an entry saved with an `http://` URL fills; an entry saved with an `https://` URL for the same host is refused with the C4 message.
+5. https page with no login field: the C5 "nothing filled" message, and the popup stays open. So Chrome's answer to a broadcast every frame stays silent on is read as "no answer", as C5 intends.
+6. http page with an https iframe: the top-frame login fills, through the F1 pinned follow-up send.
+
+VE2 status: **verified** (Chrome, the user's machine).
