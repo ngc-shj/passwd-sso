@@ -81,6 +81,9 @@ The browser's own HTTP-auth dialog was never fillable by either path. It is trac
 - the page is out of scope;
 - the bundle injection rejects;
 - an `about:blank` frame with an inherited https origin (sec R2 F1). `isInBundleScope` stays URL-based and refuses it, so the expected kinds are exactly `["probe"]`, with the probe asserted as run, and there is no resend to that document. Making it land would widen the bundle's injection scope, which the product decision rules out.
+- **The inherited-origin arm of `acceptsDocument`** keeps a positive control on the context-menu path (test R2-1), where it still decides the first send:
+  - **allow:** an `about:blank` frame inheriting `https://example.com` gets the first `sendMessage` with its `documentId`, then ends `AUTOFILL_INJECT_FAILED`, not `ORIGIN_MISMATCH`;
+  - **deny:** the same frame inheriting `https://evil.example` gets `ORIGIN_MISMATCH` and no `sendMessage`.
 
 The A6 "released without a lock" control becomes `AUTOFILL_INJECT_FAILED`; its lock sibling stays `VAULT_LOCKED`. A TOTP pair is added: failed fill means no clipboard write, and a fill through the resend means one.
 
