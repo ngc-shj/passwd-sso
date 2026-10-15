@@ -1,18 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-// C6's drift pin: directAutofill (background/direct-autofill.ts) re-implements
-// the content side's card-form exclusion (ccFormFields / isLoginEligible) inline
-// because executeScript serializes it with no imports. These tests run both
-// implementations on the SAME markup (one after the other, on a fresh DOM built
-// from the same HTML string) and assert they choose the same password and
-// username target. A drift between the two is a silent LOGIN/CC leak in
-// whichever implementation falls behind.
+// Which fields the LOGIN fill writes, pinned by literal targets on markup that
+// tests the card-form exclusion (ccFormFields / isLoginEligible) and the field
+// visibility rule. Each row runs performAutofill on a fresh DOM built from its
+// HTML string and asserts the username and password targets by element id.
 import { describe, it, expect, afterEach } from "vitest";
-import { directAutofill } from "../../background/direct-autofill";
 import { performAutofill } from "../../content/autofill-lib";
 import { __resetFillSequenceForTests } from "../../content/fill-sequence-lib";
-import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../../lib/cc-patterns";
 import { AUTOFILL_FILL } from "../../lib/constants";
 import { setCheckVisibility, setWindowScroll } from "../helpers/layout-stub";
 
@@ -37,6 +32,13 @@ interface Targets {
   password: string | null;
 }
 
+type FillExtras = {
+  targetHint?: { id: string };
+  customFields?: Array<{ label: string; value: string }>;
+  username?: string;
+  password?: string;
+};
+
 function valueOwnerId(value: string): string | null {
   const el = Array.from(document.querySelectorAll("input")).find(
     (i) => (i as HTMLInputElement).value === value,
@@ -44,22 +46,16 @@ function valueOwnerId(value: string): string | null {
   return el?.id ?? null;
 }
 
-async function runDirect(html: string, focusId?: string, prepare?: () => void): Promise<Targets> {
-  document.body.innerHTML = html;
-  prepare?.();
-  if (focusId) (document.getElementById(focusId) as HTMLInputElement | null)?.focus();
-  await directAutofill(
-    USERNAME,
-    PASSWORD,
-    null,
-    [],
-    CARD_PATTERN_SOURCES,
-    [...LOGIN_AUTOCOMPLETE_TOKENS],
-  );
-  return { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-}
-
-async function runContent(html: string, focusId?: string, prepare?: () => void): Promise<Targets> {
+/**
+ * Builds the markup, runs `prepare` (e.g. to attach a shadow root or a page
+ * handler), focuses `focusId`, fills, and returns which inputs got the values.
+ */
+async function runContent(
+  html: string,
+  focusId?: string,
+  prepare?: () => void,
+  extras: FillExtras = {},
+): Promise<Targets> {
   document.body.innerHTML = html;
   prepare?.();
   if (focusId) (document.getElementById(focusId) as HTMLInputElement | null)?.focus();
@@ -69,24 +65,14 @@ async function runContent(html: string, focusId?: string, prepare?: () => void):
       allowedHosts: [PAGE_HOST],
       username: USERNAME,
       password: PASSWORD,
+      ...extras,
     },
     NO_WAIT,
   );
   return { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
 }
 
-/**
- * Runs both implementations on the same markup and asserts they agree.
- * `prepare` runs after each rebuild of the markup (e.g. to attach a shadow root).
- */
-async function expectParity(html: string, focusId?: string, prepare?: () => void): Promise<Targets> {
-  const direct = await runDirect(html, focusId, prepare);
-  const content = await runContent(html, focusId, prepare);
-  expect(direct, "directAutofill vs performAutofill target mismatch").toEqual(content);
-  return direct;
-}
-
-describe("directAutofill / performAutofill parity (C6)", () => {
+describe("LOGIN fill targets: card-form exclusion (C6)", () => {
   // ── 1: login form + card form with masked CVV ──
   it("excludes the card-form CVV; the login password is chosen", async () => {
     const html = `
@@ -97,7 +83,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="cvv" type="password" name="security_code">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -109,7 +95,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="cvv" type="password" name="security_code">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "cvv" });
   });
 
@@ -121,7 +107,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="cvv" type="password" name="security_code" autocomplete="current-password">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result.password).toBe("cvv");
   });
 
@@ -136,7 +122,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="realcvv" type="password" name="cvv">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "loginuser", password: "loginpw_sc" });
   });
 
@@ -145,7 +131,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
       <input id="loginuser" type="text" name="username">
       <input id="loginpw_sc" type="password" name="security_code">
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "loginuser", password: "loginpw_sc" });
   });
 
@@ -159,7 +145,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <label>セキュリティコード<input id="jacvv" type="password" name="x"></label>
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -168,7 +154,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
       <input id="username" type="text" name="username">
       <label>セキュリティコード<input id="jacvv" type="password" name="x"></label>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "jacvv" });
   });
 
@@ -183,7 +169,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="forcvv" type="password" name="x">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -197,7 +183,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <tr><td><input id="cvv" type="password" name="cvv"></td></tr>
       </table>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -208,7 +194,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <tr><td><input id="cvv" type="password" name="cvv"></td></tr>
       </table>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "cvv" });
   });
 
@@ -222,7 +208,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="cvv" type="password" name="cvv">
       </div>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -237,16 +223,15 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="sibling_sc" type="password" name="security_code">
       </div>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "sibling_sc" });
   });
 
   // ── 8: hidden card number — nothing excluded ──
   //
   // The hidden card-number field is not a card candidate (so no exclusion
-  // applies) and sits between the password and the real "username" field. Both
-  // username walks skip a hidden field, so both reach "username"; before the
-  // shared visibility rule, directAutofill's walk stopped on it and filled none.
+  // applies) and sits between the password and the real "username" field. The
+  // username walk skips a hidden field, so it reaches "username".
   it("a hidden (display:none) card number is not detected; nothing is excluded", async () => {
     const html = `
       <input id="username" type="text" name="username">
@@ -255,7 +240,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="cvv" type="password" name="cvv">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "cvv" });
   });
 
@@ -268,7 +253,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
       </form>
       <input id="loginpw" type="password" name="password">
     `;
-    const result = await expectParity(html, "ccnum");
+    const result = await runContent(html, "ccnum");
     expect(result).toEqual({ username: null, password: "loginpw" });
   });
 
@@ -283,7 +268,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="cvv" type="password" name="security_code">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "otherpw" });
   });
 
@@ -296,7 +281,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="cvv" type="password" name="security_code">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result.password).toBe("cvv");
   });
 
@@ -309,7 +294,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
       </form>
       <input id="loginpw" type="password" name="password">
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: null, password: "loginpw" });
   });
 
@@ -324,18 +309,15 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="loginpw" type="password" name="password">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: null, password: "loginpw" });
   });
 
   // ── 14: a lone card number plus a login security_code in a separate form ──
   //
-  // DIVERGENCE (reported, not fixed): the same root cause as fixture 8. The
-  // lone ccnum (no neighbour, so not excluded per C2's "lone card number is not
-  // excluded" rule) sits between "username" and the chosen password in DOM
-  // order. directAutofill's unfiltered walk stops on it (ccnum is visible here,
-  // so the write DOES land on ccnum instead of "username");
-  // performAutofill's hint filter correctly skips it.
+  // The lone ccnum (no neighbour, so not excluded per C2's "lone card number is
+  // not excluded" rule) sits between "username" and the chosen password in DOM
+  // order; the username hint filter skips it.
   it("allow: a lone card number with no neighbour excludes nothing; the separate-form security_code password is eligible", async () => {
     const html = `
       <input id="username" type="text" name="username">
@@ -346,42 +328,24 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="loginpw_sc" type="password" name="security_code">
       </form>
     `;
-    const direct = await runDirect(html);
-    const content = await runContent(html);
-    expect(direct.password).toBe("loginpw_sc");
-    expect(content.password).toBe("loginpw_sc");
-    // Pinned divergence: directAutofill's naive walk lands on the lone,
-    // not-excluded card number; performAutofill's hint filter skips it.
-    expect(direct.username).toBe("ccnum");
-    expect(content.username).toBe("username");
+    const result = await runContent(html);
+    expect(result).toEqual({ username: "username", password: "loginpw_sc" });
   });
 
   // ── 15: 利用者カード番号 + password login — allow: username is filled ──
   //
-  // DIVERGENCE (reported, not fixed): the lone 利用者カード番号 field is not
-  // excluded (no card neighbour), so both agree it is a valid LOGIN candidate.
-  // But performAutofill's findUsernameInput additionally requires the field's
-  // hint to match a username-shaped regex, and neither the Latin nor the JA
-  // username pattern there matches "利用者カード番号" — so performAutofill
-  // fills no username at all, while directAutofill's unfiltered walk (any
-  // eligible preceding text field) fills it. This is the inverse of fixture 8/14:
-  // there, directAutofill's lack of a hint filter loses to a real username;
-  // here it is the only one of the two that actually fills the field the plan
-  // describes as "the username is filled" (S12).
+  // The lone 利用者カード番号 field is not excluded (no card neighbour), so it
+  // is a valid LOGIN candidate. But findUsernameInput also requires the
+  // field's hint to match a username-shaped regex, and neither the Latin nor
+  // the JA username pattern there matches "利用者カード番号", so no username
+  // is filled (the plan's S12 "the username is filled" does not hold here).
   it("a 利用者カード番号 library-card field has no card neighbour and stays eligible as a LOGIN candidate", async () => {
     const html = `
       <input id="libcard" type="text" name="利用者カード番号">
       <input id="loginpw" type="password" name="password">
     `;
-    const direct = await runDirect(html);
-    const content = await runContent(html);
-    expect(direct.password).toBe("loginpw");
-    expect(content.password).toBe("loginpw");
-    // Pinned divergence: directAutofill fills libcard as the username;
-    // performAutofill's hint regex does not recognize 利用者カード番号 as a
-    // username hint at all, so it fills no username.
-    expect(direct.username).toBe("libcard");
-    expect(content.username).toBeNull();
+    const result = await runContent(html);
+    expect(result).toEqual({ username: null, password: "loginpw" });
   });
 
   // ── 16: form-wrapped card number + form=-associated CVV outside the form ──
@@ -393,7 +357,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
       <input id="cvv" type="password" name="security_code" form="cardForm">
       <input id="loginpw" type="password" name="password">
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: null, password: "loginpw" });
   });
 
@@ -408,7 +372,7 @@ describe("directAutofill / performAutofill parity (C6)", () => {
       </form>
       <input id="loginpw" type="password" name="password">
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -422,14 +386,14 @@ describe("directAutofill / performAutofill parity (C6)", () => {
       </form>
       <input id="loginpw" type="password" name="password">
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "cardusername", password: "loginpw" });
   });
 
   // ── hinted card field: it does not scope the password search ──
   // The card form holds an unrelated eligible masked field ("pin") besides its
   // CVV. A hint on the card number must not narrow the search to that form:
-  // both sides then take the last eligible password page-wide, the login one.
+  // the fill takes the last eligible password page-wide, the login one.
   it("a targetHint on a card-form field does not scope the password search to the card form", async () => {
     const html = `
       <form id="card">
@@ -442,30 +406,18 @@ describe("directAutofill / performAutofill parity (C6)", () => {
         <input id="loginpw" type="password" name="password">
       </form>
     `;
-    const hint = { id: "ccnum" };
-    document.body.innerHTML = html;
-    await directAutofill(USERNAME, PASSWORD, hint, [], CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
-    const direct = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-    __resetFillSequenceForTests();
-    document.body.innerHTML = html;
-    await performAutofill(
-      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: USERNAME, password: PASSWORD, targetHint: hint },
-      NO_WAIT,
-    );
-    const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-    expect(direct).toEqual(content);
-    expect(direct.password).toBe("loginpw");
+    const result = await runContent(html, undefined, undefined, { targetHint: { id: "ccnum" } });
+    expect(result.password).toBe("loginpw");
   });
 });
 
-// ── C1 twin (#884): directAutofill's inline isFieldVisible copy ──
+// ── C1 (#884): field visibility ──
 //
 // Each case puts a second password LAST in the page, after a visible one, so
 // the last-password rule would pick it if visibility let it through. Deny rows
 // assert the visible "pw" is filled and "pwLast" is not; allow rows (the same
-// markup differing on one axis) assert "pwLast" is filled. Every row also pins
-// twin = content.
-describe("directAutofill twin: field visibility (C1)", () => {
+// markup differing on one axis) assert "pwLast" is filled.
+describe("LOGIN fill targets: field visibility (C1)", () => {
   type Row = { name: string; last: string; allowed: boolean; setup?: () => void };
   const CLIP = "overflow-x:hidden; overflow-y:hidden";
   const pwLast = (attrs = "") => `<input id="pwLast" type="password" ${attrs}>`;
@@ -596,7 +548,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
       <input id="pw" type="password" name="password">
       ${last}
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: allowed ? "pwLast" : "pw" });
   });
 
@@ -613,7 +565,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
   };
 
   it("a password slotted into a zero-size clipping wrapper is not written", async () => {
-    const result = await expectParity(
+    const result = await runContent(
       SLOTTED,
       undefined,
       attachShadow(`<div style="${CLIP}" data-rect="0,0,0,0"><slot></slot></div>`),
@@ -622,7 +574,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
   });
 
   it("the same password slotted with no wrapper around the slot is written", async () => {
-    const result = await expectParity(SLOTTED, undefined, attachShadow(`<slot></slot>`));
+    const result = await runContent(SLOTTED, undefined, attachShadow(`<slot></slot>`));
     expect(result).toEqual({ username: "username", password: "pwLast" });
   });
 
@@ -632,7 +584,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
       <div style="display:none"><input id="pwHidden" type="password" autocomplete="current-password"></div>
       <input id="pw" type="password" autocomplete="current-password">
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "pw" });
   });
 
@@ -642,7 +594,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
       <input id="loginHidden" type="text" name="login" data-rect="0,0,0,0">
       <input id="pw" type="password" name="password">
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "pw" });
   });
 
@@ -652,7 +604,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
       <input id="focused" type="email" name="email" data-rect="0,0,0,0">
       <input id="pw" type="password" name="password">
     `;
-    const result = await expectParity(html, "focused");
+    const result = await runContent(html, "focused");
     expect(result).toEqual({ username: "username", password: "pw" });
   });
 
@@ -662,19 +614,8 @@ describe("directAutofill twin: field visibility (C1)", () => {
       <div style="display:none"><input id="hinted" type="text" name="email"></div>
       <input id="pw" type="password" name="password">
     `;
-    const hint = { id: "hinted" };
-    document.body.innerHTML = html;
-    await directAutofill(USERNAME, PASSWORD, hint, [], CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
-    const direct = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-    __resetFillSequenceForTests();
-    document.body.innerHTML = html;
-    await performAutofill(
-      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: USERNAME, password: PASSWORD, targetHint: hint },
-      NO_WAIT,
-    );
-    const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-    expect(direct).toEqual(content);
-    expect(direct).toEqual({ username: "username", password: "pw" });
+    const result = await runContent(html, undefined, undefined, { targetHint: { id: "hinted" } });
+    expect(result).toEqual({ username: "username", password: "pw" });
   });
 
   it("a hinted hidden field does not scope the password search to its form", async () => {
@@ -685,19 +626,8 @@ describe("directAutofill twin: field visibility (C1)", () => {
       </form>
       <input id="pwB" type="password" name="password">
     `;
-    const hint = { id: "hinted" };
-    document.body.innerHTML = html;
-    await directAutofill(USERNAME, PASSWORD, hint, [], CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
-    const direct = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-    __resetFillSequenceForTests();
-    document.body.innerHTML = html;
-    await performAutofill(
-      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: USERNAME, password: PASSWORD, targetHint: hint },
-      NO_WAIT,
-    );
-    const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-    expect(direct).toEqual(content);
-    expect(direct).toEqual({ username: null, password: "pwB" });
+    const result = await runContent(html, undefined, undefined, { targetHint: { id: "hinted" } });
+    expect(result).toEqual({ username: null, password: "pwB" });
   });
 
   it("an opacity:0 input matching a custom-field label is not written; the visible match is", async () => {
@@ -705,19 +635,12 @@ describe("directAutofill twin: field visibility (C1)", () => {
       <input id="memoHidden" type="text" name="memo" style="opacity:0">
       <input id="memo" type="text" name="memo">
     `;
-    const custom = [{ label: "memo", value: "m1" }];
-    document.body.innerHTML = html;
-    await directAutofill("", "", null, custom, CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
-    const direct = valueOwnerId("m1");
-    __resetFillSequenceForTests();
-    document.body.innerHTML = html;
-    await performAutofill(
-      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: "", password: "", customFields: custom },
-      NO_WAIT,
-    );
-    const content = valueOwnerId("m1");
-    expect(direct).toBe(content);
-    expect(direct).toBe("memo");
+    await runContent(html, undefined, undefined, {
+      username: "",
+      password: "",
+      customFields: [{ label: "memo", value: "m1" }],
+    });
+    expect(valueOwnerId("m1")).toBe("memo");
   });
 
   it("a password the page hides before its write is not written", async () => {
@@ -731,20 +654,8 @@ describe("directAutofill twin: field visibility (C1)", () => {
       document.getElementById("username")?.addEventListener("input", () => {
         (document.getElementById("pw") as HTMLInputElement).style.display = "none";
       });
-    document.body.innerHTML = html;
-    hideOnUsernameInput();
-    await directAutofill(USERNAME, PASSWORD, null, [], CARD_PATTERN_SOURCES, [...LOGIN_AUTOCOMPLETE_TOKENS]);
-    const direct = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-    __resetFillSequenceForTests();
-    document.body.innerHTML = html;
-    hideOnUsernameInput();
-    await performAutofill(
-      { type: AUTOFILL_FILL, allowedHosts: [PAGE_HOST], username: USERNAME, password: PASSWORD },
-      NO_WAIT,
-    );
-    const content = { username: valueOwnerId(USERNAME), password: valueOwnerId(PASSWORD) };
-    expect(direct).toEqual(content);
-    expect(direct).toEqual({ username: "username", password: null });
+    const result = await runContent(html, undefined, hideOnUsernameInput);
+    expect(result).toEqual({ username: "username", password: null });
   });
 
   it("a card number hidden by an ancestor still excludes its CVV", async () => {
@@ -756,7 +667,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
         <input id="cvv" type="password" name="cvv">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -769,7 +680,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
         <input id="cvv" type="password" name="cvv">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -781,7 +692,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
       </form>
       <input id="loginpw" type="password" name="password">
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: null, password: "loginpw" });
   });
 
@@ -798,7 +709,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
         <input id="cvv2" type="password" name="cvv">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -818,7 +729,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
       ${cardForm(1)}
       ${cardForm(2)}
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "loginpw" });
   });
 
@@ -835,7 +746,7 @@ describe("directAutofill twin: field visibility (C1)", () => {
         <input id="cvv2" type="password" name="cvv">
       </form>
     `;
-    const result = await expectParity(html);
+    const result = await runContent(html);
     expect(result).toEqual({ username: "username", password: "cvv2" });
   });
 });

@@ -1115,6 +1115,106 @@ describe("performAutofill — sequential fill", () => {
     expect(byId("member").value).toBe("");
   });
 
+  // Sony Bank login shape: no <form>, two custom ID fields, then the password.
+  // A page handler on one write changes the page before the next write's turn.
+  const SONY_SHAPE = `
+    <input id="brchNum" type="text" />
+    <input id="accountNum" type="text" />
+    <input id="loginPwd_inputPass" type="password" name="loginPwd" />
+  `;
+  const SONY_CUSTOM_FIELDS = [
+    { label: "brchNum", value: "123" },
+    { label: "accountNum", value: "4567890" },
+  ];
+  const fillSony = () =>
+    settle(performAutofill(loginPayload({ username: "", password: "pw", customFields: SONY_CUSTOM_FIELDS })));
+
+  it("writes the Sony-shaped custom fields, then the password, one field per task", async () => {
+    setupForm(SONY_SHAPE);
+    const log: string[] = [];
+    for (const el of document.querySelectorAll("input")) {
+      el.addEventListener("input", () => log.push(el.id));
+    }
+    // A task queued by the first write runs before the second write only if the
+    // fill yields a macrotask between fields.
+    byId("brchNum").addEventListener("input", () => setTimeout(() => log.push("task"), 0), { once: true });
+
+    await fillSony();
+
+    expect(log).toEqual(["brchNum", "task", "accountNum", "loginPwd_inputPass"]);
+    expect(byId("brchNum").value).toBe("123");
+    expect(byId("accountNum").value).toBe("4567890");
+    expect(byId("loginPwd_inputPass").value).toBe("pw");
+  });
+
+  it("does not write a target the page detached before its turn", async () => {
+    setupForm(SONY_SHAPE);
+    const account = byId("accountNum");
+    byId("brchNum").addEventListener("input", () => account.remove(), { once: true });
+
+    await fillSony();
+
+    expect(account.value).toBe("");
+    expect(byId("loginPwd_inputPass").value).toBe("pw");
+  });
+
+  it("does not write a password whose type the page changed before its turn", async () => {
+    setupForm(SONY_SHAPE);
+    const password = byId("loginPwd_inputPass");
+    byId("accountNum").addEventListener("input", () => (password.type = "text"), { once: true });
+
+    await fillSony();
+
+    expect(byId("accountNum").value).toBe("4567890");
+    expect(password.value).toBe("");
+  });
+
+  it("does not write a custom field into a hidden-type input that matches its label", async () => {
+    setupForm(`
+      <input id="pin" type="hidden" />
+      <input id="user" type="text" />
+    `);
+
+    await settle(
+      performAutofill(loginPayload({ password: "", customFields: [{ label: "pin", value: "1234" }] })),
+    );
+
+    expect(byId("pin").value).toBe("");
+  });
+
+  it("writes a custom field into the text input when a password input earlier shares its label", async () => {
+    setupForm(`
+      <input name="pin" type="password" />
+      <input id="target" name="pin" type="text" />
+    `);
+
+    await settle(
+      performAutofill(loginPayload({ username: "", password: "", customFields: [{ label: "pin", value: "123" }] })),
+    );
+
+    expect(byId("target").value).toBe("123");
+  });
+
+  it("leaves to a custom field the input it reserved, and picks the username elsewhere", async () => {
+    // The reserved input is username-like and sits nearest the password, where
+    // the username walk would otherwise land. Writes are write-once, so without
+    // the reservation the username step would hit the already-written field and
+    // #user would stay empty.
+    setupForm(`
+      <input id="user" type="text" />
+      <input id="member-id" type="text" />
+      <input id="pw" type="password" />
+    `);
+
+    await settle(
+      performAutofill(loginPayload({ password: "pw", customFields: [{ label: "member-id", value: "M-1" }] })),
+    );
+
+    expect(byId("member-id").value).toBe("M-1");
+    expect(byId("user").value).toBe("alice");
+    expect(byId("pw").value).toBe("pw");
+  });
+
   it("does not write the TOTP into a masked one-time-code field", async () => {
     setupForm(`
       <input id="user" type="text" autocomplete="username" />

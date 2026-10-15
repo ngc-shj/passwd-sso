@@ -5,7 +5,7 @@
 //
 // - Every element's rect defaults to 100×20 at (10, 10). An element overrides
 //   it with `data-rect="w,h,x,y"`, resolved at call time so it survives an
-//   `innerHTML` rebuild and reaches the injected direct-autofill twin.
+//   `innerHTML` rebuild.
 // - clientWidth / clientHeight follow the rect; scrollLeft / scrollTop come from
 //   `data-scroll="x,y"` (default 0); scrollWidth / scrollHeight come from
 //   `data-scroll-size="w,h"`, defaulting to the largest of the client size, the

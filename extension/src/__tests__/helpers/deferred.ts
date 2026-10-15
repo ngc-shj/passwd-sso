@@ -102,8 +102,7 @@ export function holdDecrypt(decryptMock: HoldableMock, ciphertext: string): Hold
 
 /**
  * Hold the next chrome.scripting.executeScript location probe: a `func`
- * injection without `args` (the direct-autofill func always passes args, the
- * bundle passes `files`).
+ * injection without `args` (the bundle passes `files`).
  */
 export function holdProbe(executeScriptMock: HoldableMock): Hold {
   return holdNextCall(executeScriptMock, (injection: { func?: unknown; args?: unknown }) =>
@@ -113,11 +112,6 @@ export function holdProbe(executeScriptMock: HoldableMock): Hold {
 /** Hold the next content-bundle injection (an executeScript call with `files`). */
 export function holdBundleInjection(executeScriptMock: HoldableMock): Hold {
   return holdNextCall(executeScriptMock, (injection: { files?: unknown }) => !!injection.files);
-}
-
-/** Hold the next direct-autofill injection (an executeScript call with `args`). */
-export function holdDirectInjection(executeScriptMock: HoldableMock): Hold {
-  return holdNextCall(executeScriptMock, (injection: { args?: unknown }) => !!injection.args);
 }
 
 /**
