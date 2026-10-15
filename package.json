@@ -155,6 +155,7 @@
     "esbuild": ">=0.28.1",
     "nanoid": "^3.3.18",
     "sharp": "^0.35.5",
-    "body-parser": "^2.3.0"
+    "body-parser": "^2.3.0",
+    "postcss-selector-parser@<7.1.6": "^7.1.6"
   }
 }
