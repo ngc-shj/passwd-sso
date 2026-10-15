@@ -81,15 +81,12 @@ export function BaseWebhookCard({ config }: Props) {
   const {
     listEndpoint,
     createEndpoint,
+    deleteEndpoint,
     eventGroups,
     groupLabelMap,
     i18nNamespace,
     locale,
   } = config;
-
-  // Store deleteEndpoint in a ref to avoid stale closures without re-creating fetchWebhooks
-  const deleteEndpointRef = useRef(config.deleteEndpoint);
-  deleteEndpointRef.current = config.deleteEndpoint;
 
   const t = useTranslations(i18nNamespace);
   const tCommon = useTranslations("Common");
@@ -107,26 +104,28 @@ export function BaseWebhookCard({ config }: Props) {
   // The retry arg records which mutation was attempted so the post-reauth retry
   // replays the same one.
   type ReauthRetry = { type: "create" } | { type: "delete"; webhookId: string };
-  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
-    if (retry.type === "create") await handleCreate();
-    else if (retry.type === "delete") await handleDelete(retry.webhookId);
-  });
+  const handleRetryRef = useRef<(retry: ReauthRetry) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetry>((retry) => handleRetryRef.current(retry));
 
   // listEndpoint already encodes all dynamic identifiers (e.g. teamId is baked into
   // apiPath.teamWebhooks(teamId)), so depending on listEndpoint alone is sufficient.
-  const fetchWebhooks = useCallback(async () => {
-    try {
-      const res = await fetchApi(listEndpoint);
-      if (res.ok) {
-        const data = await res.json();
-        setWebhooks(data.webhooks ?? []);
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false);
-    }
-  }, [listEndpoint]);
+  const fetchWebhooks = useCallback(
+    () =>
+      fetchApi(listEndpoint)
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setWebhooks(data.webhooks ?? []);
+          }
+        })
+        .catch(() => {
+          // silently fail
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [listEndpoint],
+  );
 
   useEffect(() => {
     fetchWebhooks();
@@ -206,7 +205,7 @@ export function BaseWebhookCard({ config }: Props) {
     try {
       // @stepup id:tenant-webhook-delete
       // @stepup id:team-webhook-delete
-      const res = await fetchApi(deleteEndpointRef.current(webhookId), {
+      const res = await fetchApi(deleteEndpoint(webhookId), {
         method: "DELETE",
       });
       if (res.ok) {
@@ -220,6 +219,13 @@ export function BaseWebhookCard({ config }: Props) {
       toast.error(t("deleteFailed"));
     }
   };
+
+  useEffect(() => {
+    handleRetryRef.current = async (retry) => {
+      if (retry.type === "create") await handleCreate();
+      else if (retry.type === "delete") await handleDelete(retry.webhookId);
+    };
+  });
 
   const toggleEvent = (action: string, checked: boolean) => {
     setSelectedEvents((prev) => {
@@ -252,11 +258,15 @@ export function BaseWebhookCard({ config }: Props) {
   const [showInactive, setShowInactive] = useState(false);
 
   // Auto-expand inactive section when limit is reached so users can delete inactive webhooks
-  useEffect(() => {
+  const [prevLimitReached, setPrevLimitReached] = useState(limitReached);
+  const [prevInactiveCount, setPrevInactiveCount] = useState(inactiveWebhooks.length);
+  if (limitReached !== prevLimitReached || inactiveWebhooks.length !== prevInactiveCount) {
+    setPrevLimitReached(limitReached);
+    setPrevInactiveCount(inactiveWebhooks.length);
     if (limitReached && inactiveWebhooks.length > 0) {
       setShowInactive(true);
     }
-  }, [limitReached, inactiveWebhooks.length]);
+  }
 
   const renderWebhookItem = (w: WebhookItem) => (
     <div

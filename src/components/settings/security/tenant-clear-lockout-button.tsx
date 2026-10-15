@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +43,8 @@ export function TenantClearLockoutButton({
   // (a plain Button, not AlertDialogAction, keeps it open through failure/
   // step-up; setOpen(false) fires only on success) and the hook re-runs
   // handleClear after reauth.
-  const inlineReauth = useInlineReauth(() => handleClear());
+  const handleClearRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleClearRetryRef.current());
 
   const handleClear = async () => {
     setLoading(true);
@@ -75,6 +76,10 @@ export function TenantClearLockoutButton({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    handleClearRetryRef.current = () => handleClear();
+  });
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>

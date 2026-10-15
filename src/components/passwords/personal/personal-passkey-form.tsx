@@ -121,21 +121,6 @@ export function PasskeyForm({
       travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      relyingPartyId,
-      relyingPartyName,
-      username,
-      credentialId,
-      creationDate,
-      deviceInfo,
-      notes,
-      base.selectedTags,
-      base.folderId,
-      base.requireReprompt,
-      travelSafe,
-      base.expiresAt,
-    ],
   );
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant

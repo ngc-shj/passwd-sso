@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useState } from "react";
 
 /**
  * Detect whether the current entry form state differs from the baseline
@@ -13,8 +13,6 @@ import { useMemo, useRef } from "react";
  *       selectedTagIds: selectedTags.map((t) => t.id).sort(),
  *       folderId, requireReprompt, travelSafe, expiresAt,
  *     }),
- *     [title, username, password, url, notes, selectedTags, folderId,
- *      requireReprompt, travelSafe, expiresAt],
  *   );
  *
  * Replaces the two-step pattern that previously appeared in every entry
@@ -24,21 +22,13 @@ import { useMemo, useRef } from "react";
  *   const hasChanges = currentSnapshot !== baselineSnapshot;
  *
  * Implementation notes:
- * - The baseline is captured on the first render via useRef and is stable
- *   across re-renders (equivalent to initializing a ref lazily from the
- *   first `build()` result).
- * - Callers pass an explicit dep array so the current snapshot is only
- *   recomputed when form fields change.
+ * - The baseline is captured on the first render via a useState
+ *   initializer and is stable across re-renders.
+ * - The current snapshot is recomputed on every render; entry forms are
+ *   small enough that serializing them is cheaper than tracking deps.
  */
-export function useEntryHasChanges(
-  build: () => unknown,
-  deps: readonly unknown[],
-): boolean {
-  const baselineRef = useRef<string | null>(null);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- deps supplied by caller
-  const current = useMemo(() => JSON.stringify(build()), deps);
-  if (baselineRef.current === null) {
-    baselineRef.current = current;
-  }
-  return current !== baselineRef.current;
+export function useEntryHasChanges(build: () => unknown): boolean {
+  const current = JSON.stringify(build());
+  const [baseline] = useState(current);
+  return current !== baseline;
 }

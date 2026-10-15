@@ -66,16 +66,6 @@ export function TeamSecureNoteForm({
       travelSafe: base.travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      base.notes,
-      content,
-      base.selectedTags,
-      base.teamFolderId,
-      base.requireReprompt,
-      base.travelSafe,
-      base.expiresAt,
-    ],
   );
   const submitDisabled = !base.title.trim();
 

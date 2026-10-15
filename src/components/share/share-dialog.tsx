@@ -190,25 +190,31 @@ export function ShareDialog({
     ? `passwordEntryId=${passwordEntryId}`
     : `teamPasswordEntryId=${teamPasswordEntryId}`;
 
-  const fetchLinks = useCallback(async () => {
-    setLoadingLinks(true);
-    try {
-      const res = await fetchApi(`${API_PATH.SHARE_LINKS}?${entryParam}`);
-      if (res.ok) {
-        const data = await res.json();
-        setLinks(data.items);
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setLoadingLinks(false);
-    }
-  }, [entryParam]);
+  const fetchLinks = useCallback(() =>
+    fetchApi(`${API_PATH.SHARE_LINKS}?${entryParam}`)
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setLinks(data.items);
+        }
+      })
+      .catch(() => {
+        // silently fail
+      })
+      .finally(() => setLoadingLinks(false)), [entryParam]);
 
-  useEffect(() => {
+  const [prevOpenState, setPrevOpenState] = useState<{ open: boolean; entryParam: string } | null>(null);
+  if (prevOpenState === null || prevOpenState.open !== open || prevOpenState.entryParam !== entryParam) {
+    setPrevOpenState({ open, entryParam });
     if (open) {
       setCreatedUrl(null);
       setPermission(SHARE_PERMISSION.VIEW_ALL);
+      setLoadingLinks(true);
+    }
+  }
+
+  useEffect(() => {
+    if (open) {
       fetchLinks();
     }
   }, [open, fetchLinks]);
@@ -338,6 +344,7 @@ export function ShareDialog({
       }
       setCreatedUrl(fullUrl);
       if (data.accessPassword) setCreatedAccessPassword(data.accessPassword);
+      setLoadingLinks(true);
       fetchLinks();
       toast.success(t("createSuccess"));
     } catch {
@@ -396,6 +403,7 @@ export function ShareDialog({
       const res = await fetchApi(apiPath.shareLinkById(id), { method: "DELETE" });
       if (res.ok) {
         toast.success(t("revokeSuccess"));
+        setLoadingLinks(true);
         fetchLinks();
       } else {
         toast.error(t("revokeError"));

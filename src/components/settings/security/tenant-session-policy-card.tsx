@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Clock, Loader2 } from "lucide-react";
@@ -88,60 +88,59 @@ export function TenantSessionPolicyCard() {
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchPolicy = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.TENANT_POLICY);
-      if (res.ok) {
-        const data = await res.json();
-
-        const maxVal = data.maxConcurrentSessions;
-        const unlimitedVal = maxVal === null || maxVal === undefined;
-        const maxSessionsVal = unlimitedVal ? "" : String(maxVal);
-        setUnlimited(unlimitedVal);
-        setMaxSessions(maxSessionsVal);
-
-        const idleVal = String(data.sessionIdleTimeoutMinutes ?? SESSION_IDLE_TIMEOUT_DEFAULT);
-        const absVal = String(data.sessionAbsoluteTimeoutMinutes ?? SESSION_ABSOLUTE_TIMEOUT_DEFAULT);
-        const extIdleVal = String(data.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT);
-        const extAbsVal = String(data.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT);
-        setIdleTimeoutMinutes(idleVal);
-        setAbsoluteTimeoutMinutes(absVal);
-        setExtensionIdleMinutes(extIdleVal);
-        setExtensionAbsoluteMinutes(extAbsVal);
-
-        const autoLockVal = data.vaultAutoLockMinutes;
-        const autoLockEnabledVal = !(autoLockVal === null || autoLockVal === undefined);
-        const autoLockMinutesVal = autoLockEnabledVal ? String(autoLockVal) : "";
-        setVaultAutoLockEnabled(autoLockEnabledVal);
-        setVaultAutoLockMinutes(autoLockMinutesVal);
-
-        const requireLogoutVal = !!data.requireVaultTimeoutLogout;
-        setRequireVaultTimeoutLogout(requireLogoutVal);
-
-        setInitialPolicy({
-          unlimited: unlimitedVal,
-          maxSessions: maxSessionsVal,
-          idleTimeoutMinutes: idleVal,
-          absoluteTimeoutMinutes: absVal,
-          extensionIdleMinutes: extIdleVal,
-          extensionAbsoluteMinutes: extAbsVal,
-          vaultAutoLockEnabled: autoLockEnabledVal,
-          vaultAutoLockMinutes: autoLockMinutesVal,
-          requireVaultTimeoutLogout: requireLogoutVal,
-        });
-      } else {
-        toast.error(t("sessionPolicyLoadFailed"));
-      }
-    } catch {
-      toast.error(t("sessionPolicyLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
+    const fetchPolicy = async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_POLICY);
+        if (res.ok) {
+          const data = await res.json();
+
+          const maxVal = data.maxConcurrentSessions;
+          const unlimitedVal = maxVal === null || maxVal === undefined;
+          const maxSessionsVal = unlimitedVal ? "" : String(maxVal);
+          setUnlimited(unlimitedVal);
+          setMaxSessions(maxSessionsVal);
+
+          const idleVal = String(data.sessionIdleTimeoutMinutes ?? SESSION_IDLE_TIMEOUT_DEFAULT);
+          const absVal = String(data.sessionAbsoluteTimeoutMinutes ?? SESSION_ABSOLUTE_TIMEOUT_DEFAULT);
+          const extIdleVal = String(data.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT);
+          const extAbsVal = String(data.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT);
+          setIdleTimeoutMinutes(idleVal);
+          setAbsoluteTimeoutMinutes(absVal);
+          setExtensionIdleMinutes(extIdleVal);
+          setExtensionAbsoluteMinutes(extAbsVal);
+
+          const autoLockVal = data.vaultAutoLockMinutes;
+          const autoLockEnabledVal = !(autoLockVal === null || autoLockVal === undefined);
+          const autoLockMinutesVal = autoLockEnabledVal ? String(autoLockVal) : "";
+          setVaultAutoLockEnabled(autoLockEnabledVal);
+          setVaultAutoLockMinutes(autoLockMinutesVal);
+
+          const requireLogoutVal = !!data.requireVaultTimeoutLogout;
+          setRequireVaultTimeoutLogout(requireLogoutVal);
+
+          setInitialPolicy({
+            unlimited: unlimitedVal,
+            maxSessions: maxSessionsVal,
+            idleTimeoutMinutes: idleVal,
+            absoluteTimeoutMinutes: absVal,
+            extensionIdleMinutes: extIdleVal,
+            extensionAbsoluteMinutes: extAbsVal,
+            vaultAutoLockEnabled: autoLockEnabledVal,
+            vaultAutoLockMinutes: autoLockMinutesVal,
+            requireVaultTimeoutLogout: requireLogoutVal,
+          });
+        } else {
+          toast.error(t("sessionPolicyLoadFailed"));
+        }
+      } catch {
+        toast.error(t("sessionPolicyLoadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    };
     void fetchPolicy();
-  }, [fetchPolicy]);
+  }, [t]);
 
   const validate = (): string | null => {
     // Helper: runs min/max check on a per-field basis and returns the
@@ -230,7 +229,8 @@ export function TenantSessionPolicyCard() {
     return null;
   };
 
-  const inlineReauth = useInlineReauth(() => handleSave());
+  const handleSaveRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleSaveRetryRef.current());
 
   const handleSave = async () => {
     const validationError = validate();
@@ -284,6 +284,10 @@ export function TenantSessionPolicyCard() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    handleSaveRetryRef.current = () => handleSave();
+  });
 
   if (loading) {
     return (

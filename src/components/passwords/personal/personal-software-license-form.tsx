@@ -116,22 +116,6 @@ export function SoftwareLicenseForm({
       travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      softwareName,
-      licenseKey,
-      version,
-      licensee,
-      email,
-      purchaseDate,
-      expirationDate,
-      notes,
-      base.selectedTags,
-      base.folderId,
-      base.requireReprompt,
-      travelSafe,
-      base.expiresAt,
-    ],
   );
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant

@@ -47,16 +47,23 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
   // Inline step-up reauth — adding a tenant member is server-side
   // step-up-gated. The retry arg (owned by the hook) carries the user id so the
   // post-reauth retry replays the same add.
-  const inlineReauth = useInlineReauth<string>((userId) => handleAddMember(userId));
+  const addMemberRetryRef = useRef<(arg: string) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<string>((arg) => addMemberRetryRef.current(arg));
 
   // Debounced tenant member search
-  useEffect(() => {
+  const [prevSearchKey, setPrevSearchKey] = useState({ addSearch, teamId });
+  if (addSearch !== prevSearchKey.addSearch || teamId !== prevSearchKey.teamId) {
+    setPrevSearchKey({ addSearch, teamId });
     if (!addSearch.trim()) {
       setSearchResults([]);
       setSearchLoading(false);
-      return;
+    } else {
+      setSearchLoading(true);
     }
-    setSearchLoading(true);
+  }
+
+  useEffect(() => {
+    if (!addSearch.trim()) return;
     const timer = setTimeout(() => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -125,6 +132,10 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
       setAdding(null);
     }
   };
+
+  useEffect(() => {
+    addMemberRetryRef.current = (userId) => handleAddMember(userId);
+  });
 
   return (
     <>

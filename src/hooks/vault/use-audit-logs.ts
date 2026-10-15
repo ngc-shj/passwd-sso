@@ -145,9 +145,18 @@ export function useAuditLogs(config: UseAuditLogsConfig): UseAuditLogsReturn {
     [buildFilterParams, fetchEndpoint],
   );
 
+  const [prevFetchInputs, setPrevFetchInputs] = useState({ fetchLogs, resolveEntryNames, onDataReceived });
+  if (
+    prevFetchInputs.fetchLogs !== fetchLogs ||
+    prevFetchInputs.resolveEntryNames !== resolveEntryNames ||
+    prevFetchInputs.onDataReceived !== onDataReceived
+  ) {
+    setPrevFetchInputs({ fetchLogs, resolveEntryNames, onDataReceived });
+    setLoading(true);
+  }
+
   useEffect(() => {
     let stale = false;
-    setLoading(true);
     fetchLogs().then(async (data) => {
       if (stale) return;
       if (data) {

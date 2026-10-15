@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { ShieldAlert, Loader2 } from "lucide-react";
@@ -56,40 +56,39 @@ export function TenantLockoutPolicyCard() {
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchPolicy = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.TENANT_POLICY);
-      if (res.ok) {
-        const data = await res.json();
-
-        const t1 = data.lockoutThreshold1 !== null && data.lockoutThreshold1 !== undefined ? String(data.lockoutThreshold1) : "";
-        const d1 = data.lockoutDuration1Minutes !== null && data.lockoutDuration1Minutes !== undefined ? String(data.lockoutDuration1Minutes) : "";
-        const t2 = data.lockoutThreshold2 !== null && data.lockoutThreshold2 !== undefined ? String(data.lockoutThreshold2) : "";
-        const d2 = data.lockoutDuration2Minutes !== null && data.lockoutDuration2Minutes !== undefined ? String(data.lockoutDuration2Minutes) : "";
-        const t3 = data.lockoutThreshold3 !== null && data.lockoutThreshold3 !== undefined ? String(data.lockoutThreshold3) : "";
-        const d3 = data.lockoutDuration3Minutes !== null && data.lockoutDuration3Minutes !== undefined ? String(data.lockoutDuration3Minutes) : "";
-
-        setThreshold1(t1);
-        setDuration1(d1);
-        setThreshold2(t2);
-        setDuration2(d2);
-        setThreshold3(t3);
-        setDuration3(d3);
-
-        setInitialPolicy({ threshold1: t1, duration1: d1, threshold2: t2, duration2: d2, threshold3: t3, duration3: d3 });
-      } else {
-        toast.error(t("lockoutPolicyLoadFailed"));
-      }
-    } catch {
-      toast.error(t("lockoutPolicyLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
+    const fetchPolicy = async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_POLICY);
+        if (res.ok) {
+          const data = await res.json();
+
+          const t1 = data.lockoutThreshold1 !== null && data.lockoutThreshold1 !== undefined ? String(data.lockoutThreshold1) : "";
+          const d1 = data.lockoutDuration1Minutes !== null && data.lockoutDuration1Minutes !== undefined ? String(data.lockoutDuration1Minutes) : "";
+          const t2 = data.lockoutThreshold2 !== null && data.lockoutThreshold2 !== undefined ? String(data.lockoutThreshold2) : "";
+          const d2 = data.lockoutDuration2Minutes !== null && data.lockoutDuration2Minutes !== undefined ? String(data.lockoutDuration2Minutes) : "";
+          const t3 = data.lockoutThreshold3 !== null && data.lockoutThreshold3 !== undefined ? String(data.lockoutThreshold3) : "";
+          const d3 = data.lockoutDuration3Minutes !== null && data.lockoutDuration3Minutes !== undefined ? String(data.lockoutDuration3Minutes) : "";
+
+          setThreshold1(t1);
+          setDuration1(d1);
+          setThreshold2(t2);
+          setDuration2(d2);
+          setThreshold3(t3);
+          setDuration3(d3);
+
+          setInitialPolicy({ threshold1: t1, duration1: d1, threshold2: t2, duration2: d2, threshold3: t3, duration3: d3 });
+        } else {
+          toast.error(t("lockoutPolicyLoadFailed"));
+        }
+      } catch {
+        toast.error(t("lockoutPolicyLoadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    };
     void fetchPolicy();
-  }, [fetchPolicy]);
+  }, [t]);
 
   const validate = (): string | null => {
     const t1 = threshold1 !== "" ? Number(threshold1) : null;
@@ -117,7 +116,8 @@ export function TenantLockoutPolicyCard() {
     return null;
   };
 
-  const inlineReauth = useInlineReauth(() => handleSave());
+  const handleSaveRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleSaveRetryRef.current());
 
   const handleSave = async () => {
     const validationError = validate();
@@ -155,6 +155,10 @@ export function TenantLockoutPolicyCard() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    handleSaveRetryRef.current = () => handleSave();
+  });
 
   if (loading) {
     return (

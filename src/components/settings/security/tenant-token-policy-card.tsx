@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Key, Loader2 } from "lucide-react";
@@ -59,52 +59,51 @@ export function TenantTokenPolicyCard() {
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchPolicy = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.TENANT_POLICY);
-      if (res.ok) {
-        const data = await res.json();
-
-        const saExpiry = data.saTokenMaxExpiryDays;
-        const saExpiryEnabled = saExpiry !== null && saExpiry !== undefined;
-        const saExpiryStr = saExpiryEnabled ? String(saExpiry) : "";
-
-        const jitDefault = data.jitTokenDefaultTtlSec;
-        const jitDefaultEnabled = jitDefault !== null && jitDefault !== undefined;
-        const jitDefaultStr = jitDefaultEnabled ? String(jitDefault) : "";
-
-        const jitMax = data.jitTokenMaxTtlSec;
-        const jitMaxEnabled = jitMax !== null && jitMax !== undefined;
-        const jitMaxStr = jitMaxEnabled ? String(jitMax) : "";
-
-        setSaTokenMaxExpiryEnabled(saExpiryEnabled);
-        setSaTokenMaxExpiryDays(saExpiryStr);
-        setJitTokenDefaultEnabled(jitDefaultEnabled);
-        setJitTokenDefaultTtlSec(jitDefaultStr);
-        setJitTokenMaxEnabled(jitMaxEnabled);
-        setJitTokenMaxTtlSec(jitMaxStr);
-
-        setInitialPolicy({
-          saTokenMaxExpiryEnabled: saExpiryEnabled,
-          saTokenMaxExpiryDays: saExpiryStr,
-          jitTokenDefaultEnabled: jitDefaultEnabled,
-          jitTokenDefaultTtlSec: jitDefaultStr,
-          jitTokenMaxEnabled: jitMaxEnabled,
-          jitTokenMaxTtlSec: jitMaxStr,
-        });
-      } else {
-        toast.error(t("tokenPolicyLoadFailed"));
-      }
-    } catch {
-      toast.error(t("tokenPolicyLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
+    const fetchPolicy = async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_POLICY);
+        if (res.ok) {
+          const data = await res.json();
+
+          const saExpiry = data.saTokenMaxExpiryDays;
+          const saExpiryEnabled = saExpiry !== null && saExpiry !== undefined;
+          const saExpiryStr = saExpiryEnabled ? String(saExpiry) : "";
+
+          const jitDefault = data.jitTokenDefaultTtlSec;
+          const jitDefaultEnabled = jitDefault !== null && jitDefault !== undefined;
+          const jitDefaultStr = jitDefaultEnabled ? String(jitDefault) : "";
+
+          const jitMax = data.jitTokenMaxTtlSec;
+          const jitMaxEnabled = jitMax !== null && jitMax !== undefined;
+          const jitMaxStr = jitMaxEnabled ? String(jitMax) : "";
+
+          setSaTokenMaxExpiryEnabled(saExpiryEnabled);
+          setSaTokenMaxExpiryDays(saExpiryStr);
+          setJitTokenDefaultEnabled(jitDefaultEnabled);
+          setJitTokenDefaultTtlSec(jitDefaultStr);
+          setJitTokenMaxEnabled(jitMaxEnabled);
+          setJitTokenMaxTtlSec(jitMaxStr);
+
+          setInitialPolicy({
+            saTokenMaxExpiryEnabled: saExpiryEnabled,
+            saTokenMaxExpiryDays: saExpiryStr,
+            jitTokenDefaultEnabled: jitDefaultEnabled,
+            jitTokenDefaultTtlSec: jitDefaultStr,
+            jitTokenMaxEnabled: jitMaxEnabled,
+            jitTokenMaxTtlSec: jitMaxStr,
+          });
+        } else {
+          toast.error(t("tokenPolicyLoadFailed"));
+        }
+      } catch {
+        toast.error(t("tokenPolicyLoadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    };
     void fetchPolicy();
-  }, [fetchPolicy]);
+  }, [t]);
 
   const validate = (): string | null => {
     if (saTokenMaxExpiryEnabled) {
@@ -133,7 +132,8 @@ export function TenantTokenPolicyCard() {
     return null;
   };
 
-  const inlineReauth = useInlineReauth(() => handleSave());
+  const handleSaveRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleSaveRetryRef.current());
 
   const handleSave = async () => {
     const validationError = validate();
@@ -168,6 +168,10 @@ export function TenantTokenPolicyCard() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    handleSaveRetryRef.current = () => handleSave();
+  });
 
   if (loading) {
     return (

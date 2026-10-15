@@ -53,18 +53,6 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const fetchUnreadCount = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.NOTIFICATIONS_COUNT);
-      if (res.ok) {
-        const data = await res.json();
-        setUnreadCount(data.unreadCount);
-      }
-    } catch {
-      // Silently ignore polling errors
-    }
-  }, []);
-
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
@@ -84,6 +72,18 @@ export function NotificationBell() {
 
   // Poll unread count (pause when tab is hidden)
   useEffect(() => {
+    async function fetchUnreadCount() {
+      try {
+        const res = await fetchApi(API_PATH.NOTIFICATIONS_COUNT);
+        if (res.ok) {
+          const data = await res.json();
+          setUnreadCount(data.unreadCount);
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    }
+
     fetchUnreadCount();
     let id: ReturnType<typeof setInterval> | null = setInterval(fetchUnreadCount, POLL_INTERVAL_MS);
 
@@ -101,14 +101,15 @@ export function NotificationBell() {
       if (id) clearInterval(id);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [fetchUnreadCount]);
+  }, []);
 
   // Fetch list when dropdown opens
-  useEffect(() => {
-    if (open) {
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) {
       fetchNotifications();
     }
-  }, [open, fetchNotifications]);
+  };
 
   const markAllAsRead = useCallback(async () => {
     try {
@@ -160,7 +161,7 @@ export function NotificationBell() {
   }, []);
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"

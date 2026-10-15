@@ -50,26 +50,7 @@ export function VaultLockScreen() {
   const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [error, setError] = useState("");
   const [hasPrfPasskeys, setHasPrfPasskeys] = useState(false);
-  const [prfChecked, setPrfChecked] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
-
-  // Check if user has PRF-capable passkeys
-  useEffect(() => {
-    if (!isWebAuthnSupported()) {
-      setPrfChecked(true);
-      return;
-    }
-
-    fetchApi(API_PATH.WEBAUTHN_CREDENTIALS)
-      .then(async (res) => {
-        if (res.ok) {
-          const creds: Array<{ prfSupported: boolean }> = await res.json();
-          setHasPrfPasskeys(creds.some((c) => c.prfSupported));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setPrfChecked(true));
-  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,41 +133,67 @@ export function VaultLockScreen() {
       sessionStorage.getItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN) === "1",
   );
 
-  // Auto-unlock vault after WebAuthn sign-in.
-  // If PRF output was captured during sign-in (single-ceremony flow),
-  // use it directly. Otherwise fall back to a separate ceremony.
+  // Auto-unlock vault after WebAuthn sign-in, once the PRF passkey check below
+  // has settled. If PRF output was captured during sign-in (single-ceremony
+  // flow), use it directly. Otherwise fall back to a separate ceremony.
+  const autoUnlockRef = useRef<() => void>(() => {});
   useEffect(() => {
-    if (!webauthnSignInRef.current || !prfChecked) return;
-    // Consume flag (one-shot)
-    webauthnSignInRef.current = false;
-    sessionStorage.removeItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN);
+    autoUnlockRef.current = () => {
+      if (!webauthnSignInRef.current) return;
+      // Consume flag (one-shot)
+      webauthnSignInRef.current = false;
+      sessionStorage.removeItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN);
 
-    // PRF material is handed off in-memory (not sessionStorage) and consumed by
-    // unlockWithStoredPrf; peek without consuming to decide whether to attempt.
-    if (hasPrf()) {
-      // Single-ceremony flow: use PRF output from sign-in (no second QR scan)
-      setPasskeyLoading(true);
-      unlockWithStoredPrf()
-        .then((ok) => {
-          if (!ok) setError(tw("unlockError"));
-        })
-        .catch((err) => {
-          if (err instanceof VaultUnlockError) {
-            if (err.code === API_ERROR.UNAUTHORIZED) {
-              setSessionExpired(true);
-              return;
+      // PRF material is handed off in-memory (not sessionStorage) and consumed by
+      // unlockWithStoredPrf; peek without consuming to decide whether to attempt.
+      if (hasPrf()) {
+        // Single-ceremony flow: use PRF output from sign-in (no second QR scan)
+        setPasskeyLoading(true);
+        unlockWithStoredPrf()
+          .then((ok) => {
+            if (!ok) setError(tw("unlockError"));
+          })
+          .catch((err) => {
+            if (err instanceof VaultUnlockError) {
+              if (err.code === API_ERROR.UNAUTHORIZED) {
+                setSessionExpired(true);
+                return;
+              }
+              setError(formatLockedUntil(err.lockedUntil, t));
+            } else {
+              setError(tw("unlockError"));
             }
-            setError(formatLockedUntil(err.lockedUntil, t));
-          } else {
-            setError(tw("unlockError"));
-          }
-        })
-        .finally(() => setPasskeyLoading(false));
-    }
-    // If sign-in did not produce PRF output (authenticator doesn't support PRF),
-    // do NOT auto-trigger a separate ceremony — the user can manually unlock
-    // with passphrase or click the passkey unlock button.
-  }, [prfChecked, unlockWithStoredPrf, t, tw]);
+          })
+          .finally(() => setPasskeyLoading(false));
+      }
+      // If sign-in did not produce PRF output (authenticator doesn't support PRF),
+      // do NOT auto-trigger a separate ceremony — the user can manually unlock
+      // with passphrase or click the passkey unlock button.
+    };
+  }, [unlockWithStoredPrf, t, tw]);
+
+  // Check if user has PRF-capable passkeys
+  useEffect(() => {
+    let cancelled = false;
+    const prfCheck = isWebAuthnSupported()
+      ? fetchApi(API_PATH.WEBAUTHN_CREDENTIALS)
+          .then(async (res) => {
+            if (res.ok) {
+              const creds: Array<{ prfSupported: boolean }> = await res.json();
+              setHasPrfPasskeys(creds.some((c) => c.prfSupported));
+            }
+          })
+          .catch(() => {})
+      : Promise.resolve();
+    // An unmounted screen must not consume the one-shot sign-in flag: the
+    // remounted one would then have nothing to auto-unlock with.
+    void prfCheck.finally(() => {
+      if (!cancelled) autoUnlockRef.current();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (sessionExpired) {
     return (

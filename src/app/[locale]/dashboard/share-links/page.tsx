@@ -98,10 +98,11 @@ export default function ShareLinksPage() {
   const [logNextCursor, setLogNextCursor] = useState<string | null>(null);
 
   // Sync typeFilter when navigating via sidebar links (?type=send / ?type=entry)
-  useEffect(() => {
-    const next = typeParam === "send" || typeParam === "entry" ? typeParam : "all";
-    setTypeFilter(next);
-  }, [typeParam]);
+  const [prevTypeParam, setPrevTypeParam] = useState(typeParam);
+  if (typeParam !== prevTypeParam) {
+    setPrevTypeParam(typeParam);
+    setTypeFilter(typeParam === "send" || typeParam === "entry" ? typeParam : "all");
+  }
 
   const fetchLinks = useCallback(
     async (cursor?: string) => {
@@ -118,8 +119,14 @@ export default function ShareLinksPage() {
     [statusFilter, typeFilter, teamFilter]
   );
 
-  useEffect(() => {
+  // A new fetchLinks is exactly what re-runs the effect below.
+  const [prevFetchLinks, setPrevFetchLinks] = useState(() => fetchLinks);
+  if (fetchLinks !== prevFetchLinks) {
+    setPrevFetchLinks(() => fetchLinks);
     setLoading(true);
+  }
+
+  useEffect(() => {
     fetchLinks().then((data) => {
       if (data) {
         setLinks(data.items);

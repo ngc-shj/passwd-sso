@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -85,29 +85,29 @@ export function ScimTokenManager({ locale }: Props) {
   // server-side step-up-gated. The retry arg (owned by the hook) records
   // which mutation was in flight so the post-reauth retry replays the same one.
   type ReauthRetry = { type: "create" } | { type: "revoke"; tokenId: string };
-  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
-    if (retry.type === "create") await handleCreate();
-    else if (retry.type === "revoke") await handleRevoke(retry.tokenId);
-  });
+  const handleRetryRef = useRef<(arg: ReauthRetry) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetry>((arg) => handleRetryRef.current(arg));
 
   const scimEndpoint =
     typeof window !== "undefined"
       ? appUrl("/api/scim/v2")
       : "/api/scim/v2";
 
-  const fetchTokens = useCallback(async () => {
-    try {
-      const res = await fetchApi(apiPath.tenantScimTokens());
-      if (res.ok) {
-        setTokens(await res.json());
-      } else {
+  const fetchTokens = useCallback(() => {
+    void (async () => {
+      try {
+        const res = await fetchApi(apiPath.tenantScimTokens());
+        if (res.ok) {
+          setTokens(await res.json());
+        } else {
+          toast.error(t("networkError"));
+        }
+      } catch {
         toast.error(t("networkError"));
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      toast.error(t("networkError"));
-    } finally {
-      setLoading(false);
-    }
+    })();
   }, [t]);
 
   useEffect(() => {
@@ -174,6 +174,13 @@ export function ScimTokenManager({ locale }: Props) {
       toast.error(t("networkError"));
     }
   };
+
+  useEffect(() => {
+    handleRetryRef.current = async (retry) => {
+      if (retry.type === "create") await handleCreate();
+      else if (retry.type === "revoke") await handleRevoke(retry.tokenId);
+    };
+  });
 
   const getTokenStatus = (token: ScimToken) => {
     if (token.revokedAt) return "revoked";

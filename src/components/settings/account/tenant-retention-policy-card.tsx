@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Archive, Loader2 } from "lucide-react";
@@ -90,43 +90,47 @@ export function TenantRetentionPolicyCard() {
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchPolicy = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.TENANT_POLICY);
-      if (res.ok) {
-        const data = await res.json();
+  const fetchPolicy = useCallback(
+    () =>
+      fetchApi(API_PATH.TENANT_POLICY)
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
 
-        const retentionVal = data.auditLogRetentionDays;
-        const retentionEnabled = retentionVal !== null && retentionVal !== undefined;
-        const retentionStr = retentionEnabled ? String(retentionVal) : "";
+            const retentionVal = data.auditLogRetentionDays;
+            const retentionEnabled = retentionVal !== null && retentionVal !== undefined;
+            const retentionStr = retentionEnabled ? String(retentionVal) : "";
 
-        setAuditLogRetentionEnabled(retentionEnabled);
-        setAuditLogRetentionDays(retentionStr);
+            setAuditLogRetentionEnabled(retentionEnabled);
+            setAuditLogRetentionDays(retentionStr);
 
-        const nextGeneric = emptyGenericState();
-        for (const { key } of GENERIC_FIELDS) {
-          const val = data[key];
-          const enabled = val !== null && val !== undefined;
-          nextGeneric.enabled[key] = enabled;
-          nextGeneric.days[key] = enabled ? String(val) : "";
-        }
-        setGeneric(nextGeneric);
+            const nextGeneric = emptyGenericState();
+            for (const { key } of GENERIC_FIELDS) {
+              const val = data[key];
+              const enabled = val !== null && val !== undefined;
+              nextGeneric.enabled[key] = enabled;
+              nextGeneric.days[key] = enabled ? String(val) : "";
+            }
+            setGeneric(nextGeneric);
 
-        setInitialPolicy({
-          auditLogRetentionEnabled: retentionEnabled,
-          auditLogRetentionDays: retentionStr,
-          enabled: { ...nextGeneric.enabled },
-          days: { ...nextGeneric.days },
-        });
-      } else {
-        toast.error(t("retentionPolicyLoadFailed"));
-      }
-    } catch {
-      toast.error(t("retentionPolicyLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+            setInitialPolicy({
+              auditLogRetentionEnabled: retentionEnabled,
+              auditLogRetentionDays: retentionStr,
+              enabled: { ...nextGeneric.enabled },
+              days: { ...nextGeneric.days },
+            });
+          } else {
+            toast.error(t("retentionPolicyLoadFailed"));
+          }
+        })
+        .catch(() => {
+          toast.error(t("retentionPolicyLoadFailed"));
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [t],
+  );
 
   useEffect(() => {
     void fetchPolicy();
@@ -165,7 +169,8 @@ export function TenantRetentionPolicyCard() {
     return null;
   };
 
-  const inlineReauth = useInlineReauth(() => handleSave());
+  const handleSaveRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => handleSaveRef.current());
 
   const handleSave = async () => {
     const validationError = validate();
@@ -206,6 +211,10 @@ export function TenantRetentionPolicyCard() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+  });
 
   const renderGenericField = (field: GenericFieldKey) => {
     const labelKey = labelKeyOf(field);

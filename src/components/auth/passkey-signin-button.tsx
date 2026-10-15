@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useClientSnapshot } from "@/hooks/use-client-snapshot";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
@@ -21,11 +22,10 @@ export function PasskeySignInButton() {
   const router = useRouter();
   const callbackUrl = useCallbackUrl();
   const [loading, setLoading] = useState(false);
-  const [supported, setSupported] = useState(true);
+  const supported = useClientSnapshot(isWebAuthnSupported, true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setSupported(isWebAuthnSupported());
     // Release any ceremony left pending if the user navigates away mid-prompt,
     // so it can't silently block the next passkey attempt.
     return abortInFlightCeremony;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -46,12 +46,16 @@ export function FolderDialog({
   const [loading, setLoading] = useState(false);
 
   // Reset form when dialog opens or editFolder changes
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevEditFolder, setPrevEditFolder] = useState(editFolder);
+  if (open !== prevOpen || editFolder !== prevEditFolder) {
+    setPrevOpen(open);
+    setPrevEditFolder(editFolder);
     if (open) {
       setName(editFolder?.name ?? "");
       setParentId(editFolder?.parentId ?? null);
     }
-  }, [open, editFolder]);
+  }
 
   const isEdit = !!editFolder;
 

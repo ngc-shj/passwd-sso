@@ -120,21 +120,25 @@ export function OperatorTokenCard() {
     });
   }, [tokenName, expiresInDays]);
 
-  const fetchTokens = useCallback(async () => {
-    try {
-      const res = await fetchApi(apiPath.tenantOperatorTokens());
-      if (res.ok) {
-        const data = (await res.json()) as { tokens: OperatorToken[] };
-        setTokens(data.tokens);
-      } else {
-        toast.error(t("networkError"));
-      }
-    } catch {
-      toast.error(t("networkError"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const fetchTokens = useCallback(
+    () =>
+      fetchApi(apiPath.tenantOperatorTokens())
+        .then(async (res) => {
+          if (res.ok) {
+            const data = (await res.json()) as { tokens: OperatorToken[] };
+            setTokens(data.tokens);
+          } else {
+            toast.error(t("networkError"));
+          }
+        })
+        .catch(() => {
+          toast.error(t("networkError"));
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [t],
+  );
 
   useEffect(() => {
     fetchTokens();

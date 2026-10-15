@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { ShieldBan, Loader2 } from "lucide-react";
@@ -118,7 +118,8 @@ export function TenantAccessRestrictionCard() {
   // Discriminator carries `confirmLockout` so a step-up interruption on
   // either the initial save or the self-lockout confirm replays the same
   // request shape after reauth.
-  const inlineReauth = useInlineReauth<boolean>((confirmLockout) => doSave(confirmLockout));
+  const doSaveRetryRef = useRef<(confirmLockout: boolean) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<boolean>((confirmLockout) => doSaveRetryRef.current(confirmLockout));
 
   const doSave = async (confirmLockout: boolean) => {
     const validationError = validate();
@@ -166,6 +167,10 @@ export function TenantAccessRestrictionCard() {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    doSaveRetryRef.current = (confirmLockout) => doSave(confirmLockout);
+  });
 
   const handleSave = () => doSave(false);
   const handleConfirmLockout = () => doSave(true);

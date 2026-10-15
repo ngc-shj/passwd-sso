@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -95,10 +95,8 @@ export function AccessRequestCard() {
   // The retry arg (owned by the hook) carries which mutation and request id so
   // the post-reauth retry replays the same action on the same request.
   type ReauthRetry = { type: "approve"; requestId: string } | { type: "deny"; requestId: string };
-  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
-    if (retry.type === "approve") await handleApprove(retry.requestId);
-    else if (retry.type === "deny") await handleDeny(retry.requestId);
-  });
+  const handleRetryRef = useRef<(retry: ReauthRetry) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetry>((retry) => handleRetryRef.current(retry));
 
   // Create dialog state
   const [createOpen, setCreateOpen] = useState(false);
@@ -109,26 +107,34 @@ export function AccessRequestCard() {
   const [justification, setJustification] = useState("");
   const [expiresInMinutes, setExpiresInMinutes] = useState("60");
 
-  const fetchRequests = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (statusFilter !== "ALL") params.set("status", statusFilter);
-      const url = `${apiPath.tenantAccessRequests()}?${params.toString()}`;
-      const res = await fetchApi(url);
-      if (res.ok) {
-        const data = await res.json();
-        const raw = Array.isArray(data) ? data : data.requests ?? [];
-        setRequests(raw);
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false);
-    }
+  const fetchRequests = useCallback(() => {
+    const params = new URLSearchParams();
+    if (statusFilter !== "ALL") params.set("status", statusFilter);
+    const url = `${apiPath.tenantAccessRequests()}?${params.toString()}`;
+    return fetchApi(url)
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          const raw = Array.isArray(data) ? data : data.requests ?? [];
+          setRequests(raw);
+        }
+      })
+      .catch(() => {
+        // silently fail
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [statusFilter]);
 
-  useEffect(() => {
+  // A new fetchRequests is exactly what re-runs the effect below.
+  const [prevFetchRequests, setPrevFetchRequests] = useState(() => fetchRequests);
+  if (fetchRequests !== prevFetchRequests) {
+    setPrevFetchRequests(() => fetchRequests);
     setLoading(true);
+  }
+
+  useEffect(() => {
     fetchRequests();
   }, [fetchRequests]);
 
@@ -254,6 +260,13 @@ export function AccessRequestCard() {
       toast.error(t("arDenyFailed"));
     }
   };
+
+  useEffect(() => {
+    handleRetryRef.current = async (retry) => {
+      if (retry.type === "approve") await handleApprove(retry.requestId);
+      else if (retry.type === "deny") await handleDeny(retry.requestId);
+    };
+  });
 
   const statusLabel = (status: AccessRequestStatus) => {
     const map: Record<AccessRequestStatus, string> = {

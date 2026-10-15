@@ -58,6 +58,27 @@ export function TeamSshKeyForm({
   const [privateKeyWarning, setPrivateKeyWarning] = useState("");
 
   // Auto-parse SSH key and show warning on failure
+  const applyParsedPrivateKey = useCallback(
+    (pem: string) =>
+      parseSshPrivateKey(pem)
+        .then((parsed) => {
+          if (parsed) {
+            setPublicKey(parsed.publicKey);
+            setKeyType(parsed.keyType);
+            setKeySize(parsed.keySize);
+            setFingerprint(parsed.fingerprint);
+            if (parsed.comment) setSshComment(parsed.comment);
+            setPrivateKeyWarning("");
+          } else {
+            setPrivateKeyWarning(tsk("privateKeyFormatWarning"));
+          }
+        })
+        .catch(() => {
+          setPrivateKeyWarning(tsk("privateKeyFormatWarning"));
+        }),
+    [tsk],
+  );
+
   const handlePrivateKeyChange = useCallback(async (pem: string) => {
     setPrivateKey(pem);
     if (!pem.trim()) {
@@ -68,27 +89,13 @@ export function TeamSshKeyForm({
       setPrivateKeyWarning("");
       return;
     }
-    try {
-      const parsed = await parseSshPrivateKey(pem);
-      if (parsed) {
-        setPublicKey(parsed.publicKey);
-        setKeyType(parsed.keyType);
-        setKeySize(parsed.keySize);
-        setFingerprint(parsed.fingerprint);
-        if (parsed.comment) setSshComment(parsed.comment);
-        setPrivateKeyWarning("");
-      } else {
-        setPrivateKeyWarning(tsk("privateKeyFormatWarning"));
-      }
-    } catch {
-      setPrivateKeyWarning(tsk("privateKeyFormatWarning"));
-    }
-  }, [tsk]);
+    await applyParsedPrivateKey(pem);
+  }, [applyParsedPrivateKey]);
 
   // Parse on initial load
   useEffect(() => {
-    if (editData?.privateKey) {
-      void handlePrivateKeyChange(editData.privateKey);
+    if (editData?.privateKey?.trim()) {
+      void applyParsedPrivateKey(editData.privateKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -107,19 +114,6 @@ export function TeamSshKeyForm({
       travelSafe: base.travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      base.notes,
-      privateKey,
-      publicKey,
-      passphrase,
-      sshComment,
-      base.selectedTags,
-      base.teamFolderId,
-      base.requireReprompt,
-      base.travelSafe,
-      base.expiresAt,
-    ],
   );
   const submitDisabled = !base.title.trim();
 

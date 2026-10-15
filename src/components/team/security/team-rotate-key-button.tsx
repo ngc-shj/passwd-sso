@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -101,7 +101,8 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
   // Inline step-up reauth — rotate-key is server-side step-up-gated. On a stale
   // session the confirm dialog stays open and the hook replays the rotation
   // (re-fetch + re-encrypt) after reauth.
-  const inlineReauth = useInlineReauth(() => handleRotate());
+  const rotateRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => rotateRetryRef.current());
 
   const handleRotate = async () => {
     setLoading(true);
@@ -290,6 +291,10 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
       setProgress({ current: 0, total: 0 });
     }
   };
+
+  useEffect(() => {
+    rotateRetryRef.current = () => handleRotate();
+  });
 
   const progressLabel = describeProgress(phase, progress.current, progress.total);
 

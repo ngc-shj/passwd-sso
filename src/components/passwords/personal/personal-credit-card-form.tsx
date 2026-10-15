@@ -123,21 +123,6 @@ export function CreditCardForm({
       travelSafe,
       expiresAt: base.expiresAt,
     }),
-    [
-      base.title,
-      cardholderName,
-      cardNumber,
-      brand,
-      expiryMonth,
-      expiryYear,
-      cvv,
-      notes,
-      base.selectedTags,
-      base.folderId,
-      base.requireReprompt,
-      travelSafe,
-      base.expiresAt,
-    ],
   );
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant

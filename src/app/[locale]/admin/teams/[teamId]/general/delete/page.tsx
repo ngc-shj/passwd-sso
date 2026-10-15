@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
@@ -48,12 +48,16 @@ export default function TeamGeneralDeletePage({
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [prevTeamId, setPrevTeamId] = useState(teamId);
+  if (teamId !== prevTeamId) {
+    setPrevTeamId(teamId);
+    setTeam(null);
+    setLoadError(false);
+  }
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   useEffect(() => {
-    setTeam(null);
-    setLoadError(false);
     (async () => {
       try {
         const res = await fetchApi(apiPath.teamById(teamId));
@@ -69,7 +73,8 @@ export default function TeamGeneralDeletePage({
   const isOwner = team?.role === TEAM_ROLE.OWNER;
 
   // Inline step-up reauth — team deletion is server-side step-up-gated.
-  const inlineReauth = useInlineReauth(() => handleDeleteTeam());
+  const deleteRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => deleteRetryRef.current());
 
   const handleDeleteTeam = async () => {
     try {
@@ -86,6 +91,10 @@ export default function TeamGeneralDeletePage({
       toast.error(t("deleteFailed"));
     }
   };
+
+  useEffect(() => {
+    deleteRetryRef.current = () => handleDeleteTeam();
+  });
 
   if (!team) {
     if (loadError) {

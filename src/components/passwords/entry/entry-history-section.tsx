@@ -138,26 +138,30 @@ export function EntryHistorySection({
   const { requireVerification, repromptDialog } = useReprompt();
   const [expanded, setExpanded] = useState(false);
   const [histories, setHistories] = useState<HistoryEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [restoreTarget, setRestoreTarget] = useState<HistoryEntry | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [viewData, setViewData] = useState<Record<string, unknown> | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
-  const fetchHistory = useCallback(async () => {
+  const [prevHistorySource, setPrevHistorySource] = useState({ entryId, scopedTeamId });
+  if (prevHistorySource.entryId !== entryId || prevHistorySource.scopedTeamId !== scopedTeamId) {
+    setPrevHistorySource({ entryId, scopedTeamId });
     setLoading(true);
-    try {
-      const url = scopedTeamId
-        ? apiPath.teamPasswordHistory(scopedTeamId, entryId)
-        : apiPath.passwordHistory(entryId);
-      const res = await fetchApi(url);
-      if (res.ok) {
-        const data = await res.json();
-        setHistories(data);
-      }
-    } finally {
-      setLoading(false);
-    }
+  }
+
+  const fetchHistory = useCallback(() => {
+    const url = scopedTeamId
+      ? apiPath.teamPasswordHistory(scopedTeamId, entryId)
+      : apiPath.passwordHistory(entryId);
+    return fetchApi(url)
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setHistories(data);
+        }
+      })
+      .finally(() => setLoading(false));
   }, [entryId, scopedTeamId]);
 
   useEffect(() => {
@@ -181,6 +185,7 @@ export function EntryHistorySection({
         }
         toast.success(t("restoreVersion"));
         setRestoreTarget(null);
+        setLoading(true);
         fetchHistory();
         onRestore?.();
       }

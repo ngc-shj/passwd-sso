@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
@@ -143,35 +143,33 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
   // Internal text representation for teamAllowedCidrs textarea
   const [teamCidrsText, setTeamCidrsText] = useState("");
 
-  const inlineReauth = useInlineReauth(async () => {
-    await handleSave();
-  });
+  const saveRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => saveRetryRef.current());
 
   const hasChanges = useFormDirty(policy as unknown as Record<string, unknown>, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchPolicy = useCallback(async () => {
-    try {
-      const res = await fetchApi(`/api/teams/${teamId}/policy`);
-      if (res.ok) {
-        const data = await res.json();
-        const cidrsText = (data.teamAllowedCidrs ?? []).join("\n");
-        setTeamCidrsText(cidrsText);
-        setPolicy({ ...DEFAULT_POLICY, ...data });
-        setInitialPolicy({ ...DEFAULT_POLICY, ...data });
-      } else {
-        toast.error(t("fetchError"));
-      }
-    } catch {
-      toast.error(t("fetchError"));
-    } finally {
-      setLoading(false);
-    }
-  }, [teamId, t]);
-
   useEffect(() => {
-    fetchPolicy();
-  }, [fetchPolicy]);
+    const fetchPolicy = async () => {
+      try {
+        const res = await fetchApi(`/api/teams/${teamId}/policy`);
+        if (res.ok) {
+          const data = await res.json();
+          const cidrsText = (data.teamAllowedCidrs ?? []).join("\n");
+          setTeamCidrsText(cidrsText);
+          setPolicy({ ...DEFAULT_POLICY, ...data });
+          setInitialPolicy({ ...DEFAULT_POLICY, ...data });
+        } else {
+          toast.error(t("fetchError"));
+        }
+      } catch {
+        toast.error(t("fetchError"));
+      } finally {
+        setLoading(false);
+      }
+    };
+    void fetchPolicy();
+  }, [teamId, t]);
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -222,6 +220,12 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    saveRetryRef.current = async () => {
+      await handleSave();
+    };
+  });
 
   if (loading) {
     return (

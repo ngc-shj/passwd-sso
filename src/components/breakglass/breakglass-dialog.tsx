@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -53,9 +53,24 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
   const [incidentRef, setIncidentRef] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Reset form state + member roster when dialog closes; the next open
+  // re-fetches fresh members in case the tenant roster changed.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (!open) {
+      setTargetUserId("");
+      setMemberSearch("");
+      setReason("");
+      setIncidentRef("");
+      setMembers([]);
+    }
+  }
+
   // Inline step-up reauth — creating a break-glass grant is server-side
   // step-up-gated. On a stale session the hook replays the submit after reauth.
-  const inlineReauth = useInlineReauth(() => handleSubmit());
+  const submitRetryRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth(() => submitRetryRef.current());
 
   useEffect(() => {
     if (!open) return;
@@ -74,16 +89,6 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
     })();
   }, [open, members.length]);
 
-  // Reset form state + member roster when dialog closes; the next open
-  // re-fetches fresh members in case the tenant roster changed.
-  useEffect(() => {
-    if (open) return;
-    setTargetUserId("");
-    setMemberSearch("");
-    setReason("");
-    setIncidentRef("");
-    setMembers([]);
-  }, [open]);
 
   const filteredMembers = filterMembers(members, memberSearch);
 
@@ -146,6 +151,10 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
       setSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    submitRetryRef.current = () => handleSubmit();
+  });
 
   const canSubmit = targetUserId && reason.length >= 10 && !submitting;
 

@@ -17,7 +17,6 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
     const [isMac, setIsMac] = useState(false);
 
     useEffect(() => {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsMac(navigator.platform.toUpperCase().includes("MAC"));
     }, []);
 

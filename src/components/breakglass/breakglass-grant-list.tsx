@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -64,20 +64,27 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
   const [viewingLogGrantId, setViewingLogGrantId] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null);
+  const [prevRefreshTrigger, setPrevRefreshTrigger] = useState(refreshTrigger);
+  if (refreshTrigger !== prevRefreshTrigger) {
+    setPrevRefreshTrigger(refreshTrigger);
+    setLoading(true);
+  }
 
   // Inline step-up reauth — revoking a break-glass grant is server-side
   // step-up-gated. The retry arg (owned by the hook) carries the grant id so
   // the post-reauth retry replays the same revoke.
-  const inlineReauth = useInlineReauth<string>((id) => handleRevoke(id));
+  const revokeRetryRef = useRef<(arg: string) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<string>((arg) => revokeRetryRef.current(arg));
 
-  const fetchGrants = useCallback(async () => {
-    setLoading(true);
-    const res = await fetchApi(apiPath.tenantBreakglass());
-    if (res.ok) {
-      const data = await res.json();
-      setGrants(data.items ?? []);
-    }
-    setLoading(false);
+  const fetchGrants = useCallback(() => {
+    void (async () => {
+      const res = await fetchApi(apiPath.tenantBreakglass());
+      if (res.ok) {
+        const data = await res.json();
+        setGrants(data.items ?? []);
+      }
+      setLoading(false);
+    })();
   }, []);
 
   useEffect(() => {
@@ -93,6 +100,7 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
       });
       if (res.ok) {
         toast.success(t("revokeSuccess"));
+        setLoading(true);
         fetchGrants();
       } else if (res.status === 403) {
         const body = await readApiErrorBody(res);
@@ -110,6 +118,10 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
       setRevoking(null);
     }
   };
+
+  useEffect(() => {
+    revokeRetryRef.current = (id) => handleRevoke(id);
+  });
 
   const statusLabel = (status: string) => {
     if (status === GRANT_STATUS.ACTIVE) return t("statusActive");

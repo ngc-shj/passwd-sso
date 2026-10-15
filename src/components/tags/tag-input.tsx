@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,22 +38,22 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const fetchTags = useCallback(async () => {
-    try {
-      const res = await fetchApi(`${API_PATH.TAGS}?tree=true`);
-      if (!res.ok) {
-        return;
-      }
-      const data = await res.json();
-      if (Array.isArray(data)) setAllTags(data);
-    } catch {
-      // ignore
-    }
-  }, []);
-
   useEffect(() => {
+    async function fetchTags() {
+      try {
+        const res = await fetchApi(`${API_PATH.TAGS}?tree=true`);
+        if (!res.ok) {
+          return;
+        }
+        const data = await res.json();
+        if (Array.isArray(data)) setAllTags(data);
+      } catch {
+        // ignore
+      }
+    }
+
     fetchTags();
-  }, [fetchTags]);
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {

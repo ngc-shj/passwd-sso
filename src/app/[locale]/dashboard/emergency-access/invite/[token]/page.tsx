@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useVault } from "@/lib/vault/vault-context";
@@ -28,17 +28,8 @@ export default function AcceptEmergencyInvitePage() {
   const { status: vaultStatus, encryptionKey } = useVault();
   const [loading, setLoading] = useState(false);
 
-  const [grantInfo, setGrantInfo] = useState<{
-    ownerName: string;
-    waitDays: number;
-  } | null>(null);
-
-  // We don't have a pre-flight endpoint; we'll show the token-based form directly
-  useEffect(() => {
-    // The grant info will be revealed after accept/reject attempt
-    // For now, show a generic invitation card
-    setGrantInfo({ ownerName: "", waitDays: 0 });
-  }, [token]);
+  // We don't have a pre-flight endpoint; we show a generic token-based form
+  // directly. The grant info is revealed after an accept/reject attempt.
 
   const handleAccept = async () => {
     if (!encryptionKey) {
@@ -117,8 +108,6 @@ export default function AcceptEmergencyInvitePage() {
       setLoading(false);
     }
   };
-
-  if (!grantInfo) return null;
 
   const vaultLocked = vaultStatus !== VAULT_STATUS.UNLOCKED;
 

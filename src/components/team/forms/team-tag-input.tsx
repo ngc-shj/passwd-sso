@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,22 +39,21 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const fetchTags = useCallback(async () => {
-    try {
-      const res = await fetchApi(`${apiPath.teamTags(teamId)}?tree=true`);
-      if (!res.ok) {
-        return;
-      }
-      const data = await res.json();
-      if (Array.isArray(data)) setAllTags(data);
-    } catch {
-      // ignore
-    }
-  }, [teamId]);
-
   useEffect(() => {
-    fetchTags();
-  }, [fetchTags]);
+    const fetchTags = async () => {
+      try {
+        const res = await fetchApi(`${apiPath.teamTags(teamId)}?tree=true`);
+        if (!res.ok) {
+          return;
+        }
+        const data = await res.json();
+        if (Array.isArray(data)) setAllTags(data);
+      } catch {
+        // ignore
+      }
+    };
+    void fetchTags();
+  }, [teamId]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
