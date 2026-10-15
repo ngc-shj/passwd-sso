@@ -2290,6 +2290,17 @@ describe("background message flow", () => {
       },
       httpHosts: ["example.com"],
     },
+    // Deny rows beside the allow rows: an http url on another host, and an
+    // http URL held in a text-type custom field, are not http hosts of this page.
+    { name: "an http url on another host", saved: { url: "http://other.example/login" }, httpHosts: null },
+    {
+      name: "an http URL in a text-type custom field",
+      saved: {
+        url: "https://example.com/login",
+        customFields: [{ label: "Legacy", value: "http://example.com/old", type: "text" }],
+      },
+      httpHosts: null,
+    },
   ];
 
   it.each(SAVED_FOR)("C4 popup: a LOGIN saved with $name on an http page", async ({ saved, httpHosts }) => {
@@ -2336,6 +2347,57 @@ describe("background message flow", () => {
       );
       expect(fillMessages()).toEqual([]);
       expect(injectionKinds()).toEqual(["probe"]);
+    }
+  });
+
+  // A content request names its sender's own URL, so an insecure sender page
+  // is refused before any send, as the popup's is.
+  const fillFromHttpSender = () =>
+    sendMessageWithSender(
+      { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+      { tab: { id: 1, url: HTTP_PAGE }, url: HTTP_PAGE, frameId: 0, documentId: documentIdFor(0) },
+    );
+
+  it.each(SAVED_FOR)("C4 content: a LOGIN saved with $name requested from an http page", async ({ saved, httpHosts }) => {
+    loginSavedWith(saved);
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    probeUrls = { 0: HTTP_PAGE };
+
+    const res = await fillFromHttpSender();
+
+    if (httpHosts) {
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+      expect(fillMessages().map((c: unknown[]) => c[2])).toEqual([{ documentId: documentIdFor(0) }]);
+    } else {
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "INSECURE_PAGE_FILL_REFUSED" });
+      expect(chromeMock?.tabs.sendMessage).not.toHaveBeenCalled();
+      expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    { entryType: EXT_ENTRY_TYPE.CREDIT_CARD, blob: { cardNumber: "4111111111111111" }, page: HTTP_PAGE, refused: true },
+    { entryType: EXT_ENTRY_TYPE.CREDIT_CARD, blob: { cardNumber: "4111111111111111" }, page: "https://example.com/login", refused: false },
+    { entryType: EXT_ENTRY_TYPE.IDENTITY, blob: { fullName: "Jane Doe" }, page: HTTP_PAGE, refused: true },
+    { entryType: EXT_ENTRY_TYPE.IDENTITY, blob: { fullName: "Jane Doe" }, page: "https://example.com/login", refused: false },
+  ])("C4 content: a $entryType requested from $page refused: $refused", async ({ entryType, blob, page, refused }) => {
+    stubLoginFetch({ title: "Entry" }, entryType);
+    setDecryptedPlaintext("aa", JSON.stringify(blob));
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await sendMessageWithSender(
+      { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+      { tab: { id: 1, url: page }, url: page, frameId: 0, documentId: documentIdFor(0) },
+    );
+
+    if (refused) {
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: false, error: "INSECURE_PAGE_FILL_REFUSED" });
+      expect(chromeMock?.tabs.sendMessage).not.toHaveBeenCalled();
+    } else {
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+      expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1);
     }
   });
 
@@ -2445,6 +2507,33 @@ describe("background message flow", () => {
     expect(ccCalls.length).toBe(1);
     // The bound: pinned to the probed document, never a tab-wide broadcast.
     expect(ccCalls[0][2]).toEqual({ documentId: documentIdFor(0) });
+  });
+
+  // C4: an about:blank frame is judged by the origin it inherits.
+  it.each([
+    { inherited: "http://unrelated.example", refused: true },
+    { inherited: "https://unrelated.example", refused: false },
+  ])("C4 context menu: a CREDIT_CARD into about:blank inheriting $inherited refused: $refused", async ({ inherited, refused }) => {
+    stubCreditCardFetch();
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    setDecryptedPlaintext("aa", JSON.stringify({ title: "Card", cardNumber: "4111111111111111", cvv: "123" }));
+    probeUrls = { 0: "about:blank" };
+    probeOrigins = { 0: inherited };
+
+    await clickMenuItem({ menuItemId: `psso-cc-${MENU_ENTRY_UUID}`, pageUrl: `${inherited}/checkout` });
+
+    const ccCalls = (chromeMock?.tabs.sendMessage.mock.calls ?? []).filter(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_CC_FILL",
+    );
+    if (refused) {
+      await vi.waitFor(() =>
+        expect(failureTitles()).toEqual([humanizeError("INSECURE_PAGE_FILL_REFUSED")]),
+      );
+      expect(ccCalls).toEqual([]);
+    } else {
+      expect(ccCalls.map((c: unknown[]) => c[2])).toEqual([{ documentId: documentIdFor(0) }]);
+    }
   });
 
   // C4: the probed document decides for a card from the context menu; the
@@ -2711,6 +2800,75 @@ describe("background message flow", () => {
         .mockResolvedValueOnce({ filled: 1 });
     }
 
+    // The popup's broadcast and its send pinned to the top document both find
+    // no listener; the resend after the bundle lands.
+    function landOnPopupResend() {
+      chromeMock?.tabs.sendMessage
+        .mockRejectedValueOnce(new Error(NO_RECEIVER))
+        .mockRejectedValueOnce(new Error(NO_RECEIVER))
+        .mockResolvedValueOnce({ filled: 1 });
+    }
+
+    // F1: an iframe with a listener ends the popup's broadcast quietly (Chrome
+    // rejects a broadcast only when NO frame has one), while the top document
+    // has none: a plain http page, or an orphaned tab whose iframe reloaded.
+    // The send pinned to the top document finds that, and only its
+    // no-receiver rejection injects there and resends.
+    describe("popup broadcast answered by no frame that filled", () => {
+      const PORT_CLOSED_MESSAGE = "The message port closed before a response was received.";
+      const pinnedTop = { documentId: documentIdFor(0) };
+
+      it.each([
+        { page: "http://example.com", kind: "fill-only", broadcast: "no answer" },
+        { page: "http://example.com", kind: "fill-only", broadcast: "port closed" },
+        { page: "https://example.com", kind: "bundle", broadcast: "no answer" },
+        { page: "https://example.com", kind: "bundle", broadcast: "port closed" },
+      ])("on $page with $broadcast, the top document gets the $kind and the resend lands", async ({ page, kind, broadcast }) => {
+        await unlockForLogin();
+        setDecryptedPlaintext(
+          "aa",
+          JSON.stringify({ password: "secret", username: "alice", url: "http://example.com/login" }),
+        );
+        probeUrls = { 0: `${page}/login` };
+        if (broadcast === "no answer") {
+          chromeMock?.tabs.sendMessage.mockResolvedValueOnce(undefined);
+        } else {
+          chromeMock?.tabs.sendMessage.mockRejectedValueOnce(new Error(PORT_CLOSED_MESSAGE));
+        }
+        chromeMock?.tabs.sendMessage
+          .mockRejectedValueOnce(new Error(NO_RECEIVER))
+          .mockResolvedValueOnce({ filled: 1 });
+
+        const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1, expectedOrigin: page });
+
+        expect(res).toEqual({ type: "AUTOFILL", ok: true });
+        expect(injectionKinds()).toEqual(["probe", kind]);
+        expect(sendOptions()).toEqual([undefined, pinnedTop, pinnedTop]);
+      });
+
+      it("control: a broadcast answered { filled: 1 } sends nothing pinned and injects nothing", async () => {
+        await unlockForLogin();
+        chromeMock?.tabs.sendMessage.mockResolvedValueOnce({ filled: 1 });
+
+        const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1, expectedOrigin: POPUP_ORIGIN });
+
+        expect(res).toEqual({ type: "AUTOFILL", ok: true });
+        expect(injectionKinds()).toEqual([]);
+        expect(sendOptions()).toEqual([undefined]);
+      });
+
+      it("the pinned send's own answer decides: { filled: 0 } there is AUTOFILL_NOTHING_FILLED with no injection", async () => {
+        await unlockForLogin();
+        chromeMock?.tabs.sendMessage.mockResolvedValueOnce(undefined).mockResolvedValueOnce({ filled: 0 });
+
+        const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1, expectedOrigin: POPUP_ORIGIN });
+
+        expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "AUTOFILL_NOTHING_FILLED" });
+        expect(injectionKinds()).toEqual(["probe"]);
+        expect(sendOptions()).toEqual([undefined, pinnedTop]);
+      });
+    });
+
     // A plain http page is outside the manifest scope, but the popup copies a
     // password onto it, so the fill lands there too: through the fill-only
     // script, never the manifest bundle.
@@ -2843,7 +3001,7 @@ describe("background message flow", () => {
     // `probed.origin === expectedOrigin`.
     it("allows the popup's LOGIN fallback for a hostless entry when the probe matches expectedOrigin exactly", async () => {
       await unlockForLogin({ username: "alice", urlHost: "" });
-      landOnResend();
+      landOnPopupResend();
       probeUrls = { 0: `${POPUP_ORIGIN}/dashboard` };
 
       const res = await sendMessage({
@@ -2855,8 +3013,9 @@ describe("background message flow", () => {
 
       expect(res).toEqual({ type: "AUTOFILL", ok: true });
       expect(injectionKinds()).toEqual(["probe", "bundle"]);
-      // The tab-wide first send, then the resend pinned to the probed top document.
-      expect(sendOptions()).toEqual([undefined, { documentId: documentIdFor(0) }]);
+      // The tab-wide first send, then the send and the resend pinned to the
+      // probed top document.
+      expect(sendOptions()).toEqual([undefined, { documentId: documentIdFor(0) }, { documentId: documentIdFor(0) }]);
     });
 
     // C3 allow, host-mismatched entry: the user explicitly confirmed a LOGIN
@@ -2865,7 +3024,7 @@ describe("background message flow", () => {
     // popup showed the user this exact origin and they confirmed.
     it("allows the popup's LOGIN fallback for a host-mismatched entry when the probe matches expectedOrigin exactly", async () => {
       await unlockForLogin({ username: "alice", urlHost: "other-entry.example" });
-      landOnResend();
+      landOnPopupResend();
       probeUrls = { 0: `${POPUP_ORIGIN}/dashboard` };
 
       const res = await sendMessage({
@@ -2877,7 +3036,7 @@ describe("background message flow", () => {
 
       expect(res).toEqual({ type: "AUTOFILL", ok: true });
       expect(injectionKinds()).toEqual(["probe", "bundle"]);
-      expect(sendOptions()).toEqual([undefined, { documentId: documentIdFor(0) }]);
+      expect(sendOptions()).toEqual([undefined, { documentId: documentIdFor(0) }, { documentId: documentIdFor(0) }]);
     });
 
     // D12: the content path's fallback accepts ONLY the sender's own document,
@@ -2990,8 +3149,10 @@ describe("background message flow", () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    // The tab-wide first send finds no listener; the resend after the bundle lands.
+    // The tab-wide first send and the send pinned to the top document find no
+    // listener; the resend after the bundle lands.
     chromeMock?.tabs.sendMessage
+      .mockRejectedValueOnce(new Error(NO_RECEIVER))
       .mockRejectedValueOnce(new Error(NO_RECEIVER))
       .mockResolvedValueOnce({ filled: 1 });
 
@@ -3023,7 +3184,7 @@ describe("background message flow", () => {
       target: { tabId: 1, documentIds: [documentIdFor(0)] },
       files: [PROD_LOADER],
     });
-    expect(sendOptions()).toEqual([undefined, { documentId: documentIdFor(0) }]);
+    expect(sendOptions()).toEqual([undefined, { documentId: documentIdFor(0) }, { documentId: documentIdFor(0) }]);
   });
 });
 
@@ -6249,13 +6410,17 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
     describe("fill answer (C5)", () => {
       // The channel closing after a listener promised an answer: the message
       // may have been received, so it is never re-delivered.
+      const PORT_CLOSED = () => new Error("The message port closed before a response was received.");
       const CHANNEL_CLOSED = () =>
         new Error(
           "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received",
         );
+      // The popup's broadcast is followed by one send pinned to the top
+      // document whenever no frame filled, so it takes two sends to reach the
+      // fallback there.
       const fills = [
-        { name: "content", fill: () => fillFromContent(), type: "AUTOFILL_FROM_CONTENT" },
-        { name: "popup", fill: fillFromPopup, type: "AUTOFILL" },
+        { name: "content", fill: () => fillFromContent(), type: "AUTOFILL_FROM_CONTENT", sendsBeforeFallback: 1 },
+        { name: "popup", fill: fillFromPopup, type: "AUTOFILL", sendsBeforeFallback: 2 },
       ];
 
       describe("LOGIN with TOTP", () => {
@@ -6269,7 +6434,7 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
         const sentTotp = () =>
           (chromeMock!.tabs.sendMessage.mock.calls[0]?.[1] as { totpCode?: string } | undefined)?.totpCode;
 
-        describe.each(fills)("$name first send", ({ fill, type }) => {
+        describe.each(fills)("$name first send", ({ fill, type, sendsBeforeFallback }) => {
           it.each([
             { answer: { filled: 0 } },
             { answer: undefined },
@@ -6279,7 +6444,7 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
             { answer: { filled: 0.5 } },
           ])("an answer of $answer is AUTOFILL_NOTHING_FILLED and copies nothing", async ({ answer }) => {
             await unlockAndSettle();
-            chromeMock!.tabs.sendMessage.mockResolvedValueOnce(answer);
+            chromeMock!.tabs.sendMessage.mockResolvedValue(answer);
 
             expect(await fill()).toEqual({ type, ok: false, error: "AUTOFILL_NOTHING_FILLED" });
             expect(sentTotp()).toMatch(/^\d{6}$/);
@@ -6304,13 +6469,27 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
             expect(clipboardWrites()).toEqual([]);
           });
 
+          // "The message port closed" is Chrome's rejection when the listeners
+          // that got the message gave no answer: a delivery, never resent.
+          it("a message-port-closed rejection is AUTOFILL_NOTHING_FILLED, not resent and copies nothing", async () => {
+            await unlockAndSettle();
+            chromeMock!.tabs.sendMessage.mockRejectedValue(PORT_CLOSED());
+
+            expect(await fill()).toEqual({ type, ok: false, error: "AUTOFILL_NOTHING_FILLED" });
+            expect(injectionKinds()).not.toContain("bundle");
+            expect(chromeMock!.tabs.sendMessage).toHaveBeenCalledTimes(sendsBeforeFallback);
+            expect(clipboardWrites()).toEqual([]);
+          });
+
           it("control: a no-receiver rejection injects and resends", async () => {
             await unlockAndSettle();
-            chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
+            for (let i = 0; i < sendsBeforeFallback; i += 1) {
+              chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
+            }
 
             expect(await fill()).toEqual({ type, ok: true, error: undefined });
             expect(injectionKinds()).toEqual(["probe", "bundle"]);
-            expect(chromeMock!.tabs.sendMessage).toHaveBeenCalledTimes(2);
+            expect(chromeMock!.tabs.sendMessage).toHaveBeenCalledTimes(sendsBeforeFallback + 1);
           });
 
           it.each(INTERRUPTIONS)("%s during a send answered { filled: 0 } answers VAULT_LOCKED", async (_name, interrupt) => {
@@ -6334,6 +6513,19 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
             expect(await fill()).toEqual({ type, ok: false, error: "VAULT_LOCKED" });
             expect(injectionKinds()).toEqual([]);
           });
+        });
+
+        it("a resend rejected with message port closed is AUTOFILL_NOTHING_FILLED, not retried, and copies nothing", async () => {
+          await unlockAndSettle();
+          chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR()).mockRejectedValueOnce(PORT_CLOSED());
+
+          expect(await fillFromContent()).toEqual({
+            type: "AUTOFILL_FROM_CONTENT",
+            ok: false,
+            error: "AUTOFILL_NOTHING_FILLED",
+          });
+          expect(chromeMock!.tabs.sendMessage).toHaveBeenCalledTimes(2);
+          expect(clipboardWrites()).toEqual([]);
         });
 
         // The background judges the resend's answer too.
@@ -6365,6 +6557,14 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
         it.each([
           { name: "{ filled: 0 }", arrange: () => chromeMock!.tabs.sendMessage.mockResolvedValueOnce({ filled: 0 }), error: "AUTOFILL_NOTHING_FILLED", kinds: [] },
           { name: "no answer", arrange: () => chromeMock!.tabs.sendMessage.mockResolvedValueOnce(undefined), error: "AUTOFILL_NOTHING_FILLED", kinds: [] },
+          { name: "a message-port-closed rejection", arrange: () => chromeMock!.tabs.sendMessage.mockRejectedValueOnce(PORT_CLOSED()), error: "AUTOFILL_NOTHING_FILLED", kinds: [] },
+          {
+            name: "a resend rejected with message port closed",
+            arrange: () =>
+              chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR()).mockRejectedValueOnce(PORT_CLOSED()),
+            error: "AUTOFILL_NOTHING_FILLED",
+            kinds: ["probe", "bundle"],
+          },
           { name: "a closed channel", arrange: () => chromeMock!.tabs.sendMessage.mockRejectedValueOnce(CHANNEL_CLOSED()), error: "AUTOFILL_FAILED", kinds: [] },
           {
             name: "a resend answering { filled: 0 }",
@@ -6427,6 +6627,59 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
 
           expect(await pending).toEqual({ type: "AUTOFILL", ok: false, error: "INSECURE_PAGE_FILL_REFUSED" });
           expect(pageMessagesCarrying("4111111111111111")).toEqual([]);
+        });
+      });
+
+      // F4: every failure decided from the decrypted entry belongs to the
+      // vault state the decrypt ran in; a lock during it outranks the failure.
+      describe("failures decided after the decrypt", () => {
+        describe.each([
+          {
+            name: "NO_PASSWORD",
+            blob: { username: "alice" },
+            fill: () => fillFromContent(),
+            type: "AUTOFILL_FROM_CONTENT",
+          },
+          {
+            name: "ORIGIN_MISMATCH",
+            blob: { password: "a6-secret", username: "alice" },
+            fill: () => fillFromContent(7, "https://other.example/login"),
+            type: "AUTOFILL_FROM_CONTENT",
+          },
+          {
+            name: "INSECURE_PAGE_FILL_REFUSED",
+            blob: { password: "a6-secret", username: "alice" },
+            fill: () => fillFromContent(7, "http://example.com/login"),
+            type: "AUTOFILL_FROM_CONTENT",
+          },
+        ])("$name", ({ name, blob, fill, type }) => {
+          beforeEach(() => {
+            serve(
+              { id: "pw-a6", blob: "a6-f4-blob", overview: "a6-f4-ov", entryType: EXT_ENTRY_TYPE.LOGIN },
+              blob,
+              LOGIN_OVERVIEW,
+            );
+          });
+
+          async function runHeld(interrupt?: () => Promise<void>) {
+            await unlockAndSettle();
+            const hold = holdDecrypt(cryptoMocks.decryptData, "a6-f4-ov");
+            const pending = fill();
+            await hold.reached;
+            if (interrupt) await interrupt();
+            hold.release();
+            return pending;
+          }
+
+          it.each(INTERRUPTIONS)("%s during the last decrypt answers VAULT_LOCKED", async (_name, interrupt) => {
+            expect(await runHeld(interrupt)).toEqual({ type, ok: false, error: "VAULT_LOCKED" });
+            expect(pageMessagesCarrying("a6-secret")).toEqual([]);
+          });
+
+          it("positive control: released without a lock it answers the failure itself", async () => {
+            expect(await runHeld()).toEqual({ type, ok: false, error: name });
+            expect(pageMessagesCarrying("a6-secret")).toEqual([]);
+          });
         });
       });
 

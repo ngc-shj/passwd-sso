@@ -158,8 +158,9 @@ export async function performCreditCardAutofill(
   opts: { lateFieldWindowMs?: number } = {},
 ): Promise<number> {
   // Never into an insecure http page, where a network attacker can serve the
-  // form. The request still ends this frame's pending fill.
-  if (isInsecureHttpUrl(window.location.href)) {
+  // form: by the frame's URL, or by the origin an about:blank or srcdoc frame
+  // inherits. The request still ends this frame's pending fill.
+  if (isInsecureHttpUrl(window.location.href) || isInsecureHttpUrl(self.origin)) {
     supersedeActiveFill();
     return 0;
   }

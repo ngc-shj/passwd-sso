@@ -986,6 +986,7 @@ describe("performAutofill — frame-origin gate", () => {
   it.each([
     { allowedHttpHosts: undefined, written: "" },
     { allowedHttpHosts: [] as string[], written: "" },
+    { allowedHttpHosts: ["other.example"], written: "" },
     { allowedHttpHosts: ["bank.example"], written: "secret" },
   ])(
     "C4: an http subframe on a matching allowedHosts host with allowedHttpHosts $allowedHttpHosts writes '$written'",
@@ -1017,6 +1018,30 @@ describe("performAutofill — frame-origin gate", () => {
       setupForm(LOGIN_FORM);
 
       await inTopFrame({ href: "http://bank.example/login", origin: "http://bank.example" }, async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          topFrameOrigin: "http://bank.example",
+          ...(allowedHttpHosts ? { allowedHttpHosts } : {}),
+        }, NO_WAIT);
+      });
+
+      expect(writtenPassword()).toBe(written);
+    },
+  );
+
+  // An about:blank or srcdoc frame has no URL host; the origin it inherits
+  // from an http creator makes it an insecure page all the same.
+  it.each([
+    { allowedHttpHosts: undefined, written: "" },
+    { allowedHttpHosts: ["bank.example"], written: "secret" },
+  ])(
+    "C4: a top-level about:blank inheriting http://bank.example with allowedHttpHosts $allowedHttpHosts writes '$written'",
+    async ({ allowedHttpHosts, written }) => {
+      setupForm(LOGIN_FORM);
+
+      await inTopFrame({ href: "about:blank", origin: "http://bank.example" }, async () => {
         await performAutofill({
           type: "AUTOFILL_FILL",
           username: "alice",

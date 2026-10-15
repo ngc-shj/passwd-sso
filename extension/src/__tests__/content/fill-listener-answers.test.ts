@@ -16,6 +16,7 @@ type Listener = (message: unknown, sender: { id: string }, sendResponse: SendRes
 const EXT_ID = "ext-test-id";
 const GUARD_KEYS = ["__pssoAutofillHandler", "__pssoCCAutofillHandler", "__pssoIdentityAutofillHandler"];
 const originalLocation = window.location;
+const originalOrigin = self.origin;
 
 afterEach(async () => {
   const { __resetFillSequenceForTests } = await import("../../content/fill-sequence-lib");
@@ -24,22 +25,29 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.resetModules();
   Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+  Object.defineProperty(window, "origin", { configurable: true, value: originalOrigin });
   for (const key of GUARD_KEYS) delete (window as unknown as Record<string, unknown>)[key];
   document.body.innerHTML = "";
 });
 
-async function registerListener(load: () => Promise<unknown>): Promise<Listener> {
-  let listener: Listener | null = null;
+async function registerListeners(...loads: Array<() => Promise<unknown>>): Promise<Listener[]> {
+  const listeners: Listener[] = [];
   vi.stubGlobal("chrome", {
-    runtime: { id: EXT_ID, onMessage: { addListener: (fn: Listener) => (listener = fn) } },
+    runtime: { id: EXT_ID, onMessage: { addListener: (fn: Listener) => listeners.push(fn) } },
   });
-  await load();
-  if (!listener) throw new Error("listener was not registered");
+  for (const load of loads) await load();
+  if (listeners.length !== loads.length) throw new Error("a listener was not registered");
+  return listeners;
+}
+
+async function registerListener(load: () => Promise<unknown>): Promise<Listener> {
+  const [listener] = await registerListeners(load);
   return listener;
 }
 
-function atPage(href: string): void {
+function atPage(href: string, origin?: string): void {
   Object.defineProperty(window, "location", { configurable: true, value: new URL(href) });
+  if (origin !== undefined) Object.defineProperty(window, "origin", { configurable: true, value: origin });
 }
 
 /** Delivers `message`, lets every run end, and returns what the listener did. */
@@ -158,6 +166,54 @@ describe.each([
     expect(sendResponse).toHaveBeenCalledTimes(1);
     expect(sendResponse).toHaveBeenCalledWith({ filled });
     expect(value("f")).toBe(expected);
+  });
+
+  // An about:srcdoc frame has no URL host; the origin it inherits decides.
+  it.each([
+    { origin: "https://shop.example", filled: fields, expected: written },
+    { origin: "http://shop.example", filled: 0, expected: "" },
+  ])("in an about:srcdoc frame inheriting $origin answers { filled: $filled }", async ({ origin, filled, expected }) => {
+    atPage("about:srcdoc", origin);
+    document.body.innerHTML = form;
+    const listener = await registerListener(load);
+
+    const { sendResponse } = await deliver(listener, { ...message });
+
+    expect(sendResponse).toHaveBeenCalledWith({ filled });
+    expect(value("f")).toBe(expected);
+  });
+
+  // The refusal still ends the frame's pending fill, as a LOGIN refusal does.
+  it.each([
+    { refusal: true, late: "" },
+    { refusal: false, late: "secret" },
+  ])("a refused request supersedes the pending fill (refusal sent: $refusal)", async ({ refusal, late }) => {
+    atPage("https://shop.example/login");
+    document.body.innerHTML = `<form id="lf"><input id="u" type="text" autocomplete="username" /></form>`;
+    const [loginListener, listener] = await registerListeners(
+      () => import("../../content/autofill-lib"),
+      load,
+    );
+    vi.useFakeTimers();
+    loginListener(
+      { type: AUTOFILL_FILL, username: "alice", password: "secret", allowedHosts: ["shop.example"] },
+      { id: EXT_ID },
+      vi.fn(),
+    );
+    await vi.advanceTimersByTimeAsync(5);
+    if (refusal) {
+      atPage("http://shop.example/checkout");
+      listener({ ...message }, { id: EXT_ID }, vi.fn());
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    const lateField = document.createElement("input");
+    lateField.id = "p";
+    lateField.type = "password";
+    document.getElementById("lf")?.appendChild(lateField);
+    await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
+
+    expect(value("u")).toBe("alice");
+    expect(value("p")).toBe(late);
   });
 
   it("answers { filled: 0 } when the page has no field for it", async () => {

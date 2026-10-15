@@ -55,6 +55,7 @@ import { swFetchAuthenticated } from "./dpop-fetch";
 import {
   injectContentBundleAndResend,
   injectFillBundleInto,
+  isNoAnswerError,
   isNoReceiverError,
   probeDocument,
   resendUntilReceived,
@@ -1950,7 +1951,10 @@ async function performAutofillForEntry(
       if (err instanceof VaultLockedError) return lockedResult;
       throw err;
     }
-    if (!result) return { ok: false, error: "FETCH_FAILED" };
+    if (!result) {
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
+      return { ok: false, error: "FETCH_FAILED" };
+    }
     blobPlain = JSON.stringify(result.blob);
     overviewPlain = JSON.stringify(result.overview);
     entryType = result.entryType;
@@ -1959,6 +1963,7 @@ async function performAutofillForEntry(
     const res = await swFetch(extApiPath.passwordById(entryId));
     if (!res.ok) {
       const body = await readApiErrorBody(res);
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
       return { ok: false, error: body?.error || "FETCH_FAILED" };
     }
     const data = (await res.json()) as {
@@ -1986,6 +1991,9 @@ async function performAutofillForEntry(
     );
     entryType = data.entryType;
   }
+  // A lock during the fetch or the decrypts: every return below, failures
+  // included, belongs to a vault that is gone.
+  if (!isVaultEpochCurrent(epoch)) return lockedResult;
 
   // Narrow: a JSON.parse SyntaxError embeds a window of its input, and this
   // function's callers surface the message through normalizeErrorCode into a
@@ -2080,9 +2088,15 @@ async function performAutofillForEntry(
   const refusesInsecureDocument = (probed: ProbedDocument): boolean =>
     refusedAsInsecure(probed.url) || refusedAsInsecure(probed.origin);
   const insecureRefusedResult = { ok: false, error: "INSECURE_PAGE_FILL_REFUSED" } as const;
-  // The page the popup showed is known before any send.
-  if (origin.kind === AUTOFILL_REQUEST_KIND.POPUP && refusedAsInsecure(origin.expectedOrigin)) {
-    if (!isVaultEpochCurrent(epoch)) return lockedResult;
+  // The page the request names is known before any send: the popup's
+  // expectedOrigin, or the content sender's own URL.
+  const requestPageUrl =
+    origin.kind === AUTOFILL_REQUEST_KIND.POPUP
+      ? origin.expectedOrigin
+      : origin.kind === AUTOFILL_REQUEST_KIND.CONTENT
+        ? origin.senderUrl
+        : null;
+  if (requestPageUrl !== null && refusedAsInsecure(requestPageUrl)) {
     return { ok: false, error: "INSECURE_PAGE_FILL_REFUSED" };
   }
 
@@ -2129,52 +2143,67 @@ async function performAutofillForEntry(
     return origin.kind !== AUTOFILL_REQUEST_KIND.POPUP && probedHost === origin.senderHost;
   };
 
+  // Delivers `payload` to one document and judges its answer. Only a
+  // no-receiver rejection (no listener in that document yet: the manifest
+  // content script never ran, or the page is outside its scope) injects the
+  // fill's receiver into that document and resends. Any other rejection may
+  // follow a delivery, so it is never re-delivered; the "message port closed"
+  // rejection is a delivery nobody answered. Success is an answer with
+  // filled > 0. A lock is checked before every failure return.
+  //
+  // `pinned` is the document already probed for this delivery; without one the
+  // fallback probes the request's frame first, and that document must still
+  // pass the host rule (the frame may have navigated since the request).
+  const deliverToDocument = async (
+    payload: unknown,
+    documentId: string,
+    pinned: ProbedDocument | null,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    let answer: unknown;
+    try {
+      answer = await sendToDocument(payload, documentId);
+    } catch (err) {
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
+      if (!isNoAnswerError(err)) {
+        if (!isNoReceiverError(err)) return { ok: false, error: "AUTOFILL_FAILED" };
+        const target = pinned ?? (await pinDocument());
+        if (!isVaultEpochCurrent(epoch)) return lockedResult;
+        if (!target || !acceptsDocument(target)) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+        try {
+          await injectFillBundleInto(tabId, target);
+          answer = await resendUntilReceived(() => sendToDocument(payload, target.documentId));
+        } catch (resendErr) {
+          // Inject-and-resend is the only fallback: a document the bundle
+          // cannot reach (outside the fill scope, or no listener after the
+          // resends) gets nothing.
+          if (!isVaultEpochCurrent(epoch)) return lockedResult;
+          if (!isNoAnswerError(resendErr)) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+        }
+      }
+    }
+    // A frame that wrote nothing, no answer, or a malformed one is not a fill.
+    if (!isFilledAnswer(answer)) {
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
+      return { ok: false, error: "AUTOFILL_NOTHING_FILLED" };
+    }
+    return { ok: true };
+  };
+
   // CC/Identity delivery: one pinned document only, never a frame or the tab.
   // A content request is already bound to its document; any other request
   // probes its frame first and checks the document it found.
   const deliverToRequester = async (
     payload: unknown,
   ): Promise<{ ok: boolean; error?: string }> => {
-    let pinned: ProbedDocument | null = null;
-    let documentId: string;
     if (origin.kind === AUTOFILL_REQUEST_KIND.CONTENT) {
-      documentId = origin.documentId;
-    } else {
-      pinned = await pinDocument();
-      if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
-      if (refusesInsecureDocument(pinned)) return insecureRefusedResult;
-      if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
-      documentId = pinned.documentId;
+      return deliverToDocument(payload, origin.documentId, null);
     }
-    let answer: unknown;
-    try {
-      answer = await sendToDocument(payload, documentId);
-    } catch (err) {
-      if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      // Only "no listener in that document yet" (the manifest content script
-      // never ran) means the payload was never received: inject the bundle into
-      // the same document and resend. Any other rejection may follow a
-      // delivery, so it is not re-delivered.
-      if (!isNoReceiverError(err)) return { ok: false, error: "AUTOFILL_FAILED" };
-      try {
-        const target = pinned ?? (await pinDocument());
-        if (!target || !acceptsDocument(target)) {
-          if (!isVaultEpochCurrent(epoch)) return lockedResult;
-          return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
-        }
-        await injectFillBundleInto(tabId, target);
-        answer = await resendUntilReceived(() => sendToDocument(payload, target.documentId));
-      } catch {
-        if (!isVaultEpochCurrent(epoch)) return lockedResult;
-        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
-      }
-    }
-    if (!isFilledAnswer(answer)) {
-      if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      return { ok: false, error: "AUTOFILL_NOTHING_FILLED" };
-    }
-    return { ok: true };
+    const pinned = await pinDocument();
+    if (!isVaultEpochCurrent(epoch)) return lockedResult;
+    if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+    if (refusesInsecureDocument(pinned)) return insecureRefusedResult;
+    if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
+    return deliverToDocument(payload, pinned.documentId, pinned);
   };
 
   // ── Credit Card autofill path ──
@@ -2290,69 +2319,48 @@ async function performAutofillForEntry(
       ? { topFrameOrigin: origin.expectedOrigin }
       : {}),
   };
-  // The one document every delivery after a pin goes to: the first send of a
-  // context-menu fill, and the bundle and its resends. Without it, the
-  // fallback does not run.
-  let pinned: ProbedDocument | null = null;
-  let firstSendDocumentId: string | undefined;
+  // A content request goes to its own document, a context-menu click to the
+  // clicked frame's probed document. Every failure returns before the TOTP
+  // copy, so a fill that never landed copies no code.
   if (origin.kind === AUTOFILL_REQUEST_KIND.CONTENT) {
-    firstSendDocumentId = origin.documentId;
+    const delivered = await deliverToDocument(loginPayload, origin.documentId, null);
+    if (!delivered.ok) return delivered;
   } else if (origin.kind === AUTOFILL_REQUEST_KIND.CONTEXT_MENU) {
-    pinned = await pinDocument();
+    const pinned = await pinDocument();
     // A lock during the probe outranks what the probe found.
     if (!isVaultEpochCurrent(epoch)) return lockedResult;
     if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
     if (refusesInsecureDocument(pinned)) return insecureRefusedResult;
     if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
-    firstSendDocumentId = pinned.documentId;
-  }
-  // The answer of the send that was received: { filled } from the frame that
-  // ran the fill. On the popup broadcast only a frame that passed its gate and
-  // found a target at T0 answers.
-  let answer: unknown;
-  try {
-    // The popup broadcasts (no documentId); every other request goes to its
-    // one document.
-    if (firstSendDocumentId) {
-      answer = await sendToDocument(loginPayload, firstSendDocumentId);
-    } else {
-      assertVaultEpoch(epoch);
-      answer = await chrome.tabs.sendMessage(tabId, loginPayload);
-    }
-  } catch (err) {
-    // Only a no-receiver rejection starts the fallback. Any other (the channel
-    // closed by a navigation mid-fill) may follow a delivery, and a resend
-    // could reach the document that replaced the one it was sent to.
-    if (!isNoReceiverError(err)) {
-      if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      return { ok: false, error: "AUTOFILL_FAILED" };
-    }
-    // No listener in the document: pin it (if not already), inject the bundle
-    // there and resend. The document must still pass the host rule — the frame
-    // may have navigated since the request was checked.
+    const delivered = await deliverToDocument(loginPayload, pinned.documentId, pinned);
+    if (!delivered.ok) return delivered;
+  } else {
+    // The popup broadcasts so a login form inside an iframe fills; only a
+    // frame that passed its gate and found a target at T0 answers, and the
+    // first answer wins.
+    let broadcastAnswer: unknown;
     try {
-      pinned ??= await pinDocument();
-      if (!pinned || !acceptsDocument(pinned)) {
-        if (!isVaultEpochCurrent(epoch)) return lockedResult;
-        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
-      }
-      const target = pinned;
-      await injectFillBundleInto(tabId, target);
-      answer = await resendUntilReceived(() => sendToDocument(loginPayload, target.documentId));
-    } catch {
-      // Inject-and-resend is the only fallback: a document the bundle cannot
-      // reach (outside the fill scope, or no listener after the resends) gets
-      // nothing. Returned before the TOTP copy, so a fill that never
-      // landed copies no code.
+      assertVaultEpoch(epoch);
+      broadcastAnswer = await chrome.tabs.sendMessage(tabId, loginPayload);
+    } catch (err) {
       if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      if (!isNoReceiverError(err) && !isNoAnswerError(err)) {
+        return { ok: false, error: "AUTOFILL_FAILED" };
+      }
     }
-  }
-  // A frame that wrote nothing, no answer, or a malformed one is not a fill:
-  // returned before the TOTP copy, like every failure above.
-  if (!isFilledAnswer(answer)) {
-    if (!isVaultEpochCurrent(epoch)) return lockedResult;
-    return { ok: false, error: "AUTOFILL_NOTHING_FILLED" };
+    // No frame filled. Chrome rejects a broadcast with no receiver only when
+    // NO frame has a listener, so an iframe that has one ends the broadcast
+    // quietly while the top document may have none (a plain http page, or an
+    // orphaned tab after an extension reload). One send pinned to the top
+    // frame's probed document decides, and only its no-receiver rejection
+    // injects there and resends.
+    if (!isFilledAnswer(broadcastAnswer)) {
+      const pinned = await pinDocument();
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
+      if (!pinned || !acceptsDocument(pinned)) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      const delivered = await deliverToDocument(loginPayload, pinned.documentId, pinned);
+      if (!delivered.ok) return delivered;
+    }
   }
 
   // Auto-copy TOTP to clipboard after successful LOGIN autofill
@@ -3195,12 +3203,13 @@ async function handleMessage(
         // frame host, not the top page's. Fail closed if the frame origin is
         // unknown: a content-driven fill with no resolvable origin must not
         // release a password.
-        const senderHost = _sender.url ? extractHost(_sender.url) : null;
+        const senderUrl = _sender.url;
+        const senderHost = senderUrl ? extractHost(senderUrl) : null;
         // Every delivery goes to the sender's own document (the one whose
         // _sender.url was just checked), never to whatever its frame holds by
         // the time the entry is decrypted. No documentId, no fill.
         const documentId = _sender.documentId;
-        if (!senderHost || !documentId) {
+        if (!senderUrl || !senderHost || !documentId) {
           sendResponse({
             type: EXT_MSG.AUTOFILL_FROM_CONTENT,
             ok: false,
@@ -3211,7 +3220,7 @@ async function handleMessage(
         const result = await performAutofillForEntry(
           message.entryId,
           tabId,
-          { kind: AUTOFILL_REQUEST_KIND.CONTENT, documentId, senderHost },
+          { kind: AUTOFILL_REQUEST_KIND.CONTENT, documentId, senderUrl, senderHost },
           message.targetHint,
           message.teamId,
         );

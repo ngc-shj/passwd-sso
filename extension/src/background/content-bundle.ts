@@ -33,6 +33,9 @@ export const CONTENT_BUNDLE_ERROR = {
 } as const;
 
 const NO_RECEIVER_RE = /Receiving end does not exist/;
+// Chrome's rejection when every listener that got the message returned without
+// answering: the message was received, and nothing answered.
+const NO_ANSWER_RE = /^The message port closed before a response was received\.?$/;
 
 type ContentBundle = { file: string; matches: readonly string[] };
 
@@ -94,6 +97,15 @@ export function matchesPattern(url: string, pattern: string): boolean {
 export function isNoReceiverError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return NO_RECEIVER_RE.test(message);
+}
+
+/**
+ * Whether a send was rejected because the listeners that received it gave no
+ * answer. That is a delivery with no answer, never a reason to resend.
+ */
+export function isNoAnswerError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return NO_ANSWER_RE.test(message);
 }
 
 /**

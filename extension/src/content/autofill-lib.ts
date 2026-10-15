@@ -25,18 +25,21 @@ import { isFieldVisible, isNotSelfHidden } from "./field-query-lib";
  * requested one checks itself here, so a navigation before delivery cannot turn
  * into a fill on another site.
  *
- * On an insecure http page (isInsecureHttpUrl) both arms also need the frame's
+ * On an insecure http page (isInsecureHttpUrl) both arms also need the page's
  * host to match one of `allowedHttpHosts`, the hosts the entry was saved for
- * over http; absent or empty denies there.
+ * over http; absent or empty denies there. The page is read from both the
+ * frame's URL and its origin, which an about:blank or srcdoc frame inherits
+ * from its creator.
  */
 function isFrameAllowedToFill(payload: AutofillPayload): boolean {
   const { allowedHosts, allowedHttpHosts, topFrameOrigin } = payload;
+  const refusedAsInsecure = (pageUrl: string): boolean => {
+    if (!isInsecureHttpUrl(pageUrl)) return false;
+    const pageHost = extractHost(pageUrl);
+    return !pageHost || !(allowedHttpHosts ?? []).some((h) => isHostMatch(h, pageHost));
+  };
+  if (refusedAsInsecure(window.location.href) || refusedAsInsecure(self.origin)) return false;
   const frameHost = extractHost(window.location.href);
-  if (isInsecureHttpUrl(window.location.href)) {
-    if (!frameHost || !(allowedHttpHosts ?? []).some((h) => isHostMatch(h, frameHost))) {
-      return false;
-    }
-  }
   if (
     window.top === window.self &&
     typeof topFrameOrigin === "string" &&

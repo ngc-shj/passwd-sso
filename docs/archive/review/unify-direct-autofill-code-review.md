@@ -45,3 +45,22 @@ Two reviewers each raised this from reading the code; neither reproduced it in a
 ## Environment Verification Report
 - **Unit tests:** 2100 passed. `tsc`, `typecheck:test` and the extension build all pass.
 - **VE2:** blocked-deferred to the user's manual check before merge (plan scenarios 1–4).
+
+## Round 2: C3–C5 (http fill, http-scheme gate, fill result)
+
+The VE2 check found the popup contradicting itself on an http page, and an external security review then raised the scheme-less host match (Medium) and the unanswered fill (Low). The user chose to fix both here: C3 (`3b90cac70`), C4 and C5 (`af7e11bc0`). Two reviewers then checked those commits.
+
+| ID | Expert | Severity | Finding | Resolution |
+|----|--------|----------|---------|------------|
+| F1 | Sec/Func | Major | A tab-wide send reports no receiver only when no frame listens, so an in-scope iframe hid a top document with no listener (an http top page, an orphaned https top frame), and no inject-and-resend ran. | After a broadcast with no `filled > 0`, one send pinned to the top frame's probed document; only its no-receiver rejection injects and resends (plan C5). |
+| F2 / T6 | Sec/Func, Test | Minor | Chrome ends a send whose receivers all stay silent with a "message port closed" rejection, which the code read as a failure, not "nothing filled". | That rejection counts as no answer on every judged send. |
+| F3 | Sec/Func | Minor | Two frames with targets: a `{ filled: 0 }` can win over a frame that wrote. | Accepted cost, recorded in plan C5 (fail-closed). |
+| F4 | Sec/Func | Minor | Failure returns after the fetch/decrypt skipped the lock check (pre-existing). | One epoch check right after the decrypt. |
+| F5 | Sec/Func | Minor | The content-side insecure check read only `location.href`, missing an about:blank inheriting http. | It also reads `self.origin`, as the background does. |
+| (obs) | Test | Minor | A content request from an http page reached the content gate with no background C4 check. | The CONTENT request origin carries `senderUrl`; the popup's pre-check covers it. |
+| T1 | Test | High | `npx vitest run` exited 1: an unchanged test called the CC/Identity listeners without `sendResponse` (the summary line still read "passed"). | The test passes one and pins each listener's answer on a throw. |
+| T2–T5, T7 | Test | Medium/Low | The http-host match, the url-type filter, the content host match, the probed-origin arm, and the CC/Identity supersede had no deny row. | Deny rows added; each red under its mutation. |
+
+Every fix was red-proved on a scratch copy (19 reverts). The full suite exits 0 (2245 tests); `tsc`, `typecheck:test` and the build pass.
+
+**VE2** covers what unit tests cannot: which rejection a silent broadcast produces in Chrome, the F1 pinned send on a page with an https iframe, and the fill-only script on an http page.

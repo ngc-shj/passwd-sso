@@ -11,9 +11,14 @@ export const AUTOFILL_REQUEST_KIND = {
 } as const;
 
 export type AutofillRequestOrigin =
-  // documentId and senderHost both come from the browser-set MessageSender of
-  // the requesting document.
-  | { kind: typeof AUTOFILL_REQUEST_KIND.CONTENT; documentId: string; senderHost: string }
+  // documentId, senderUrl and senderHost all come from the browser-set
+  // MessageSender of the requesting document.
+  | {
+      kind: typeof AUTOFILL_REQUEST_KIND.CONTENT;
+      documentId: string;
+      senderUrl: string;
+      senderHost: string;
+    }
   // frameId is the clicked frame (top frame when OnClickData has none);
   // senderHost is the host the click resolved to.
   | { kind: typeof AUTOFILL_REQUEST_KIND.CONTEXT_MENU; frameId: number; senderHost: string }
