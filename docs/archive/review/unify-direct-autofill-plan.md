@@ -72,14 +72,15 @@ The browser's own HTTP-auth dialog was never fillable by either path. It is trac
 
 ## Testing strategy
 
-**Background allow-side tests (test T4, group A).** These are the tests that showed acceptance through the direct func: host and pinning acceptance, the about:blank inherited origin, the hostless and host-mismatched popup cases, and the frame-scoped and top-frame-only fallbacks. They migrate to "lands through the resend":
+**Background allow-side tests (test T4, group A).** These are the tests that showed acceptance through the direct func: host and pinning acceptance, the hostless and host-mismatched popup cases, and the frame-scoped and top-frame-only fallbacks. They migrate to "lands through the resend":
 - the first `sendMessage` rejects, then the next one resolves;
 - expect `ok: true`, `injectionKinds()` equal to `["probe", "bundle"]`, and the resend pinned to the right document.
 
 **Background failure tests (test T4, group B; T7).** These cases expect `AUTOFILL_INJECT_FAILED` with an exact `injectionKinds()`:
 - every resend fails;
 - the page is out of scope;
-- the bundle injection rejects.
+- the bundle injection rejects;
+- an `about:blank` frame with an inherited https origin (sec R2 F1). `isInBundleScope` stays URL-based and refuses it, so the expected kinds are exactly `["probe"]`, with the probe asserted as run, and there is no resend to that document. Making it land would widen the bundle's injection scope, which the product decision rules out.
 
 The A6 "released without a lock" control becomes `AUTOFILL_INJECT_FAILED`; its lock sibling stays `VAULT_LOCKED`. A TOTP pair is added: failed fill means no clipboard write, and a fill through the resend means one.
 
