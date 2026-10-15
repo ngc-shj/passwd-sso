@@ -46,12 +46,14 @@ function setInputValue(input: HTMLInputElement, value: string): boolean {
     input.value = value;
   }
   // Taken before any event runs, so a page handler that rewrites the field
-  // cannot decide it. A value the input's type rejects (a postcode in
-  // type=number, 01/15/1990 in type=date) is sanitized to "" without an error;
-  // that is the only case read as not taken. Exact equality is not required:
-  // the browser also normalizes values it accepts (an email's surrounding
-  // whitespace).
-  const took = value === "" || input.value !== "";
+  // cannot decide it. The field must hold exactly the value: the browser's
+  // sanitization changes it silently, emptying one the type rejects (a
+  // postcode in type=number, 01/15/1990 in type=date) and stripping line
+  // breaks from text and password inputs, which would leave a password that
+  // no longer matches. Only email and url inputs, which also trim surrounding
+  // whitespace, are compared against the trimmed value.
+  const expected = input.type === "email" || input.type === "url" ? value.trim() : value;
+  const took = input.value === expected;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
   input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));

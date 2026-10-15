@@ -1110,9 +1110,9 @@ describe("performAutofill — sequential fill", () => {
     return el;
   }
 
-  async function settle(fill: Promise<unknown>): Promise<void> {
+  async function settle<T>(fill: Promise<T>): Promise<T> {
     await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
-    await fill;
+    return fill;
   }
 
   it("writes the custom fields, then a focused non-custom username, then the password", async () => {
@@ -1296,6 +1296,34 @@ describe("performAutofill — sequential fill", () => {
     );
 
     expect(byId("target").value).toBe("123");
+  });
+
+  // C5: a field counts only when it holds exactly the value. A password input
+  // strips line breaks, which leaves a password that no longer matches.
+  it.each([
+    { name: "a password whose line break the input strips", password: "abc\ndef", filled: 1 },
+    { name: "control: a password the input keeps as it is", password: "abcdef", filled: 2 },
+  ])("counts $filled filled fields for $name", async ({ password, filled }) => {
+    setupForm(`
+      <input id="user" type="text" autocomplete="username" />
+      <input id="pw" type="password" />
+    `);
+
+    const count = await settle(performAutofill(loginPayload({ password })));
+
+    expect(count).toBe(filled);
+  });
+
+  it("counts an email input that trims the username's surrounding whitespace", async () => {
+    setupForm(`
+      <input id="user" type="email" autocomplete="username" />
+      <input id="pw" type="password" />
+    `);
+
+    const count = await settle(performAutofill(loginPayload({ username: " alice@example.com " })));
+
+    expect(byId("user").value).toBe("alice@example.com");
+    expect(count).toBe(2);
   });
 
   it("leaves to a custom field the input it reserved, and picks the username elsewhere", async () => {
