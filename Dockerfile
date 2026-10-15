@@ -420,7 +420,7 @@ COPY --from=builder /app/node_modules/xtend ./node_modules/xtend
 # AWS rotates this bundle. When it does, the build fails on the checksum: fetch
 # the new one, diff the certificate list, and move the pin deliberately.
 ARG RDS_CA_BUNDLE_URL=https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-ARG RDS_CA_BUNDLE_SHA256=fe45bbebf92ad3e27a583bbb2ddd1553c521ed4d49af5514dc0a40372ea5395c
+ARG RDS_CA_BUNDLE_SHA256=90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b
 RUN mkdir -p /app/certs && \
     wget -qO /app/certs/rds-global-bundle.pem "${RDS_CA_BUNDLE_URL}" && \
     echo "${RDS_CA_BUNDLE_SHA256}  /app/certs/rds-global-bundle.pem" | sha256sum -c - && \
