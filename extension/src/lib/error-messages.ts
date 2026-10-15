@@ -22,6 +22,8 @@ const ERROR_KEY_MAP: Record<string, string> = {
   FILL_FAILED: "errors.autofillFailed",
   NO_CARD_NUMBER: "errors.noCardNumber",
   AUTOFILL_INJECT_FAILED: "errors.autofillInjectFailed",
+  AUTOFILL_NOTHING_FILLED: "errors.autofillNothingFilled",
+  INSECURE_PAGE_FILL_REFUSED: "errors.insecurePageFillRefused",
   COPY_TOTP_FAILED: "errors.copyTotpFailed",
   UNLOCK_FAILED: "errors.unlockFailed",
   NO_TOKEN: "errors.noToken",

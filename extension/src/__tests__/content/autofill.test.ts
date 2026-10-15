@@ -974,6 +974,81 @@ describe("performAutofill — frame-origin gate", () => {
     const inputs = document.querySelectorAll("input");
     expect((inputs[1] as HTMLInputElement).value).toBe("");
   });
+
+  // C4: an insecure http frame fills only on a host the entry was saved for
+  // over http (allowedHttpHosts). Each pair differs on that field alone.
+  const LOGIN_FORM = `
+    <input type="text" autocomplete="username" />
+    <input type="password" autocomplete="current-password" />
+  `;
+  const writtenPassword = () => (document.querySelectorAll("input")[1] as HTMLInputElement).value;
+
+  it.each([
+    { allowedHttpHosts: undefined, written: "" },
+    { allowedHttpHosts: [] as string[], written: "" },
+    { allowedHttpHosts: ["bank.example"], written: "secret" },
+  ])(
+    "C4: an http subframe on a matching allowedHosts host with allowedHttpHosts $allowedHttpHosts writes '$written'",
+    async ({ allowedHttpHosts, written }) => {
+      setupForm(LOGIN_FORM);
+
+      await inSubframe("http://bank.example/login", async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          allowedHosts: ["bank.example"],
+          ...(allowedHttpHosts ? { allowedHttpHosts } : {}),
+        }, NO_WAIT);
+      });
+
+      expect(writtenPassword()).toBe(written);
+    },
+  );
+
+  // The top-frame arm (a hostless or mismatched entry the user confirmed) is
+  // held to the same http rule.
+  it.each([
+    { allowedHttpHosts: undefined, written: "" },
+    { allowedHttpHosts: ["bank.example"], written: "secret" },
+  ])(
+    "C4: the top-frame topFrameOrigin arm on an http page with allowedHttpHosts $allowedHttpHosts writes '$written'",
+    async ({ allowedHttpHosts, written }) => {
+      setupForm(LOGIN_FORM);
+
+      await inTopFrame({ href: "http://bank.example/login", origin: "http://bank.example" }, async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          topFrameOrigin: "http://bank.example",
+          ...(allowedHttpHosts ? { allowedHttpHosts } : {}),
+        }, NO_WAIT);
+      });
+
+      expect(writtenPassword()).toBe(written);
+    },
+  );
+
+  // localhost and 127.0.0.1 are not insecure pages: no http host is needed
+  // there (the http://bank.example rows above are the deny side).
+  it.each(["http://localhost:3000/login", "http://127.0.0.1:8080/login"])(
+    "C4: %s fills on allowedHosts alone",
+    async (href) => {
+      setupForm(LOGIN_FORM);
+
+      await inSubframe(href, async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          allowedHosts: [new URL(href).hostname],
+        }, NO_WAIT);
+      });
+
+      expect(writtenPassword()).toBe("secret");
+    },
+  );
 });
 
 // ── Sequential fill (plan C2) ─────────────────────────────────
@@ -1010,7 +1085,7 @@ describe("performAutofill — sequential fill", () => {
     return el;
   }
 
-  async function settle(fill: Promise<void>): Promise<void> {
+  async function settle(fill: Promise<unknown>): Promise<void> {
     await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
     await fill;
   }

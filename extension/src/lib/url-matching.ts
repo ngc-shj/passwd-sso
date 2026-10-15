@@ -26,6 +26,25 @@ export function parseHttpOrigin(value: unknown): string | null {
   }
 }
 
+/**
+ * Whether `url` is a plain http page on a host other than localhost or
+ * 127.0.0.1, where a network attacker can serve the page. Such a page gets only
+ * what was saved for http: a LOGIN whose http host matches, never a card or an
+ * identity.
+ */
+export function isInsecureHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "http:" &&
+      parsed.hostname !== "localhost" &&
+      parsed.hostname !== "127.0.0.1"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function normalizeHost(host: string): string {
   return host.replace(/^www\./i, "").toLowerCase();
 }

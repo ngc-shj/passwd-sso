@@ -546,7 +546,7 @@ describe("performIdentityAutofill — sequential fill", () => {
     return el;
   }
 
-  async function settle(fill: Promise<void>): Promise<void> {
+  async function settle(fill: Promise<unknown>): Promise<void> {
     await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
     await fill;
   }

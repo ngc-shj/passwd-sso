@@ -178,6 +178,8 @@
     "originMismatch": "この認証情報は別のサイト用です。選択した後にページが変わった可能性があります。",
     "unknownOrigin": "このページを確認できなかったため、入力を中止しました。",
     "autofillInjectFailed": "このページでは自動入力を実行できませんでした。",
+    "autofillNothingFilled": "このページには入力できる欄が見つかりませんでした。",
+    "insecurePageFillRefused": "HTTP のページには、http:// の URL で登録したログイン情報だけを入力します。",
     "copyTotpFailed": "TOTP コードをコピーできませんでした。",
     "unlockFailed": "保管庫をアンロックできませんでした。",
     "noToken": "未接続です。先に passwd-sso にサインインしてください。",

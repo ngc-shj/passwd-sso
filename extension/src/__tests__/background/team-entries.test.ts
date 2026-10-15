@@ -120,7 +120,8 @@ function installChromeMock() {
       unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
     },
     tabs: {
-      sendMessage: vi.fn().mockResolvedValue({}),
+      // A fill listener answers the fields it wrote; one means the fill landed.
+      sendMessage: vi.fn().mockResolvedValue({ filled: 1 }),
       query: vi.fn().mockResolvedValue([{ id: 1, url: "https://github.com" }]),
       onActivated: { addListener: vi.fn() },
       onUpdated: { addListener: vi.fn() },

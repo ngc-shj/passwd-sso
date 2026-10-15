@@ -87,11 +87,16 @@ export function supersedeActiveFill(): void {
   supersedeActiveRun();
 }
 
+/**
+ * Runs the steps and resolves, once the run ends, with the number of steps it
+ * wrote: the fill's own report of what landed (0 when superseded before any
+ * write, or when nothing was found).
+ */
 export function runFillSequence(
   root: FillRoot | null,
   steps: FillStep[],
   opts: FillSequenceOptions = {},
-): Promise<void> {
+): Promise<number> {
   supersedeActiveRun();
   const runGeneration = currentGeneration;
   const deadline =
@@ -115,8 +120,8 @@ export function runFillSequence(
   // performance.now() reaches the deadline; once it has run, the deadline holds.
   let deadlineReached = false;
   let observer: MutationObserver | null = null;
-  let resolveRun!: () => void;
-  const done = new Promise<void>((resolve) => {
+  let resolveRun!: (filled: number) => void;
+  const done = new Promise<number>((resolve) => {
     resolveRun = resolve;
   });
 
@@ -155,7 +160,7 @@ export function runFillSequence(
     }
     if (errorCode) logFillError(errorCode);
     else if (releaseFailed) logFillError(FILL_DIAG_CODE.RELEASE_ERROR);
-    resolveRun();
+    resolveRun(written.size);
   }
 
   function guarded(fn: () => void): () => void {

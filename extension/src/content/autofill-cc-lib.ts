@@ -2,7 +2,8 @@
 // plus a self-registering AUTOFILL_CC_FILL listener, mirroring autofill-lib.ts.
 
 import { EXT_MSG } from "../lib/constants";
-import type { CreditCardAutofillPayload } from "../types/messages";
+import type { CreditCardAutofillPayload, FillResponse } from "../types/messages";
+import { isInsecureHttpUrl } from "../lib/url-matching";
 import { detectExpiryFormat, formatCombinedExpiry } from "./cc-form-detector-lib";
 import {
   detectCreditCardFields,
@@ -155,7 +156,14 @@ function writeExpiryPart(
 export async function performCreditCardAutofill(
   payload: CreditCardAutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
-): Promise<void> {
+): Promise<number> {
+  // Never into an insecure http page, where a network attacker can serve the
+  // form. The request still ends this frame's pending fill.
+  if (isInsecureHttpUrl(window.location.href)) {
+    supersedeActiveFill();
+    return 0;
+  }
+
   // T0: the detector's result, scoped to the block the user is in, is every
   // step's initial target.
   const admit = fillAdmission();
@@ -175,7 +183,7 @@ export async function performCreditCardAutofill(
   });
   if (!fields?.cardNumber) {
     supersedeActiveFill();
-    return;
+    return 0;
   }
   const cardNumber = fields.cardNumber;
 
@@ -294,10 +302,24 @@ if (
   !(window as unknown as Record<string, boolean>)[CC_AUTOFILL_GUARD]
 ) {
   (window as unknown as Record<string, boolean>)[CC_AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener((message: CreditCardAutofillPayload, sender: chrome.runtime.MessageSender) => {
-    // Only accept messages from our own extension — reject external senders
-    if (message?.type === EXT_MSG.AUTOFILL_CC_FILL && sender.id === chrome.runtime.id) {
-      performCreditCardAutofill(message).catch(() => logFillError(FILL_DIAG_CODE.CC_FILL_FAILED));
-    }
-  });
+  chrome.runtime.onMessage.addListener(
+    (
+      message: CreditCardAutofillPayload,
+      sender: chrome.runtime.MessageSender,
+      sendResponse: (response: FillResponse) => void,
+    ) => {
+      // Only accept messages from our own extension — reject external senders
+      if (message?.type !== EXT_MSG.AUTOFILL_CC_FILL || sender.id !== chrome.runtime.id) return false;
+      // Sent to one document only, so this frame always answers; a refusal or
+      // an empty page answers 0.
+      performCreditCardAutofill(message).then(
+        (filled) => sendResponse({ filled }),
+        () => {
+          logFillError(FILL_DIAG_CODE.CC_FILL_FAILED);
+          sendResponse({ filled: 0 });
+        },
+      );
+      return true;
+    },
+  );
 }

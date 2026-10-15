@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EXT_ENTRY_TYPE, EXT_MSG } from "../../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 import { createExecuteScriptMock, documentIdFor } from "../helpers/execute-script-mock";
-import { FILL_LISTENERS_FILE } from "../../background/fill-listeners-file";
 import {
   BUNDLE_RESEND_ATTEMPTS,
   BUNDLE_RESEND_INTERVAL_MS,
@@ -107,7 +106,8 @@ function installChromeMock() {
       unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
     },
     tabs: {
-      sendMessage: vi.fn().mockResolvedValue({}),
+      // A fill listener answers the fields it wrote; one means the fill landed.
+      sendMessage: vi.fn().mockResolvedValue({ filled: 1 }),
       get: vi.fn().mockResolvedValue({ id: 1, url: "https://example.com" }),
       query: vi.fn().mockResolvedValue([{ id: 1, url: "https://example.com" }]),
       onActivated: { addListener: vi.fn() },
@@ -733,8 +733,8 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     // a cross-origin subframe.
     chromeMock!.tabs.sendMessage = vi
       .fn()
-      .mockRejectedValueOnce(new Error("Could not establish connection"))
-      .mockResolvedValueOnce({});
+      .mockRejectedValueOnce(new Error(NO_RECEIVER))
+      .mockResolvedValueOnce({ filled: 1 });
 
     const res = (await sendMessage(
       { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId: "cc-1" },
@@ -786,7 +786,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
       times.push(performance.now());
       const next = queue.shift();
       if (next !== undefined) throw new Error(next);
-      return {};
+      return { filled: 1 };
     });
     return times;
   }
@@ -866,12 +866,13 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
   // The bundle only goes where the manifest's own content_scripts.matches reach;
   // activeTab would otherwise let it into pages the manifest deliberately skips.
-  // A plain http page gets the fill-only script instead, and a document with no
-  // host of its own gets nothing.
+  // A document with no host of its own gets nothing. A card never goes to an
+  // insecure http page (C4), so that page gets no fill script either; the
+  // fill-only script it would get is pinned by the LOGIN fallback tests.
   it.each([
     { url: "https://shop.example/checkout", files: [PROD_LOADER] },
     { url: "http://localhost:3000/checkout", files: [PROD_LOADER] },
-    { url: "http://shop.example/checkout", files: [FILL_LISTENERS_FILE] },
+    { url: "http://shop.example/checkout", files: null },
     { url: "about:blank", files: null },
   ])("C5: a fill into $url injects $files", async ({ url, files }) => {
     probeUrl = url;

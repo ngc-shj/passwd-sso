@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractHost,
   isHostMatch,
+  isInsecureHttpUrl,
   parseHttpOrigin,
   sortByUrlMatch,
 } from "../../lib/url-matching";
@@ -95,5 +96,19 @@ describe("sortByUrlMatch", () => {
     ];
     const sorted = sortByUrlMatch(entries, "example.com");
     expect(sorted.map((e) => e.id)).toEqual(["1", "2"]);
+  });
+});
+
+// C4: an insecure page is plain http on any host but localhost / 127.0.0.1.
+describe("isInsecureHttpUrl", () => {
+  it.each([
+    ["http://bank.example/login", true],
+    ["http://localhost:3000/login", false],
+    ["http://127.0.0.1:8080/", false],
+    ["https://bank.example/login", false],
+    ["about:blank", false],
+    ["not a url", false],
+  ])("%s → %s", (url, expected) => {
+    expect(isInsecureHttpUrl(url)).toBe(expected);
   });
 });

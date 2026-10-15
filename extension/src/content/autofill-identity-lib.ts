@@ -2,7 +2,8 @@
 // plus a self-registering AUTOFILL_IDENTITY_FILL listener, mirroring autofill-lib.ts.
 
 import { EXT_MSG } from "../lib/constants";
-import type { IdentityAutofillPayload } from "../types/messages";
+import type { IdentityAutofillPayload, FillResponse } from "../types/messages";
+import { isInsecureHttpUrl } from "../lib/url-matching";
 import {
   detectIdentityFields,
   isIdentityCandidate,
@@ -119,7 +120,14 @@ function writeField(el: FillTarget, value: string, diagField: SelectDiagField): 
 export async function performIdentityAutofill(
   payload: IdentityAutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
-): Promise<void> {
+): Promise<number> {
+  // Never into an insecure http page, where a network attacker can serve the
+  // form. The request still ends this frame's pending fill.
+  if (isInsecureHttpUrl(window.location.href)) {
+    supersedeActiveFill();
+    return 0;
+  }
+
   // T0: the detector's result, scoped to the block the user is in, is every
   // step's initial target.
   const admit = fillAdmission();
@@ -137,7 +145,7 @@ export async function performIdentityAutofill(
   });
   if (!fields) {
     supersedeActiveFill();
-    return;
+    return 0;
   }
 
   const steps: FillStep[] = [];
@@ -237,12 +245,24 @@ if (
   !(window as unknown as Record<string, boolean>)[IDENTITY_AUTOFILL_GUARD]
 ) {
   (window as unknown as Record<string, boolean>)[IDENTITY_AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener((message: IdentityAutofillPayload, sender: chrome.runtime.MessageSender) => {
-    // Only accept messages from our own extension — reject external senders
-    if (message?.type === EXT_MSG.AUTOFILL_IDENTITY_FILL && sender.id === chrome.runtime.id) {
-      performIdentityAutofill(message).catch(() =>
-        logFillError(FILL_DIAG_CODE.IDENTITY_FILL_FAILED),
+  chrome.runtime.onMessage.addListener(
+    (
+      message: IdentityAutofillPayload,
+      sender: chrome.runtime.MessageSender,
+      sendResponse: (response: FillResponse) => void,
+    ) => {
+      // Only accept messages from our own extension — reject external senders
+      if (message?.type !== EXT_MSG.AUTOFILL_IDENTITY_FILL || sender.id !== chrome.runtime.id) return false;
+      // Sent to one document only, so this frame always answers; a refusal or
+      // an empty page answers 0.
+      performIdentityAutofill(message).then(
+        (filled) => sendResponse({ filled }),
+        () => {
+          logFillError(FILL_DIAG_CODE.IDENTITY_FILL_FAILED);
+          sendResponse({ filled: 0 });
+        },
       );
-    }
-  });
+      return true;
+    },
+  );
 }

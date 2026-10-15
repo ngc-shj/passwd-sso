@@ -86,7 +86,12 @@ export function matchesPattern(url: string, pattern: string): boolean {
   return globToRegExp(path).test(parsed.pathname + parsed.search);
 }
 
-function isNoReceiverError(err: unknown): boolean {
+/**
+ * Whether a send was rejected because the document has no listener yet. Only
+ * this rejection means the payload was never received; any other (a channel
+ * closed by a navigation mid-fill) may follow a delivery.
+ */
+export function isNoReceiverError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return NO_RECEIVER_RE.test(message);
 }
@@ -217,8 +222,9 @@ export async function injectContentBundle(
 
 /**
  * Deliver via `send`, retrying a "Receiving end does not exist" rejection up to
- * BUNDLE_RESEND_ATTEMPTS times, BUNDLE_RESEND_INTERVAL_MS apart; any other
- * rejection, or an exhausted budget, rejects.
+ * BUNDLE_RESEND_ATTEMPTS times, BUNDLE_RESEND_INTERVAL_MS apart, and resolve with
+ * the answer of the send that was received; any other rejection, or an
+ * exhausted budget, rejects.
  */
 export async function resendUntilReceived<T>(send: () => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {

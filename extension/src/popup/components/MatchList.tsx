@@ -3,6 +3,7 @@ import { sendMessage } from "../../lib/messaging";
 import {
   extractHost,
   isHostMatch,
+  isInsecureHttpUrl,
   sortByUrlMatch,
 } from "../../lib/url-matching";
 import type { DecryptedEntry } from "../../types/messages";
@@ -36,20 +37,7 @@ export function MatchList({ tabUrl }: Props) {
   // this exact origin, so a navigation after the click cannot redirect the fill.
   // Set whenever tabHost is (extractHost accepts http(s) URLs only).
   const tabOrigin = tabHost && tabUrl ? new URL(tabUrl).origin : null;
-  const isInsecurePage = tabUrl
-    ? (() => {
-        try {
-          const url = new URL(tabUrl);
-          return (
-            url.protocol === "http:" &&
-            url.hostname !== "localhost" &&
-            url.hostname !== "127.0.0.1"
-          );
-        } catch {
-          return false;
-        }
-      })()
-    : false;
+  const isInsecurePage = tabUrl ? isInsecureHttpUrl(tabUrl) : false;
 
   useEffect(() => {
     sendMessage({ type: "FETCH_PASSWORDS" }).then((res) => {

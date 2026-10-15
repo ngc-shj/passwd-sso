@@ -94,7 +94,7 @@ function recorder(): Recorder {
   };
 }
 
-function track(p: Promise<void>): { settled: () => boolean } {
+function track(p: Promise<unknown>): { settled: () => boolean } {
   let settled = false;
   void p.then(() => {
     settled = true;
@@ -152,6 +152,38 @@ describe("runFillSequence — order and yield", () => {
     await vi.runAllTimersAsync();
     await done;
     expect(r.log).toEqual(["a", "task", "b", "c"]);
+  });
+});
+
+// C5: the run reports what it wrote, so a frame can answer how many fields it filled.
+describe("runFillSequence — written count", () => {
+  it("resolves with the number of steps written", async () => {
+    document.body.innerHTML = `<input id="a"><input id="b">`;
+    const r = recorder();
+    const done = runFillSequence(document.body, [r.step("a", $("#a")), r.step("b", $("#b"))]);
+
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toBe(2);
+  });
+
+  it("resolves with 0 when no step finds a field", async () => {
+    document.body.innerHTML = `<input id="a">`;
+    const r = recorder();
+    const done = runFillSequence(document.body, [r.step("late", null)], { lateFieldWindowMs: 100 });
+
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(done).resolves.toBe(0);
+  });
+
+  it("a superseded run resolves with the writes it made before the newer run", async () => {
+    document.body.innerHTML = `<input id="a"><input id="b">`;
+    const r = recorder();
+    const first = runFillSequence(document.body, [r.step("a", $("#a")), r.step("b", $("#b"))]);
+    await firstTask();
+    runFillSequence(document.body, []);
+
+    await vi.runAllTimersAsync();
+    await expect(first).resolves.toBe(1);
   });
 });
 

@@ -34,7 +34,7 @@ import {
 import { getSettings, validateSettings, TimeoutAction } from "../lib/storage";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { humanizeError } from "../lib/error-messages";
-import { extractHost, isHostMatch, parseHttpOrigin } from "../lib/url-matching";
+import { extractHost, isHostMatch, isInsecureHttpUrl, parseHttpOrigin } from "../lib/url-matching";
 import {
   persistSession,
   loadSession,
@@ -55,6 +55,7 @@ import { swFetchAuthenticated } from "./dpop-fetch";
 import {
   injectContentBundleAndResend,
   injectFillBundleInto,
+  isNoReceiverError,
   probeDocument,
   resendUntilReceived,
   type ProbedDocument,
@@ -1869,6 +1870,13 @@ async function fetchAndDecryptTeamBlob(
   }
 }
 
+/** Whether a fill listener's answer reports at least one written field. */
+function isFilledAnswer(answer: unknown): boolean {
+  if (typeof answer !== "object" || answer === null) return false;
+  const filled = (answer as { filled?: unknown }).filled;
+  return typeof filled === "number" && Number.isInteger(filled) && filled > 0;
+}
+
 async function performAutofillForEntry(
   entryId: string,
   tabId: number,
@@ -1985,6 +1993,7 @@ async function performAutofillForEntry(
   // this narrowing is the second layer — the parse failure is not diagnosable from
   // its message anyway.
   type DecryptedEntryBlob = {
+    url?: string | null;
     password?: string | null;
     username?: string | null;
     loginId?: string | null;
@@ -2040,6 +2049,43 @@ async function performAutofillForEntry(
     ...(overview.additionalUrlHosts ?? []),
   ].filter((h): h is string => typeof h === "string" && h.length > 0);
 
+  // Hosts the entry was saved for over plain http: its url and its url-type
+  // custom fields whose scheme is http:. Matching is by host only, so without
+  // this an https entry would also fill the same host's http page, which a
+  // network attacker can serve. An insecure page gets a LOGIN only on one of
+  // these, and never a card or an identity.
+  const entryHttpHosts = [
+    blob.url,
+    ...(Array.isArray(blob.customFields) ? blob.customFields : [])
+      .filter((f) => f.type?.toLowerCase() === "url")
+      .map((f) => f.value),
+  ]
+    .map((value) => {
+      if (typeof value !== "string") return null;
+      try {
+        return new URL(value).protocol === "http:" ? extractHost(value) : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((h): h is string => typeof h === "string" && h.length > 0);
+  const refusedAsInsecure = (pageUrl: string): boolean => {
+    if (!isInsecureHttpUrl(pageUrl)) return false;
+    if (entryType !== EXT_ENTRY_TYPE.LOGIN) return true;
+    const pageHost = extractHost(pageUrl);
+    return !pageHost || !entryHttpHosts.some((h) => isHostMatch(h, pageHost));
+  };
+  // A probed document is checked on its URL and on its effective origin, which
+  // an about:blank or srcdoc frame inherits from its creator.
+  const refusesInsecureDocument = (probed: ProbedDocument): boolean =>
+    refusedAsInsecure(probed.url) || refusedAsInsecure(probed.origin);
+  const insecureRefusedResult = { ok: false, error: "INSECURE_PAGE_FILL_REFUSED" } as const;
+  // The page the popup showed is known before any send.
+  if (origin.kind === AUTOFILL_REQUEST_KIND.POPUP && refusedAsInsecure(origin.expectedOrigin)) {
+    if (!isVaultEpochCurrent(epoch)) return lockedResult;
+    return { ok: false, error: "INSECURE_PAGE_FILL_REFUSED" };
+  }
+
   // Origin re-binding for content-driven fills: when the caller does not trust
   // the entryId's origin — the content-script path, and the context menu, whose
   // items are persisted browser state that outlives the navigation they were
@@ -2065,8 +2111,10 @@ async function performAutofillForEntry(
   // of the entry's hosts, or, for the popup, on the exact origin the user saw.
   // CC/Identity are hostless by design and have no content-side gate, so the
   // document must be the requester's: on the sender host, or on the popup's
-  // exact origin.
+  // exact origin. An insecure http document is refused first, unless it is a
+  // LOGIN's http host (C4).
   const acceptsDocument = (probed: ProbedDocument): boolean => {
+    if (refusesInsecureDocument(probed)) return false;
     if (
       origin.kind === AUTOFILL_REQUEST_KIND.POPUP &&
       probed.origin === origin.expectedOrigin
@@ -2095,28 +2143,36 @@ async function performAutofillForEntry(
       pinned = await pinDocument();
       if (!isVaultEpochCurrent(epoch)) return lockedResult;
       if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      if (refusesInsecureDocument(pinned)) return insecureRefusedResult;
       if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
       documentId = pinned.documentId;
     }
+    let answer: unknown;
     try {
-      await sendToDocument(payload, documentId);
-      return { ok: true };
-    } catch {
+      answer = await sendToDocument(payload, documentId);
+    } catch (err) {
       if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      // No listener in that document yet (the manifest content script never
-      // ran): inject the bundle into the same document and resend.
-    }
-    try {
-      const target = pinned ?? (await pinDocument());
-      if (!target || !acceptsDocument(target)) {
+      // Only "no listener in that document yet" (the manifest content script
+      // never ran) means the payload was never received: inject the bundle into
+      // the same document and resend. Any other rejection may follow a
+      // delivery, so it is not re-delivered.
+      if (!isNoReceiverError(err)) return { ok: false, error: "AUTOFILL_FAILED" };
+      try {
+        const target = pinned ?? (await pinDocument());
+        if (!target || !acceptsDocument(target)) {
+          if (!isVaultEpochCurrent(epoch)) return lockedResult;
+          return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+        }
+        await injectFillBundleInto(tabId, target);
+        answer = await resendUntilReceived(() => sendToDocument(payload, target.documentId));
+      } catch {
         if (!isVaultEpochCurrent(epoch)) return lockedResult;
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       }
-      await injectFillBundleInto(tabId, target);
-      await resendUntilReceived(() => sendToDocument(payload, target.documentId));
-    } catch {
+    }
+    if (!isFilledAnswer(answer)) {
       if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      return { ok: false, error: "AUTOFILL_NOTHING_FILLED" };
     }
     return { ok: true };
   };
@@ -2228,6 +2284,8 @@ async function performAutofillForEntry(
     // Each receiving frame checks its own host against these before writing,
     // and the top frame also its origin against topFrameOrigin (popup only).
     ...(entryHosts.length ? { allowedHosts: entryHosts } : {}),
+    // An insecure http frame also needs its host among these (absent denies).
+    allowedHttpHosts: entryHttpHosts,
     ...(origin.kind === AUTOFILL_REQUEST_KIND.POPUP
       ? { topFrameOrigin: origin.expectedOrigin }
       : {}),
@@ -2244,19 +2302,31 @@ async function performAutofillForEntry(
     // A lock during the probe outranks what the probe found.
     if (!isVaultEpochCurrent(epoch)) return lockedResult;
     if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+    if (refusesInsecureDocument(pinned)) return insecureRefusedResult;
     if (!acceptsDocument(pinned)) return { ok: false, error: "ORIGIN_MISMATCH" };
     firstSendDocumentId = pinned.documentId;
   }
+  // The answer of the send that was received: { filled } from the frame that
+  // ran the fill. On the popup broadcast only a frame that passed its gate and
+  // found a target at T0 answers.
+  let answer: unknown;
   try {
     // The popup broadcasts (no documentId); every other request goes to its
     // one document.
     if (firstSendDocumentId) {
-      await sendToDocument(loginPayload, firstSendDocumentId);
+      answer = await sendToDocument(loginPayload, firstSendDocumentId);
     } else {
       assertVaultEpoch(epoch);
-      await chrome.tabs.sendMessage(tabId, loginPayload);
+      answer = await chrome.tabs.sendMessage(tabId, loginPayload);
     }
-  } catch {
+  } catch (err) {
+    // Only a no-receiver rejection starts the fallback. Any other (the channel
+    // closed by a navigation mid-fill) may follow a delivery, and a resend
+    // could reach the document that replaced the one it was sent to.
+    if (!isNoReceiverError(err)) {
+      if (!isVaultEpochCurrent(epoch)) return lockedResult;
+      return { ok: false, error: "AUTOFILL_FAILED" };
+    }
     // No listener in the document: pin it (if not already), inject the bundle
     // there and resend. The document must still pass the host rule — the frame
     // may have navigated since the request was checked.
@@ -2268,7 +2338,7 @@ async function performAutofillForEntry(
       }
       const target = pinned;
       await injectFillBundleInto(tabId, target);
-      await resendUntilReceived(() => sendToDocument(loginPayload, target.documentId));
+      answer = await resendUntilReceived(() => sendToDocument(loginPayload, target.documentId));
     } catch {
       // Inject-and-resend is the only fallback: a document the bundle cannot
       // reach (outside the fill scope, or no listener after the resends) gets
@@ -2277,6 +2347,12 @@ async function performAutofillForEntry(
       if (!isVaultEpochCurrent(epoch)) return lockedResult;
       return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
     }
+  }
+  // A frame that wrote nothing, no answer, or a malformed one is not a fill:
+  // returned before the TOTP copy, like every failure above.
+  if (!isFilledAnswer(answer)) {
+    if (!isVaultEpochCurrent(epoch)) return lockedResult;
+    return { ok: false, error: "AUTOFILL_NOTHING_FILLED" };
   }
 
   // Auto-copy TOTP to clipboard after successful LOGIN autofill
