@@ -35,7 +35,6 @@ import { getSettings, validateSettings, TimeoutAction } from "../lib/storage";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { humanizeError } from "../lib/error-messages";
 import { extractHost, isHostMatch, parseHttpOrigin } from "../lib/url-matching";
-import { CARD_PATTERN_SOURCES, LOGIN_AUTOCOMPLETE_TOKENS } from "../lib/cc-patterns";
 import {
   persistSession,
   loadSession,
@@ -61,7 +60,6 @@ import {
   type ProbedDocument,
 } from "./content-bundle";
 import { AUTOFILL_REQUEST_KIND, type AutofillRequestOrigin } from "./autofill-request-origin";
-import { directAutofill } from "./direct-autofill";
 import { classifyError, warnBackground } from "./log";
 import {
   attemptTokenRefreshWith,
@@ -2216,7 +2214,6 @@ async function performAutofillForEntry(
     return { ok: false, error: "NO_PASSWORD" };
   }
 
-  let messageFillSucceeded = false;
   // autofill-lib.ts is bundled in form-detector.ts (manifest content_scripts),
   // so the AUTOFILL_FILL listener is already present — no executeScript needed.
   const loginPayload = {
@@ -2234,8 +2231,8 @@ async function performAutofillForEntry(
       : {}),
   };
   // The one document every delivery after a pin goes to: the first send of a
-  // context-menu fill, and the bundle, its resends and the direct func of any
-  // fallback. Without it, the fallback does not run.
+  // context-menu fill, and the bundle and its resends. Without it, the
+  // fallback does not run.
   let pinned: ProbedDocument | null = null;
   let firstSendDocumentId: string | undefined;
   if (origin.kind === AUTOFILL_REQUEST_KIND.CONTENT) {
@@ -2255,7 +2252,6 @@ async function performAutofillForEntry(
       assertVaultEpoch(epoch);
       await chrome.tabs.sendMessage(tabId, loginPayload);
     }
-    messageFillSucceeded = true;
   } catch {
     // No listener in the document: pin it (if not already), inject the bundle
     // there and resend. The document must still pass the host rule — the frame
@@ -2268,55 +2264,13 @@ async function performAutofillForEntry(
       const target = pinned;
       await injectContentBundleInto(tabId, target);
       await resendUntilReceived(() => sendToDocument(loginPayload, target.documentId));
-      messageFillSucceeded = true;
     } catch {
+      // Inject-and-resend is the only fallback: a document the bundle cannot
+      // reach (outside its match patterns, or no listener after the resends)
+      // gets nothing. Returned before the TOTP copy, so a fill that never
+      // landed copies no code.
       if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      // Continue to the pinned direct fallback below.
-    }
-  }
-
-  // Direct fallback for pages where content-script messaging is blocked/unstable
-  // (see direct-autofill.ts). Pinned to the one checked document, so neither a
-  // sibling frame nor a navigation since can receive the password.
-  const directTarget: chrome.scripting.InjectionTarget = {
-    tabId,
-    documentIds: pinned ? [pinned.documentId] : [],
-  };
-  const injectDirectAutofill = async (
-    hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
-  ) => {
-    assertVaultEpoch(epoch);
-    return chrome.scripting.executeScript({
-      target: directTarget,
-      // The card-form patterns and LOGIN autocomplete tokens are always passed:
-      // without them directAutofill runs no card-form exclusion.
-      args: [
-        username,
-        password ?? "",
-        hintArg,
-        textCustomFields,
-        CARD_PATTERN_SOURCES,
-        [...LOGIN_AUTOCOMPLETE_TOKENS],
-      ],
-      func: directAutofill,
-    });
-  };
-
-  // Only run direct fallback when message-based autofill failed.
-  // The direct fallback doesn't support TOTP and would overwrite OTP fields
-  // with username values, so running both approaches causes conflicts.
-  if (!messageFillSucceeded) {
-    // No pinned document (the probe failed or found no single document): the
-    // credential has nowhere it can be delivered safely.
-    if (!pinned) return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
-    try {
-      await injectDirectAutofill(serializableTargetHint);
-    } catch (err) {
-      if (err instanceof VaultLockedError) return lockedResult;
-      const message = err instanceof Error ? err.message : String(err);
-      if (!/unserializable/i.test(message)) throw err;
-      if (!isVaultEpochCurrent(epoch)) return lockedResult;
-      await injectDirectAutofill(null);
+      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
     }
   }
 

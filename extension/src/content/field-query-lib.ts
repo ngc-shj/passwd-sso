@@ -36,8 +36,6 @@ export function resolveOpacity(value: string): number {
 // - isNotSelfHidden: card-form exclusion and fill-root boundaries, where
 //   "hidden" removes a protection — so it stays no stricter than the element's
 //   own style.
-// A direct-autofill twin of isFieldVisible lives in background/direct-autofill.ts
-// (executeScript serializes it with no imports); the parity tests pin the two.
 
 /** Below this opacity (own, or multiplied down the ancestor chain) a field is hidden. */
 const MIN_OPACITY = 0.05;
