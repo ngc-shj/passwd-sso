@@ -78,6 +78,27 @@ The browser's own HTTP-auth dialog was never fillable by either path. It is trac
 
 **Cost:** the extension package carries the fill code twice (about 35 kB). It is built from the same source, so the fill logic still has one implementation. The fill-only script cannot be exercised by unit tests end to end; VE2 scenario 4 covers it.
 
+### C4: an http page gets only what was saved for http (review: external sec Medium)
+
+Matching is by host only, so `https://bank.example`'s login also matched `http://bank.example`. A network attacker who serves that http page would get it from one click; C3 also newly opened card and identity fill there.
+
+- **Insecure page:** `isInsecureHttpUrl(url)` in `lib/url-matching.ts`: `http:` with a hostname other than `localhost` or `127.0.0.1` (the popup's existing HTTP-warning rule, which then uses the helper).
+- **LOGIN:** an insecure document is filled only when its host matches an *http host* of the entry: a host from the blob's `url` or a `url`-type custom field whose scheme is `http:`.
+  - The payload carries `allowedHttpHosts` (always an array; absent or empty denies). The content gate (`isFrameAllowedToFill`) applies it to its own `location.href`, for every frame and also on the top-frame `topFrameOrigin` arm.
+  - The background refuses before any send when the page it knows is insecure and not an http host: the popup's `expectedOrigin`, or the context menu's probed document.
+- **CC / Identity:** never filled into an insecure document. The background refuses (popup `expectedOrigin`; `acceptsDocument` for every probed document), and the content listeners refuse on their own `location.href`.
+- **Error:** `INSECURE_PAGE_FILL_REFUSED`, in `error-messages.ts` and both locales: en "On an HTTP page, only logins saved with an http:// URL are filled.", ja "HTTP のページには、http:// の URL で登録したログイン情報だけを入力します。"
+
+### C5: a fill reports what it wrote (review: external sec Low)
+
+The content listeners never answered, so the background took a delivered message as a fill: a refusing frame still meant `ok` and a TOTP copy.
+
+- **Content:** `runFillSequence` resolves with the number of steps written; `performAutofill` (and the CC / Identity fills) return it. Each listener answers `{ filled: number }` when its run ends (returning `true` to keep the channel open).
+- **Broadcast rule:** on the popup LOGIN broadcast the first answer wins. So a LOGIN frame answers only when it passes the frame gate and its T0 found at least one initial target; otherwise it returns `false` and stays silent. A frame that only fills late (no initial target) is then reported as not filled: an accepted cost, fail-closed.
+- **CC / Identity** are always sent to one document, so they always answer (a refusal answers `{ filled: 0 }`).
+- **Background:** success is an answer with `filled > 0`, from the first send or from a resend. An answer with `filled: 0`, a missing answer, or a malformed one gives `AUTOFILL_NOTHING_FILLED` (new code, both locales: en "No field on this page could be filled.", ja "このページには入力できる欄が見つかりませんでした。"), with the lock checked first, and no TOTP copy.
+- **Fallback trigger:** only a no-receiver rejection starts inject-and-resend. Any other rejection (for example the channel closing on a navigation mid-fill) is a failure, so a fill never re-delivers into a document that replaced the one it was sent to.
+
 **Control class:** the direct fallback was a sink that bypassed the content side's checks. Removing it is a narrowing.
 
 **Acceptance:**
@@ -133,7 +154,10 @@ It is red-proved with the guard removed.
 1. **Login baseline:** fill from the popup, the context menu and the inline dropdown.
 2. **Orphaned LOGIN:** reload the extension without reloading the page, then fill from the popup. The fill lands, now with no fallback.
 3. **Orphaned dropdown:** in the same tab, after scenario 2's fill, focusing a field shows the dropdown again. Nothing re-injects the bundle on reload; the fill's injection is what brings the detector back, on main as well (func R2 N1).
-4. **Plain http page:** a fill from the popup lands through the fill-only script. Focusing a field shows no inline dropdown (no detector is injected).
+4. **Plain http page:**
+   - an entry saved with an `http://` URL for that host fills from the popup through the fill-only script, and focusing a field shows no inline dropdown;
+   - an entry saved with an `https://` URL for the same host is refused with the C4 message, and nothing is written.
+5. **Nothing to fill:** a popup fill on an https page with no login field shows the C5 message, and the popup stays open.
 
 ## Scope contract
 
@@ -147,3 +171,5 @@ It is red-proved with the guard removed.
 | C1 | (dropped; the manual check showed it unnecessary) | — |
 | C2 | remove the LOGIN direct-autofill twin | locked |
 | C3 | plain http pages get a fill-only classic script | locked (VE2) |
+| C4 | http pages get only logins saved for http; no CC / Identity | locked |
+| C5 | a fill reports the fields it wrote; success needs filled > 0 | locked |
