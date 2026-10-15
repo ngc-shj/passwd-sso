@@ -42,6 +42,15 @@ jobs:
 
       - run: npm ci
 
+      # check-bypass-rls resolves Prisma model types to prove which receivers
+      # can reach a with*Rls helper; without the generated client they are
+      # any/unknown and the gate fails closed. `generate` never connects, so a
+      # dummy URL satisfies prisma.config.ts's env("DATABASE_URL").
+      - name: Generate Prisma client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+
       # Several refactor-phase-verify scripts (verify-move-only-diff,
       # check-vitest-coverage-include, etc.) compare against main via
       # `git show main:<path>` and `git diff main...HEAD`. actions/checkout
