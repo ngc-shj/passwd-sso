@@ -14,6 +14,7 @@ import {
 import { DISCONNECT_REASON } from "../lib/disconnect-reason";
 import { humanizeError } from "../lib/error-messages";
 import { BUNDLE_RESEND_ATTEMPTS } from "../background/content-bundle";
+import { FILL_LISTENERS_FILE } from "../background/fill-listeners-file";
 import { DEBOUNCE_MS } from "../background/context-menu";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
@@ -275,7 +276,9 @@ function installChromeMock() {
 function injectionKinds(): string[] {
   return (chromeMock!.scripting.executeScript.mock.calls as unknown[][]).map((c) => {
     const injection = c[0] as object;
-    if ("files" in injection) return "bundle";
+    if ("files" in injection) {
+      return (injection as { files: string[] }).files.includes(FILL_LISTENERS_FILE) ? "fill-only" : "bundle";
+    }
     return "args" in injection ? "func" : "probe";
   });
 }
@@ -2532,8 +2535,31 @@ describe("background message flow", () => {
         .mockResolvedValueOnce(undefined);
     }
 
-    it("refuses the fallback when the page is outside the bundle scope (plain http)", async () => {
+    // A plain http page is outside the manifest scope, but the popup copies a
+    // password onto it, so the fill lands there too: through the fill-only
+    // script, never the manifest bundle.
+    it("lands on a plain http page through the fill-only script and the resend", async () => {
       probeUrls = { 7: "http://example.com/login" };
+      await unlockForLogin();
+      landOnResend();
+
+      const res = await fillFromFrame7();
+
+      expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+      expect(injectionKinds()).toEqual(["probe", "fill-only"]);
+      expect(chromeMock?.scripting.executeScript).toHaveBeenCalledWith({
+        target: { tabId: 1, documentIds: [documentIdFor(7)] },
+        files: [FILL_LISTENERS_FILE],
+      });
+      expect(sendOptions()).toEqual([{ documentId: documentIdFor(7) }, { documentId: documentIdFor(7) }]);
+      expect(injectionsCarrying("secret")).toEqual([]);
+    });
+
+    // A blob: document keeps its creator's origin, so only the fill
+    // injection, which reads the URL, refuses it.
+    it("refuses the fallback for a blob: document, outside the fill scope", async () => {
+      probeUrls = { 7: "blob:https://example.com/5f0c" };
+      probeOrigins = { 7: "https://example.com" };
 
       const res = await fillWithNoReceiver();
 
@@ -2580,7 +2606,7 @@ describe("background message flow", () => {
 
     // sec R2 F1: an about:blank or srcdoc login frame has no host in its URL but
     // inherits its creator's origin. acceptsDocument reads the origin and
-    // passes it, but isInBundleScope reads the URL and refuses it, so the
+    // passes it, but injectFillBundleInto reads the URL and refuses it, so the
     // bundle never goes in and nothing is resent: the fill fails. Making it
     // land would widen the bundle's injection scope (the product decision in
     // unify-direct-autofill-plan.md rules that out).
@@ -5846,18 +5872,22 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       });
     });
 
-    // An http:// page is outside the bundle's manifest scope: no bundle goes
-    // in, so the fill fails after the first send. A lock while the fallback
-    // runs must still read as the lock, not as the inject failure.
+    // An about:blank frame inheriting the entry's origin passes the origin
+    // check but is outside the fill scope: no bundle goes in, so the fill
+    // fails after the first send. A lock while the fallback runs must still
+    // read as the lock, not as the inject failure.
     describe("out-of-scope fallback", () => {
-      const OUT_OF_SCOPE = "http://example.com/login";
+      const outOfScope = () => {
+        probeUrls = { 7: "about:blank" };
+        probeOrigins = { 7: "https://example.com" };
+      };
 
       it.each(INTERRUPTIONS)("%s during the fallback's document probe answers VAULT_LOCKED", async (_name, interrupt) => {
-        probeUrls = { 7: OUT_OF_SCOPE };
+        outOfScope();
         await unlockAndSettle();
         chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
         const hold = holdProbe(chromeMock!.scripting.executeScript);
-        const pending = fillFromContent(7, OUT_OF_SCOPE);
+        const pending = fillFromContent();
         await hold.reached;
         await interrupt();
         hold.release();
@@ -5868,11 +5898,11 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
       });
 
       it("positive control: released without a lock it answers AUTOFILL_INJECT_FAILED", async () => {
-        probeUrls = { 7: OUT_OF_SCOPE };
+        outOfScope();
         await unlockAndSettle();
         chromeMock!.tabs.sendMessage.mockRejectedValueOnce(NO_RECEIVER_ERROR());
         const hold = holdProbe(chromeMock!.scripting.executeScript);
-        const pending = fillFromContent(7, OUT_OF_SCOPE);
+        const pending = fillFromContent();
         await hold.reached;
         hold.release();
 

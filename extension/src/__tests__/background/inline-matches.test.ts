@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EXT_ENTRY_TYPE, EXT_MSG } from "../../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 import { createExecuteScriptMock, documentIdFor } from "../helpers/execute-script-mock";
+import { FILL_LISTENERS_FILE } from "../../background/fill-listeners-file";
 import {
   BUNDLE_RESEND_ATTEMPTS,
   BUNDLE_RESEND_INTERVAL_MS,
@@ -865,25 +866,28 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
   // The bundle only goes where the manifest's own content_scripts.matches reach;
   // activeTab would otherwise let it into pages the manifest deliberately skips.
+  // A plain http page gets the fill-only script instead, and a document with no
+  // host of its own gets nothing.
   it.each([
-    { url: "https://shop.example/checkout", injected: true },
-    { url: "http://localhost:3000/checkout", injected: true },
-    { url: "http://shop.example/checkout", injected: false },
-    { url: "about:blank", injected: false },
-  ])("C5: injects the bundle into $url: $injected", async ({ url, injected }) => {
+    { url: "https://shop.example/checkout", files: [PROD_LOADER] },
+    { url: "http://localhost:3000/checkout", files: [PROD_LOADER] },
+    { url: "http://shop.example/checkout", files: [FILL_LISTENERS_FILE] },
+    { url: "about:blank", files: null },
+  ])("C5: a fill into $url injects $files", async ({ url, files }) => {
     probeUrl = url;
     await unlock();
     queueCcSendResults([NO_RECEIVER]);
 
-    // The request comes from the probed host, so only the bundle scope decides.
+    // The request comes from the probed host, so only the fill scope decides.
     const res = await ccFillFromFrame42(url.startsWith("about:") ? undefined : url);
 
-    const bundleCalls = chromeMock!.scripting.executeScript.mock.calls.filter(
-      (c: unknown[]) => "files" in (c[0] as object),
-    );
-    expect(bundleCalls).toHaveLength(injected ? 1 : 0);
-    expect(res).toMatchObject(injected ? { ok: true } : { ok: false, error: "AUTOFILL_INJECT_FAILED" });
-    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(injected ? 2 : 1);
+    const fileInjections = chromeMock!.scripting.executeScript.mock.calls
+      .map((c: unknown[]) => c[0] as { files?: string[] })
+      .filter((injection: { files?: string[] }) => injection.files)
+      .map((injection: { files?: string[] }) => injection.files);
+    expect(fileInjections).toEqual(files ? [files] : []);
+    expect(res).toMatchObject(files ? { ok: true } : { ok: false, error: "AUTOFILL_INJECT_FAILED" });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(files ? 2 : 1);
   });
 
   // CC/Identity have no content-side origin gate: a fallback bound to the

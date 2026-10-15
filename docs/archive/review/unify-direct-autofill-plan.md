@@ -21,11 +21,13 @@ So no guard change is needed. The plan-round-1 contract C1 (`claimWindowGuard`) 
 
 ## Product decision (user)
 
-Removing the fallback ends LOGIN fill on documents outside the content-bundle scope (`https://*/*`, `http://localhost/*`). Two kinds of document are affected:
+Removing the fallback would end LOGIN fill on documents outside the content-bundle scope (`https://*/*`, `http://localhost/*`). Two kinds of document are affected:
 - page-DOM forms on plain `http://` (non-localhost) pages, filled through the popup, the context menu or the command;
 - `about:blank`, `srcdoc` and `blob:` frames reached through the context menu.
 
-The user accepted this. Card and identity fill never worked there. The fallback wrote credentials into unencrypted pages, and it skipped the content side's frame and root checks.
+The user first accepted losing both. The VE2 manual check then showed the popup contradicting itself on an http page: its warning ("filling an insecure page is risky") implies the fill works, and the fill then failed. The user's call: the popup lets the user copy a password onto that page, so refusing the fill there protects nothing.
+
+**Revised decision:** plain `http://` pages keep the fill, through a fill-only script (C3). Frames with no host of their own (`about:blank`, `srcdoc`, `blob:`) stay unfilled. Card and identity fill reach http pages through the same script, for the same reason.
 
 The browser's own HTTP-auth dialog was never fillable by either path. It is tracked separately in #905.
 
@@ -63,6 +65,19 @@ The browser's own HTTP-auth dialog was never fillable by either path. It is trac
 
 **Resend budget (func F3):** it stays at 10 × 50 ms. The card and identity fills already rely on it alone in production, and the orphaned-tab check passed within it. Moving to a readiness signal is out of scope (SC1).
 
+### C3: plain http pages get a fill-only script
+
+**Why not the manifest bundle:** its CRXJS loader starts the code with `import()`, and the bundle's `web_accessible_resources` match only `https://*/*` and `http://localhost/*`, so an http page refuses that import. Widening the resources would expose the extension's files (`token-bridge.js` among them) to every http page and network attacker.
+
+**Mechanism:**
+- `src/content/fill-listeners.ts` imports only the three fill listener modules (LOGIN, CC, Identity): no detectors, no inline UI, no WebAuthn bridge.
+- `vite.fill.config.ts` builds it as one classic script (`iife`) at `FILL_LISTENERS_FILE`. `npm run build` runs it as a second pass. `executeScript({ files })` needs no web-accessible grant.
+- `injectFillBundleInto` (the fill's only injector) sends the manifest bundle to an in-scope document, the fill-only script to a plain `http:` document with a host, and nothing to any other document.
+- The keyboard-command re-injection (`injectContentBundle`) is unchanged and stays manifest-scope only.
+- `check-dist-hygiene.mjs` fails the build when the fill-only script is missing, empty, or uses module syntax.
+
+**Cost:** the extension package carries the fill code twice (about 35 kB). It is built from the same source, so the fill logic still has one implementation. The fill-only script cannot be exercised by unit tests end to end; VE2 scenario 4 covers it.
+
 **Control class:** the direct fallback was a sink that bypassed the content side's checks. Removing it is a narrowing.
 
 **Acceptance:**
@@ -80,6 +95,7 @@ The browser's own HTTP-auth dialog was never fillable by either path. It is trac
 - every resend fails;
 - the page is out of scope;
 - the bundle injection rejects;
+- a `blob:` document, whose origin the probe reports as its creator's, so only the URL-based fill injection refuses it;
 - an `about:blank` frame with an inherited https origin (sec R2 F1). `isInBundleScope` stays URL-based and refuses it, so the expected kinds are exactly `["probe"]`, with the probe asserted as run, and there is no resend to that document. Making it land would widen the bundle's injection scope, which the product decision rules out.
 - **The inherited-origin arm of `acceptsDocument`** keeps a positive control on the context-menu path (test R2-1), where it still decides the first send:
   - **allow:** an `about:blank` frame inheriting `https://example.com` gets the first `sendMessage` with its `documentId`, then ends `AUTOFILL_INJECT_FAILED`, not `ORIGIN_MISMATCH`;
@@ -117,7 +133,7 @@ It is red-proved with the guard removed.
 1. **Login baseline:** fill from the popup, the context menu and the inline dropdown.
 2. **Orphaned LOGIN:** reload the extension without reloading the page, then fill from the popup. The fill lands, now with no fallback.
 3. **Orphaned dropdown:** in the same tab, after scenario 2's fill, focusing a field shows the dropdown again. Nothing re-injects the bundle on reload; the fill's injection is what brings the detector back, on main as well (func R2 N1).
-4. **Plain http page:** a fill from the popup reports failure and writes nothing.
+4. **Plain http page:** a fill from the popup lands through the fill-only script. Focusing a field shows no inline dropdown (no detector is injected).
 
 ## Scope contract
 
@@ -130,3 +146,4 @@ It is red-proved with the guard removed.
 |----|---------|--------|
 | C1 | (dropped; the manual check showed it unnecessary) | — |
 | C2 | remove the LOGIN direct-autofill twin | locked |
+| C3 | plain http pages get a fill-only classic script | locked (VE2) |

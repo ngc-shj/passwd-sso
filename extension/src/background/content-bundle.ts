@@ -8,11 +8,14 @@
 // `src/content/form-detector.js` exists in the build.
 //
 // Delivery is pinned to one document. A probe reads each target document's URL
-// and origin together with its documentId; documents outside the bundle's own manifest
-// `matches` are refused (activeTab reaches pages the manifest deliberately does
-// not match, such as plain http:// hosts), and the bundle and every resend go to
-// the probed documentId, so a navigation in the frame during the resend window
-// cannot receive the payload.
+// and origin together with its documentId; documents outside the bundle's own
+// manifest `matches` get no bundle (activeTab reaches pages the manifest
+// deliberately does not match, such as plain http:// hosts; a fill sends those
+// the fill-only script instead, see injectFillBundleInto), and the bundle and
+// every resend go to the probed documentId, so a navigation in the frame during
+// the resend window cannot receive the payload.
+
+import { FILL_LISTENERS_FILE } from "./fill-listeners-file";
 
 const CONTENT_BUNDLE_NAME = "form-detector";
 const CONTENT_BUNDLE_LOADER_RE = /-loader(-[A-Za-z0-9_-]+)?\.js$/;
@@ -140,12 +143,50 @@ async function injectBundleFile(tabId: number, documentIds: string[]): Promise<v
 }
 
 /** Inject the bundle into one probed document, refusing one outside the bundle's scope. */
-export async function injectContentBundleInto(
+async function injectContentBundleInto(
   tabId: number,
   probed: ProbedDocument,
 ): Promise<void> {
   if (!isInBundleScope(probed.url)) throw new Error(CONTENT_BUNDLE_ERROR.SCOPE_REFUSED);
   await injectBundleFile(tabId, [probed.documentId]);
+}
+
+/**
+ * Whether `url` is a plain http page outside the bundle's manifest scope, which
+ * a fill reaches with the fill-only script instead. The popup lets the user
+ * copy a password onto such a page, so refusing the fill there protects
+ * nothing; the fill runs on the user's own gesture, whose activeTab grant
+ * reaches a page the manifest does not match, and the content side's host and
+ * frame checks apply there as anywhere. Documents without a host of their own
+ * (about:blank, srcdoc, blob:) are neither.
+ */
+function isPlainHttpPage(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" && parsed.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Inject a fill's receiver into one probed document: the manifest bundle when
+ * the document is inside its scope, the fill-only classic script (no detectors,
+ * no inline UI) when it is a plain http page, and nothing otherwise.
+ */
+export async function injectFillBundleInto(
+  tabId: number,
+  probed: ProbedDocument,
+): Promise<void> {
+  if (isInBundleScope(probed.url)) {
+    await injectBundleFile(tabId, [probed.documentId]);
+    return;
+  }
+  if (!isPlainHttpPage(probed.url)) throw new Error(CONTENT_BUNDLE_ERROR.SCOPE_REFUSED);
+  await chrome.scripting.executeScript({
+    target: { tabId, documentIds: [probed.documentId] },
+    files: [FILL_LISTENERS_FILE],
+  });
 }
 
 /**

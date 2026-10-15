@@ -54,7 +54,7 @@ import {
 import { swFetchAuthenticated } from "./dpop-fetch";
 import {
   injectContentBundleAndResend,
-  injectContentBundleInto,
+  injectFillBundleInto,
   probeDocument,
   resendUntilReceived,
   type ProbedDocument,
@@ -2112,7 +2112,7 @@ async function performAutofillForEntry(
         if (!isVaultEpochCurrent(epoch)) return lockedResult;
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       }
-      await injectContentBundleInto(tabId, target);
+      await injectFillBundleInto(tabId, target);
       await resendUntilReceived(() => sendToDocument(payload, target.documentId));
     } catch {
       if (!isVaultEpochCurrent(epoch)) return lockedResult;
@@ -2267,12 +2267,12 @@ async function performAutofillForEntry(
         return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
       }
       const target = pinned;
-      await injectContentBundleInto(tabId, target);
+      await injectFillBundleInto(tabId, target);
       await resendUntilReceived(() => sendToDocument(loginPayload, target.documentId));
     } catch {
       // Inject-and-resend is the only fallback: a document the bundle cannot
-      // reach (outside its match patterns, or no listener after the resends)
-      // gets nothing. Returned before the TOTP copy, so a fill that never
+      // reach (outside the fill scope, or no listener after the resends) gets
+      // nothing. Returned before the TOTP copy, so a fill that never
       // landed copies no code.
       if (!isVaultEpochCurrent(epoch)) return lockedResult;
       return { ok: false, error: "AUTOFILL_INJECT_FAILED" };

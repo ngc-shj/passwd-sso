@@ -15,6 +15,12 @@
  *    hand-built extension zip. There is no packaging script to fix instead, so
  *    the check belongs here, on the directory the build owns.
  *
+ * 3. The fill-only script (src/content/fill-listeners.js, from
+ *    vite.fill.config.ts) exists and is a classic script. The background injects
+ *    it with executeScript `files` into plain http pages, which refuse the
+ *    import() a module chunk needs; a build that drops the second pass, or emits
+ *    it as a module, would leave those fills failing with nothing to show why.
+ *
  * The absent-subject cases matter as much as the positive ones: a missing dist/,
  * a walk that finds no HTML, or a throw inside the walk must all exit non-zero.
  * "Scanned nothing" must never be reported the same way as "found nothing".
@@ -25,6 +31,8 @@ import { fileURLToPath } from "node:url";
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const FORBIDDEN_HTML = 'rel="modulepreload"';
+const FILL_LISTENERS = join(DIST, "src", "content", "fill-listeners.js");
+const MODULE_SYNTAX_RE = /\bimport\s*\(|\bimport\.meta\b|^\s*(?:import|export)\b/m;
 
 // Matched on basename. Chrome rejects an unpacked extension containing a
 // directory whose name starts with "_" (reserved), but junk files are the
@@ -87,6 +95,22 @@ try {
     );
   }
 
+  let fillScript = null;
+  try {
+    fillScript = await readFile(FILL_LISTENERS, "utf8");
+  } catch {
+    failures.push(
+      `${relative(DIST, FILL_LISTENERS)} is missing — run the fill pass (vite build -c vite.fill.config.ts).`,
+    );
+  }
+  if (fillScript === "") {
+    failures.push(`${relative(DIST, FILL_LISTENERS)} is empty.`);
+  } else if (fillScript !== null && MODULE_SYNTAX_RE.test(fillScript)) {
+    failures.push(
+      `${relative(DIST, FILL_LISTENERS)} uses module syntax; executeScript \`files\` needs a classic script (lib format "iife").`,
+    );
+  }
+
   if (failures.length > 0) {
     for (const failure of failures) console.error(`check-dist-hygiene: ${failure}`);
     process.exit(1);
@@ -94,7 +118,7 @@ try {
 
   // The counts are the evidence that the gate actually examined something.
   console.log(
-    `check-dist-hygiene: ${html.length} HTML file(s) scanned, no modulepreload links, no junk files`,
+    `check-dist-hygiene: ${html.length} HTML file(s) scanned, no modulepreload links, no junk files, fill-only script is classic (${fillScript.length} bytes)`,
   );
 } catch (err) {
   console.error(
