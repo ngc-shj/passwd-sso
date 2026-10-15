@@ -32,7 +32,7 @@ import {
 // Every write runs in the task where its step's `accepts` has just passed
 // (runFillSequence), so the setters do not re-check visibility.
 
-function setInputValue(input: HTMLInputElement, value: string): void {
+function setInputValue(input: HTMLInputElement, value: string): boolean {
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -43,10 +43,18 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   } else {
     input.value = value;
   }
+  // Taken before any event runs, so a page handler that rewrites the field
+  // cannot decide it. A value the input's type rejects (a postcode in
+  // type=number, 01/15/1990 in type=date) is sanitized to "" without an error;
+  // that is the only case read as not taken. Exact equality is not required:
+  // the browser also normalizes values it accepts (an email's surrounding
+  // whitespace).
+  const took = value === "" || input.value !== "";
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
   input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
   input.dispatchEvent(new Event("blur", { bubbles: true }));
+  return took;
 }
 
 function setSelectValue(
@@ -112,8 +120,7 @@ const GEOMETRY_EXEMPT_ROLES: ReadonlySet<keyof IdentityFormFields> = new Set(["c
 
 function writeField(el: FillTarget, value: string, diagField: SelectDiagField): boolean {
   if (el instanceof HTMLSelectElement) return setSelectValue(el, value, diagField);
-  setInputValue(el, value);
-  return true;
+  return setInputValue(el, value);
 }
 
 export async function performIdentityAutofill(

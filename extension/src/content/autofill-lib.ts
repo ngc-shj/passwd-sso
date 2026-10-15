@@ -51,7 +51,7 @@ function isFrameAllowedToFill(payload: AutofillPayload): boolean {
   return (allowedHosts ?? []).some((h) => isHostMatch(h, frameHost));
 }
 
-function setInputValue(input: HTMLInputElement, value: string) {
+function setInputValue(input: HTMLInputElement, value: string): boolean {
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -62,11 +62,19 @@ function setInputValue(input: HTMLInputElement, value: string) {
   } else {
     input.value = value;
   }
+  // Taken before any event runs, so a page handler that rewrites the field
+  // cannot decide it. A value the input's type rejects (a postcode in
+  // type=number, 01/15/1990 in type=date) is sanitized to "" without an error;
+  // that is the only case read as not taken. Exact equality is not required:
+  // the browser also normalizes values it accepts (an email's surrounding
+  // whitespace).
+  const took = value === "" || input.value !== "";
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
   // Legacy forms often validate on keyup/blur handlers.
   input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
   input.dispatchEvent(new Event("blur", { bubbles: true }));
+  return took;
 }
 
 // Input types a username can be written into.
@@ -497,8 +505,7 @@ export function startAutofill(
         inputsIn(root).find((i) => isTextLikeTarget(i) && matchesLabel(i, lower)) ?? null,
       accepts: isTextLikeTarget,
       write: (el) => {
-        setInputValue(el as HTMLInputElement, payload.customFields?.[index]?.value ?? "");
-        return true;
+        return setInputValue(el as HTMLInputElement, payload.customFields?.[index]?.value ?? "");
       },
       release: () => {},
     });
@@ -514,8 +521,7 @@ export function startAutofill(
       },
       accepts: isUsernameTarget,
       write: (el) => {
-        setInputValue(el as HTMLInputElement, payload.username);
-        return true;
+        return setInputValue(el as HTMLInputElement, payload.username);
       },
       release: () => {},
     });
@@ -528,8 +534,7 @@ export function startAutofill(
       relocate: (root) => findPasswordInput(eligibleInputsIn(root)),
       accepts: isPasswordTarget,
       write: (el) => {
-        setInputValue(el as HTMLInputElement, payload.password);
-        return true;
+        return setInputValue(el as HTMLInputElement, payload.password);
       },
       release: () => {
         payload.password = "";
@@ -550,8 +555,7 @@ export function startAutofill(
           relocate: (root) => findSplitOtpInputs(eligibleInputsIn(root), codeLen)?.[i] ?? null,
           accepts: isOtpTarget,
           write: (el) => {
-            setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? "");
-            return true;
+            return setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? "");
           },
           release: releaseTotp,
         });
@@ -563,8 +567,7 @@ export function startAutofill(
         relocate: (root) => findOtpInput(eligibleInputsIn(root)),
         accepts: isOtpTarget,
         write: (el) => {
-        setInputValue(el as HTMLInputElement, payload.totpCode ?? "");
-        return true;
+        return setInputValue(el as HTMLInputElement, payload.totpCode ?? "");
       },
         release: releaseTotp,
       });

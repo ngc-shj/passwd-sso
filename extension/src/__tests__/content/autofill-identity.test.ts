@@ -302,6 +302,22 @@ describe("performIdentityAutofill", () => {
     expect(count).toBe(filled);
   });
 
+  // C5: a value the input's type rejects is sanitized to "" without an error,
+  // so the field is not counted.
+  it.each([
+    { name: "the input types reject both values", postalCode: "SW1A 1AA", dateOfBirth: "01/15/1990", filled: 0 },
+    { name: "control: both values fit the input types", postalCode: "90210", dateOfBirth: "1990-01-15", filled: 2 },
+  ])("counts $filled filled fields when $name", async ({ postalCode, dateOfBirth, filled }) => {
+    setupForm(`
+      <input type="number" autocomplete="postal-code" />
+      <input type="date" autocomplete="bday" />
+    `);
+
+    const count = await performIdentityAutofill(payload({ postalCode, dateOfBirth }), NO_WAIT);
+
+    expect(count).toBe(filled);
+  });
+
   // ── Kana fill: kana values land only in the kana fields ──
 
   it("routes kana values to kana fields without touching the plain name fields", async () => {

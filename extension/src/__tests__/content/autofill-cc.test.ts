@@ -139,6 +139,26 @@ describe("performCreditCardAutofill", () => {
     expect(count).toBe(filled);
   });
 
+  // C5: a card number with spaces is rejected by type=number, which sanitizes
+  // it to "" without an error, so the field is not counted.
+  it.each([
+    { name: "type=number rejects the spaced number", cardNumber: "4111 1111 1111 1111", filled: 0 },
+    { name: "control: the digits alone fit", cardNumber: "4111111111111111", filled: 1 },
+  ])("counts $filled filled fields when $name", async ({ cardNumber, filled }) => {
+    setupForm(`<input type="number" autocomplete="cc-number" />`);
+
+    const count = await performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber,
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "",
+    }, NO_WAIT);
+
+    expect(count).toBe(filled);
+  });
+
   it("normalizes month select values (1 matches 01)", async () => {
     setupForm(`
       <input autocomplete="cc-number" />

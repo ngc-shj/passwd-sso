@@ -34,7 +34,7 @@ import { fillAdmission, getHintString } from "./field-query-lib";
 
 // Every write runs in the task where its step's `accepts` has just passed
 // (runFillSequence), so the setters do not re-check visibility.
-function setInputValue(input: HTMLInputElement, value: string): void {
+function setInputValue(input: HTMLInputElement, value: string): boolean {
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -45,10 +45,18 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   } else {
     input.value = value;
   }
+  // Taken before any event runs, so a page handler that rewrites the field
+  // cannot decide it. A value the input's type rejects (a postcode in
+  // type=number, 01/15/1990 in type=date) is sanitized to "" without an error;
+  // that is the only case read as not taken. Exact equality is not required:
+  // the browser also normalizes values it accepts (an email's surrounding
+  // whitespace).
+  const took = value === "" || input.value !== "";
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
   input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
   input.dispatchEvent(new Event("blur", { bubbles: true }));
+  return took;
 }
 
 /** Normalize month values for select matching: "1" → "01", "January" → "01", etc. */
@@ -148,8 +156,7 @@ function writeExpiryPart(
   diagField: SelectDiagField,
 ): boolean {
   if (el instanceof HTMLSelectElement) return setSelectValue(el, value, normalizer, diagField);
-  setInputValue(el, value);
-  return true;
+  return setInputValue(el, value);
 }
 
 export async function performCreditCardAutofill(
@@ -199,8 +206,7 @@ export async function performCreditCardAutofill(
       relocate: relocateCcField("cardholderName"),
       accepts: isCreditCardFillable,
       write: (el) => {
-        setInputValue(el as HTMLInputElement, payload.cardholderName);
-        return true;
+        return setInputValue(el as HTMLInputElement, payload.cardholderName);
       },
       release: noRelease,
     });
@@ -213,8 +219,7 @@ export async function performCreditCardAutofill(
       relocate: relocateCcField("cardNumber"),
       accepts: isCreditCardFillable,
       write: (el) => {
-        setInputValue(el as HTMLInputElement, payload.cardNumber);
-        return true;
+        return setInputValue(el as HTMLInputElement, payload.cardNumber);
       },
       release: noRelease,
     });
@@ -237,8 +242,7 @@ export async function performCreditCardAutofill(
       write: (el) => {
         const input = el as HTMLInputElement;
         const format = detectExpiryFormat(input);
-        setInputValue(input, formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format));
-        return true;
+        return setInputValue(input, formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format));
       },
       release: noRelease,
     });
@@ -278,10 +282,10 @@ export async function performCreditCardAutofill(
       relocate: relocateCcField("cvv"),
       accepts: isCreditCardFillable,
       write: (el) => {
-        setInputValue(el as HTMLInputElement, payload.cvv);
+        const took = setInputValue(el as HTMLInputElement, payload.cvv);
         // CVV memory wipe — overwrite payload property immediately after use
         payload.cvv = "";
-        return true;
+        return took;
       },
       release: () => {
         payload.cvv = "";
