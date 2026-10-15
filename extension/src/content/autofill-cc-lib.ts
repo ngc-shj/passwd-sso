@@ -85,7 +85,7 @@ function setSelectValue(
   targetValue: string,
   normalizer: (v: string) => string,
   diagField: SelectDiagField,
-): void {
+): boolean {
   const normalizedTarget = normalizer(targetValue);
 
   // Find exact match after normalization
@@ -103,7 +103,7 @@ function setSelectValue(
     // Only the extension's own field identifier is logged; neither the target
     // VALUE (the user's card expiry) nor anything read from the DOM reaches it.
     logNoSelectMatch(diagField);
-    return;
+    return false;
   }
 
   const setter = Object.getOwnPropertyDescriptor(
@@ -117,6 +117,7 @@ function setSelectValue(
   }
   select.dispatchEvent(new Event("input", { bubbles: true }));
   select.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
 }
 
 // A year input asking for two digits (a "YY" hint, maxlength 2) gets the last
@@ -145,12 +146,10 @@ function writeExpiryPart(
   value: string,
   normalizer: (v: string) => string,
   diagField: SelectDiagField,
-): void {
-  if (el instanceof HTMLSelectElement) {
-    setSelectValue(el, value, normalizer, diagField);
-  } else {
-    setInputValue(el, value);
-  }
+): boolean {
+  if (el instanceof HTMLSelectElement) return setSelectValue(el, value, normalizer, diagField);
+  setInputValue(el, value);
+  return true;
 }
 
 export async function performCreditCardAutofill(
@@ -199,7 +198,10 @@ export async function performCreditCardAutofill(
       initial: fields.cardholderName,
       relocate: relocateCcField("cardholderName"),
       accepts: isCreditCardFillable,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.cardholderName),
+      write: (el) => {
+        setInputValue(el as HTMLInputElement, payload.cardholderName);
+        return true;
+      },
       release: noRelease,
     });
   }
@@ -210,7 +212,10 @@ export async function performCreditCardAutofill(
       initial: cardNumber,
       relocate: relocateCcField("cardNumber"),
       accepts: isCreditCardFillable,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.cardNumber),
+      write: (el) => {
+        setInputValue(el as HTMLInputElement, payload.cardNumber);
+        return true;
+      },
       release: noRelease,
     });
   }
@@ -233,6 +238,7 @@ export async function performCreditCardAutofill(
         const input = el as HTMLInputElement;
         const format = detectExpiryFormat(input);
         setInputValue(input, formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format));
+        return true;
       },
       release: noRelease,
     });
@@ -275,6 +281,7 @@ export async function performCreditCardAutofill(
         setInputValue(el as HTMLInputElement, payload.cvv);
         // CVV memory wipe — overwrite payload property immediately after use
         payload.cvv = "";
+        return true;
       },
       release: () => {
         payload.cvv = "";

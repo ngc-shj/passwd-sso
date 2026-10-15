@@ -72,7 +72,7 @@ async function startPendingFill(): Promise<{ done: Promise<number> }> {
       initial: null,
       relocate: () => null,
       accepts: () => true,
-      write: () => {},
+      write: () => true,
       release: () => {},
     },
   ]);

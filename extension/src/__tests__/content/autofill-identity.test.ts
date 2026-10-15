@@ -280,6 +280,28 @@ describe("performIdentityAutofill", () => {
     expect((document.querySelector('[autocomplete="country-name"]') as HTMLSelectElement).value).toBe("US");
   });
 
+  // C5: a select with no matching option is left as it was, so it is not a
+  // filled field; a form of only such selects answers 0.
+  it.each([
+    { name: "neither select has a matching option", state: "Tokyo", country: "Japan", filled: 0 },
+    { name: "control: both selects match", state: "CA", country: "US", filled: 2 },
+  ])("counts $filled filled fields when $name", async ({ state, country, filled }) => {
+    setupForm(`
+      <select autocomplete="address-level1">
+        <option value="">Select</option>
+        <option value="CA">California</option>
+      </select>
+      <select autocomplete="country-name">
+        <option value="">Select</option>
+        <option value="US">United States</option>
+      </select>
+    `);
+
+    const count = await performIdentityAutofill(payload({ state, country }), NO_WAIT);
+
+    expect(count).toBe(filled);
+  });
+
   // ── Kana fill: kana values land only in the kana fields ──
 
   it("routes kana values to kana fields without touching the plain name fields", async () => {

@@ -85,6 +85,7 @@ function recorder(): Recorder {
           ((el) => {
             el.value = key;
             log.push(key);
+            return true;
           }),
         release: () => {
           releases[key]++;
@@ -140,6 +141,7 @@ describe("runFillSequence — order and yield", () => {
           r.log.push("a");
           // A task queued during the first write must run before the second write.
           setTimeout(() => r.log.push("task"), 0);
+          return true;
         },
       }),
       r.step("b", $("#b")),
@@ -173,6 +175,34 @@ describe("runFillSequence — written count", () => {
 
     await vi.advanceTimersByTimeAsync(200);
     await expect(done).resolves.toBe(0);
+  });
+
+  it.each([
+    ["a write that reports nothing taken", () => false, 1],
+    ["control: the same write reporting it took", () => true, 2],
+  ])("%s counts accordingly", async (_name, took, expected) => {
+    document.body.innerHTML = `<input id="a"><input id="b">`;
+    const r = recorder();
+    const done = runFillSequence(document.body, [r.step("a", $("#a")), r.step("b", $("#b"), { write: took })]);
+
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toBe(expected);
+  });
+
+  it("a write that throws is not counted", async () => {
+    document.body.innerHTML = `<input id="a"><input id="b">`;
+    const r = recorder();
+    const done = runFillSequence(document.body, [
+      r.step("a", $("#a")),
+      r.step("b", $("#b"), {
+        write: () => {
+          throw new Error("page setter threw");
+        },
+      }),
+    ]);
+
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toBe(1);
   });
 
   it("a superseded run resolves with the writes it made before the newer run", async () => {
@@ -279,6 +309,7 @@ describe("runFillSequence — step states and the deadline", () => {
         write: (el) => {
           (el as HTMLInputElement).value = "a";
           vi.advanceTimersByTime(200);
+          return true;
         },
       }),
       r.step("b", $("#b")),

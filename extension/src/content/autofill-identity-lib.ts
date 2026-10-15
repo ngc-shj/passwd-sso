@@ -53,7 +53,7 @@ function setSelectValue(
   select: HTMLSelectElement,
   targetValue: string,
   diagField: SelectDiagField,
-): void {
+): boolean {
   const normalizedTarget = targetValue.trim().toLowerCase();
 
   // Exact match by value first, then by text content
@@ -70,7 +70,7 @@ function setSelectValue(
     // be the user's name, address, phone, email or date of birth — and nothing
     // read from the DOM reaches the console either.
     logNoSelectMatch(diagField);
-    return;
+    return false;
   }
 
   const setter = Object.getOwnPropertyDescriptor(
@@ -84,6 +84,7 @@ function setSelectValue(
   }
   select.dispatchEvent(new Event("input", { bubbles: true }));
   select.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
 }
 
 // ── Main autofill function ──
@@ -109,12 +110,10 @@ const IDENTITY_ROLES = [
 // other role, date of birth and postal code included, gets the full rule.
 const GEOMETRY_EXEMPT_ROLES: ReadonlySet<keyof IdentityFormFields> = new Set(["country", "region"]);
 
-function writeField(el: FillTarget, value: string, diagField: SelectDiagField): void {
-  if (el instanceof HTMLSelectElement) {
-    setSelectValue(el, value, diagField);
-  } else {
-    setInputValue(el, value);
-  }
+function writeField(el: FillTarget, value: string, diagField: SelectDiagField): boolean {
+  if (el instanceof HTMLSelectElement) return setSelectValue(el, value, diagField);
+  setInputValue(el, value);
+  return true;
 }
 
 export async function performIdentityAutofill(

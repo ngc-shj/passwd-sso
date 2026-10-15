@@ -113,6 +113,32 @@ describe("performCreditCardAutofill", () => {
     expect(yearSelect.value).toBe("2026");
   });
 
+  // C5: an expiry select with no matching option is left as it was and is not
+  // counted; the card number still is.
+  it.each([
+    { name: "the expiry select has no matching option", expiryMonth: "07", filled: 1 },
+    { name: "control: the expiry select matches", expiryMonth: "12", filled: 2 },
+  ])("counts $filled filled fields when $name", async ({ expiryMonth, filled }) => {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <select autocomplete="cc-exp-month">
+        <option value="">Month</option>
+        <option value="12">December</option>
+      </select>
+    `);
+
+    const count = await performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth,
+      expiryYear: "",
+      cvv: "",
+    }, NO_WAIT);
+
+    expect(count).toBe(filled);
+  });
+
   it("normalizes month select values (1 matches 01)", async () => {
     setupForm(`
       <input autocomplete="cc-number" />

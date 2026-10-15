@@ -64,3 +64,9 @@ The VE2 check found the popup contradicting itself on an http page, and an exter
 Every fix was red-proved on a scratch copy (19 reverts). The full suite exits 0 (2245 tests); `tsc`, `typecheck:test` and the build pass.
 
 **VE2** covers what unit tests cannot: which rejection a silent broadcast produces in Chrome, the F1 pinned send on a page with an https iframe, and the fill-only script on an http page.
+
+## Round 3 (external review)
+
+| ID | Severity | Finding | Resolution |
+|----|----------|---------|------------|
+| X1 | Low | `filled` counted claimed fields, not writes: `written.add` came before `step.write`, and a select with no matching option changes nothing, so a form of only unmatched selects answered `{ filled: 2 }`; a throwing write was counted too. | `FillStep.write` returns whether the field took the value (the select setters return false on no match); the claim set stays for write-once, and a separate count increments only after a write that took. Tests: a write reporting false or throwing is not counted (each with a control); identity selects with no match answer 0 (control 2); a CC expiry select with no match is not counted (control 2). Each red when reverted on a scratch copy. |

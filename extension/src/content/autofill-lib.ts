@@ -496,7 +496,10 @@ export function startAutofill(
       relocate: (root) =>
         inputsIn(root).find((i) => isTextLikeTarget(i) && matchesLabel(i, lower)) ?? null,
       accepts: isTextLikeTarget,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.customFields?.[index]?.value ?? ""),
+      write: (el) => {
+        setInputValue(el as HTMLInputElement, payload.customFields?.[index]?.value ?? "");
+        return true;
+      },
       release: () => {},
     });
   }
@@ -510,7 +513,10 @@ export function startAutofill(
         return findUsernameInput(scoped, findPasswordInput(scoped));
       },
       accepts: isUsernameTarget,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.username),
+      write: (el) => {
+        setInputValue(el as HTMLInputElement, payload.username);
+        return true;
+      },
       release: () => {},
     });
   }
@@ -521,7 +527,10 @@ export function startAutofill(
       initial: passwordInput,
       relocate: (root) => findPasswordInput(eligibleInputsIn(root)),
       accepts: isPasswordTarget,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.password),
+      write: (el) => {
+        setInputValue(el as HTMLInputElement, payload.password);
+        return true;
+      },
       release: () => {
         payload.password = "";
       },
@@ -540,7 +549,10 @@ export function startAutofill(
           initial: splitOtpInputs[i],
           relocate: (root) => findSplitOtpInputs(eligibleInputsIn(root), codeLen)?.[i] ?? null,
           accepts: isOtpTarget,
-          write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? ""),
+          write: (el) => {
+            setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? "");
+            return true;
+          },
           release: releaseTotp,
         });
       }
@@ -550,7 +562,10 @@ export function startAutofill(
         initial: singleOtpInput,
         relocate: (root) => findOtpInput(eligibleInputsIn(root)),
         accepts: isOtpTarget,
-        write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode ?? ""),
+        write: (el) => {
+        setInputValue(el as HTMLInputElement, payload.totpCode ?? "");
+        return true;
+      },
         release: releaseTotp,
       });
     }
