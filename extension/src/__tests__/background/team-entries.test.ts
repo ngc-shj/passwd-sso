@@ -1215,5 +1215,66 @@ describe("team entries in background", () => {
 
       expect(teamEntryIds(await sendMessage({ type: "FETCH_PASSWORDS" }))).toEqual(["team-pw-1"]);
     });
+
+    // C7: the shared entry access the autofill and HTTP-auth paths call.
+    describe("fetchAndDecryptEntry, team path", () => {
+      const TEAM_BLOB_PATH = extApiPath.teamPasswordById("team-1", "team-pw-1");
+      const currentEpoch = async () => (await import("../../background/vault-epoch")).currentVaultEpoch();
+
+      it("returns the team entry's decrypted blob, overview and type", async () => {
+        await unlockAndSettle();
+        setDecryptedPlaintext("blob-cipher", JSON.stringify({ password: "team-secret", url: "https://team.com" }));
+
+        expect(await bgModule!.fetchAndDecryptEntry("team-pw-1", "team-1", await currentEpoch())).toEqual({
+          ok: true,
+          blob: { password: "team-secret", url: "https://team.com" },
+          overview: JSON.parse(TEAM_OVERVIEW_PLAINTEXT),
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        });
+      });
+
+      function failTeamBlobFetch(): void {
+        const base = fetchMock.getMockImplementation() as (url: string) => Promise<unknown>;
+        fetchMock.mockImplementation(async (url: string) =>
+          url.endsWith(TEAM_BLOB_PATH) ? { ok: false, status: 404, json: async () => ({ error: "NOT_FOUND" }) } : base(url),
+        );
+      }
+
+      it("answers FETCH_FAILED when the team entry fetch fails", async () => {
+        await unlockAndSettle();
+        failTeamBlobFetch();
+
+        expect(await bgModule!.fetchAndDecryptEntry("team-pw-1", "team-1", await currentEpoch())).toEqual({
+          ok: false,
+          error: "FETCH_FAILED",
+        });
+      });
+
+      it.each(INTERRUPTIONS)("answers VAULT_LOCKED, not FETCH_FAILED, after %s during a failing team fetch", async (_name, interrupt) => {
+        await unlockAndSettle();
+        failTeamBlobFetch();
+        const epoch = await currentEpoch();
+        const hold = holdFetch(fetchMock, TEAM_BLOB_PATH);
+        const pending = bgModule!.fetchAndDecryptEntry("team-pw-1", "team-1", epoch);
+        await hold.reached;
+        await interrupt();
+        hold.release();
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+      });
+
+      it.each(INTERRUPTIONS)("answers VAULT_LOCKED after %s during the team blob fetch", async (_name, interrupt) => {
+        await unlockAndSettle();
+        setDecryptedPlaintext("blob-cipher", JSON.stringify({ password: "team-secret" }));
+        const epoch = await currentEpoch();
+        const hold = holdFetch(fetchMock, TEAM_BLOB_PATH);
+        const pending = bgModule!.fetchAndDecryptEntry("team-pw-1", "team-1", epoch);
+        await hold.reached;
+        await interrupt();
+        hold.release();
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+      });
+    });
   });
 });

@@ -44,7 +44,14 @@
     "badgeCard": "カード",
     "badgeIdentity": "個人情報",
     "searchResults": "検索結果",
-    "badgePasskey": "パスキー"
+    "badgePasskey": "パスキー",
+    "httpAuthRegister": "サイトのサインインダイアログに使う",
+    "httpAuthRegisterTitle": "このログインをサインインダイアログに使いますか？",
+    "httpAuthRegisterBody": "{origin} がブラウザのサインインダイアログでユーザー名とパスワードを求めたとき、passwd-sso は {title} を提示します。送信の前に毎回確認します。",
+    "httpAuthRegisterHttpWarning": "このサイトは HTTP です。現在のネットワークでこのアドレスに応答した相手がパスワードを受け取れます（Basic では平文、Digest では解析可能なハッシュ）。",
+    "httpAuthRegisterConfirm": "続ける",
+    "httpAuthRegistered": "{origin} のサインインダイアログを設定しました",
+    "httpAuthRegisterFailed": "設定を完了できませんでした。拡張機能のオプションの「サイトのサインイン」を確認してください。"
   },
   "options": {
     "title": "設定",
@@ -101,7 +108,15 @@
     "unsavedChanges": "未保存の変更があります。",
     "save": "保存",
     "saved": "保存しました",
-    "close": "閉じる"
+    "close": "閉じる",
+    "sectionHttpAuth": "サイトのサインイン",
+    "httpAuthHint": "ブラウザのサインインダイアログ（HTTP Basic / Digest）に保存済みのログインで応答するサイトです。送信の前に毎回確認します。",
+    "httpAuthNone": "設定されたサイトはありません。ポップアップで、そのサイトのログインから設定できます。",
+    "httpAuthLocked": "ロック中",
+    "httpAuthEntryMissing": "ログインが見つかりません",
+    "httpAuthPermissionMissing": "このサイトの権限が削除されています",
+    "httpAuthRemove": "削除",
+    "httpAuthOtherAccount": "別のアカウント"
   },
   "contentScript": {
     "vaultLocked": "保管庫がロックされています",
@@ -157,6 +172,25 @@
     "noMatch": "このサイトに一致するエントリがありません",
     "clipboardCleared": "クリップボードをクリアしました"
   },
+  "authPrompt": {
+    "heading": "保存済みのログインをこのサイトに送信しますか？",
+    "site": "サイト",
+    "address": "アドレス",
+    "triggeredBy": "要求元",
+    "login": "ログイン",
+    "method": "方式",
+    "httpWarning": "このサイトは HTTP です。現在のネットワークでこのアドレスに応答した相手がパスワードを受け取れます（Basic では平文、Digest では解析可能なハッシュ）。",
+    "send": "送信",
+    "cancel": "キャンセル",
+    "expired": "このサインイン要求は終了しています。",
+    "close": "閉じる",
+    "loading": "読み込み中...",
+    "notFromPage": "Web ページ以外（アドレスバー、ブックマーク、他のアプリ、またはリダイレクト）",
+    "redirectedFrom": "リダイレクト元",
+    "hintFocusWindow": "このウィンドウをクリックしてください。",
+    "hintWait": "少しお待ちください…",
+    "hintMovePointer": "ポインタを送信ボタンに乗せてから押してください。"
+  },
   "errors": {
     "invalidPassphrase": "パスフレーズが正しくありません。",
     "vaultLocked": "保管庫がロックされています。",
@@ -183,6 +217,8 @@
     "copyTotpFailed": "TOTP コードをコピーできませんでした。",
     "unlockFailed": "保管庫をアンロックできませんでした。",
     "noToken": "未接続です。先に passwd-sso にサインインしてください。",
-    "internalError": "問題が発生しました。もう一度お試しください。"
+    "internalError": "問題が発生しました。もう一度お試しください。",
+    "httpAuthEntryMismatch": "このログインはここでは使えません。ユーザー名、パスワード、そしてこのサイトと完全に一致する保存済み URL が必要です。",
+    "httpAuthPermissionDenied": "このサイトの権限が許可されませんでした。"
   }
 }

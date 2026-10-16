@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { crx } from "@crxjs/vite-plugin";
 import manifest from "./manifest.config";
+import { HTTP_AUTH_PROMPT_PAGE } from "./src/lib/constants";
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), crx({ manifest })],
@@ -15,5 +16,13 @@ export default defineConfig({
     // preloaded chunk is fetched twice and reported as an unused preload.
     // The chunks still load through the module graph; only the links go away.
     modulePreload: false,
+    rollupOptions: {
+      // The HTTP auth confirmation window (#905) is opened by URL from the
+      // service worker, so the manifest does not name it. Never list it in
+      // web_accessible_resources: no site may frame it.
+      input: {
+        authPrompt: HTTP_AUTH_PROMPT_PAGE,
+      },
+    },
   },
 });

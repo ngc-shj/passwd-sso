@@ -8,6 +8,7 @@
 import { EXT_API_PATH } from "../lib/api-paths";
 import { BRIDGE_CODE_LENGTH } from "../lib/constants";
 import { getSettings } from "../lib/storage";
+import { isAllowedServerUrl } from "../lib/server-url";
 import { signDpopProof } from "../lib/dpop-key";
 import { DpopSignError, swFetchAuthenticated } from "./dpop-fetch";
 import { MS_PER_SECOND } from "../lib/time";
@@ -24,12 +25,9 @@ export const MIN_RETRY_HEADROOM_MS = 5 * MS_PER_SECOND;
 
 async function getValidServerUrl(): Promise<string | null> {
   const { serverUrl } = await getSettings();
-  try {
-    new URL(serverUrl);
-    return serverUrl;
-  } catch {
-    return null;
-  }
+  // Also covers the bridge-code and exchange fetches, which do not go through
+  // swFetchAuthenticated.
+  return isAllowedServerUrl(serverUrl) ? serverUrl : null;
 }
 
 // ── Token refresh ──────────────────────────────────────────────

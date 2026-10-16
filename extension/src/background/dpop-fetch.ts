@@ -6,6 +6,7 @@
  */
 
 import { signDpopProof, resetInMemoryKeyCache } from "../lib/dpop-key";
+import { isAllowedServerUrl } from "../lib/server-url";
 
 /** Thrown when two consecutive DPoP sign attempts fail. Callers MUST NOT
  * clearToken() on this error — a transient WebCrypto glitch is not a security
@@ -23,7 +24,8 @@ export class DpopSignError extends Error {
  * Fetch `${serverUrl}${path}` with Bearer + DPoP headers attached.
  *
  * Retries signing once (with a fresh key-cache flush) on transient WebCrypto
- * failures. Throws DpopSignError if the second attempt also fails.
+ * failures. Throws DpopSignError if the second attempt also fails. Refuses
+ * (HTTPS_REQUIRED, before signing) a serverUrl the server-URL rule refuses.
  */
 export async function swFetchAuthenticated(
   path: string,
@@ -35,6 +37,7 @@ export async function swFetchAuthenticated(
   // "immediately before the send".
   beforeSend?: () => void,
 ): Promise<Response> {
+  if (!isAllowedServerUrl(serverUrl)) throw new Error("HTTPS_REQUIRED");
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${token}`);
   if (!headers.has("Content-Type") && init?.body) {

@@ -85,6 +85,7 @@ import {
   PSSO_SHOW_SAVE_BANNER,
   PSSO_TRIGGER_INLINE_SUGGESTIONS,
   AUTOFILL_FILL,
+  RECORD_ID_RE,
 } from "../lib/constants";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "../lib/time";
 import { generateTOTPCode } from "../lib/totp";
@@ -118,6 +119,21 @@ import {
   handlePasskeyCreateCredential,
 } from "./passkey-provider";
 import { copyToClipboard } from "./clipboard";
+import { isAllowedServerUrl } from "../lib/server-url";
+import {
+  clearPendingIntent,
+  initHttpAuth,
+  installHttpAuthLifecycle,
+  registerHttpAuthBinding,
+  removeHttpAuthBinding,
+} from "./http-auth";
+import {
+  decidePrompt,
+  getPromptView,
+  openPrompt,
+  registerPromptListeners,
+  resetHttpAuthPrompts,
+} from "./http-auth-prompt";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
 
@@ -544,6 +560,9 @@ function clearVault(): void {
   invalidateCache();
   invalidateContextMenu();
   pendingSavePrompts.clear();
+  // An open HTTP auth confirmation names an entry of the vault being locked:
+  // settle it as cancel and close its window.
+  resetHttpAuthPrompts();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
   void stopKeepalive();
   persistState();
@@ -883,7 +902,8 @@ async function isOwnAppPage(url: string): Promise<boolean> {
   if (!/^https?:$/.test(pageUrl.protocol)) return false;
 
   const { serverUrl } = await chrome.storage.local.get("serverUrl");
-  if (typeof serverUrl !== "string" || !serverUrl) {
+  // A server URL the rule refuses (plain http off localhost) is no server.
+  if (!isAllowedServerUrl(serverUrl)) {
     return false;
   }
   let base: URL;
@@ -979,6 +999,31 @@ initPasskeyProvider({
   swFetch,
   invalidateCache,
 });
+
+// HTTP authentication (#905). Registered synchronously at the top level so a
+// challenge that wakes the SW finds its listener; every step is guarded, so a
+// browser or mock without the optional APIs still starts the SW.
+try {
+  initHttpAuth({
+    isVaultUnlocked: () => encryptionKey !== null && currentUserId !== null,
+    currentUserId: () => (encryptionKey !== null ? currentUserId : null),
+    awaitHydrationBounded,
+    currentVaultEpoch,
+    isVaultEpochCurrent,
+    fetchAndDecryptEntry,
+    getEntryOverview: async (entryId, teamId) => {
+      const entry = (await getCachedEntries()).find(
+        (e) => e.id === entryId && (e.teamId ?? undefined) === teamId,
+      );
+      return entry ? { title: entry.title, username: entry.username, entryType: entry.entryType } : null;
+    },
+    openPrompt,
+  });
+  registerPromptListeners();
+  installHttpAuthLifecycle();
+} catch (err) {
+  warnBackground("http-auth-listener-register-failed", classifyError(err));
+}
 
 // Register MAIN world WebAuthn interceptor via scripting API.
 // Only the scripting API can inject into MAIN world while bypassing page CSP.
@@ -1215,6 +1260,8 @@ async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
   } catch {
     // ignore
   }
+  // Never bridge a token into a server the server-URL rule refuses.
+  if (!isAllowedServerUrl(serverUrl)) return;
   const allowed = await chrome.permissions.contains({
     origins: [`${origin}/*`],
   });
@@ -1372,6 +1419,11 @@ async function swFetch(
     parsed = new URL(serverUrl);
   } catch {
     throw new Error("INVALID_SERVER_URL");
+  }
+  // http://*/* is an optional host permission (HTTP auth), so a granted
+  // origin no longer implies an allowed server: apply the server-URL rule.
+  if (!isAllowedServerUrl(serverUrl)) {
+    throw new Error("HTTPS_REQUIRED");
   }
   const allowed = await chrome.permissions.contains({
     origins: [`${parsed.origin}/*`],
@@ -1871,72 +1923,76 @@ async function fetchAndDecryptTeamBlob(
   }
 }
 
-/** Whether a fill listener's answer reports at least one written field. */
-function isFilledAnswer(answer: unknown): boolean {
-  if (typeof answer !== "object" || answer === null) return false;
-  const filled = (answer as { filled?: unknown }).filled;
-  return typeof filled === "number" && Number.isInteger(filled) && filled > 0;
-}
+// ── Entry fetch and decrypt (autofill, HTTP auth) ───────────────
 
-async function performAutofillForEntry(
+type DecryptedEntryBlob = {
+  url?: string | null;
+  password?: string | null;
+  username?: string | null;
+  loginId?: string | null;
+  userId?: string | null;
+  email?: string | null;
+  customFields?: Array<{ label?: string; value?: string; type?: string }>;
+  totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
+  // CREDIT_CARD fields
+  cardholderName?: string | null;
+  cardNumber?: string | null;
+  expiryMonth?: string | null;
+  expiryYear?: string | null;
+  cvv?: string | null;
+  // IDENTITY fields
+  fullName?: string | null;
+  givenName?: string | null;
+  familyName?: string | null;
+  middleName?: string | null;
+  familyNameKana?: string | null;
+  givenNameKana?: string | null;
+  address?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  idNumber?: string | null;
+};
+type DecryptedEntryOverview = {
+  username?: string | null;
+  urlHost?: string | null;
+  additionalUrlHosts?: string[] | null;
+};
+
+/** Why fetchAndDecryptEntry produced no entry; a server error code passes through. */
+type EntryAccessError = "VAULT_LOCKED" | "FETCH_FAILED" | "INVALID_ENTRY" | (string & {});
+
+type EntryAccessResult =
+  | {
+      ok: true;
+      blob: DecryptedEntryBlob;
+      overview: DecryptedEntryOverview;
+      entryType: string;
+    }
+  | { ok: false; error: EntryAccessError };
+
+/**
+ * Fetch one entry (personal, or the team's when `teamId` is given) and decrypt
+ * its blob and overview, for the vault state `epoch` names. A lock at any point
+ * up to the return answers VAULT_LOCKED, which outranks every other failure.
+ * Decrypt failures other than a lock propagate, as they did inline in
+ * performAutofillForEntry.
+ */
+export async function fetchAndDecryptEntry(
   entryId: string,
-  tabId: number,
-  origin: AutofillRequestOrigin,
-  targetHint?: AutofillTargetHint,
-  teamId?: string,
-): Promise<{ ok: boolean; error?: string }> {
-  if (!encryptionKey || !currentUserId) {
-    return { ok: false, error: "VAULT_LOCKED" };
-  }
-  // The vault state this fill belongs to. Every delivery below asserts it right
-  // before the payload leaves: a lock during a probe, an inject or a resend
-  // sleep must stop the credential, not just the next fetch.
-  const epoch = currentVaultEpoch();
+  teamId: string | undefined,
+  epoch: number,
+): Promise<EntryAccessResult> {
+  const lockedResult = { ok: false, error: "VAULT_LOCKED" } as const;
   const vaultKey = encryptionKey;
   const vaultUserId = currentUserId;
-  const lockedResult = { ok: false, error: "VAULT_LOCKED" } as const;
-
-  // Every delivery of the decrypted payload goes to one document whose host was
-  // checked, addressed by documentId so a navigation in between cannot receive
-  // it: the content sender's own document, or a document probed before the
-  // first send (context menu, popup CC/Identity) or before the fallback (popup
-  // LOGIN). The one exception is the popup LOGIN first send, which is broadcast
-  // tab-wide so a login form inside an iframe fills; each frame checks its own
-  // host against allowedHosts / topFrameOrigin (isFrameAllowedToFill).
-  //
-  // The frame a probe reads. A content request names its document; the context
-  // menu names the clicked frame; the popup names no frame, so the top frame.
-  // Never `allFrames`: that would inject the decrypted credential into every
-  // frame, including a cross-origin third-party iframe whose page JS could read
-  // the filled value.
-  const probeTarget: chrome.scripting.InjectionTarget =
-    origin.kind === AUTOFILL_REQUEST_KIND.CONTENT
-      ? { tabId, documentIds: [origin.documentId] }
-      : {
-          tabId,
-          frameIds: [origin.kind === AUTOFILL_REQUEST_KIND.CONTEXT_MENU ? origin.frameId : 0],
-        };
-  // Pin the document the request is bound to. A content request accepts only its
-  // own document: if that one is gone, the fill fails rather than following the
-  // frame to a document the user never picked from.
-  const pinDocument = async (): Promise<ProbedDocument | null> => {
-    try {
-      const probed = await probeDocument(probeTarget);
-      if (
-        origin.kind === AUTOFILL_REQUEST_KIND.CONTENT &&
-        probed.documentId !== origin.documentId
-      ) {
-        return null;
-      }
-      return probed;
-    } catch {
-      return null;
-    }
-  };
-  const sendToDocument = (payload: unknown, documentId: string): Promise<unknown> => {
-    assertVaultEpoch(epoch);
-    return chrome.tabs.sendMessage(tabId, payload, { documentId });
-  };
+  if (!vaultKey || !vaultUserId || !isVaultEpochCurrent(epoch)) return lockedResult;
 
   let blobPlain: string;
   let overviewPlain: string;
@@ -1995,59 +2051,91 @@ async function performAutofillForEntry(
   // included, belongs to a vault that is gone.
   if (!isVaultEpochCurrent(epoch)) return lockedResult;
 
-  // Narrow: a JSON.parse SyntaxError embeds a window of its input, and this
-  // function's callers surface the message through normalizeErrorCode into a
-  // rendered popup toast. normalizeErrorCode now refuses free-form messages, and
-  // this narrowing is the second layer — the parse failure is not diagnosable from
+  // Narrow: a JSON.parse SyntaxError embeds a window of its input, and the
+  // callers surface the message through normalizeErrorCode into a rendered
+  // popup toast. normalizeErrorCode now refuses free-form messages, and this
+  // narrowing is the second layer — the parse failure is not diagnosable from
   // its message anyway.
-  type DecryptedEntryBlob = {
-    url?: string | null;
-    password?: string | null;
-    username?: string | null;
-    loginId?: string | null;
-    userId?: string | null;
-    email?: string | null;
-    customFields?: Array<{ label?: string; value?: string; type?: string }>;
-    totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
-    // CREDIT_CARD fields
-    cardholderName?: string | null;
-    cardNumber?: string | null;
-    expiryMonth?: string | null;
-    expiryYear?: string | null;
-    cvv?: string | null;
-    // IDENTITY fields
-    fullName?: string | null;
-    givenName?: string | null;
-    familyName?: string | null;
-    middleName?: string | null;
-    familyNameKana?: string | null;
-    givenNameKana?: string | null;
-    address?: string | null;
-    addressLine1?: string | null;
-    addressLine2?: string | null;
-    city?: string | null;
-    state?: string | null;
-    postalCode?: string | null;
-    country?: string | null;
-    phone?: string | null;
-    dateOfBirth?: string | null;
-    nationality?: string | null;
-    idNumber?: string | null;
-  };
-  type DecryptedEntryOverview = {
-    username?: string | null;
-    urlHost?: string | null;
-    additionalUrlHosts?: string[] | null;
-  };
-
-  let blob: DecryptedEntryBlob;
-  let overview: DecryptedEntryOverview;
   try {
-    blob = JSON.parse(blobPlain) as DecryptedEntryBlob;
-    overview = JSON.parse(overviewPlain) as DecryptedEntryOverview;
+    return {
+      ok: true,
+      blob: JSON.parse(blobPlain) as DecryptedEntryBlob,
+      overview: JSON.parse(overviewPlain) as DecryptedEntryOverview,
+      entryType,
+    };
   } catch {
     return { ok: false, error: "INVALID_ENTRY" };
   }
+}
+
+/** Whether a fill listener's answer reports at least one written field. */
+function isFilledAnswer(answer: unknown): boolean {
+  if (typeof answer !== "object" || answer === null) return false;
+  const filled = (answer as { filled?: unknown }).filled;
+  return typeof filled === "number" && Number.isInteger(filled) && filled > 0;
+}
+
+async function performAutofillForEntry(
+  entryId: string,
+  tabId: number,
+  origin: AutofillRequestOrigin,
+  targetHint?: AutofillTargetHint,
+  teamId?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!encryptionKey || !currentUserId) {
+    return { ok: false, error: "VAULT_LOCKED" };
+  }
+  // The vault state this fill belongs to. Every delivery below asserts it right
+  // before the payload leaves: a lock during a probe, an inject or a resend
+  // sleep must stop the credential, not just the next fetch.
+  const epoch = currentVaultEpoch();
+  const lockedResult = { ok: false, error: "VAULT_LOCKED" } as const;
+
+  // Every delivery of the decrypted payload goes to one document whose host was
+  // checked, addressed by documentId so a navigation in between cannot receive
+  // it: the content sender's own document, or a document probed before the
+  // first send (context menu, popup CC/Identity) or before the fallback (popup
+  // LOGIN). The one exception is the popup LOGIN first send, which is broadcast
+  // tab-wide so a login form inside an iframe fills; each frame checks its own
+  // host against allowedHosts / topFrameOrigin (isFrameAllowedToFill).
+  //
+  // The frame a probe reads. A content request names its document; the context
+  // menu names the clicked frame; the popup names no frame, so the top frame.
+  // Never `allFrames`: that would inject the decrypted credential into every
+  // frame, including a cross-origin third-party iframe whose page JS could read
+  // the filled value.
+  const probeTarget: chrome.scripting.InjectionTarget =
+    origin.kind === AUTOFILL_REQUEST_KIND.CONTENT
+      ? { tabId, documentIds: [origin.documentId] }
+      : {
+          tabId,
+          frameIds: [origin.kind === AUTOFILL_REQUEST_KIND.CONTEXT_MENU ? origin.frameId : 0],
+        };
+  // Pin the document the request is bound to. A content request accepts only its
+  // own document: if that one is gone, the fill fails rather than following the
+  // frame to a document the user never picked from.
+  const pinDocument = async (): Promise<ProbedDocument | null> => {
+    try {
+      const probed = await probeDocument(probeTarget);
+      if (
+        origin.kind === AUTOFILL_REQUEST_KIND.CONTENT &&
+        probed.documentId !== origin.documentId
+      ) {
+        return null;
+      }
+      return probed;
+    } catch {
+      return null;
+    }
+  };
+  const sendToDocument = (payload: unknown, documentId: string): Promise<unknown> => {
+    assertVaultEpoch(epoch);
+    return chrome.tabs.sendMessage(tabId, payload, { documentId });
+  };
+
+  const access = await fetchAndDecryptEntry(entryId, teamId, epoch);
+  if (!access.ok) return { ok: false, error: access.error };
+  const { blob, overview, entryType } = access;
 
   // Hosts this entry is bound to. Sent to the content script so each frame can
   // self-verify its host before writing the password (the popup LOGIN fill is
@@ -2393,10 +2481,8 @@ interface InlineMatchResult {
 /**
  * Content-supplied identifiers reach an authenticated API path; bound their
  * charset/length as defense-in-depth (the id is also URL-encoded into the path).
- * NOT a UUIDv4-strict guard — entry ids in this repo are mixed CUID v1 + UUIDv4,
- * so a UUIDv4-only regex would reject legitimate legacy CUID entries.
  */
-const CONTENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const CONTENT_ID_RE = RECORD_ID_RE;
 
 function isValidContentId(value: unknown): value is string {
   return typeof value === "string" && CONTENT_ID_RE.test(value);
@@ -2534,8 +2620,13 @@ async function handleMessage(
   //  - a content-script fill/copy request the content script only sends from
   //    a trusted user gesture (userGesture: true — see form-detector-lib.ts).
   //    A page-triggerable message without that field must NOT extend it.
+  //  The HTTP auth confirmation window's GET/DECIDE are excluded too: a
+  //  challenge (which the page answers) must not keep the vault unlocked.
   const isExtensionPageMessage =
-    message.type !== EXT_MSG.KEEPALIVE_PING && isExtensionPageSender(_sender);
+    message.type !== EXT_MSG.KEEPALIVE_PING &&
+    message.type !== EXT_MSG.HTTP_AUTH_PROMPT_GET &&
+    message.type !== EXT_MSG.HTTP_AUTH_PROMPT_DECIDE &&
+    isExtensionPageSender(_sender);
   const isTrustedContentActivity =
     message.type === EXT_MSG.AUTOFILL_FROM_CONTENT && message.userGesture === true;
   if (isExtensionPageMessage || isTrustedContentActivity) {
@@ -2638,6 +2729,9 @@ async function handleMessage(
         // Tenant-policy override forcing "logout" as the vault-timeout
         // action (C10). Same null-until-known semantics as above.
         requireVaultTimeoutLogout,
+        // The unlocked vault's account (null while locked), so the options
+        // page can tell its own HTTP auth bindings from another account's.
+        userId: encryptionKey !== null ? currentUserId : null,
       });
       return;
     }
@@ -3445,6 +3539,45 @@ async function handleMessage(
       return;
     }
 
+    case EXT_MSG.HTTP_AUTH_REGISTER: {
+      let result: Awaited<ReturnType<typeof registerHttpAuthBinding>>;
+      try {
+        result = await registerHttpAuthBinding(message);
+      } finally {
+        // The popup's intent is done with on every outcome.
+        await clearPendingIntent(message.nonce);
+      }
+      sendResponse(
+        result.ok
+          ? { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: true }
+          : { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: false, error: result.error },
+      );
+      return;
+    }
+
+    case EXT_MSG.HTTP_AUTH_REMOVE: {
+      const result = await removeHttpAuthBinding(message.origin);
+      sendResponse(
+        result.ok
+          ? { type: EXT_MSG.HTTP_AUTH_REMOVE, ok: true }
+          : { type: EXT_MSG.HTTP_AUTH_REMOVE, ok: false, error: result.error },
+      );
+      return;
+    }
+
+    case EXT_MSG.HTTP_AUTH_PROMPT_GET: {
+      sendResponse({ type: EXT_MSG.HTTP_AUTH_PROMPT_GET, prompt: getPromptView(message.promptId) });
+      return;
+    }
+
+    case EXT_MSG.HTTP_AUTH_PROMPT_DECIDE: {
+      sendResponse({
+        type: EXT_MSG.HTTP_AUTH_PROMPT_DECIDE,
+        ok: decidePrompt(message.promptId, message.decision),
+      });
+      return;
+    }
+
     case EXT_MSG.CHECK_PENDING_SAVE: {
       const tabId = _sender.tab?.id;
       if (!tabId) {
@@ -3550,6 +3683,12 @@ function respondWithFailure(
         break;
       case EXT_MSG.PASSKEY_CREATE_CREDENTIAL:
         sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.HTTP_AUTH_PROMPT_GET:
+        sendResponse({ type: EXT_MSG.HTTP_AUTH_PROMPT_GET, prompt: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.HTTP_AUTH_PROMPT_DECIDE:
+        sendResponse({ type: EXT_MSG.HTTP_AUTH_PROMPT_DECIDE, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
         break;
       default:
         sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

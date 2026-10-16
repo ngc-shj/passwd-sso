@@ -51,6 +51,23 @@ export const ALARM_CLEAR_CLIPBOARD = "clear-clipboard";
 // ── URL params ──
 export const EXT_CONNECT_PARAM = "ext_connect";
 
+// ── HTTP auth confirmation window (#905) ──
+// The page the service worker opens per challenge (vite.config.ts builds it;
+// scripts/check-dist-hygiene.mjs checks it; a test pins all three together),
+// and how long one challenge waits for a decision. The page closes itself
+// after the same time, in case the service worker that opened it is gone.
+export const HTTP_AUTH_PROMPT_PAGE = "src/auth-prompt/index.html";
+export const HTTP_AUTH_PROMPT_TIMEOUT_MS = MS_PER_MINUTE;
+
+// ── Record ids ──
+/**
+ * Charset/length bound for an entry, team or user id that reaches an API path
+ * or a stored record. Defense-in-depth, NOT a UUIDv4-strict guard: entry ids in
+ * this repo are mixed CUID v1 + UUIDv4, so a UUIDv4-only regex would reject
+ * legitimate legacy CUID entries.
+ */
+export const RECORD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
 // ── Entry types used in extension UI/logic ──
 export const EXT_ENTRY_TYPE = {
   LOGIN: "LOGIN",
@@ -104,6 +121,14 @@ export const EXT_MSG = {
   PASSKEY_SIGN_ASSERTION: "PASSKEY_SIGN_ASSERTION",
   PASSKEY_CHECK_DUPLICATE: "PASSKEY_CHECK_DUPLICATE",
   PASSKEY_CREATE_CREDENTIAL: "PASSKEY_CREATE_CREDENTIAL",
+  // HTTP authentication (#905). Popup → SW: bind a LOGIN entry to an origin
+  // after the user granted its permissions. Auth-prompt window → SW: read what
+  // the confirmation shows, and answer it.
+  HTTP_AUTH_REGISTER: "HTTP_AUTH_REGISTER",
+  HTTP_AUTH_PROMPT_GET: "HTTP_AUTH_PROMPT_GET",
+  HTTP_AUTH_PROMPT_DECIDE: "HTTP_AUTH_PROMPT_DECIDE",
+  // Options → SW: remove a binding (all binding mutations run in the SW).
+  HTTP_AUTH_REMOVE: "HTTP_AUTH_REMOVE",
 } as const;
 
 type ExtMsgType = (typeof EXT_MSG)[keyof typeof EXT_MSG];
@@ -123,6 +148,10 @@ export const EXTENSION_PAGE_ONLY_MESSAGES: ReadonlySet<ExtMsgType> = new Set([
   EXT_MSG.FETCH_PASSWORDS,
   EXT_MSG.GET_STATUS,
   EXT_MSG.GET_TOKEN,
+  EXT_MSG.HTTP_AUTH_PROMPT_DECIDE,
+  EXT_MSG.HTTP_AUTH_PROMPT_GET,
+  EXT_MSG.HTTP_AUTH_REGISTER,
+  EXT_MSG.HTTP_AUTH_REMOVE,
   EXT_MSG.KEEPALIVE_PING,
   EXT_MSG.LOCK_VAULT,
   EXT_MSG.RESET_DPOP_KEY,

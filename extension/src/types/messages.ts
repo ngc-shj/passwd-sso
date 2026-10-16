@@ -57,6 +57,12 @@ export type ExtensionMessage =
       rpId: string;
       userName: string;
     }
+  // nonce: the pending intent the popup wrote before the permission prompt;
+  // the SW clears that intent when it handles this registration.
+  | { type: typeof EXT_MSG.HTTP_AUTH_REGISTER; origin: string; entryId: string; teamId?: string; nonce?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_REMOVE; origin: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_GET; promptId: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_DECIDE; promptId: string; decision: HttpAuthDecision }
   | {
       type: typeof EXT_MSG.PASSKEY_CREATE_CREDENTIAL;
       rpId: string;
@@ -68,6 +74,28 @@ export type ExtensionMessage =
       clientDataJSON: string;
       replaceEntryId?: string;
     };
+
+export type HttpAuthDecision = "send" | "cancel";
+
+/** What the HTTP auth confirmation window shows. No realm: it is server text. */
+export interface HttpAuthPromptView {
+  /** The URL of the challenged navigation (webRequest details.url). */
+  url: string;
+  origin: string;
+  /**
+   * details.initiator; null when no web page started the navigation (address
+   * bar, bookmark, another app) or Chrome did not report one.
+   */
+  initiator: string | null;
+  /** The origin a main-frame redirect to this URL came from, when one was seen. */
+  redirectedFrom: string | null;
+  /** "basic" or "digest". */
+  scheme: string;
+  entryTitle: string;
+  entryUsername: string;
+  /** The origin is plain http: the credential crosses the network unencrypted (Basic) or as a crackable hash (Digest). */
+  insecure: boolean;
+}
 
 export interface DecryptedEntry {
   id: string;
@@ -117,7 +145,7 @@ export type ExtensionResponse =
   | { type: typeof EXT_MSG.START_CONNECT; ok: boolean; errorCode?: string }
   | { type: typeof EXT_MSG.GET_TOKEN; token: string | null }
   | { type: typeof EXT_MSG.CLEAR_TOKEN; ok: true }
-  | { type: typeof EXT_MSG.GET_STATUS; hasToken: boolean; expiresAt: number | null; vaultUnlocked: boolean; disconnectReason?: DisconnectReason | null; tenantAutoLockMinutes?: number | null; requireVaultTimeoutLogout?: boolean | null }
+  | { type: typeof EXT_MSG.GET_STATUS; hasToken: boolean; expiresAt: number | null; vaultUnlocked: boolean; disconnectReason?: DisconnectReason | null; tenantAutoLockMinutes?: number | null; requireVaultTimeoutLogout?: boolean | null; userId?: string | null }
   | { type: typeof EXT_MSG.UNLOCK_VAULT; ok: boolean; error?: string }
   | { type: typeof EXT_MSG.LOCK_VAULT; ok: true }
   | { type: typeof EXT_MSG.FETCH_PASSWORDS; entries: DecryptedEntry[] | null; error?: string }
@@ -180,6 +208,10 @@ export type ExtensionResponse =
       vaultLocked?: boolean;
       suppressed?: boolean;
     }
+  | { type: typeof EXT_MSG.HTTP_AUTH_REGISTER; ok: boolean; error?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_REMOVE; ok: boolean; error?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_GET; prompt: HttpAuthPromptView | null; error?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_DECIDE; ok: boolean; error?: string }
   | {
       type: typeof EXT_MSG.PASSKEY_CREATE_CREDENTIAL;
       ok: boolean;

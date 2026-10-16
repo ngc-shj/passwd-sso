@@ -1245,4 +1245,167 @@ describe("MatchList", () => {
       closeSpy.mockRestore();
     });
   });
+
+  // ── HTTP auth registration (#905, C3) ──
+  describe("HTTP auth registration", () => {
+    const ACTION = "Use for the site's sign-in dialog";
+    const login = (over: Record<string, unknown> = {}) => ({
+      id: "pw-r",
+      title: "Router",
+      username: "admin",
+      urlHost: "router.example",
+      entryType: EXT_ENTRY_TYPE.LOGIN,
+      ...over,
+    });
+    let order: string[];
+    let request: ReturnType<typeof vi.fn>;
+    let sessionSet: ReturnType<typeof vi.fn>;
+    let sessionRemove: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      order = [];
+      request = vi.fn(() => {
+        order.push("request");
+        return new Promise<boolean>(() => {});
+      });
+      // Pending until the test ends: the request must not wait on it.
+      sessionSet = vi.fn(() => {
+        order.push("set");
+        return new Promise<void>(() => {});
+      });
+      sessionRemove = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal("chrome", {
+        tabs: { query: vi.fn().mockResolvedValue([{ id: 1 }]) },
+        permissions: { request },
+        storage: { session: { set: sessionSet, remove: sessionRemove } },
+      });
+    });
+
+    async function renderWith(entries: unknown[], tabUrl: string) {
+      mockSendMessage.mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries });
+      render(<MatchList tabUrl={tabUrl} />);
+      await screen.findByText((entries[0] as { title: string }).title);
+    }
+
+    it("shows the action on a LOGIN whose host is exactly the tab's", async () => {
+      await renderWith([login()], "http://router.example:8080/admin");
+      expect(screen.getByRole("button", { name: ACTION })).toBeInTheDocument();
+    });
+
+    it("shows the action for an exact additional host", async () => {
+      await renderWith([login({ urlHost: "other.example", additionalUrlHosts: ["Router.example"] })], "http://router.example/");
+      expect(screen.getByRole("button", { name: ACTION })).toBeInTheDocument();
+    });
+
+    it.each([
+      ["a subdomain match (not exact)", login({ urlHost: "example.com" }), "https://www.example.com/"],
+      ["a www-stripped match (not exact)", login({ urlHost: "router.example" }), "https://www.router.example/"],
+    ])("hides the action for %s", async (_name, entry, tabUrl) => {
+      mockSendMessage.mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [entry] });
+      render(<MatchList tabUrl={tabUrl} />);
+      await screen.findByText(/Router/);
+      expect(screen.queryByRole("button", { name: ACTION })).toBeNull();
+    });
+
+    it("hides the action for a non-LOGIN entry on the same host", async () => {
+      await renderWith(
+        [login({ title: "My Card", entryType: EXT_ENTRY_TYPE.CREDIT_CARD })],
+        "https://router.example/",
+      );
+      expect(screen.queryByRole("button", { name: ACTION })).toBeNull();
+    });
+
+    it("the dialog names the origin and warns on http", async () => {
+      await renderWith([login()], "http://router.example:8080/admin");
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toHaveTextContent("http://router.example:8080");
+      expect(dialog).toHaveTextContent(/plain HTTP/);
+    });
+
+    it("control: no http warning on https", async () => {
+      await renderWith([login()], "https://router.example/admin");
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      expect(screen.getByRole("dialog")).not.toHaveTextContent(/plain HTTP/);
+    });
+
+    it("confirm writes the intent un-awaited, then calls permissions.request synchronously in the click", async () => {
+      await renderWith([login()], "http://router.example:8080/admin");
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      // No await between the click and these: neither mock has resolved.
+      expect(order).toEqual(["set", "request"]);
+      expect(request).toHaveBeenCalledWith({
+        permissions: ["webRequest", "webRequestAuthProvider"],
+        origins: ["http://router.example:8080/*"],
+      });
+      expect(sessionSet).toHaveBeenCalledWith({
+        httpAuthPendingIntent: {
+          nonce: expect.any(String),
+          origin: "http://router.example:8080",
+          entryId: "pw-r",
+          expiresAt: expect.any(Number),
+        },
+      });
+    });
+
+    it("a refused grant sends nothing, clears the intent and shows HTTP_AUTH_PERMISSION_DENIED", async () => {
+      request.mockResolvedValueOnce(false);
+      await renderWith([login()], "https://router.example/admin");
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("status")).toHaveTextContent("Permission for this site was not granted.");
+      expect(sessionRemove).toHaveBeenCalledWith("httpAuthPendingIntent");
+      expect(mockSendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "HTTP_AUTH_REGISTER" }));
+    });
+
+    it("a throwing request is a refusal", async () => {
+      request.mockImplementationOnce(() => {
+        throw new Error("This function must be called during a user gesture");
+      });
+      await renderWith([login()], "https://router.example/admin");
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("status")).toHaveTextContent("Permission for this site was not granted.");
+      expect(sessionRemove).toHaveBeenCalledWith("httpAuthPendingIntent");
+    });
+
+    it("a grant sends HTTP_AUTH_REGISTER with the intent's nonce", async () => {
+      request.mockResolvedValueOnce(true);
+      await renderWith([login({ teamId: "t1" })], "https://router.example/admin");
+      mockSendMessage.mockResolvedValueOnce({ type: "HTTP_AUTH_REGISTER", ok: true });
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      await waitFor(() =>
+        expect(mockSendMessage).toHaveBeenCalledWith({
+          type: "HTTP_AUTH_REGISTER",
+          origin: "https://router.example",
+          entryId: "pw-r",
+          teamId: "t1",
+          nonce: (sessionSet.mock.calls[0][0] as { httpAuthPendingIntent: { nonce: string } }).httpAuthPendingIntent.nonce,
+        }),
+      );
+      expect(await screen.findByRole("status")).toHaveTextContent("Sign-in dialog set up for https://router.example");
+    });
+
+    it("a register message that fails shows a neutral toast pointing at the options page", async () => {
+      request.mockResolvedValueOnce(true);
+      await renderWith([login()], "https://router.example/admin");
+      mockSendMessage.mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."));
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Could not finish setting this up. Check Site sign-in in the extension options.",
+      );
+    });
+
+    it("shows the SW's error when the registration is refused", async () => {
+      request.mockResolvedValueOnce(true);
+      await renderWith([login()], "https://router.example/admin");
+      mockSendMessage.mockResolvedValueOnce({ type: "HTTP_AUTH_REGISTER", ok: false, error: "HTTP_AUTH_ENTRY_MISMATCH" });
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("status")).toHaveTextContent(/cannot be used here/);
+    });
+  });
 });

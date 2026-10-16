@@ -13,8 +13,17 @@ export default defineManifest({
   version: rootPkg.version,
   description: "__MSG_extDescription__",
   default_locale: "en",
+  // asyncBlocking on webRequest.onAuthRequired in MV3 is supported from Chrome
+  // 120 (MDN browser-compat for onAuthRequired extraInfoSpec "asyncBlocking";
+  // Chrome's own reference lists only the MV2-era "58+"). HTTP auth (#905)
+  // registers that listener, so this is the floor.
+  minimum_chrome_version: "120",
   permissions: ["storage", "alarms", "activeTab", "scripting", "contextMenus", "clipboardWrite", "offscreen"],
-  optional_host_permissions: ["https://*/*", "http://localhost/*"],
+  // HTTP auth (#905) asks for these per site from the popup. Optional, so the
+  // install and update prompts do not change; never move them into
+  // `permissions`.
+  optional_permissions: ["webRequest", "webRequestAuthProvider"],
+  optional_host_permissions: ["https://*/*", "http://localhost/*", "http://*/*"],
   background: {
     service_worker: "src/background/index.ts",
     type: "module",

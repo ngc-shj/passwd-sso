@@ -28,6 +28,7 @@ function read(relative: string): string {
 }
 
 const INDEX_SRC = read("background/index.ts");
+const HTTP_AUTH_SRC = read("background/http-auth.ts");
 
 /**
  * Literals the popup and options views pass to humanizeError, including the
@@ -53,16 +54,32 @@ function uiDisplayedCodes(): string[] {
   return [...new Set(codes)];
 }
 
-function fillPathErrorCodes(): string[] {
-  const start = INDEX_SRC.indexOf("async function performAutofillForEntry");
-  expect(start).toBeGreaterThan(-1);
+/**
+ * The functions whose `error:` literals reach the fill result:
+ * performAutofillForEntry, and fetchAndDecryptEntry, whose failure it returns
+ * as is (FETCH_FAILED, INVALID_ENTRY and VAULT_LOCKED moved there in C7).
+ */
+const FILL_PATH_FUNCTIONS = [
+  "async function performAutofillForEntry",
+  "export async function fetchAndDecryptEntry",
+] as const;
+
+function functionErrorCodes(signature: string, src: string = INDEX_SRC): string[] {
+  const start = src.indexOf(signature);
+  expect(start, `${signature} not found`).toBeGreaterThan(-1);
   // Bounded by the next top-level function so the scan cannot silently widen.
-  const rest = INDEX_SRC.slice(start + 1);
-  const end = rest.indexOf("\nasync function ");
-  expect(end).toBeGreaterThan(-1);
+  const rest = src.slice(start + 1);
+  const end = rest.search(/\n(?:export )?(?:async )?function /);
+  expect(end, `${signature} has no following function`).toBeGreaterThan(-1);
   const body = rest.slice(0, end);
   const codes = [...body.matchAll(/error:\s*"([A-Z_]+)"/g)].map((m) => m[1]);
-  return [...new Set(codes)];
+  // Each function contributes, so an empty scan of one cannot hide in the union.
+  expect(codes.length, `${signature} returned no codes`).toBeGreaterThan(0);
+  return codes;
+}
+
+function fillPathErrorCodes(): string[] {
+  return [...new Set(FILL_PATH_FUNCTIONS.flatMap((f) => functionErrorCodes(f)))];
 }
 
 /**
@@ -77,6 +94,19 @@ const POPUP_INVOKED_HANDLERS = [
   "COPY_PASSWORD",
   "COPY_TOTP",
   "FETCH_PASSWORDS",
+  "HTTP_AUTH_REGISTER",
+  // Invoked by the options page, which renders its error the same way.
+  "HTTP_AUTH_REMOVE",
+] as const;
+
+/**
+ * The HTTP auth registration helper (#905, C3): its result is the popup's
+ * HTTP_AUTH_REGISTER `error`, which MatchList renders through humanizeError.
+ */
+const REGISTRATION_FUNCTIONS = [
+  "async function checkRegistration",
+  "async function registerBindingNow",
+  "async function removeBindingNow",
 ] as const;
 
 function popupReachableCodes(): string[] {
@@ -106,8 +136,10 @@ describe("humanizeError", () => {
   it("maps every error code the autofill path can return", () => {
     const codes = fillPathErrorCodes();
     // Fail loudly if the scan matched nothing: an empty set would satisfy the
-    // per-code assertion vacuously.
-    expect(codes.length).toBeGreaterThan(3);
+    // per-code assertion vacuously. Ten is the set before the C7 extraction,
+    // which must survive the move of the fetch/decrypt codes.
+    expect(codes.length).toBeGreaterThanOrEqual(10);
+    expect(codes).toEqual(expect.arrayContaining(["FETCH_FAILED", "INVALID_ENTRY", "VAULT_LOCKED"]));
 
     for (const code of codes) {
       expect(humanizeError(code), `${code} is unmapped`).not.toBe(code);
@@ -146,6 +178,16 @@ describe("humanizeError", () => {
     const unmapped = codes.filter((c) => humanizeError(c) === c);
     expect(unmapped, `unmapped codes reachable from the popup: ${unmapped.join(", ")}`)
       .toEqual([]);
+  });
+
+  it("maps every code the HTTP auth registration can return", () => {
+    const codes = [...new Set(REGISTRATION_FUNCTIONS.flatMap((f) => functionErrorCodes(f, HTTP_AUTH_SRC)))];
+    expect(codes.length).toBeGreaterThanOrEqual(5);
+    expect(codes).toEqual(
+      expect.arrayContaining(["HTTP_AUTH_ENTRY_MISMATCH", "HTTP_AUTH_PERMISSION_DENIED", "VAULT_LOCKED"]),
+    );
+    const unmapped = codes.filter((c) => humanizeError(c) === c);
+    expect(unmapped, `unmapped registration codes: ${unmapped.join(", ")}`).toEqual([]);
   });
 
   it("returns the raw code when there is genuinely no mapping", () => {

@@ -1,0 +1,34 @@
+# Coding Deviation Log: http-auth-dialog
+
+- **D1 — `savedUrlOrigins` lives in `background/entry-origins.ts`** (not `index.ts`). `background/http-auth.ts` needs it, and importing it from `index.ts` would create an import cycle. It is also directly table-testable there.
+- **D2 — `fetchAndDecryptEntry` is exported from `index.ts`** for direct tests. `initHttpAuth` receives it as a dependency.
+- **D3 — the pending intent also completes at SW start** (`completePendingIntent(null)`, using `permissions.contains`). VE2 saw Chrome restart the SW right after the grant, so `onAdded` may never reach a listener.
+- **D4 — the prompt GET/DECIDE failsafe responses carry `error: "INTERNAL_ERROR"`.** The sender-gate table test must tell the failsafe apart from an unknown-id answer.
+- **D5 — the background suites that import `index.ts` keep their old mocks.** Every new chrome call is guarded. C6 and the wiring are covered in the new `http-auth-wiring.test.ts`.
+- **D6 — `lib/http-auth-bindings.ts` imports `warnBackground`** (the sanctioned console sink), because the options page also runs `releasePermissions`.
+- **D7 — `minimum_chrome_version: "120"`.** The source is MDN onAuthRequired (`asyncBlocking` "Supported from Chrome 120"). Chrome's reference names no version for `webRequestAuthProvider`.
+- **D8 — `check-dist-hygiene.mjs` also fails when the built manifest's `web_accessible_resources` names the auth-prompt page.** This is stricter than the plan.
+- **D9 — the copy paths keep their own fetch and decrypt (self-check R17).** The copy-command lookup and the `COPY_PASSWORD` and `COPY_TOTP` handlers decrypt the blob only. `fetchAndDecryptEntry` also decrypts the overview and fails with `INVALID_ENTRY` when that fails, so swapping it in would add a decrypt and a new failure mode to the copy paths. Moving them over is a behaviour change outside this feature's contracts. They stay as they are, and a follow-up can adopt the helper with an option to skip the overview.
+- **D10 — bindings carry the vault `userId` (self-check R39, account boundary).**
+  - C4 answers `{}` for another account's binding, or a binding with no account.
+  - The options page labels such bindings "another account".
+  - `GET_STATUS` returns `userId` to extension pages, null while locked.
+  - A repeat registration short-circuits only for the same unlocked account.
+- **D11 — the server URL rule is enforced at the shared sinks (self-check R43/R52).**
+  - The rule: https, or http only on localhost/127.0.0.1.
+  - `optional_host_permissions` gained `http://*/*`, which made a stored non-loopback http server URL grantable.
+  - The rule (`lib/server-url.ts`, moved from the options page) now guards five sinks: `ensureHostPermission`, `swFetchAuthenticated`, `swFetch`, `getValidServerUrl`, and the token-bridge registration.
+- **D12 — a queued prompt's 60 s timeout starts when it is created, not when it is shown.** Every challenge then ends within 60 s, and fails closed. The cost is that a queued prompt gets less time on screen.
+- **D13 — Send uses `aria-disabled` instead of `disabled`.** A disabled button swallows the pointerdown that must restart the arm delay (review S1). Space on an armed Send counts as a press; Enter and Escape mean Cancel.
+- **D14 — the per-origin cooldown follows every non-send end of a cross-site-initiated prompt** (Cancel, close, timeout, tab closed, request failed). A lock clears it.
+- **D15 — the redirect source is recorded** (`webRequest.onBeforeRedirect`, main_frame, bound targets only, bounded LRU) and shown as "Redirected from <origin>" (review S2).
+- **D16 — origins in the initiator and redirect rows are never shortened (review F-R2-2).** Cutting a host could hide its registrable domain. Only a path after the origin is cut, and the button row is a sticky footer.
+- **D17 — the cooldown applies only to cross-site-initiated challenges.** A challenge with no initiator, or a same-origin one, is never held (review S-R2-1, S-R2-3).
+- **D18 — Space on Send works through the `detail === 0` click rule.** That is the same path as assistive-tech activation. Focusing Send restarts the arm delay, so Tab then Space needs the pause (review S-R2-4, F-R2-1).
+- **D19 — a pointer click on Send counts only if the pointer entered Send after it armed (external review, click train above 800 ms).**
+  - A pointer resting where Send appears never qualifies. Keyboard focus on Send restarts the arm, and Space (a detail-0 click with no `pointerType`) is the keyboard and assistive-tech path.
+  - A status hint (`aria-live`) tells the user why Send is not usable yet: focus the window; wait; move the pointer onto Send.
+- **D20 — every binding mutation runs in the SW through one serialized queue** (register, remove, pending-intent completion, rollback).
+  - The options page sends `HTTP_AUTH_REMOVE` instead of writing storage and releasing permissions itself (external review, non-atomic updates).
+  - `HTTP_AUTH_REMOVE` registers activity, because it is a user click.
+- **D21 — revoking `webRequest` or `webRequestAuthProvider` cancels every pending prompt, and Send re-checks the API permissions as well as the origin permission** (external review).

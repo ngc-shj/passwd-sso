@@ -3,6 +3,7 @@
 
 import { handleWebAuthnMessage } from "./webauthn-bridge-lib";
 import { WEBAUTHN_OWN_APP_BYPASS_MSG } from "../lib/constants";
+import { isAllowedServerUrl } from "../lib/server-url";
 
 const GUARD_KEY = "__pssoWebAuthnBridge";
 if (!(window as unknown as Record<string, boolean>)[GUARD_KEY]) {
@@ -12,7 +13,8 @@ if (!(window as unknown as Record<string, boolean>)[GUARD_KEY]) {
   // Tell MAIN world interceptor to bypass all WebAuthn interception on own app pages.
   // This must happen early so the flag is set before any WebAuthn API call.
   chrome.storage.local.get("serverUrl", ({ serverUrl }) => {
-    if (typeof serverUrl !== "string" || !serverUrl) return;
+    // A server URL the rule refuses (plain http off localhost) is no server.
+    if (!isAllowedServerUrl(serverUrl)) return;
     try {
       const base = new URL(serverUrl);
       const page = new URL(window.location.href);
