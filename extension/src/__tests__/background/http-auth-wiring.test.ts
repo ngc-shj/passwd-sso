@@ -44,6 +44,7 @@ function chromeEvent() {
 }
 
 let messageHandlers: MessageHandler[];
+let serverUrl: string;
 let local: Record<string, unknown>;
 let session: Record<string, unknown>;
 let chromeMock: ReturnType<typeof installChromeMock>;
@@ -102,7 +103,7 @@ function installChromeMock({ webRequest = true }: { webRequest?: boolean } = {})
         get: vi.fn(async (keys: unknown) =>
           typeof keys === "string"
             ? { [keys]: local[keys] }
-            : { serverUrl: "https://localhost:3000", autoLockMinutes: 15 },
+            : { serverUrl, autoLockMinutes: 15 },
         ),
         set: vi.fn(async (items: Record<string, unknown>) => {
           Object.assign(local, items);
@@ -206,6 +207,7 @@ async function unlock(): Promise<void> {
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
+  serverUrl = "https://localhost:3000";
   byIdBlob = { url: `${ORIGIN}/admin`, username: "admin", password: "r0uter" };
   keyedDecrypt.install({ "11": OVERVIEW });
   keyedDecrypt.set("blob-r", JSON.stringify(byIdBlob));
@@ -295,7 +297,7 @@ describe("HTTP_AUTH_REGISTER", () => {
     await unlock();
     session[HTTP_AUTH_PENDING_INTENT_KEY] = { nonce: "n1", origin: ORIGIN, entryId: "pw-r", expiresAt: Date.now() + 60_000 };
     expect(await register()).toEqual({ type: "HTTP_AUTH_REGISTER", ok: true });
-    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "pw-r" }]);
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "pw-r", userId: "user-1" }]);
     expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeUndefined();
   });
 
@@ -325,7 +327,7 @@ describe("HTTP_AUTH_REGISTER", () => {
     session[HTTP_AUTH_PENDING_INTENT_KEY] = { nonce: "n2", origin: ORIGIN, entryId: "pw-r", expiresAt: Date.now() + 60_000 };
     const [onAdded] = [...chromeMock.permissions.onAdded.listeners] as Array<(p: chrome.permissions.Permissions) => void>;
     onAdded({ permissions: ["webRequest", "webRequestAuthProvider"], origins: [`${ORIGIN}/*`] });
-    await vi.waitFor(() => expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "pw-r" }]));
+    await vi.waitFor(() => expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "pw-r", userId: "user-1" }]));
     expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeUndefined();
   });
 });
@@ -344,7 +346,7 @@ describe("a challenge answered end to end", () => {
   };
 
   beforeEach(async () => {
-    local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "pw-r" }];
+    local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "pw-r", userId: "user-1" }];
     await loadBackground();
     await unlock();
   });
@@ -383,6 +385,26 @@ describe("a challenge answered end to end", () => {
     expect(callback).toHaveBeenCalledWith({ authCredentials: { username: "admin", password: "r0uter" } });
   });
 
+  it("a lock settles the open prompt as cancel, closes its window and stops serving its view", async () => {
+    const { callback, promptId } = await raise();
+    await send({ type: "LOCK_VAULT" });
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledWith({}));
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(chromeMock.windows.remove).toHaveBeenCalledWith(77);
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual({ type: "HTTP_AUTH_PROMPT_GET", prompt: null });
+  });
+
+  it("control: without a lock the prompt stays open and keeps its view", async () => {
+    const { callback, promptId } = await raise();
+    await send({ type: "GET_STATUS" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(callback).not.toHaveBeenCalled();
+    expect(chromeMock.windows.remove).not.toHaveBeenCalled();
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual(
+      expect.objectContaining({ prompt: expect.objectContaining({ origin: ORIGIN }) }),
+    );
+  });
+
   it("Cancel gives {} and a stale DECIDE is ignored", async () => {
     const { callback, promptId } = await raise();
     await send({ type: "HTTP_AUTH_PROMPT_DECIDE", promptId, decision: "cancel" });
@@ -392,5 +414,36 @@ describe("a challenge answered end to end", () => {
       ok: false,
     });
     expect(callback).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The server-URL rule (https, or http only on localhost / 127.0.0.1) holds
+// for the SW's own server traffic now that http://*/* is grantable.
+describe("server URL rule in the service worker", () => {
+  const serverFetches = (origin: string) =>
+    (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(([url]) => String(url).startsWith(origin)).length;
+
+  it("refuses a plain-http non-loopback server: no fetch, no permission check, no token bridge", async () => {
+    serverUrl = "http://server.example";
+    await loadBackground();
+    bgModule!.applyToken("t", Date.now() + 3_600_000, "");
+    const res = (await send({ type: "UNLOCK_VAULT", passphrase: "pw" })) as { ok: boolean };
+    expect(res.ok).toBe(false);
+    expect(serverFetches("http://server.example")).toBe(0);
+    expect(chromeMock.permissions.contains).not.toHaveBeenCalledWith({ origins: ["http://server.example/*"] });
+    expect(chromeMock.scripting.registerContentScripts).not.toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "token-bridge" })]),
+    );
+  });
+
+  it.each(["http://localhost:3000", "https://server.example"])("control: %s is used", async (url) => {
+    serverUrl = url;
+    await loadBackground();
+    bgModule!.applyToken("t", Date.now() + 3_600_000, "");
+    expect(await send({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({ type: "UNLOCK_VAULT", ok: true });
+    expect(serverFetches(url)).toBeGreaterThan(0);
+    expect(chromeMock.scripting.registerContentScripts).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "token-bridge", matches: [`${new URL(url).origin}/*`] }),
+    ]);
   });
 });

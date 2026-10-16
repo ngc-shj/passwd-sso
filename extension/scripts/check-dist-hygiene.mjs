@@ -25,7 +25,8 @@
  *    service worker opens it by URL and the manifest never names it, so only
  *    vite.config.ts `build.rollupOptions.input` puts it in the build; without it
  *    every challenge's window would open a missing page and time out. The
- *    built manifest must not list it as web-accessible: no site may frame it.
+ *    built manifest must not make it web-accessible, by name or by a wildcard
+ *    resource ("*", "src/*", "*.html", ...): no site may frame it.
  *
  * The absent-subject cases matter as much as the positive ones: a missing dist/,
  * a walk that finds no HTML, or a throw inside the walk must all exit non-zero.
@@ -40,6 +41,18 @@ const FORBIDDEN_HTML = 'rel="modulepreload"';
 const FILL_LISTENERS = join(DIST, "src", "content", "fill-listeners.js");
 const AUTH_PROMPT_PAGE = join(DIST, "src", "auth-prompt", "index.html");
 const MANIFEST = join(DIST, "manifest.json");
+const AUTH_PROMPT_RESOURCE = "src/auth-prompt/index.html";
+
+// A web_accessible_resources entry as Chrome reads it: a path relative to the
+// extension root (a leading "/" is optional) where "*" matches any run of
+// characters, "/" included.
+function resourceCovers(resource, path) {
+  const pattern = String(resource).replace(/^\/+/, "");
+  const regex = new RegExp(
+    `^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`,
+  );
+  return regex.test(path);
+}
 const MODULE_SYNTAX_RE = /\bimport\s*\(|\bimport\.meta\b|^\s*(?:import|export)\b/m;
 
 // Matched on basename. Chrome rejects an unpacked extension containing a
@@ -128,7 +141,7 @@ try {
   const manifest = JSON.parse(await readFile(MANIFEST, "utf8"));
   const exposed = (manifest.web_accessible_resources ?? [])
     .flatMap((entry) => entry.resources ?? [])
-    .filter((resource) => resource.includes("auth-prompt"));
+    .filter((resource) => String(resource).includes("auth-prompt") || resourceCovers(resource, AUTH_PROMPT_RESOURCE));
   if (exposed.length > 0) {
     failures.push(
       `web_accessible_resources exposes the auth-prompt page: ${exposed.join(", ")} — any site could frame it.`,

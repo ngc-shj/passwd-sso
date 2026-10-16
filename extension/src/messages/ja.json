@@ -114,7 +114,8 @@
     "httpAuthLocked": "ロック中",
     "httpAuthEntryMissing": "ログインが見つかりません",
     "httpAuthPermissionMissing": "このサイトの権限が削除されています",
-    "httpAuthRemove": "削除"
+    "httpAuthRemove": "削除",
+    "httpAuthOtherAccount": "別のアカウント"
   },
   "contentScript": {
     "vaultLocked": "保管庫がロックされています",

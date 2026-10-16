@@ -51,6 +51,15 @@ export const ALARM_CLEAR_CLIPBOARD = "clear-clipboard";
 // ── URL params ──
 export const EXT_CONNECT_PARAM = "ext_connect";
 
+// ── Record ids ──
+/**
+ * Charset/length bound for an entry, team or user id that reaches an API path
+ * or a stored record. Defense-in-depth, NOT a UUIDv4-strict guard: entry ids in
+ * this repo are mixed CUID v1 + UUIDv4, so a UUIDv4-only regex would reject
+ * legitimate legacy CUID entries.
+ */
+export const RECORD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
 // ── Entry types used in extension UI/logic ──
 export const EXT_ENTRY_TYPE = {
   LOGIN: "LOGIN",

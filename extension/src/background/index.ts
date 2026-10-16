@@ -85,6 +85,7 @@ import {
   PSSO_SHOW_SAVE_BANNER,
   PSSO_TRIGGER_INLINE_SUGGESTIONS,
   AUTOFILL_FILL,
+  RECORD_ID_RE,
 } from "../lib/constants";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "../lib/time";
 import { generateTOTPCode } from "../lib/totp";
@@ -118,6 +119,7 @@ import {
   handlePasskeyCreateCredential,
 } from "./passkey-provider";
 import { copyToClipboard } from "./clipboard";
+import { isAllowedServerUrl } from "../lib/server-url";
 import {
   clearPendingIntent,
   initHttpAuth,
@@ -129,6 +131,7 @@ import {
   getPromptView,
   openPrompt,
   registerPromptListeners,
+  resetHttpAuthPrompts,
 } from "./http-auth-prompt";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
@@ -556,6 +559,9 @@ function clearVault(): void {
   invalidateCache();
   invalidateContextMenu();
   pendingSavePrompts.clear();
+  // An open HTTP auth confirmation names an entry of the vault being locked:
+  // settle it as cancel and close its window.
+  resetHttpAuthPrompts();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
   void stopKeepalive();
   persistState();
@@ -998,6 +1004,7 @@ initPasskeyProvider({
 try {
   initHttpAuth({
     isVaultUnlocked: () => encryptionKey !== null && currentUserId !== null,
+    currentUserId: () => (encryptionKey !== null ? currentUserId : null),
     awaitHydrationBounded,
     currentVaultEpoch,
     isVaultEpochCurrent,
@@ -1251,6 +1258,8 @@ async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
   } catch {
     // ignore
   }
+  // Never bridge a token into a server the server-URL rule refuses.
+  if (!isAllowedServerUrl(serverUrl)) return;
   const allowed = await chrome.permissions.contains({
     origins: [`${origin}/*`],
   });
@@ -1408,6 +1417,11 @@ async function swFetch(
     parsed = new URL(serverUrl);
   } catch {
     throw new Error("INVALID_SERVER_URL");
+  }
+  // http://*/* is an optional host permission (HTTP auth), so a granted
+  // origin no longer implies an allowed server: apply the server-URL rule.
+  if (!isAllowedServerUrl(serverUrl)) {
+    throw new Error("HTTPS_REQUIRED");
   }
   const allowed = await chrome.permissions.contains({
     origins: [`${parsed.origin}/*`],
@@ -2465,10 +2479,8 @@ interface InlineMatchResult {
 /**
  * Content-supplied identifiers reach an authenticated API path; bound their
  * charset/length as defense-in-depth (the id is also URL-encoded into the path).
- * NOT a UUIDv4-strict guard — entry ids in this repo are mixed CUID v1 + UUIDv4,
- * so a UUIDv4-only regex would reject legitimate legacy CUID entries.
  */
-const CONTENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const CONTENT_ID_RE = RECORD_ID_RE;
 
 function isValidContentId(value: unknown): value is string {
   return typeof value === "string" && CONTENT_ID_RE.test(value);
@@ -2715,6 +2727,9 @@ async function handleMessage(
         // Tenant-policy override forcing "logout" as the vault-timeout
         // action (C10). Same null-until-known semantics as above.
         requireVaultTimeoutLogout,
+        // The unlocked vault's account (null while locked), so the options
+        // page can tell its own HTTP auth bindings from another account's.
+        userId: encryptionKey !== null ? currentUserId : null,
       });
       return;
     }

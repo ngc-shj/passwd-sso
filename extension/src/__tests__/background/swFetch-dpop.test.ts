@@ -38,6 +38,19 @@ describe("swFetchAuthenticated (C8)", () => {
     vi.unstubAllGlobals();
   });
 
+  it("refuses a plain-http server off localhost before signing or fetching", async () => {
+    await expect(
+      swFetchAuthenticated("/api/passwords", { method: "GET" }, "http://server.example", TOKEN),
+    ).rejects.toThrow("HTTPS_REQUIRED");
+    expect(dpopKeyMocks.signDpopProof).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("control: fetches an http://localhost server", async () => {
+    await swFetchAuthenticated("/api/passwords", { method: "GET" }, "http://localhost:3000", TOKEN);
+    expect(mockFetch).toHaveBeenCalledWith("http://localhost:3000/api/passwords", expect.anything());
+  });
+
   it("attaches DPoP header on every authenticated fetch", async () => {
     await swFetchAuthenticated("/api/passwords", { method: "GET" }, SERVER_URL, TOKEN);
 

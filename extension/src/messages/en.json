@@ -114,7 +114,8 @@
     "httpAuthLocked": "Locked",
     "httpAuthEntryMissing": "The login no longer exists",
     "httpAuthPermissionMissing": "Permission for this site was removed",
-    "httpAuthRemove": "Remove"
+    "httpAuthRemove": "Remove",
+    "httpAuthOtherAccount": "Another account"
   },
   "contentScript": {
     "vaultLocked": "Vault is locked",

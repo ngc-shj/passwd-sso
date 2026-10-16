@@ -7,6 +7,7 @@ import { useTheme } from "../lib/theme";
 import { getDpopThumbprint, deleteIdbKey } from "../lib/dpop-key";
 import { EXT_API_PATH } from "../lib/api-paths";
 import { EXT_MSG } from "../lib/constants";
+import { DEFAULT_SERVER_URL, validateServerUrl } from "../lib/server-url";
 import { sendMessage } from "../lib/messaging";
 import {
   listBindings,
@@ -15,29 +16,6 @@ import {
   removeBinding,
   type HttpAuthBinding,
 } from "../lib/http-auth-bindings";
-
-const DEFAULT_SERVER_URL = "https://localhost:3000";
-
-function validateServerUrl(raw: string): { ok: boolean; value: string; error?: string } {
-  const trimmed = raw.trim() || DEFAULT_SERVER_URL;
-  try {
-    const url = new URL(trimmed);
-    const isLocalhost =
-      url.hostname === "localhost" || url.hostname === "127.0.0.1";
-    if (url.protocol !== "https:" && !(isLocalhost && url.protocol === "http:")) {
-      return { ok: false, value: trimmed, error: "HTTPS_REQUIRED" };
-    }
-    // Reject double slashes in the path (e.g. https://example.com//path)
-    if (/\/\//.test(url.pathname)) {
-      return { ok: false, value: trimmed, error: "INVALID_URL" };
-    }
-    // Strip trailing slash; URL constructor lowercases scheme/host and strips default port.
-    const path = url.pathname.replace(/\/+$/, "");
-    return { ok: true, value: `${url.origin}${path}` };
-  } catch {
-    return { ok: false, value: trimmed, error: "INVALID_URL" };
-  }
-}
 
 function Toggle({
   checked,
@@ -91,25 +69,33 @@ type HttpAuthRow = {
   binding: HttpAuthBinding;
   /** null while the vault is locked (no titles to show). */
   title: string | null;
+  /** Registered by another vault account (or by no recorded one). */
+  otherAccount: boolean;
   entryMissing: boolean;
   permissionMissing: boolean;
 };
 
 // HTTP auth bindings (#905). Titles come from the SW's entry list, so they
 // show only while the vault is unlocked; the flags tell a binding whose entry
-// is gone, and one whose site permission was removed outside the extension.
+// is gone, one whose site permission was removed outside the extension, and
+// one another account registered (it is never answered, but can be removed).
 function HttpAuthSection() {
   const [rows, setRows] = useState<HttpAuthRow[] | null>(null);
 
   const load = async () => {
     const bindings = await listBindings();
     let entries: Array<{ id: string; teamId?: string; title: string }> | null = null;
+    let userId: string | null = null;
     try {
+      const status = await sendMessage({ type: EXT_MSG.GET_STATUS });
+      userId = typeof status?.userId === "string" ? status.userId : null;
       const res = await sendMessage({ type: EXT_MSG.FETCH_PASSWORDS });
       entries = Array.isArray(res?.entries) ? res.entries : null;
     } catch {
       entries = null;
     }
+    // Ownership is known only while unlocked; locked rows just say "Locked".
+    if (userId === null) entries = null;
     const next = await Promise.all(
       bindings.map(async (binding) => {
         const entry = entries?.find(
@@ -121,10 +107,15 @@ function HttpAuthSection() {
         } catch {
           permitted = false;
         }
+        // No recorded account is never the current one (bindings from before
+        // accounts were recorded); otherwise ownership is known only unlocked.
+        const otherAccount =
+          binding.userId === undefined || (entries !== null && binding.userId !== userId);
         return {
           binding,
-          title: entries ? (entry?.title ?? null) : null,
-          entryMissing: entries !== null && !entry,
+          title: entries && !otherAccount ? (entry?.title ?? null) : null,
+          otherAccount,
+          entryMissing: entries !== null && !otherAccount && !entry,
           permissionMissing: !permitted,
         };
       }),
@@ -153,7 +144,11 @@ function HttpAuthSection() {
           <div className="flex flex-col gap-0.5 min-w-0">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-200 break-all">{row.binding.origin}</span>
             <span className="text-xs text-gray-500 dark:text-gray-400">
-              {row.entryMissing ? "" : (row.title ?? t("options.httpAuthLocked"))}
+              {row.otherAccount
+                ? t("options.httpAuthOtherAccount")
+                : row.entryMissing
+                  ? ""
+                  : (row.title ?? t("options.httpAuthLocked"))}
             </span>
             {row.entryMissing && (
               <span className="text-xs text-amber-600 dark:text-amber-400">{t("options.httpAuthEntryMissing")}</span>

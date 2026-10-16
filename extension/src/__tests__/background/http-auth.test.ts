@@ -93,6 +93,7 @@ function installChrome({ webRequest = true }: { webRequest?: boolean } = {}) {
 // ── seam fakes ───────────────────────────────────────────────────
 
 const ORIGIN = "https://intranet.example";
+const USER = "user-1";
 const LOGIN_ACCESS: EntryAccess = {
   ok: true,
   blob: { url: "https://intranet.example/login", password: "s3cret" },
@@ -102,6 +103,7 @@ const LOGIN_ACCESS: EntryAccess = {
 const SENT: AuthAnswer = { authCredentials: { username: "alice", password: "s3cret" } };
 
 let unlocked: boolean;
+let currentUser: string;
 let epoch: number;
 let deps: {
   [K in keyof HttpAuthDeps]: ReturnType<typeof vi.fn> & HttpAuthDeps[K];
@@ -109,9 +111,11 @@ let deps: {
 
 function installDeps(): void {
   unlocked = true;
+  currentUser = USER;
   epoch = 1;
   deps = {
     isVaultUnlocked: vi.fn(() => unlocked),
+    currentUserId: vi.fn(() => (unlocked ? currentUser : null)),
     awaitHydrationBounded: vi.fn(async () => {}),
     currentVaultEpoch: vi.fn(() => epoch),
     isVaultEpochCurrent: vi.fn((e: number) => e === epoch),
@@ -139,9 +143,12 @@ function challenge(over: Partial<AuthChallenge> = {}): AuthChallenge {
   };
 }
 
-function bind(origin = ORIGIN, entryId = "e1", teamId?: string): void {
+function bind(origin = ORIGIN, entryId = "e1", teamId?: string, userId: string | null = USER): void {
   const existing = (local[HTTP_AUTH_BINDINGS_KEY] as unknown[] | undefined) ?? [];
-  local[HTTP_AUTH_BINDINGS_KEY] = [...existing, { origin, entryId, ...(teamId ? { teamId } : {}) }];
+  local[HTTP_AUTH_BINDINGS_KEY] = [
+    ...existing,
+    { origin, entryId, ...(teamId ? { teamId } : {}), ...(userId !== null ? { userId } : {}) },
+  ];
 }
 
 /** Await the handler's own promise, then assert the callback fired exactly once. */
@@ -337,6 +344,37 @@ describe("handleAuthRequired (C4)", () => {
     });
   });
 
+  describe("account: only the registering account's challenges", () => {
+    it("a binding registered by another account gets {} with no window", async () => {
+      local[HTTP_AUTH_BINDINGS_KEY] = [];
+      bind(ORIGIN, "e1", undefined, "user-2");
+      expect(await answer(challenge())).toEqual({});
+      expect(deps.openPrompt).not.toHaveBeenCalled();
+    });
+
+    it("a binding with no recorded account gets {} with no window", async () => {
+      local[HTTP_AUTH_BINDINGS_KEY] = [];
+      bind(ORIGIN, "e1", undefined, null);
+      expect(await answer(challenge())).toEqual({});
+      expect(deps.openPrompt).not.toHaveBeenCalled();
+    });
+
+    it("control: the same binding under its own account is answered", async () => {
+      local[HTTP_AUTH_BINDINGS_KEY] = [];
+      bind(ORIGIN, "e1", undefined, USER);
+      expect(await answer(challenge())).toEqual(SENT);
+    });
+
+    it("a binding taken over by another account while the window was open gets {}", async () => {
+      deps.openPrompt.mockImplementationOnce(async () => {
+        local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "e1", userId: "user-2" }];
+        return "send";
+      });
+      expect(await answer(challenge())).toEqual({});
+      expect(deps.fetchAndDecryptEntry).not.toHaveBeenCalled();
+    });
+  });
+
   describe("rule 7: the user's decision", () => {
     it("Cancel (also: window closed, timeout) gets {} and decrypts nothing", async () => {
       deps.openPrompt.mockResolvedValueOnce("cancel");
@@ -395,7 +433,7 @@ describe("handleAuthRequired (C4)", () => {
   describe("after Send: rules 4 and 9 again", () => {
     it("a binding replaced while the window was open gets {}", async () => {
       deps.openPrompt.mockImplementationOnce(async () => {
-        local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "e2" }];
+        local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "e2", userId: USER }];
         return "send";
       });
       expect(await answer(challenge())).toEqual({});
@@ -486,6 +524,30 @@ describe("handleAuthRequired (C4)", () => {
       expect(callback).toHaveBeenCalledWith(SENT);
     });
 
+    it("an overview read that hangs past the deadline gets {} once, with no window", async () => {
+      vi.useFakeTimers();
+      deps.getEntryOverview.mockReturnValueOnce(new Promise(() => {}));
+      const callback = vi.fn();
+      const pending = handleAuthRequired(challenge(), callback);
+      await vi.advanceTimersByTimeAsync(DECRYPT_DEADLINE_MS);
+      await pending;
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith({});
+      expect(deps.openPrompt).not.toHaveBeenCalled();
+    });
+
+    it("control: an overview read just inside the deadline goes on to the window", async () => {
+      vi.useFakeTimers();
+      const slow = deferred<{ title: string; username: string; entryType: string }>();
+      deps.getEntryOverview.mockReturnValueOnce(slow.promise);
+      const callback = vi.fn();
+      const pending = handleAuthRequired(challenge(), callback);
+      await vi.advanceTimersByTimeAsync(DECRYPT_DEADLINE_MS - 1);
+      slow.resolve({ title: "Intranet", username: "alice", entryType: "LOGIN" });
+      await pending;
+      expect(callback).toHaveBeenCalledWith(SENT);
+    });
+
     it("a thrown error gets {} exactly once", async () => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
       deps.getEntryOverview.mockRejectedValueOnce(new Error("VAULT_LOCKED"));
@@ -545,7 +607,7 @@ describe("registerHttpAuthBinding (C3)", () => {
 
   it("control: stores the binding and registers the listener", async () => {
     expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" })).toEqual({ ok: true });
-    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1" }]);
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
     expect(removed()).toEqual([]);
     expect(chromeMock.webRequest!.onAuthRequired.addListener).toHaveBeenCalledTimes(1);
     expect(chromeMock.permissions.contains).toHaveBeenCalledWith({
@@ -557,7 +619,7 @@ describe("registerHttpAuthBinding (C3)", () => {
   it("stores a team binding with its teamId", async () => {
     expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1", teamId: "t1" })).toEqual({ ok: true });
     expect(deps.fetchAndDecryptEntry).toHaveBeenCalledWith("e1", "t1", 1);
-    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", teamId: "t1" }]);
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", teamId: "t1", userId: USER }]);
   });
 
   it("allows a url-type custom field match", async () => {
@@ -617,20 +679,34 @@ describe("registerHttpAuthBinding (C3)", () => {
     expect(removed()).toEqual([]);
   });
 
-  it("is idempotent: a second completion keeps the binding and the permissions", async () => {
+  it("is idempotent: a second completion for the same account is a no-op that keeps everything", async () => {
     expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" })).toEqual({ ok: true });
-    unlocked = false;
     expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" })).toEqual({ ok: true });
     expect(deps.fetchAndDecryptEntry).toHaveBeenCalledTimes(1);
-    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1" }]);
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
     expect(removed()).toEqual([]);
+  });
+
+  it("a second completion after a lock keeps the binding and the permissions", async () => {
+    expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" })).toEqual({ ok: true });
+    unlocked = false;
+    expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" })).toEqual({ ok: false, error: "VAULT_LOCKED" });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
+    expect(removed()).toEqual([]);
+  });
+
+  it("re-registering another account's binding for the same entry runs the checks and takes it over", async () => {
+    bind(ORIGIN, "e1", undefined, "user-2");
+    expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" })).toEqual({ ok: true });
+    expect(deps.fetchAndDecryptEntry).toHaveBeenCalledTimes(1);
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
   });
 
   it("control: registering another entry for a bound origin runs the checks", async () => {
     bind(ORIGIN, "e0");
     expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" })).toEqual({ ok: true });
     expect(deps.fetchAndDecryptEntry).toHaveBeenCalledTimes(1);
-    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1" }]);
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
   });
 });
 
@@ -655,7 +731,7 @@ describe("pending intent (C3)", () => {
   it("onAdded completes a fresh intent whose pattern was added, and clears the slot", async () => {
     write();
     await completePendingIntent([PATTERN]);
-    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1" }]);
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
     expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeUndefined();
   });
 
@@ -686,7 +762,7 @@ describe("pending intent (C3)", () => {
   it("at SW start (no added list) completes an intent whose origin is already granted", async () => {
     write();
     await completePendingIntent(null);
-    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1" }]);
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
     expect(deps.awaitHydrationBounded).toHaveBeenCalled();
   });
 

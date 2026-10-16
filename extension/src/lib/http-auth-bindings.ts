@@ -9,9 +9,16 @@
 
 import { getSettings } from "./storage";
 import { MS_PER_MINUTE } from "./time";
+import { RECORD_ID_RE } from "./constants";
 import { classifyError, warnBackground } from "../background/log";
 
-export type HttpAuthBinding = { origin: string; entryId: string; teamId?: string };
+/**
+ * `userId` is the vault account that registered the binding. Bindings outlive
+ * a disconnect or an account switch; only the registering account's challenges
+ * are answered, and a binding without one (or with another account's) is never
+ * answered.
+ */
+export type HttpAuthBinding = { origin: string; entryId: string; teamId?: string; userId?: string };
 
 export const HTTP_AUTH_BINDINGS_KEY = "httpAuthBindings";
 
@@ -34,10 +41,6 @@ export const HTTP_AUTH_INTENT_TTL_MS = 2 * MS_PER_MINUTE;
 
 /** The optional API permissions an answer needs, granted with the first binding. */
 export const HTTP_AUTH_API_PERMISSIONS = ["webRequest", "webRequestAuthProvider"] as const;
-
-// Same bound as the background's content-supplied ids: entry ids are mixed
-// CUID v1 and UUIDv4, so this is a charset/length bound, not a format check.
-const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * The origin an http(s) URL belongs to, as `URL.origin` serializes it: scheme,
@@ -81,12 +84,16 @@ export function patternCovers(patternOrigin: string, origin: string): boolean {
   return pattern.port === "" || pattern.port === target.port;
 }
 
-function isBinding(value: unknown): value is HttpAuthBinding {
+const isOptionalId = (value: unknown): boolean =>
+  value === undefined || (typeof value === "string" && RECORD_ID_RE.test(value));
+
+/** A well-formed binding: a serialized http(s) origin and bounded ids. */
+export function isBinding(value: unknown): value is HttpAuthBinding {
   if (typeof value !== "object" || value === null) return false;
-  const { origin, entryId, teamId } = value as Record<string, unknown>;
+  const { origin, entryId, teamId, userId } = value as Record<string, unknown>;
   if (typeof origin !== "string" || normalizeOrigin(origin) !== origin) return false;
-  if (typeof entryId !== "string" || !ID_RE.test(entryId)) return false;
-  return teamId === undefined || (typeof teamId === "string" && ID_RE.test(teamId));
+  if (typeof entryId !== "string" || !RECORD_ID_RE.test(entryId)) return false;
+  return isOptionalId(teamId) && isOptionalId(userId);
 }
 
 export function isPendingIntent(value: unknown): value is HttpAuthPendingIntent {
@@ -112,6 +119,7 @@ export async function listBindings(): Promise<HttpAuthBinding[]> {
       origin: record.origin,
       entryId: record.entryId,
       ...(record.teamId !== undefined ? { teamId: record.teamId } : {}),
+      ...(record.userId !== undefined ? { userId: record.userId } : {}),
     });
   }
   return [...byOrigin.values()];

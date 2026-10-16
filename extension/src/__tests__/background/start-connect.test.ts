@@ -9,9 +9,10 @@
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
-vi.mock("../../lib/storage", () => ({
+const storageMocks = vi.hoisted(() => ({
   getSettings: vi.fn().mockResolvedValue({ serverUrl: "https://example.com" }),
 }));
+vi.mock("../../lib/storage", () => storageMocks);
 
 import { startConnect, type StartConnectCallbacks } from "../../background/token-handler";
 import { DpopSignError } from "../../background/dpop-fetch";
@@ -182,5 +183,14 @@ describe("startConnect (C6)", () => {
     expect(setToken).not.toHaveBeenCalled();
     // No fetch should have been issued — the signer failure happens first.
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses a plain-http server off localhost: no fetch at all", async () => {
+    storageMocks.getSettings.mockResolvedValueOnce({ serverUrl: "http://server.example" });
+    const fetchImpl = vi.fn<typeof fetch>();
+    const result = await startConnect({ setToken, fetchImpl, signDpopProofImpl: signDpopProof });
+    expect(result).toEqual({ ok: false, errorCode: "GENERIC_FAILURE" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(signDpopProof).not.toHaveBeenCalled();
   });
 });

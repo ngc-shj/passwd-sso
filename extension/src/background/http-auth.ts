@@ -18,6 +18,7 @@ import {
   HTTP_AUTH_API_PERMISSIONS,
   HTTP_AUTH_PENDING_INTENT_KEY,
   getBinding,
+  isBinding,
   isPendingIntent,
   normalizeOrigin,
   originPattern,
@@ -63,6 +64,8 @@ export type EntryOverview = { title: string; username: string; entryType: string
 
 export type HttpAuthDeps = {
   isVaultUnlocked: () => boolean;
+  /** The unlocked vault's account, or null while locked. */
+  currentUserId: () => string | null;
   awaitHydrationBounded: () => Promise<void>;
   currentVaultEpoch: () => number;
   isVaultEpochCurrent: (epoch: number) => boolean;
@@ -73,6 +76,7 @@ export type HttpAuthDeps = {
 };
 
 export const ANSWERED_REQUEST_LIMIT = 256;
+/** Bound on each network-backed step of an answer (the overview read, and the full decrypt after Send). */
 export const DECRYPT_DEADLINE_MS = 10 * MS_PER_SECOND;
 
 let deps: HttpAuthDeps | null = null;
@@ -178,10 +182,14 @@ async function decideChallenge(details: AuthChallenge): Promise<AuthCredentials 
   // 6. A challenge can wake the SW mid-hydration.
   await d.awaitHydrationBounded();
   if (!d.isVaultUnlocked()) return null;
+  // Bindings survive a disconnect or an account switch: answer only for the
+  // account that registered this one (a binding without an account never).
+  if (binding.userId === undefined || binding.userId !== d.currentUserId()) return null;
   // 8 starts here: the vault state this answer belongs to.
   const epoch = d.currentVaultEpoch();
-  const overview = await d.getEntryOverview(binding.entryId, binding.teamId);
-  if (!overview || overview.entryType !== EXT_ENTRY_TYPE.LOGIN) return null;
+  // The cache read can fetch and decrypt overviews: bounded like the decrypt.
+  const overview = await withDeadline(d.getEntryOverview(binding.entryId, binding.teamId), DECRYPT_DEADLINE_MS);
+  if (overview === TIMED_OUT || !overview || overview.entryType !== EXT_ENTRY_TYPE.LOGIN) return null;
   if (!d.isVaultEpochCurrent(epoch)) return null;
   // 7. The user's decision. Only the overview has been read so far.
   const decision = await d.openPrompt({
@@ -199,7 +207,14 @@ async function decideChallenge(details: AuthChallenge): Promise<AuthCredentials 
   // 4 again: the binding may have been removed or replaced while the window
   // was open, or the permission revoked.
   const current = await getBinding(origin);
-  if (!current || current.entryId !== binding.entryId || current.teamId !== binding.teamId) return null;
+  if (
+    !current ||
+    current.entryId !== binding.entryId ||
+    current.teamId !== binding.teamId ||
+    current.userId !== binding.userId
+  ) {
+    return null;
+  }
   if (!(await hasOriginPermission(origin))) return null;
   if (!d.isVaultEpochCurrent(epoch)) return null;
   // The full decrypt happens only now, bounded.
@@ -243,8 +258,6 @@ export async function handleAuthRequired(
 }
 
 // ── Registration (C3) ───────────────────────────────────────────
-
-const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export type RegistrationRequest = { origin: unknown; entryId: unknown; teamId?: unknown };
 export type RegistrationResult = { ok: true } | { ok: false; error: string };
@@ -290,21 +303,31 @@ export async function registerHttpAuthBinding(req: RegistrationRequest): Promise
     return result;
   };
   if (!origin || origin !== req.origin) return rollback({ ok: false, error: "INVALID_URL" });
-  const entryId = typeof req.entryId === "string" && ID_RE.test(req.entryId) ? req.entryId : null;
-  const teamId =
-    req.teamId === undefined || req.teamId === null
-      ? undefined
-      : typeof req.teamId === "string" && ID_RE.test(req.teamId)
-        ? req.teamId
-        : null;
-  if (!entryId || teamId === null) return rollback({ ok: false, error: "HTTP_AUTH_ENTRY_MISMATCH" });
+  const candidate = {
+    origin,
+    entryId: req.entryId,
+    ...(req.teamId !== undefined && req.teamId !== null ? { teamId: req.teamId } : {}),
+  };
+  if (!isBinding(candidate)) return rollback({ ok: false, error: "HTTP_AUTH_ENTRY_MISMATCH" });
+  const { entryId, teamId } = candidate;
 
+  const userId = d.currentUserId();
   const existing = await getBinding(origin);
-  if (existing && existing.entryId === entryId && existing.teamId === teamId) return { ok: true };
+  if (
+    userId !== null &&
+    existing?.entryId === entryId &&
+    existing.teamId === teamId &&
+    existing.userId === userId
+  ) {
+    return { ok: true };
+  }
 
   const checked = await checkRegistration(d, origin, entryId, teamId);
   if (!checked.ok) return rollback(checked);
-  await setBinding({ origin, entryId, ...(teamId !== undefined ? { teamId } : {}) });
+  // The account the entry was decrypted for: a challenge is answered only
+  // while that account's vault is unlocked.
+  if (userId === null || d.currentUserId() !== userId) return rollback({ ok: false, error: "VAULT_LOCKED" });
+  await setBinding({ origin, entryId, ...(teamId !== undefined ? { teamId } : {}), userId });
   registerHttpAuthListeners();
   return { ok: true };
 }

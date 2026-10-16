@@ -80,6 +80,8 @@ describe("binding store", () => {
       { origin: "https://bad-id.example", entryId: "../etc" },
       { origin: "https://team.example", entryId: "e4", teamId: "t1" },
       { origin: "https://bad-team.example", entryId: "e5", teamId: 7 },
+      { origin: "https://owned.example", entryId: "e6", userId: "user-1" },
+      { origin: "https://bad-owner.example", entryId: "e7", userId: "u 1" },
       null,
       "https://raw.example",
       { origin: "https://ok.example", entryId: "duplicate" },
@@ -88,6 +90,7 @@ describe("binding store", () => {
     expect(await listBindings()).toEqual([
       { origin: "https://ok.example", entryId: "e1" },
       { origin: "https://team.example", entryId: "e4", teamId: "t1" },
+      { origin: "https://owned.example", entryId: "e6", userId: "user-1" },
     ]);
   });
 

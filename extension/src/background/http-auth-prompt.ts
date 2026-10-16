@@ -173,7 +173,11 @@ export function handlePromptRequestError(requestId: string): void {
   }
 }
 
-/** Cancel every pending prompt and forget them (SW start, tests). */
+/**
+ * Cancel every pending prompt, close its window and forget it. Called when the
+ * vault locks (clearVault): a window must not keep showing, or serving, an
+ * entry of a vault that is gone.
+ */
 export function resetHttpAuthPrompts(): void {
   for (const prompt of [...promptsById.values()]) settle(prompt, "cancel");
   promptsById.clear();

@@ -50,4 +50,19 @@ describe("ensureHostPermission", () => {
     const ok = await ensureHostPermission("https://example.com");
     expect(ok).toBe(false);
   });
+
+  it("never requests a plain-http server off localhost", async () => {
+    const chromeMock = installChromeMock();
+    chromeMock.permissions.contains.mockResolvedValue(false);
+    expect(await ensureHostPermission("http://server.example")).toBe(false);
+    expect(chromeMock.permissions.contains).not.toHaveBeenCalled();
+    expect(chromeMock.permissions.request).not.toHaveBeenCalled();
+  });
+
+  it.each(["http://localhost:3000", "https://server.example"])("control: requests %s", async (url) => {
+    const chromeMock = installChromeMock();
+    chromeMock.permissions.contains.mockResolvedValue(false);
+    expect(await ensureHostPermission(url)).toBe(true);
+    expect(chromeMock.permissions.request).toHaveBeenCalledWith({ origins: [`${new URL(url).origin}/*`] });
+  });
 });
