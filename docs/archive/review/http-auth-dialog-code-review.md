@@ -74,3 +74,26 @@ All round-1 resolutions were verified correct. T1–T7 each fail for the reason 
 | T-R2-7 | Low | The queued-timeout test fails only by hanging. | Explicit settle assertions. |
 
 **Stopping call.** Round 2 found nothing above Minor. Its fixes change only test code and narrow existing behaviour; no new feature surface is added. Per the review-loop stopping rule, there is no round 3. The next check is the manual run (VE1).
+
+## Manual verification (VE1)
+The user ran these on a build of `2685a2f98` in Chrome (macOS, z1mn). Test servers: go-httpbin on the tailnet (http `:8080`, https through tailscale `:10000`).
+
+- **http Basic, real device.** A Yamaha RTX840 router logged in after registration, confirmation and Send.
+- **http Basic, test server.** Registration shows the cleartext warning and the permission prompt. The confirmation window shows the method, site, address, the neutral initiator label and the login. Send logs in.
+- **Send arming.** Send stays inactive until the window has focus and 800 ms pass; a click inside the window first is needed when it opens unfocused. This works as designed, though the first-time UX is not obvious.
+- **Registration from a different port.** Registering from a page on another port of the same host (`:8767`) is refused with `HTTP_AUTH_ENTRY_MISMATCH`. This is correct: the exact-origin rule applies.
+- **Cross-site iframe.** A cross-site page embedding the bound URL in an iframe gets no confirmation window; Chrome's own dialog shows.
+- **Cancel; wrong password; SW stopped; locked vault; binding removed.** The user reported all of these as passing:
+  - Cancel falls through to Chrome's dialog;
+  - a wrong password gets a single answer, then Chrome's dialog, with no loop;
+  - after stopping the SW in chrome://serviceworker-internals, the confirmation still shows;
+  - with the vault locked, no confirmation shows;
+  - after removing the binding, Chrome's dialog shows again and the site permission is gone.
+- **https Digest** (`:10000`):
+  - registration showed no permission prompt (the API permissions were already granted, and https origins are covered by `content_scripts.matches`), which exercises the F2 completion;
+  - the confirmation showed "Digest" with no http warning;
+  - Send gave `"authorized": true`.
+
+VE1 status: **verified**.
+
+**Environment note.** The local `node_modules` on one host had an older `@types/chrome` than the lockfile. `npm ci` fixed it, and the build passes on 0.3.5 from the lockfile.
