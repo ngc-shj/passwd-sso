@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ALARM_VAULT_LOCK, EXT_ENTRY_TYPE } from "../../lib/constants";
+import { ALARM_TOKEN_REFRESH, ALARM_VAULT_LOCK, EXT_ENTRY_TYPE } from "../../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 import { HTTP_AUTH_BINDINGS_KEY, HTTP_AUTH_PENDING_INTENT_KEY } from "../../lib/http-auth-bindings";
 import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
@@ -256,6 +256,12 @@ function stubFetch(): void {
 async function unlock(): Promise<void> {
   bgModule!.applyToken("t", Date.now() + 3_600_000, "");
   expect(await send({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({ type: "UNLOCK_VAULT", ok: true });
+  // A verified unlock refreshes the token in the background and re-arms the
+  // refresh alarm at the end; let that finish inside the test, or it lands
+  // after afterEach has removed the chrome stub.
+  await vi.waitFor(() =>
+    expect(chromeMock.alarms.create).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH, expect.anything()),
+  );
 }
 
 beforeEach(async () => {
@@ -520,6 +526,9 @@ describe("server URL rule in the service worker", () => {
     await loadBackground();
     bgModule!.applyToken("t", Date.now() + 3_600_000, "");
     expect(await send({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({ type: "UNLOCK_VAULT", ok: true });
+    await vi.waitFor(() =>
+      expect(chromeMock.alarms.create).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH, expect.anything()),
+    );
     expect(serverFetches(url)).toBeGreaterThan(0);
     expect(chromeMock.scripting.registerContentScripts).toHaveBeenCalledWith([
       expect.objectContaining({ id: "token-bridge", matches: [`${new URL(url).origin}/*`] }),

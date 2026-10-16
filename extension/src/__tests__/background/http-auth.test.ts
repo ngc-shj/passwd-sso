@@ -982,25 +982,38 @@ describe("listener lifecycle (C6)", () => {
 // ── S2: where a redirected navigation came from ─────────────────
 
 describe("redirect source", () => {
-  it("names the origin a main-frame redirect into a bound origin came from", async () => {
+  it("names the origin a main-frame redirect into the bound origin came from", async () => {
     const details = challenge();
-    await handleBeforeRedirect({ requestId: details.requestId, url: "https://evil.example/go", redirectUrl: `${ORIGIN}/admin` });
+    handleBeforeRedirect({ requestId: details.requestId, url: "https://evil.example/go", redirectUrl: `${ORIGIN}/admin` });
     await answer(details);
     expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: "https://evil.example" });
   });
 
-  it.each([
-    ["a redirect into an unbound origin", "https://evil.example/go", "https://unbound.example/"],
-    ["a same-origin redirect", `${ORIGIN}/a`, `${ORIGIN}/admin`],
-  ])("records nothing for %s", async (_name, url, redirectUrl) => {
+  it("keeps the FIRST source of a two-hop chain", async () => {
     const details = challenge();
-    await handleBeforeRedirect({ requestId: details.requestId, url, redirectUrl });
+    handleBeforeRedirect({ requestId: details.requestId, url: "https://evil.example/go", redirectUrl: "https://hop.example/" });
+    handleBeforeRedirect({ requestId: details.requestId, url: "https://hop.example/", redirectUrl: `${ORIGIN}/admin` });
+    await answer(details);
+    expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: "https://evil.example" });
+  });
+
+  it("records nothing for a same-origin redirect", async () => {
+    const details = challenge();
+    handleBeforeRedirect({ requestId: details.requestId, url: `${ORIGIN}/a`, redirectUrl: `${ORIGIN}/admin` });
+    await answer(details);
+    expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: null });
+  });
+
+  it("does not name the challenged origin itself as the source of its own chain", async () => {
+    const details = challenge();
+    handleBeforeRedirect({ requestId: details.requestId, url: `${ORIGIN}/a`, redirectUrl: "https://hop.example/" });
+    handleBeforeRedirect({ requestId: details.requestId, url: "https://hop.example/", redirectUrl: `${ORIGIN}/admin` });
     await answer(details);
     expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: null });
   });
 
   it("control: another request's redirect is not attributed", async () => {
-    await handleBeforeRedirect({ requestId: "other", url: "https://evil.example/go", redirectUrl: `${ORIGIN}/admin` });
+    handleBeforeRedirect({ requestId: "other", url: "https://evil.example/go", redirectUrl: `${ORIGIN}/admin` });
     await answer(challenge());
     expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: null });
   });

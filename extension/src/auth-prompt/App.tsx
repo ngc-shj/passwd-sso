@@ -25,6 +25,9 @@ export function displayUrl(url: string, max = URL_DISPLAY_MAX): string {
     return `${url.slice(0, max - 1)}…`;
   }
   const rest = url.slice(origin.length);
+  // Nothing after the origin to cut: an origin is never shortened, since
+  // cutting a host would hide its registrable domain.
+  if (rest === "") return url;
   const room = Math.max(0, max - origin.length - 1);
   return `${origin}${rest.slice(0, room)}…`;
 }
@@ -39,8 +42,12 @@ export function App({ promptId }: { promptId: string | null }) {
   const [view, setView] = useState<HttpAuthPromptView | null | undefined>(undefined);
   const [armed, setArmed] = useState(false);
   const armedRef = useRef(false);
-  // Whether the press now ending on Send began while Send was armed.
+  // Whether the pointer press now ending on Send began while Send was armed.
   const pressBeganArmed = useRef(false);
+  // Set by a pointerdown on Send, so the focus that press gives Send is not
+  // taken for keyboard focus.
+  const focusFromPointer = useRef(false);
+  const rearmRef = useRef<() => void>(() => {});
   const decided = useRef(false);
 
   const setArmedBoth = (value: boolean) => {
@@ -87,6 +94,7 @@ export function App({ promptId }: { promptId: string | null }) {
     const disarm = () => {
       clearTimeout(timer);
       timer = undefined;
+      pressBeganArmed.current = false;
       setArmedBoth(false);
     };
     const rearm = () => {
@@ -98,6 +106,7 @@ export function App({ promptId }: { promptId: string | null }) {
     const onPress = () => {
       if (!armedRef.current) rearm();
     };
+    rearmRef.current = rearm;
     rearm();
     window.addEventListener("focus", rearm);
     window.addEventListener("blur", disarm);
@@ -111,6 +120,7 @@ export function App({ promptId }: { promptId: string | null }) {
       document.removeEventListener("visibilitychange", rearm);
       window.removeEventListener("pointerdown", onPress, true);
       window.removeEventListener("keydown", onPress, true);
+      rearmRef.current = () => {};
     };
   }, [ready]);
 
@@ -125,15 +135,29 @@ export function App({ promptId }: { promptId: string | null }) {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [decide]);
 
-  // Recorded at the start of a press on Send (pointer, or Space on the button).
-  const onSendPressStart = () => {
+  const onSendPointerDown = () => {
     pressBeganArmed.current = armedRef.current;
+    focusFromPointer.current = true;
   };
 
-  const onSend = () => {
+  // Keyboard focus reaching Send (Tab) starts the delay over, so Tab then
+  // Space cannot run together.
+  const onSendFocus = () => {
+    if (focusFromPointer.current) {
+      focusFromPointer.current = false;
+      return;
+    }
+    rearmRef.current();
+  };
+
+  const onSend = (e: React.MouseEvent<HTMLButtonElement>) => {
     const began = pressBeganArmed.current;
     pressBeganArmed.current = false;
-    if (!armedRef.current || !began || !document.hasFocus()) return;
+    if (!armedRef.current || !document.hasFocus()) return;
+    // detail 0: a click with no pointer press behind it (Space on the focused
+    // button, assistive technology). A pointer click counts only when its
+    // press began while armed.
+    if (e.detail !== 0 && !began) return;
     decide("send");
   };
 
@@ -159,8 +183,10 @@ export function App({ promptId }: { promptId: string | null }) {
   const rows: Array<[string, string]> = [
     [t("authPrompt.site"), view.origin],
     [t("authPrompt.address"), displayUrl(view.url)],
-    [t("authPrompt.triggeredBy"), view.initiator ?? t("authPrompt.notFromPage")],
-    ...(view.redirectedFrom ? [[t("authPrompt.redirectedFrom"), view.redirectedFrom] as [string, string]] : []),
+    [t("authPrompt.triggeredBy"), view.initiator !== null ? displayUrl(view.initiator) : t("authPrompt.notFromPage")],
+    ...(view.redirectedFrom
+      ? [[t("authPrompt.redirectedFrom"), displayUrl(view.redirectedFrom)] as [string, string]]
+      : []),
     [t("authPrompt.login"), view.entryUsername ? `${view.entryTitle} (${view.entryUsername})` : view.entryTitle],
   ];
 
@@ -188,7 +214,8 @@ export function App({ promptId }: { promptId: string | null }) {
           </div>
         ))}
       </dl>
-      <div className="flex gap-2 justify-end">
+      {/* Sticky: long details never push the buttons out of the window. */}
+      <div className="sticky bottom-0 flex gap-2 justify-end bg-white dark:bg-gray-900 py-2" data-testid="auth-actions">
         <button
           type="button"
           onClick={() => decide("cancel")}
@@ -198,10 +225,8 @@ export function App({ promptId }: { promptId: string | null }) {
         </button>
         <button
           type="button"
-          onPointerDown={onSendPressStart}
-          onKeyDown={(e) => {
-            if (e.key === " ") onSendPressStart();
-          }}
+          onPointerDown={onSendPointerDown}
+          onFocus={onSendFocus}
           onClick={onSend}
           // aria-disabled, not disabled: a disabled button swallows the
           // pointerdown that must restart the arm delay.

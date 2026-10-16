@@ -280,6 +280,10 @@ describe("openPrompt", () => {
     ["another url", { url: "https://intranet.example/other" }],
     ["another initiator", { initiator: "https://evil.example" }],
     ["another scheme", { scheme: "digest" }],
+    ["another redirect source", { redirectedFrom: "https://evil.example" }],
+    ["another entry title", { entryTitle: "Other" }],
+    ["another entry username", { entryUsername: "bob" }],
+    ["another insecure flag", { insecure: true }],
   ])("a concurrent challenge with %s does not reuse the decision: it gets cancel at once", async (_name, over) => {
     const first = openPrompt(request());
     const other = openPrompt(request({ requestId: "req-2", ...over }));
@@ -318,28 +322,86 @@ describe("openPrompt", () => {
     });
 
     it("a queued prompt is neither served nor decidable before it is shown", async () => {
-      void openPrompt(request());
+      // Known ids, so the queued prompt's id can be tried before any window has it.
+      let n = 0;
+      const uuid = vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+        n += 1;
+        return `00000000-0000-4000-8000-00000000000${n}` as `${string}-${string}-${string}-${string}-${string}`;
+      });
+      try {
+        const first = openPrompt(request());
+        const second = openPrompt(request({ tabId: 8, requestId: "req-2" }));
+        await opened();
+        const queuedId = "00000000-0000-4000-8000-000000000002";
+        expect(getPromptView(queuedId)).toBeNull();
+        expect(decidePrompt(queuedId, "send")).toBe(false);
+        expect(decidePrompt(promptIdOf(0), "cancel")).toBe(true);
+        await first;
+        await opened(2);
+        expect(promptIdOf(1)).toBe(queuedId);
+        expect(getPromptView(queuedId)).not.toBeNull();
+        expect(decidePrompt(queuedId, "send")).toBe(true);
+        await expect(second).resolves.toBe("send");
+      } finally {
+        uuid.mockRestore();
+      }
+    });
+
+    it("a queued prompt cancelled while waiting leaves the queue: it never gets a window", async () => {
+      const first = openPrompt(request());
       const second = openPrompt(request({ tabId: 8, requestId: "req-2" }));
       await opened();
-      // The first window's id does not reach the second prompt.
-      expect(getPromptView(promptIdOf(0))).toMatchObject({ url: "https://intranet.example/admin" });
       handlePromptTabRemoved(8);
       await expect(second).resolves.toBe("cancel");
+      expect(decidePrompt(promptIdOf(0), "send")).toBe(true);
+      await expect(first).resolves.toBe("send");
+      await tick();
       expect(chromeMock.windows.create).toHaveBeenCalledTimes(1);
     });
 
     it("a queued prompt's 60 s runs from when it was queued (fail-closed)", async () => {
       vi.useFakeTimers();
-      const first = openPrompt(request());
-      const second = openPrompt(request({ tabId: 8, requestId: "req-2" }));
-      await vi.advanceTimersByTimeAsync(PROMPT_TIMEOUT_MS);
-      await expect(first).resolves.toBe("cancel");
-      await expect(second).resolves.toBe("cancel");
+      const settledAs: Record<string, string> = {};
+      void openPrompt(request()).then((d) => (settledAs.first = d));
+      void openPrompt(request({ tabId: 8, requestId: "req-2" })).then((d) => (settledAs.second = d));
+      await vi.advanceTimersByTimeAsync(PROMPT_TIMEOUT_MS - 1);
+      expect(settledAs).toEqual({});
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settledAs).toEqual({ first: "cancel", second: "cancel" });
     });
   });
 
   describe("cooldown after a cross-site prompt ends without Send", () => {
     const crossSite = { initiator: "https://evil.example" };
+
+    it("a queued cross-site prompt for an origin that went into cooldown settles cancel without a window", async () => {
+      const first = openPrompt(request(crossSite));
+      const second = openPrompt(request({ ...crossSite, tabId: 8, requestId: "req-2" }));
+      await opened();
+      decidePrompt(promptIdOf(), "cancel");
+      await first;
+      await expect(second).resolves.toBe("cancel");
+      await tick();
+      expect(chromeMock.windows.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("control: a queued prompt with no initiator still opens after the cooldown starts", async () => {
+      const first = openPrompt(request(crossSite));
+      void openPrompt(request({ initiator: null, tabId: 8, requestId: "req-2" }));
+      await opened();
+      decidePrompt(promptIdOf(), "cancel");
+      await first;
+      await opened(2);
+    });
+
+    it("a challenge with no initiator is not held by the cooldown", async () => {
+      const first = openPrompt(request(crossSite));
+      await opened();
+      decidePrompt(promptIdOf(), "cancel");
+      await first;
+      void openPrompt(request({ initiator: null, requestId: "req-2" }));
+      await opened(2);
+    });
 
     it("answers cancel without a window for 10 s", async () => {
       vi.useFakeTimers();
@@ -347,10 +409,10 @@ describe("openPrompt", () => {
       await vi.advanceTimersByTimeAsync(0);
       decidePrompt(promptIdOf(), "cancel");
       await first;
-      await expect(openPrompt(request({ requestId: "req-2" }))).resolves.toBe("cancel");
+      await expect(openPrompt(request({ ...crossSite, requestId: "req-2" }))).resolves.toBe("cancel");
       expect(chromeMock.windows.create).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(PROMPT_COOLDOWN_MS);
-      void openPrompt(request({ requestId: "req-3" }));
+      void openPrompt(request({ ...crossSite, requestId: "req-3" }));
       await vi.advanceTimersByTimeAsync(0);
       expect(chromeMock.windows.create).toHaveBeenCalledTimes(2);
     });
@@ -363,7 +425,7 @@ describe("openPrompt", () => {
       await opened();
       decidePrompt(promptIdOf(), "cancel");
       await first;
-      void openPrompt(request({ requestId: "req-2" }));
+      void openPrompt(request({ ...crossSite, requestId: "req-2" }));
       await opened(2);
     });
 
@@ -372,7 +434,7 @@ describe("openPrompt", () => {
       await opened();
       decidePrompt(promptIdOf(), "send");
       await first;
-      void openPrompt(request({ requestId: "req-2" }));
+      void openPrompt(request({ ...crossSite, requestId: "req-2" }));
       await opened(2);
     });
 
@@ -381,7 +443,7 @@ describe("openPrompt", () => {
       await opened();
       decidePrompt(promptIdOf(), "cancel");
       await first;
-      void openPrompt(request({ requestId: "req-2", origin: "https://nas.example", url: "https://nas.example/" }));
+      void openPrompt(request({ ...crossSite, requestId: "req-2", origin: "https://nas.example", url: "https://nas.example/" }));
       await opened(2);
     });
   });

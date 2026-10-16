@@ -55,10 +55,10 @@ const advance = async (ms: number) => {
 };
 const sendButton = () => screen.getByRole("button", { name: "Send" });
 const isArmed = () => sendButton().getAttribute("aria-disabled") === "false";
-/** A full pointer press on Send: pointerdown, then the click. */
+/** A full pointer press on Send: pointerdown, then a pointer click (detail 1). */
 const pressSend = () => {
   fireEvent.pointerDown(sendButton());
-  fireEvent.click(sendButton());
+  fireEvent.click(sendButton(), { detail: 1 });
 };
 
 beforeEach(() => {
@@ -143,8 +143,29 @@ describe("auth-prompt page", () => {
     ["a short url is unchanged", "https://h.example/x", "https://h.example/x"],
     ["a long path is cut with an ellipsis", `https://h.example/${"p".repeat(200)}`, `https://h.example/${"p".repeat(101)}…`],
     ["an origin longer than the cap is kept whole", `https://${"h".repeat(130)}.example/x`, `https://${"h".repeat(130)}.example…`],
+    ["a bare origin longer than the cap is unchanged, no ellipsis", `https://${"h".repeat(130)}.example`, `https://${"h".repeat(130)}.example`],
   ])("displayUrl: %s", (_name, url, expected) => {
     expect(displayUrl(url)).toBe(expected);
+  });
+
+  it("shows long initiator and redirect origins whole (never hiding the registrable domain) with the buttons kept in view", async () => {
+    // Both rows are origins: displayUrl keeps an origin whole, since cutting a
+    // host would hide its registrable domain (the part that tells sites apart).
+    const long = `https://${"x".repeat(200)}.evil.example`;
+    await renderPrompt({ ...VIEW, initiator: long, redirectedFrom: `${long}:8443` });
+    expect(screen.getByText(long)).toBeInTheDocument();
+    expect(screen.getByText(`${long}:8443`)).toBeInTheDocument();
+    const actions = screen.getByTestId("auth-actions");
+    expect(screen.getByRole("alert").compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actions.className).toMatch(/\bsticky\b/);
+    expect(actions.className).toMatch(/\bbottom-0\b/);
+  });
+
+  it("caps an initiator that carries a path like the address", async () => {
+    const withPath = `https://portal.example/${"p".repeat(300)}`;
+    await renderPrompt({ ...VIEW, initiator: withPath });
+    const shown = screen.getByText(/^https:\/\/portal\.example\/p+…$/).textContent ?? "";
+    expect(shown.length).toBe(URL_DISPLAY_MAX);
   });
 
   it("an unknown or settled id shows that the request is over, with no Send", async () => {
@@ -249,15 +270,79 @@ describe("auth-prompt page", () => {
       fireEvent.pointerDown(sendButton());
       await advance(SEND_ARM_DELAY_MS);
       expect(isArmed()).toBe(true);
-      fireEvent.click(sendButton());
+      fireEvent.click(sendButton(), { detail: 1 });
       expect(decisions()).toEqual([]);
     });
 
-    it("a click without a pointerdown on Send does not send", async () => {
+    it("a press interrupted by a disarm does not count after re-arming", async () => {
       await renderPrompt();
       await advance(SEND_ARM_DELAY_MS);
-      fireEvent.click(sendButton());
+      fireEvent.pointerDown(sendButton());
+      focused = false;
+      act(() => {
+        window.dispatchEvent(new Event("blur"));
+      });
+      focused = true;
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await advance(SEND_ARM_DELAY_MS);
+      expect(isArmed()).toBe(true);
+      fireEvent.click(sendButton(), { detail: 1 });
       expect(decisions()).toEqual([]);
+    });
+
+    it("a pointer click without a pointerdown on Send does not send", async () => {
+      await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS);
+      fireEvent.click(sendButton(), { detail: 1 });
+      expect(decisions()).toEqual([]);
+    });
+
+    it("a click with no pointer behind it (detail 0: Space, assistive tech) sends while armed", async () => {
+      await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS);
+      fireEvent.click(sendButton(), { detail: 0 });
+      expect(decisions()).toEqual(["send"]);
+    });
+
+    it("a detail-0 click while disarmed does not send", async () => {
+      await renderPrompt();
+      fireEvent.click(sendButton(), { detail: 0 });
+      expect(decisions()).toEqual([]);
+    });
+
+    it("keyboard focus reaching Send restarts the delay (Tab then Space needs a pause)", async () => {
+      await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS);
+      expect(isArmed()).toBe(true);
+      fireEvent.focus(sendButton());
+      expect(isArmed()).toBe(false);
+      fireEvent.click(sendButton(), { detail: 0 });
+      expect(decisions()).toEqual([]);
+      await advance(SEND_ARM_DELAY_MS);
+      fireEvent.click(sendButton(), { detail: 0 });
+      expect(decisions()).toEqual(["send"]);
+    });
+
+    it("control: the focus a pointer press gives Send does not disarm it", async () => {
+      await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS);
+      fireEvent.pointerDown(sendButton());
+      fireEvent.focus(sendButton());
+      expect(isArmed()).toBe(true);
+      fireEvent.click(sendButton(), { detail: 1 });
+      expect(decisions()).toEqual(["send"]);
+    });
+
+    it("while disarmed Send is aria-disabled, not disabled", async () => {
+      // A disabled button gets no pointerdown in a browser, so a press on it
+      // could not restart the delay. jsdom dispatches events to disabled
+      // buttons anyway, so it cannot show that; the attributes are what is
+      // pinned here.
+      await renderPrompt();
+      expect(sendButton()).not.toBeDisabled();
+      expect(sendButton()).toHaveAttribute("aria-disabled", "true");
     });
 
     it("an armed press while the window lacks focus decides nothing", async () => {
@@ -281,7 +366,7 @@ describe("auth-prompt page", () => {
       await renderPrompt();
       await advance(SEND_ARM_DELAY_MS);
       fireEvent.keyDown(sendButton(), { key: " " });
-      fireEvent.click(sendButton());
+      fireEvent.click(sendButton(), { detail: 0 });
       expect(decisions()).toEqual(["send"]);
     });
 

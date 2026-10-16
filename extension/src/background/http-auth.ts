@@ -86,8 +86,11 @@ let deps: HttpAuthDeps | null = null;
 // challenge for the same request (wrong credentials, or Chrome's retry after
 // {}) falls to Chrome's dialog. A SW restart forgets them, which is accepted.
 const seenRequests = new Map<string, true>();
-// requestId → origin a main-frame redirect into a bound origin came from, so
-// the window can say so (details.initiator does not change through redirects).
+// requestId → the origin the FIRST cross-origin main-frame redirect of that
+// request left from, so the window can say where a redirected navigation
+// started (details.initiator does not change through redirects, and a later
+// hop must not hide the first). Recorded for every request, bounded; only a
+// request that ends in a challenge on a bound origin ever reads it.
 const redirectSources = new Map<string, string>();
 
 /** Wire the dependencies and reset per-SW state. */
@@ -107,16 +110,12 @@ function rememberBounded<V>(map: Map<string, V>, key: string, value: V): void {
   }
 }
 
-/** Record a main-frame redirect into a bound origin (webRequest.onBeforeRedirect). */
-export async function handleBeforeRedirect(details: {
-  requestId: string;
-  url: string;
-  redirectUrl: string;
-}): Promise<void> {
+/** Record a request's first cross-origin main-frame redirect (webRequest.onBeforeRedirect). */
+export function handleBeforeRedirect(details: { requestId: string; url: string; redirectUrl: string }): void {
+  if (redirectSources.has(details.requestId)) return;
   const source = normalizeOrigin(details.url);
   const target = normalizeOrigin(details.redirectUrl);
   if (!source || !target || source === target) return;
-  if (!(await getBinding(target))) return;
   rememberBounded(redirectSources, details.requestId, source);
 }
 
@@ -145,6 +144,12 @@ export function credentialsForOrigin(access: EntryAccess, origin: string): AuthC
   if (!username || !password) return null;
   if (!savedUrlOrigins(access.blob).includes(origin)) return null;
   return { username, password };
+}
+
+/** Where the request's redirects started, unless that is the challenged origin itself. */
+function redirectedFrom(requestId: string, origin: string): string | null {
+  const source = redirectSources.get(requestId);
+  return source !== undefined && source !== origin ? source : null;
 }
 
 /** The challenger as an origin on the request URL's scheme. */
@@ -222,7 +227,7 @@ async function decideChallenge(details: AuthChallenge): Promise<AuthCredentials 
     url: details.url,
     origin,
     initiator: typeof details.initiator === "string" ? details.initiator : null,
-    redirectedFrom: redirectSources.get(details.requestId) ?? null,
+    redirectedFrom: redirectedFrom(details.requestId, origin),
     scheme,
     entryTitle: overview.title,
     entryUsername: overview.username,
@@ -437,9 +442,7 @@ function onErrorOccurred(details: chrome.webRequest.OnErrorOccurredDetails): voi
 }
 
 function onBeforeRedirect(details: chrome.webRequest.OnBeforeRedirectDetails): void {
-  handleBeforeRedirect(details).catch((err: unknown) => {
-    warnBackground("http-auth-answer-failed", classifyError(err));
-  });
+  handleBeforeRedirect(details);
 }
 
 function isApiPermissionChange(change: chrome.permissions.Permissions): boolean {

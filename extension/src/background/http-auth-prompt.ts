@@ -59,8 +59,17 @@ const queue: Prompt[] = [];
 // origin → time until which challenges get {} without a window.
 const cooldownUntil = new Map<string, number>();
 
+/**
+ * A challenge a web page on another origin started. Only these start or obey
+ * the cooldown: a navigation with no initiator (address bar, bookmark, another
+ * app) is not something a page can raise in a loop.
+ */
 function isCrossSiteInitiated(view: HttpAuthPromptView): boolean {
   return view.initiator !== null && view.initiator !== view.origin;
+}
+
+function inCooldown(view: HttpAuthPromptView): boolean {
+  return isCrossSiteInitiated(view) && (cooldownUntil.get(view.origin) ?? 0) > Date.now();
 }
 
 function settle(prompt: Prompt, decision: HttpAuthDecision): void {
@@ -84,10 +93,17 @@ function settle(prompt: Prompt, decision: HttpAuthDecision): void {
 
 function showNext(): void {
   if (shown) return;
-  const next = queue.shift();
-  if (!next) return;
-  shown = next;
-  void showWindow(next);
+  for (let next = queue.shift(); next; next = queue.shift()) {
+    // A queued prompt whose origin went into cooldown while it waited is
+    // answered like a new one would be: cancel, no window.
+    if (inCooldown(next.view)) {
+      settle(next, "cancel");
+      continue;
+    }
+    shown = next;
+    void showWindow(next);
+    return;
+  }
 }
 
 function closeWindow(windowId: number): void {
@@ -155,8 +171,16 @@ async function showWindow(prompt: Prompt): Promise<void> {
   }
 }
 
+/** Every field the window shows is equal, so the user's decision covers both. */
 const sameChallenge = (a: HttpAuthPromptView, b: HttpAuthPromptView): boolean =>
-  a.url === b.url && a.initiator === b.initiator && a.scheme === b.scheme;
+  a.url === b.url &&
+  a.origin === b.origin &&
+  a.initiator === b.initiator &&
+  a.redirectedFrom === b.redirectedFrom &&
+  a.scheme === b.scheme &&
+  a.entryTitle === b.entryTitle &&
+  a.entryUsername === b.entryUsername &&
+  a.insecure === b.insecure;
 
 /**
  * Ask the user whether to send the bound login for this challenge. Resolves
@@ -167,7 +191,7 @@ const sameChallenge = (a: HttpAuthPromptView, b: HttpAuthPromptView): boolean =>
  */
 export function openPrompt(req: PromptRequest): Promise<HttpAuthDecision> {
   const { requestId, tabId, ...view } = req;
-  if ((cooldownUntil.get(view.origin) ?? 0) > Date.now()) return Promise.resolve("cancel");
+  if (inCooldown(view)) return Promise.resolve("cancel");
   const key = `${view.origin}\n${tabId}`;
   const existing = promptsByKey.get(key);
   if (existing && !existing.settled) {

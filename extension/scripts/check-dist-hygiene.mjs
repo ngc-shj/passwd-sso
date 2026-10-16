@@ -35,7 +35,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resourceCovers } from "./lib/war-resource.mjs";
+import { exposedPromptResources } from "./lib/war-resource.mjs";
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const FORBIDDEN_HTML = 'rel="modulepreload"';
@@ -132,9 +132,7 @@ try {
   }
 
   const manifest = JSON.parse(await readFile(MANIFEST, "utf8"));
-  const exposed = (manifest.web_accessible_resources ?? [])
-    .flatMap((entry) => entry.resources ?? [])
-    .filter((resource) => String(resource).includes("auth-prompt") || resourceCovers(resource, AUTH_PROMPT_RESOURCE));
+  const exposed = exposedPromptResources(manifest, AUTH_PROMPT_RESOURCE);
   if (exposed.length > 0) {
     failures.push(
       `web_accessible_resources exposes the auth-prompt page: ${exposed.join(", ")} — any site could frame it.`,

@@ -22,3 +22,6 @@
 - **D13 — Send uses `aria-disabled` instead of `disabled`.** A disabled button swallows the pointerdown that must restart the arm delay (review S1). Space on an armed Send counts as a press; Enter and Escape mean Cancel.
 - **D14 — the per-origin cooldown follows every non-send end of a cross-site-initiated prompt** (Cancel, close, timeout, tab closed, request failed). A lock clears it.
 - **D15 — the redirect source is recorded** (`webRequest.onBeforeRedirect`, main_frame, bound targets only, bounded LRU) and shown as "Redirected from <origin>" (review S2).
+- **D16 — origins in the initiator and redirect rows are never shortened (review F-R2-2).** Cutting a host could hide its registrable domain. Only a path after the origin is cut, and the button row is a sticky footer.
+- **D17 — the cooldown applies only to cross-site-initiated challenges.** A challenge with no initiator, or a same-origin one, is never held (review S-R2-1, S-R2-3).
+- **D18 — Space on Send works through the `detail === 0` click rule.** That is the same path as assistive-tech activation. Focusing Send restarts the arm delay, so Tab then Space needs the pause (review S-R2-4, F-R2-1).

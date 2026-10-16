@@ -48,8 +48,19 @@ describe("webauthn-bridge own-app bypass", () => {
   });
 
   it("a server URL the rule refuses is no server: no bypass", async () => {
-    vi.doMock("../../lib/server-url", () => ({ isAllowedServerUrl: () => false }));
+    const isAllowedServerUrl = vi.fn(() => false);
+    vi.doMock("../../lib/server-url", () => ({ isAllowedServerUrl }));
     const post = await loadBridgeWith(window.location.origin);
+    expect(isAllowedServerUrl).toHaveBeenCalledWith(window.location.origin);
+    expect(bypassPosts(post)).toEqual([]);
+  });
+
+  it("asks the rule about the stored serverUrl itself", async () => {
+    const actual = await vi.importActual<typeof import("../../lib/server-url")>("../../lib/server-url");
+    const isAllowedServerUrl = vi.fn((url: unknown) => actual.isAllowedServerUrl(url));
+    vi.doMock("../../lib/server-url", () => ({ isAllowedServerUrl }));
+    const post = await loadBridgeWith(`${window.location.origin}/app`);
+    expect(isAllowedServerUrl).toHaveBeenCalledWith(`${window.location.origin}/app`);
     expect(bypassPosts(post)).toEqual([]);
   });
 });
