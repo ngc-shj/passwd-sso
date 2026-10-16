@@ -64,7 +64,7 @@ afterEach(async () => {
 
 // A fill whose only step waits for a field that never appears stays active
 // until its deadline. Wrapped so that awaiting the import does not also await the fill.
-async function startPendingFill(): Promise<{ done: Promise<void> }> {
+async function startPendingFill(): Promise<{ done: Promise<number> }> {
   const { runFillSequence } = await import("../../content/fill-sequence-lib");
   const done = runFillSequence(document.body, [
     {
@@ -72,7 +72,7 @@ async function startPendingFill(): Promise<{ done: Promise<void> }> {
       initial: null,
       relocate: () => null,
       accepts: () => true,
-      write: () => {},
+      write: () => true,
       release: () => {},
     },
   ]);

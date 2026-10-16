@@ -20,21 +20,29 @@ const destroyIdentity = vi.hoisted(() => vi.fn());
 const destroyForm = vi.hoisted(() => vi.fn());
 const destroyLogin = vi.hoisted(() => vi.fn());
 const removeShadowHostMock = vi.hoisted(() => vi.fn());
+// One spy per detector init: the double-injection guard is observed as how
+// many times the entry point ran them.
+const inits = vi.hoisted(() => ({
+  cc: vi.fn(() => ({ destroy: destroyCC })),
+  identity: vi.fn(() => ({ destroy: destroyIdentity })),
+  form: vi.fn(() => ({ destroy: destroyForm })),
+  login: vi.fn(() => ({ destroy: destroyLogin })),
+}));
 
 vi.mock("../../content/cc-form-detector-lib", () => ({
-  initCreditCardDetector: () => ({ destroy: destroyCC }),
+  initCreditCardDetector: inits.cc,
 }));
 
 vi.mock("../../content/identity-form-detector-lib", () => ({
-  initIdentityDetector: () => ({ destroy: destroyIdentity }),
+  initIdentityDetector: inits.identity,
 }));
 
 vi.mock("../../content/form-detector-lib", () => ({
-  initFormDetector: () => ({ destroy: destroyForm }),
+  initFormDetector: inits.form,
 }));
 
 vi.mock("../../content/login-detector-lib", () => ({
-  initLoginDetector: () => ({ destroy: destroyLogin }),
+  initLoginDetector: inits.login,
 }));
 
 vi.mock("../../content/ui/shadow-host", () => ({
@@ -70,6 +78,7 @@ beforeEach(() => {
   destroyForm.mockReset();
   destroyLogin.mockReset();
   removeShadowHostMock.mockReset();
+  for (const init of Object.values(inits)) init.mockClear();
 
   // Clear the double-injection guard so the entry point re-runs on import.
   delete (window as unknown as Record<string, unknown>)[GUARD_KEY];
@@ -133,16 +142,35 @@ describe("M5: entry-point error-handler teardown (F6 invariant)", () => {
     expect(removeShadowHostMock).toHaveBeenCalledOnce();
   });
 
-  it("double-injection guard prevents a second init when the entry point is imported again", async () => {
-    // First import triggers init.
-    await import("../../content/form-detector");
-    const callsAfterFirst = destroyForm.mock.calls.length;
+});
 
-    // Simulate a second import WITHOUT resetting the guard or modules —
-    // the guard key is set, so no second init should run.
-    await import("../../content/form-detector");
+// The guard is what keeps a second evaluation of the entry point in the same
+// window (the bundle injected again by the fill's inject-and-resend, beside the
+// manifest copy) from starting a second set of detectors. vi.resetModules()
+// makes the second import evaluate the module again, as a second injection
+// does; a plain re-import would hit the module cache and prove nothing.
+describe("double-injection guard", () => {
+  const initCallCounts = () => Object.values(inits).map((init) => init.mock.calls.length);
 
-    // destroyForm should not have been called a second time (no second init).
-    expect(destroyForm.mock.calls.length).toBe(callsAfterFirst);
+  async function evaluateTwice({ clearKeyBetween }: { clearKeyBetween: boolean }) {
+    await import("../../content/form-detector");
+    expect(initCallCounts()).toEqual([1, 1, 1, 1]);
+    vi.resetModules();
+    if (clearKeyBetween) delete (window as unknown as Record<string, unknown>)[GUARD_KEY];
+    await import("../../content/form-detector");
+  }
+
+  it("a second evaluation with the guard key set runs no detector init", async () => {
+    await evaluateTwice({ clearKeyBetween: false });
+
+    expect(initCallCounts()).toEqual([1, 1, 1, 1]);
+    expect(errorListeners).toHaveLength(1);
+  });
+
+  it("control: a second evaluation with the guard key unset runs every init again", async () => {
+    await evaluateTwice({ clearKeyBetween: true });
+
+    expect(initCallCounts()).toEqual([2, 2, 2, 2]);
+    expect(errorListeners).toHaveLength(2);
   });
 });

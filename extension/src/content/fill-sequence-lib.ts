@@ -25,8 +25,11 @@ export type FillStep = {
   relocate?: (root: FillRoot) => FillTarget | null;
   /** Type allowlist + visibility + usable. */
   accepts: (el: FillTarget) => boolean;
-  /** Reads the payload lazily at write time. */
-  write: (el: FillTarget) => void;
+  /**
+   * Reads the payload lazily at write time. Returns whether the field now holds
+   * the value; false (a select with no matching option) counts as not filled.
+   */
+  write: (el: FillTarget) => boolean;
   /** Drops this step's payload reference. Called exactly once, at exit. */
   release: () => void;
 };
@@ -87,11 +90,16 @@ export function supersedeActiveFill(): void {
   supersedeActiveRun();
 }
 
+/**
+ * Runs the steps and resolves, once the run ends, with the number of steps it
+ * wrote: the fill's own report of what landed (0 when superseded before any
+ * write, or when nothing was found).
+ */
 export function runFillSequence(
   root: FillRoot | null,
   steps: FillStep[],
   opts: FillSequenceOptions = {},
-): Promise<void> {
+): Promise<number> {
   supersedeActiveRun();
   const runGeneration = currentGeneration;
   const deadline =
@@ -105,7 +113,11 @@ export function runFillSequence(
       ? "abandoned"
       : "pending",
   );
+  // Fields a step has claimed (write-once), whether or not its write took.
   const written = new Set<FillTarget>();
+  // Writes that took: the run's answer (C5). A write that throws ends the run
+  // before it is counted.
+  let filledCount = 0;
   let currentRoot = root;
   let exited = false;
   let tickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -115,8 +127,8 @@ export function runFillSequence(
   // performance.now() reaches the deadline; once it has run, the deadline holds.
   let deadlineReached = false;
   let observer: MutationObserver | null = null;
-  let resolveRun!: () => void;
-  const done = new Promise<void>((resolve) => {
+  let resolveRun!: (filled: number) => void;
+  const done = new Promise<number>((resolve) => {
     resolveRun = resolve;
   });
 
@@ -155,7 +167,7 @@ export function runFillSequence(
     }
     if (errorCode) logFillError(errorCode);
     else if (releaseFailed) logFillError(FILL_DIAG_CODE.RELEASE_ERROR);
-    resolveRun();
+    resolveRun(filledCount);
   }
 
   function guarded(fn: () => void): () => void {
@@ -225,7 +237,7 @@ export function runFillSequence(
     if (!isCurrent() || !el.isConnected || written.has(el) || !step.accepts(el)) return;
     written.add(el);
     states[index] = "written";
-    step.write(el);
+    if (step.write(el)) filledCount++;
   }
 
   function tick(): void {

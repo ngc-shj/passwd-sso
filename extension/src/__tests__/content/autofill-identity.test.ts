@@ -280,6 +280,44 @@ describe("performIdentityAutofill", () => {
     expect((document.querySelector('[autocomplete="country-name"]') as HTMLSelectElement).value).toBe("US");
   });
 
+  // C5: a select with no matching option is left as it was, so it is not a
+  // filled field; a form of only such selects answers 0.
+  it.each([
+    { name: "neither select has a matching option", state: "Tokyo", country: "Japan", filled: 0 },
+    { name: "control: both selects match", state: "CA", country: "US", filled: 2 },
+  ])("counts $filled filled fields when $name", async ({ state, country, filled }) => {
+    setupForm(`
+      <select autocomplete="address-level1">
+        <option value="">Select</option>
+        <option value="CA">California</option>
+      </select>
+      <select autocomplete="country-name">
+        <option value="">Select</option>
+        <option value="US">United States</option>
+      </select>
+    `);
+
+    const count = await performIdentityAutofill(payload({ state, country }), NO_WAIT);
+
+    expect(count).toBe(filled);
+  });
+
+  // C5: a value the input's type rejects is sanitized to "" without an error,
+  // so the field is not counted.
+  it.each([
+    { name: "the input types reject both values", postalCode: "SW1A 1AA", dateOfBirth: "01/15/1990", filled: 0 },
+    { name: "control: both values fit the input types", postalCode: "90210", dateOfBirth: "1990-01-15", filled: 2 },
+  ])("counts $filled filled fields when $name", async ({ postalCode, dateOfBirth, filled }) => {
+    setupForm(`
+      <input type="number" autocomplete="postal-code" />
+      <input type="date" autocomplete="bday" />
+    `);
+
+    const count = await performIdentityAutofill(payload({ postalCode, dateOfBirth }), NO_WAIT);
+
+    expect(count).toBe(filled);
+  });
+
   // ── Kana fill: kana values land only in the kana fields ──
 
   it("routes kana values to kana fields without touching the plain name fields", async () => {
@@ -546,7 +584,7 @@ describe("performIdentityAutofill — sequential fill", () => {
     return el;
   }
 
-  async function settle(fill: Promise<void>): Promise<void> {
+  async function settle(fill: Promise<unknown>): Promise<void> {
     await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
     await fill;
   }

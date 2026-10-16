@@ -629,7 +629,7 @@ describe("card and identity fill — a hidden foreign control still bounds the f
   `;
 
   async function withLateField(
-    run: () => Promise<void>,
+    run: () => Promise<unknown>,
     slotId: string,
     lateAttrs: string,
   ): Promise<HTMLInputElement> {

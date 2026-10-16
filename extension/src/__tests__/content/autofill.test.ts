@@ -974,6 +974,106 @@ describe("performAutofill — frame-origin gate", () => {
     const inputs = document.querySelectorAll("input");
     expect((inputs[1] as HTMLInputElement).value).toBe("");
   });
+
+  // C4: an insecure http frame fills only on a host the entry was saved for
+  // over http (allowedHttpHosts). Each pair differs on that field alone.
+  const LOGIN_FORM = `
+    <input type="text" autocomplete="username" />
+    <input type="password" autocomplete="current-password" />
+  `;
+  const writtenPassword = () => (document.querySelectorAll("input")[1] as HTMLInputElement).value;
+
+  it.each([
+    { allowedHttpHosts: undefined, written: "" },
+    { allowedHttpHosts: [] as string[], written: "" },
+    { allowedHttpHosts: ["other.example"], written: "" },
+    { allowedHttpHosts: ["bank.example"], written: "secret" },
+  ])(
+    "C4: an http subframe on a matching allowedHosts host with allowedHttpHosts $allowedHttpHosts writes '$written'",
+    async ({ allowedHttpHosts, written }) => {
+      setupForm(LOGIN_FORM);
+
+      await inSubframe("http://bank.example/login", async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          allowedHosts: ["bank.example"],
+          ...(allowedHttpHosts ? { allowedHttpHosts } : {}),
+        }, NO_WAIT);
+      });
+
+      expect(writtenPassword()).toBe(written);
+    },
+  );
+
+  // The top-frame arm (a hostless or mismatched entry the user confirmed) is
+  // held to the same http rule.
+  it.each([
+    { allowedHttpHosts: undefined, written: "" },
+    { allowedHttpHosts: ["bank.example"], written: "secret" },
+  ])(
+    "C4: the top-frame topFrameOrigin arm on an http page with allowedHttpHosts $allowedHttpHosts writes '$written'",
+    async ({ allowedHttpHosts, written }) => {
+      setupForm(LOGIN_FORM);
+
+      await inTopFrame({ href: "http://bank.example/login", origin: "http://bank.example" }, async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          topFrameOrigin: "http://bank.example",
+          ...(allowedHttpHosts ? { allowedHttpHosts } : {}),
+        }, NO_WAIT);
+      });
+
+      expect(writtenPassword()).toBe(written);
+    },
+  );
+
+  // An about:blank or srcdoc frame has no URL host; the origin it inherits
+  // from an http creator makes it an insecure page all the same.
+  it.each([
+    { allowedHttpHosts: undefined, written: "" },
+    { allowedHttpHosts: ["bank.example"], written: "secret" },
+  ])(
+    "C4: a top-level about:blank inheriting http://bank.example with allowedHttpHosts $allowedHttpHosts writes '$written'",
+    async ({ allowedHttpHosts, written }) => {
+      setupForm(LOGIN_FORM);
+
+      await inTopFrame({ href: "about:blank", origin: "http://bank.example" }, async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          topFrameOrigin: "http://bank.example",
+          ...(allowedHttpHosts ? { allowedHttpHosts } : {}),
+        }, NO_WAIT);
+      });
+
+      expect(writtenPassword()).toBe(written);
+    },
+  );
+
+  // localhost and 127.0.0.1 are not insecure pages: no http host is needed
+  // there (the http://bank.example rows above are the deny side).
+  it.each(["http://localhost:3000/login", "http://127.0.0.1:8080/login"])(
+    "C4: %s fills on allowedHosts alone",
+    async (href) => {
+      setupForm(LOGIN_FORM);
+
+      await inSubframe(href, async () => {
+        await performAutofill({
+          type: "AUTOFILL_FILL",
+          username: "alice",
+          password: "secret",
+          allowedHosts: [new URL(href).hostname],
+        }, NO_WAIT);
+      });
+
+      expect(writtenPassword()).toBe("secret");
+    },
+  );
 });
 
 // ── Sequential fill (plan C2) ─────────────────────────────────
@@ -1010,9 +1110,9 @@ describe("performAutofill — sequential fill", () => {
     return el;
   }
 
-  async function settle(fill: Promise<void>): Promise<void> {
+  async function settle<T>(fill: Promise<T>): Promise<T> {
     await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
-    await fill;
+    return fill;
   }
 
   it("writes the custom fields, then a focused non-custom username, then the password", async () => {
@@ -1113,6 +1213,137 @@ describe("performAutofill — sequential fill", () => {
     await settle(fill);
 
     expect(byId("member").value).toBe("");
+  });
+
+  // Sony Bank login shape: no <form>, two custom ID fields, then the password.
+  // A page handler on one write changes the page before the next write's turn.
+  const SONY_SHAPE = `
+    <input id="brchNum" type="text" />
+    <input id="accountNum" type="text" />
+    <input id="loginPwd_inputPass" type="password" name="loginPwd" />
+  `;
+  const SONY_CUSTOM_FIELDS = [
+    { label: "brchNum", value: "123" },
+    { label: "accountNum", value: "4567890" },
+  ];
+  const fillSony = () =>
+    settle(performAutofill(loginPayload({ username: "", password: "pw", customFields: SONY_CUSTOM_FIELDS })));
+
+  it("writes the Sony-shaped custom fields, then the password, one field per task", async () => {
+    setupForm(SONY_SHAPE);
+    const log: string[] = [];
+    for (const el of document.querySelectorAll("input")) {
+      el.addEventListener("input", () => log.push(el.id));
+    }
+    // A task queued by the first write runs before the second write only if the
+    // fill yields a macrotask between fields.
+    byId("brchNum").addEventListener("input", () => setTimeout(() => log.push("task"), 0), { once: true });
+
+    await fillSony();
+
+    expect(log).toEqual(["brchNum", "task", "accountNum", "loginPwd_inputPass"]);
+    expect(byId("brchNum").value).toBe("123");
+    expect(byId("accountNum").value).toBe("4567890");
+    expect(byId("loginPwd_inputPass").value).toBe("pw");
+  });
+
+  it("does not write a target the page detached before its turn", async () => {
+    setupForm(SONY_SHAPE);
+    const account = byId("accountNum");
+    byId("brchNum").addEventListener("input", () => account.remove(), { once: true });
+
+    await fillSony();
+
+    expect(account.value).toBe("");
+    expect(byId("loginPwd_inputPass").value).toBe("pw");
+  });
+
+  it("does not write a password whose type the page changed before its turn", async () => {
+    setupForm(SONY_SHAPE);
+    const password = byId("loginPwd_inputPass");
+    byId("accountNum").addEventListener("input", () => (password.type = "text"), { once: true });
+
+    await fillSony();
+
+    expect(byId("accountNum").value).toBe("4567890");
+    expect(password.value).toBe("");
+  });
+
+  it.each([
+    ["does not write", "hidden", ""],
+    ["writes (control)", "text", "1234"],
+  ])("%s a custom field into a %s-type input that matches its label", async (_verb, type, expected) => {
+    setupForm(`
+      <input id="pin" type="${type}" />
+      <input id="user" type="text" />
+    `);
+
+    await settle(
+      performAutofill(loginPayload({ password: "", customFields: [{ label: "pin", value: "1234" }] })),
+    );
+
+    expect(byId("pin").value).toBe(expected);
+  });
+
+  it("writes a custom field into the text input when a password input earlier shares its label", async () => {
+    setupForm(`
+      <input name="pin" type="password" />
+      <input id="target" name="pin" type="text" />
+    `);
+
+    await settle(
+      performAutofill(loginPayload({ username: "", password: "", customFields: [{ label: "pin", value: "123" }] })),
+    );
+
+    expect(byId("target").value).toBe("123");
+  });
+
+  // C5: a field counts only when it holds exactly the value. A password input
+  // strips line breaks, which leaves a password that no longer matches.
+  it.each([
+    { name: "a password whose line break the input strips", password: "abc\ndef", filled: 1 },
+    { name: "control: a password the input keeps as it is", password: "abcdef", filled: 2 },
+  ])("counts $filled filled fields for $name", async ({ password, filled }) => {
+    setupForm(`
+      <input id="user" type="text" autocomplete="username" />
+      <input id="pw" type="password" />
+    `);
+
+    const count = await settle(performAutofill(loginPayload({ password })));
+
+    expect(count).toBe(filled);
+  });
+
+  it("counts an email input that trims the username's surrounding whitespace", async () => {
+    setupForm(`
+      <input id="user" type="email" autocomplete="username" />
+      <input id="pw" type="password" />
+    `);
+
+    const count = await settle(performAutofill(loginPayload({ username: " alice@example.com " })));
+
+    expect(byId("user").value).toBe("alice@example.com");
+    expect(count).toBe(2);
+  });
+
+  it("leaves to a custom field the input it reserved, and picks the username elsewhere", async () => {
+    // The reserved input is username-like and sits nearest the password, where
+    // the username walk would otherwise land. Writes are write-once, so without
+    // the reservation the username step would hit the already-written field and
+    // #user would stay empty.
+    setupForm(`
+      <input id="user" type="text" />
+      <input id="member-id" type="text" />
+      <input id="pw" type="password" />
+    `);
+
+    await settle(
+      performAutofill(loginPayload({ password: "pw", customFields: [{ label: "member-id", value: "M-1" }] })),
+    );
+
+    expect(byId("member-id").value).toBe("M-1");
+    expect(byId("user").value).toBe("alice");
+    expect(byId("pw").value).toBe("pw");
   });
 
   it("does not write the TOTP into a masked one-time-code field", async () => {

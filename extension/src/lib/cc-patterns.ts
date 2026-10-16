@@ -1,7 +1,5 @@
-// Credit-card field hint patterns and the LOGIN autocomplete roles. DOM-free:
-// the content detectors import them, and the service worker passes them to the
-// self-contained direct-autofill func as { source, flags } args, so every
-// matcher shares one definition.
+// Credit-card field hint patterns and the LOGIN autocomplete roles. DOM-free,
+// so every content detector shares one definition.
 
 export const CC_DETECT_RE = {
   number:      /card.?num|cc.?num|\bcard.?no\b|\bccno\b|\bpan\b/i,
@@ -61,20 +59,3 @@ export const CARD_NEIGHBOUR_PATTERNS: readonly RegExp[] = [
   CC_EXPIRY_RE,
   CC_EXPIRY_JA_RE,
 ];
-
-/** A RegExp as plain data, for an executeScript arg (RegExp does not serialize). */
-export type PatternSource = { source: string; flags: string };
-
-export type CardPatternSources = {
-  number: PatternSource[];
-  neighbour: PatternSource[];
-  fillableTypes: string[];
-};
-
-const toSource = (re: RegExp): PatternSource => ({ source: re.source, flags: re.flags });
-
-export const CARD_PATTERN_SOURCES: CardPatternSources = {
-  number: CARD_NUMBER_PATTERNS.map(toSource),
-  neighbour: CARD_NEIGHBOUR_PATTERNS.map(toSource),
-  fillableTypes: [...CARD_FILLABLE_INPUT_TYPES],
-};

@@ -178,6 +178,8 @@
     "originMismatch": "This credential is for a different site. The page may have changed after you chose it.",
     "unknownOrigin": "Could not verify this page, so the credential was not filled.",
     "autofillInjectFailed": "Autofill could not run on this page.",
+    "autofillNothingFilled": "No field on this page could be filled.",
+    "insecurePageFillRefused": "On an HTTP page, only logins saved with an http:// URL are filled.",
     "copyTotpFailed": "Could not copy the TOTP code.",
     "unlockFailed": "Could not unlock the vault.",
     "noToken": "Not connected. Sign in to passwd-sso first.",

@@ -85,6 +85,7 @@ function recorder(): Recorder {
           ((el) => {
             el.value = key;
             log.push(key);
+            return true;
           }),
         release: () => {
           releases[key]++;
@@ -94,7 +95,7 @@ function recorder(): Recorder {
   };
 }
 
-function track(p: Promise<void>): { settled: () => boolean } {
+function track(p: Promise<unknown>): { settled: () => boolean } {
   let settled = false;
   void p.then(() => {
     settled = true;
@@ -140,6 +141,7 @@ describe("runFillSequence — order and yield", () => {
           r.log.push("a");
           // A task queued during the first write must run before the second write.
           setTimeout(() => r.log.push("task"), 0);
+          return true;
         },
       }),
       r.step("b", $("#b")),
@@ -152,6 +154,66 @@ describe("runFillSequence — order and yield", () => {
     await vi.runAllTimersAsync();
     await done;
     expect(r.log).toEqual(["a", "task", "b", "c"]);
+  });
+});
+
+// C5: the run reports what it wrote, so a frame can answer how many fields it filled.
+describe("runFillSequence — written count", () => {
+  it("resolves with the number of steps written", async () => {
+    document.body.innerHTML = `<input id="a"><input id="b">`;
+    const r = recorder();
+    const done = runFillSequence(document.body, [r.step("a", $("#a")), r.step("b", $("#b"))]);
+
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toBe(2);
+  });
+
+  it("resolves with 0 when no step finds a field", async () => {
+    document.body.innerHTML = `<input id="a">`;
+    const r = recorder();
+    const done = runFillSequence(document.body, [r.step("late", null)], { lateFieldWindowMs: 100 });
+
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(done).resolves.toBe(0);
+  });
+
+  it.each([
+    ["a write that reports nothing taken", () => false, 1],
+    ["control: the same write reporting it took", () => true, 2],
+  ])("%s counts accordingly", async (_name, took, expected) => {
+    document.body.innerHTML = `<input id="a"><input id="b">`;
+    const r = recorder();
+    const done = runFillSequence(document.body, [r.step("a", $("#a")), r.step("b", $("#b"), { write: took })]);
+
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toBe(expected);
+  });
+
+  it("a write that throws is not counted", async () => {
+    document.body.innerHTML = `<input id="a"><input id="b">`;
+    const r = recorder();
+    const done = runFillSequence(document.body, [
+      r.step("a", $("#a")),
+      r.step("b", $("#b"), {
+        write: () => {
+          throw new Error("page setter threw");
+        },
+      }),
+    ]);
+
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toBe(1);
+  });
+
+  it("a superseded run resolves with the writes it made before the newer run", async () => {
+    document.body.innerHTML = `<input id="a"><input id="b">`;
+    const r = recorder();
+    const first = runFillSequence(document.body, [r.step("a", $("#a")), r.step("b", $("#b"))]);
+    await firstTask();
+    runFillSequence(document.body, []);
+
+    await vi.runAllTimersAsync();
+    await expect(first).resolves.toBe(1);
   });
 });
 
@@ -247,6 +309,7 @@ describe("runFillSequence — step states and the deadline", () => {
         write: (el) => {
           (el as HTMLInputElement).value = "a";
           vi.advanceTimersByTime(200);
+          return true;
         },
       }),
       r.step("b", $("#b")),

@@ -113,6 +113,52 @@ describe("performCreditCardAutofill", () => {
     expect(yearSelect.value).toBe("2026");
   });
 
+  // C5: an expiry select with no matching option is left as it was and is not
+  // counted; the card number still is.
+  it.each([
+    { name: "the expiry select has no matching option", expiryMonth: "07", filled: 1 },
+    { name: "control: the expiry select matches", expiryMonth: "12", filled: 2 },
+  ])("counts $filled filled fields when $name", async ({ expiryMonth, filled }) => {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <select autocomplete="cc-exp-month">
+        <option value="">Month</option>
+        <option value="12">December</option>
+      </select>
+    `);
+
+    const count = await performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth,
+      expiryYear: "",
+      cvv: "",
+    }, NO_WAIT);
+
+    expect(count).toBe(filled);
+  });
+
+  // C5: a card number with spaces is rejected by type=number, which sanitizes
+  // it to "" without an error, so the field is not counted.
+  it.each([
+    { name: "type=number rejects the spaced number", cardNumber: "4111 1111 1111 1111", filled: 0 },
+    { name: "control: the digits alone fit", cardNumber: "4111111111111111", filled: 1 },
+  ])("counts $filled filled fields when $name", async ({ cardNumber, filled }) => {
+    setupForm(`<input type="number" autocomplete="cc-number" />`);
+
+    const count = await performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber,
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "",
+    }, NO_WAIT);
+
+    expect(count).toBe(filled);
+  });
+
   it("normalizes month select values (1 matches 01)", async () => {
     setupForm(`
       <input autocomplete="cc-number" />
@@ -591,7 +637,7 @@ describe("performCreditCardAutofill — dynamic forms (#654)", () => {
 
   const DETAILS = `<input autocomplete="cc-exp" placeholder="MM/YY" /><input autocomplete="cc-csc" />`;
 
-  async function settle(fill: Promise<void>): Promise<void> {
+  async function settle(fill: Promise<unknown>): Promise<void> {
     await vi.advanceTimersByTimeAsync(DEFAULT_LATE_FIELD_WINDOW_MS + 100);
     await fill;
   }

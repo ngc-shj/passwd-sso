@@ -2,7 +2,8 @@
 // plus a self-registering AUTOFILL_CC_FILL listener, mirroring autofill-lib.ts.
 
 import { EXT_MSG } from "../lib/constants";
-import type { CreditCardAutofillPayload } from "../types/messages";
+import type { CreditCardAutofillPayload, FillResponse } from "../types/messages";
+import { isInsecureHttpUrl } from "../lib/url-matching";
 import { detectExpiryFormat, formatCombinedExpiry } from "./cc-form-detector-lib";
 import {
   detectCreditCardFields,
@@ -33,7 +34,7 @@ import { fillAdmission, getHintString } from "./field-query-lib";
 
 // Every write runs in the task where its step's `accepts` has just passed
 // (runFillSequence), so the setters do not re-check visibility.
-function setInputValue(input: HTMLInputElement, value: string): void {
+function setInputValue(input: HTMLInputElement, value: string): boolean {
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -44,10 +45,20 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   } else {
     input.value = value;
   }
+  // Taken before any event runs, so a page handler that rewrites the field
+  // cannot decide it. The field must hold exactly the value: the browser's
+  // sanitization changes it silently, emptying one the type rejects (a
+  // postcode in type=number, 01/15/1990 in type=date) and stripping line
+  // breaks from text and password inputs, which would leave a password that
+  // no longer matches. Only email and url inputs, which also trim surrounding
+  // whitespace, are compared against the trimmed value.
+  const expected = input.type === "email" || input.type === "url" ? value.trim() : value;
+  const took = input.value === expected;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
   input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
   input.dispatchEvent(new Event("blur", { bubbles: true }));
+  return took;
 }
 
 /** Normalize month values for select matching: "1" → "01", "January" → "01", etc. */
@@ -84,7 +95,7 @@ function setSelectValue(
   targetValue: string,
   normalizer: (v: string) => string,
   diagField: SelectDiagField,
-): void {
+): boolean {
   const normalizedTarget = normalizer(targetValue);
 
   // Find exact match after normalization
@@ -102,7 +113,7 @@ function setSelectValue(
     // Only the extension's own field identifier is logged; neither the target
     // VALUE (the user's card expiry) nor anything read from the DOM reaches it.
     logNoSelectMatch(diagField);
-    return;
+    return false;
   }
 
   const setter = Object.getOwnPropertyDescriptor(
@@ -116,6 +127,7 @@ function setSelectValue(
   }
   select.dispatchEvent(new Event("input", { bubbles: true }));
   select.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
 }
 
 // A year input asking for two digits (a "YY" hint, maxlength 2) gets the last
@@ -144,18 +156,23 @@ function writeExpiryPart(
   value: string,
   normalizer: (v: string) => string,
   diagField: SelectDiagField,
-): void {
-  if (el instanceof HTMLSelectElement) {
-    setSelectValue(el, value, normalizer, diagField);
-  } else {
-    setInputValue(el, value);
-  }
+): boolean {
+  if (el instanceof HTMLSelectElement) return setSelectValue(el, value, normalizer, diagField);
+  return setInputValue(el, value);
 }
 
 export async function performCreditCardAutofill(
   payload: CreditCardAutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
-): Promise<void> {
+): Promise<number> {
+  // Never into an insecure http page, where a network attacker can serve the
+  // form: by the frame's URL, or by the origin an about:blank or srcdoc frame
+  // inherits. The request still ends this frame's pending fill.
+  if (isInsecureHttpUrl(window.location.href) || isInsecureHttpUrl(self.origin)) {
+    supersedeActiveFill();
+    return 0;
+  }
+
   // T0: the detector's result, scoped to the block the user is in, is every
   // step's initial target.
   const admit = fillAdmission();
@@ -175,7 +192,7 @@ export async function performCreditCardAutofill(
   });
   if (!fields?.cardNumber) {
     supersedeActiveFill();
-    return;
+    return 0;
   }
   const cardNumber = fields.cardNumber;
 
@@ -190,7 +207,9 @@ export async function performCreditCardAutofill(
       initial: fields.cardholderName,
       relocate: relocateCcField("cardholderName"),
       accepts: isCreditCardFillable,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.cardholderName),
+      write: (el) => {
+        return setInputValue(el as HTMLInputElement, payload.cardholderName);
+      },
       release: noRelease,
     });
   }
@@ -201,7 +220,9 @@ export async function performCreditCardAutofill(
       initial: cardNumber,
       relocate: relocateCcField("cardNumber"),
       accepts: isCreditCardFillable,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.cardNumber),
+      write: (el) => {
+        return setInputValue(el as HTMLInputElement, payload.cardNumber);
+      },
       release: noRelease,
     });
   }
@@ -223,7 +244,7 @@ export async function performCreditCardAutofill(
       write: (el) => {
         const input = el as HTMLInputElement;
         const format = detectExpiryFormat(input);
-        setInputValue(input, formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format));
+        return setInputValue(input, formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format));
       },
       release: noRelease,
     });
@@ -263,9 +284,10 @@ export async function performCreditCardAutofill(
       relocate: relocateCcField("cvv"),
       accepts: isCreditCardFillable,
       write: (el) => {
-        setInputValue(el as HTMLInputElement, payload.cvv);
+        const took = setInputValue(el as HTMLInputElement, payload.cvv);
         // CVV memory wipe — overwrite payload property immediately after use
         payload.cvv = "";
+        return took;
       },
       release: () => {
         payload.cvv = "";
@@ -294,10 +316,24 @@ if (
   !(window as unknown as Record<string, boolean>)[CC_AUTOFILL_GUARD]
 ) {
   (window as unknown as Record<string, boolean>)[CC_AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener((message: CreditCardAutofillPayload, sender: chrome.runtime.MessageSender) => {
-    // Only accept messages from our own extension — reject external senders
-    if (message?.type === EXT_MSG.AUTOFILL_CC_FILL && sender.id === chrome.runtime.id) {
-      performCreditCardAutofill(message).catch(() => logFillError(FILL_DIAG_CODE.CC_FILL_FAILED));
-    }
-  });
+  chrome.runtime.onMessage.addListener(
+    (
+      message: CreditCardAutofillPayload,
+      sender: chrome.runtime.MessageSender,
+      sendResponse: (response: FillResponse) => void,
+    ) => {
+      // Only accept messages from our own extension — reject external senders
+      if (message?.type !== EXT_MSG.AUTOFILL_CC_FILL || sender.id !== chrome.runtime.id) return false;
+      // Sent to one document only, so this frame always answers; a refusal or
+      // an empty page answers 0.
+      performCreditCardAutofill(message).then(
+        (filled) => sendResponse({ filled }),
+        () => {
+          logFillError(FILL_DIAG_CODE.CC_FILL_FAILED);
+          sendResponse({ filled: 0 });
+        },
+      );
+      return true;
+    },
+  );
 }

@@ -200,10 +200,20 @@ export interface AutofillPayload {
   // fill to every frame so an embedded login iframe can fill, and each frame
   // self-checks so a cross-origin third-party iframe does not.
   allowedHosts?: string[];
+  // Hosts of the entry's http:// URLs (its url and url-type custom fields). A
+  // frame on an insecure http page fills only when its host matches one of
+  // these; absent or empty denies there.
+  allowedHttpHosts?: string[];
   // Popup fills only: the exact origin the popup showed the user. The top frame
   // also fills when its own origin equals it (a user-confirmed mismatched or
   // hostless entry); a subframe ignores it.
   topFrameOrigin?: string;
+}
+
+// A content fill listener's answer: the number of fields its run wrote. The
+// background counts a fill as landed only when `filled` is above zero.
+export interface FillResponse {
+  filled: number;
 }
 
 export interface AutofillTargetHint {

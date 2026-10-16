@@ -2,7 +2,8 @@
 // plus a self-registering AUTOFILL_IDENTITY_FILL listener, mirroring autofill-lib.ts.
 
 import { EXT_MSG } from "../lib/constants";
-import type { IdentityAutofillPayload } from "../types/messages";
+import type { IdentityAutofillPayload, FillResponse } from "../types/messages";
+import { isInsecureHttpUrl } from "../lib/url-matching";
 import {
   detectIdentityFields,
   isIdentityCandidate,
@@ -31,7 +32,7 @@ import {
 // Every write runs in the task where its step's `accepts` has just passed
 // (runFillSequence), so the setters do not re-check visibility.
 
-function setInputValue(input: HTMLInputElement, value: string): void {
+function setInputValue(input: HTMLInputElement, value: string): boolean {
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -42,17 +43,27 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   } else {
     input.value = value;
   }
+  // Taken before any event runs, so a page handler that rewrites the field
+  // cannot decide it. The field must hold exactly the value: the browser's
+  // sanitization changes it silently, emptying one the type rejects (a
+  // postcode in type=number, 01/15/1990 in type=date) and stripping line
+  // breaks from text and password inputs, which would leave a password that
+  // no longer matches. Only email and url inputs, which also trim surrounding
+  // whitespace, are compared against the trimmed value.
+  const expected = input.type === "email" || input.type === "url" ? value.trim() : value;
+  const took = input.value === expected;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
   input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
   input.dispatchEvent(new Event("blur", { bubbles: true }));
+  return took;
 }
 
 function setSelectValue(
   select: HTMLSelectElement,
   targetValue: string,
   diagField: SelectDiagField,
-): void {
+): boolean {
   const normalizedTarget = targetValue.trim().toLowerCase();
 
   // Exact match by value first, then by text content
@@ -69,7 +80,7 @@ function setSelectValue(
     // be the user's name, address, phone, email or date of birth — and nothing
     // read from the DOM reaches the console either.
     logNoSelectMatch(diagField);
-    return;
+    return false;
   }
 
   const setter = Object.getOwnPropertyDescriptor(
@@ -83,6 +94,7 @@ function setSelectValue(
   }
   select.dispatchEvent(new Event("input", { bubbles: true }));
   select.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
 }
 
 // ── Main autofill function ──
@@ -108,18 +120,23 @@ const IDENTITY_ROLES = [
 // other role, date of birth and postal code included, gets the full rule.
 const GEOMETRY_EXEMPT_ROLES: ReadonlySet<keyof IdentityFormFields> = new Set(["country", "region"]);
 
-function writeField(el: FillTarget, value: string, diagField: SelectDiagField): void {
-  if (el instanceof HTMLSelectElement) {
-    setSelectValue(el, value, diagField);
-  } else {
-    setInputValue(el, value);
-  }
+function writeField(el: FillTarget, value: string, diagField: SelectDiagField): boolean {
+  if (el instanceof HTMLSelectElement) return setSelectValue(el, value, diagField);
+  return setInputValue(el, value);
 }
 
 export async function performIdentityAutofill(
   payload: IdentityAutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
-): Promise<void> {
+): Promise<number> {
+  // Never into an insecure http page, where a network attacker can serve the
+  // form: by the frame's URL, or by the origin an about:blank or srcdoc frame
+  // inherits. The request still ends this frame's pending fill.
+  if (isInsecureHttpUrl(window.location.href) || isInsecureHttpUrl(self.origin)) {
+    supersedeActiveFill();
+    return 0;
+  }
+
   // T0: the detector's result, scoped to the block the user is in, is every
   // step's initial target.
   const admit = fillAdmission();
@@ -137,7 +154,7 @@ export async function performIdentityAutofill(
   });
   if (!fields) {
     supersedeActiveFill();
-    return;
+    return 0;
   }
 
   const steps: FillStep[] = [];
@@ -237,12 +254,24 @@ if (
   !(window as unknown as Record<string, boolean>)[IDENTITY_AUTOFILL_GUARD]
 ) {
   (window as unknown as Record<string, boolean>)[IDENTITY_AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener((message: IdentityAutofillPayload, sender: chrome.runtime.MessageSender) => {
-    // Only accept messages from our own extension — reject external senders
-    if (message?.type === EXT_MSG.AUTOFILL_IDENTITY_FILL && sender.id === chrome.runtime.id) {
-      performIdentityAutofill(message).catch(() =>
-        logFillError(FILL_DIAG_CODE.IDENTITY_FILL_FAILED),
+  chrome.runtime.onMessage.addListener(
+    (
+      message: IdentityAutofillPayload,
+      sender: chrome.runtime.MessageSender,
+      sendResponse: (response: FillResponse) => void,
+    ) => {
+      // Only accept messages from our own extension — reject external senders
+      if (message?.type !== EXT_MSG.AUTOFILL_IDENTITY_FILL || sender.id !== chrome.runtime.id) return false;
+      // Sent to one document only, so this frame always answers; a refusal or
+      // an empty page answers 0.
+      performIdentityAutofill(message).then(
+        (filled) => sendResponse({ filled }),
+        () => {
+          logFillError(FILL_DIAG_CODE.IDENTITY_FILL_FAILED);
+          sendResponse({ filled: 0 });
+        },
       );
-    }
-  });
+      return true;
+    },
+  );
 }

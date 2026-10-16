@@ -35,8 +35,8 @@ type InjectionResult = { frameId: number; documentId: string; result: unknown };
 
 /**
  * chrome.scripting.executeScript as the content-bundle probe sees it: a `func`
- * call without `args` (the location probe; the direct-autofill func always
- * passes args) gets one InjectionResult per targeted frame — every frame in
+ * call without `args` (the location probe) gets one InjectionResult per
+ * targeted frame — every frame in
  * `frames` for an `allFrames` target, the named frames for a `frameIds`
  * target, or the frame a `documentIds` target's id was minted for — carrying
  * that frame's documentId and a `{ href, origin }` result: `urlFor(frameId)`

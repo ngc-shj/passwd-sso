@@ -106,7 +106,8 @@ function installChromeMock() {
       unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
     },
     tabs: {
-      sendMessage: vi.fn().mockResolvedValue({}),
+      // A fill listener answers the fields it wrote; one means the fill landed.
+      sendMessage: vi.fn().mockResolvedValue({ filled: 1 }),
       get: vi.fn().mockResolvedValue({ id: 1, url: "https://example.com" }),
       query: vi.fn().mockResolvedValue([{ id: 1, url: "https://example.com" }]),
       onActivated: { addListener: vi.fn() },
@@ -732,8 +733,8 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     // a cross-origin subframe.
     chromeMock!.tabs.sendMessage = vi
       .fn()
-      .mockRejectedValueOnce(new Error("Could not establish connection"))
-      .mockResolvedValueOnce({});
+      .mockRejectedValueOnce(new Error(NO_RECEIVER))
+      .mockResolvedValueOnce({ filled: 1 });
 
     const res = (await sendMessage(
       { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId: "cc-1" },
@@ -785,7 +786,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
       times.push(performance.now());
       const next = queue.shift();
       if (next !== undefined) throw new Error(next);
-      return {};
+      return { filled: 1 };
     });
     return times;
   }
@@ -865,25 +866,30 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
   // The bundle only goes where the manifest's own content_scripts.matches reach;
   // activeTab would otherwise let it into pages the manifest deliberately skips.
+  // A document with no host of its own gets nothing. A card never goes to an
+  // insecure http page (C4): the sender's own URL refuses it before any send,
+  // so that page gets no fill script either; the fill-only script it would get
+  // is pinned by the LOGIN fallback tests.
   it.each([
-    { url: "https://shop.example/checkout", injected: true },
-    { url: "http://localhost:3000/checkout", injected: true },
-    { url: "http://shop.example/checkout", injected: false },
-    { url: "about:blank", injected: false },
-  ])("C5: injects the bundle into $url: $injected", async ({ url, injected }) => {
+    { url: "https://shop.example/checkout", files: [PROD_LOADER], error: undefined, sends: 2 },
+    { url: "http://localhost:3000/checkout", files: [PROD_LOADER], error: undefined, sends: 2 },
+    { url: "http://shop.example/checkout", files: null, error: "INSECURE_PAGE_FILL_REFUSED", sends: 0 },
+    { url: "about:blank", files: null, error: "AUTOFILL_INJECT_FAILED", sends: 1 },
+  ])("C5: a fill into $url injects $files", async ({ url, files, error, sends }) => {
     probeUrl = url;
     await unlock();
     queueCcSendResults([NO_RECEIVER]);
 
-    // The request comes from the probed host, so only the bundle scope decides.
+    // The request comes from the probed host, so only the fill scope decides.
     const res = await ccFillFromFrame42(url.startsWith("about:") ? undefined : url);
 
-    const bundleCalls = chromeMock!.scripting.executeScript.mock.calls.filter(
-      (c: unknown[]) => "files" in (c[0] as object),
-    );
-    expect(bundleCalls).toHaveLength(injected ? 1 : 0);
-    expect(res).toMatchObject(injected ? { ok: true } : { ok: false, error: "AUTOFILL_INJECT_FAILED" });
-    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(injected ? 2 : 1);
+    const fileInjections = chromeMock!.scripting.executeScript.mock.calls
+      .map((c: unknown[]) => c[0] as { files?: string[] })
+      .filter((injection: { files?: string[] }) => injection.files)
+      .map((injection: { files?: string[] }) => injection.files);
+    expect(fileInjections).toEqual(files ? [files] : []);
+    expect(res).toMatchObject(error ? { ok: false, error } : { ok: true });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(sends);
   });
 
   // CC/Identity have no content-side origin gate: a fallback bound to the
@@ -926,13 +932,21 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("C5: does not resend on a post-inject rejection other than 'Receiving end does not exist'", async () => {
+  // Neither rejection is resent. A closed async channel fails the resend; the
+  // "message port closed" rejection is a delivery nobody answered (C5).
+  it.each([
+    {
+      rejection: "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received",
+      error: "AUTOFILL_INJECT_FAILED",
+    },
+    { rejection: "The message port closed before a response was received.", error: "AUTOFILL_NOTHING_FILLED" },
+  ])("C5: does not resend on the post-inject rejection '$rejection'", async ({ rejection, error }) => {
     await unlock();
-    queueCcSendResults([NO_RECEIVER, "The message port closed before a response was received."]);
+    queueCcSendResults([NO_RECEIVER, rejection]);
 
     const res = await ccFillFromFrame42();
 
-    expect(res).toMatchObject({ ok: false, error: "AUTOFILL_INJECT_FAILED" });
+    expect(res).toMatchObject({ ok: false, error });
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledTimes(2);
   });
 

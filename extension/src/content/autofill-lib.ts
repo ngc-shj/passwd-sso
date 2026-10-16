@@ -1,6 +1,6 @@
-import type { AutofillPayload } from "../types/messages";
+import type { AutofillPayload, FillResponse } from "../types/messages";
 import { AUTOFILL_FILL } from "../lib/constants";
-import { extractHost, isHostMatch } from "../lib/url-matching";
+import { extractHost, isHostMatch, isInsecureHttpUrl } from "../lib/url-matching";
 import {
   resolveFillRoot,
   runFillSequence,
@@ -24,11 +24,22 @@ import { isFieldVisible, isNotSelfHidden } from "./field-query-lib";
  * user (a confirmed mismatched or hostless entry). A document that replaced the
  * requested one checks itself here, so a navigation before delivery cannot turn
  * into a fill on another site.
+ *
+ * On an insecure http page (isInsecureHttpUrl) both arms also need the page's
+ * host to match one of `allowedHttpHosts`, the hosts the entry was saved for
+ * over http; absent or empty denies there. The page is read from both the
+ * frame's URL and its origin, which an about:blank or srcdoc frame inherits
+ * from its creator.
  */
-function isFrameAllowedToFill(
-  allowedHosts: string[] | undefined,
-  topFrameOrigin: string | undefined,
-): boolean {
+function isFrameAllowedToFill(payload: AutofillPayload): boolean {
+  const { allowedHosts, allowedHttpHosts, topFrameOrigin } = payload;
+  const refusedAsInsecure = (pageUrl: string): boolean => {
+    if (!isInsecureHttpUrl(pageUrl)) return false;
+    const pageHost = extractHost(pageUrl);
+    return !pageHost || !(allowedHttpHosts ?? []).some((h) => isHostMatch(h, pageHost));
+  };
+  if (refusedAsInsecure(window.location.href) || refusedAsInsecure(self.origin)) return false;
+  const frameHost = extractHost(window.location.href);
   if (
     window.top === window.self &&
     typeof topFrameOrigin === "string" &&
@@ -36,12 +47,11 @@ function isFrameAllowedToFill(
   ) {
     return true;
   }
-  const frameHost = extractHost(window.location.href);
   if (!frameHost) return false;
   return (allowedHosts ?? []).some((h) => isHostMatch(h, frameHost));
 }
 
-function setInputValue(input: HTMLInputElement, value: string) {
+function setInputValue(input: HTMLInputElement, value: string): boolean {
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -52,11 +62,21 @@ function setInputValue(input: HTMLInputElement, value: string) {
   } else {
     input.value = value;
   }
+  // Taken before any event runs, so a page handler that rewrites the field
+  // cannot decide it. The field must hold exactly the value: the browser's
+  // sanitization changes it silently, emptying one the type rejects (a
+  // postcode in type=number, 01/15/1990 in type=date) and stripping line
+  // breaks from text and password inputs, which would leave a password that
+  // no longer matches. Only email and url inputs, which also trim surrounding
+  // whitespace, are compared against the trimmed value.
+  const expected = input.type === "email" || input.type === "url" ? value.trim() : value;
+  const took = input.value === expected;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
   // Legacy forms often validate on keyup/blur handlers.
   input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
   input.dispatchEvent(new Event("blur", { bubbles: true }));
+  return took;
 }
 
 // Input types a username can be written into.
@@ -329,15 +349,30 @@ function inDocumentOrder(elements: HTMLInputElement[]): HTMLInputElement[] {
   );
 }
 
-export async function performAutofill(
+/** A LOGIN run started by startAutofill. */
+export type StartedAutofill = {
+  /** Resolves, when the run ends, with the number of fields it wrote. */
+  filled: Promise<number>;
+  /** Whether T0 found at least one target; a run without one can only fill late. */
+  hasInitialTarget: boolean;
+};
+
+/**
+ * The synchronous part of a LOGIN fill: the frame gate and every T0 decision,
+ * then the run's start. Returns null when the frame gate refuses (the request
+ * still ends this frame's pending fill), else the started run. The listener
+ * needs both answers before it returns, to decide whether this frame answers
+ * the popup's broadcast.
+ */
+export function startAutofill(
   payload: AutofillPayload,
   opts: { lateFieldWindowMs?: number } = {},
-): Promise<void> {
+): StartedAutofill | null {
   // Frame-origin gate: never write the credential into a cross-origin subframe.
   // The newer request still ends this frame's pending fill (FR4).
-  if (!isFrameAllowedToFill(payload.allowedHosts, payload.topFrameOrigin)) {
+  if (!isFrameAllowedToFill(payload)) {
     supersedeActiveFill();
-    return;
+    return null;
   }
 
   // ── T0: every target decision is made here, before the first write ──
@@ -471,7 +506,9 @@ export async function performAutofill(
       relocate: (root) =>
         inputsIn(root).find((i) => isTextLikeTarget(i) && matchesLabel(i, lower)) ?? null,
       accepts: isTextLikeTarget,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.customFields?.[index]?.value ?? ""),
+      write: (el) => {
+        return setInputValue(el as HTMLInputElement, payload.customFields?.[index]?.value ?? "");
+      },
       release: () => {},
     });
   }
@@ -485,7 +522,9 @@ export async function performAutofill(
         return findUsernameInput(scoped, findPasswordInput(scoped));
       },
       accepts: isUsernameTarget,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.username),
+      write: (el) => {
+        return setInputValue(el as HTMLInputElement, payload.username);
+      },
       release: () => {},
     });
   }
@@ -496,7 +535,9 @@ export async function performAutofill(
       initial: passwordInput,
       relocate: (root) => findPasswordInput(eligibleInputsIn(root)),
       accepts: isPasswordTarget,
-      write: (el) => setInputValue(el as HTMLInputElement, payload.password),
+      write: (el) => {
+        return setInputValue(el as HTMLInputElement, payload.password);
+      },
       release: () => {
         payload.password = "";
       },
@@ -515,7 +556,9 @@ export async function performAutofill(
           initial: splitOtpInputs[i],
           relocate: (root) => findSplitOtpInputs(eligibleInputsIn(root), codeLen)?.[i] ?? null,
           accepts: isOtpTarget,
-          write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? ""),
+          write: (el) => {
+            return setInputValue(el as HTMLInputElement, payload.totpCode?.[i] ?? "");
+          },
           release: releaseTotp,
         });
       }
@@ -525,7 +568,9 @@ export async function performAutofill(
         initial: singleOtpInput,
         relocate: (root) => findOtpInput(eligibleInputsIn(root)),
         accepts: isOtpTarget,
-        write: (el) => setInputValue(el as HTMLInputElement, payload.totpCode ?? ""),
+        write: (el) => {
+        return setInputValue(el as HTMLInputElement, payload.totpCode ?? "");
+      },
         release: releaseTotp,
       });
     }
@@ -550,7 +595,19 @@ export async function performAutofill(
     ? resolveFillRoot(anchor, t0Targets, isLoginForeignCandidate)
     : { root: null, reanchor: () => null };
 
-  return runFillSequence(root, steps, { ...opts, reanchor });
+  return {
+    filled: runFillSequence(root, steps, { ...opts, reanchor }),
+    hasInitialTarget: steps.some((step) => step.initial !== null),
+  };
+}
+
+/** Runs a LOGIN fill and resolves with the number of fields it wrote. */
+export async function performAutofill(
+  payload: AutofillPayload,
+  opts: { lateFieldWindowMs?: number } = {},
+): Promise<number> {
+  const started = startAutofill(payload, opts);
+  return started ? started.filled : 0;
 }
 
 // Guard against double-registration when this script is injected more than once
@@ -562,10 +619,38 @@ if (
   !(window as unknown as Record<string, boolean>)[AUTOFILL_GUARD]
 ) {
   (window as unknown as Record<string, boolean>)[AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener((message: AutofillPayload, sender: chrome.runtime.MessageSender) => {
-    // Only accept messages from our own extension — reject external senders
-    if (message?.type === AUTOFILL_FILL && sender.id === chrome.runtime.id) {
-      performAutofill(message).catch(() => logFillError(FILL_DIAG_CODE.LOGIN_FILL_FAILED));
-    }
-  });
+  chrome.runtime.onMessage.addListener(
+    (
+      message: AutofillPayload,
+      sender: chrome.runtime.MessageSender,
+      sendResponse: (response: FillResponse) => void,
+    ) => {
+      // Only accept messages from our own extension — reject external senders
+      if (message?.type !== AUTOFILL_FILL || sender.id !== chrome.runtime.id) return false;
+      let started: StartedAutofill | null;
+      try {
+        started = startAutofill(message);
+      } catch {
+        logFillError(FILL_DIAG_CODE.LOGIN_FILL_FAILED);
+        return false;
+      }
+      if (!started) return false;
+      // The popup broadcasts to every frame and the first answer wins, so only a
+      // frame that passed the gate and found a target at T0 answers; any other
+      // stays silent. A frame that only fills late is reported as not filled.
+      if (!started.hasInitialTarget) {
+        started.filled.catch(() => logFillError(FILL_DIAG_CODE.LOGIN_FILL_FAILED));
+        return false;
+      }
+      started.filled.then(
+        (filled) => sendResponse({ filled }),
+        () => {
+          logFillError(FILL_DIAG_CODE.LOGIN_FILL_FAILED);
+          sendResponse({ filled: 0 });
+        },
+      );
+      // Keep the channel open until the run ends.
+      return true;
+    },
+  );
 }
