@@ -53,16 +53,32 @@ function uiDisplayedCodes(): string[] {
   return [...new Set(codes)];
 }
 
-function fillPathErrorCodes(): string[] {
-  const start = INDEX_SRC.indexOf("async function performAutofillForEntry");
-  expect(start).toBeGreaterThan(-1);
+/**
+ * The functions whose `error:` literals reach the fill result:
+ * performAutofillForEntry, and fetchAndDecryptEntry, whose failure it returns
+ * as is (FETCH_FAILED, INVALID_ENTRY and VAULT_LOCKED moved there in C7).
+ */
+const FILL_PATH_FUNCTIONS = [
+  "async function performAutofillForEntry",
+  "export async function fetchAndDecryptEntry",
+] as const;
+
+function functionErrorCodes(signature: string): string[] {
+  const start = INDEX_SRC.indexOf(signature);
+  expect(start, `${signature} not found`).toBeGreaterThan(-1);
   // Bounded by the next top-level function so the scan cannot silently widen.
   const rest = INDEX_SRC.slice(start + 1);
-  const end = rest.indexOf("\nasync function ");
-  expect(end).toBeGreaterThan(-1);
+  const end = rest.search(/\n(?:export )?(?:async )?function /);
+  expect(end, `${signature} has no following function`).toBeGreaterThan(-1);
   const body = rest.slice(0, end);
   const codes = [...body.matchAll(/error:\s*"([A-Z_]+)"/g)].map((m) => m[1]);
-  return [...new Set(codes)];
+  // Each function contributes, so an empty scan of one cannot hide in the union.
+  expect(codes.length, `${signature} returned no codes`).toBeGreaterThan(0);
+  return codes;
+}
+
+function fillPathErrorCodes(): string[] {
+  return [...new Set(FILL_PATH_FUNCTIONS.flatMap(functionErrorCodes))];
 }
 
 /**
@@ -106,8 +122,10 @@ describe("humanizeError", () => {
   it("maps every error code the autofill path can return", () => {
     const codes = fillPathErrorCodes();
     // Fail loudly if the scan matched nothing: an empty set would satisfy the
-    // per-code assertion vacuously.
-    expect(codes.length).toBeGreaterThan(3);
+    // per-code assertion vacuously. Ten is the set before the C7 extraction,
+    // which must survive the move of the fetch/decrypt codes.
+    expect(codes.length).toBeGreaterThanOrEqual(10);
+    expect(codes).toEqual(expect.arrayContaining(["FETCH_FAILED", "INVALID_ENTRY", "VAULT_LOCKED"]));
 
     for (const code of codes) {
       expect(humanizeError(code), `${code} is unmapped`).not.toBe(code);

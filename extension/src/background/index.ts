@@ -1871,72 +1871,76 @@ async function fetchAndDecryptTeamBlob(
   }
 }
 
-/** Whether a fill listener's answer reports at least one written field. */
-function isFilledAnswer(answer: unknown): boolean {
-  if (typeof answer !== "object" || answer === null) return false;
-  const filled = (answer as { filled?: unknown }).filled;
-  return typeof filled === "number" && Number.isInteger(filled) && filled > 0;
-}
+// ── Entry fetch and decrypt (autofill, HTTP auth) ───────────────
 
-async function performAutofillForEntry(
+type DecryptedEntryBlob = {
+  url?: string | null;
+  password?: string | null;
+  username?: string | null;
+  loginId?: string | null;
+  userId?: string | null;
+  email?: string | null;
+  customFields?: Array<{ label?: string; value?: string; type?: string }>;
+  totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
+  // CREDIT_CARD fields
+  cardholderName?: string | null;
+  cardNumber?: string | null;
+  expiryMonth?: string | null;
+  expiryYear?: string | null;
+  cvv?: string | null;
+  // IDENTITY fields
+  fullName?: string | null;
+  givenName?: string | null;
+  familyName?: string | null;
+  middleName?: string | null;
+  familyNameKana?: string | null;
+  givenNameKana?: string | null;
+  address?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  idNumber?: string | null;
+};
+type DecryptedEntryOverview = {
+  username?: string | null;
+  urlHost?: string | null;
+  additionalUrlHosts?: string[] | null;
+};
+
+/** Why fetchAndDecryptEntry produced no entry; a server error code passes through. */
+type EntryAccessError = "VAULT_LOCKED" | "FETCH_FAILED" | "INVALID_ENTRY" | (string & {});
+
+type EntryAccessResult =
+  | {
+      ok: true;
+      blob: DecryptedEntryBlob;
+      overview: DecryptedEntryOverview;
+      entryType: string;
+    }
+  | { ok: false; error: EntryAccessError };
+
+/**
+ * Fetch one entry (personal, or the team's when `teamId` is given) and decrypt
+ * its blob and overview, for the vault state `epoch` names. A lock at any point
+ * up to the return answers VAULT_LOCKED, which outranks every other failure.
+ * Decrypt failures other than a lock propagate, as they did inline in
+ * performAutofillForEntry.
+ */
+export async function fetchAndDecryptEntry(
   entryId: string,
-  tabId: number,
-  origin: AutofillRequestOrigin,
-  targetHint?: AutofillTargetHint,
-  teamId?: string,
-): Promise<{ ok: boolean; error?: string }> {
-  if (!encryptionKey || !currentUserId) {
-    return { ok: false, error: "VAULT_LOCKED" };
-  }
-  // The vault state this fill belongs to. Every delivery below asserts it right
-  // before the payload leaves: a lock during a probe, an inject or a resend
-  // sleep must stop the credential, not just the next fetch.
-  const epoch = currentVaultEpoch();
+  teamId: string | undefined,
+  epoch: number,
+): Promise<EntryAccessResult> {
+  const lockedResult = { ok: false, error: "VAULT_LOCKED" } as const;
   const vaultKey = encryptionKey;
   const vaultUserId = currentUserId;
-  const lockedResult = { ok: false, error: "VAULT_LOCKED" } as const;
-
-  // Every delivery of the decrypted payload goes to one document whose host was
-  // checked, addressed by documentId so a navigation in between cannot receive
-  // it: the content sender's own document, or a document probed before the
-  // first send (context menu, popup CC/Identity) or before the fallback (popup
-  // LOGIN). The one exception is the popup LOGIN first send, which is broadcast
-  // tab-wide so a login form inside an iframe fills; each frame checks its own
-  // host against allowedHosts / topFrameOrigin (isFrameAllowedToFill).
-  //
-  // The frame a probe reads. A content request names its document; the context
-  // menu names the clicked frame; the popup names no frame, so the top frame.
-  // Never `allFrames`: that would inject the decrypted credential into every
-  // frame, including a cross-origin third-party iframe whose page JS could read
-  // the filled value.
-  const probeTarget: chrome.scripting.InjectionTarget =
-    origin.kind === AUTOFILL_REQUEST_KIND.CONTENT
-      ? { tabId, documentIds: [origin.documentId] }
-      : {
-          tabId,
-          frameIds: [origin.kind === AUTOFILL_REQUEST_KIND.CONTEXT_MENU ? origin.frameId : 0],
-        };
-  // Pin the document the request is bound to. A content request accepts only its
-  // own document: if that one is gone, the fill fails rather than following the
-  // frame to a document the user never picked from.
-  const pinDocument = async (): Promise<ProbedDocument | null> => {
-    try {
-      const probed = await probeDocument(probeTarget);
-      if (
-        origin.kind === AUTOFILL_REQUEST_KIND.CONTENT &&
-        probed.documentId !== origin.documentId
-      ) {
-        return null;
-      }
-      return probed;
-    } catch {
-      return null;
-    }
-  };
-  const sendToDocument = (payload: unknown, documentId: string): Promise<unknown> => {
-    assertVaultEpoch(epoch);
-    return chrome.tabs.sendMessage(tabId, payload, { documentId });
-  };
+  if (!vaultKey || !vaultUserId || !isVaultEpochCurrent(epoch)) return lockedResult;
 
   let blobPlain: string;
   let overviewPlain: string;
@@ -1995,59 +1999,91 @@ async function performAutofillForEntry(
   // included, belongs to a vault that is gone.
   if (!isVaultEpochCurrent(epoch)) return lockedResult;
 
-  // Narrow: a JSON.parse SyntaxError embeds a window of its input, and this
-  // function's callers surface the message through normalizeErrorCode into a
-  // rendered popup toast. normalizeErrorCode now refuses free-form messages, and
-  // this narrowing is the second layer — the parse failure is not diagnosable from
+  // Narrow: a JSON.parse SyntaxError embeds a window of its input, and the
+  // callers surface the message through normalizeErrorCode into a rendered
+  // popup toast. normalizeErrorCode now refuses free-form messages, and this
+  // narrowing is the second layer — the parse failure is not diagnosable from
   // its message anyway.
-  type DecryptedEntryBlob = {
-    url?: string | null;
-    password?: string | null;
-    username?: string | null;
-    loginId?: string | null;
-    userId?: string | null;
-    email?: string | null;
-    customFields?: Array<{ label?: string; value?: string; type?: string }>;
-    totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
-    // CREDIT_CARD fields
-    cardholderName?: string | null;
-    cardNumber?: string | null;
-    expiryMonth?: string | null;
-    expiryYear?: string | null;
-    cvv?: string | null;
-    // IDENTITY fields
-    fullName?: string | null;
-    givenName?: string | null;
-    familyName?: string | null;
-    middleName?: string | null;
-    familyNameKana?: string | null;
-    givenNameKana?: string | null;
-    address?: string | null;
-    addressLine1?: string | null;
-    addressLine2?: string | null;
-    city?: string | null;
-    state?: string | null;
-    postalCode?: string | null;
-    country?: string | null;
-    phone?: string | null;
-    dateOfBirth?: string | null;
-    nationality?: string | null;
-    idNumber?: string | null;
-  };
-  type DecryptedEntryOverview = {
-    username?: string | null;
-    urlHost?: string | null;
-    additionalUrlHosts?: string[] | null;
-  };
-
-  let blob: DecryptedEntryBlob;
-  let overview: DecryptedEntryOverview;
   try {
-    blob = JSON.parse(blobPlain) as DecryptedEntryBlob;
-    overview = JSON.parse(overviewPlain) as DecryptedEntryOverview;
+    return {
+      ok: true,
+      blob: JSON.parse(blobPlain) as DecryptedEntryBlob,
+      overview: JSON.parse(overviewPlain) as DecryptedEntryOverview,
+      entryType,
+    };
   } catch {
     return { ok: false, error: "INVALID_ENTRY" };
   }
+}
+
+/** Whether a fill listener's answer reports at least one written field. */
+function isFilledAnswer(answer: unknown): boolean {
+  if (typeof answer !== "object" || answer === null) return false;
+  const filled = (answer as { filled?: unknown }).filled;
+  return typeof filled === "number" && Number.isInteger(filled) && filled > 0;
+}
+
+async function performAutofillForEntry(
+  entryId: string,
+  tabId: number,
+  origin: AutofillRequestOrigin,
+  targetHint?: AutofillTargetHint,
+  teamId?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!encryptionKey || !currentUserId) {
+    return { ok: false, error: "VAULT_LOCKED" };
+  }
+  // The vault state this fill belongs to. Every delivery below asserts it right
+  // before the payload leaves: a lock during a probe, an inject or a resend
+  // sleep must stop the credential, not just the next fetch.
+  const epoch = currentVaultEpoch();
+  const lockedResult = { ok: false, error: "VAULT_LOCKED" } as const;
+
+  // Every delivery of the decrypted payload goes to one document whose host was
+  // checked, addressed by documentId so a navigation in between cannot receive
+  // it: the content sender's own document, or a document probed before the
+  // first send (context menu, popup CC/Identity) or before the fallback (popup
+  // LOGIN). The one exception is the popup LOGIN first send, which is broadcast
+  // tab-wide so a login form inside an iframe fills; each frame checks its own
+  // host against allowedHosts / topFrameOrigin (isFrameAllowedToFill).
+  //
+  // The frame a probe reads. A content request names its document; the context
+  // menu names the clicked frame; the popup names no frame, so the top frame.
+  // Never `allFrames`: that would inject the decrypted credential into every
+  // frame, including a cross-origin third-party iframe whose page JS could read
+  // the filled value.
+  const probeTarget: chrome.scripting.InjectionTarget =
+    origin.kind === AUTOFILL_REQUEST_KIND.CONTENT
+      ? { tabId, documentIds: [origin.documentId] }
+      : {
+          tabId,
+          frameIds: [origin.kind === AUTOFILL_REQUEST_KIND.CONTEXT_MENU ? origin.frameId : 0],
+        };
+  // Pin the document the request is bound to. A content request accepts only its
+  // own document: if that one is gone, the fill fails rather than following the
+  // frame to a document the user never picked from.
+  const pinDocument = async (): Promise<ProbedDocument | null> => {
+    try {
+      const probed = await probeDocument(probeTarget);
+      if (
+        origin.kind === AUTOFILL_REQUEST_KIND.CONTENT &&
+        probed.documentId !== origin.documentId
+      ) {
+        return null;
+      }
+      return probed;
+    } catch {
+      return null;
+    }
+  };
+  const sendToDocument = (payload: unknown, documentId: string): Promise<unknown> => {
+    assertVaultEpoch(epoch);
+    return chrome.tabs.sendMessage(tabId, payload, { documentId });
+  };
+
+  const access = await fetchAndDecryptEntry(entryId, teamId, epoch);
+  if (!access.ok) return { ok: false, error: access.error };
+  const { blob, overview, entryType } = access;
 
   // Hosts this entry is bound to. Sent to the content script so each frame can
   // self-verify its host before writing the password (the popup LOGIN fill is

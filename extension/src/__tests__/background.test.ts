@@ -6715,6 +6715,237 @@ describe("vault epoch: an operation stops at the lock it straddles (#885)", () =
     });
   });
 
+  // ── C7 characterization: the entry fetch and decrypt behind AUTOFILL ──
+  // Pinned at the message level so the extraction of fetchAndDecryptEntry
+  // (http-auth-dialog plan C7) cannot change what a fill decrypts or answers.
+
+  describe("AUTOFILL entry fetch and decrypt (C7)", () => {
+    const BY_ID_PATH = extApiPath.passwordById("pw-c7");
+    const fillFromPopup = () =>
+      sendMessage({ type: "AUTOFILL", entryId: "pw-c7", tabId: 1, expectedOrigin: "https://example.com" });
+    // The AAD each decryptData call received, decoded from the observable
+    // buildPersonalEntryAAD mock below; undefined when the call passed none.
+    const aadsFor = (ciphertext: string) =>
+      (cryptoMocks.decryptData.mock.calls as unknown[][])
+        .filter(([encrypted]) => (encrypted as { ciphertext?: string })?.ciphertext === ciphertext)
+        .map(([, , aad]) => (aad === undefined ? undefined : new TextDecoder().decode(aad as Uint8Array)));
+
+    // Replace the by-id answer; every other path keeps the describe's fetch mock.
+    function serveById(respond: (body: Record<string, unknown>) => unknown): void {
+      const base = fetchMock.getMockImplementation() as (
+        url: string,
+        init?: RequestInit,
+      ) => Promise<{ json: () => Promise<unknown> }>;
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (!String(url).endsWith(BY_ID_PATH)) return base(url, init);
+        const res = await base(url, init);
+        return respond((await res.json()) as Record<string, unknown>);
+      });
+    }
+    const serverError = (body: unknown) => () => ({ ok: false, status: 404, json: async () => body });
+
+    beforeEach(() => {
+      // The shared mock answers one constant AAD for every field, which would
+      // make a BLOB/OVERVIEW swap invisible. Encode the inputs instead.
+      cryptoMocks.buildPersonalEntryAAD.mockImplementation(
+        (userId: string, entryId: string, vaultType: string) =>
+          new TextEncoder().encode(`${userId}/${entryId}/${vaultType}`),
+      );
+      serve(
+        { id: "pw-c7", blob: "c7-blob", overview: "c7-ov", entryType: EXT_ENTRY_TYPE.LOGIN },
+        { password: "c7-secret", username: "alice" },
+        LOGIN_OVERVIEW,
+      );
+    });
+
+    afterEach(() => {
+      cryptoMocks.buildPersonalEntryAAD.mockReturnValue(new Uint8Array([1, 2]));
+    });
+
+    it("decrypts the blob with the BLOB AAD and the overview with the OVERVIEW AAD", async () => {
+      await unlockAndSettle();
+
+      expect(await fillFromPopup()).toEqual({ type: "AUTOFILL", ok: true, error: undefined });
+      expect(aadsFor("c7-blob")).toEqual(["user-1/pw-c7/blob"]);
+      expect(aadsFor("c7-ov")).toEqual(["user-1/pw-c7/overview"]);
+      // Both under the vault key.
+      const keys = (cryptoMocks.decryptData.mock.calls as unknown[][])
+        .filter(([encrypted]) => ["c7-blob", "c7-ov"].includes((encrypted as { ciphertext: string }).ciphertext))
+        .map(([, key]) => key);
+      expect(keys).toEqual(["enc-key", "enc-key"]);
+    });
+
+    it.each([
+      ["0", (body: Record<string, unknown>) => ({ ...body, aadVersion: 0 })],
+      ["absent", ({ aadVersion: _omitted, ...body }: Record<string, unknown>) => body],
+    ])("passes no AAD to either decrypt when aadVersion is %s", async (_name, rewrite) => {
+      serveById((body) => ({ ok: true, json: async () => rewrite(body) }));
+      await unlockAndSettle();
+
+      expect(await fillFromPopup()).toEqual({ type: "AUTOFILL", ok: true, error: undefined });
+      expect(aadsFor("c7-blob")).toEqual([undefined]);
+      expect(aadsFor("c7-ov")).toEqual([undefined]);
+    });
+
+    it.each([
+      ["blob", "c7-blob"],
+      ["overview", "c7-ov"],
+    ])("answers INVALID_ENTRY with no plaintext when the %s is not JSON", async (_name, ciphertext) => {
+      setDecryptedPlaintext(ciphertext, '{"password":"c7-plain-leak');
+      await unlockAndSettle();
+
+      const res = await fillFromPopup();
+      expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "INVALID_ENTRY" });
+      expect(JSON.stringify(res)).not.toContain("c7-plain-leak");
+      expect(pageMessagesCarrying("c7-plain-leak")).toEqual([]);
+    });
+
+    it("passes the server's body.error through on a failed fetch", async () => {
+      serveById(serverError({ error: "NOT_FOUND" }));
+      await unlockAndSettle();
+
+      expect(await fillFromPopup()).toEqual({ type: "AUTOFILL", ok: false, error: "NOT_FOUND" });
+      expect(aadsFor("c7-blob")).toEqual([]);
+    });
+
+    it("answers FETCH_FAILED on a failed fetch whose body names no error", async () => {
+      serveById(serverError({}));
+      await unlockAndSettle();
+
+      expect(await fillFromPopup()).toEqual({ type: "AUTOFILL", ok: false, error: "FETCH_FAILED" });
+    });
+
+    describe("a lock during the personal fetch", () => {
+      it.each(INTERRUPTIONS)("answers VAULT_LOCKED and delivers nothing after %s", async (_name, interrupt) => {
+        await unlockAndSettle();
+        const hold = holdFetch(fetchMock, BY_ID_PATH);
+        const pending = fillFromPopup();
+        await hold.reached;
+        await interrupt();
+        hold.release();
+
+        expect(await pending).toEqual({ type: "AUTOFILL", ok: false, error: "VAULT_LOCKED" });
+        expect(pageMessagesCarrying("c7-secret")).toEqual([]);
+        expect(injectionsCarrying("c7-secret")).toEqual([]);
+      });
+
+      it.each(INTERRUPTIONS)("outranks the entry's own INVALID_ENTRY after %s", async (_name, interrupt) => {
+        setDecryptedPlaintext("c7-blob", "not json");
+        await unlockAndSettle();
+        const hold = holdFetch(fetchMock, BY_ID_PATH);
+        const pending = fillFromPopup();
+        await hold.reached;
+        await interrupt();
+        hold.release();
+
+        expect(await pending).toEqual({ type: "AUTOFILL", ok: false, error: "VAULT_LOCKED" });
+      });
+
+      it("positive control: released without a lock the invalid entry answers INVALID_ENTRY", async () => {
+        setDecryptedPlaintext("c7-blob", "not json");
+        await unlockAndSettle();
+        const hold = holdFetch(fetchMock, BY_ID_PATH);
+        const pending = fillFromPopup();
+        await hold.reached;
+        hold.release();
+
+        expect(await pending).toEqual({ type: "AUTOFILL", ok: false, error: "INVALID_ENTRY" });
+      });
+
+      it.each(INTERRUPTIONS)("outranks the server's error code after %s", async (_name, interrupt) => {
+        serveById(serverError({ error: "NOT_FOUND" }));
+        await unlockAndSettle();
+        const hold = holdFetch(fetchMock, BY_ID_PATH);
+        const pending = fillFromPopup();
+        await hold.reached;
+        await interrupt();
+        hold.release();
+
+        expect(await pending).toEqual({ type: "AUTOFILL", ok: false, error: "VAULT_LOCKED" });
+      });
+
+      it("positive control: released without a lock the server's error code passes through", async () => {
+        serveById(serverError({ error: "NOT_FOUND" }));
+        await unlockAndSettle();
+        const hold = holdFetch(fetchMock, BY_ID_PATH);
+        const pending = fillFromPopup();
+        await hold.reached;
+        hold.release();
+
+        expect(await pending).toEqual({ type: "AUTOFILL", ok: false, error: "NOT_FOUND" });
+      });
+
+      it("positive control: released without a lock the password is delivered", async () => {
+        await unlockAndSettle();
+        const hold = holdFetch(fetchMock, BY_ID_PATH);
+        const pending = fillFromPopup();
+        await hold.reached;
+        hold.release();
+
+        expect(await pending).toEqual({ type: "AUTOFILL", ok: true, error: undefined });
+        expect(pageMessagesCarrying("c7-secret")).toHaveLength(1);
+      });
+    });
+
+    // The extracted helper itself, as the HTTP-auth path will call it.
+    describe("fetchAndDecryptEntry, personal path", () => {
+      const vaultEpoch = () => import("../background/vault-epoch");
+
+      it("returns the decrypted blob, overview and entry type", async () => {
+        await unlockAndSettle();
+        const epoch = (await vaultEpoch()).currentVaultEpoch();
+
+        expect(await bgModule!.fetchAndDecryptEntry("pw-c7", undefined, epoch)).toEqual({
+          ok: true,
+          blob: { password: "c7-secret", username: "alice" },
+          overview: LOGIN_OVERVIEW,
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        });
+        expect(aadsFor("c7-blob")).toEqual(["user-1/pw-c7/blob"]);
+        expect(aadsFor("c7-ov")).toEqual(["user-1/pw-c7/overview"]);
+      });
+
+      it("answers VAULT_LOCKED without a fetch while the vault is locked", async () => {
+        connect();
+        const epoch = (await vaultEpoch()).currentVaultEpoch();
+
+        expect(await bgModule!.fetchAndDecryptEntry("pw-c7", undefined, epoch)).toEqual({
+          ok: false,
+          error: "VAULT_LOCKED",
+        });
+        expect(fetchCalls(BY_ID_PATH)).toBe(0);
+      });
+
+      it("answers VAULT_LOCKED without a fetch for an epoch that is no longer current", async () => {
+        await unlockAndSettle();
+        const { currentVaultEpoch } = await vaultEpoch();
+        const stale = currentVaultEpoch();
+        await lock();
+        unlockUserId = "user-2";
+        expect(await unlock()).toEqual({ type: "UNLOCK_VAULT", ok: true });
+        expect(currentVaultEpoch()).not.toBe(stale);
+
+        expect(await bgModule!.fetchAndDecryptEntry("pw-c7", undefined, stale)).toEqual({
+          ok: false,
+          error: "VAULT_LOCKED",
+        });
+        expect(fetchCalls(BY_ID_PATH)).toBe(0);
+      });
+
+      it.each(INTERRUPTIONS)("answers VAULT_LOCKED after %s during the fetch", async (_name, interrupt) => {
+        await unlockAndSettle();
+        const epoch = (await vaultEpoch()).currentVaultEpoch();
+        const hold = holdFetch(fetchMock, BY_ID_PATH);
+        const pending = bgModule!.fetchAndDecryptEntry("pw-c7", undefined, epoch);
+        await hold.reached;
+        await interrupt();
+        hold.release();
+
+        expect(await pending).toEqual({ ok: false, error: "VAULT_LOCKED" });
+      });
+    });
+  });
+
   // ── A11: LOGIN_DETECTED ──
 
   describe("LOGIN_DETECTED (A11)", () => {
