@@ -121,10 +121,86 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
 - **`savedUrlOrigins(blob)`:** extracted beside the existing `entryHttpHosts` logic, returning normalized origins from `url` and `url`-type custom fields.
 - **Callers:** autofill, C3 and C4. The autofill tests must stay green with no expectation changes.
 
+## Round 2 amendments (these override the contract text above where they differ)
+
+- **C4 rule 3 (sec R2 N1):** additionally `details.type === "main_frame"`. Only a top-level navigation is answered; an `<img>`, `fetch` or `sub_frame` from any page gets `{}`. After one answered navigation, Chrome's auth cache covers the site's subresources.
+- **Incognito (N14):** a challenge from an incognito tab is not answered.
+- **C4 rule 5 (N10, T11):** a `requestId` is recorded at first receipt. Any terminal decision (Send, Cancel, close, timeout, error) ends it, so a re-raised challenge, including Chrome's own retry after Cancel, gets `{}` with no new window.
+- **C4 rule 7, the prompt (T1, N2, N3, N5, N6, N7, N13):**
+  - **Module:** `background/http-auth-prompt.ts` owns the prompt:
+    - `openPrompt(req): Promise<"send" | "cancel">`;
+    - window creation (`chrome.windows.create({ type: "popup" })`, placed relative to the tab's window);
+    - the 60 s timeout, which also closes the window;
+    - `windows.onRemoved` mapped to `"cancel"`;
+    - routing of `HTTP_AUTH_PROMPT_DECIDE` by an unguessable prompt id.
+  - **Decisions:** an unknown, settled or stale id is ignored. A second `DECIDE` is dropped.
+  - **Tests:** this module is tested against a `chrome.windows` mock; `http-auth.ts` is tested through the seam.
+  - **One prompt per `(origin, tabId)`.** With `main_frame` only, that is one navigation.
+  - **Abort:** `tabs.onRemoved`, and `webRequest.onErrorOccurred` for the requestId, settle it as `"cancel"`.
+  - **The window shows:**
+    - `details.url`;
+    - `details.initiator`, labelled "triggered by", or "address bar / bookmark" when undefined;
+    - the entry title and username, from the cached overview, never a full decrypt;
+    - `details.scheme`;
+    - the http warning, which covers Digest too (an offline-crackable hash).
+    
+    It does not show `details.realm` (server-controlled text). It does not show `tab.url`, which the extension cannot read without host access.
+  - **Input protection:**
+    - "Send" is disabled for 800 ms after the window becomes visible and focused, and again after each refocus;
+    - "Send" is never autofocused or the default button;
+    - Enter and Escape mean Cancel;
+    - a click counts only while `document.hasFocus()`.
+  - **The page is not web-accessible.** It is not in `web_accessible_resources`, so no site can frame it.
+- **After "Send" (N9):** rules 4 and 9 run again (`getBinding` still maps to the same entry, and `permissions.contains`) before the full fetch and decrypt. The full decrypt happens only after Send. A test asserts `fetchAndDecryptEntry` is not called before `DECIDE`.
+- **Activity (N4, T2):** `HTTP_AUTH_PROMPT_GET` and `HTTP_AUTH_PROMPT_DECIDE` are excluded from `registerActivity()`, as `KEEPALIVE_PING` is. This is tested at `handleMessage` level, observing `alarms.create(ALARM_VAULT_LOCK)`, with a `GET_STATUS` control.
+- **C5 (N8):** `releasePermissions` keeps a pattern that *covers* the server origin. Coverage, not equality: `http://localhost/*` covers `http://localhost:3001`. Every `permissions.remove` is wrapped in try/catch and logged (N11).
+- **C3 pending intent (N12, T9, T12):**
+  - **Shape:** one `storage.session` slot `{ nonce, origin, entryId, teamId, expiresAt }` with a 2-minute TTL.
+  - **Order in the click handler:** the `set` is fired un-awaited, then `permissions.request` is called.
+  - **Clearing:** a `false` grant or a throw clears the slot.
+  - **Completion:** `onAdded` completes the intent only when it is fresh, `added.origins` includes its pattern, and the API permissions are present. Completion clears the slot.
+  - **Idempotent:** the popup path and the `onAdded` path may both run. A second completion is a no-op that keeps the binding and the permissions.
+- **C2 tampering (N11):** content-script `matches` may already grant host access to every https origin, so for https the defence rests on the click and rule 9, not on `permissions.contains`. VE2 adds observable (e): `permissions.contains({ origins: ["https://unrelated.example/*"] })` before any grant.
+- **C7 (T3):** before the extraction, characterization tests at the AUTOFILL message level are committed and run green against the inline code. They cover:
+  - `decryptData` args per field (BLOB vs OVERVIEW AAD; `undefined` AAD for `aadVersion` 0);
+  - `INVALID_ENTRY` with no plaintext in the error;
+  - the server `body.error` passthrough;
+  - `VAULT_LOCKED` on a lock during the personal fetch.
+  
+  `entryHttpHosts` is left as it is (host-based). `savedUrlOrigins` is a new origin-based helper.
+- **Error gate (T4):** `error-messages.test.ts` scans `fetchAndDecryptEntry` and the register helper. `HTTP_AUTH_REGISTER` joins `POPUP_INVOKED_HANDLERS`. The minimum member count includes the moved codes.
+- **Manifest (T8):** a test imports `manifest.config.ts` (`defineManifest` is the identity) and asserts all of these:
+  - the required `permissions`;
+  - the optional permissions;
+  - `minimum_chrome_version`;
+  - unchanged `content_scripts.matches` and `web_accessible_resources`;
+  - that the auth-prompt page is not web-accessible.
+  
+  `check-dist-hygiene.mjs` checks that `dist/` contains the auth-prompt page.
+- **Build (N15):** the page is added through `build.rollupOptions.input` in `vite.config.ts`.
+- **VE2 (T6):**
+  - (a) is read from `chrome.runtime.getManifest()` and `chrome.permissions.getAll()` in the SW, plus the Errors list;
+  - (c) is `typeof chrome.webRequest?.onAuthRequired` in SW devtools, before and after the grant, with no restart;
+  - the version floor comes from Chrome's docs, and VE2 confirms it.
+- **Manual (T5, T7, T15):**
+  - each scenario starts with Chrome's auth cache cleared (quit Chrome, or clear "Passwords and other sign-in data"), and the first server response for the path must be a 401;
+  - the observables are the status lines (200 vs 401) in the go-httpbin log, or DevTools Network;
+  - scenario 6's embedding page is served by `python3 -m http.server` on another port, and it asserts only "no confirmation window, no 200";
+  - scenario 8 runs on scenario 1's http binding, with a control that the server-origin permission stays.
+- **Tests added (T13, T14):**
+  - a self-test for the static `cancel` check (`{cancel: true}`, `{cancel}`, `["cancel"]`);
+  - one shared entry predicate for C3 and rule 9, tested by a table;
+  - table tests for `normalizeOrigin` and `savedUrlOrigins`;
+  - jsdom tests of the prompt page (rendering, warning on and off, input protection, Send and Cancel post `DECIDE`);
+  - popup action visibility (exact-host LOGIN vs non-LOGIN or host mismatch);
+  - the options flags, each with a control;
+  - module state reset per test (`initHttpAuth` resets it).
+- **SC1 last-answer time:** dropped. A local log without a server audit adds UI for little value. The server-side audit follow-up covers it.
+
 ## Files
 - `manifest.config.ts`
 - `vite.config.ts`: the confirmation page as an extra input.
-- New: `lib/http-auth-bindings.ts`, `background/http-auth.ts`, `src/auth-prompt/*` (the confirmation page).
+- New: `lib/http-auth-bindings.ts`, `background/http-auth.ts`, `background/http-auth-prompt.ts`, `src/auth-prompt/*` (the confirmation page).
 - `background/index.ts`:
   - wiring;
   - the C7 extraction;
@@ -136,7 +212,7 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
 - The chrome mocks of the background suites, which need `webRequest` / `permissions` events where used, and a key-aware `storage.local`.
 
 ## Scope contract
-- **SC1, audit:** existing extension fills record no audit event, and `GET /api/passwords/[id]` logs none (`grep -n logAudit src/app/api/passwords/\[id\]/route.ts` shows update and delete only). Server-side audit for every fill kind is a follow-up issue. The options page shows each binding's last answer time locally (sec Adjacent).
+- **SC1, audit:** existing extension fills record no audit event, and `GET /api/passwords/[id]` logs none (`grep -n logAudit src/app/api/passwords/\[id\]/route.ts` shows update and delete only). Server-side audit for every fill kind is a follow-up issue.
 - **SC2:** proxy authentication, and NTLM/Negotiate. Never answered.
 - **SC3:** registering from a page whose host matches no entry.
 
