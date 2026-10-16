@@ -121,6 +121,14 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
 - **`savedUrlOrigins(blob)`:** extracted beside the existing `entryHttpHosts` logic, returning normalized origins from `url` and `url`-type custom fields.
 - **Callers:** autofill, C3 and C4. The autofill tests must stay green with no expectation changes.
 
+## VE2 result (user's Chrome 154, probe extension, 2026-10-16)
+- **Optional grant works.** `permissions.request({ permissions: ["webRequest", "webRequestAuthProvider"], origins: ["https://httpbin.org/*"] })` was granted. Challenges from that origin were then delivered to `onAuthRequired` with `asyncBlocking`.
+- **The API became available after the grant.** Chrome restarted the SW right after the grant (15:15:32), and registration at SW start then succeeded. `onAdded` must still register idempotently.
+- **The SW wakes on a challenge.** After the SW was stopped, a challenge woke it (`SW start` and `onAuthRequired` in the same second). The top-level registration path works.
+- **`details` matched the plan:** `challenger.port` is the number `443`, `initiator` is `undefined` for an address-bar navigation, and `frameType` is `outermost_frame`.
+- **The popup most likely closes on the permission prompt.** The request that showed a prompt logged no result. The one that resolved `true` (15:16:07) needed no prompt. The probe's log can drop lines when writes race, so this is not conclusive. Either way, the C3 pending intent completed in `onAdded` is required.
+- **Not observed:** (a) the Errors list, and (e) `contains` for an unrelated https origin. Both are checked again in VE1 on the real build.
+
 ## Round 2 amendments (these override the contract text above where they differ)
 
 - **C4 rule 3 (sec R2 N1):** additionally `details.type === "main_frame"`. Only a top-level navigation is answered; an `<img>`, `fetch` or `sub_frame` from any page gets `{}`. After one answered navigation, Chrome's auth cache covers the site's subresources.
@@ -271,11 +279,14 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
 ## Go/No-Go Gate
 | ID | Subject | Status |
 |----|---------|--------|
-| VE2 | optional permissions and the popup-survives check, confirmed in Chrome | pending |
-| C1 | optional permissions only; version floor | pending |
-| C2 | binding store with normalized origins | pending |
-| C3 | popup registration, pending intent, rollback | pending |
-| C4 | per-challenge confirmation under rules 1–9, else `{}` | pending |
-| C5 | reference-counted permission release; options management | pending |
-| C6 | guarded listener registration at start / on grant | pending |
-| C7 | shared entry fetch/decrypt and saved-origin helpers | pending |
+| VE2 | optional permissions, wake-up, details shape confirmed in Chrome 154 | done |
+| C1 | optional permissions only; version floor | locked |
+| C2 | binding store with normalized origins | locked |
+| C3 | popup registration, pending intent, rollback | locked |
+| C4 | per-challenge confirmation under rules 1–9, else `{}` | locked |
+| C5 | reference-counted permission release; options management | locked |
+| C6 | guarded listener registration at start / on grant | locked |
+| C7 | shared entry fetch/decrypt and saved-origin helpers | locked |
+
+## Plan-review exit
+Round 2 left no open finding against the consent model, which the user decided. Its findings were mechanism-level and are folded into the Round 2 amendments. Per the saturation rule (two rounds, no open Critical/Major), the remaining detail is settled by building it: Phase 2 implements against the amended contracts, and Phase 3 reviews the code.
