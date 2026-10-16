@@ -290,3 +290,40 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
 
 ## Plan-review exit
 Round 2 left no open finding against the consent model, which the user decided. Its findings were mechanism-level and are folded into the Round 2 amendments. Per the saturation rule (two rounds, no open Critical/Major), the remaining detail is settled by building it: Phase 2 implements against the amended contracts, and Phase 3 reviews the code.
+
+## Implementation Checklist
+- **Batch A (C7, first):**
+  - characterization tests at the AUTOFILL message level in `src/__tests__/background.test.ts`, green against the inline code;
+  - extract `fetchAndDecryptEntry` and `savedUrlOrigins` in `background/index.ts`;
+  - `src/__tests__/error-messages.test.ts`: scan the extracted helper; raise the member floor.
+- **Batch B (C1, C2, C5):**
+  - `manifest.config.ts`;
+  - `lib/http-auth-bindings.ts` (`normalizeOrigin`; the store; `releasePermissions` with coverage-based retention of the server origin and of other bindings);
+  - `options/App.tsx` section;
+  - `scripts/check-dist-hygiene.mjs` (auth-prompt page present);
+  - a manifest assertion test.
+- **Batch C (C3, C4, C6, prompt):**
+  - `background/http-auth.ts` (`initHttpAuth`, `handleAuthRequired`, listener lifecycle);
+  - `background/http-auth-prompt.ts`;
+  - `src/auth-prompt/{index.html,main.tsx,App.tsx}`;
+  - `vite.config.ts` `build.rollupOptions.input`;
+  - `background/index.ts`:
+    - wiring: guarded top-level registration and `permissions.onAdded` / `onRemoved`;
+    - the `HTTP_AUTH_REGISTER`, `HTTP_AUTH_PROMPT_GET` and `HTTP_AUTH_PROMPT_DECIDE` cases;
+    - the exclusion of the last two from `registerActivity()` (index.ts, the activity call in `handleMessage`);
+  - `lib/constants.ts` (`EXT_MSG`, `EXTENSION_PAGE_ONLY_MESSAGES`);
+  - `types/messages.ts`;
+  - `lib/error-messages.ts`;
+  - `src/messages/{en,ja}.json`;
+  - `popup/components/MatchList.tsx` plus `HttpAuthRegisterDialog.tsx`.
+- **Test mocks that import `background/index.ts`** (add `webRequest` / `permissions.onAdded` / `onRemoved` / a key-aware `storage.local` where needed): `background.test.ts`, `background-commands.test.ts`, `background/{totp-handlers,inline-matches,team-entries}.test.ts`, `options/App.test.tsx`.
+- **Reuse:**
+  - `swFetch` / `decryptData` / `buildPersonalEntryAAD` / `fetchAndDecryptTeamBlob` (index.ts);
+  - `isVaultEpochCurrent` / `assertVaultEpoch` (`vault-epoch.ts`);
+  - `awaitHydrationBounded`;
+  - `isExtensionPageSender`;
+  - `getCachedEntries` (overview for the prompt);
+  - `warnBackground`;
+  - the `FillMismatchDialog` dialog pattern;
+  - `extractHost` / `isHostMatch` (`lib/url-matching.ts`).
+- **CI parity:** the extension job runs `npm ci`, the tests, `typecheck:test` and the build. `scripts/pre-pr.sh` runs the same set. No gap.
