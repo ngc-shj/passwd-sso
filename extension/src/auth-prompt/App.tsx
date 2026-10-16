@@ -264,13 +264,13 @@ export function App({ promptId }: { promptId: string | null }) {
       </dl>
       {/* Sticky: long details never push the buttons out of the window. */}
       <div className="sticky bottom-0 flex items-center gap-2 justify-end bg-white dark:bg-gray-900 py-2" data-testid="auth-actions">
-        <p aria-live="polite" className="mr-auto text-xs text-gray-500 dark:text-gray-400" data-testid="auth-hint">
+        <p aria-live="polite" className="mr-auto min-w-0 flex-1 text-xs text-gray-500 dark:text-gray-400" data-testid="auth-hint">
           {hint ?? ""}
         </p>
         <button
           type="button"
           onClick={() => decide("cancel")}
-          className="h-9 px-4 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
+          className="h-9 shrink-0 whitespace-nowrap px-4 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
         >
           {t("authPrompt.cancel")}
         </button>
@@ -284,7 +284,7 @@ export function App({ promptId }: { promptId: string | null }) {
           // aria-disabled, not disabled: a disabled button swallows the
           // pointerdown that must restart the arm delay.
           aria-disabled={!armed}
-          className={`h-9 px-4 rounded-md text-sm font-medium text-white bg-gray-900 dark:bg-gray-200 dark:text-gray-900 ${
+          className={`h-9 shrink-0 whitespace-nowrap px-4 rounded-md text-sm font-medium text-white bg-gray-900 dark:bg-gray-200 dark:text-gray-900 ${
             armed ? "hover:bg-gray-800 dark:hover:bg-gray-300" : "opacity-50 cursor-not-allowed"
           }`}
         >
