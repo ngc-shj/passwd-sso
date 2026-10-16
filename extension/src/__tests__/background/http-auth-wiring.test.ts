@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ALARM_TOKEN_REFRESH, ALARM_VAULT_LOCK, EXT_ENTRY_TYPE } from "../../lib/constants";
+import { ALARM_VAULT_LOCK, EXT_ENTRY_TYPE } from "../../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 import { HTTP_AUTH_BINDINGS_KEY, HTTP_AUTH_PENDING_INTENT_KEY } from "../../lib/http-auth-bindings";
 import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
@@ -21,6 +21,27 @@ const cryptoMocks = vi.hoisted(() => ({
   VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 vi.mock("../../lib/crypto", () => cryptoMocks);
+
+// DPoP signing and session persistence would otherwise run real WebCrypto and
+// IndexedDB work, which makes progress without touching any mock and so could
+// still be running when settleBackground() sees the module go quiet.
+const sessionStorageMocks = vi.hoisted(() => ({
+  persistSession: vi.fn().mockResolvedValue(undefined),
+  loadSession: vi.fn().mockResolvedValue(null),
+  clearSession: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../../lib/session-storage", () => sessionStorageMocks);
+
+const dpopKeyMocks = vi.hoisted(() => ({
+  getDpopThumbprint: vi.fn().mockResolvedValue("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"),
+  signDpopProof: vi.fn().mockResolvedValue("fake.dpop.proof"),
+  getOrGenerateDpopKeyPair: vi.fn().mockResolvedValue({
+    publicJwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+    sign: vi.fn().mockResolvedValue(new ArrayBuffer(64)),
+  }),
+  resetInMemoryKeyCache: vi.fn(),
+}));
+vi.mock("../../lib/dpop-key", () => dpopKeyMocks);
 
 const teamCryptoMocks = vi.hoisted(() => ({
   deriveEcdhWrappingKey: vi.fn().mockResolvedValue("ecdh-wrap-key"),
@@ -256,17 +277,73 @@ function stubFetch(): void {
 async function unlock(): Promise<void> {
   bgModule!.applyToken("t", Date.now() + 3_600_000, "");
   expect(await send({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({ type: "UNLOCK_VAULT", ok: true });
-  // A verified unlock refreshes the token in the background and re-arms the
-  // refresh alarm at the end; let that finish inside the test, or it lands
-  // after afterEach has removed the chrome stub.
-  await vi.waitFor(() =>
-    expect(chromeMock.alarms.create).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH, expect.anything()),
-  );
+}
+
+// ── Draining the module's background work ─────────────────────────
+//
+// A test that loads background/index.ts starts work it does not await: the
+// unlock's presence POST and the token refresh it triggers (alarms on the way
+// out), the keepalive (offscreen), the debounced context-menu rebuild (a real
+// 200 ms timer), badge updates, the startup hydration, interceptor and token
+// bridge registration, the pending-intent check, and prompt timeouts (60 s).
+// CI once saw the refresh's closing chrome.alarms.create land after the stub
+// was removed. Every test therefore ends with the module drained: its timers
+// cancelled, and its promise chains run until they stop calling anything.
+
+/** Calls on every vi.fn reachable from the chrome stub, plus fetch. */
+function backgroundCalls(): number {
+  const seen = new Set<unknown>();
+  const count = (value: unknown): number => {
+    if (value === null || (typeof value !== "object" && typeof value !== "function") || seen.has(value)) return 0;
+    seen.add(value);
+    let n = vi.isMockFunction(value) ? value.mock.calls.length : 0;
+    if (typeof value === "object") for (const child of Object.values(value)) n += count(child);
+    return n;
+  };
+  const fetchMock = globalThis.fetch as unknown;
+  return count(chromeMock) + (vi.isMockFunction(fetchMock) ? fetchMock.mock.calls.length : 0);
+}
+
+const QUIET_TURNS = 10;
+const MAX_TURNS = 1_000;
+
+/**
+ * Resolve once the module has gone quiet: no new chrome or fetch call across
+ * QUIET_TURNS consecutive macrotask turns. Everything the chains wait on is a
+ * mock that settles at once (fetch, crypto, DPoP, session storage), so a quiet
+ * run means they have ended. Counted in turns, not time; a chain that never
+ * settles fails the test instead of leaking into the next one.
+ */
+async function settleBackground(): Promise<void> {
+  let last = -1;
+  let quiet = 0;
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const now = backgroundCalls();
+    quiet = now === last ? quiet + 1 : 0;
+    if (quiet >= QUIET_TURNS) return;
+    last = now;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`background work still running after ${MAX_TURNS} turns`);
+}
+
+/** Cancel the module's own timers, then let its chains finish. */
+async function drainBackground(): Promise<void> {
+  if (bgModule) {
+    const [prompts, contextMenu] = await Promise.all([
+      import("../../background/http-auth-prompt"),
+      import("../../background/context-menu"),
+    ]);
+    prompts.resetHttpAuthPrompts();
+    await contextMenu.disableContextMenu();
+  }
+  await settleBackground();
 }
 
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
+  bgModule = null;
   serverUrl = "https://localhost:3000";
   byIdBlob = { url: `${ORIGIN}/admin`, username: "admin", password: "r0uter" };
   withTeam = false;
@@ -279,9 +356,11 @@ beforeEach(async () => {
   stubFetch();
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
+  await drainBackground();
+  // The stubs stay installed (the next test replaces them): removing chrome
+  // while anything of this module could still run is what failed in CI.
 });
 
 describe("C6: registration at SW start", () => {
@@ -324,13 +403,11 @@ describe("activity: the confirmation window's messages never extend the vault", 
     chromeMock.alarms.create.mock.calls.filter(([name]) => name === ALARM_VAULT_LOCK).length;
   // Past the activity debounce, so each message below could re-arm the alarm.
   const pastDebounce = () => vi.setSystemTime(Date.now() + 31_000);
-  const settle = () => new Promise((r) => setTimeout(r, 10));
-
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     await loadBackground();
     await unlock();
-    await settle();
+    await settleBackground();
   });
 
   it.each([
@@ -340,11 +417,11 @@ describe("activity: the confirmation window's messages never extend the vault", 
     pastDebounce();
     chromeMock.alarms.create.mockClear();
     await send(message);
-    await settle();
+    await settleBackground();
     expect(vaultLockAlarms()).toBe(0);
     // Control, at the same time: an ordinary popup message does.
     await send({ type: "GET_STATUS" });
-    await settle();
+    await settleBackground();
     expect(vaultLockAlarms()).toBe(1);
   });
 });
@@ -462,7 +539,7 @@ describe("a challenge answered end to end", () => {
   it("control: without a lock the prompt stays open and keeps its view", async () => {
     const { callback, promptId } = await raise();
     await send({ type: "GET_STATUS" });
-    await new Promise((r) => setTimeout(r, 10));
+    await settleBackground();
     expect(callback).not.toHaveBeenCalled();
     expect(chromeMock.windows.remove).not.toHaveBeenCalled();
     expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual(
@@ -483,7 +560,27 @@ describe("a challenge answered end to end", () => {
     const { callback, promptId } = await raise();
     const [onError] = [...chromeMock.webRequest!.onErrorOccurred.listeners] as Array<(d: unknown) => void>;
     onError({ requestId: "req-other", error: "net::ERR_ABORTED" });
-    await new Promise((r) => setTimeout(r, 10));
+    await settleBackground();
+    expect(callback).not.toHaveBeenCalled();
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual(
+      expect.objectContaining({ prompt: expect.objectContaining({ origin: ORIGIN }) }),
+    );
+  });
+
+  it("revoking the API permissions settles the open prompt as cancel and closes its window", async () => {
+    const { callback, promptId } = await raise();
+    const [onRemoved] = [...chromeMock.permissions.onRemoved.listeners] as Array<(p: chrome.permissions.Permissions) => void>;
+    onRemoved({ permissions: ["webRequestAuthProvider"] });
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledWith({}));
+    expect(chromeMock.windows.remove).toHaveBeenCalledWith(77);
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual({ type: "HTTP_AUTH_PROMPT_GET", prompt: null });
+  });
+
+  it("control: an origin-only revoke leaves the prompt open", async () => {
+    const { callback, promptId } = await raise();
+    const [onRemoved] = [...chromeMock.permissions.onRemoved.listeners] as Array<(p: chrome.permissions.Permissions) => void>;
+    onRemoved({ origins: ["https://unrelated.example/*"] });
+    await settleBackground();
     expect(callback).not.toHaveBeenCalled();
     expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual(
       expect.objectContaining({ prompt: expect.objectContaining({ origin: ORIGIN }) }),
@@ -526,9 +623,6 @@ describe("server URL rule in the service worker", () => {
     await loadBackground();
     bgModule!.applyToken("t", Date.now() + 3_600_000, "");
     expect(await send({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({ type: "UNLOCK_VAULT", ok: true });
-    await vi.waitFor(() =>
-      expect(chromeMock.alarms.create).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH, expect.anything()),
-    );
     expect(serverFetches(url)).toBeGreaterThan(0);
     expect(chromeMock.scripting.registerContentScripts).toHaveBeenCalledWith([
       expect.objectContaining({ id: "token-bridge", matches: [`${new URL(url).origin}/*`] }),
@@ -631,5 +725,27 @@ describe("own-app detection uses the server URL rule", () => {
     serverUrl = url;
     await loadBackground();
     expect(await matchesOn(`${url}/login`)).toEqual(expect.objectContaining({ suppressInline: true }));
+  });
+});
+
+describe("HTTP_AUTH_REMOVE", () => {
+  it("removes the binding in the SW and releases what it no longer needs", async () => {
+    local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "pw-r", userId: "user-1" }];
+    await loadBackground();
+    expect(await send({ type: "HTTP_AUTH_REMOVE", origin: ORIGIN }, { url: "chrome-extension://test-extension-id/src/options/index.html" })).toEqual({
+      type: "HTTP_AUTH_REMOVE",
+      ok: true,
+    });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([]);
+    expect(chromeMock.permissions.remove).toHaveBeenCalledWith({ origins: [`${ORIGIN}/*`] });
+  });
+
+  it("is refused from a content script", async () => {
+    local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "pw-r", userId: "user-1" }];
+    await loadBackground();
+    expect(
+      await send({ type: "HTTP_AUTH_REMOVE", origin: ORIGIN }, { tab: { id: 1, url: "https://evil.example/" }, url: "https://evil.example/", frameId: 0 }),
+    ).toEqual({ type: "HTTP_AUTH_REMOVE", ok: false, error: "INTERNAL_ERROR" });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "pw-r", userId: "user-1" }]);
   });
 });

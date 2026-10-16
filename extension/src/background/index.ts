@@ -125,6 +125,7 @@ import {
   initHttpAuth,
   installHttpAuthLifecycle,
   registerHttpAuthBinding,
+  removeHttpAuthBinding,
 } from "./http-auth";
 import {
   decidePrompt,
@@ -3550,6 +3551,16 @@ async function handleMessage(
         result.ok
           ? { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: true }
           : { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: false, error: result.error },
+      );
+      return;
+    }
+
+    case EXT_MSG.HTTP_AUTH_REMOVE: {
+      const result = await removeHttpAuthBinding(message.origin);
+      sendResponse(
+        result.ok
+          ? { type: EXT_MSG.HTTP_AUTH_REMOVE, ok: true }
+          : { type: EXT_MSG.HTTP_AUTH_REMOVE, ok: false, error: result.error },
       );
       return;
     }

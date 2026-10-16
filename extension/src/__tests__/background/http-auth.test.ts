@@ -11,6 +11,7 @@ import {
   initHttpAuth,
   installHttpAuthLifecycle,
   registerHttpAuthBinding,
+  removeHttpAuthBinding,
   registerHttpAuthListeners,
   type AuthAnswer,
   type AuthChallenge,
@@ -467,6 +468,24 @@ describe("handleAuthRequired (C4)", () => {
   });
 
   describe("after Send: rules 4 and 9 again", () => {
+    it("API permissions revoked while the window was open (origin still granted) get {}", async () => {
+      deps.openPrompt.mockImplementationOnce(async () => {
+        chromeMock.permissions.contains.mockImplementation(async (req) => !req.permissions);
+        return "send";
+      });
+      expect(await answer(challenge())).toEqual({});
+      expect(deps.fetchAndDecryptEntry).not.toHaveBeenCalled();
+      expect(chromeMock.permissions.contains).toHaveBeenCalledWith({ permissions: ["webRequest", "webRequestAuthProvider"] });
+    });
+
+    it("control: with both permissions still granted the login is sent", async () => {
+      deps.openPrompt.mockImplementationOnce(async () => {
+        chromeMock.permissions.contains.mockImplementation(async () => true);
+        return "send";
+      });
+      expect(await answer(challenge())).toEqual(SENT);
+    });
+
     it("a binding moved to a team entry with the same id while the window was open gets {}", async () => {
       deps.openPrompt.mockImplementationOnce(async () => {
         local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "e1", teamId: "t1", userId: USER }];
@@ -1016,5 +1035,76 @@ describe("redirect source", () => {
     handleBeforeRedirect({ requestId: "other", url: "https://evil.example/go", redirectUrl: `${ORIGIN}/admin` });
     await answer(challenge());
     expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: null });
+  });
+});
+
+// ── Binding mutations run one at a time (register, remove, rollback) ─
+
+describe("serialized binding mutations", () => {
+  beforeEach(() => {
+    local[HTTP_AUTH_BINDINGS_KEY] = [];
+  });
+
+  it("a remove that arrives during a register waits for it: no resurrected binding, release after the removal", async () => {
+    const decrypt = deferred<EntryAccess>();
+    deps.fetchAndDecryptEntry.mockReturnValueOnce(decrypt.promise);
+    // What the store held each time a permission was released.
+    const storeAtRelease: unknown[] = [];
+    chromeMock.permissions.remove.mockImplementation(async () => {
+      storeAtRelease.push(structuredClone(local[HTTP_AUTH_BINDINGS_KEY]));
+      return true;
+    });
+    const registering = registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" });
+    await vi.waitFor(() => expect(deps.fetchAndDecryptEntry).toHaveBeenCalled());
+    const removing = removeHttpAuthBinding(ORIGIN);
+    await new Promise((r) => setTimeout(r, 0));
+    // The remove has not touched the store while the register is mid-way.
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+    decrypt.resolve(LOGIN_ACCESS);
+    expect(await registering).toEqual({ ok: true });
+    expect(await removing).toEqual({ ok: true });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([]);
+    expect(storeAtRelease).toEqual([[], []]);
+  });
+
+  it("a register that arrives during a remove of another origin keeps both changes: no lost binding", async () => {
+    bind("https://nas.example", "e9");
+    const firstWrite = deferred<void>();
+    const realSet = chromeMock.storage.local.set.getMockImplementation()!;
+    chromeMock.storage.local.set.mockImplementationOnce(async (items: Record<string, unknown>) => {
+      await firstWrite.promise;
+      return realSet(items);
+    });
+    const removing = removeHttpAuthBinding("https://nas.example");
+    const registering = registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(deps.fetchAndDecryptEntry).not.toHaveBeenCalled();
+    firstWrite.resolve();
+    expect(await removing).toEqual({ ok: true });
+    expect(await registering).toEqual({ ok: true });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
+  });
+
+  it("a failed mutation does not stall the ones queued after it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    chromeMock.storage.local.set.mockRejectedValueOnce(new Error("QUOTA_BYTES quota exceeded"));
+    const failing = removeHttpAuthBinding(ORIGIN);
+    const next = registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" });
+    expect(await failing).toEqual({ ok: false, error: "INTERNAL_ERROR" });
+    expect(await next).toEqual({ ok: true });
+  });
+
+  it("remove refuses a malformed origin without touching anything", async () => {
+    expect(await removeHttpAuthBinding("https://intranet.example/admin")).toEqual({ ok: false, error: "INVALID_URL" });
+    expect(await removeHttpAuthBinding(42)).toEqual({ ok: false, error: "INVALID_URL" });
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+    expect(chromeMock.permissions.remove).not.toHaveBeenCalled();
+  });
+
+  it("remove deletes the binding and releases its permissions", async () => {
+    bind();
+    expect(await removeHttpAuthBinding(ORIGIN)).toEqual({ ok: true });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([]);
+    expect(chromeMock.permissions.remove).toHaveBeenCalledWith({ origins: [`${ORIGIN}/*`] });
   });
 });

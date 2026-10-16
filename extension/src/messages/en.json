@@ -186,7 +186,10 @@
     "close": "Close",
     "loading": "Loading...",
     "notFromPage": "Not from a web page (address bar, bookmark, another app, or a redirect)",
-    "redirectedFrom": "Redirected from"
+    "redirectedFrom": "Redirected from",
+    "hintFocusWindow": "Click this window to continue.",
+    "hintWait": "Please wait…",
+    "hintMovePointer": "Move the pointer onto Send, then click."
   },
   "errors": {
     "invalidPassphrase": "Passphrase is incorrect.",

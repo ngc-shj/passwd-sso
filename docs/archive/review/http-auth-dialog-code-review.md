@@ -97,3 +97,13 @@ The user ran these on a build of `2685a2f98` in Chrome (macOS, z1mn). Test serve
 VE1 status: **verified**.
 
 **Environment note.** The local `node_modules` on one host had an older `@types/chrome` than the lockfile. `npm ci` fixed it, and the build passes on 0.3.5 from the lockfile.
+
+## Round 3 (external review of PR 907, and a CI failure)
+| ID | Severity | Finding | Resolution |
+|----|----------|---------|------------|
+| X1 | Major | A click train slower than the 800 ms arm (a lure to click about once a second at Send's fixed position) sends, because an armed Send accepts the next click. | D19: a pointer click counts only if the pointer entered Send after arming; status hint. Tests include a 1000 ms train at one position. |
+| X2 | Minor | Revoking the API permissions does not cancel pending prompts, and Send re-checked only the origin permission. | D21. |
+| X3 | Minor | `setBinding` and `removeBinding` were independent read-modify-writes from the SW and the options page, so a removed binding could be resurrected. | D20 serialized SW queue. |
+| CI | — | `chrome is not defined` unhandled rejection from the wiring test. A token refresh started by a verified unlock outlived the test's chrome stub; the earlier wait was already satisfied. | The wiring tests drain every background chain (mocked DPoP and session storage; a turn-counted settle that fails if work never settles) before teardown. The file passed 20 random seeds and the full suite passed 7 seeds, each exit 0 with no unhandled errors. |
+
+Also removed trailing whitespace from the review documents.

@@ -95,6 +95,8 @@ const POPUP_INVOKED_HANDLERS = [
   "COPY_TOTP",
   "FETCH_PASSWORDS",
   "HTTP_AUTH_REGISTER",
+  // Invoked by the options page, which renders its error the same way.
+  "HTTP_AUTH_REMOVE",
 ] as const;
 
 /**
@@ -103,7 +105,8 @@ const POPUP_INVOKED_HANDLERS = [
  */
 const REGISTRATION_FUNCTIONS = [
   "async function checkRegistration",
-  "export async function registerHttpAuthBinding",
+  "async function registerBindingNow",
+  "async function removeBindingNow",
 ] as const;
 
 function popupReachableCodes(): string[] {

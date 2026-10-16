@@ -25,3 +25,10 @@
 - **D16 — origins in the initiator and redirect rows are never shortened (review F-R2-2).** Cutting a host could hide its registrable domain. Only a path after the origin is cut, and the button row is a sticky footer.
 - **D17 — the cooldown applies only to cross-site-initiated challenges.** A challenge with no initiator, or a same-origin one, is never held (review S-R2-1, S-R2-3).
 - **D18 — Space on Send works through the `detail === 0` click rule.** That is the same path as assistive-tech activation. Focusing Send restarts the arm delay, so Tab then Space needs the pause (review S-R2-4, F-R2-1).
+- **D19 — a pointer click on Send counts only if the pointer entered Send after it armed (external review, click train above 800 ms).**
+  - A pointer resting where Send appears never qualifies. Keyboard focus on Send restarts the arm, and Space (a detail-0 click with no `pointerType`) is the keyboard and assistive-tech path.
+  - A status hint (`aria-live`) tells the user why Send is not usable yet: focus the window; wait; move the pointer onto Send.
+- **D20 — every binding mutation runs in the SW through one serialized queue** (register, remove, pending-intent completion, rollback).
+  - The options page sends `HTTP_AUTH_REMOVE` instead of writing storage and releasing permissions itself (external review, non-atomic updates).
+  - `HTTP_AUTH_REMOVE` registers activity, because it is a user click.
+- **D21 — revoking `webRequest` or `webRequestAuthProvider` cancels every pending prompt, and Send re-checks the API permissions as well as the origin permission** (external review).

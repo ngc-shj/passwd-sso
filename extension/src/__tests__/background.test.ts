@@ -5448,6 +5448,7 @@ describe("C5 sender gate: EXTENSION_PAGE_ONLY_MESSAGES refused from content send
     [EXT_MSG.HTTP_AUTH_PROMPT_DECIDE]: { type: EXT_MSG.HTTP_AUTH_PROMPT_DECIDE, ok: false, error: "INTERNAL_ERROR" },
     [EXT_MSG.HTTP_AUTH_PROMPT_GET]: { type: EXT_MSG.HTTP_AUTH_PROMPT_GET, prompt: null, error: "INTERNAL_ERROR" },
     [EXT_MSG.HTTP_AUTH_REGISTER]: { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: false, error: "INTERNAL_ERROR" },
+    [EXT_MSG.HTTP_AUTH_REMOVE]: { type: EXT_MSG.HTTP_AUTH_REMOVE, ok: false, error: "INTERNAL_ERROR" },
     [EXT_MSG.LOCK_VAULT]: { type: EXT_MSG.LOCK_VAULT, ok: false, error: "INTERNAL_ERROR" },
     [EXT_MSG.RESET_DPOP_KEY]: { type: EXT_MSG.RESET_DPOP_KEY, ok: false, error: "INTERNAL_ERROR" },
     [EXT_MSG.UNLOCK_VAULT]: { type: EXT_MSG.UNLOCK_VAULT, ok: false, error: "INTERNAL_ERROR" },
@@ -5467,6 +5468,9 @@ describe("C5 sender gate: EXTENSION_PAGE_ONLY_MESSAGES refused from content send
         return { type, passphrase: "pw" };
       case EXT_MSG.HTTP_AUTH_REGISTER:
         return { type, origin: "https://example.com", entryId: "pw-1" };
+      case EXT_MSG.HTTP_AUTH_REMOVE:
+        // A malformed origin: the real handler answers INVALID_URL, the failsafe INTERNAL_ERROR.
+        return { type, origin: "not-an-origin" };
       case EXT_MSG.HTTP_AUTH_PROMPT_GET:
         return { type, promptId: "no-such-prompt" };
       case EXT_MSG.HTTP_AUTH_PROMPT_DECIDE:

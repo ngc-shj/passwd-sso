@@ -60,6 +60,13 @@ const pressSend = () => {
   fireEvent.pointerDown(sendButton());
   fireEvent.click(sendButton(), { detail: 1 });
 };
+/** The pointer moving onto Send from outside it. */
+const enterSend = () => {
+  act(() => {
+    sendButton().dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+  });
+};
+const hint = () => screen.getByTestId("auth-hint");
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -328,11 +335,125 @@ describe("auth-prompt page", () => {
     it("control: the focus a pointer press gives Send does not disarm it", async () => {
       await renderPrompt();
       await advance(SEND_ARM_DELAY_MS);
+      enterSend();
       fireEvent.pointerDown(sendButton());
       fireEvent.focus(sendButton());
       expect(isArmed()).toBe(true);
       fireEvent.click(sendButton(), { detail: 1 });
       expect(decisions()).toEqual(["send"]);
+    });
+
+    describe("the pointer must move onto Send after arming", () => {
+      it("a click train once a second at one position never sends", async () => {
+        await renderPrompt();
+        for (let i = 0; i < 6; i++) {
+          await advance(1_000);
+          pressSend();
+        }
+        expect(decisions()).toEqual([]);
+      });
+
+      it("moving onto Send after arming, then clicking, sends", async () => {
+        await renderPrompt();
+        await advance(SEND_ARM_DELAY_MS);
+        enterSend();
+        pressSend();
+        expect(decisions()).toEqual(["send"]);
+      });
+
+      it("entering before arming and staying there does not count", async () => {
+        await renderPrompt();
+        await advance(100);
+        enterSend();
+        await advance(SEND_ARM_DELAY_MS);
+        expect(isArmed()).toBe(true);
+        pressSend();
+        expect(decisions()).toEqual([]);
+      });
+
+      it("an entry before a disarm does not count after re-arming", async () => {
+        await renderPrompt();
+        await advance(SEND_ARM_DELAY_MS);
+        enterSend();
+        focused = false;
+        act(() => {
+          window.dispatchEvent(new Event("blur"));
+        });
+        focused = true;
+        act(() => {
+          window.dispatchEvent(new Event("focus"));
+        });
+        await advance(SEND_ARM_DELAY_MS);
+        pressSend();
+        expect(decisions()).toEqual([]);
+      });
+
+      it("a pointer-made click with detail 0 does not take the keyboard path", async () => {
+        await renderPrompt();
+        await advance(SEND_ARM_DELAY_MS);
+        act(() => {
+          sendButton().dispatchEvent(new PointerEvent("click", { bubbles: true, detail: 0, pointerType: "mouse" }));
+        });
+        expect(decisions()).toEqual([]);
+      });
+
+      it("control: a click with neither detail nor pointerType (keyboard, assistive tech) sends while armed", async () => {
+        await renderPrompt();
+        await advance(SEND_ARM_DELAY_MS);
+        act(() => {
+          sendButton().dispatchEvent(new PointerEvent("click", { bubbles: true, detail: 0, pointerType: "" }));
+        });
+        expect(decisions()).toEqual(["send"]);
+      });
+    });
+
+    describe("status hint", () => {
+      it("asks for a click on the window while it is not focused", async () => {
+        focused = false;
+        await renderPrompt();
+        expect(hint()).toHaveTextContent("Click this window to continue.");
+        expect(hint()).toHaveAttribute("aria-live", "polite");
+      });
+
+      it("asks to wait while the delay runs", async () => {
+        await renderPrompt();
+        expect(hint()).toHaveTextContent("Please wait…");
+      });
+
+      it("asks to move onto Send once armed, and a click there still does not send", async () => {
+        await renderPrompt();
+        await advance(SEND_ARM_DELAY_MS);
+        expect(hint()).toHaveTextContent("Move the pointer onto Send, then click.");
+        pressSend();
+        expect(decisions()).toEqual([]);
+      });
+
+      it("is empty once the pointer has moved onto Send, and a press then sends", async () => {
+        await renderPrompt();
+        await advance(SEND_ARM_DELAY_MS);
+        enterSend();
+        expect(hint()).toHaveTextContent(/^$/);
+        pressSend();
+        expect(decisions()).toEqual(["send"]);
+      });
+
+      it("is empty for keyboard focus on Send once re-armed (Space needs no pointer)", async () => {
+        await renderPrompt();
+        fireEvent.focus(sendButton());
+        expect(hint()).toHaveTextContent("Please wait…");
+        await advance(SEND_ARM_DELAY_MS);
+        expect(hint()).toHaveTextContent(/^$/);
+      });
+
+      it("returns to the window prompt on blur", async () => {
+        await renderPrompt();
+        await advance(SEND_ARM_DELAY_MS);
+        focused = false;
+        act(() => {
+          window.dispatchEvent(new Event("blur"));
+        });
+        expect(hint()).toHaveTextContent("Click this window to continue.");
+      });
     });
 
     it("while disarmed Send is aria-disabled, not disabled", async () => {
@@ -348,6 +469,7 @@ describe("auth-prompt page", () => {
     it("an armed press while the window lacks focus decides nothing", async () => {
       await renderPrompt();
       await advance(SEND_ARM_DELAY_MS);
+      enterSend();
       focused = false;
       pressSend();
       expect(decisions()).toEqual([]);
@@ -356,6 +478,7 @@ describe("auth-prompt page", () => {
     it("an armed press with focus decides send, once", async () => {
       await renderPrompt();
       await advance(SEND_ARM_DELAY_MS);
+      enterSend();
       pressSend();
       pressSend();
       expect(decisions()).toEqual(["send"]);

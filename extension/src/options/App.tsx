@@ -9,13 +9,7 @@ import { EXT_API_PATH } from "../lib/api-paths";
 import { EXT_MSG } from "../lib/constants";
 import { DEFAULT_SERVER_URL, validateServerUrl } from "../lib/server-url";
 import { sendMessage } from "../lib/messaging";
-import {
-  listBindings,
-  originPattern,
-  releasePermissions,
-  removeBinding,
-  type HttpAuthBinding,
-} from "../lib/http-auth-bindings";
+import { listBindings, originPattern, type HttpAuthBinding } from "../lib/http-auth-bindings";
 
 function Toggle({
   checked,
@@ -127,15 +121,27 @@ function HttpAuthSection() {
     void load();
   }, []);
 
+  const [removeError, setRemoveError] = useState("");
+
+  // The SW removes the binding and releases its permissions, serialized with
+  // every other binding change (a registration may be running there).
   const remove = async (origin: string) => {
-    await removeBinding(origin);
-    await releasePermissions(origin);
+    setRemoveError("");
+    try {
+      const res = await sendMessage({ type: EXT_MSG.HTTP_AUTH_REMOVE, origin });
+      if (!res?.ok) setRemoveError(res?.error || "INTERNAL_ERROR");
+    } catch {
+      setRemoveError("INTERNAL_ERROR");
+    }
     await load();
   };
 
   return (
     <>
       <p className="py-3 text-xs text-gray-400 dark:text-gray-500">{t("options.httpAuthHint")}</p>
+      {removeError && (
+        <p role="alert" className="py-2 text-sm text-red-600 dark:text-red-400">{humanizeError(removeError)}</p>
+      )}
       {rows !== null && rows.length === 0 && (
         <p className="py-3 text-sm text-gray-400 dark:text-gray-500">{t("options.httpAuthNone")}</p>
       )}

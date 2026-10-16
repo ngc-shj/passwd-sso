@@ -249,6 +249,7 @@ describe("Options App", () => {
     let stored: Record<string, unknown>;
     let fetchResponse: unknown;
     let statusUserId: string | null;
+    let removeResponse: { ok: boolean; error?: string };
     // The chrome stub is file-wide and the order is shuffled: put back what
     // this describe replaces so the other tests keep their GET_STATUS answer.
     let saved: { sendMessage: unknown; get: unknown; set: unknown; remove: unknown };
@@ -276,6 +277,7 @@ describe("Options App", () => {
         ],
       };
       statusUserId = "user-1";
+      removeResponse = { ok: true };
       fetchResponse = {
         type: "FETCH_PASSWORDS",
         entries: [
@@ -299,6 +301,14 @@ describe("Options App", () => {
         }
         if (msg.type === "GET_STATUS") {
           return Promise.resolve({ type: "GET_STATUS", hasToken: true, expiresAt: null, vaultUnlocked: statusUserId !== null, userId: statusUserId });
+        }
+        if (msg.type === "HTTP_AUTH_REMOVE") {
+          // The SW's part: remove the binding (the page itself never writes it).
+          const { origin } = msg as unknown as { origin: string };
+          if (removeResponse.ok) {
+            stored.httpAuthBindings = (stored.httpAuthBindings as Array<{ origin: string }>).filter((b) => b.origin !== origin);
+          }
+          return Promise.resolve({ type: "HTTP_AUTH_REMOVE", ...removeResponse });
         }
         return Promise.resolve(msg.type === "FETCH_PASSWORDS" ? fetchResponse : undefined);
       });
@@ -346,17 +356,25 @@ describe("Options App", () => {
       expect(await row("https://nas.example")).not.toHaveTextContent("Permission for this site was removed");
     });
 
-    it("Remove deletes the binding, then releases what it no longer needs", async () => {
+    it("Remove asks the SW to remove the binding and reloads; the page writes nothing itself", async () => {
       await openSection();
       const target = await row("http://router.example:8080");
       fireEvent.click(within(target).getByRole("button", { name: "Remove" }));
       await waitFor(() => expect(screen.queryByText("http://router.example:8080")).toBeNull());
-      expect(stored.httpAuthBindings).toEqual([{ origin: "https://nas.example", entryId: "pw-n", teamId: "t1", userId: "user-1" }]);
-      expect(chromeMock().permissions.remove).toHaveBeenCalledWith({ origins: ["http://router.example:8080/*"] });
-      // Another binding remains, so the API permissions stay.
-      expect(chromeMock().permissions.remove).not.toHaveBeenCalledWith(
-        expect.objectContaining({ permissions: expect.anything() }),
-      );
+      expect(chromeMock().runtime.sendMessage).toHaveBeenCalledWith({
+        type: "HTTP_AUTH_REMOVE",
+        origin: "http://router.example:8080",
+      });
+      expect(chromeMock().storage.local.set).not.toHaveBeenCalled();
+      expect(chromeMock().permissions.remove).not.toHaveBeenCalled();
+    });
+
+    it("shows the SW's error when the removal fails", async () => {
+      removeResponse = { ok: false, error: "INVALID_URL" };
+      await openSection();
+      fireEvent.click(within(await row("http://router.example:8080")).getByRole("button", { name: "Remove" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Invalid URL");
+      expect(await row("http://router.example:8080")).toBeInTheDocument();
     });
 
     it("labels another account's binding, without its title or a missing-entry flag", async () => {
@@ -387,7 +405,10 @@ describe("Options App", () => {
       const other = await row("http://router.example:8080");
       fireEvent.click(within(other).getByRole("button", { name: "Remove" }));
       await waitFor(() => expect(screen.queryByText("http://router.example:8080")).toBeNull());
-      expect(chromeMock().permissions.remove).toHaveBeenCalledWith({ origins: ["http://router.example:8080/*"] });
+      expect(chromeMock().runtime.sendMessage).toHaveBeenCalledWith({
+        type: "HTTP_AUTH_REMOVE",
+        origin: "http://router.example:8080",
+      });
     });
 
     it("says so when no site is set up", async () => {

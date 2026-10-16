@@ -60,6 +60,7 @@ export type ExtensionMessage =
   // nonce: the pending intent the popup wrote before the permission prompt;
   // the SW clears that intent when it handles this registration.
   | { type: typeof EXT_MSG.HTTP_AUTH_REGISTER; origin: string; entryId: string; teamId?: string; nonce?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_REMOVE; origin: string }
   | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_GET; promptId: string }
   | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_DECIDE; promptId: string; decision: HttpAuthDecision }
   | {
@@ -208,6 +209,7 @@ export type ExtensionResponse =
       suppressed?: boolean;
     }
   | { type: typeof EXT_MSG.HTTP_AUTH_REGISTER; ok: boolean; error?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_REMOVE; ok: boolean; error?: string }
   | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_GET; prompt: HttpAuthPromptView | null; error?: string }
   | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_DECIDE; ok: boolean; error?: string }
   | {

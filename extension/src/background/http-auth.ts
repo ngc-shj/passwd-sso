@@ -23,6 +23,7 @@ import {
   normalizeOrigin,
   originPattern,
   releasePermissions,
+  removeBinding,
   setBinding,
 } from "../lib/http-auth-bindings";
 import { EXT_ENTRY_TYPE } from "../lib/constants";
@@ -31,7 +32,7 @@ import { normalizeErrorCode } from "../lib/error-utils";
 import { MS_PER_SECOND } from "../lib/time";
 import type { HttpAuthDecision } from "../types/messages";
 import { savedUrlOrigins } from "./entry-origins";
-import { handlePromptRequestError, type PromptRequest } from "./http-auth-prompt";
+import { handlePromptRequestError, resetHttpAuthPrompts, type PromptRequest } from "./http-auth-prompt";
 import { classifyError, warnBackground } from "./log";
 
 /** The fields of chrome.webRequest.OnAuthRequiredDetails the rules read. */
@@ -96,6 +97,7 @@ const redirectSources = new Map<string, string>();
 /** Wire the dependencies and reset per-SW state. */
 export function initHttpAuth(next: HttpAuthDeps): void {
   deps = next;
+  bindingQueue = Promise.resolve();
   seenRequests.clear();
   redirectSources.clear();
 }
@@ -163,6 +165,10 @@ function challengerOrigin(details: AuthChallenge, protocol: string): string | nu
 
 async function hasOriginPermission(origin: string): Promise<boolean> {
   return chrome.permissions.contains({ origins: [originPattern(origin)] });
+}
+
+async function hasApiPermissions(): Promise<boolean> {
+  return chrome.permissions.contains({ permissions: [...HTTP_AUTH_API_PERMISSIONS] });
 }
 
 async function isIncognitoTab(tabId: number): Promise<boolean> {
@@ -245,7 +251,8 @@ async function decideChallenge(details: AuthChallenge): Promise<AuthCredentials 
   ) {
     return null;
   }
-  if (!(await hasOriginPermission(origin))) return null;
+  // ...and both permissions, either of which may have been revoked meanwhile.
+  if (!(await hasOriginPermission(origin)) || !(await hasApiPermissions())) return null;
   if (!d.isVaultEpochCurrent(epoch)) return null;
   // The full decrypt happens only now, bounded.
   const access = await withDeadline(
@@ -289,6 +296,43 @@ export async function handleAuthRequired(
 
 // ── Registration (C3) ───────────────────────────────────────────
 
+// Binding mutations (register, remove, pending-intent completion, rollback)
+// are read-modify-write over one storage key followed by permission release
+// that reads the result: run them one at a time, in arrival order, so none
+// reads a store another is halfway through changing.
+let bindingQueue: Promise<unknown> = Promise.resolve();
+
+function serializeBindingMutation<T>(task: () => Promise<T>): Promise<T> {
+  const run = bindingQueue.then(task, task);
+  bindingQueue = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * Remove the binding for `origin` (options page), then give back what it no
+ * longer needs. Serialized with every other binding mutation.
+ */
+export function removeHttpAuthBinding(origin: unknown): Promise<RegistrationResult> {
+  return serializeBindingMutation(() => removeBindingNow(origin));
+}
+
+async function removeBindingNow(origin: unknown): Promise<RegistrationResult> {
+  const normalized = typeof origin === "string" ? normalizeOrigin(origin) : null;
+  if (!normalized || normalized !== origin) return { ok: false, error: "INVALID_URL" };
+  try {
+    await removeBinding(normalized);
+  } catch (err) {
+    warnBackground("http-auth-register-failed", classifyError(err));
+    return { ok: false, error: "INTERNAL_ERROR" };
+  }
+  try {
+    await releasePermissions(normalized);
+  } catch (err) {
+    warnBackground("http-auth-permission-remove-failed", classifyError(err));
+  }
+  return { ok: true };
+}
+
 export type RegistrationRequest = { origin: unknown; entryId: unknown; teamId?: unknown };
 
 /** A thrown registration step as a code the popup can show (never raw text). */
@@ -324,7 +368,11 @@ async function checkRegistration(
  * binding or the server needs), so no permission is left without a binding.
  * Idempotent: re-registering the same binding is a no-op that keeps it.
  */
-export async function registerHttpAuthBinding(req: RegistrationRequest): Promise<RegistrationResult> {
+export function registerHttpAuthBinding(req: RegistrationRequest): Promise<RegistrationResult> {
+  return serializeBindingMutation(() => registerBindingNow(req));
+}
+
+async function registerBindingNow(req: RegistrationRequest): Promise<RegistrationResult> {
   const d = deps;
   if (!d) return { ok: false, error: "INTERNAL_ERROR" };
   const origin = typeof req.origin === "string" ? normalizeOrigin(req.origin) : null;
@@ -499,7 +547,11 @@ async function onPermissionsAdded(added: chrome.permissions.Permissions): Promis
 }
 
 function onPermissionsRemoved(removed: chrome.permissions.Permissions): void {
-  if (isApiPermissionChange(removed)) unregisterHttpAuthListeners();
+  if (!isApiPermissionChange(removed)) return;
+  unregisterHttpAuthListeners();
+  // A prompt still open could otherwise be answered after the user took the
+  // capability away.
+  resetHttpAuthPrompts();
 }
 
 const permissionsAddedListener = (added: chrome.permissions.Permissions): void => {

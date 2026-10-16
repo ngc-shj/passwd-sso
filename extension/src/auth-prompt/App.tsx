@@ -33,9 +33,12 @@ export function displayUrl(url: string, max = URL_DISPLAY_MAX): string {
 }
 
 // The HTTP auth confirmation window (#905). Shows what the challenge is and
-// which login would answer it; never the server's realm text. Only a click on
-// Send that started (pointerdown) after Send was armed, while this window has
-// focus, releases the login. Enter and Escape mean Cancel, and Send is never
+// which login would answer it; never the server's realm text. A pointer click
+// releases the login only when the pointer moved onto Send after Send was
+// armed and the press began there while armed, so a stationary click train
+// at Send's position never completes, however slow. The keyboard (Tab to Send,
+// which restarts the delay, then Space) and assistive technology use clicks
+// with no pointer behind them. Enter and Escape mean Cancel, and Send is never
 // the default or focused button.
 export function App({ promptId }: { promptId: string | null }) {
   // undefined: loading; null: unknown or no longer pending.
@@ -49,10 +52,26 @@ export function App({ promptId }: { promptId: string | null }) {
   const focusFromPointer = useRef(false);
   const rearmRef = useRef<() => void>(() => {});
   const decided = useRef(false);
+  // Whether the pointer moved onto Send (from outside it) since Send was armed.
+  const [entered, setEntered] = useState(false);
+  const enteredRef = useRef(false);
+  // Whether the window is visible and focused (only then can Send arm).
+  const [windowActive, setWindowActive] = useState(false);
+  // Whether Send holds keyboard focus (Tab), which needs no pointer.
+  const [keyboardOnSend, setKeyboardOnSend] = useState(false);
+  const sendRef = useRef<HTMLButtonElement | null>(null);
+
+  const setEnteredBoth = (value: boolean) => {
+    enteredRef.current = value;
+    setEntered(value);
+  };
 
   const setArmedBoth = (value: boolean) => {
     armedRef.current = value;
     setArmed(value);
+    // Arming starts a new wait for the pointer to arrive; a pointer already
+    // resting on Send does not count.
+    setEnteredBoth(false);
   };
 
   useEffect(() => {
@@ -99,9 +118,15 @@ export function App({ promptId }: { promptId: string | null }) {
     };
     const rearm = () => {
       disarm();
-      if (document.visibilityState === "visible" && document.hasFocus()) {
+      const active = document.visibilityState === "visible" && document.hasFocus();
+      setWindowActive(active);
+      if (active) {
         timer = setTimeout(() => setArmedBoth(true), SEND_ARM_DELAY_MS);
       }
+    };
+    const onBlur = () => {
+      disarm();
+      setWindowActive(false);
     };
     const onPress = () => {
       if (!armedRef.current) rearm();
@@ -109,14 +134,14 @@ export function App({ promptId }: { promptId: string | null }) {
     rearmRef.current = rearm;
     rearm();
     window.addEventListener("focus", rearm);
-    window.addEventListener("blur", disarm);
+    window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", rearm);
     window.addEventListener("pointerdown", onPress, true);
     window.addEventListener("keydown", onPress, true);
     return () => {
       clearTimeout(timer);
       window.removeEventListener("focus", rearm);
-      window.removeEventListener("blur", disarm);
+      window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", rearm);
       window.removeEventListener("pointerdown", onPress, true);
       window.removeEventListener("keydown", onPress, true);
@@ -135,6 +160,18 @@ export function App({ promptId }: { promptId: string | null }) {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [decide]);
 
+  // The pointer moving onto Send from outside it (pointerenter does not fire
+  // for a pointer that was already there).
+  useEffect(() => {
+    const button = sendRef.current;
+    if (!ready || !button) return;
+    const onEnter = () => {
+      if (armedRef.current) setEnteredBoth(true);
+    };
+    button.addEventListener("pointerenter", onEnter);
+    return () => button.removeEventListener("pointerenter", onEnter);
+  }, [ready]);
+
   const onSendPointerDown = () => {
     pressBeganArmed.current = armedRef.current;
     focusFromPointer.current = true;
@@ -147,6 +184,7 @@ export function App({ promptId }: { promptId: string | null }) {
       focusFromPointer.current = false;
       return;
     }
+    setKeyboardOnSend(true);
     rearmRef.current();
   };
 
@@ -154,12 +192,22 @@ export function App({ promptId }: { promptId: string | null }) {
     const began = pressBeganArmed.current;
     pressBeganArmed.current = false;
     if (!armedRef.current || !document.hasFocus()) return;
-    // detail 0: a click with no pointer press behind it (Space on the focused
-    // button, assistive technology). A pointer click counts only when its
-    // press began while armed.
-    if (e.detail !== 0 && !began) return;
+    // A click from a pointer has a detail (click count) or a pointerType; one
+    // with neither is Space on the focused button or assistive technology.
+    const pointerType = (e.nativeEvent as MouseEvent & { pointerType?: unknown }).pointerType;
+    const fromPointer = e.detail !== 0 || (typeof pointerType === "string" && pointerType !== "");
+    if (fromPointer && !(began && enteredRef.current)) return;
     decide("send");
   };
+
+  // Why Send cannot be used yet, if it cannot. Display only: onSend decides.
+  const hint = !windowActive
+    ? t("authPrompt.hintFocusWindow")
+    : !armed
+      ? t("authPrompt.hintWait")
+      : !entered && !keyboardOnSend
+        ? t("authPrompt.hintMovePointer")
+        : null;
 
   if (view === undefined) {
     return <p className="p-4 text-sm text-gray-500 dark:text-gray-400">{t("authPrompt.loading")}</p>;
@@ -215,7 +263,10 @@ export function App({ promptId }: { promptId: string | null }) {
         ))}
       </dl>
       {/* Sticky: long details never push the buttons out of the window. */}
-      <div className="sticky bottom-0 flex gap-2 justify-end bg-white dark:bg-gray-900 py-2" data-testid="auth-actions">
+      <div className="sticky bottom-0 flex items-center gap-2 justify-end bg-white dark:bg-gray-900 py-2" data-testid="auth-actions">
+        <p aria-live="polite" className="mr-auto text-xs text-gray-500 dark:text-gray-400" data-testid="auth-hint">
+          {hint ?? ""}
+        </p>
         <button
           type="button"
           onClick={() => decide("cancel")}
@@ -225,8 +276,10 @@ export function App({ promptId }: { promptId: string | null }) {
         </button>
         <button
           type="button"
+          ref={sendRef}
           onPointerDown={onSendPointerDown}
           onFocus={onSendFocus}
+          onBlur={() => setKeyboardOnSend(false)}
           onClick={onSend}
           // aria-disabled, not disabled: a disabled button swallows the
           // pointerdown that must restart the arm delay.

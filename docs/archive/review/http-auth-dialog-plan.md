@@ -98,7 +98,7 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
 - **`releasePermissions(origin)`:** removes `origin/*` only when nothing else needs it:
   - no other binding is covered by that pattern (patterns without a port match any port);
   - it is not the configured server's origin (func F5, sec F7).
-  
+
   It removes `webRequest` / `webRequestAuthProvider` only when no binding remains.
 - **Options page:**
   - **Lists bindings by origin.** Each shows the entry title when unlocked, or "locked" otherwise.
@@ -151,7 +151,7 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
     - the entry title and username, from the cached overview, never a full decrypt;
     - `details.scheme`;
     - the http warning, which covers Digest too (an offline-crackable hash).
-    
+
     It does not show `details.realm` (server-controlled text). It does not show `tab.url`, which the extension cannot read without host access.
   - **Input protection:**
     - "Send" is disabled for 800 ms after the window becomes visible and focused, and again after each refocus;
@@ -174,7 +174,7 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
   - `INVALID_ENTRY` with no plaintext in the error;
   - the server `body.error` passthrough;
   - `VAULT_LOCKED` on a lock during the personal fetch.
-  
+
   `entryHttpHosts` is left as it is (host-based). `savedUrlOrigins` is a new origin-based helper.
 - **Error gate (T4):** `error-messages.test.ts` scans `fetchAndDecryptEntry` and the register helper. `HTTP_AUTH_REGISTER` joins `POPUP_INVOKED_HANDLERS`. The minimum member count includes the moved codes.
 - **Manifest (T8):** a test imports `manifest.config.ts` (`defineManifest` is the identity) and asserts all of these:
@@ -183,7 +183,7 @@ Chrome shows its own dialog for a `401` with `WWW-Authenticate: Basic|Digest` (r
   - `minimum_chrome_version`;
   - unchanged `content_scripts.matches` and `web_accessible_resources`;
   - that the auth-prompt page is not web-accessible.
-  
+
   `check-dist-hygiene.mjs` checks that `dist/` contains the auth-prompt page.
 - **Build (N15):** the page is added through `build.rollupOptions.input` in `vite.config.ts`.
 - **VE2 (T6):**
