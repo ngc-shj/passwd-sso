@@ -53,3 +53,24 @@ This is the initial review of `900a9815e`..`bda95ed3b`.
 - **Server-URL rule:** no regression for valid stored URLs. It is identical to the options validator.
 - **C7 extraction:** behaviour unchanged.
 - **i18n:** key parity holds.
+
+## Round 2 (verifying `edac5b17b`)
+All round-1 resolutions were verified correct. T1–T7 each fail for the reason they claim. The new findings are Minor or Low only.
+
+| ID | Severity | Finding | Resolution |
+|----|----------|---------|------------|
+| S-R2-1 | Minor | Prompts already queued are still shown inside an origin's cooldown. | `showNext` cancels a queued cross-site prompt for an origin in cooldown. |
+| S-R2-2 | Minor | Only the last cross-origin redirect hop is shown, so an attacker can choose the displayed source. | The first source is kept. |
+| S-R2-3 | Minor | A cross-site page can keep the cooldown armed and suppress the user's own address-bar login. | The cooldown never applies to a challenge with no initiator. |
+| S-R2-4 | Low | Tab to Send then Space needs no pause. | The arm restarts when Send gains focus. |
+| F-R2-1 | Low | Assistive-tech activation (a click with no preceding press) cannot send. | A `detail === 0` click counts while armed and focused; the press flag resets on disarm. |
+| F-R2-2 | Low | Long initiator and redirect rows push the buttons out of view. | Rows capped; sticky button row. |
+| F-R2-3 / T-R2-3 | Minor | The join rule ignores `redirectedFrom`. | The join compares every view field. |
+| T-R2-1 | Minor | The shown-only checks for a queued prompt are untested. | Test with the queued id. |
+| T-R2-2 | Minor | Removing a settled prompt from the queue is untested; a regression would wedge HTTP auth. | Test, including the decide step. |
+| T-R2-4 | Minor | The `aria-disabled` choice (S1) is unpinned. | Asserted, with the jsdom caveat. |
+| T-R2-5 | Low | The script's use of the exposure filter is untested. | Moved into the lib and tested with manifest fixtures. |
+| T-R2-6 | Low | The bridge's server-URL check argument is unpinned. | `toHaveBeenCalledWith` the stored URL. |
+| T-R2-7 | Low | The queued-timeout test fails only by hanging. | Explicit settle assertions. |
+
+**Stopping call.** Round 2 found nothing above Minor. Its fixes change only test code and narrow existing behaviour; no new feature surface is added. Per the review-loop stopping rule, there is no round 3. The next check is the manual run (VE1).
