@@ -57,6 +57,11 @@ export type ExtensionMessage =
       rpId: string;
       userName: string;
     }
+  // nonce: the pending intent the popup wrote before the permission prompt;
+  // the SW clears that intent when it handles this registration.
+  | { type: typeof EXT_MSG.HTTP_AUTH_REGISTER; origin: string; entryId: string; teamId?: string; nonce?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_GET; promptId: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_DECIDE; promptId: string; decision: HttpAuthDecision }
   | {
       type: typeof EXT_MSG.PASSKEY_CREATE_CREDENTIAL;
       rpId: string;
@@ -68,6 +73,23 @@ export type ExtensionMessage =
       clientDataJSON: string;
       replaceEntryId?: string;
     };
+
+export type HttpAuthDecision = "send" | "cancel";
+
+/** What the HTTP auth confirmation window shows. No realm: it is server text. */
+export interface HttpAuthPromptView {
+  /** The URL of the challenged navigation (webRequest details.url). */
+  url: string;
+  origin: string;
+  /** details.initiator; null for an address-bar or bookmark navigation. */
+  initiator: string | null;
+  /** "basic" or "digest". */
+  scheme: string;
+  entryTitle: string;
+  entryUsername: string;
+  /** The origin is plain http: the credential crosses the network unencrypted (Basic) or as a crackable hash (Digest). */
+  insecure: boolean;
+}
 
 export interface DecryptedEntry {
   id: string;
@@ -180,6 +202,9 @@ export type ExtensionResponse =
       vaultLocked?: boolean;
       suppressed?: boolean;
     }
+  | { type: typeof EXT_MSG.HTTP_AUTH_REGISTER; ok: boolean; error?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_GET; prompt: HttpAuthPromptView | null; error?: string }
+  | { type: typeof EXT_MSG.HTTP_AUTH_PROMPT_DECIDE; ok: boolean; error?: string }
   | {
       type: typeof EXT_MSG.PASSKEY_CREATE_CREDENTIAL;
       ok: boolean;

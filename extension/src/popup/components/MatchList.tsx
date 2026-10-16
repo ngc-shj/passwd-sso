@@ -14,6 +14,14 @@ import { EXT_ENTRY_TYPE } from "../../lib/constants";
 import { MS_PER_SECOND } from "../../lib/time";
 import { Toast } from "./Toast";
 import { FillMismatchDialog } from "./FillMismatchDialog";
+import { HttpAuthRegisterDialog } from "./HttpAuthRegisterDialog";
+import {
+  HTTP_AUTH_API_PERMISSIONS,
+  HTTP_AUTH_INTENT_TTL_MS,
+  HTTP_AUTH_PENDING_INTENT_KEY,
+  originPattern,
+  type HttpAuthPendingIntent,
+} from "../../lib/http-auth-bindings";
 
 interface Props {
   tabUrl: string | null;
@@ -26,6 +34,7 @@ export function MatchList({ tabUrl }: Props) {
   const [filling, setFilling] = useState(false);
   const [query, setQuery] = useState("");
   const [pendingFill, setPendingFill] = useState<DecryptedEntry | null>(null);
+  const [pendingRegister, setPendingRegister] = useState<DecryptedEntry | null>(null);
   const [toast, setToast] = useState<{
     message: string;
     type: "success" | "error";
@@ -38,6 +47,8 @@ export function MatchList({ tabUrl }: Props) {
   // Set whenever tabHost is (extractHost accepts http(s) URLs only).
   const tabOrigin = tabHost && tabUrl ? new URL(tabUrl).origin : null;
   const isInsecurePage = tabUrl ? isInsecureHttpUrl(tabUrl) : false;
+  // The tab's exact hostname (no www. stripping), for the HTTP auth action.
+  const tabHostname = tabOrigin ? new URL(tabOrigin).hostname : null;
 
   useEffect(() => {
     sendMessage({ type: "FETCH_PASSWORDS" }).then((res) => {
@@ -126,6 +137,69 @@ export function MatchList({ tabUrl }: Props) {
       setToast({ message: humanizeError(res.error || "AUTOFILL_FAILED"), type: "error" });
       setFilling(false);
     }
+  };
+
+  // HTTP auth registration (#905). The popup knows only the entry's hosts, so
+  // the action shows for a LOGIN whose host equals the tab's exactly; the SW
+  // then requires a saved URL with the tab's exact origin.
+  const canRegisterHttpAuth = (e: DecryptedEntry): boolean =>
+    e.entryType === EXT_ENTRY_TYPE.LOGIN &&
+    tabHostname !== null &&
+    [e.urlHost, ...(e.additionalUrlHosts ?? [])].some(
+      (h) => typeof h === "string" && h.toLowerCase() === tabHostname,
+    );
+
+  const finishRegister = async (granted: Promise<boolean>, intent: HttpAuthPendingIntent) => {
+    let ok = false;
+    try {
+      ok = await granted;
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      await chrome.storage.session.remove(HTTP_AUTH_PENDING_INTENT_KEY).catch(() => {});
+      setToast({ message: humanizeError("HTTP_AUTH_PERMISSION_DENIED"), type: "error" });
+      return;
+    }
+    const res = await sendMessage({
+      type: "HTTP_AUTH_REGISTER",
+      origin: intent.origin,
+      entryId: intent.entryId,
+      teamId: intent.teamId,
+      nonce: intent.nonce,
+    });
+    if (res?.ok) {
+      setToast({ message: t("popup.httpAuthRegistered", { origin: intent.origin }), type: "success", autoDismiss: true });
+    } else {
+      setToast({ message: humanizeError(res?.error || "HTTP_AUTH_ENTRY_MISMATCH"), type: "error" });
+    }
+  };
+
+  // The dialog's confirm click. chrome.permissions.request needs the user
+  // gesture, so it is the first call that waits on anything: the intent write
+  // before it is fired, not awaited. If the popup closes on the permission
+  // prompt, the SW completes the registration from that intent.
+  const confirmRegister = (e: DecryptedEntry) => {
+    setPendingRegister(null);
+    if (!tabOrigin) return;
+    const intent: HttpAuthPendingIntent = {
+      nonce: crypto.randomUUID(),
+      origin: tabOrigin,
+      entryId: e.id,
+      ...(e.teamId ? { teamId: e.teamId } : {}),
+      expiresAt: Date.now() + HTTP_AUTH_INTENT_TTL_MS,
+    };
+    void chrome.storage.session.set({ [HTTP_AUTH_PENDING_INTENT_KEY]: intent }).catch(() => {});
+    let granted: Promise<boolean>;
+    try {
+      granted = chrome.permissions.request({
+        permissions: [...HTTP_AUTH_API_PERMISSIONS],
+        origins: [originPattern(tabOrigin)],
+      });
+    } catch {
+      granted = Promise.resolve(false);
+    }
+    void finishRegister(granted, intent);
   };
 
   const entryTypeBadge = (type: string) => {
@@ -253,6 +327,16 @@ export function MatchList({ tabUrl }: Props) {
               )}
               {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
                 <>
+                  {canRegisterHttpAuth(e) && (
+                    <button
+                      onClick={() => setPendingRegister(e)}
+                      title={t("popup.httpAuthRegister")}
+                      aria-label={t("popup.httpAuthRegister")}
+                      className="p-1.5 rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 active:bg-gray-300 dark:active:bg-gray-500 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    </button>
+                  )}
                   {e.username && (
                     <button
                       onClick={() => handleCopyUsername(e)}
@@ -307,6 +391,14 @@ export function MatchList({ tabUrl }: Props) {
             void handleFill(entry.id, entry.entryType, entry.teamId);
           }}
           onCancel={() => setPendingFill(null)}
+        />
+      )}
+      {pendingRegister && tabOrigin && (
+        <HttpAuthRegisterDialog
+          title={pendingRegister.title || "(Untitled)"}
+          origin={tabOrigin}
+          onConfirm={() => confirmRegister(pendingRegister)}
+          onCancel={() => setPendingRegister(null)}
         />
       )}
       {isInsecurePage && (

@@ -7,6 +7,14 @@ import { useTheme } from "../lib/theme";
 import { getDpopThumbprint, deleteIdbKey } from "../lib/dpop-key";
 import { EXT_API_PATH } from "../lib/api-paths";
 import { EXT_MSG } from "../lib/constants";
+import { sendMessage } from "../lib/messaging";
+import {
+  listBindings,
+  originPattern,
+  releasePermissions,
+  removeBinding,
+  type HttpAuthBinding,
+} from "../lib/http-auth-bindings";
 
 const DEFAULT_SERVER_URL = "https://localhost:3000";
 
@@ -79,14 +87,103 @@ function SettingRow({ label, description, children, htmlFor }: {
   );
 }
 
+type HttpAuthRow = {
+  binding: HttpAuthBinding;
+  /** null while the vault is locked (no titles to show). */
+  title: string | null;
+  entryMissing: boolean;
+  permissionMissing: boolean;
+};
+
+// HTTP auth bindings (#905). Titles come from the SW's entry list, so they
+// show only while the vault is unlocked; the flags tell a binding whose entry
+// is gone, and one whose site permission was removed outside the extension.
+function HttpAuthSection() {
+  const [rows, setRows] = useState<HttpAuthRow[] | null>(null);
+
+  const load = async () => {
+    const bindings = await listBindings();
+    let entries: Array<{ id: string; teamId?: string; title: string }> | null = null;
+    try {
+      const res = await sendMessage({ type: EXT_MSG.FETCH_PASSWORDS });
+      entries = Array.isArray(res?.entries) ? res.entries : null;
+    } catch {
+      entries = null;
+    }
+    const next = await Promise.all(
+      bindings.map(async (binding) => {
+        const entry = entries?.find(
+          (e) => e.id === binding.entryId && (e.teamId ?? undefined) === binding.teamId,
+        );
+        let permitted = false;
+        try {
+          permitted = await chrome.permissions.contains({ origins: [originPattern(binding.origin)] });
+        } catch {
+          permitted = false;
+        }
+        return {
+          binding,
+          title: entries ? (entry?.title ?? null) : null,
+          entryMissing: entries !== null && !entry,
+          permissionMissing: !permitted,
+        };
+      }),
+    );
+    setRows(next);
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const remove = async (origin: string) => {
+    await removeBinding(origin);
+    await releasePermissions(origin);
+    await load();
+  };
+
+  return (
+    <>
+      <p className="py-3 text-xs text-gray-400 dark:text-gray-500">{t("options.httpAuthHint")}</p>
+      {rows !== null && rows.length === 0 && (
+        <p className="py-3 text-sm text-gray-400 dark:text-gray-500">{t("options.httpAuthNone")}</p>
+      )}
+      {rows?.map((row) => (
+        <div key={row.binding.origin} className="flex items-center justify-between gap-4 py-3" data-testid="http-auth-row">
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200 break-all">{row.binding.origin}</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {row.entryMissing ? "" : (row.title ?? t("options.httpAuthLocked"))}
+            </span>
+            {row.entryMissing && (
+              <span className="text-xs text-amber-600 dark:text-amber-400">{t("options.httpAuthEntryMissing")}</span>
+            )}
+            {row.permissionMissing && (
+              <span className="text-xs text-amber-600 dark:text-amber-400">{t("options.httpAuthPermissionMissing")}</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void remove(row.binding.origin)}
+            className="px-3 py-1 text-sm text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-md hover:bg-red-50 dark:hover:bg-red-900/30 shrink-0"
+          >
+            {t("options.httpAuthRemove")}
+          </button>
+        </div>
+      ))}
+    </>
+  );
+}
+
 const selectClass =
   "h-8 px-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-gray-800";
 
-type SectionId = "general" | "autofill" | "notifications" | "security" | "shortcuts" | "about";
+type SectionId = "general" | "autofill" | "httpAuth" | "notifications" | "security" | "shortcuts" | "about";
 
 const SECTIONS: { id: SectionId; labelKey: string; icon: string }[] = [
   { id: "general", labelKey: "options.sectionGeneral", icon: "M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7 7 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a7 7 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.212-1.281c-.062-.374-.312-.686-.644-.87a7 7 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a7 7 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28ZM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" },
   { id: "autofill", labelKey: "options.sectionAutofill", icon: "M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" },
+  { id: "httpAuth", labelKey: "options.sectionHttpAuth", icon: "M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" },
   { id: "notifications", labelKey: "options.sectionNotifications", icon: "M14.857 17.082a24 24 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.3 24.3 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" },
   { id: "security", labelKey: "options.sectionSecurity", icon: "M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751A11.96 11.96 0 0 0 12 2.714Z" },
   { id: "shortcuts", labelKey: "options.sectionShortcuts", icon: "M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z" },
@@ -339,6 +436,9 @@ export function App() {
             </SettingRow>
           </>
         );
+
+      case "httpAuth":
+        return <HttpAuthSection />;
 
       case "notifications":
         return (

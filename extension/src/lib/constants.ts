@@ -104,6 +104,12 @@ export const EXT_MSG = {
   PASSKEY_SIGN_ASSERTION: "PASSKEY_SIGN_ASSERTION",
   PASSKEY_CHECK_DUPLICATE: "PASSKEY_CHECK_DUPLICATE",
   PASSKEY_CREATE_CREDENTIAL: "PASSKEY_CREATE_CREDENTIAL",
+  // HTTP authentication (#905). Popup → SW: bind a LOGIN entry to an origin
+  // after the user granted its permissions. Auth-prompt window → SW: read what
+  // the confirmation shows, and answer it.
+  HTTP_AUTH_REGISTER: "HTTP_AUTH_REGISTER",
+  HTTP_AUTH_PROMPT_GET: "HTTP_AUTH_PROMPT_GET",
+  HTTP_AUTH_PROMPT_DECIDE: "HTTP_AUTH_PROMPT_DECIDE",
 } as const;
 
 type ExtMsgType = (typeof EXT_MSG)[keyof typeof EXT_MSG];
@@ -123,6 +129,9 @@ export const EXTENSION_PAGE_ONLY_MESSAGES: ReadonlySet<ExtMsgType> = new Set([
   EXT_MSG.FETCH_PASSWORDS,
   EXT_MSG.GET_STATUS,
   EXT_MSG.GET_TOKEN,
+  EXT_MSG.HTTP_AUTH_PROMPT_DECIDE,
+  EXT_MSG.HTTP_AUTH_PROMPT_GET,
+  EXT_MSG.HTTP_AUTH_REGISTER,
   EXT_MSG.KEEPALIVE_PING,
   EXT_MSG.LOCK_VAULT,
   EXT_MSG.RESET_DPOP_KEY,

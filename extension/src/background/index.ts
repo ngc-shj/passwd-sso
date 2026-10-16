@@ -118,6 +118,18 @@ import {
   handlePasskeyCreateCredential,
 } from "./passkey-provider";
 import { copyToClipboard } from "./clipboard";
+import {
+  clearPendingIntent,
+  initHttpAuth,
+  installHttpAuthLifecycle,
+  registerHttpAuthBinding,
+} from "./http-auth";
+import {
+  decidePrompt,
+  getPromptView,
+  openPrompt,
+  registerPromptListeners,
+} from "./http-auth-prompt";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
 
@@ -979,6 +991,30 @@ initPasskeyProvider({
   swFetch,
   invalidateCache,
 });
+
+// HTTP authentication (#905). Registered synchronously at the top level so a
+// challenge that wakes the SW finds its listener; every step is guarded, so a
+// browser or mock without the optional APIs still starts the SW.
+try {
+  initHttpAuth({
+    isVaultUnlocked: () => encryptionKey !== null && currentUserId !== null,
+    awaitHydrationBounded,
+    currentVaultEpoch,
+    isVaultEpochCurrent,
+    fetchAndDecryptEntry,
+    getEntryOverview: async (entryId, teamId) => {
+      const entry = (await getCachedEntries()).find(
+        (e) => e.id === entryId && (e.teamId ?? undefined) === teamId,
+      );
+      return entry ? { title: entry.title, username: entry.username, entryType: entry.entryType } : null;
+    },
+    openPrompt,
+  });
+  registerPromptListeners();
+  installHttpAuthLifecycle();
+} catch (err) {
+  warnBackground("http-auth-listener-register-failed", classifyError(err));
+}
 
 // Register MAIN world WebAuthn interceptor via scripting API.
 // Only the scripting API can inject into MAIN world while bypassing page CSP.
@@ -2570,8 +2606,13 @@ async function handleMessage(
   //  - a content-script fill/copy request the content script only sends from
   //    a trusted user gesture (userGesture: true — see form-detector-lib.ts).
   //    A page-triggerable message without that field must NOT extend it.
+  //  The HTTP auth confirmation window's GET/DECIDE are excluded too: a
+  //  challenge (which the page answers) must not keep the vault unlocked.
   const isExtensionPageMessage =
-    message.type !== EXT_MSG.KEEPALIVE_PING && isExtensionPageSender(_sender);
+    message.type !== EXT_MSG.KEEPALIVE_PING &&
+    message.type !== EXT_MSG.HTTP_AUTH_PROMPT_GET &&
+    message.type !== EXT_MSG.HTTP_AUTH_PROMPT_DECIDE &&
+    isExtensionPageSender(_sender);
   const isTrustedContentActivity =
     message.type === EXT_MSG.AUTOFILL_FROM_CONTENT && message.userGesture === true;
   if (isExtensionPageMessage || isTrustedContentActivity) {
@@ -3481,6 +3522,30 @@ async function handleMessage(
       return;
     }
 
+    case EXT_MSG.HTTP_AUTH_REGISTER: {
+      const result = await registerHttpAuthBinding(message);
+      await clearPendingIntent(message.nonce);
+      sendResponse(
+        result.ok
+          ? { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: true }
+          : { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: false, error: result.error },
+      );
+      return;
+    }
+
+    case EXT_MSG.HTTP_AUTH_PROMPT_GET: {
+      sendResponse({ type: EXT_MSG.HTTP_AUTH_PROMPT_GET, prompt: getPromptView(message.promptId) });
+      return;
+    }
+
+    case EXT_MSG.HTTP_AUTH_PROMPT_DECIDE: {
+      sendResponse({
+        type: EXT_MSG.HTTP_AUTH_PROMPT_DECIDE,
+        ok: decidePrompt(message.promptId, message.decision),
+      });
+      return;
+    }
+
     case EXT_MSG.CHECK_PENDING_SAVE: {
       const tabId = _sender.tab?.id;
       if (!tabId) {
@@ -3586,6 +3651,12 @@ function respondWithFailure(
         break;
       case EXT_MSG.PASSKEY_CREATE_CREDENTIAL:
         sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.HTTP_AUTH_PROMPT_GET:
+        sendResponse({ type: EXT_MSG.HTTP_AUTH_PROMPT_GET, prompt: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+        break;
+      case EXT_MSG.HTTP_AUTH_PROMPT_DECIDE:
+        sendResponse({ type: EXT_MSG.HTTP_AUTH_PROMPT_DECIDE, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
         break;
       default:
         sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

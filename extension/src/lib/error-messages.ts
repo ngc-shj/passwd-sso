@@ -28,6 +28,8 @@ const ERROR_KEY_MAP: Record<string, string> = {
   UNLOCK_FAILED: "errors.unlockFailed",
   NO_TOKEN: "errors.noToken",
   INTERNAL_ERROR: "errors.internalError",
+  HTTP_AUTH_ENTRY_MISMATCH: "errors.httpAuthEntryMismatch",
+  HTTP_AUTH_PERMISSION_DENIED: "errors.httpAuthPermissionDenied",
 };
 
 export function humanizeError(code: string): string {

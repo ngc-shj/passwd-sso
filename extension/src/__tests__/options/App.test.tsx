@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 import "@testing-library/jest-dom/vitest";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 const mockGetSettings = vi.fn();
 const mockSetSettings = vi.fn();
@@ -236,5 +236,127 @@ describe("Options App", () => {
     expect(inlineToggle).toHaveAttribute("aria-checked", "true");
     fireEvent.click(inlineToggle);
     expect(inlineToggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  // ── HTTP auth bindings (#905, C5) ──
+  describe("Site sign-in section", () => {
+    type ChromeMock = {
+      runtime: { sendMessage: ReturnType<typeof vi.fn> };
+      permissions: { contains: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+      storage: { local: { get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> } };
+    };
+    const chromeMock = () => (globalThis as unknown as { chrome: ChromeMock }).chrome;
+    let stored: Record<string, unknown>;
+    let fetchResponse: unknown;
+    // The chrome stub is file-wide and the order is shuffled: put back what
+    // this describe replaces so the other tests keep their GET_STATUS answer.
+    let saved: { sendMessage: unknown; get: unknown; set: unknown; remove: unknown };
+
+    afterEach(() => {
+      const c = chromeMock();
+      c.runtime.sendMessage = saved.sendMessage as ChromeMock["runtime"]["sendMessage"];
+      c.storage.local.get = saved.get as ChromeMock["storage"]["local"]["get"];
+      c.storage.local.set = saved.set as ChromeMock["storage"]["local"]["set"];
+      c.permissions.remove = saved.remove as ChromeMock["permissions"]["remove"];
+    });
+
+    beforeEach(() => {
+      const original = chromeMock();
+      saved = {
+        sendMessage: original.runtime.sendMessage,
+        get: original.storage.local.get,
+        set: original.storage.local.set,
+        remove: original.permissions.remove,
+      };
+      stored = {
+        httpAuthBindings: [
+          { origin: "http://router.example:8080", entryId: "pw-r" },
+          { origin: "https://nas.example", entryId: "pw-n", teamId: "t1" },
+        ],
+      };
+      fetchResponse = {
+        type: "FETCH_PASSWORDS",
+        entries: [
+          { id: "pw-r", title: "Router", username: "admin", urlHost: "router.example", entryType: "LOGIN" },
+          { id: "pw-n", teamId: "t1", title: "NAS", username: "root", urlHost: "nas.example", entryType: "LOGIN" },
+        ],
+      };
+      const c = chromeMock();
+      c.storage.local.get = vi.fn(async (key: unknown) => (typeof key === "string" ? { [key]: stored[key] } : {}));
+      c.storage.local.set = vi.fn(async (items: Record<string, unknown>) => {
+        Object.assign(stored, items);
+      });
+      c.permissions.contains = vi.fn().mockResolvedValue(true);
+      c.permissions.remove = vi.fn().mockResolvedValue(true);
+      // Callback form: GET_STATUS from the page itself. Promise form: the
+      // section's FETCH_PASSWORDS through lib/messaging.
+      c.runtime.sendMessage = vi.fn((msg: { type: string }, cb?: (res: unknown) => void) => {
+        if (cb) {
+          cb({ type: "GET_STATUS", hasToken: true, expiresAt: null, vaultUnlocked: true });
+          return undefined;
+        }
+        return Promise.resolve(msg.type === "FETCH_PASSWORDS" ? fetchResponse : undefined);
+      });
+    });
+
+    async function openSection() {
+      render(<App />);
+      await screen.findByText("General");
+      navigateTo("Site sign-in");
+    }
+
+    const row = async (origin: string) =>
+      (await screen.findByText(origin)).closest("[data-testid='http-auth-row']") as HTMLElement;
+
+    it("lists bindings by origin with the entry title while unlocked", async () => {
+      await openSection();
+      expect(await row("http://router.example:8080")).toHaveTextContent("Router");
+      expect(await row("https://nas.example")).toHaveTextContent("NAS");
+      expect(screen.queryByText("Locked")).toBeNull();
+    });
+
+    it("shows Locked instead of titles while the vault is locked", async () => {
+      fetchResponse = { type: "FETCH_PASSWORDS", entries: null, error: "VAULT_LOCKED" };
+      await openSection();
+      expect(await row("http://router.example:8080")).toHaveTextContent("Locked");
+      expect(screen.queryByText("The login no longer exists")).toBeNull();
+    });
+
+    it("flags a binding whose entry is gone", async () => {
+      fetchResponse = { type: "FETCH_PASSWORDS", entries: [(fetchResponse as { entries: unknown[] }).entries[1]] };
+      await openSection();
+      expect(await row("http://router.example:8080")).toHaveTextContent("The login no longer exists");
+      // Control: the other binding's entry is present.
+      expect(await row("https://nas.example")).not.toHaveTextContent("The login no longer exists");
+    });
+
+    it("flags a binding whose site permission was removed", async () => {
+      chromeMock().permissions.contains = vi.fn(async ({ origins }: { origins: string[] }) =>
+        origins[0] !== "http://router.example:8080/*",
+      );
+      await openSection();
+      expect(await row("http://router.example:8080")).toHaveTextContent("Permission for this site was removed");
+      // Control: the other origin still has its permission.
+      expect(await row("https://nas.example")).not.toHaveTextContent("Permission for this site was removed");
+    });
+
+    it("Remove deletes the binding, then releases what it no longer needs", async () => {
+      await openSection();
+      const target = await row("http://router.example:8080");
+      fireEvent.click(within(target).getByRole("button", { name: "Remove" }));
+      await waitFor(() => expect(screen.queryByText("http://router.example:8080")).toBeNull());
+      expect(stored.httpAuthBindings).toEqual([{ origin: "https://nas.example", entryId: "pw-n", teamId: "t1" }]);
+      expect(chromeMock().permissions.remove).toHaveBeenCalledWith({ origins: ["http://router.example:8080/*"] });
+      // Another binding remains, so the API permissions stay.
+      expect(chromeMock().permissions.remove).not.toHaveBeenCalledWith(
+        expect.objectContaining({ permissions: expect.anything() }),
+      );
+    });
+
+    it("says so when no site is set up", async () => {
+      stored = {};
+      await openSection();
+      expect(await screen.findByText(/No sites set up/)).toBeInTheDocument();
+    });
   });
 });

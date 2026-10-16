@@ -5445,6 +5445,9 @@ describe("C5 sender gate: EXTENSION_PAGE_ONLY_MESSAGES refused from content send
     [EXT_MSG.FETCH_PASSWORDS]: { type: EXT_MSG.FETCH_PASSWORDS, entries: null, error: "INTERNAL_ERROR" },
     [EXT_MSG.GET_STATUS]: { type: EXT_MSG.GET_STATUS, hasToken: false, expiresAt: null, vaultUnlocked: false },
     [EXT_MSG.GET_TOKEN]: { type: EXT_MSG.GET_TOKEN, token: null },
+    [EXT_MSG.HTTP_AUTH_PROMPT_DECIDE]: { type: EXT_MSG.HTTP_AUTH_PROMPT_DECIDE, ok: false, error: "INTERNAL_ERROR" },
+    [EXT_MSG.HTTP_AUTH_PROMPT_GET]: { type: EXT_MSG.HTTP_AUTH_PROMPT_GET, prompt: null, error: "INTERNAL_ERROR" },
+    [EXT_MSG.HTTP_AUTH_REGISTER]: { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: false, error: "INTERNAL_ERROR" },
     [EXT_MSG.LOCK_VAULT]: { type: EXT_MSG.LOCK_VAULT, ok: false, error: "INTERNAL_ERROR" },
     [EXT_MSG.RESET_DPOP_KEY]: { type: EXT_MSG.RESET_DPOP_KEY, ok: false, error: "INTERNAL_ERROR" },
     [EXT_MSG.UNLOCK_VAULT]: { type: EXT_MSG.UNLOCK_VAULT, ok: false, error: "INTERNAL_ERROR" },
@@ -5462,6 +5465,12 @@ describe("C5 sender gate: EXTENSION_PAGE_ONLY_MESSAGES refused from content send
         return { type, entryId: "pw-1" };
       case EXT_MSG.UNLOCK_VAULT:
         return { type, passphrase: "pw" };
+      case EXT_MSG.HTTP_AUTH_REGISTER:
+        return { type, origin: "https://example.com", entryId: "pw-1" };
+      case EXT_MSG.HTTP_AUTH_PROMPT_GET:
+        return { type, promptId: "no-such-prompt" };
+      case EXT_MSG.HTTP_AUTH_PROMPT_DECIDE:
+        return { type, promptId: "no-such-prompt", decision: "send" };
       default:
         return { type };
     }

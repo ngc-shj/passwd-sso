@@ -21,6 +21,12 @@
  *    import() a module chunk needs; a build that drops the second pass, or emits
  *    it as a module, would leave those fills failing with nothing to show why.
  *
+ * 4. The HTTP auth confirmation page (src/auth-prompt/index.html) exists. The
+ *    service worker opens it by URL and the manifest never names it, so only
+ *    vite.config.ts `build.rollupOptions.input` puts it in the build; without it
+ *    every challenge's window would open a missing page and time out. The
+ *    built manifest must not list it as web-accessible: no site may frame it.
+ *
  * The absent-subject cases matter as much as the positive ones: a missing dist/,
  * a walk that finds no HTML, or a throw inside the walk must all exit non-zero.
  * "Scanned nothing" must never be reported the same way as "found nothing".
@@ -32,6 +38,8 @@ import { fileURLToPath } from "node:url";
 const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const FORBIDDEN_HTML = 'rel="modulepreload"';
 const FILL_LISTENERS = join(DIST, "src", "content", "fill-listeners.js");
+const AUTH_PROMPT_PAGE = join(DIST, "src", "auth-prompt", "index.html");
+const MANIFEST = join(DIST, "manifest.json");
 const MODULE_SYNTAX_RE = /\bimport\s*\(|\bimport\.meta\b|^\s*(?:import|export)\b/m;
 
 // Matched on basename. Chrome rejects an unpacked extension containing a
@@ -111,6 +119,22 @@ try {
     );
   }
 
+  if (!html.includes(AUTH_PROMPT_PAGE)) {
+    failures.push(
+      `${relative(DIST, AUTH_PROMPT_PAGE)} is missing — add it to build.rollupOptions.input in vite.config.ts.`,
+    );
+  }
+
+  const manifest = JSON.parse(await readFile(MANIFEST, "utf8"));
+  const exposed = (manifest.web_accessible_resources ?? [])
+    .flatMap((entry) => entry.resources ?? [])
+    .filter((resource) => resource.includes("auth-prompt"));
+  if (exposed.length > 0) {
+    failures.push(
+      `web_accessible_resources exposes the auth-prompt page: ${exposed.join(", ")} — any site could frame it.`,
+    );
+  }
+
   if (failures.length > 0) {
     for (const failure of failures) console.error(`check-dist-hygiene: ${failure}`);
     process.exit(1);
@@ -118,7 +142,7 @@ try {
 
   // The counts are the evidence that the gate actually examined something.
   console.log(
-    `check-dist-hygiene: ${html.length} HTML file(s) scanned, no modulepreload links, no junk files, fill-only script is classic (${fillScript.length} bytes)`,
+    `check-dist-hygiene: ${html.length} HTML file(s) scanned, no modulepreload links, no junk files, fill-only script is classic (${fillScript.length} bytes), auth-prompt page present`,
   );
 } catch (err) {
   console.error(

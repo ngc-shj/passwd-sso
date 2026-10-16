@@ -1,0 +1,396 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ALARM_VAULT_LOCK, EXT_ENTRY_TYPE } from "../../lib/constants";
+import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
+import { HTTP_AUTH_BINDINGS_KEY, HTTP_AUTH_PENDING_INTENT_KEY } from "../../lib/http-auth-bindings";
+import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
+
+// HTTP auth (#905) as background/index.ts wires it: C6 registration at SW
+// start, the HTTP_AUTH_* message handlers, the activity exclusion, and one
+// challenge answered end to end through the real prompt module.
+
+const cryptoMocks = vi.hoisted(() => ({
+  deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
+  unwrapSecretKey: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+  deriveEncryptionKey: vi.fn().mockResolvedValue("enc-key"),
+  deriveAuthKeyBytes: vi.fn().mockResolvedValue(new Uint8Array([4, 5, 6])),
+  computeAuthHash: vi.fn().mockResolvedValue("fake-auth-hash"),
+  verifyKey: vi.fn().mockResolvedValue(true),
+  decryptData: vi.fn(),
+  buildPersonalEntryAAD: vi.fn().mockReturnValue(new Uint8Array([1, 2])),
+  hexDecode: vi.fn().mockReturnValue(new Uint8Array([0, 1])),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
+}));
+vi.mock("../../lib/crypto", () => cryptoMocks);
+
+const ORIGIN = "http://router.example:8080";
+const OVERVIEW = JSON.stringify({ title: "Router", username: "admin", urlHost: "router.example" });
+const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
+
+type MessageHandler = (message: unknown, sender: unknown, sendResponse: (resp: unknown) => void) => boolean | void;
+type Listener = (...args: never[]) => unknown;
+
+function chromeEvent() {
+  const listeners = new Set<Listener>();
+  return {
+    listeners,
+    addListener: vi.fn((l: Listener) => {
+      listeners.add(l);
+    }),
+    removeListener: vi.fn((l: Listener) => {
+      listeners.delete(l);
+    }),
+    hasListener: vi.fn((l: Listener) => listeners.has(l)),
+  };
+}
+
+let messageHandlers: MessageHandler[];
+let local: Record<string, unknown>;
+let session: Record<string, unknown>;
+let chromeMock: ReturnType<typeof installChromeMock>;
+
+function installChromeMock({ webRequest = true }: { webRequest?: boolean } = {}) {
+  messageHandlers = [];
+  local = {};
+  session = {};
+  const mock = {
+    runtime: {
+      onMessage: { addListener: (fn: MessageHandler) => messageHandlers.push(fn) },
+      onInstalled: { addListener: vi.fn() },
+      onStartup: { addListener: vi.fn() },
+      sendMessage: vi.fn().mockResolvedValue({ ok: true }),
+      getContexts: vi.fn().mockResolvedValue([]),
+      getURL: vi.fn((path: string) => `chrome-extension://test-extension-id/${path}`),
+    },
+    offscreen: { createDocument: vi.fn().mockResolvedValue(undefined), Reason: { CLIPBOARD: "CLIPBOARD" } },
+    alarms: { onAlarm: { addListener: vi.fn() }, create: vi.fn(), clear: vi.fn() },
+    scripting: {
+      executeScript: vi.fn().mockResolvedValue([]),
+      registerContentScripts: vi.fn().mockResolvedValue(undefined),
+      unregisterContentScripts: vi.fn().mockResolvedValue(undefined),
+    },
+    tabs: {
+      sendMessage: vi.fn().mockResolvedValue({ filled: 1 }),
+      query: vi.fn().mockResolvedValue([{ id: 1, url: undefined }]),
+      get: vi.fn(async (id: number) => ({ id, windowId: 3, incognito: false })),
+      onActivated: { addListener: vi.fn() },
+      onUpdated: { addListener: vi.fn() },
+      onRemoved: chromeEvent(),
+    },
+    windows: {
+      get: vi.fn(async () => ({ id: 3, left: 0, top: 0, width: 1000 })),
+      create: vi.fn(async (_params: chrome.windows.CreateData) => ({ id: 77 })),
+      remove: vi.fn(async () => {}),
+      onRemoved: chromeEvent(),
+    },
+    action: {
+      setBadgeText: vi.fn().mockResolvedValue(undefined),
+      setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+    },
+    contextMenus: {
+      create: vi.fn((_p: unknown, cb?: () => void) => cb?.()),
+      removeAll: vi.fn((cb?: () => void) => cb?.()),
+      onClicked: { addListener: vi.fn() },
+    },
+    permissions: {
+      contains: vi.fn(async () => true),
+      remove: vi.fn(async () => true),
+      onAdded: chromeEvent(),
+      onRemoved: chromeEvent(),
+    },
+    storage: {
+      local: {
+        get: vi.fn(async (keys: unknown) =>
+          typeof keys === "string"
+            ? { [keys]: local[keys] }
+            : { serverUrl: "https://localhost:3000", autoLockMinutes: 15 },
+        ),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          Object.assign(local, items);
+        }),
+      },
+      session: {
+        get: vi.fn(async (key: string) => (typeof key === "string" ? { [key]: session[key] } : {})),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          Object.assign(session, items);
+        }),
+        remove: vi.fn(async (key: string) => {
+          delete session[key];
+        }),
+        setAccessLevel: vi.fn().mockResolvedValue(undefined),
+      },
+      onChanged: { addListener: vi.fn() },
+    },
+    commands: { onCommand: { addListener: vi.fn() } },
+    webRequest: webRequest ? { onAuthRequired: chromeEvent(), onErrorOccurred: chromeEvent() } : undefined,
+  };
+  vi.stubGlobal("chrome", mock);
+  return mock;
+}
+
+let bgModule: typeof import("../../background/index") | null = null;
+async function loadBackground(): Promise<void> {
+  bgModule = await import("../../background/index");
+  await bgModule.tokenBridgeRegistration;
+}
+
+const extensionPage = () => ({ url: "chrome-extension://test-extension-id/popup/index.html" });
+function send(message: unknown, sender: unknown = extensionPage()): Promise<unknown> {
+  return new Promise((resolve) => {
+    messageHandlers[0](message, sender, resolve);
+  });
+}
+
+let byIdBlob: Record<string, unknown>;
+
+function stubFetch(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+        return {
+          ok: true,
+          json: async () => ({
+            token: "refreshed-tok",
+            expiresAt: new Date(Date.now() + 900_000).toISOString(),
+            scope: ["passwords:read", "vault:unlock-data"],
+          }),
+        };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_VERIFY)) {
+        return { ok: true, status: 200, json: async () => ({ verified: true }) };
+      }
+      if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+        return {
+          ok: true,
+          json: async () => ({
+            userId: "user-1",
+            accountSalt: "00",
+            encryptedSecretKey: "aa",
+            secretKeyIv: "bb",
+            secretKeyAuthTag: "cc",
+            verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+          }),
+        };
+      }
+      if (url.includes(extApiPath.passwordById(""))) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: "pw-r",
+            encryptedBlob: { ciphertext: "blob-r", iv: "bb", authTag: "cc" },
+            encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+            aadVersion: 1,
+          }),
+        };
+      }
+      if (url.includes(EXT_API_PATH.PASSWORDS)) {
+        return {
+          ok: true,
+          json: async () => [
+            { id: "pw-r", encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" }, entryType: EXT_ENTRY_TYPE.LOGIN, aadVersion: 1 },
+          ],
+        };
+      }
+      if (url.endsWith(EXT_API_PATH.TEAMS)) return { ok: true, json: async () => [] };
+      return { ok: false, json: async () => ({}) };
+    }),
+  );
+}
+
+async function unlock(): Promise<void> {
+  bgModule!.applyToken("t", Date.now() + 3_600_000, "");
+  expect(await send({ type: "UNLOCK_VAULT", passphrase: "pw" })).toEqual({ type: "UNLOCK_VAULT", ok: true });
+}
+
+beforeEach(async () => {
+  vi.resetModules();
+  vi.clearAllMocks();
+  byIdBlob = { url: `${ORIGIN}/admin`, username: "admin", password: "r0uter" };
+  keyedDecrypt.install({ "11": OVERVIEW });
+  keyedDecrypt.set("blob-r", JSON.stringify(byIdBlob));
+  chromeMock = installChromeMock();
+  stubFetch();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("C6: registration at SW start", () => {
+  it("registers the asyncBlocking challenge listener at module load, before any message", async () => {
+    await loadBackground();
+    expect(chromeMock.webRequest!.onAuthRequired.addListener).toHaveBeenCalledTimes(1);
+    expect(chromeMock.webRequest!.onAuthRequired.addListener).toHaveBeenCalledWith(
+      expect.any(Function),
+      { urls: ["http://*/*", "https://*/*"], types: ["main_frame"] },
+      ["asyncBlocking"],
+    );
+    expect(chromeMock.permissions.onAdded.addListener).toHaveBeenCalledTimes(1);
+    expect(chromeMock.permissions.onRemoved.addListener).toHaveBeenCalledTimes(1);
+    expect(chromeMock.windows.onRemoved.addListener).toHaveBeenCalledTimes(1);
+  });
+
+  it("control: without chrome.webRequest the SW starts and answers messages", async () => {
+    chromeMock = installChromeMock({ webRequest: false });
+    await loadBackground();
+    expect(messageHandlers).toHaveLength(1);
+    expect(await send({ type: "GET_STATUS" })).toEqual(expect.objectContaining({ type: "GET_STATUS" }));
+  });
+
+  it("a throwing addListener does not abort SW start", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    chromeMock.webRequest!.onAuthRequired.addListener.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    chromeMock.permissions.onAdded.addListener.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    await loadBackground();
+    expect(messageHandlers).toHaveLength(1);
+    expect(await send({ type: "GET_STATUS" })).toEqual(expect.objectContaining({ type: "GET_STATUS" }));
+  });
+});
+
+describe("activity: the confirmation window's messages never extend the vault", () => {
+  const vaultLockAlarms = () =>
+    chromeMock.alarms.create.mock.calls.filter(([name]) => name === ALARM_VAULT_LOCK).length;
+  // Past the activity debounce, so each message below could re-arm the alarm.
+  const pastDebounce = () => vi.setSystemTime(Date.now() + 31_000);
+  const settle = () => new Promise((r) => setTimeout(r, 10));
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await loadBackground();
+    await unlock();
+    await settle();
+  });
+
+  it.each([
+    ["HTTP_AUTH_PROMPT_GET", { type: "HTTP_AUTH_PROMPT_GET", promptId: "x" }],
+    ["HTTP_AUTH_PROMPT_DECIDE", { type: "HTTP_AUTH_PROMPT_DECIDE", promptId: "x", decision: "cancel" }],
+  ])("%s does not re-arm the vault-lock alarm", async (_name, message) => {
+    pastDebounce();
+    chromeMock.alarms.create.mockClear();
+    await send(message);
+    await settle();
+    expect(vaultLockAlarms()).toBe(0);
+    // Control, at the same time: an ordinary popup message does.
+    await send({ type: "GET_STATUS" });
+    await settle();
+    expect(vaultLockAlarms()).toBe(1);
+  });
+});
+
+describe("HTTP_AUTH_REGISTER", () => {
+  const register = (over: Record<string, unknown> = {}, sender?: unknown) =>
+    send({ type: "HTTP_AUTH_REGISTER", origin: ORIGIN, entryId: "pw-r", nonce: "n1", ...over }, sender);
+
+  beforeEach(async () => {
+    await loadBackground();
+  });
+
+  it("stores the binding for a matching LOGIN and clears the popup's intent", async () => {
+    await unlock();
+    session[HTTP_AUTH_PENDING_INTENT_KEY] = { nonce: "n1", origin: ORIGIN, entryId: "pw-r", expiresAt: Date.now() + 60_000 };
+    expect(await register()).toEqual({ type: "HTTP_AUTH_REGISTER", ok: true });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "pw-r" }]);
+    expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeUndefined();
+  });
+
+  it("is refused from a content script", async () => {
+    await unlock();
+    const res = await register({}, { tab: { id: 1, url: "https://evil.example/" }, url: "https://evil.example/", frameId: 0 });
+    expect(res).toEqual({ type: "HTTP_AUTH_REGISTER", ok: false, error: "INTERNAL_ERROR" });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toBeUndefined();
+  });
+
+  it("answers VAULT_LOCKED while locked and rolls the permissions back", async () => {
+    expect(await register()).toEqual({ type: "HTTP_AUTH_REGISTER", ok: false, error: "VAULT_LOCKED" });
+    expect(chromeMock.permissions.remove).toHaveBeenCalledWith({ origins: [`${ORIGIN}/*`] });
+  });
+
+  it("answers HTTP_AUTH_ENTRY_MISMATCH for an entry saved for another origin", async () => {
+    byIdBlob = { url: "https://router.example/", username: "admin", password: "r0uter" };
+    keyedDecrypt.set("blob-r", JSON.stringify(byIdBlob));
+    await unlock();
+    expect(await register()).toEqual({ type: "HTTP_AUTH_REGISTER", ok: false, error: "HTTP_AUTH_ENTRY_MISMATCH" });
+    expect(chromeMock.permissions.remove).toHaveBeenCalledWith({ origins: [`${ORIGIN}/*`] });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toBeUndefined();
+  });
+
+  it("permissions.onAdded completes a pending intent when the popup closed", async () => {
+    await unlock();
+    session[HTTP_AUTH_PENDING_INTENT_KEY] = { nonce: "n2", origin: ORIGIN, entryId: "pw-r", expiresAt: Date.now() + 60_000 };
+    const [onAdded] = [...chromeMock.permissions.onAdded.listeners] as Array<(p: chrome.permissions.Permissions) => void>;
+    onAdded({ permissions: ["webRequest", "webRequestAuthProvider"], origins: [`${ORIGIN}/*`] });
+    await vi.waitFor(() => expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "pw-r" }]));
+    expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeUndefined();
+  });
+});
+
+describe("a challenge answered end to end", () => {
+  const challenge = {
+    requestId: "req-e2e",
+    url: `${ORIGIN}/admin`,
+    tabId: 4,
+    type: "main_frame",
+    frameType: "outermost_frame",
+    documentLifecycle: "active",
+    isProxy: false,
+    scheme: "basic",
+    challenger: { host: "router.example", port: 8080 },
+  };
+
+  beforeEach(async () => {
+    local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "pw-r" }];
+    await loadBackground();
+    await unlock();
+  });
+
+  async function raise(): Promise<{ callback: ReturnType<typeof vi.fn>; promptId: string }> {
+    const [listener] = [...chromeMock.webRequest!.onAuthRequired.listeners] as Array<
+      (d: unknown, cb: (a: unknown) => void) => void
+    >;
+    const callback = vi.fn();
+    listener(challenge, callback);
+    await vi.waitFor(() => expect(chromeMock.windows.create).toHaveBeenCalledTimes(1));
+    const { url } = chromeMock.windows.create.mock.calls[0][0] as { url: string };
+    return { callback, promptId: new URL(url).searchParams.get("id") ?? "" };
+  }
+
+  it("the window reads its view, Send releases the login once", async () => {
+    const { callback, promptId } = await raise();
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual({
+      type: "HTTP_AUTH_PROMPT_GET",
+      prompt: {
+        url: `${ORIGIN}/admin`,
+        origin: ORIGIN,
+        initiator: null,
+        scheme: "basic",
+        entryTitle: "Router",
+        entryUsername: "admin",
+        insecure: true,
+      },
+    });
+    expect(callback).not.toHaveBeenCalled();
+    expect(await send({ type: "HTTP_AUTH_PROMPT_DECIDE", promptId, decision: "send" })).toEqual({
+      type: "HTTP_AUTH_PROMPT_DECIDE",
+      ok: true,
+    });
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(1));
+    expect(callback).toHaveBeenCalledWith({ authCredentials: { username: "admin", password: "r0uter" } });
+  });
+
+  it("Cancel gives {} and a stale DECIDE is ignored", async () => {
+    const { callback, promptId } = await raise();
+    await send({ type: "HTTP_AUTH_PROMPT_DECIDE", promptId, decision: "cancel" });
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledWith({}));
+    expect(await send({ type: "HTTP_AUTH_PROMPT_DECIDE", promptId, decision: "send" })).toEqual({
+      type: "HTTP_AUTH_PROMPT_DECIDE",
+      ok: false,
+    });
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+});

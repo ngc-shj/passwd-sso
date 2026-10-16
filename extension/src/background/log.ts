@@ -17,7 +17,15 @@ export type BackgroundWarnEvent =
   | "vault-unlock-verify-account-locked"
   | "vault-unlock-verify-rate-limited"
   | "vault-unlock-verify-network-error"
-  | "vault-unlock-verify-failed";
+  | "vault-unlock-verify-failed"
+  // HTTP authentication (#905): listener lifecycle, permission bookkeeping
+  // (also logged from the options page through lib/http-auth-bindings.ts), and
+  // a challenge answered with {} because something threw.
+  | "http-auth-listener-register-failed"
+  | "http-auth-listener-unregister-failed"
+  | "http-auth-permission-remove-failed"
+  | "http-auth-answer-failed"
+  | "http-auth-prompt-failed";
 
 export type BackgroundErrorCode =
   | "dom-exception"
