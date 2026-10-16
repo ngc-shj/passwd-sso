@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { deferred } from "../helpers/deferred";
 import {
   ANSWERED_REQUEST_LIMIT,
@@ -7,6 +7,7 @@ import {
   clearPendingIntent,
   credentialsForOrigin,
   handleAuthRequired,
+  handleBeforeRedirect,
   initHttpAuth,
   installHttpAuthLifecycle,
   registerHttpAuthBinding,
@@ -83,7 +84,7 @@ function installChrome({ webRequest = true }: { webRequest?: boolean } = {}) {
       get: vi.fn(async (id: number) => ({ id, windowId: 1, incognito: false })),
     },
     webRequest: webRequest
-      ? { onAuthRequired: chromeEvent(), onErrorOccurred: chromeEvent() }
+      ? { onAuthRequired: chromeEvent(), onErrorOccurred: chromeEvent(), onBeforeRedirect: chromeEvent() }
       : undefined,
   };
   vi.stubGlobal("chrome", mock);
@@ -105,24 +106,27 @@ const SENT: AuthAnswer = { authCredentials: { username: "alice", password: "s3cr
 let unlocked: boolean;
 let currentUser: string;
 let epoch: number;
-let deps: {
-  [K in keyof HttpAuthDeps]: ReturnType<typeof vi.fn> & HttpAuthDeps[K];
-};
+type MockedDeps = { [K in keyof HttpAuthDeps]: Mock<HttpAuthDeps[K]> };
+let deps: MockedDeps;
 
 function installDeps(): void {
   unlocked = true;
   currentUser = USER;
   epoch = 1;
   deps = {
-    isVaultUnlocked: vi.fn(() => unlocked),
-    currentUserId: vi.fn(() => (unlocked ? currentUser : null)),
-    awaitHydrationBounded: vi.fn(async () => {}),
-    currentVaultEpoch: vi.fn(() => epoch),
-    isVaultEpochCurrent: vi.fn((e: number) => e === epoch),
-    fetchAndDecryptEntry: vi.fn(async () => LOGIN_ACCESS),
-    getEntryOverview: vi.fn(async () => ({ title: "Intranet", username: "alice", entryType: "LOGIN" })),
-    openPrompt: vi.fn(async () => "send" as const),
-  } as typeof deps;
+    isVaultUnlocked: vi.fn<HttpAuthDeps["isVaultUnlocked"]>(() => unlocked),
+    currentUserId: vi.fn<HttpAuthDeps["currentUserId"]>(() => (unlocked ? currentUser : null)),
+    awaitHydrationBounded: vi.fn<HttpAuthDeps["awaitHydrationBounded"]>(async () => {}),
+    currentVaultEpoch: vi.fn<HttpAuthDeps["currentVaultEpoch"]>(() => epoch),
+    isVaultEpochCurrent: vi.fn<HttpAuthDeps["isVaultEpochCurrent"]>((e) => e === epoch),
+    fetchAndDecryptEntry: vi.fn<HttpAuthDeps["fetchAndDecryptEntry"]>(async () => LOGIN_ACCESS),
+    getEntryOverview: vi.fn<HttpAuthDeps["getEntryOverview"]>(async () => ({
+      title: "Intranet",
+      username: "alice",
+      entryType: "LOGIN",
+    })),
+    openPrompt: vi.fn<HttpAuthDeps["openPrompt"]>(async () => "send"),
+  } satisfies MockedDeps;
   initHttpAuth(deps);
 }
 
@@ -214,6 +218,11 @@ describe("handleAuthRequired (C4)", () => {
       expect(await answer(challenge())).toEqual({});
     });
 
+    it("a tab whose incognito flag is missing gets {}", async () => {
+      chromeMock.tabs.get.mockResolvedValueOnce({ id: 7, windowId: 1 } as { id: number; windowId: number; incognito: boolean });
+      expect(await answer(challenge())).toEqual({});
+    });
+
     it("a tab that cannot be read gets {}", async () => {
       chromeMock.tabs.get.mockRejectedValueOnce(new Error("No tab with id: 7"));
       expect(await answer(challenge())).toEqual({});
@@ -299,6 +308,15 @@ describe("handleAuthRequired (C4)", () => {
       expect(await answer(challenge())).toEqual(SENT);
     });
 
+    it("the record holds exactly the newest 256: the oldest is still remembered at 256", async () => {
+      deps.openPrompt.mockResolvedValue("cancel");
+      const oldest = challenge();
+      await answer(oldest);
+      for (let i = 0; i < ANSWERED_REQUEST_LIMIT - 1; i++) await answer(challenge());
+      deps.openPrompt.mockResolvedValue("send");
+      expect(await answer({ ...oldest })).toEqual({});
+    });
+
     it("the record is bounded: the oldest id is forgotten past the limit", async () => {
       deps.openPrompt.mockResolvedValue("cancel");
       const oldest = challenge();
@@ -312,6 +330,13 @@ describe("handleAuthRequired (C4)", () => {
   describe("rule 6: the vault after hydration", () => {
     it("a locked vault gets {} and opens no window", async () => {
       unlocked = false;
+      expect(await answer(challenge())).toEqual({});
+      expect(deps.openPrompt).not.toHaveBeenCalled();
+    });
+
+    it("the unlock check alone denies (the account would match)", async () => {
+      unlocked = false;
+      deps.currentUserId.mockImplementation(() => USER);
       expect(await answer(challenge())).toEqual({});
       expect(deps.openPrompt).not.toHaveBeenCalled();
     });
@@ -334,6 +359,7 @@ describe("handleAuthRequired (C4)", () => {
     it("hydration that ends locked (or past its bound) gets {}", async () => {
       const hydration = deferred<void>();
       unlocked = false;
+      deps.currentUserId.mockImplementation(() => USER);
       deps.awaitHydrationBounded.mockReturnValueOnce(hydration.promise);
       const callback = vi.fn();
       const pending = handleAuthRequired(challenge(), callback);
@@ -404,6 +430,7 @@ describe("handleAuthRequired (C4)", () => {
         url: `${ORIGIN}/admin`,
         origin: ORIGIN,
         initiator: "https://portal.example",
+        redirectedFrom: null,
         scheme: "digest",
         entryTitle: "Intranet",
         entryUsername: "alice",
@@ -430,7 +457,25 @@ describe("handleAuthRequired (C4)", () => {
     });
   });
 
+  it("a lock during the overview read gets {} and opens no window", async () => {
+    deps.getEntryOverview.mockImplementationOnce(async () => {
+      epoch += 1;
+      return { title: "Intranet", username: "alice", entryType: "LOGIN" };
+    });
+    expect(await answer(challenge())).toEqual({});
+    expect(deps.openPrompt).not.toHaveBeenCalled();
+  });
+
   describe("after Send: rules 4 and 9 again", () => {
+    it("a binding moved to a team entry with the same id while the window was open gets {}", async () => {
+      deps.openPrompt.mockImplementationOnce(async () => {
+        local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "e1", teamId: "t1", userId: USER }];
+        return "send";
+      });
+      expect(await answer(challenge())).toEqual({});
+      expect(deps.fetchAndDecryptEntry).not.toHaveBeenCalled();
+    });
+
     it("a binding replaced while the window was open gets {}", async () => {
       deps.openPrompt.mockImplementationOnce(async () => {
         local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "e2", userId: USER }];
@@ -648,6 +693,21 @@ describe("registerHttpAuthBinding (C3)", () => {
     expect(removed()).toEqual(ROLLED_BACK);
   });
 
+  it.each<[string, () => void, string]>([
+    ["a thrown code (no token)", () => { deps.fetchAndDecryptEntry.mockRejectedValueOnce(new Error("NO_TOKEN")); }, "NO_TOKEN"],
+    ["a refused server URL", () => { deps.fetchAndDecryptEntry.mockRejectedValueOnce(new Error("HTTPS_REQUIRED")); }, "HTTPS_REQUIRED"],
+    ["a network failure", () => { deps.fetchAndDecryptEntry.mockRejectedValueOnce(new TypeError("Failed to fetch")); }, "NETWORK_ERROR"],
+    ["a decrypt failure (raw text never passes)", () => { deps.fetchAndDecryptEntry.mockRejectedValueOnce(new DOMException("The operation failed for an operation-specific reason", "OperationError")); }, "FETCH_FAILED"],
+    ["an unmapped thrown code", () => { deps.fetchAndDecryptEntry.mockRejectedValueOnce(new Error("SOMETHING_ODD")); }, "FETCH_FAILED"],
+    ["a failing permission check", () => { chromeMock.permissions.contains.mockRejectedValueOnce(new Error("boom")); }, "FETCH_FAILED"],
+    ["a failing store write", () => { chromeMock.storage.local.set.mockRejectedValueOnce(new Error("QUOTA_BYTES quota exceeded")); }, "FETCH_FAILED"],
+  ])("rolls the permissions back when a step throws: %s", async (_name, arrange, error) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    arrange();
+    expect(await registerHttpAuthBinding({ origin: ORIGIN, entryId: "e1" })).toEqual({ ok: false, error });
+    expect(removed()).toEqual(ROLLED_BACK);
+  });
+
   it("rejects a non-serialized origin and rolls back its normalized pattern", async () => {
     expect(await registerHttpAuthBinding({ origin: `${ORIGIN}/admin`, entryId: "e1" })).toEqual({
       ok: false,
@@ -714,6 +774,7 @@ describe("registerHttpAuthBinding (C3)", () => {
 
 describe("pending intent (C3)", () => {
   const PATTERN = `${ORIGIN}/*`;
+  const API: chrome.runtime.ManifestPermission[] = ["webRequest", "webRequestAuthProvider"];
   const write = (over: Record<string, unknown> = {}) => {
     session[HTTP_AUTH_PENDING_INTENT_KEY] = {
       nonce: "n1",
@@ -730,14 +791,14 @@ describe("pending intent (C3)", () => {
 
   it("onAdded completes a fresh intent whose pattern was added, and clears the slot", async () => {
     write();
-    await completePendingIntent([PATTERN]);
+    await completePendingIntent({ origins: [PATTERN], permissions: [...API] });
     expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
     expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeUndefined();
   });
 
   it("does nothing for a grant of another origin", async () => {
     write();
-    await completePendingIntent(["https://other.example/*"]);
+    await completePendingIntent({ origins: ["https://other.example/*"] });
     expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([]);
     expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeDefined();
   });
@@ -745,7 +806,7 @@ describe("pending intent (C3)", () => {
   it("does nothing while the API permissions are missing", async () => {
     write();
     chromeMock.permissions.contains.mockImplementation(async (req) => !req.permissions);
-    await completePendingIntent([PATTERN]);
+    await completePendingIntent({ origins: [PATTERN], permissions: [...API] });
     expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([]);
     // Left for the API grant still to come: neither consumed nor rolled back.
     expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeDefined();
@@ -754,9 +815,30 @@ describe("pending intent (C3)", () => {
 
   it("drops an expired intent without registering", async () => {
     write({ expiresAt: Date.now() - 1 });
-    await completePendingIntent([PATTERN]);
+    await completePendingIntent({ origins: [PATTERN], permissions: [...API] });
     expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([]);
     expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeUndefined();
+  });
+
+  it("an https origin already granted by content_scripts (absent from added.origins) completes when the API permissions are added", async () => {
+    write();
+    await completePendingIntent({ permissions: [...API], origins: [] });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([{ origin: ORIGIN, entryId: "e1", userId: USER }]);
+    expect(chromeMock.permissions.contains).toHaveBeenCalledWith({ origins: [PATTERN] });
+  });
+
+  it("control: that grant does not complete while the origin is not granted", async () => {
+    write();
+    chromeMock.permissions.contains.mockImplementation(async (req) => !req.origins);
+    await completePendingIntent({ permissions: [...API], origins: [] });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([]);
+    expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeDefined();
+  });
+
+  it("control: a grant of neither the origin nor the API does not check the origin", async () => {
+    write();
+    await completePendingIntent({ permissions: ["clipboardRead"], origins: [] });
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toEqual([]);
   });
 
   it("at SW start (no added list) completes an intent whose origin is already granted", async () => {
@@ -856,6 +938,29 @@ describe("listener lifecycle (C6)", () => {
     expect(chromeMock.webRequest!.onAuthRequired.listeners.size).toBe(0);
   });
 
+  it.each<[string, chrome.permissions.Permissions]>([
+    ["an origin-only removal", { origins: ["https://intranet.example/*"] }],
+    ["an unrelated permission", { permissions: ["clipboardRead"] }],
+  ])("onRemoved for %s keeps the listener", (_name, removed) => {
+    installHttpAuthLifecycle();
+    const [onRemoved] = [...chromeMock.permissions.onRemoved.listeners] as Array<(p: chrome.permissions.Permissions) => void>;
+    onRemoved(removed);
+    expect(chromeMock.webRequest!.onAuthRequired.removeListener).not.toHaveBeenCalled();
+    expect(chromeMock.webRequest!.onAuthRequired.listeners.size).toBe(1);
+  });
+
+  it("registers and unregisters the redirect recorder with the challenge listener", () => {
+    registerHttpAuthListeners();
+    expect(chromeMock.webRequest!.onBeforeRedirect.addListener).toHaveBeenCalledWith(expect.any(Function), {
+      urls: ["http://*/*", "https://*/*"],
+      types: ["main_frame"],
+    });
+    installHttpAuthLifecycle();
+    const [onRemoved] = [...chromeMock.permissions.onRemoved.listeners] as Array<(p: chrome.permissions.Permissions) => void>;
+    onRemoved({ permissions: ["webRequest"] });
+    expect(chromeMock.webRequest!.onBeforeRedirect.listeners.size).toBe(0);
+  });
+
   it("onRemoved with the namespace already gone does not throw", () => {
     installHttpAuthLifecycle();
     const [onRemoved] = [...chromeMock.permissions.onRemoved.listeners] as Array<(p: chrome.permissions.Permissions) => void>;
@@ -871,5 +976,32 @@ describe("listener lifecycle (C6)", () => {
     const callback = vi.fn();
     expect(listener(challenge(), callback)).toBeUndefined();
     await vi.waitFor(() => expect(callback).toHaveBeenCalledWith(SENT));
+  });
+});
+
+// ── S2: where a redirected navigation came from ─────────────────
+
+describe("redirect source", () => {
+  it("names the origin a main-frame redirect into a bound origin came from", async () => {
+    const details = challenge();
+    await handleBeforeRedirect({ requestId: details.requestId, url: "https://evil.example/go", redirectUrl: `${ORIGIN}/admin` });
+    await answer(details);
+    expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: "https://evil.example" });
+  });
+
+  it.each([
+    ["a redirect into an unbound origin", "https://evil.example/go", "https://unbound.example/"],
+    ["a same-origin redirect", `${ORIGIN}/a`, `${ORIGIN}/admin`],
+  ])("records nothing for %s", async (_name, url, redirectUrl) => {
+    const details = challenge();
+    await handleBeforeRedirect({ requestId: details.requestId, url, redirectUrl });
+    await answer(details);
+    expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: null });
+  });
+
+  it("control: another request's redirect is not attributed", async () => {
+    await handleBeforeRedirect({ requestId: "other", url: "https://evil.example/go", redirectUrl: `${ORIGIN}/admin` });
+    await answer(challenge());
+    expect(deps.openPrompt.mock.calls[0][0]).toMatchObject({ redirectedFrom: null });
   });
 });

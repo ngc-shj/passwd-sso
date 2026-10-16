@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
+  PROMPT_COOLDOWN_MS,
   PROMPT_PAGE,
   PROMPT_TIMEOUT_MS,
   decidePrompt,
@@ -41,12 +42,15 @@ const request = (over: Partial<PromptRequest> = {}): PromptRequest => ({
   url: "https://intranet.example/admin",
   origin: "https://intranet.example",
   initiator: null,
+  redirectedFrom: null,
   scheme: "basic",
   entryTitle: "Intranet",
   entryUsername: "alice",
   insecure: false,
   ...over,
 });
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /** The prompt id from the window URL the SW opened. */
 function promptIdOf(callIndex = 0): string {
@@ -77,7 +81,7 @@ describe("openPrompt", () => {
       url: expect.stringMatching(new RegExp(`^chrome-extension://ext-id/${PROMPT_PAGE}\\?id=`)),
       type: "popup",
       width: 440,
-      height: 420,
+      height: 460,
       focused: true,
       left: 500,
       top: 130,
@@ -95,8 +99,42 @@ describe("openPrompt", () => {
     expect(params.top).toBeUndefined();
   });
 
-  it("gives every prompt an unguessable id", async () => {
+  it("keeps negative window coordinates (a display left of or above the primary)", async () => {
+    chromeMock.windows.get.mockResolvedValueOnce({ id: 5, left: -1920, top: -200, width: 1920, height: 1080 });
     void openPrompt(request());
+    await opened();
+    expect(chromeMock.windows.create).toHaveBeenCalledWith(expect.objectContaining({ left: -1180, top: -120 }));
+  });
+
+  it("retries once unplaced when a placed window cannot be created", async () => {
+    chromeMock.windows.create.mockRejectedValueOnce(new Error("Invalid value for bounds"));
+    const decision = openPrompt(request());
+    await opened(2);
+    const retry = chromeMock.windows.create.mock.calls[1][0] as Record<string, unknown>;
+    expect(retry.left).toBeUndefined();
+    expect(retry.top).toBeUndefined();
+    await tick();
+    expect(decidePrompt(promptIdOf(1), "send")).toBe(true);
+    await expect(decision).resolves.toBe("send");
+  });
+
+  it("cancels when the unplaced retry fails too", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    chromeMock.windows.create.mockRejectedValue(new Error("no windows"));
+    await expect(openPrompt(request())).resolves.toBe("cancel");
+    expect(chromeMock.windows.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels promptly when windows.create resolves without an id", async () => {
+    chromeMock.windows.create.mockResolvedValueOnce({} as { id: number });
+    await expect(openPrompt(request())).resolves.toBe("cancel");
+  });
+
+  it("gives every prompt an unguessable id", async () => {
+    const first = openPrompt(request());
+    await opened();
+    decidePrompt(promptIdOf(0), "cancel");
+    await first;
     void openPrompt(request({ tabId: 8, requestId: "req-2" }));
     await opened(2);
     const [a, b] = [promptIdOf(0), promptIdOf(1)];
@@ -111,6 +149,7 @@ describe("openPrompt", () => {
       url: "https://intranet.example/admin",
       origin: "https://intranet.example",
       initiator: null,
+      redirectedFrom: null,
       scheme: "basic",
       entryTitle: "Intranet",
       entryUsername: "alice",
@@ -179,6 +218,14 @@ describe("openPrompt", () => {
     await expect(decision).resolves.toBe("cancel");
   });
 
+  it("control: closing another tab leaves it pending", async () => {
+    const decision = openPrompt(request());
+    await opened();
+    handlePromptTabRemoved(99);
+    expect(decidePrompt(promptIdOf(), "send")).toBe(true);
+    await expect(decision).resolves.toBe("send");
+  });
+
   it("a webRequest error for its request resolves cancel", async () => {
     const decision = openPrompt(request());
     await opened();
@@ -206,6 +253,18 @@ describe("openPrompt", () => {
     expect(chromeMock.windows.remove).toHaveBeenCalledWith(100);
   });
 
+  it("a request error ends only that request; the prompt ends when none remains", async () => {
+    const first = openPrompt(request());
+    const second = openPrompt(request({ requestId: "req-2" }));
+    await opened();
+    handlePromptRequestError("req-1");
+    await tick();
+    expect(getPromptView(promptIdOf())).not.toBeNull();
+    handlePromptRequestError("req-2");
+    await expect(first).resolves.toBe("cancel");
+    await expect(second).resolves.toBe("cancel");
+  });
+
   it("two challenges from one origin and tab share one window and its decision", async () => {
     const first = openPrompt(request());
     const second = openPrompt(request({ requestId: "req-2" }));
@@ -217,17 +276,20 @@ describe("openPrompt", () => {
     await expect(second).resolves.toBe("send");
   });
 
-  it("control: the same origin in another tab gets its own window", async () => {
-    void openPrompt(request());
-    void openPrompt(request({ tabId: 8, requestId: "req-2" }));
-    await opened(2);
+  it.each<[string, Partial<PromptRequest>]>([
+    ["another url", { url: "https://intranet.example/other" }],
+    ["another initiator", { initiator: "https://evil.example" }],
+    ["another scheme", { scheme: "digest" }],
+  ])("a concurrent challenge with %s does not reuse the decision: it gets cancel at once", async (_name, over) => {
+    const first = openPrompt(request());
+    const other = openPrompt(request({ requestId: "req-2", ...over }));
+    await expect(other).resolves.toBe("cancel");
+    await opened();
+    expect(decidePrompt(promptIdOf(), "send")).toBe(true);
+    await expect(first).resolves.toBe("send");
+    expect(chromeMock.windows.create).toHaveBeenCalledTimes(1);
   });
 
-  it("a window that cannot be created resolves cancel", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    chromeMock.windows.create.mockRejectedValueOnce(new Error("no windows"));
-    await expect(openPrompt(request())).resolves.toBe("cancel");
-  });
 
   it("a prompt settled before its window opened closes that window", async () => {
     let finishCreate!: (w: { id: number }) => void;
@@ -238,6 +300,90 @@ describe("openPrompt", () => {
     await expect(decision).resolves.toBe("cancel");
     finishCreate({ id: 321 });
     await vi.waitFor(() => expect(chromeMock.windows.remove).toHaveBeenCalledWith(321));
+  });
+
+  describe("one window at a time", () => {
+    it("two concurrent prompts never have two windows; the queued one opens after the first settles", async () => {
+      const first = openPrompt(request());
+      const second = openPrompt(request({ tabId: 8, requestId: "req-2", origin: "https://nas.example", url: "https://nas.example/" }));
+      await opened();
+      await tick();
+      expect(chromeMock.windows.create).toHaveBeenCalledTimes(1);
+      decidePrompt(promptIdOf(0), "cancel");
+      await expect(first).resolves.toBe("cancel");
+      await opened(2);
+      expect(getPromptView(promptIdOf(1))).toMatchObject({ origin: "https://nas.example" });
+      expect(decidePrompt(promptIdOf(1), "send")).toBe(true);
+      await expect(second).resolves.toBe("send");
+    });
+
+    it("a queued prompt is neither served nor decidable before it is shown", async () => {
+      void openPrompt(request());
+      const second = openPrompt(request({ tabId: 8, requestId: "req-2" }));
+      await opened();
+      // The first window's id does not reach the second prompt.
+      expect(getPromptView(promptIdOf(0))).toMatchObject({ url: "https://intranet.example/admin" });
+      handlePromptTabRemoved(8);
+      await expect(second).resolves.toBe("cancel");
+      expect(chromeMock.windows.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("a queued prompt's 60 s runs from when it was queued (fail-closed)", async () => {
+      vi.useFakeTimers();
+      const first = openPrompt(request());
+      const second = openPrompt(request({ tabId: 8, requestId: "req-2" }));
+      await vi.advanceTimersByTimeAsync(PROMPT_TIMEOUT_MS);
+      await expect(first).resolves.toBe("cancel");
+      await expect(second).resolves.toBe("cancel");
+    });
+  });
+
+  describe("cooldown after a cross-site prompt ends without Send", () => {
+    const crossSite = { initiator: "https://evil.example" };
+
+    it("answers cancel without a window for 10 s", async () => {
+      vi.useFakeTimers();
+      const first = openPrompt(request(crossSite));
+      await vi.advanceTimersByTimeAsync(0);
+      decidePrompt(promptIdOf(), "cancel");
+      await first;
+      await expect(openPrompt(request({ requestId: "req-2" }))).resolves.toBe("cancel");
+      expect(chromeMock.windows.create).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(PROMPT_COOLDOWN_MS);
+      void openPrompt(request({ requestId: "req-3" }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(chromeMock.windows.create).toHaveBeenCalledTimes(2);
+    });
+
+    it.each<[string, Partial<PromptRequest>]>([
+      ["no initiator", { initiator: null }],
+      ["a same-origin initiator", { initiator: "https://intranet.example" }],
+    ])("control: %s starts no cooldown", async (_name, over) => {
+      const first = openPrompt(request(over));
+      await opened();
+      decidePrompt(promptIdOf(), "cancel");
+      await first;
+      void openPrompt(request({ requestId: "req-2" }));
+      await opened(2);
+    });
+
+    it("control: Send starts no cooldown", async () => {
+      const first = openPrompt(request(crossSite));
+      await opened();
+      decidePrompt(promptIdOf(), "send");
+      await first;
+      void openPrompt(request({ requestId: "req-2" }));
+      await opened(2);
+    });
+
+    it("control: another origin is not cooled down", async () => {
+      const first = openPrompt(request(crossSite));
+      await opened();
+      decidePrompt(promptIdOf(), "cancel");
+      await first;
+      void openPrompt(request({ requestId: "req-2", origin: "https://nas.example", url: "https://nas.example/" }));
+      await opened(2);
+    });
   });
 
   it("after a decision, a new challenge opens a new window", async () => {

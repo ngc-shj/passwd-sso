@@ -35,24 +35,17 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resourceCovers } from "./lib/war-resource.mjs";
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const FORBIDDEN_HTML = 'rel="modulepreload"';
 const FILL_LISTENERS = join(DIST, "src", "content", "fill-listeners.js");
-const AUTH_PROMPT_PAGE = join(DIST, "src", "auth-prompt", "index.html");
-const MANIFEST = join(DIST, "manifest.json");
+// Must equal HTTP_AUTH_PROMPT_PAGE in src/lib/constants.ts (this script cannot
+// import TypeScript; src/__tests__/check-dist-hygiene.test.ts pins the two).
 const AUTH_PROMPT_RESOURCE = "src/auth-prompt/index.html";
+const AUTH_PROMPT_PAGE = join(DIST, ...AUTH_PROMPT_RESOURCE.split("/"));
+const MANIFEST = join(DIST, "manifest.json");
 
-// A web_accessible_resources entry as Chrome reads it: a path relative to the
-// extension root (a leading "/" is optional) where "*" matches any run of
-// characters, "/" included.
-function resourceCovers(resource, path) {
-  const pattern = String(resource).replace(/^\/+/, "");
-  const regex = new RegExp(
-    `^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`,
-  );
-  return regex.test(path);
-}
 const MODULE_SYNTAX_RE = /\bimport\s*\(|\bimport\.meta\b|^\s*(?:import|export)\b/m;
 
 // Matched on basename. Chrome rejects an unpacked extension containing a

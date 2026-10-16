@@ -50,7 +50,8 @@
     "httpAuthRegisterBody": "{origin} がブラウザのサインインダイアログでユーザー名とパスワードを求めたとき、passwd-sso は {title} を提示します。送信の前に毎回確認します。",
     "httpAuthRegisterHttpWarning": "このサイトは HTTP です。現在のネットワークでこのアドレスに応答した相手がパスワードを受け取れます（Basic では平文、Digest では解析可能なハッシュ）。",
     "httpAuthRegisterConfirm": "続ける",
-    "httpAuthRegistered": "{origin} のサインインダイアログを設定しました"
+    "httpAuthRegistered": "{origin} のサインインダイアログを設定しました",
+    "httpAuthRegisterFailed": "設定を完了できませんでした。拡張機能のオプションの「サイトのサインイン」を確認してください。"
   },
   "options": {
     "title": "設定",
@@ -176,7 +177,6 @@
     "site": "サイト",
     "address": "アドレス",
     "triggeredBy": "要求元",
-    "addressBar": "アドレスバーまたはブックマーク",
     "login": "ログイン",
     "method": "方式",
     "httpWarning": "このサイトは HTTP です。現在のネットワークでこのアドレスに応答した相手がパスワードを受け取れます（Basic では平文、Digest では解析可能なハッシュ）。",
@@ -184,7 +184,9 @@
     "cancel": "キャンセル",
     "expired": "このサインイン要求は終了しています。",
     "close": "閉じる",
-    "loading": "読み込み中..."
+    "loading": "読み込み中...",
+    "notFromPage": "Web ページ以外（アドレスバー、ブックマーク、他のアプリ、またはリダイレクト）",
+    "redirectedFrom": "リダイレクト元"
   },
   "errors": {
     "invalidPassphrase": "パスフレーズが正しくありません。",

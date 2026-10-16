@@ -22,6 +22,19 @@ const cryptoMocks = vi.hoisted(() => ({
 }));
 vi.mock("../../lib/crypto", () => cryptoMocks);
 
+const teamCryptoMocks = vi.hoisted(() => ({
+  deriveEcdhWrappingKey: vi.fn().mockResolvedValue("ecdh-wrap-key"),
+  unwrapEcdhPrivateKey: vi.fn().mockResolvedValue(new Uint8Array([10, 20, 30])),
+  importEcdhPrivateKey: vi.fn().mockResolvedValue("ecdh-private-key"),
+  unwrapTeamKey: vi.fn().mockResolvedValue(new Uint8Array([40, 50, 60])),
+  deriveTeamEncryptionKey: vi.fn().mockResolvedValue("team-enc-key"),
+  unwrapItemKey: vi.fn().mockResolvedValue(new Uint8Array([70, 80, 90])),
+  deriveItemEncryptionKey: vi.fn().mockResolvedValue("item-enc-key"),
+  buildTeamEntryAAD: vi.fn().mockReturnValue(new Uint8Array([3, 4])),
+  buildItemKeyWrapAAD: vi.fn().mockReturnValue(new Uint8Array([5, 6])),
+}));
+vi.mock("../../lib/crypto-team", () => teamCryptoMocks);
+
 const ORIGIN = "http://router.example:8080";
 const OVERVIEW = JSON.stringify({ title: "Router", username: "admin", urlHost: "router.example" });
 const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
@@ -102,7 +115,7 @@ function installChromeMock({ webRequest = true }: { webRequest?: boolean } = {})
       local: {
         get: vi.fn(async (keys: unknown) =>
           typeof keys === "string"
-            ? { [keys]: local[keys] }
+            ? { [keys]: keys === "serverUrl" ? serverUrl : local[keys] }
             : { serverUrl, autoLockMinutes: 15 },
         ),
         set: vi.fn(async (items: Record<string, unknown>) => {
@@ -122,7 +135,9 @@ function installChromeMock({ webRequest = true }: { webRequest?: boolean } = {})
       onChanged: { addListener: vi.fn() },
     },
     commands: { onCommand: { addListener: vi.fn() } },
-    webRequest: webRequest ? { onAuthRequired: chromeEvent(), onErrorOccurred: chromeEvent() } : undefined,
+    webRequest: webRequest
+      ? { onAuthRequired: chromeEvent(), onErrorOccurred: chromeEvent(), onBeforeRedirect: chromeEvent() }
+      : undefined,
   };
   vi.stubGlobal("chrome", mock);
   return mock;
@@ -142,6 +157,9 @@ function send(message: unknown, sender: unknown = extensionPage()): Promise<unkn
 }
 
 let byIdBlob: Record<string, unknown>;
+// When set, the account has one team ("team-1") holding a LOGIN with the same
+// id as the personal entry ("pw-r"), so a teamId mix-up would show.
+let withTeam: boolean;
 
 function stubFetch(): void {
   vi.stubGlobal(
@@ -170,8 +188,45 @@ function stubFetch(): void {
             secretKeyIv: "bb",
             secretKeyAuthTag: "cc",
             verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            ...(withTeam
+              ? { encryptedEcdhPrivateKey: "dd", ecdhPrivateKeyIv: "ee", ecdhPrivateKeyAuthTag: "ff" }
+              : {}),
           }),
         };
+      }
+      if (withTeam && url.includes("/member-key")) {
+        return {
+          ok: true,
+          json: async () => ({
+            encryptedTeamKey: "tk-cipher",
+            teamKeyIv: "tk-iv",
+            teamKeyAuthTag: "tk-tag",
+            ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"x","y":"y"}',
+            hkdfSalt: "aabb",
+            keyVersion: 1,
+            wrapVersion: 0,
+          }),
+        };
+      }
+      if (withTeam && url.endsWith(extApiPath.teamPasswords("team-1"))) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: "pw-r",
+              entryType: EXT_ENTRY_TYPE.LOGIN,
+              encryptedOverview: "team-ov",
+              overviewIv: "ov-iv",
+              overviewAuthTag: "ov-tag",
+              teamKeyVersion: 1,
+              deletedAt: null,
+              isArchived: false,
+            },
+          ],
+        };
+      }
+      if (url.endsWith(EXT_API_PATH.TEAMS)) {
+        return { ok: true, json: async () => (withTeam ? [{ id: "team-1", name: "Ops" }] : []) };
       }
       if (url.includes(extApiPath.passwordById(""))) {
         return {
@@ -193,7 +248,6 @@ function stubFetch(): void {
           ],
         };
       }
-      if (url.endsWith(EXT_API_PATH.TEAMS)) return { ok: true, json: async () => [] };
       return { ok: false, json: async () => ({}) };
     }),
   );
@@ -209,7 +263,11 @@ beforeEach(async () => {
   vi.clearAllMocks();
   serverUrl = "https://localhost:3000";
   byIdBlob = { url: `${ORIGIN}/admin`, username: "admin", password: "r0uter" };
-  keyedDecrypt.install({ "11": OVERVIEW });
+  withTeam = false;
+  keyedDecrypt.install({
+    "11": OVERVIEW,
+    "team-ov": JSON.stringify({ title: "Team Router", username: "ops", urlHost: "router.example" }),
+  });
   keyedDecrypt.set("blob-r", JSON.stringify(byIdBlob));
   chromeMock = installChromeMock();
   stubFetch();
@@ -370,6 +428,7 @@ describe("a challenge answered end to end", () => {
         url: `${ORIGIN}/admin`,
         origin: ORIGIN,
         initiator: null,
+        redirectedFrom: null,
         scheme: "basic",
         entryTitle: "Router",
         entryUsername: "admin",
@@ -400,6 +459,26 @@ describe("a challenge answered end to end", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(callback).not.toHaveBeenCalled();
     expect(chromeMock.windows.remove).not.toHaveBeenCalled();
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual(
+      expect.objectContaining({ prompt: expect.objectContaining({ origin: ORIGIN }) }),
+    );
+  });
+
+  it("webRequest.onErrorOccurred for the request reaches the prompt: {} and the window closes", async () => {
+    const { callback, promptId } = await raise();
+    const [onError] = [...chromeMock.webRequest!.onErrorOccurred.listeners] as Array<(d: unknown) => void>;
+    onError({ requestId: "req-e2e", error: "net::ERR_ABORTED" });
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledWith({}));
+    expect(chromeMock.windows.remove).toHaveBeenCalledWith(77);
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual({ type: "HTTP_AUTH_PROMPT_GET", prompt: null });
+  });
+
+  it("control: another request's error leaves the prompt open", async () => {
+    const { callback, promptId } = await raise();
+    const [onError] = [...chromeMock.webRequest!.onErrorOccurred.listeners] as Array<(d: unknown) => void>;
+    onError({ requestId: "req-other", error: "net::ERR_ABORTED" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(callback).not.toHaveBeenCalled();
     expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual(
       expect.objectContaining({ prompt: expect.objectContaining({ origin: ORIGIN }) }),
     );
@@ -445,5 +524,103 @@ describe("server URL rule in the service worker", () => {
     expect(chromeMock.scripting.registerContentScripts).toHaveBeenCalledWith([
       expect.objectContaining({ id: "token-bridge", matches: [`${new URL(url).origin}/*`] }),
     ]);
+  });
+});
+
+describe("a team binding answered end to end", () => {
+  const challenge = (requestId: string) => ({
+    requestId,
+    url: `${ORIGIN}/admin`,
+    tabId: 4,
+    type: "main_frame",
+    frameType: "outermost_frame",
+    documentLifecycle: "active",
+    isProxy: false,
+    scheme: "basic",
+    challenger: { host: "router.example", port: 8080 },
+  });
+
+  beforeEach(async () => {
+    withTeam = true;
+    await loadBackground();
+    await unlock();
+  });
+
+  function raise(requestId: string): ReturnType<typeof vi.fn> {
+    const [listener] = [...chromeMock.webRequest!.onAuthRequired.listeners] as Array<
+      (d: unknown, cb: (a: unknown) => void) => void
+    >;
+    const callback = vi.fn();
+    listener(challenge(requestId), callback);
+    return callback;
+  }
+
+  it("a {teamId} binding opens the window with the team entry's title", async () => {
+    local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "pw-r", teamId: "team-1", userId: "user-1" }];
+    raise("req-team");
+    await vi.waitFor(() => expect(chromeMock.windows.create).toHaveBeenCalledTimes(1));
+    const { url } = chromeMock.windows.create.mock.calls[0][0] as { url: string };
+    const promptId = new URL(url).searchParams.get("id") ?? "";
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual(
+      expect.objectContaining({ prompt: expect.objectContaining({ entryTitle: "Team Router", entryUsername: "ops" }) }),
+    );
+  });
+
+  it("control: a personal binding with the same entry id shows the personal entry, not the team one", async () => {
+    local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "pw-r", userId: "user-1" }];
+    raise("req-personal");
+    await vi.waitFor(() => expect(chromeMock.windows.create).toHaveBeenCalledTimes(1));
+    const { url } = chromeMock.windows.create.mock.calls[0][0] as { url: string };
+    const promptId = new URL(url).searchParams.get("id") ?? "";
+    expect(await send({ type: "HTTP_AUTH_PROMPT_GET", promptId })).toEqual(
+      expect.objectContaining({ prompt: expect.objectContaining({ entryTitle: "Router", entryUsername: "admin" }) }),
+    );
+  });
+
+  it("control: a binding to a team entry id that does not exist opens no window", async () => {
+    local[HTTP_AUTH_BINDINGS_KEY] = [{ origin: ORIGIN, entryId: "pw-r", teamId: "team-9", userId: "user-1" }];
+    const callback = raise("req-missing");
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledWith({}));
+    expect(chromeMock.windows.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("HTTP_AUTH_REGISTER when a step throws", () => {
+  it("rolls the permissions back, answers a mapped code and still clears the popup's intent", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await loadBackground();
+    await unlock();
+    const base = (fetch as unknown as ReturnType<typeof vi.fn>).getMockImplementation() as (url: string) => Promise<unknown>;
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      if (url.includes(extApiPath.passwordById("pw-r"))) throw new TypeError("Failed to fetch");
+      return base(url);
+    });
+    session[HTTP_AUTH_PENDING_INTENT_KEY] = { nonce: "n9", origin: ORIGIN, entryId: "pw-r", expiresAt: Date.now() + 60_000 };
+    expect(
+      await send({ type: "HTTP_AUTH_REGISTER", origin: ORIGIN, entryId: "pw-r", nonce: "n9" }),
+    ).toEqual({ type: "HTTP_AUTH_REGISTER", ok: false, error: "NETWORK_ERROR" });
+    expect(chromeMock.permissions.remove).toHaveBeenCalledWith({ origins: [`${ORIGIN}/*`] });
+    expect(session[HTTP_AUTH_PENDING_INTENT_KEY]).toBeUndefined();
+    expect(local[HTTP_AUTH_BINDINGS_KEY]).toBeUndefined();
+  });
+});
+
+describe("own-app detection uses the server URL rule", () => {
+  // Inline suggestions are suppressed on the app's own pages (isOwnAppPage).
+  const matchesOn = (url: string) =>
+    send({ type: "GET_MATCHES_FOR_URL" }, { tab: { id: 9, url }, url, frameId: 0, documentId: "doc-0" });
+
+  it("a plain-http non-loopback server URL is no server: its pages are not the app", async () => {
+    serverUrl = "http://server.example";
+    await loadBackground();
+    expect(await matchesOn("http://server.example/login")).toEqual(
+      expect.objectContaining({ suppressInline: false, disconnected: true }),
+    );
+  });
+
+  it.each(["https://server.example", "http://localhost:3000"])("control: %s pages are the app", async (url) => {
+    serverUrl = url;
+    await loadBackground();
+    expect(await matchesOn(`${url}/login`)).toEqual(expect.objectContaining({ suppressInline: true }));
   });
 });

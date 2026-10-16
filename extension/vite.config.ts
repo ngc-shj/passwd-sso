@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { crx } from "@crxjs/vite-plugin";
 import manifest from "./manifest.config";
+import { HTTP_AUTH_PROMPT_PAGE } from "./src/lib/constants";
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), crx({ manifest })],
@@ -20,7 +21,7 @@ export default defineConfig({
       // service worker, so the manifest does not name it. Never list it in
       // web_accessible_resources: no site may frame it.
       input: {
-        authPrompt: "src/auth-prompt/index.html",
+        authPrompt: HTTP_AUTH_PROMPT_PAGE,
       },
     },
   },

@@ -3,11 +3,12 @@
  */
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
-vi.mock("../../lib/storage", () => ({
+const storageMocks = vi.hoisted(() => ({
   getSettings: vi.fn().mockResolvedValue({ serverUrl: "https://vault.example.com" }),
 }));
+vi.mock("../../lib/storage", () => storageMocks);
 
 import { LoginPrompt } from "../../popup/components/LoginPrompt";
 
@@ -67,5 +68,23 @@ describe("LoginPrompt", () => {
       expect(screen.getByText("https://vault.example.com")).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
+  });
+
+  it("treats a plain-http non-loopback server URL as no server: nothing shown, nothing opened", async () => {
+    storageMocks.getSettings.mockResolvedValueOnce({ serverUrl: "http://server.example" });
+    render(<LoginPrompt reason={null} />);
+    await waitFor(() => expect(storageMocks.getSettings).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText("http://server.example")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["https://vault.example.com", "http://localhost:3000"])("control: %s is shown and opened", async (url) => {
+    storageMocks.getSettings.mockResolvedValueOnce({ serverUrl: url });
+    render(<LoginPrompt reason={null} />);
+    expect(await screen.findByText(url)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(chrome.tabs.create).toHaveBeenCalledWith({ url: `${url}/dashboard?ext_connect=1` });
   });
 });

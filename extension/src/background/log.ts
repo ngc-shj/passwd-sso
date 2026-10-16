@@ -25,6 +25,7 @@ export type BackgroundWarnEvent =
   | "http-auth-listener-unregister-failed"
   | "http-auth-permission-remove-failed"
   | "http-auth-answer-failed"
+  | "http-auth-register-failed"
   | "http-auth-prompt-failed";
 
 export type BackgroundErrorCode =

@@ -81,8 +81,13 @@ export interface HttpAuthPromptView {
   /** The URL of the challenged navigation (webRequest details.url). */
   url: string;
   origin: string;
-  /** details.initiator; null for an address-bar or bookmark navigation. */
+  /**
+   * details.initiator; null when no web page started the navigation (address
+   * bar, bookmark, another app) or Chrome did not report one.
+   */
   initiator: string | null;
+  /** The origin a main-frame redirect to this URL came from, when one was seen. */
+  redirectedFrom: string | null;
   /** "basic" or "digest". */
   scheme: string;
   entryTitle: string;

@@ -18,3 +18,7 @@
   - The rule: https, or http only on localhost/127.0.0.1.
   - `optional_host_permissions` gained `http://*/*`, which made a stored non-loopback http server URL grantable.
   - The rule (`lib/server-url.ts`, moved from the options page) now guards five sinks: `ensureHostPermission`, `swFetchAuthenticated`, `swFetch`, `getValidServerUrl`, and the token-bridge registration.
+- **D12 — a queued prompt's 60 s timeout starts when it is created, not when it is shown.** Every challenge then ends within 60 s, and fails closed. The cost is that a queued prompt gets less time on screen.
+- **D13 — Send uses `aria-disabled` instead of `disabled`.** A disabled button swallows the pointerdown that must restart the arm delay (review S1). Space on an armed Send counts as a press; Enter and Escape mean Cancel.
+- **D14 — the per-origin cooldown follows every non-send end of a cross-site-initiated prompt** (Cancel, close, timeout, tab closed, request failed). A lock clears it.
+- **D15 — the redirect source is recorded** (`webRequest.onBeforeRedirect`, main_frame, bound targets only, bounded LRU) and shown as "Redirected from <origin>" (review S2).

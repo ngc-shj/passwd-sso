@@ -5,18 +5,20 @@ import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import type { HttpAuthPromptView } from "../../types/messages";
+import { HTTP_AUTH_PROMPT_TIMEOUT_MS } from "../../lib/constants";
 
 const mockSendMessage = vi.fn();
 vi.mock("../../lib/messaging", () => ({
   sendMessage: (...args: unknown[]) => mockSendMessage(...args),
 }));
 
-import { App, SEND_ARM_DELAY_MS } from "../../auth-prompt/App";
+import { App, SEND_ARM_DELAY_MS, URL_DISPLAY_MAX, displayUrl } from "../../auth-prompt/App";
 
 const VIEW: HttpAuthPromptView = {
   url: "http://router.example:8080/admin",
   origin: "http://router.example:8080",
   initiator: "https://portal.example",
+  redirectedFrom: null,
   scheme: "basic",
   entryTitle: "Router",
   entryUsername: "admin",
@@ -46,7 +48,18 @@ async function renderPrompt(view: HttpAuthPromptView | null = VIEW, promptId: st
   });
 }
 
+const advance = async (ms: number) => {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+};
 const sendButton = () => screen.getByRole("button", { name: "Send" });
+const isArmed = () => sendButton().getAttribute("aria-disabled") === "false";
+/** A full pointer press on Send: pointerdown, then the click. */
+const pressSend = () => {
+  fireEvent.pointerDown(sendButton());
+  fireEvent.click(sendButton());
+};
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -77,12 +90,26 @@ describe("auth-prompt page", () => {
     expect(screen.getByText("Triggered by")).toBeInTheDocument();
     expect(screen.getByText("https://portal.example")).toBeInTheDocument();
     expect(screen.getByText("Router (admin)")).toBeInTheDocument();
-    expect(screen.getByText("Basic")).toBeInTheDocument();
+    expect(screen.getByTestId("auth-method")).toHaveTextContent("Method: Basic");
   });
 
-  it("labels a navigation with no initiator as the address bar or a bookmark", async () => {
+  it("does not claim the address bar when no initiator was reported", async () => {
     await renderPrompt({ ...VIEW, initiator: null });
-    expect(screen.getByText("Address bar or bookmark")).toBeInTheDocument();
+    expect(
+      screen.getByText("Not from a web page (address bar, bookmark, another app, or a redirect)"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Address bar or bookmark$/)).toBeNull();
+  });
+
+  it("names the origin a redirect came from", async () => {
+    await renderPrompt({ ...VIEW, initiator: null, redirectedFrom: "https://evil.example" });
+    expect(screen.getByText("Redirected from")).toBeInTheDocument();
+    expect(screen.getByText("https://evil.example")).toBeInTheDocument();
+  });
+
+  it("control: no redirect row without a redirect", async () => {
+    await renderPrompt();
+    expect(screen.queryByText("Redirected from")).toBeNull();
   });
 
   it("shows the http warning for an insecure origin", async () => {
@@ -93,7 +120,31 @@ describe("auth-prompt page", () => {
   it("control: no warning for an https origin", async () => {
     await renderPrompt({ ...VIEW, origin: "https://router.example", url: "https://router.example/", insecure: false, scheme: "digest" });
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByText("Digest")).toBeInTheDocument();
+    expect(screen.getByTestId("auth-method")).toHaveTextContent("Digest");
+  });
+
+  it("puts the warning and the method above the details", async () => {
+    await renderPrompt();
+    const details = document.querySelector("dl") as HTMLElement;
+    for (const above of [screen.getByRole("alert"), screen.getByTestId("auth-method")]) {
+      expect(above.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it("cuts a long address, keeping the origin whole", async () => {
+    const longUrl = `http://router.example:8080/${"a".repeat(300)}`;
+    await renderPrompt({ ...VIEW, url: longUrl });
+    const shown = screen.getByText(/^http:\/\/router\.example:8080\/a+…$/).textContent ?? "";
+    expect(shown.length).toBe(URL_DISPLAY_MAX);
+    expect(screen.queryByText(longUrl)).toBeNull();
+  });
+
+  it.each([
+    ["a short url is unchanged", "https://h.example/x", "https://h.example/x"],
+    ["a long path is cut with an ellipsis", `https://h.example/${"p".repeat(200)}`, `https://h.example/${"p".repeat(101)}…`],
+    ["an origin longer than the cap is kept whole", `https://${"h".repeat(130)}.example/x`, `https://${"h".repeat(130)}.example…`],
+  ])("displayUrl: %s", (_name, url, expected) => {
+    expect(displayUrl(url)).toBe(expected);
   });
 
   it("an unknown or settled id shows that the request is over, with no Send", async () => {
@@ -102,106 +153,150 @@ describe("auth-prompt page", () => {
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 
+  it("closes itself once the challenge's time is up", async () => {
+    await renderPrompt();
+    await advance(HTTP_AUTH_PROMPT_TIMEOUT_MS - 1);
+    expect(window.close).not.toHaveBeenCalled();
+    await advance(1);
+    expect(window.close).toHaveBeenCalled();
+  });
+
   describe("input protection", () => {
-    it("keeps Send disabled for 800 ms after the window is visible and focused", async () => {
+    it("keeps Send disarmed for 800 ms after the window is visible and focused", async () => {
       await renderPrompt();
-      expect(sendButton()).toBeDisabled();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS - 1);
-      });
-      expect(sendButton()).toBeDisabled();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-      expect(sendButton()).toBeEnabled();
+      expect(isArmed()).toBe(false);
+      await advance(SEND_ARM_DELAY_MS - 1);
+      expect(isArmed()).toBe(false);
+      await advance(1);
+      expect(isArmed()).toBe(true);
     });
 
     it("does not arm while the window is unfocused", async () => {
       focused = false;
       await renderPrompt();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS * 3);
-      });
-      expect(sendButton()).toBeDisabled();
+      await advance(SEND_ARM_DELAY_MS * 3);
+      expect(isArmed()).toBe(false);
     });
 
     it("does not arm while the window is hidden", async () => {
       visibility = "hidden";
       await renderPrompt();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS * 3);
-      });
-      expect(sendButton()).toBeDisabled();
+      await advance(SEND_ARM_DELAY_MS * 3);
+      expect(isArmed()).toBe(false);
     });
 
     it("disarms on blur and re-arms 800 ms after the next focus", async () => {
       await renderPrompt();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS);
-      });
-      expect(sendButton()).toBeEnabled();
+      await advance(SEND_ARM_DELAY_MS);
+      expect(isArmed()).toBe(true);
       focused = false;
       act(() => {
         window.dispatchEvent(new Event("blur"));
       });
-      expect(sendButton()).toBeDisabled();
+      expect(isArmed()).toBe(false);
       focused = true;
       act(() => {
         window.dispatchEvent(new Event("focus"));
       });
-      expect(sendButton()).toBeDisabled();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS - 1);
-      });
-      expect(sendButton()).toBeDisabled();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-      expect(sendButton()).toBeEnabled();
+      await advance(SEND_ARM_DELAY_MS - 1);
+      expect(isArmed()).toBe(false);
+      await advance(1);
+      expect(isArmed()).toBe(true);
     });
 
-    it("a click on the disarmed Send decides nothing", async () => {
+    it("re-arms 800 ms after becoming visible again", async () => {
       await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS);
+      visibility = "hidden";
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(isArmed()).toBe(false);
+      visibility = "visible";
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await advance(SEND_ARM_DELAY_MS - 1);
+      expect(isArmed()).toBe(false);
+      await advance(1);
+      expect(isArmed()).toBe(true);
+    });
+
+    it("a click train across the 800 ms boundary never sends", async () => {
+      await renderPrompt();
+      // A press every 500 ms keeps restarting the delay, so Send never arms.
+      for (let i = 0; i < 6; i++) {
+        await advance(500);
+        pressSend();
+      }
+      expect(isArmed()).toBe(false);
+      expect(decisions()).toEqual([]);
+    });
+
+    it("a key press while disarmed restarts the delay", async () => {
+      await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS - 100);
+      fireEvent.keyDown(window, { key: "a" });
+      await advance(100);
+      expect(isArmed()).toBe(false);
+      await advance(SEND_ARM_DELAY_MS - 100);
+      expect(isArmed()).toBe(true);
+    });
+
+    it("a press that began before arming does not send when it ends after", async () => {
+      await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS - 1);
+      fireEvent.pointerDown(sendButton());
+      await advance(SEND_ARM_DELAY_MS);
+      expect(isArmed()).toBe(true);
       fireEvent.click(sendButton());
       expect(decisions()).toEqual([]);
     });
 
-    it("an armed Send click while the window lacks focus decides nothing", async () => {
+    it("a click without a pointerdown on Send does not send", async () => {
       await renderPrompt();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS);
-      });
+      await advance(SEND_ARM_DELAY_MS);
+      fireEvent.click(sendButton());
+      expect(decisions()).toEqual([]);
+    });
+
+    it("an armed press while the window lacks focus decides nothing", async () => {
+      await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS);
       focused = false;
-      fireEvent.click(sendButton());
+      pressSend();
       expect(decisions()).toEqual([]);
     });
 
-    it("an armed Send click with focus decides send, once", async () => {
+    it("an armed press with focus decides send, once", async () => {
       await renderPrompt();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS);
-      });
-      fireEvent.click(sendButton());
-      fireEvent.click(sendButton());
+      await advance(SEND_ARM_DELAY_MS);
+      pressSend();
+      pressSend();
       expect(decisions()).toEqual(["send"]);
       expect(mockSendMessage).toHaveBeenCalledWith({ type: "HTTP_AUTH_PROMPT_DECIDE", promptId: "p-1", decision: "send" });
     });
 
-    it.each(["Enter", "Escape"])("%s means Cancel, even with Send armed and focused", async (key) => {
+    it("Space on an armed Send decides send (keyboard users)", async () => {
       await renderPrompt();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS);
-      });
-      sendButton().focus();
+      await advance(SEND_ARM_DELAY_MS);
+      fireEvent.keyDown(sendButton(), { key: " " });
+      fireEvent.click(sendButton());
+      expect(decisions()).toEqual(["send"]);
+    });
+
+    it.each(["Enter", "Escape"])("%s means Cancel, even with Send armed", async (key) => {
+      await renderPrompt();
+      await advance(SEND_ARM_DELAY_MS);
       fireEvent.keyDown(sendButton(), { key });
       expect(decisions()).toEqual(["cancel"]);
     });
 
-    it("Send is never focused, autofocused or a default (submit) button", async () => {
+    it("Send is never focused by the page, nor a default (submit) button", async () => {
+      const focus = vi.spyOn(HTMLElement.prototype, "focus");
       await renderPrompt();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SEND_ARM_DELAY_MS);
-      });
+      await advance(SEND_ARM_DELAY_MS);
+      expect(focus.mock.contexts.filter((el) => el === sendButton())).toEqual([]);
       expect(document.activeElement).not.toBe(sendButton());
       expect(sendButton()).toHaveAttribute("type", "button");
       expect(sendButton()).not.toHaveAttribute("autofocus");
@@ -219,9 +314,7 @@ describe("auth-prompt page", () => {
       await renderPrompt();
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       expect(decisions()).toEqual(["cancel"]);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
-      });
+      await advance(0);
       expect(window.close).toHaveBeenCalled();
     });
   });

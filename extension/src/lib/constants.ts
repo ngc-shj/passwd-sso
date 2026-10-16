@@ -51,6 +51,14 @@ export const ALARM_CLEAR_CLIPBOARD = "clear-clipboard";
 // ── URL params ──
 export const EXT_CONNECT_PARAM = "ext_connect";
 
+// ── HTTP auth confirmation window (#905) ──
+// The page the service worker opens per challenge (vite.config.ts builds it;
+// scripts/check-dist-hygiene.mjs checks it; a test pins all three together),
+// and how long one challenge waits for a decision. The page closes itself
+// after the same time, in case the service worker that opened it is gone.
+export const HTTP_AUTH_PROMPT_PAGE = "src/auth-prompt/index.html";
+export const HTTP_AUTH_PROMPT_TIMEOUT_MS = MS_PER_MINUTE;
+
 // ── Record ids ──
 /**
  * Charset/length bound for an entry, team or user id that reaches an API path

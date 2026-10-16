@@ -1388,6 +1388,17 @@ describe("MatchList", () => {
       expect(await screen.findByRole("status")).toHaveTextContent("Sign-in dialog set up for https://router.example");
     });
 
+    it("a register message that fails shows a neutral toast pointing at the options page", async () => {
+      request.mockResolvedValueOnce(true);
+      await renderWith([login()], "https://router.example/admin");
+      mockSendMessage.mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."));
+      fireEvent.click(screen.getByRole("button", { name: ACTION }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Could not finish setting this up. Check Site sign-in in the extension options.",
+      );
+    });
+
     it("shows the SW's error when the registration is refused", async () => {
       request.mockResolvedValueOnce(true);
       await renderWith([login()], "https://router.example/admin");

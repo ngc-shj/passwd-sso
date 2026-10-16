@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getSettings } from "../../lib/storage";
 import { t } from "../../lib/i18n";
 import { EXT_CONNECT_PARAM } from "../../lib/constants";
+import { isAllowedServerUrl } from "../../lib/server-url";
 import { DISCONNECT_REASON, type DisconnectReason } from "../../lib/disconnect-reason";
 
 interface LoginPromptProps {
@@ -27,7 +28,9 @@ export function LoginPrompt({ reason }: LoginPromptProps) {
   const [serverUrl, setServerUrl] = useState("");
 
   useEffect(() => {
-    getSettings().then((s) => setServerUrl(s.serverUrl));
+    // A server URL the rule refuses (plain http off localhost) is no server:
+    // no link to it, and nothing shown as if it were the app.
+    getSettings().then((s) => setServerUrl(isAllowedServerUrl(s.serverUrl) ? s.serverUrl : ""));
   }, []);
 
   const handleLogin = () => {

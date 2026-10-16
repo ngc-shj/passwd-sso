@@ -50,7 +50,8 @@
     "httpAuthRegisterBody": "When {origin} asks for a username and password in the browser's own sign-in dialog, passwd-sso will offer {title}. You confirm each time before it is sent.",
     "httpAuthRegisterHttpWarning": "This site uses plain HTTP. Anyone who answers at this address on your current network can receive the password: in clear text with Basic, as a crackable hash with Digest.",
     "httpAuthRegisterConfirm": "Continue",
-    "httpAuthRegistered": "Sign-in dialog set up for {origin}"
+    "httpAuthRegistered": "Sign-in dialog set up for {origin}",
+    "httpAuthRegisterFailed": "Could not finish setting this up. Check Site sign-in in the extension options."
   },
   "options": {
     "title": "Settings",
@@ -176,7 +177,6 @@
     "site": "Site",
     "address": "Address",
     "triggeredBy": "Triggered by",
-    "addressBar": "Address bar or bookmark",
     "login": "Login",
     "method": "Method",
     "httpWarning": "This site uses plain HTTP. Anyone who answers at this address on your current network can receive the password: in clear text with Basic, as a crackable hash with Digest.",
@@ -184,7 +184,9 @@
     "cancel": "Cancel",
     "expired": "This sign-in request is no longer pending.",
     "close": "Close",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "notFromPage": "Not from a web page (address bar, bookmark, another app, or a redirect)",
+    "redirectedFrom": "Redirected from"
   },
   "errors": {
     "invalidPassphrase": "Passphrase is incorrect.",

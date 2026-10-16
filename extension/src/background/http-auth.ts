@@ -26,6 +26,8 @@ import {
   setBinding,
 } from "../lib/http-auth-bindings";
 import { EXT_ENTRY_TYPE } from "../lib/constants";
+import { humanizeError } from "../lib/error-messages";
+import { normalizeErrorCode } from "../lib/error-utils";
 import { MS_PER_SECOND } from "../lib/time";
 import type { HttpAuthDecision } from "../types/messages";
 import { savedUrlOrigins } from "./entry-origins";
@@ -84,22 +86,44 @@ let deps: HttpAuthDeps | null = null;
 // challenge for the same request (wrong credentials, or Chrome's retry after
 // {}) falls to Chrome's dialog. A SW restart forgets them, which is accepted.
 const seenRequests = new Map<string, true>();
+// requestId → origin a main-frame redirect into a bound origin came from, so
+// the window can say so (details.initiator does not change through redirects).
+const redirectSources = new Map<string, string>();
 
 /** Wire the dependencies and reset per-SW state. */
 export function initHttpAuth(next: HttpAuthDeps): void {
   deps = next;
   seenRequests.clear();
+  redirectSources.clear();
+}
+
+function rememberBounded<V>(map: Map<string, V>, key: string, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > ANSWERED_REQUEST_LIMIT) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
+/** Record a main-frame redirect into a bound origin (webRequest.onBeforeRedirect). */
+export async function handleBeforeRedirect(details: {
+  requestId: string;
+  url: string;
+  redirectUrl: string;
+}): Promise<void> {
+  const source = normalizeOrigin(details.url);
+  const target = normalizeOrigin(details.redirectUrl);
+  if (!source || !target || source === target) return;
+  if (!(await getBinding(target))) return;
+  rememberBounded(redirectSources, details.requestId, source);
 }
 
 /** Record `requestId`; false when it was already seen. */
 function firstReceipt(requestId: string): boolean {
   if (seenRequests.has(requestId)) return false;
-  seenRequests.set(requestId, true);
-  while (seenRequests.size > ANSWERED_REQUEST_LIMIT) {
-    const oldest = seenRequests.keys().next().value;
-    if (oldest === undefined) break;
-    seenRequests.delete(oldest);
-  }
+  rememberBounded(seenRequests, requestId, true);
   return true;
 }
 
@@ -198,6 +222,7 @@ async function decideChallenge(details: AuthChallenge): Promise<AuthCredentials 
     url: details.url,
     origin,
     initiator: typeof details.initiator === "string" ? details.initiator : null,
+    redirectedFrom: redirectSources.get(details.requestId) ?? null,
     scheme,
     entryTitle: overview.title,
     entryUsername: overview.username,
@@ -260,6 +285,12 @@ export async function handleAuthRequired(
 // ── Registration (C3) ───────────────────────────────────────────
 
 export type RegistrationRequest = { origin: unknown; entryId: unknown; teamId?: unknown };
+
+/** A thrown registration step as a code the popup can show (never raw text). */
+function registrationErrorCode(err: unknown): string {
+  const code = normalizeErrorCode(err, "FETCH_FAILED");
+  return humanizeError(code) !== code ? code : "FETCH_FAILED";
+}
 export type RegistrationResult = { ok: true } | { ok: false; error: string };
 
 async function checkRegistration(
@@ -311,23 +342,30 @@ export async function registerHttpAuthBinding(req: RegistrationRequest): Promise
   if (!isBinding(candidate)) return rollback({ ok: false, error: "HTTP_AUTH_ENTRY_MISMATCH" });
   const { entryId, teamId } = candidate;
 
-  const userId = d.currentUserId();
-  const existing = await getBinding(origin);
-  if (
-    userId !== null &&
-    existing?.entryId === entryId &&
-    existing.teamId === teamId &&
-    existing.userId === userId
-  ) {
-    return { ok: true };
-  }
+  // A step that throws (no token, a refused server URL, the network, a
+  // decrypt) rolls back like a refusal: no permission without a binding.
+  try {
+    const userId = d.currentUserId();
+    const existing = await getBinding(origin);
+    if (
+      userId !== null &&
+      existing?.entryId === entryId &&
+      existing.teamId === teamId &&
+      existing.userId === userId
+    ) {
+      return { ok: true };
+    }
 
-  const checked = await checkRegistration(d, origin, entryId, teamId);
-  if (!checked.ok) return rollback(checked);
-  // The account the entry was decrypted for: a challenge is answered only
-  // while that account's vault is unlocked.
-  if (userId === null || d.currentUserId() !== userId) return rollback({ ok: false, error: "VAULT_LOCKED" });
-  await setBinding({ origin, entryId, ...(teamId !== undefined ? { teamId } : {}), userId });
+    const checked = await checkRegistration(d, origin, entryId, teamId);
+    if (!checked.ok) return rollback(checked);
+    // The account the entry was decrypted for: a challenge is answered only
+    // while that account's vault is unlocked.
+    if (userId === null || d.currentUserId() !== userId) return rollback({ ok: false, error: "VAULT_LOCKED" });
+    await setBinding({ origin, entryId, ...(teamId !== undefined ? { teamId } : {}), userId });
+  } catch (err) {
+    warnBackground("http-auth-register-failed", classifyError(err));
+    return rollback({ ok: false, error: registrationErrorCode(err) });
+  }
   registerHttpAuthListeners();
   return { ok: true };
 }
@@ -349,10 +387,16 @@ export async function clearPendingIntent(nonce: unknown): Promise<void> {
 /**
  * Complete the popup's pending registration when its grant arrives without the
  * popup (it closed on the permission prompt). Only a fresh intent whose origin
- * pattern is in `addedOrigins` (or, at SW start, already granted) and only
- * while the API permissions are present. Completion clears the slot.
+ * is granted, and only while the API permissions are present. Completion
+ * clears the slot.
+ *
+ * `added` is the onAdded event (null at SW start). Its origins name the
+ * intent's pattern when that pattern was newly granted; an https origin may
+ * already be granted through content_scripts.matches and then is absent from
+ * them, so a grant that added the API permissions checks the origin with
+ * permissions.contains instead.
  */
-export async function completePendingIntent(addedOrigins: readonly string[] | null): Promise<void> {
+export async function completePendingIntent(added: chrome.permissions.Permissions | null): Promise<void> {
   const d = deps;
   if (!d) return;
   const intent = await readPendingIntent();
@@ -363,9 +407,9 @@ export async function completePendingIntent(addedOrigins: readonly string[] | nu
   }
   const pattern = originPattern(intent.origin);
   const originGranted =
-    addedOrigins === null
-      ? await chrome.permissions.contains({ origins: [pattern] })
-      : addedOrigins.includes(pattern);
+    (added?.origins ?? []).includes(pattern) ||
+    ((added === null || isApiPermissionChange(added)) &&
+      (await chrome.permissions.contains({ origins: [pattern] })));
   if (!originGranted) return;
   if (!(await chrome.permissions.contains({ permissions: [...HTTP_AUTH_API_PERMISSIONS] }))) return;
   await chrome.storage.session.remove(HTTP_AUTH_PENDING_INTENT_KEY);
@@ -392,6 +436,12 @@ function onErrorOccurred(details: chrome.webRequest.OnErrorOccurredDetails): voi
   handlePromptRequestError(details.requestId);
 }
 
+function onBeforeRedirect(details: chrome.webRequest.OnBeforeRedirectDetails): void {
+  handleBeforeRedirect(details).catch((err: unknown) => {
+    warnBackground("http-auth-answer-failed", classifyError(err));
+  });
+}
+
 function isApiPermissionChange(change: chrome.permissions.Permissions): boolean {
   return (change.permissions ?? []).some((p) =>
     (HTTP_AUTH_API_PERMISSIONS as readonly string[]).includes(p),
@@ -415,6 +465,10 @@ export function registerHttpAuthListeners(): void {
     if (errors && !errors.hasListener(onErrorOccurred)) {
       errors.addListener(onErrorOccurred, REQUEST_FILTER);
     }
+    const redirects = webRequest.onBeforeRedirect;
+    if (redirects && !redirects.hasListener(onBeforeRedirect)) {
+      redirects.addListener(onBeforeRedirect, REQUEST_FILTER);
+    }
   } catch (err) {
     warnBackground("http-auth-listener-register-failed", classifyError(err));
   }
@@ -426,6 +480,7 @@ export function unregisterHttpAuthListeners(): void {
     const webRequest = chrome.webRequest;
     webRequest?.onAuthRequired?.removeListener(onAuthRequired);
     webRequest?.onErrorOccurred?.removeListener(onErrorOccurred);
+    webRequest?.onBeforeRedirect?.removeListener(onBeforeRedirect);
   } catch (err) {
     warnBackground("http-auth-listener-unregister-failed", classifyError(err));
   }
@@ -434,7 +489,7 @@ export function unregisterHttpAuthListeners(): void {
 async function onPermissionsAdded(added: chrome.permissions.Permissions): Promise<void> {
   if (isApiPermissionChange(added)) registerHttpAuthListeners();
   try {
-    await completePendingIntent(added.origins ?? []);
+    await completePendingIntent(added);
   } catch (err) {
     warnBackground("http-auth-listener-register-failed", classifyError(err));
   }

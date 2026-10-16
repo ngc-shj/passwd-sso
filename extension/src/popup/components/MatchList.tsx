@@ -6,7 +6,7 @@ import {
   isInsecureHttpUrl,
   sortByUrlMatch,
 } from "../../lib/url-matching";
-import type { DecryptedEntry } from "../../types/messages";
+import type { DecryptedEntry, ExtensionResponse } from "../../types/messages";
 import { humanizeError } from "../../lib/error-messages";
 import { getSettings } from "../../lib/storage";
 import { t } from "../../lib/i18n";
@@ -161,13 +161,21 @@ export function MatchList({ tabUrl }: Props) {
       setToast({ message: humanizeError("HTTP_AUTH_PERMISSION_DENIED"), type: "error" });
       return;
     }
-    const res = await sendMessage({
-      type: "HTTP_AUTH_REGISTER",
-      origin: intent.origin,
-      entryId: intent.entryId,
-      teamId: intent.teamId,
-      nonce: intent.nonce,
-    });
+    let res: Extract<ExtensionResponse, { type: "HTTP_AUTH_REGISTER" }> | undefined;
+    try {
+      res = await sendMessage({
+        type: "HTTP_AUTH_REGISTER",
+        origin: intent.origin,
+        entryId: intent.entryId,
+        teamId: intent.teamId,
+        nonce: intent.nonce,
+      });
+    } catch {
+      // The SW may have finished from the pending intent anyway (onAdded), so
+      // this cannot say it failed: point at where the outcome shows.
+      setToast({ message: t("popup.httpAuthRegisterFailed"), type: "error" });
+      return;
+    }
     if (res?.ok) {
       setToast({ message: t("popup.httpAuthRegistered", { origin: intent.origin }), type: "success", autoDismiss: true });
     } else {

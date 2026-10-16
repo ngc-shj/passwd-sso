@@ -901,7 +901,8 @@ async function isOwnAppPage(url: string): Promise<boolean> {
   if (!/^https?:$/.test(pageUrl.protocol)) return false;
 
   const { serverUrl } = await chrome.storage.local.get("serverUrl");
-  if (typeof serverUrl !== "string" || !serverUrl) {
+  // A server URL the rule refuses (plain http off localhost) is no server.
+  if (!isAllowedServerUrl(serverUrl)) {
     return false;
   }
   let base: URL;
@@ -3538,8 +3539,13 @@ async function handleMessage(
     }
 
     case EXT_MSG.HTTP_AUTH_REGISTER: {
-      const result = await registerHttpAuthBinding(message);
-      await clearPendingIntent(message.nonce);
+      let result: Awaited<ReturnType<typeof registerHttpAuthBinding>>;
+      try {
+        result = await registerHttpAuthBinding(message);
+      } finally {
+        // The popup's intent is done with on every outcome.
+        await clearPendingIntent(message.nonce);
+      }
       sendResponse(
         result.ok
           ? { type: EXT_MSG.HTTP_AUTH_REGISTER, ok: true }

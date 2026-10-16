@@ -1,25 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { sendMessage } from "../lib/messaging";
 import { t } from "../lib/i18n";
-import { EXT_MSG } from "../lib/constants";
+import { EXT_MSG, HTTP_AUTH_PROMPT_TIMEOUT_MS } from "../lib/constants";
 import type { HttpAuthDecision, HttpAuthPromptView } from "../types/messages";
 
 /**
- * Send stays disabled this long after the window is visible and focused, and
- * again after every refocus, so a click or key aimed at the page the window
- * popped over cannot land on it.
+ * Send stays disabled this long after the window is visible and focused, after
+ * every refocus, and again after any press (pointer or key) made while it is
+ * disabled, so a click train or key repeat aimed at the page the window popped
+ * over cannot run into it.
  */
 export const SEND_ARM_DELAY_MS = 800;
 
+/** Longest address shown; the origin is always shown whole. */
+export const URL_DISPLAY_MAX = 120;
+
+/** `url` for display: the origin whole, the rest cut to fit with an ellipsis. */
+export function displayUrl(url: string, max = URL_DISPLAY_MAX): string {
+  if (url.length <= max) return url;
+  let origin = "";
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return `${url.slice(0, max - 1)}…`;
+  }
+  const rest = url.slice(origin.length);
+  const room = Math.max(0, max - origin.length - 1);
+  return `${origin}${rest.slice(0, room)}…`;
+}
+
 // The HTTP auth confirmation window (#905). Shows what the challenge is and
-// which login would answer it; never the server's realm text. Only an
-// unhurried click on Send while this window has focus releases the login.
-// Enter and Escape mean Cancel, and Send is never the default or focused button.
+// which login would answer it; never the server's realm text. Only a click on
+// Send that started (pointerdown) after Send was armed, while this window has
+// focus, releases the login. Enter and Escape mean Cancel, and Send is never
+// the default or focused button.
 export function App({ promptId }: { promptId: string | null }) {
   // undefined: loading; null: unknown or no longer pending.
   const [view, setView] = useState<HttpAuthPromptView | null | undefined>(undefined);
   const [armed, setArmed] = useState(false);
+  const armedRef = useRef(false);
+  // Whether the press now ending on Send began while Send was armed.
+  const pressBeganArmed = useRef(false);
   const decided = useRef(false);
+
+  const setArmedBoth = (value: boolean) => {
+    armedRef.current = value;
+    setArmed(value);
+  };
 
   useEffect(() => {
     if (!promptId) {
@@ -31,11 +58,18 @@ export function App({ promptId }: { promptId: string | null }) {
       .catch(() => setView(null));
   }, [promptId]);
 
+  // A window left open outlives its challenge; the SW closes it on every
+  // outcome, and this is the backstop for a SW that is gone.
+  useEffect(() => {
+    const timer = setTimeout(() => window.close(), HTTP_AUTH_PROMPT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
   const decide = useCallback(
     (decision: HttpAuthDecision) => {
       if (decided.current || !promptId) return;
       decided.current = true;
-      setArmed(false);
+      setArmedBoth(false);
       sendMessage({ type: EXT_MSG.HTTP_AUTH_PROMPT_DECIDE, promptId, decision })
         .catch(() => {})
         .finally(() => window.close());
@@ -45,30 +79,38 @@ export function App({ promptId }: { promptId: string | null }) {
 
   const ready = view !== undefined && view !== null;
 
-  // Arm Send only while the window is visible and focused, after the delay.
+  // Arm Send only while the window is visible and focused, after the delay;
+  // any press while disarmed starts the delay over.
   useEffect(() => {
     if (!ready) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const disarm = () => {
       clearTimeout(timer);
       timer = undefined;
-      setArmed(false);
+      setArmedBoth(false);
     };
     const rearm = () => {
       disarm();
       if (document.visibilityState === "visible" && document.hasFocus()) {
-        timer = setTimeout(() => setArmed(true), SEND_ARM_DELAY_MS);
+        timer = setTimeout(() => setArmedBoth(true), SEND_ARM_DELAY_MS);
       }
+    };
+    const onPress = () => {
+      if (!armedRef.current) rearm();
     };
     rearm();
     window.addEventListener("focus", rearm);
     window.addEventListener("blur", disarm);
     document.addEventListener("visibilitychange", rearm);
+    window.addEventListener("pointerdown", onPress, true);
+    window.addEventListener("keydown", onPress, true);
     return () => {
       clearTimeout(timer);
       window.removeEventListener("focus", rearm);
       window.removeEventListener("blur", disarm);
       document.removeEventListener("visibilitychange", rearm);
+      window.removeEventListener("pointerdown", onPress, true);
+      window.removeEventListener("keydown", onPress, true);
     };
   }, [ready]);
 
@@ -83,8 +125,15 @@ export function App({ promptId }: { promptId: string | null }) {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [decide]);
 
+  // Recorded at the start of a press on Send (pointer, or Space on the button).
+  const onSendPressStart = () => {
+    pressBeganArmed.current = armedRef.current;
+  };
+
   const onSend = () => {
-    if (!armed || !document.hasFocus()) return;
+    const began = pressBeganArmed.current;
+    pressBeganArmed.current = false;
+    if (!armedRef.current || !began || !document.hasFocus()) return;
     decide("send");
   };
 
@@ -109,23 +158,15 @@ export function App({ promptId }: { promptId: string | null }) {
 
   const rows: Array<[string, string]> = [
     [t("authPrompt.site"), view.origin],
-    [t("authPrompt.address"), view.url],
-    [t("authPrompt.triggeredBy"), view.initiator ?? t("authPrompt.addressBar")],
+    [t("authPrompt.address"), displayUrl(view.url)],
+    [t("authPrompt.triggeredBy"), view.initiator ?? t("authPrompt.notFromPage")],
+    ...(view.redirectedFrom ? [[t("authPrompt.redirectedFrom"), view.redirectedFrom] as [string, string]] : []),
     [t("authPrompt.login"), view.entryUsername ? `${view.entryTitle} (${view.entryUsername})` : view.entryTitle],
-    [t("authPrompt.method"), view.scheme === "digest" ? "Digest" : "Basic"],
   ];
 
   return (
     <div className="p-4 flex flex-col gap-3 text-gray-900 dark:text-gray-100">
       <h1 className="text-sm font-semibold">{t("authPrompt.heading")}</h1>
-      <dl className="flex flex-col gap-1.5 text-xs">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex flex-col">
-            <dt className="text-gray-500 dark:text-gray-400">{label}</dt>
-            <dd className="break-all">{value}</dd>
-          </div>
-        ))}
-      </dl>
       {view.insecure && (
         <p
           role="alert"
@@ -135,6 +176,18 @@ export function App({ promptId }: { promptId: string | null }) {
           {t("authPrompt.httpWarning")}
         </p>
       )}
+      <p className="text-xs" data-testid="auth-method">
+        <span className="text-gray-500 dark:text-gray-400">{t("authPrompt.method")}: </span>
+        {view.scheme === "digest" ? "Digest" : "Basic"}
+      </p>
+      <dl className="flex flex-col gap-1.5 text-xs">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex flex-col">
+            <dt className="text-gray-500 dark:text-gray-400">{label}</dt>
+            <dd className="break-all">{value}</dd>
+          </div>
+        ))}
+      </dl>
       <div className="flex gap-2 justify-end">
         <button
           type="button"
@@ -145,9 +198,17 @@ export function App({ promptId }: { promptId: string | null }) {
         </button>
         <button
           type="button"
+          onPointerDown={onSendPressStart}
+          onKeyDown={(e) => {
+            if (e.key === " ") onSendPressStart();
+          }}
           onClick={onSend}
-          disabled={!armed}
-          className="h-9 px-4 rounded-md text-sm font-medium text-white bg-gray-900 dark:bg-gray-200 dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          // aria-disabled, not disabled: a disabled button swallows the
+          // pointerdown that must restart the arm delay.
+          aria-disabled={!armed}
+          className={`h-9 px-4 rounded-md text-sm font-medium text-white bg-gray-900 dark:bg-gray-200 dark:text-gray-900 ${
+            armed ? "hover:bg-gray-800 dark:hover:bg-gray-300" : "opacity-50 cursor-not-allowed"
+          }`}
         >
           {t("authPrompt.send")}
         </button>
