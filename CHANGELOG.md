@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.4.77](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.76...passwd-sso-v0.4.77) (2026-10-16)
+
+
+### Features
+
+* **extension:** answer HTTP authentication dialogs after a per-challenge confirmation ([#907](https://github.com/ngc-shj/passwd-sso/issues/907)) ([684393c](https://github.com/ngc-shj/passwd-sso/commit/684393c549d9e1e584353d09021dd9ed8268b004))
+* **sso:** resolve SSO tenants only through the claim registry ([#865](https://github.com/ngc-shj/passwd-sso/issues/865)) ([6b873f9](https://github.com/ngc-shj/passwd-sso/commit/6b873f9dc856e08f9f5f524093ff1654d29f501d))
+
+
+### Bug Fixes
+
+* **ci:** generate the Prisma client in Refactor Phase Verify ([#902](https://github.com/ngc-shj/passwd-sso/issues/902)) ([be66ff2](https://github.com/ngc-shj/passwd-sso/commit/be66ff23a6b8209dc1949f74ca880c7bc562b860))
+* **ci:** wait out registry propagation before asserting CLI provenance ([#856](https://github.com/ngc-shj/passwd-sso/issues/856)) ([48e28f7](https://github.com/ngc-shj/passwd-sso/commit/48e28f7fd14a4bc2e10214f89ce415f80d9cd23b))
+* **deps:** override postcss-selector-parser to 7.1.6 for GHSA-rj75-hqrm-r3gf ([#904](https://github.com/ngc-shj/passwd-sso/issues/904)) ([937e407](https://github.com/ngc-shj/passwd-sso/commit/937e407a7c7ff158c8e86813d1a534eb2589e2c1))
+* **docker:** move the RDS CA bundle pin to AWS's sa-west-1 update ([#903](https://github.com/ngc-shj/passwd-sso/issues/903)) ([e9a38df](https://github.com/ngc-shj/passwd-sso/commit/e9a38df50b95231724426337c6c76b39733a1d1c))
+* **extension:** fill only fields the user can see, in the block the user is in ([#894](https://github.com/ngc-shj/passwd-sso/issues/894)) ([fcd02d9](https://github.com/ngc-shj/passwd-sso/commit/fcd02d9c5a1628107349ebbf1375813a4a66c1f5))
+* **extension:** keep LOGIN detection off the card form's fields ([#882](https://github.com/ngc-shj/passwd-sso/issues/882)) ([d182d06](https://github.com/ngc-shj/passwd-sso/commit/d182d06d929fb28a807d5404f06ea45fe9466ba8))
+* **extension:** keep the auth-prompt button labels on one line ([#908](https://github.com/ngc-shj/passwd-sso/issues/908)) ([dc429ee](https://github.com/ngc-shj/passwd-sso/commit/dc429ee8148be5a637621a7bab04de5c497a4b48))
+* **extension:** pin autofill deliveries to a checked document and gate extension-page messages ([#880](https://github.com/ngc-shj/passwd-sso/issues/880)) ([2b09df5](https://github.com/ngc-shj/passwd-sso/commit/2b09df57aca020fc57329f554856640f66219790))
+* **extension:** scope expiry picks, rebuild the context menu on cache change, rescan on attribute reveals ([#887](https://github.com/ngc-shj/passwd-sso/issues/887)) ([57fe590](https://github.com/ngc-shj/passwd-sso/commit/57fe5908c16fc94b7e9708410b8cabd143b0993e))
+* **extension:** sequential autofill writes with fixed targets ([#879](https://github.com/ngc-shj/passwd-sso/issues/879)) ([3663c9a](https://github.com/ngc-shj/passwd-sso/commit/3663c9a7eb7f5fb1178b7e5a2e7526e58c18e9bb))
+* **extension:** stop background operations at the vault lock they straddle ([#888](https://github.com/ngc-shj/passwd-sso/issues/888)) ([d1abca7](https://github.com/ngc-shj/passwd-sso/commit/d1abca75253afcec1de6c995aeda11c1f2c2f75a))
+* **extension:** tie the popup copy toast's dismiss timer to the toast ([#901](https://github.com/ngc-shj/passwd-sso/issues/901)) ([ff01b23](https://github.com/ngc-shj/passwd-sso/commit/ff01b23787cad89851189c3cc69a22b3749fbf14))
+* **extension:** unify the LOGIN fill, gate http pages by saved scheme, and report what a fill wrote ([#906](https://github.com/ngc-shj/passwd-sso/issues/906)) ([54e0779](https://github.com/ngc-shj/passwd-sso/commit/54e0779daaae30faf869610b785966c15fd3977f))
+* **raw-sql:** replace the raw-sql-ident marker with unforgeable SQL fragments ([#869](https://github.com/ngc-shj/passwd-sso/issues/869)) ([1d3e973](https://github.com/ngc-shj/passwd-sso/commit/1d3e97364d5923a4c30836a1f4e32d99ca8a9f05))
+* **scripts:** keep superuser URLs out of argv and ~/.psqlrc out of psql ([#858](https://github.com/ngc-shj/passwd-sso/issues/858)) ([9e3f5df](https://github.com/ngc-shj/passwd-sso/commit/9e3f5df0d7e5bd96dd5287bd998a2d6610c60183)), closes [#756](https://github.com/ngc-shj/passwd-sso/issues/756)
+* **security:** bump source-map-js and proxy-addr past new advisories ([#866](https://github.com/ngc-shj/passwd-sso/issues/866)) ([68ebf56](https://github.com/ngc-shj/passwd-sso/commit/68ebf56b46c5630f3c2dadca0e02fc63f95f5f56))
+* **security:** patch sharp (GHSA-wq5f-xc86-pv6w) and @modelcontextprotocol/sdk (GHSA-6qxp-vccf-f47h) ([#871](https://github.com/ngc-shj/passwd-sso/issues/871)) ([9696655](https://github.com/ngc-shj/passwd-sso/commit/9696655b89259c43da3e0b99d285417a24b87741))
+* **security:** unblock CI — override floors, RDS CA pin, bundled undici, unfixable-advisory suppression ([#863](https://github.com/ngc-shj/passwd-sso/issues/863)) ([0a4baa3](https://github.com/ngc-shj/passwd-sso/commit/0a4baa3932a5968eee9c2f408b23a0449e2739de))
+* **test:** give backup-db's delegating cases the real reader's budget ([#899](https://github.com/ngc-shj/passwd-sso/issues/899)) ([f438966](https://github.com/ngc-shj/passwd-sso/commit/f43896616d345992de92aad325496100021ff2d8))
+* **workers:** bound batch writes with a materialized key set ([#873](https://github.com/ngc-shj/passwd-sso/issues/873)) ([9c3ad6f](https://github.com/ngc-shj/passwd-sso/commit/9c3ad6f595a7931f7e73fa3534ad2d584ad04d13))
+* **workers:** let the retention-gc dispatcher own the RLS bypass ([#895](https://github.com/ngc-shj/passwd-sso/issues/895)) ([8d49ff2](https://github.com/ngc-shj/passwd-sso/commit/8d49ff2a5b4ec33cf89cde7be8e4f4ec217bb3ab))
+
+
+### Code Refactoring
+
+* bump eslint-config-next to 16.4.0 and satisfy react-hooks 7.1.1 ([#900](https://github.com/ngc-shj/passwd-sso/issues/900)) ([b681607](https://github.com/ngc-shj/passwd-sso/commit/b6816075ad5ccbf3f47abdfe9b12004d8b784e35))
+
 ## [0.4.76](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.75...passwd-sso-v0.4.76) (2026-09-29)
 
 
