@@ -16,8 +16,8 @@
  * tagged templates, own accessors, functions handed on as values, a wrapper's
  * callers' callbacks — and in every reached function each access whose
  * receiver is a Prisma client BY TYPE (its member is declared by the
- * generated PrismaClient; an `any` receiver counts when the name is a model)
- * is a model reached under this bypass. How the client got there — a
+ * generated PrismaClient, or the value has a model delegate's shape) is a
+ * model reached under this bypass. How the client got there — a
  * parameter, an object property, an alias, the ambient `prisma` Proxy, a
  * destructuring — no longer matters, because no name is tracked. Anything
  * reached that the resolver cannot name fails the run (unfollowedHandOffs);
@@ -97,10 +97,13 @@
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
  *   - Check 3's coverage limits are the shared reachability's (see
- *     check-rls-nesting's header): the iterator protocol, implicit
- *     conversions, Proxy traps, decorators, a getter reached through
- *     destructuring, and an own function a library invokes later. A client
- *     whose type is erased (`any`) is recognised only by a model-named access.
+ *     check-rls-nesting's header for the list), plus: a client whose type is
+ *     erased to `any` is not recognised as a client at all (a call on it
+ *     fails the run as unnameable, but a bare `any.user` read is not charged),
+ *     and a library object built around the ambient client outside the
+ *     reached code (`const repo = makeRepo(prisma)` at module level) is not
+ *     seen. A client handed INTO a library call inside reached code fails the
+ *     run.
  *
  * Treat this list as the current best enumeration, not a closed one: eleven
  * successive external reviews each found a member missing from it, which is the
@@ -120,7 +123,7 @@ import {
   unwrapExpression,
 } from "./lib/scope-bindings.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { createFunctionResolver, createReachability, isProductionPath, literalKey, merge as mergeResolutions, prismaModelNames, unwrap } from "./lib/function-resolver.mjs";
+import { createFunctionResolver, createReachability, isProductionPath, literalKey, prismaModelNames, unwrap } from "./lib/function-resolver.mjs";
 import { join, extname, dirname, relative, resolve, sep } from "node:path";
 
 // The models `countStrandedRows` counts — the keys of STRANDED_COUNTERS in
@@ -1455,7 +1458,7 @@ const bypassDecl = program
 // The Prisma client's model accessors, read off withBypassRls's own client
 // parameter type.
 const MODEL_NAMES = prismaModelNames(bypassDecl?.getParameters()[0]?.getType());
-const resolver = createFunctionResolver({ program, modelNames: MODEL_NAMES });
+const resolver = createFunctionResolver({ program });
 // The helpers' implementation nodes, as the resolver returns them: reach stops
 // at one of these: a nested context is check-rls-nesting's to reject.
 const helperImplementations = new Set();
@@ -1560,7 +1563,6 @@ function modelNamed(type, name) {
   if (name.startsWith("$")) return null;
   const prop = type.getProperty(name);
   if (prop && isPrismaClientMember(prop.getDeclarations())) return name;
-  if ((type.isAny() || type.isUnknown()) && MODEL_NAMES.has(name)) return name;
   const memberType = prop?.getTypeAtLocation?.(bypassDecl) ?? type.getStringIndexType();
   if (MODEL_NAMES.has(name) && memberType && isDelegateType(memberType)) return name;
   return null;
@@ -1578,8 +1580,6 @@ function modelAccessOf(node) {
       const name = node.getName();
       if (name.startsWith("$")) return null;
       if (isPrismaClientMember(decls)) return { model: name };
-      const t = node.getExpression().getType();
-      if ((t.isAny() || t.isUnknown()) && MODEL_NAMES.has(name)) return { model: name };
       return MODEL_NAMES.has(name) && isDelegateType(node.getType()) ? { model: name } : null;
     }
     case SyntaxKind.ElementAccessExpression: {
@@ -1634,6 +1634,27 @@ function modelAccessOf(node) {
   }
 }
 
+/**
+ * A Prisma client or model delegate handed to a library call: the library may
+ * run any query on it, which no allowlist can see. The client's own API
+ * (`tx.$transaction(...)`, `tx.user.findMany(...)`) is not a hand-off.
+ */
+function clientHandedToLibrary(node) {
+  if (node.getKind() !== SyntaxKind.CallExpression && node.getKind() !== SyntaxKind.NewExpression) return null;
+  const callee = unwrap(node.getExpression());
+  if (callee?.getKind() === SyntaxKind.PropertyAccessExpression || callee?.getKind() === SyntaxKind.ElementAccessExpression) {
+    const receiverType = callee.getExpression().getType();
+    if (isClientType(receiverType) || isDelegateType(receiverType)) return null;
+  }
+  const r = resolver.resolveCall(node);
+  if (!r.external || r.fns.length > 0) return null;
+  for (const arg of node.getArguments()) {
+    const t = arg.getType().getNonNullableType();
+    if (isClientType(t) || isDelegateType(t)) return `client handed to library code (${callee?.getText().slice(0, 60)})`;
+  }
+  return null;
+}
+
 /** The callbacks a withBypassRls call runs, or why they cannot be named. */
 function bypassRootsOf(pcall) {
   const args = pcall.getArguments();
@@ -1643,10 +1664,11 @@ function bypassRootsOf(pcall) {
   const arg = unwrap(args[BYPASS_CALLBACK_INDEX]);
   if (!arg) return { roots: [], problem: "withBypassRls called without a callback" };
   if (FN_KINDS.has(arg.getKind())) return { roots: [arg], problem: null };
-  let r = resolver.resolveValue(arg);
-  // A wrapper forwarding its own parameter(s): every production caller's callback.
-  if (r.params.length > 0) r = mergeResolutions([{ ...r, params: [] }, ...r.params.map((p) => resolver.resolveParameterFromCallers(p.param))]);
-  return { roots: r.fns, problem: r.unresolved ? `callback: ${r.unresolved}` : null };
+  const r = resolver.resolveValue(arg);
+  // A wrapper forwarding its own parameter is refused as an indirect callback
+  // (Check C2's INDIRECT_CALLBACK_ALLOWLIST); no root is guessed here.
+  const problem = r.unresolved ? `callback: ${r.unresolved}` : r.params.length > 0 ? "callback is a parameter of the enclosing function" : null;
+  return { roots: r.fns, problem };
 }
 
 const bypassReachHooks = {
@@ -1916,6 +1938,11 @@ for (const file of sourceFiles) {
         reachedUnits += 1;
         const direct = unit === root && toRelPosix(unit.getSourceFile().getFilePath()) === file;
         for (const node of reachability.ownedNodes(unit)) {
+          const handOff = clientHandedToLibrary(node);
+          if (handOff) {
+            unfollowedHandOffs.push({ file, at: siteOf(node), reason: handOff });
+            undecidableFiles.add(file);
+          }
           const access = modelAccessOf(node);
           if (!access) continue;
           const at = siteOf(node);

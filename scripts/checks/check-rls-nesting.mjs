@@ -38,10 +38,14 @@
  * NOT covered, named so the next editor does not assume otherwise: the
  * iterator protocol (`for…of`/spread over an own iterable), implicit
  * conversions (toString/valueOf/Symbol.toPrimitive/toJSON), Proxy traps,
- * decorators, a getter reached through destructuring or a computed key, and an
+ * decorators, a getter reached through destructuring or a computed key, an
  * own function registered with a library earlier (an event listener, a timer)
  * and invoked by that library later — the library call that triggers it is
- * library code to this gate.
+ * library code to this gate — a library object holding our code built OUTSIDE
+ * the reached code (`const repo = makeRepo(prisma)` at module level), an object
+ * literal's member written through an alias of an object that is returned
+ * rather than held in a variable, and a module loaded through a non-literal
+ * specifier (the production-boundary check reads literal ones only).
  */
 import { SyntaxKind } from "ts-morph";
 import { createProgramProject, ProgramBuildError } from "./lib/ast-project.mjs";
@@ -51,8 +55,8 @@ import {
   createFunctionResolver,
   createReachability,
   NON_PRODUCTION_SCRIPTS,
+  isDeclaredNonProduction,
   isProductionPath,
-  prismaModelNames,
   toRelPosix,
   unwrap,
 } from "./lib/function-resolver.mjs";
@@ -98,11 +102,7 @@ if (scanFiles.length === 0) {
 const helperSf = program.getSourceFile(join(process.cwd(), HELPER_FILE));
 if (!helperSf) fail(`${HELPER_FILE} is not in the Program; the base helpers cannot be resolved.`);
 
-const bypassDecl = helperSf.getFunctions().find((fn) => fn.getName() === "withBypassRls" && fn.getBody());
-const resolver = createFunctionResolver({
-  program,
-  modelNames: prismaModelNames(bypassDecl?.getParameters()[0]?.getType()),
-});
+const resolver = createFunctionResolver({ program });
 const { resolveValue, resolveCall } = resolver;
 const { reach, chainTo } = createReachability(resolver);
 
@@ -237,6 +237,10 @@ function conditionallyExempt(edge, unit, root) {
   if (!client) return [];
   const arg = unwrap(edge.node.getArguments()[0]);
   if (arg?.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
+  // A spread can override `tx` (`...(c ? { tx: undefined } : {})`), and a
+  // second `tx` replaces the first: only one plain member decides.
+  if (arg.getProperties().some((p) => p.getKind() === SyntaxKind.SpreadAssignment)) return [];
+  if (arg.getProperties().filter((p) => p.getName?.() === "tx").length !== 1) return [];
   const prop = arg.getProperty("tx");
   let valueDecl = null;
   if (prop?.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
@@ -353,13 +357,31 @@ for (const sf of program.getSourceFiles()) {
   const production = isProductionPath(rel);
   const tooling = NON_PRODUCTION_SCRIPTS.includes(rel);
   if (!production && !tooling) continue;
-  for (const decl of [...sf.getImportDeclarations(), ...sf.getExportDeclarations()]) {
-    const target = decl.getModuleSpecifierSourceFile?.();
-    if (!target) continue;
+  const loads = sf
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .filter((c) => {
+      const callee = c.getExpression();
+      return callee.getKind() === SyntaxKind.ImportKeyword || (callee.getKind() === SyntaxKind.Identifier && callee.getText() === "require");
+    });
+  const targets = [
+    ...[...sf.getImportDeclarations(), ...sf.getExportDeclarations()].map((decl) => ({ decl, target: decl.getModuleSpecifierSourceFile?.() })),
+    // `await import("…")` / `require("…")`: the module a literal specifier loads.
+    ...loads.map((decl) => {
+      const spec = decl.getArguments()[0];
+      if (spec?.getKind() !== SyntaxKind.StringLiteral && spec?.getKind() !== SyntaxKind.NoSubstitutionTemplateLiteral) {
+        return { decl, unresolvable: true };
+      }
+      const resolved = spec.getSymbol?.()?.getDeclarations()[0]?.getSourceFile?.() ?? null;
+      return { decl, target: resolved };
+    }),
+  ];
+  for (const { decl, target, unresolvable } of targets) {
+    // A non-literal load is not followed (named in the header).
+    if (unresolvable || !target) continue;
     const targetRel = toRelPosix(target.getFilePath());
     if (target.isDeclarationFile() || targetRel.includes("node_modules/")) continue;
-    if (production && !isProductionPath(targetRel)) {
-      boundaryViolations.push(`${siteOf(decl)}  production code imports ${targetRel}, which is not production`);
+    if (production && isDeclaredNonProduction(targetRel)) {
+      boundaryViolations.push(`${siteOf(decl)}  production code imports ${targetRel}, which is declared non-production`);
     }
     if (tooling && (targetRel === HELPER_FILE || targetRel === "src/lib/tenant-context.ts" || targetRel === "src/lib/prisma.ts")) {
       boundaryViolations.push(`${siteOf(decl)}  ${rel} is listed as non-production tooling but imports ${targetRel}`);

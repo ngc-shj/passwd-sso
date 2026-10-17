@@ -58,6 +58,17 @@ export function toRelPosix(absPath) {
   return relative(process.cwd(), absPath).split(sep).join("/");
 }
 
+/**
+ * A cwd-relative path explicitly declared non-production: tests, the CI
+ * tooling, the manual-test scripts. (A file merely outside src/ and scripts/ —
+ * a root `sentry.server.config.ts` — is neither scanned nor declared.)
+ */
+export function isDeclaredNonProduction(rel) {
+  if (NON_PRODUCTION_PREFIXES.some((prefix) => rel.startsWith(prefix))) return true;
+  if (NON_PRODUCTION_SCRIPTS.includes(rel)) return true;
+  return /\.(test|spec)\.[cm]?[jt]sx?$/.test(rel) || rel.includes("__tests__/");
+}
+
 /** A cwd-relative path that is production TypeScript. */
 export function isProductionPath(rel) {
   if (!PRODUCTION_ROOTS.some((root) => rel.startsWith(root))) return false;
@@ -111,6 +122,8 @@ const NON_FUNCTION_KINDS = new Set([
   SyntaxKind.BigIntLiteral, SyntaxKind.StringLiteral, SyntaxKind.NoSubstitutionTemplateLiteral,
   SyntaxKind.TemplateExpression, SyntaxKind.RegularExpressionLiteral, SyntaxKind.VoidExpression,
 ]);
+// Library calls known to read an object without keeping or writing it.
+const READ_ONLY_OBJECT_CALLEES = new Set(["Object.keys", "Object.values", "Object.entries", "JSON.stringify", "Object.freeze"]);
 const OBJECT_MUTATORS = new Set(["Object.assign", "Object.defineProperty", "Object.defineProperties", "Object.setPrototypeOf", "Reflect.set", "Reflect.defineProperty"]);
 const unresolvedResult = (reason) => ({ ...EMPTY, unresolved: reason });
 
@@ -130,7 +143,7 @@ export function prismaModelNames(clientType) {
   return new Set((clientType?.getProperties() ?? []).map((p) => p.getName()).filter((n) => !n.startsWith("$")));
 }
 
-export function createFunctionResolver({ program, modelNames = new Set() }) {
+export function createFunctionResolver({ program }) {
   const usedExternalShapes = new Set();
   const valueMemo = new Map();
   const callMemo = new Map();
@@ -217,10 +230,21 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
       if (!decl) return false;
       if (decl.getKind() === SyntaxKind.TypeParameter) return false;
       const name = node.getTypeName().getText();
-      return name !== "Function" && name !== "CallableFunction";
+      if (name === "Function" || name === "CallableFunction") return false;
+      // `OmitThisParameter<T>`, `NonNullable<V>`: built from what the caller put in.
+      return node.getTypeArguments().every((arg) => !mentionsTypeParameter(arg));
     }
-    // Keywords and literals (`void`, `undefined`, `string`) are not functions of ours.
-    return node.getKind() !== SyntaxKind.AnyKeyword && node.getKind() !== SyntaxKind.UnknownKeyword;
+    if (node.getKind() === SyntaxKind.AnyKeyword || node.getKind() === SyntaxKind.UnknownKeyword) return false;
+    // Any other shape (`P extends keyof T ? T[P] : any`, `T[K]`, a mapped
+    // type) is library-made only when nothing of the caller's flows into it.
+    return !mentionsTypeParameter(node);
+  }
+
+  function mentionsTypeParameter(typeNode) {
+    const refs = [typeNode, ...typeNode.getDescendantsOfKind(SyntaxKind.TypeReference)].filter(
+      (n) => n.getKind() === SyntaxKind.TypeReference,
+    );
+    return refs.some((r) => r.getTypeName().getSymbol()?.getDeclarations()[0]?.getKind() === SyntaxKind.TypeParameter);
   }
 
   /** The declaration a library call resolves to, before instantiation, or null. */
@@ -272,27 +296,16 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
     }
   }
 
-  /**
-   * A member of an `any`-typed Prisma client: `db.$transaction`, a delegate
-   * method `db.user.findMany`, or a method of a delegate destructured by a model
-   * name (`const { user } = db`). The client API, not code of ours — the model
-   * access itself is what the gates count.
-   */
-  function isUntypedClientApi(e) {
-    if (e.getKind() !== SyntaxKind.PropertyAccessExpression) return false;
-    const receiver = unwrap(e.getExpression());
-    const t = receiver.getType();
-    if (!t.isAny() && !t.isUnknown()) return false;
-    if (e.getName().startsWith("$")) return true;
-    if (receiver.getKind() === SyntaxKind.PropertyAccessExpression) return modelNames.has(receiver.getName());
-    if (receiver.getKind() === SyntaxKind.ElementAccessExpression) return modelNames.has(literalKey(receiver.getArgumentExpression()) ?? "");
-    if (receiver.getKind() === SyntaxKind.Identifier) {
-      const decl = receiver.getSymbol()?.getDeclarations()[0];
-      if (decl?.getKind() !== SyntaxKind.BindingElement) return false;
-      const key = decl.getPropertyNameNode()?.getText().replace(/^["'`]|["'`]$/g, "") ?? decl.getName();
-      return modelNames.has(key);
+  /** A call's result used as a function: invoked, or handed to another call. */
+  function isInvokedOrHandedOn(call) {
+    let node = call;
+    while (node.getParent()?.getKind() === SyntaxKind.ParenthesizedExpression || node.getParent()?.getKind() === SyntaxKind.NonNullExpression) {
+      node = node.getParent();
     }
-    return false;
+    const parent = node.getParent();
+    const k = parent?.getKind();
+    if ((k === SyntaxKind.CallExpression || k === SyntaxKind.NewExpression) && parent.getExpression() === node) return true;
+    return (k === SyntaxKind.CallExpression || k === SyntaxKind.NewExpression) && parent.getArguments().includes(node);
   }
 
   /** Own functions handed to a call as arguments, literal or by reference. */
@@ -303,24 +316,10 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
       const k = e?.getKind();
       if (LITERAL_FN_KINDS.has(k)) out.push({ ...EMPTY, fns: [e] });
       else if (k === SyntaxKind.Identifier || k === SyntaxKind.PropertyAccessExpression) {
-        if (e.getType().getCallSignatures().length > 0) out.push(resolveValue(e));
+        if (mayBeCallable(e.getType())) out.push(resolveValue(e));
       }
     }
     return out;
-  }
-
-  /**
-   * `require("pkg")` / `import("pkg")` with a bare package specifier loads a
-   * library module. A relative or `@/` specifier loads ours, and is not this.
-   */
-  function isPackageModuleLoad(call) {
-    const callee = unwrap(call.getExpression());
-    const isLoader =
-      callee?.getKind() === SyntaxKind.ImportKeyword ||
-      (callee?.getKind() === SyntaxKind.Identifier && callee.getText() === "require");
-    if (!isLoader) return false;
-    const spec = literalKey(call.getArguments()[0]);
-    return spec !== null && !spec.startsWith(".") && !spec.startsWith("@/") && !spec.startsWith("/");
   }
 
   function resolveValueUncached(e) {
@@ -348,18 +347,27 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
       return unresolvedResult("binary expression as a function value");
     }
     if (kind === SyntaxKind.CallExpression) {
+      // `fn.bind(...)` is `fn` with its arguments fixed.
+      const calleeExpr = unwrap(e.getExpression());
+      if (calleeExpr?.getKind() === SyntaxKind.PropertyAccessExpression && calleeExpr.getName() === "bind") {
+        const target = resolveValue(calleeExpr.getExpression());
+        // Binding a library method (`WeakMap.prototype.get.bind(m)`) is library code.
+        return target.fns.length > 0 || target.unresolved || target.params.length > 0 ? target : { ...EMPTY, external: true };
+      }
       // The value of a call is what the callee returns: `const log = makeLogger()`.
       const callee = resolveCall(e);
       if (callee.unresolved || callee.params.length > 0) {
         return unresolvedResult("function returned by a call this gate cannot follow");
       }
       if (callee.external && callee.fns.length === 0) {
-        if (isPackageModuleLoad(e)) return { ...EMPTY, external: true };
         // A library hands back library code, or one of ours: given here
         // (`debounce(fn)`), or stored earlier and returned through a type
         // parameter (`registry.get(k)` declared `V | undefined`), which cannot
         // be named. Judged on the declared return type, not the instantiated one.
-        const returnsFunction = e.getType().getCallSignatures().length > 0;
+        // A library value invoked as a function (`Reflect.get(o, "f")()`) or
+        // callable after removing undefined (`registry.get(k)?.()`).
+        const t = e.getType();
+        const returnsFunction = mayBeCallable(t) || ((t.isAny() || t.isUnknown()) && isInvokedOrHandedOn(e));
         if (returnsFunction && !libraryReturnIsLibraryMade(e)) {
           return unresolvedResult("function returned by a library call");
         }
@@ -385,7 +393,6 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
     }
 
     let symbol = e.getSymbol();
-    if (!symbol && isUntypedClientApi(e)) return { ...EMPTY, external: true };
     if (!symbol) return unresolvedResult("callee has no symbol");
     if (symbol.isAlias()) symbol = symbol.getAliasedSymbol();
     const decls = symbol?.getDeclarations() ?? [];
@@ -478,31 +485,128 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
       const assignment = access.getParent();
       return assignment?.getKind() === SyntaxKind.BinaryExpression && assignment.getLeft() === access ? assignment : null;
     }));
-    const container = containerVariableOf(memberDecl.getParent());
-    if (container) {
-      for (const ref of container.getNameNode().findReferencesAsNodes()) {
-        if (ref === container.getNameNode() || isNonProduction(ref) || isExternal(ref)) continue;
-        const parent = ref.getParent();
-        if (parent?.getKind() === SyntaxKind.CallExpression && parent.getExpression() !== ref) {
-          const callee = parent.getExpression().getText();
-          if (OBJECT_MUTATORS.has(callee)) {
-            results.push(unresolvedResult(`object handed to ${callee} at ${toRelPosix(ref.getSourceFile().getFilePath())}:${ref.getStartLineNumber()}`));
-          }
-        }
-        if (parent?.getKind() === SyntaxKind.ElementAccessExpression && parent.getExpression() === ref && literalKey(parent.getArgumentExpression()) === null) {
-          const outer = parent.getParent();
-          if (outer?.getKind() === SyntaxKind.BinaryExpression && outer.getLeft() === parent) {
-            results.push(unresolvedResult(`object written through a computed key at ${toRelPosix(ref.getSourceFile().getFilePath())}:${ref.getStartLineNumber()}`));
-          }
-        }
-      }
-    }
+    const memberName = memberDecl.getName?.() ?? memberDecl.getNameNode().getText();
+    for (const use of objectUses(memberDecl.getParent())) results.push(...writesThroughUse(use, memberName));
     return merge(results);
   }
 
   function containerVariableOf(literal) {
     const holder = literal?.getParent();
     return holder?.getKind() === SyntaxKind.VariableDeclaration && unwrap(holder.getInitializer()) === literal ? holder : null;
+  }
+
+  /**
+   * Every production expression that evaluates to the object `literal`
+   * builds: through the variable holding it (or an outer object's member path,
+   * `cfg.inner`), its const aliases, and own functions it is handed to (their
+   * parameter's uses). Each use is checked for writes the member symbol does
+   * not show: Object.assign and friends, a computed or string-keyed element
+   * write, a library call that could keep it.
+   */
+  function objectUses(literal) {
+    const uses = [];
+    const seenParams = new Set();
+    const seenVars = new Set();
+    const viaParameter = (fnNode, index, path) => {
+      const p = fnNode?.getParameters?.()[index];
+      if (!p || seenParams.has(p)) return;
+      seenParams.add(p);
+      if (p.getNameNode().getKind() !== SyntaxKind.Identifier) {
+        uses.push({ problem: "object handed to a parameter that destructures it" });
+        return;
+      }
+      fromVariable(p, path);
+    };
+    const handedTo = (expr, path) => {
+      const call = expr.getParent();
+      if (call?.getKind() !== SyntaxKind.CallExpression && call?.getKind() !== SyntaxKind.NewExpression) return false;
+      if (call.getExpression?.() === expr) return false;
+      const index = call.getArguments().indexOf(expr);
+      if (index < 0) return false;
+      const callee = unwrap(call.getExpression());
+      const text = callee?.getText();
+      if (OBJECT_MUTATORS.has(text)) {
+        uses.push({ problem: `object handed to ${text} at ${toRelPosix(expr.getSourceFile().getFilePath())}:${expr.getStartLineNumber()}` });
+        return true;
+      }
+      if (READ_ONLY_OBJECT_CALLEES.has(text)) return true;
+      const r = resolveCall(call);
+      if (r.fns.length > 0 && !r.external && !r.unresolved) {
+        for (const fn of r.fns) viaParameter(fn, index, path);
+      } else {
+        uses.push({ problem: `object handed to a callee that may keep or write it at ${toRelPosix(expr.getSourceFile().getFilePath())}:${expr.getStartLineNumber()}` });
+      }
+      return true;
+    };
+    function fromVariable(decl, path) {
+      if (seenVars.has(decl)) return;
+      seenVars.add(decl);
+      // `const { run } = ops` reads members; it cannot write the object.
+      if (decl.getNameNode().getKind() !== SyntaxKind.Identifier) return;
+      for (const ref of decl.getNameNode().findReferencesAsNodes()) {
+        if (ref === decl.getNameNode() || isNonProduction(ref) || isExternal(ref)) continue;
+        // Walk the member path (`cfg.inner`) up from the reference.
+        let expr = ref;
+        let matched = true;
+        for (const key of path) {
+          const parent = expr.getParent();
+          const k = parent?.getKind();
+          const name =
+            k === SyntaxKind.PropertyAccessExpression && parent.getExpression() === expr
+              ? parent.getName()
+              : k === SyntaxKind.ElementAccessExpression && parent.getExpression() === expr
+                ? literalKey(parent.getArgumentExpression())
+                : null;
+          if (name !== key) {
+            matched = false;
+            break;
+          }
+          expr = parent;
+        }
+        if (!matched) continue;
+        uses.push({ expr });
+        if (handedTo(expr, [])) continue;
+        const holder = expr.getParent();
+        if (holder?.getKind() === SyntaxKind.VariableDeclaration && holder.getInitializer() === expr) {
+          if (isConstVariable(holder)) fromVariable(holder, []);
+          else uses.push({ problem: "object aliased by a let/var" });
+        }
+      }
+    }
+    // Find the variable (or member path under one) holding the literal.
+    const path = [];
+    let node = literal;
+    while (node.getParent()?.getKind() === SyntaxKind.PropertyAssignment && node.getParent().getParent()?.getKind() === SyntaxKind.ObjectLiteralExpression) {
+      path.unshift(node.getParent().getName());
+      node = node.getParent().getParent();
+    }
+    const holder = containerVariableOf(node);
+    if (holder) {
+      fromVariable(holder, path);
+    } else if (path.length === 0) {
+      // A literal handed straight to a call: the callee's parameter uses.
+      handedTo(node, []);
+    }
+    return uses;
+  }
+
+  /** The writes a use of an object makes to member `memberName`, or the reason they cannot be seen. */
+  function writesThroughUse(use, memberName) {
+    if (use.problem) return [unresolvedResult(use.problem)];
+    const { expr } = use;
+    const access = expr.getParent();
+    if (access?.getKind() !== SyntaxKind.ElementAccessExpression || access.getExpression() !== expr) return [];
+    const assignment = access.getParent();
+    if (assignment?.getKind() !== SyntaxKind.BinaryExpression || assignment.getLeft() !== access) return [];
+    const key = literalKey(access.getArgumentExpression());
+    if (key === null) {
+      return [unresolvedResult(`object written through a computed key at ${toRelPosix(expr.getSourceFile().getFilePath())}:${expr.getStartLineNumber()}`)];
+    }
+    if (key !== memberName) return [];
+    if (assignment.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) {
+      return [unresolvedResult(`write other than a plain assignment at ${toRelPosix(expr.getSourceFile().getFilePath())}:${expr.getStartLineNumber()}`)];
+    }
+    return [resolveValue(assignment.getRight())];
   }
 
   /** A parameter's value: the argument at its position in every production call. */
@@ -552,18 +656,53 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
       holder.getArguments().includes(owner);
     if (isInlineArg) {
       const invoker = resolveCall(holder);
-      if (invoker.fns.length > 0 && !invoker.external && !invoker.unresolved) {
-        // Our own function invokes the literal; what it passes is in its body.
-        return { ...EMPTY, params: [{ param, ownInvoker: true }] };
-      }
       const argIndex = holder.getArguments().indexOf(owner);
       const paramIndex = owner.getParameters().indexOf(param);
+      if (invoker.fns.length > 0 && !invoker.external && !invoker.unresolved) {
+        // Our own function invokes the literal: the value is whatever it
+        // passes at that position wherever it calls the parameter.
+        return merge(invoker.fns.map((fn) => argumentsPassedTo(fn, argIndex, paramIndex)));
+      }
       return invoker.external && !invoker.unresolved && libraryCallbackParamIsLibraryMade(holder, argIndex, paramIndex)
         ? { ...EMPTY, external: true }
         : unresolvedResult("function supplied to a callback's parameter");
     }
     if (directOwnerOf(site) === owner) return { ...EMPTY, params: [{ param, ownInvoker: false }] };
     return resolveParameterFromCallers(param);
+  }
+
+  /**
+   * What `fn` passes as argument `paramIndex` wherever it calls its own
+   * parameter `argIndex`. A use of that parameter other than a direct call
+   * (handed on, stored) hides the arguments, and is unresolved.
+   */
+  function argumentsPassedTo(fn, argIndex, paramIndex) {
+    const p = fn.getParameters?.()[argIndex];
+    if (!p) return unresolvedResult("invoker has no parameter at the callback's position");
+    if (p.getNameNode().getKind() !== SyntaxKind.Identifier) return unresolvedResult("invoker destructures its callback parameter");
+    const results = [];
+    for (const ref of p.getNameNode().findReferencesAsNodes()) {
+      if (ref === p.getNameNode() || isNonProduction(ref) || isExternal(ref)) continue;
+      const call = ref.getParent();
+      if (call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === ref) {
+        const arg = call.getArguments()[paramIndex];
+        if (call.getArguments().slice(0, paramIndex + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement)) {
+          results.push(unresolvedResult("invoker spreads the callback's arguments"));
+        } else if (arg) {
+          results.push(resolveValue(arg));
+        }
+        continue;
+      }
+      if (call?.getKind() === SyntaxKind.PropertyAccessExpression && call.getExpression() === ref) {
+        const member = call.getName();
+        if (member === "call" || member === "apply" || member === "bind") {
+          results.push(unresolvedResult(`invoker calls its callback through .${member}`));
+        }
+        continue;
+      }
+      results.push(unresolvedResult("invoker hands its callback on, so what it is passed is unknown"));
+    }
+    return merge(results);
   }
 
   /** The function a node runs in, climbing past function literals passed inline to calls. */
@@ -721,9 +860,21 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
       case SyntaxKind.ClassExpression:
         // The construction unit: field initializers, the constructor, the base.
         return { ...EMPTY, fns: [decl] };
+      case SyntaxKind.PropertyDeclaration: {
+        // A class field holding a function: its initializer and every write.
+        const initial = decl.getInitializer() ? resolveValue(decl.getInitializer()) : { ...EMPTY };
+        return merge([
+          initial,
+          ...writesTo(decl.getNameNode(), (node) => {
+            const access = node.getParent();
+            if (access?.getKind() !== SyntaxKind.PropertyAccessExpression || access.getNameNode() !== node) return null;
+            const assignment = access.getParent();
+            return assignment?.getKind() === SyntaxKind.BinaryExpression && assignment.getLeft() === access ? assignment : null;
+          }),
+        ]);
+      }
       case SyntaxKind.MethodSignature:
       case SyntaxKind.PropertySignature:
-      case SyntaxKind.PropertyDeclaration:
       case SyntaxKind.MethodDeclaration:
         return resolveImplementations(site);
       case SyntaxKind.BindingElement: {
@@ -814,7 +965,7 @@ export function createFunctionResolver({ program, modelNames = new Set() }) {
       if (fn) {
         results.push({ ...EMPTY, fns: [fn] });
       } else if (parent?.getKind() === SyntaxKind.PropertyAssignment) {
-        results.push(resolveValue(parent.getInitializer()));
+        results.push(objectMemberValue(parent, resolveValue(parent.getInitializer())));
       } else if (parent?.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
         const valueDecl = parent.getValueSymbol?.()?.getDeclarations()[0];
         results.push(valueDecl ? resolveDeclaration(valueDecl, node) : unresolvedResult("shorthand with no value"));
@@ -912,6 +1063,16 @@ export function isInlineArgument(fn) {
   );
 }
 
+/**
+ * Whether a value of type `t` may be a function: some member of the union,
+ * after `undefined`/`null` are removed, has a call signature. `T | undefined`
+ * (an optional callback, `Map.get`) is callable; `any` is decided by caller.
+ */
+export function mayBeCallable(t) {
+  const types = t.isUnion() ? t.getUnionTypes() : [t];
+  return types.some((u) => u.getNonNullableType().getCallSignatures().length > 0);
+}
+
 const isTypePosition = (node) =>
   node.getKind() >= SyntaxKind.FirstTypeNode && node.getKind() <= SyntaxKind.LastTypeNode;
 
@@ -945,6 +1106,15 @@ export function createReachability(resolver) {
   const ownedMemo = new Map();
   const edgesMemo = new Map();
 
+  /**
+   * A unit's own nodes: its WHOLE lexical subtree, nested functions and
+   * classes included. Whatever is written inside a unit may run while it runs
+   * — a callback a library keeps (`new ReadableStream({ start })`), an object
+   * member, a class's static block — so lexical containment is the floor and
+   * reach only adds what is written elsewhere. A class reached as a unit (by
+   * `new`) owns its field initializers and static blocks; its constructor and
+   * base are edges, its methods are reached when invoked.
+   */
   function ownedNodes(unit) {
     let out = ownedMemo.get(unit);
     if (out) return out;
@@ -952,19 +1122,23 @@ export function createReachability(resolver) {
     const visit = (node) => {
       for (const child of node.getChildren()) {
         if (isTypePosition(child)) continue;
-        if (CLASS_KINDS.has(child.getKind())) continue;
-        if (FN_KINDS.has(child.getKind()) && !isInlineArgument(child)) continue;
         out.push(child);
         visit(child);
       }
     };
     if (CLASS_KINDS.has(unit.getKind())) {
-      for (const prop of unit.getProperties?.() ?? []) {
-        if (prop.isStatic?.()) continue;
-        const init = prop.getInitializer?.();
-        if (!init) continue;
-        out.push(init);
-        if (!(FN_KINDS.has(init.getKind()) && !isInlineArgument(init))) visit(init);
+      for (const member of unit.getMembers?.() ?? []) {
+        const k = member.getKind();
+        if (k === SyntaxKind.PropertyDeclaration) {
+          const init = member.getInitializer?.();
+          if (init) {
+            out.push(init);
+            visit(init);
+          }
+        } else if (k === SyntaxKind.ClassStaticBlockDeclaration) {
+          out.push(member);
+          visit(member);
+        }
       }
     } else {
       visit(unit);
@@ -1045,7 +1219,7 @@ export function createReachability(resolver) {
     if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
     const decls = symbol?.getDeclarations() ?? [];
     if (decls.length === 0 || decls.every(isExternal)) return null;
-    if (value.getType().getCallSignatures().length === 0) return null;
+    if (!mayBeCallable(value.getType())) return null;
     return value;
   }
 
@@ -1066,6 +1240,16 @@ export function createReachability(resolver) {
       if (node.getKind() === SyntaxKind.Identifier) {
         const value = referenceValueOf(node, calleeNodes);
         if (value && !(value !== node && invocationOf(value))) edges.push({ node: value, r: resolveValue(value), kind: "value" });
+      } else if (node.getKind() === SyntaxKind.ElementAccessExpression && !calleeNodes.has(node)) {
+        // `TBL["a"]`, `TBL[k]` handed on as a value.
+        const parent = node.getParent();
+        const isWriteTarget = parent?.getKind() === SyntaxKind.BinaryExpression && parent.getLeft() === node;
+        const isReceiver =
+          (parent?.getKind() === SyntaxKind.PropertyAccessExpression || parent?.getKind() === SyntaxKind.ElementAccessExpression) &&
+          parent.getExpression() === node;
+        if (!isWriteTarget && !isReceiver && mayBeCallable(node.getType())) {
+          edges.push({ node, r: resolveValue(node), kind: "value" });
+        }
       }
     }
     if (CLASS_KINDS.has(unit.getKind())) {

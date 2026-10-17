@@ -21,6 +21,11 @@ const REAL_FILES = ["src/lib/tenant-rls.ts", "src/lib/tenant-context.ts"];
 
 // Stubs for what the two real files import. Typed, so nothing they call
 // widens to `any` and reads as an unresolvable callee.
+// One getter per schema model, as the generated client declares them.
+const MODEL_GETTERS = [...readFileSync(join(REPO_ROOT, "prisma/schema.prisma"), "utf8").matchAll(/^model (\w+) \{/gm)]
+  .map((m) => `    get ${m[1][0].toLowerCase()}${m[1].slice(1)}(): Delegate;`)
+  .join("\n");
+
 const STUBS = {
   // A row's every field reads as a nested row, a string and a row array at
   // once, so \`user.email.toLowerCase()\` and \`memberships.filter(...)\` in
@@ -39,6 +44,7 @@ const STUBS = {
     [model: string]: Delegate;
   }
   export class PrismaClient {
+${MODEL_GETTERS}
     [model: string]: Delegate;
     $transaction<T>(fn: (tx: TransactionClientLike) => Promise<T>, options?: unknown): Promise<T>;
     $executeRaw(...args: unknown[]): Promise<number>;
@@ -81,7 +87,7 @@ const FIXTURE_TSCONFIG = JSON.stringify({
     target: "ES2022",
     module: "esnext",
     moduleResolution: "bundler",
-    strict: false,
+    strict: true,
     noImplicitAny: false,
     skipLibCheck: true,
     paths: {
@@ -674,12 +680,14 @@ export const f = () => withTenantRls(prisma, T, async () => { await runHook(); }
 
   it("fails a function assigned from a rest parameter", () => {
     const { code, stderr } = run([OPENER_MODULE, ["src/app/rp.ts", `${USE_OPENER}
-let hook: (() => Promise<number>) | null = null;
-export function setHooks(...hs: Array<() => Promise<number>>) { hook = hs[0]; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let hook: any = null;
+// A rest parameter's position depends on how many arguments precede it.
+export function setHooks(...hs: unknown[]) { hook = hs; }
 export function arm() { setHooks(opener); }
 export const f = () => withTenantRls(prisma, T, async () => { await hook?.(); });`]]);
     expect(code).toBe(1);
-    expect(stderr).toContain(UNFOLLOWED);
+    expect(stderr).toContain("rest parameter");
   });
 });
 
@@ -741,13 +749,77 @@ describe("check-rls-nesting: round 2 — the production boundary", () => {
       ["src/app/tool.ts", `import { ALLOW } from "../../scripts/env-allowlist";\nexport const n = ALLOW.length;\n`],
     ]);
     expect(code).toBe(1);
-    expect(stderr).toContain("production code imports scripts/env-allowlist.ts, which is not production");
+    expect(stderr).toContain("production code imports scripts/env-allowlist.ts, which is declared non-production");
   });
 
   it("fails listed tooling that imports the RLS helpers", () => {
     const { code, stderr } = run([["scripts/env-allowlist.ts", `import { withTenantRls } from "../src/lib/tenant-rls";\nexport const w = withTenantRls;\n`]]);
     expect(code).toBe(1);
     expect(stderr).toContain("scripts/env-allowlist.ts is listed as non-production tooling but imports src/lib/tenant-rls.ts");
+  });
+});
+
+describe("check-rls-nesting: round 3", () => {
+  it.each([
+    ["an object member handed to a library", "new ReadableStream({ start: () => { void opener(); } });"],
+    ["an array element", "await Promise.all([async () => opener()].map((f) => f()));"],
+    ["a class static block", "class X { static { void opener(); } } void X;"],
+    ["a class static field", "class Y { static p = opener(); } void Y;"],
+  ])("fails an opener inside %s", (_label, body) => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/lx.ts", `${USE_OPENER}
+export const f = () => withTenantRls(prisma, T, async () => { ${body} });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+  });
+
+  it("fails an opener behind a nullable library value read under strict", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/ns.ts", `${USE_OPENER}
+const registry = new Map<string, VoidFunction>([["a", () => void opener()]]);
+export const f = () => withTenantRls(prisma, T, async () => { const h = registry.get("a"); if (h) h(); });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("function returned by a library call");
+  });
+
+  it("fails the conditional opener when a spread may override tx", () => {
+    const { code, stderr } = run([
+      ["src/lib/auth/policy/passkey-enforcement.ts", `${HEAD}
+export async function derivePasskeyState(p: { userId: string; tx?: unknown }) {
+  return p.tx ? true : withBypassRls(prisma, async (tx) => tx.user.count(), BYPASS_PURPOSE.AUTH_FLOW);
+}`],
+      ["src/lib/mcp/oauth-server.ts", `${HEAD}
+import { derivePasskeyState } from "@/lib/auth/policy/passkey-enforcement";
+export const g = () => withBypassRls(prisma, async (tx) => derivePasskeyState({ userId: "u", tx }), BYPASS_PURPOSE.AUTH_FLOW);
+export const f = (c: boolean) => withBypassRls(prisma, async (tx) => derivePasskeyState({ userId: "u", tx, ...(c ? { tx: undefined } : {}) }), BYPASS_PURPOSE.AUTH_FLOW);`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/src\/lib\/mcp\/oauth-server\.ts:8 .* calls derivePasskeyState/);
+  });
+
+  it("passes a library method bound to a receiver (raw-sql's captured intrinsics)", () => {
+    const { code, stdout } = run([["src/app/lb.ts", `${HEAD}
+const registry = new WeakMap<object, string>();
+const registryGet = WeakMap.prototype.get.bind(registry);
+export const f = () => withTenantRls(prisma, T, async () => registryGet({}));`]]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+
+  it("fails production code that re-exports a listed tooling script", () => {
+    const { code, stderr } = run([
+      ["scripts/env-allowlist.ts", "export const ALLOW = [] as string[];\n"],
+      ["src/app/tool.ts", `export * from "../../scripts/env-allowlist";\n`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("production code imports scripts/env-allowlist.ts");
+  });
+
+  it("fails production code that loads a listed tooling script dynamically", () => {
+    const { code, stderr } = run([
+      ["scripts/env-allowlist.ts", "export const ALLOW = [] as string[];\n"],
+      ["src/app/tool.ts", `export const load = () => import("../../scripts/env-allowlist");\n`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("production code imports scripts/env-allowlist.ts");
   });
 });
 

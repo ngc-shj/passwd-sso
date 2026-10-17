@@ -307,3 +307,105 @@ Real-tree runs:
 - check-rls-nesting: OK — 1,046 files, 6 context functions, 594 callbacks, about 41 s.
 - check-bypass-rls: OK — 214 bypass callbacks followed through 958 reached functions, about 23 s. The only newly visible reach was emergency-access/[id]/vault, granted via its modules.
 
+
+---
+
+# Round 3
+Date: 2026-10-17
+Diff reviewed: `dd1e8ce1b..47d53b9e6` (review(2), the reach-and-types mechanism).
+
+## Changes from Previous Round
+- Round-2 status:
+  - Resolved: N1, U1, U3, SN3, SN7, B1, B2, SN4, U2, P1, SA1, M1, T4–T10.
+  - Reopened: SN1 — it holds only under the nesting fixture's `strict: false`.
+  - Partial: SN2, SN5, C1/SN6.
+- Review-log correction (N-T12): the round-2 table claimed P9/P9b/P22 pinned the SN2 Object.assign and computed-key refusals, and that a test pinned T7's rest refusal. Mutations Q15, Q16 and Q42 stayed green, so both claims were false. From this round on, every mutation ID is recorded with the clause it changes and the test it reddens.
+
+## Merged findings (round 3)
+- **R3-S1 = F1 + F7 [Critical, regression]** Lexical containment is lost. Function literals that are not direct call arguments (object members, array elements, a library-held object such as `ReadableStream({ start })`) and class static initializers or blocks inside a reached unit are neither charged nor checked. `dd1e8ce1b` scanned the callback's whole subtree.
+- **R3-S2 = F2 [Major]** Callability is decided on the instantiated type. Under the real `strict: true`, `T | undefined` and `any` have no call signatures, so `Map.get(...)?.()`, `Reflect.get(...)()` and `[1].map(x!)` read as library code. The nesting fixture's `strict: false` hid this (R48).
+- **R3-S3 = F6 [Major]** `isUntypedClientApi` and the any-receiver model-name arms treat own `any` objects as Prisma API.
+- **R3-S5 [Major]** The conditional-opener exemption ignores a later spread that overrides `tx`.
+- **F3 [Major]** An own invoker's argument is assumed reached.
+- **F4 [Major]** `.bind` result: a module-level `opener.bind(null)` is judged library-made.
+- **F5 [Major]** A client handed to library code is no longer reported.
+- **F8 [Major]** Function values read through element access are not edges.
+- **F9 [Major]** Member writes are unseen: `ops["run"] =`, `Object.assign` on an alias, on a parameter, or on a nested object.
+- **N-T1..N-T5 [Major]** Clauses no test pins: valueReached re-enqueue, bypass `follow`, the delegate member-type path, the Object.assign and computed-key refusals, the boundary re-export.
+- **Minor:**
+  - F10: a class property holding a function reports "cyclic definition".
+  - F11 = R3-S4: the boundary check misses `import()` and `require()`.
+  - F12: a library holding the ambient client is not listed in the header.
+  - R3-S6: header claims are stronger than the code.
+  - N-T6..N-T11: rest-refusal assertion, allow-side branches, the dead forwarded-param branch, spread refusals, the index-derivation failure paths, stub/real divergence.
+
+## Resolution Status (round 3)
+
+| Finding | Resolution | Mutation |
+|---|---|---|
+| R3-S1 = F1 + F7 | Lexical-containment floor: a reached unit owns its whole subtree (type positions excepted). A class unit owns its field initializers and static blocks | R3-M1, R3-M1b |
+| R3-S2 = F2 | `mayBeCallable` reads the call signatures of each non-nullable union member. The nesting fixture now runs `strict: true` | R3-M2, R3-M2b |
+| R3-S3 = F6 | `isUntypedClientApi` and the any-receiver model-name arms were removed. A client is recognised by type only: a member declared by the generated `PrismaClient`, or a delegate shape | R3-M24 |
+| R3-S5 | The conditional-opener exemption requires an object literal with no spread and exactly one `tx` | R3-M18 |
+| F3 | An inline literal passed to an own invoker resolves to what that invoker passes at that position | R3-M8 |
+| F4 | `.bind` resolves to its receiver. A library receiver is external | R3-M6, R3-M7 |
+| F5 | A client handed to a library call inside reached code fails the run (`clientHandedToLibrary`) | R3-M21 |
+| F8 | Element access in value position with a callable type is an edge | R3-M9 |
+| F9 / N-T4 | Writes are classified by the language service. A string-key write is merged. `Object.assign` and the other object mutators, and computed keys, are unresolved. An alias or own-callee parameter holding the object is followed | R3-M10–M14 |
+| F10 | A class property resolves to its initializer plus its writes | R3-M15 |
+| F11 = R3-S4 | The boundary check covers literal `import()` and `require()`. Non-literal loads are listed in the header | R3-M19 |
+| F12 / R3-S6 | The bypass header lists the module-level `makeRepo(prisma)` limit and the `any`-erased client. The stale "an `any` receiver counts" clause was removed | — |
+| N-T1 / N-T2 / N-T3 / N-T5 | valueReached re-enqueue, bypass wrapper follow, the delegate member-type path, the boundary re-export: each now has a test | R3-M16, R3-M23, R3-M24, R3-M20 |
+| N-T6 | The rest-parameter test asserts the refusal's own reason | R3-M17 |
+| N-T7 | Moot: the `isUntypedClientApi` branch was removed with R3-S3 | — |
+| N-T8 | Check 3's forwarded-parameter refusal is reachable only for a file on both INDIRECT_CALLBACK_ALLOWLIST and ALLOWED_USAGE. C2 refuses the same shape everywhere else. A test pins that no file is on both lists. The refusal stays as defence; R3-M22 is green by construction | R3-M22 (see note) |
+| N-T9 | Spread at the purpose position: refused at a direct call (the purpose is not read off a shifted position) and at a forwarder call | R3-M25, R3-M26 |
+| N-T10 | `CALLBACK_INDEX` / `PURPOSE_INDEX` derivation failure stops the run with PROGRAM_BUILD_FAILED | R3-M27, R3-M28 |
+| N-T11 | The bypass stub's PrismaClient is generated from `prisma/schema.prisma` with no index signature. `TransactionClient` omits `$connect`/`$on`. The nesting stub carries model getters | — |
+| N-T12 | This table: every mutation is listed below with its clause and the test filter it reddens | — |
+| ADJ-1 | `.call`/`.apply` in `resolveCall`: allow test (an own factory's result through `.call`). `functionArgsOf`: deny test (a library result typed `Function` built from an own function). The `.bind/.call/.apply` receiver reference was already pinned by the nesting `.bind` test. `isPackageModuleLoad` was removed as dead (below) | ADJ-A1, ADJ-A2, ADJ-A4 |
+
+Removed as dead after ADJ-A3 stayed green: `isPackageModuleLoad`. In every case it ran, the generic library branch returned the same external result: a dynamic `import()` yields a Promise, which is not callable, and `require`'s declared `any` return is judged library-made.
+
+Removed as dead after R3-M4 stayed green: the `IndexedAccessType` clause of `isLibraryMadeTypeNode`. A type parameter reached through an indexed access is already caught by the type-parameter reference check.
+
+### Mutation record (round 3)
+
+Each mutation changes one clause in a copy of the gates and runs `npx vitest run <test file> -t "<filter>"`. "Red" means that run failed.
+
+| ID | File | Clause changed | Test file | `-t` filter | Result |
+|---|---|---|---|---|---|
+| R3-M1 | function-resolver | lexical floor (non-argument literals and classes skipped) | bypass | `everything written inside` | red |
+| R3-M1b | function-resolver | same | nesting | `fails an opener inside` | red |
+| R3-M2 | function-resolver | `mayBeCallable` without `getNonNullableType` | bypass | `Map.get` | red |
+| R3-M2b | function-resolver | same | nesting | `nullable library value` | red |
+| R3-M3 | function-resolver | any/unknown invoked value not treated as a function | bypass | `returns as any` | red (green before the test was added) |
+| R3-M4 | function-resolver | `IndexedAccessType` clause | bypass | `Reflect.get` | green → clause removed |
+| R3-M5 | function-resolver | other declared shapes judged library-made | bypass | `Reflect.get` | red |
+| R3-M6 | function-resolver | `.bind` own target dropped | bypass | `module-level bound` | red |
+| R3-M7 | function-resolver | `.bind` library receiver unresolved | nesting | `library method bound` | red |
+| R3-M8 | function-resolver | own invoker's arguments dropped | bypass | `own invoker passes` | red (green before the test was added) |
+| R3-M9 | function-resolver | element-access value edges | bypass | `read off a table` | red |
+| R3-M10 | function-resolver | `Object.assign` refusal | bypass | `Object.assign` | red |
+| R3-M11 | function-resolver | computed-key write refusal | bypass | `a computed key` | red |
+| R3-M12 | function-resolver | string-key write ignored | bypass | `string key` | red |
+| R3-M13 | function-resolver | object alias not followed | bypass | `on an alias` | red |
+| R3-M14 | function-resolver | own-callee parameter not followed | bypass | `parameter it is handed to` | red |
+| R3-M15 | function-resolver | class property initializer dropped | bypass | `class field` | red (green before the test was added) |
+| R3-M16 | function-resolver | valueReached re-enqueue | bypass | `re-queues` | red |
+| R3-M17 | function-resolver | rest-parameter refusal | nesting | `rest parameter` | red |
+| R3-M18 | check-rls-nesting | conditional-exemption spread check | nesting | `spread may override` | red |
+| R3-M19 | check-rls-nesting | dynamic `import()`/`require()` boundary | nesting | `dynamically` | red |
+| R3-M20 | check-rls-nesting | re-export boundary | nesting | `re-exports` | red |
+| R3-M21 | check-bypass-rls | client handed to library | bypass | `handed to library code` | red |
+| R3-M22 | check-bypass-rls | forwarded-param refusal in `bypassRootsOf` | bypass | `own callback parameter` | green (see N-T8; pinned by `disjoint`) |
+| R3-M23 | check-bypass-rls | bypass wrapper follow of an ancestor parameter | bypass | `run inside its bypass callback` | red |
+| R3-M24 | check-bypass-rls | delegate member-type path | bypass | `own type that holds one` | red |
+| R3-M25 | check-bypass-rls | direct-call purpose spread check | bypass | `spread has shifted` | red |
+| R3-M26 | check-bypass-rls | forwarder purpose spread check | bypass | `forwarder takes its purpose` | red |
+| R3-M27 | check-bypass-rls | `CALLBACK_INDEX` failure | bypass | `declares no callback` | red |
+| R3-M28 | check-bypass-rls | `PURPOSE_INDEX` failure | bypass | `declares no purpose` | red |
+| ADJ-A1 | function-resolver | `.call`/`.apply` branch of `resolveCall` | bypass | `own factory invoked through` | red |
+| ADJ-A2 | function-resolver | `functionArgsOf` in the library-result merge | bypass | `result is typed Function` | red |
+| ADJ-A3 | function-resolver | `isPackageModuleLoad` | both, all tests | — | green → removed |
+| ADJ-A4 | function-resolver | `.bind/.call/.apply` receiver as a value reference | nesting | `bound with .bind` | red |
