@@ -259,7 +259,7 @@ Status: `PASS`
 Evidence:
 - Migration applies `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to all 52 tables.
 - `scripts/checks/check-bypass-rls.mjs` CI guard enforces allowlist (77 files) for `withBypassRls` usage.
-- `assertNoActiveRlsContext` in `src/lib/tenant-rls.ts` refuses to open an RLS context while another is active, so team auth (`requireTeamMember` opens its own `withTeamTenantRls`) cannot run nested under an RLS wrapper; pinned by `src/lib/auth/access/team-auth.rls-nesting.test.ts`. A refusal is logged (`rls.nesting_refused`) so a caller that swallows it stays visible, and `scripts/checks/check-rls-nesting.mjs` CI guard rejects any nesting statically (type-resolved, fail-closed on unfollowable calls).
+- `assertNoActiveRlsContext` in `src/lib/tenant-rls.ts` refuses to open an RLS context while another is active, so team auth (`requireTeamMember` opens its own `withTeamTenantRls`) cannot run nested under an RLS wrapper; pinned by `src/lib/auth/access/team-auth.rls-nesting.test.ts`. That runtime guard is the enforcement boundary. A refusal is logged (`rls.nesting_refused`) so a caller that swallows it stays visible, and the `scripts/checks/check-rls-nesting.mjs` CI guard reports nesting at development time: it is type-resolved and fails closed on calls it cannot follow, within the coverage limits its header lists (iterator protocol, implicit conversions, Proxy traps, decorators, and library-registered callbacks are not followed).
 
 2. Tenant context is set via session-local variable
 Status: `PASS`
