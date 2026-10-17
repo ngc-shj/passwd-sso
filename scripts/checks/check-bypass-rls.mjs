@@ -6,9 +6,22 @@
  * Any new usage of withBypassRls must be explicitly added to ALLOWED_USAGE
  * after security review. This prevents accidental RLS bypass in new code.
  *
- * Call sites, callbacks, client identifiers and `<client>.<model>` references are
- * all read from the parse tree (ts-morph, no Program). Raw text decides only
+ * Call sites and callbacks are read from the parse tree; raw text decides only
  * which files are worth parsing — see HELPER_MENTION_RE.
+ *
+ * The model allowlist (Check 3) is decided by REACH and TYPES through the
+ * type-checked Program and lib/function-resolver.mjs (shared with
+ * check-rls-nesting): everything that can run inside a bypass callback is
+ * reached — calls, `new` (field initializers, constructor, base classes),
+ * tagged templates, own accessors, functions handed on as values, a wrapper's
+ * callers' callbacks — and in every reached function each access whose
+ * receiver is a Prisma client BY TYPE (its member is declared by the
+ * generated PrismaClient; an `any` receiver counts when the name is a model)
+ * is a model reached under this bypass. How the client got there — a
+ * parameter, an object property, an alias, the ambient `prisma` Proxy, a
+ * destructuring — no longer matters, because no name is tracked. Anything
+ * reached that the resolver cannot name fails the run (unfollowedHandOffs);
+ * a computed key on a client fails it too (unresolvedModels).
  *
  * Five rounds of review found defects here, every one the same defect: a
  * predicate that judged code by its spelling. A fixed 10-line radius stopped
@@ -83,33 +96,11 @@
  *     and are examined by nothing.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
- *   - A client returned by a call is not followed: `const db = wrap(tx)`.
- *   - The client's propagation into a callee is followed only where the tree
- *     proves the mapping. A callee in ANOTHER module is resolved through the
- *     shared resolver (lib/function-resolver.mjs, the rules check-rls-nesting
- *     uses) and followed (mergeHandOffs): an import, every production
- *     implementation of an injected interface member, every member of a const
- *     table nothing mutates, a class method and its overrides. The client may
- *     be handed on as an argument or as a property of an object argument
- *     (`f({ db: tx })`); a client in an array, a spread, a nested object or a
- *     constructor argument cannot be bound and fails the run. So does a
- *     hand-off the resolver cannot map to one parameter of a function body
- *     (unfollowedHandOffs). An own callee handed NO client is followed too,
- *     with the ambient `prisma` as its client: the Proxy routes it to the
- *     active bypass. The same report
- *     covers a callee this file DOES resolve but cannot bind: the client passed
- *     as `.call`'s `this` (the flat, name-keyed client set cannot bind `this`
- *     per function), or a spread before the client (`query(...rest, tx)`,
- *     whose real position depends on `rest.length`). A receiver this file
- *     cannot prove (`const helpers = actual`, a reassigned `let`) yields null
- *     locally and goes to the Program like an import.
- *
- *     Everything else decidable from the tree IS followed — see
- *     clientBindingsIn: the helper's own first argument, aliases and their
- *     chains, plain assignments, destructuring, parameter defaults, a choice
- *     between clients, same-file callees taking the client at any argument
- *     position, and nested `$transaction` callbacks at any depth including
- *     mutually recursive ones.
+ *   - Check 3's coverage limits are the shared reachability's (see
+ *     check-rls-nesting's header): the iterator protocol, implicit
+ *     conversions, Proxy traps, decorators, a getter reached through
+ *     destructuring, and an own function a library invokes later. A client
+ *     whose type is erased (`any`) is recognised only by a model-named access.
  *
  * Treat this list as the current best enumeration, not a closed one: eleven
  * successive external reviews each found a member missing from it, which is the
@@ -126,11 +117,10 @@ import {
   FN_KINDS,
   bindingIndex,
   resolveLocalFunction,
-  resolveLocalObjectLiteral,
   unwrapExpression,
 } from "./lib/scope-bindings.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { createFunctionResolver, isProductionPath, merge as mergeResolutions } from "./lib/function-resolver.mjs";
+import { createFunctionResolver, createReachability, isProductionPath, literalKey, merge as mergeResolutions, prismaModelNames, unwrap } from "./lib/function-resolver.mjs";
 import { join, extname, dirname, relative, resolve, sep } from "node:path";
 
 // The models `countStrandedRows` counts — the keys of STRANDED_COUNTERS in
@@ -329,10 +319,7 @@ const ALLOWED_USAGE = new Map([
   // Operator-token validator: cross-tenant lookup is required because the
   // bearer-token caller has no tenant context until the token row resolves it
   ["src/lib/auth/tokens/operator-token.ts", ["operatorToken"]],
-  // webAuthnCredential + tenant: derivePasskeyState({ …, tx }) reads the
-  // credential count and the tenant's passkey policy under the code/refresh
-  // exchange's bypass (src/lib/auth/policy/passkey-enforcement.ts).
-  ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken", "tenantMember", "webAuthnCredential", "tenant"]],
+  ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken", "tenantMember"]],
   ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
   ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],
@@ -446,13 +433,23 @@ const ALLOWED_PURPOSES = new Map([
   ["scripts/migrate-webhook-secrets-v1-to-v2.ts", ["SYSTEM_MAINTENANCE"]],
 ]);
 
-// Models a file may reach only THROUGH the named module, not in its own code.
-// A realignment counts the user's stranded rows under its caller's bypass
-// (read-only counts in stranded-rows.ts); that grant must not let the caller's
-// own code write those tables.
+// Models a file may reach only THROUGH the named module, not in its own code:
+// the grant covers accesses whose site is in that module, of any operation
+// there, and none in the file itself or anywhere else. A realignment counts the
+// user's stranded rows under its caller's bypass (stranded-rows.ts holds only
+// counts today); that grant must not let the caller's own code write them.
 const ALLOWED_VIA = new Map([
   ["src/lib/tenant/tenant-realignment.ts", [{ via: "src/lib/tenant/stranded-rows.ts", models: STRANDED_ROW_MODELS }]],
   ["scripts/tenant-domain.ts", [{ via: "src/lib/tenant/stranded-rows.ts", models: STRANDED_ROW_MODELS }]],
+  // derivePasskeyState({ …, tx }) reads the credential count and the tenant's
+  // passkey policy under the code/refresh exchange's bypass.
+  ["src/lib/mcp/oauth-server.ts", [{ via: "src/lib/auth/policy/passkey-enforcement.ts", models: ["webAuthnCredential", "tenant"] }]],
+  // The auto-promotion transition writes its audit row in the same
+  // transaction: the owning-tenant lookup for the row, then the outbox enqueue.
+  ["src/app/api/emergency-access/[id]/vault/route.ts", [
+    { via: "src/lib/tenant-context.ts", models: ["user"] },
+    { via: "src/lib/audit/audit-outbox-in-tx.ts", models: ["auditOutbox"] },
+  ]],
 ]);
 
 /**
@@ -658,97 +655,22 @@ function helperCallsIn(sf) {
 }
 
 /**
- * The function a call actually invokes, when this file can say: an inline
- * function expression (an IIFE), or a name resolved through the visible
- * bindings — following `const aliasedQuery = query` to the function it names.
- * An imported callee returns null; that is the module boundary named in the
- * header, not something the tree could have answered.
+ * The callback at the helper's DECLARED callback position (withBypassRls's 2nd
+ * argument, withTenantRls's 3rd, …), never "the first function-looking
+ * argument": a function placed elsewhere is not what the helper runs.
  */
-function calleeFunctionOf(call, bindingsFor) {
-  const callee = unwrapExpression(call.getExpression());
-  if (!callee) return null;
-  if (FN_KINDS.has(callee.getKind())) return { fn: callee, argOffset: 0 };
-  if (callee.getKind() === SyntaxKind.Identifier) {
-    const fn = resolveLocalFunction(callee.getText(), call, bindingsFor);
-    return fn ? { fn, argOffset: 0 } : null;
-  }
-  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return null;
-
-  const member = callee.getNameNode().getText();
-  const receiver = unwrapExpression(callee.getExpression());
-
-  // `query.call(thisArg, a, b)` invokes the receiver with its arguments shifted
-  // by one — resolving the function without that offset binds the wrong
-  // parameter, which is a wrong answer rather than a missing one. `.apply`
-  // passes an array, so positions cannot be mapped at all and it stays
-  // unresolved.
-  if (member === "call") {
-    if (receiver?.getKind() !== SyntaxKind.Identifier) return null;
-    const fn = resolveLocalFunction(receiver.getText(), call, bindingsFor);
-    return fn ? { fn, argOffset: 1 } : null;
-  }
-
-  // `helpers.query(...)` where `helpers` is a local object literal: the method
-  // is a function this file declares, so the tree can answer.
-  if (receiver?.getKind() !== SyntaxKind.Identifier) return null;
-  const owner = resolveLocalObjectLiteral(receiver.getText(), call, bindingsFor);
-  if (!owner) return null;
-  for (const prop of owner.getProperties()) {
-    const kind = prop.getKind();
-    if (kind !== SyntaxKind.MethodDeclaration && kind !== SyntaxKind.PropertyAssignment) {
-      continue;
-    }
-    if (staticMemberName(prop.getNameNode()) !== member) continue;
-    if (kind === SyntaxKind.MethodDeclaration) return { fn: prop, argOffset: 0 };
-    const value = unwrapExpression(prop.getInitializer());
-    if (value && FN_KINDS.has(value.getKind())) return { fn: value, argOffset: 0 };
-    if (value?.getKind() === SyntaxKind.Identifier) {
-      const fn = resolveLocalFunction(value.getText(), value, bindingsFor);
-      return fn ? { fn, argOffset: 0 } : null;
-    }
-  }
-  return null;
-}
-
-function callbackOf(call, bindingsFor) {
+function callbackOf(call, bindingsFor, helper) {
+  const index = CALLBACK_INDEX.get(helper);
+  if (index === undefined) return null;
   const args = call.getArguments();
-  const inline = args.find((a) => FN_KINDS.has(a.getKind()));
-  if (inline) return inline;
-
-  for (const arg of args) {
-    if (arg.getKind() !== SyntaxKind.Identifier) continue;
-    const fn = resolveLocalFunction(arg.getText(), call, bindingsFor);
-    if (fn) return fn;
-  }
+  if (args.slice(0, index + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement)) return null;
+  const arg = unwrapExpression(args[index]);
+  if (!arg) return null;
+  if (FN_KINDS.has(arg.getKind())) return arg;
+  if (arg.getKind() === SyntaxKind.Identifier) return resolveLocalFunction(arg.getText(), call, bindingsFor);
   return null;
 }
 
-/**
- * Everything inside `fn` that carries the bypassed client, and the model
- * accesses that fall out of destructuring one.
- *
- * A client reaches a model by more than one spelling, and the gate has to
- * follow the VALUE rather than the name it happens to wear at the access:
- *
- *   tx.model.findMany()                  the parameter itself
- *   const db = tx;  db.model.findMany()  an alias — and aliases chain
- *   const { model } = tx;                the delegate lifted out directly
- *   ({ model }) => model.findMany()      the same, done in the signature
- *   ({ ...rest }) => rest.model.f()      a rest element is still the client
- *   tx.$transaction(async (t2) => …)     a nested tx inherits the bypass
- *
- * Assignments are followed to a fixpoint, so a chain of any length resolves,
- * as are parameter defaults and a choice between clients (`cond ? tx : prisma`).
- * `let`/`var` aliases are followed too: unlike a callback binding, over-
- * approximating a CLIENT can only report more models, which is the safe
- * direction.
- *
- * A client is identified by its expression text, not by a bare name, so
- * `clients.prisma` from a namespace import is tracked like any other. What
- * cannot be reduced to a name or a member access — a client returned by a call
- * — is not followed, and where that appears as the helper's own first argument
- * the site is REPORTED rather than scanned with an incomplete client set.
- */
 /**
  * A literal member name: a string, or an untagged template with no
  * substitutions. Used where the node sits in an INDEX position (`tx["model"]`),
@@ -768,501 +690,6 @@ function literalMemberName(node) {
   }
 }
 
-/**
- * The member name a node denotes in a NAME position — a destructuring property
- * key, a property assignment. An identifier there IS the name, unlike in an
- * index; a computed key reduces to its literal when it has one.
- *
- * The pair exists so every place a member name is read goes through one of
- * them: the model receiver and the `$transaction` detector use the index form,
- * destructuring uses this one. Teaching only one site about `tx["model"]` is
- * what the previous escapes were.
- */
-function staticMemberName(node) {
-  if (!node) return null;
-  switch (node.getKind()) {
-    case SyntaxKind.Identifier:
-      return node.getText();
-    case SyntaxKind.ComputedPropertyName:
-      return literalMemberName(node.getExpression());
-    default:
-      return literalMemberName(node);
-  }
-}
-
-/**
- * A structural key for the expression by which a value is named, or null when
- * it has no such name.
- *
- * Built from the parse tree rather than taken as source text: `getText()`
- * carries the trivia between tokens, so `clients . prisma` and `clients.prisma`
- * are the same value under two different strings — and a gate that compares
- * those strings is defeated by a space. Type-level wrappers reduce away
- * (`db as typeof db`, `(db)`, `db!`, `db satisfies X`), and a static string
- * index is the same thing as a property (`tx["model"]` is `tx.model`).
- *
- * The exact answer would be binding identity from the type checker; this gate
- * runs without a Program by design, and a trivia-free structural key is what
- * that leaves. It is used by BOTH sides — the client argument and the model
- * receiver — because the last three defects here were all the two sides
- * reducing an expression differently.
- */
-function clientKey(expr) {
-  if (!expr) return null;
-  switch (expr.getKind()) {
-    case SyntaxKind.Identifier:
-      return expr.getText();
-    case SyntaxKind.ThisKeyword:
-      return "this";
-    case SyntaxKind.PropertyAccessExpression: {
-      const base = clientKey(expr.getExpression());
-      return base === null ? null : `${base}.${expr.getNameNode().getText()}`;
-    }
-    case SyntaxKind.ElementAccessExpression: {
-      const member = literalMemberName(expr.getArgumentExpression());
-      if (member === null) return null;
-      const base = clientKey(expr.getExpression());
-      return base === null ? null : `${base}.${member}`;
-    }
-    case SyntaxKind.ParenthesizedExpression:
-    case SyntaxKind.AsExpression:
-    case SyntaxKind.NonNullExpression:
-    case SyntaxKind.SatisfiesExpression:
-      return clientKey(expr.getExpression());
-    default:
-      return null;
-  }
-}
-
-
-/**
- * The file's variable declarations and plain assignments, collected once.
- * `clientBindingsIn` runs per call site and needs the whole file (an alias may
- * live outside the callback), so collecting them per call walked the tree once
- * per call — measurably, ~20% of the gate's runtime.
- */
-function flowIndex(sf) {
-  return {
-    decls: sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration),
-    // A parameter's default is a value the binding may carry. For the CALLBACK
-    // this gate refuses to read a default (see callbackOf: guessing which
-    // function runs is fail-open). For a CLIENT the answer is the opposite —
-    // `function drain(db = prisma)` means `db` may be the client, and treating
-    // it as one can only report more models, which is the safe direction.
-    params: sf.getDescendantsOfKind(SyntaxKind.Parameter),
-    assignments: sf
-      .getDescendantsOfKind(SyntaxKind.BinaryExpression)
-      .filter((b) => b.getOperatorToken().getKind() === SyntaxKind.EqualsToken),
-  };
-}
-
-function clientBindingsIn(fn, flow, clientArg, bindingsFor, clientIndex = 0, clientPath = null) {
-  // `prisma` by its conventional name, plus whatever the call actually handed
-  // the helper — `withBypassRls(db, …)` after `import { prisma as db }`, or
-  // `withBypassRls(clients.prisma, …)` from a namespace import, passes the
-  // client under something this file has never seen. The argument is the client
-  // by the helper's own signature, so it needs no inference — only reducing to
-  // the expression that names it.
-  const clients = new Set(["prisma"]);
-  const argText = clientKey(clientArg);
-  if (argText) clients.add(argText);
-  const modelRefs = [];
-  // Destructuring keys and nested-transaction callbacks this file cannot read.
-  // Both are "the client goes somewhere and the gate cannot follow", which must
-  // be said rather than skipped — the same reason `tx[model]` is reported.
-  const unresolved = [];
-  // Every callback reached from this call site: the outer one, and each nested
-  // `$transaction` callback, at any depth. Filled by the worklist below.
-  const callbackNodes = [];
-  // A first argument that reduces to neither a name nor a member access (a
-  // client returned by a call) leaves the client set incomplete, and scanning
-  // with an incomplete client set reports "no violations" for a callback it
-  // could not read. The caller turns this into a named violation.
-  const clientUnresolved = Boolean(clientArg) && !argText;
-  // Call sites that hand the client to a callee outside this file. The header's
-  // fail-open class, counted rather than asserted in prose.
-  // The fixpoint revisits every call each round, so a hand-off is recorded once
-  // per (call, what is handed).
-  const handedOff = [];
-  const handedOffKeys = new Set();
-  const recordHandOff = (entry) => {
-    const key = `${entry.call.getStart()}|${JSON.stringify(entry.positions)}|${entry.problem ?? ""}|${entry.ambient ?? ""}`;
-    if (handedOffKeys.has(key)) return;
-    handedOffKeys.add(key);
-    handedOff.push(entry);
-  };
-  if (!fn) return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff };
-
-  // A destructuring OUTSIDE the callback is not a bypassed access — it only
-  // tells us what the bound names carry. Model references are collected from
-  // inside the callback only; client aliases propagate from anywhere.
-  // Inside ANY callback this call reaches, not just the outermost. Testing only
-  // the outer one treated a destructuring in a named nested callback as
-  // "outside the callback", so its delegates were never read as model access.
-  const insideCallback = (node) =>
-    callbackNodes.some(
-      (cb) => node.getStart() >= cb.getStart() && node.getEnd() <= cb.getEnd(),
-    );
-
-  const addModel = (keyNode, line) => {
-    const model = staticMemberName(keyNode);
-    if (model === null) return false;
-    if (model.startsWith("$")) return false;
-    if (modelRefs.some((r) => r.model === model && r.line === line)) return false;
-    modelRefs.push({ model, line });
-    return true;
-  };
-
-  const noteUnresolved = (node) => {
-    const line = node.getStartLineNumber();
-    const text = node.getText();
-    if (!unresolved.some((u) => u.line === line && u.text === text)) {
-      unresolved.push({ line, text });
-    }
-  };
-
-  // Local names bound to a model delegate destructured off a client
-  // (`const { auditOutbox } = tx`): a call on one is a model operation.
-  const delegates = new Set();
-
-  const addClient = (name) => {
-    if (!name || clients.has(name)) return false;
-    clients.add(name);
-    return true;
-  };
-
-  // Destructuring a client binds its delegates: each property is a model
-  // access, and a rest element carries what is left of the client.
-  const spreadPattern = (pattern, emitModels) => {
-    let grew = false;
-    for (const el of pattern.getElements()) {
-      if (el.getDotDotDotToken()) {
-        if (addClient(el.getName())) grew = true;
-        continue;
-      }
-      if (!emitModels) continue;
-      const keyNode = el.getPropertyNameNode() ?? el.getNameNode();
-      if (staticMemberName(keyNode) === null) {
-        noteUnresolved(el);
-        continue;
-      }
-      if (el.getNameNode().getKind() === SyntaxKind.Identifier) delegates.add(el.getName());
-      if (addModel(keyNode, el.getStartLineNumber())) grew = true;
-    }
-    return grew;
-  };
-
-  // The assignment form of the same thing: `({ model, ...rest } = tx)`. Its
-  // left side is an object LITERAL, not a binding pattern, so the elements come
-  // back as property assignments rather than binding elements.
-  const spreadObjectLiteral = (literal, emitModels) => {
-    let grew = false;
-    for (const prop of literal.getProperties()) {
-      const kind = prop.getKind();
-      if (kind === SyntaxKind.SpreadAssignment) {
-        const key = clientKey(prop.getExpression());
-        if (key && addClient(key)) grew = true;
-        continue;
-      }
-      if (!emitModels) continue;
-      if (
-        kind === SyntaxKind.ShorthandPropertyAssignment ||
-        kind === SyntaxKind.PropertyAssignment
-      ) {
-        if (staticMemberName(prop.getNameNode()) === null) {
-          noteUnresolved(prop);
-          continue;
-        }
-        const local = prop.getKind() === SyntaxKind.ShorthandPropertyAssignment ? prop.getName() : clientKey(prop.getInitializer());
-        if (local) delegates.add(local);
-        if (addModel(prop.getNameNode(), prop.getStartLineNumber())) grew = true;
-      }
-    }
-    return grew;
-  };
-
-  // A callback parameter, at any depth: the outer one, and every nested
-  // `$transaction` callback, which inherits the bypass through the Proxy. Both
-  // take the same treatment — an identifier is a client, a pattern destructures
-  // one — because a nested transaction is a client by a different route, not a
-  // different kind of thing.
-  // `path` is set when the client arrived as a property of an object argument
-  // (`f({ db: tx })`): the client is `param.db`, or the binding destructured
-  // under that key.
-  const takeParameter = (param, path = null) => {
-    const nameNode = param?.getNameNode();
-    if (path === null) {
-      if (nameNode?.getKind() === SyntaxKind.Identifier) addClient(nameNode.getText());
-      else if (nameNode?.getKind() === SyntaxKind.ObjectBindingPattern) {
-        spreadPattern(nameNode, true);
-      }
-      return;
-    }
-    if (nameNode?.getKind() === SyntaxKind.Identifier) {
-      addClient(`${nameNode.getText()}.${path}`);
-    } else if (nameNode?.getKind() === SyntaxKind.ObjectBindingPattern) {
-      const el = nameNode
-        .getElements()
-        .find((e) => (e.getPropertyNameNode() ? staticMemberName(e.getPropertyNameNode()) : e.getName()) === path);
-      if (el?.getNameNode().getKind() === SyntaxKind.Identifier) addClient(el.getName());
-      else if (el) noteUnresolved(el);
-    } else if (param) {
-      noteUnresolved(param);
-    }
-  };
-
-  // Walk the callbacks as a graph, not as one level with a patch bolted on.
-  // A nested `$transaction` callback is itself a callback: it binds a client,
-  // its body may destructure delegates out of it, and it may nest again. Each
-  // of the last several defects here was that structure handled to depth one,
-  // so it is a worklist — depth-N by construction — with a visited set that
-  // also makes a self-referential callback terminate.
-  const { decls, params, assignments } = flow;
-
-  // Does this expression evaluate to a client? An identifier that is one, or a
-  // choice between them — `cond ? tx : prisma`, `maybe ?? tx`. Deliberately NOT
-  // "any expression mentioning a client": `const user = await tx.user.find()`
-  // mentions `tx` and yields a row, and 131 such lines exist in this tree, so
-  // treating a mention as a flow would report every ordinary query. A client
-  // returned by a helper (`const db = wrap(tx)`) is undecidable without type
-  // resolution, which this gate runs without by design — see the header.
-  const yieldsClient = (expr) => {
-    if (!expr) return false;
-    const named = clientKey(expr);
-    if (named !== null) return clients.has(named);
-    switch (expr.getKind()) {
-      case SyntaxKind.ConditionalExpression:
-        return yieldsClient(expr.getWhenTrue()) || yieldsClient(expr.getWhenFalse());
-      case SyntaxKind.BinaryExpression: {
-        const op = expr.getOperatorToken().getKind();
-        // `a ?? tx` / `a || tx` can yield either side; `a && tx` yields the
-        // RIGHT side when it yields at all, so only that operand is a client.
-        if (op === SyntaxKind.AmpersandAmpersandToken) return yieldsClient(expr.getRight());
-        if (op !== SyntaxKind.QuestionQuestionToken && op !== SyntaxKind.BarBarToken) {
-          return false;
-        }
-        return yieldsClient(expr.getLeft()) || yieldsClient(expr.getRight());
-      }
-      default:
-        return false;
-    }
-  };
-
-  // ── One fixpoint, not two phases ────────────────────────────────────────
-  //
-  // The callback/helper graph and the client flow feed each other: resolving a
-  // helper binds a parameter, which makes an assignment relevant, which names a
-  // client, which turns a previously-uninteresting call into one that
-  // propagates. Running the graph walk first and the flow analysis afterwards
-  // meant `const alias = tx; queryMember(alias)` was invisible — the alias was
-  // learned after the only pass that could have used it. They are one loop now.
-  //
-  // Enrolment is keyed by (function, parameter index), not by function alone:
-  // the same function can be a `$transaction` callback in one call and an
-  // ordinary helper in another, and whichever was seen first used to settle its
-  // client position for good.
-  const enrolled = new Map();
-  let progressed = true;
-  const enrol = (node, index, path = null) => {
-    if (!node) return;
-    const id = `${node.getStart()}:${node.getEnd()}`;
-    let positions = enrolled.get(id);
-    if (!positions) {
-      positions = new Set();
-      enrolled.set(id, positions);
-      callbackNodes.push(node);
-      progressed = true;
-    }
-    const slot = `${index}|${path}`;
-    if (index === null || index < 0 || positions.has(slot)) return;
-    positions.add(slot);
-    takeParameter(node.getParameters()[index], path);
-    progressed = true;
-  };
-
-  // Where an argument hands the client on: the argument itself, or a
-  // property of an object-literal argument. A client inside an array, a
-  // spread or a nested object cannot be bound to one parameter.
-  const handOffsOf = (call) => {
-    const out = [];
-    let problem = null;
-    const nestedClient = (node) =>
-      node.getKind() === SyntaxKind.ArrayLiteralExpression
-        ? node.getElements().some((e) => yieldsClient(e) || nestedClient(unwrapExpression(e) ?? e))
-        : node.getKind() === SyntaxKind.ObjectLiteralExpression
-          ? node.getProperties().some((p) => {
-              if (p.getKind() === SyntaxKind.ShorthandPropertyAssignment) return clients.has(p.getName());
-              const v = p.getKind() === SyntaxKind.PropertyAssignment ? p.getInitializer() : p.getKind() === SyntaxKind.SpreadAssignment ? p.getExpression() : null;
-              return v ? yieldsClient(v) || nestedClient(unwrapExpression(v) ?? v) : false;
-            })
-          : false;
-    call.getArguments().forEach((arg, index) => {
-      if (yieldsClient(arg)) {
-        out.push({ index, path: null });
-        return;
-      }
-      const a = unwrapExpression(arg);
-      if (a?.getKind() === SyntaxKind.ObjectLiteralExpression) {
-        for (const prop of a.getProperties()) {
-          const k = prop.getKind();
-          if (k === SyntaxKind.ShorthandPropertyAssignment && clients.has(prop.getName())) {
-            out.push({ index, path: prop.getName() });
-          } else if (k === SyntaxKind.PropertyAssignment && yieldsClient(prop.getInitializer())) {
-            const key = staticMemberName(prop.getNameNode());
-            if (key === null) problem = "client under a computed key of an object argument";
-            else out.push({ index, path: key });
-          } else if (k === SyntaxKind.PropertyAssignment && nestedClient(unwrapExpression(prop.getInitializer()) ?? prop.getInitializer())) {
-            problem = "client nested inside an object argument";
-          } else if (k === SyntaxKind.SpreadAssignment && (yieldsClient(prop.getExpression()) || nestedClient(prop.getExpression()))) {
-            problem = "client spread into an object argument";
-          }
-        }
-      } else if (a && nestedClient(a)) {
-        problem = "client inside an array argument";
-      } else if (a?.getKind() === SyntaxKind.SpreadElement && yieldsClient(a.getExpression())) {
-        problem = "client spread into the arguments";
-      }
-    });
-    return { handOffs: out, problem };
-  };
-
-  // A call on the client itself (`tx.user.findMany()`, `prisma.$queryRaw…`):
-  // the model access it makes is read by modelRefsIn, and the method is the
-  // Prisma client's, not code that could reach anything else.
-  const isClientMemberCall = (call) => {
-    let e = unwrapExpression(call.getExpression());
-    while (e && (e.getKind() === SyntaxKind.PropertyAccessExpression || e.getKind() === SyntaxKind.ElementAccessExpression)) {
-      e = unwrapExpression(e.getExpression());
-      const key = clientKey(e);
-      if (key !== null && (clients.has(key) || delegates.has(key))) return true;
-    }
-    return false;
-  };
-
-  enrol(fn, clientIndex, clientPath);
-
-  while (progressed) {
-    progressed = false;
-
-    // Flow: one pass over the file's declarations, parameter defaults and
-    // assignments. `prisma` is a Proxy reading the bypass context out of
-    // AsyncLocalStorage, so a module-level `const db = prisma` is a bypassed
-    // client inside the callback too, and a binding is not a different value
-    // for having been filled in on the next line.
-    for (const decl of decls) {
-      if (!yieldsClient(decl.getInitializer())) continue;
-      const nameNode = decl.getNameNode();
-      if (nameNode.getKind() === SyntaxKind.Identifier) {
-        if (addClient(nameNode.getText())) progressed = true;
-      } else if (nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
-        if (spreadPattern(nameNode, insideCallback(decl))) progressed = true;
-      }
-    }
-    for (const param of params) {
-      if (!yieldsClient(param.getInitializer())) continue;
-      const nameNode = param.getNameNode();
-      if (nameNode.getKind() === SyntaxKind.Identifier) {
-        if (addClient(nameNode.getText())) progressed = true;
-      } else if (nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
-        if (spreadPattern(nameNode, insideCallback(param))) progressed = true;
-      }
-    }
-    for (const assignment of assignments) {
-      if (!yieldsClient(assignment.getRight())) continue;
-      const left = assignment.getLeft();
-      if (left.getKind() === SyntaxKind.ObjectLiteralExpression) {
-        if (spreadObjectLiteral(left, insideCallback(assignment))) progressed = true;
-        continue;
-      }
-      const leftText = clientKey(left);
-      if (leftText && addClient(leftText)) progressed = true;
-    }
-
-    // Graph: every call inside every function reached so far.
-    for (const node of [...callbackNodes]) {
-      const invocations = [
-        ...node.getDescendantsOfKind(SyntaxKind.CallExpression),
-        ...node.getDescendantsOfKind(SyntaxKind.NewExpression),
-      ];
-      for (const inner of invocations) {
-        const expr = inner.getExpression();
-        const member =
-          expr.getKind() === SyntaxKind.PropertyAccessExpression
-            ? expr.getNameNode().getText()
-            : expr.getKind() === SyntaxKind.ElementAccessExpression
-              ? literalMemberName(expr.getArgumentExpression())
-              : null;
-
-        if (member === "$transaction" && inner.getKind() === SyntaxKind.CallExpression) {
-          // The batch form `$transaction([...])` takes no callback, so there is
-          // no inner client to inherit and nothing to resolve.
-          if (
-            unwrapExpression(inner.getArguments()[0])?.getKind() ===
-            SyntaxKind.ArrayLiteralExpression
-          ) {
-            continue;
-          }
-          const nested = callbackOf(inner, bindingsFor);
-          if (!nested) {
-            noteUnresolved(inner);
-            continue;
-          }
-          // A transaction callback takes the client as its first parameter.
-          enrol(nested, 0);
-          continue;
-        }
-
-        // An ordinary call HANDED a client: the callee's parameter in that
-        // position (or the property of an object argument) becomes a client
-        // inside it. The argument test is yieldsClient, not a bare name, so an
-        // alias or a choice between clients counts.
-        const { handOffs, problem: handOffProblem } = handOffsOf(inner);
-        const line = inner.getStartLineNumber();
-        if (handOffProblem) {
-          recordHandOff({ line, call: inner, positions: [], problem: handOffProblem });
-          continue;
-        }
-        if (inner.getKind() === SyntaxKind.NewExpression) {
-          // A constructor stores what it is given for methods that run later,
-          // through `this`, which a name-keyed client set cannot follow.
-          if (handOffs.length > 0) recordHandOff({ line, call: inner, positions: [], problem: "client handed to a constructor" });
-          else recordHandOff({ line, call: inner, positions: [], ambient: true });
-          continue;
-        }
-        const resolved = calleeFunctionOf(inner, bindingsFor);
-        if (handOffs.length === 0 && isClientMemberCall(inner)) continue; // `tx.model.op()`: modelRefsIn's
-        if (handOffs.length === 0) {
-          // No client argument, but `prisma` is a Proxy that routes to the
-          // active transaction: an own callee reaching it runs under this
-          // bypass too.
-          if (resolved) enrol(resolved.fn, null);
-          else recordHandOff({ line, call: inner, positions: [], ambient: true });
-          continue;
-        }
-        if (!resolved) {
-          // The client crosses a module boundary this tree cannot open: the
-          // Program follows it (mergeHandOffs) or the run fails.
-          recordHandOff({ line, call: inner, positions: handOffs });
-          continue;
-        }
-        for (const { index, path } of handOffs) {
-          const target = index - resolved.argOffset;
-          const problem =
-            target < 0
-              ? "client bound to `this` (.call's first argument)"
-              : handOffBindingProblem(inner, resolved.fn, target, index);
-          if (problem) {
-            recordHandOff({ line, call: inner, positions: [], problem });
-            continue;
-          }
-          enrol(resolved.fn, target, path);
-        }
-      }
-    }
-  }
-
-  return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff };
-}
 
 /**
  * Prisma model names accessed as `<client>.<model>.…` anywhere inside `node`,
@@ -1284,20 +711,6 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor, clientIndex = 0, cli
  * client, a rest parameter — is returned as unfollowed, and the caller reports
  * it rather than exempting the file.
  */
-const handOffMemo = new Map();
-const followInProgress = new Set();
-const fileIndexMemo = new Map();
-
-function fileIndexes(sf) {
-  const key = sf.getFilePath();
-  let entry = fileIndexMemo.get(key);
-  if (!entry) {
-    entry = { flow: flowIndex(sf), bindings: null };
-    entry.bindingsFor = () => (entry.bindings ??= bindingIndex(sf));
-    fileIndexMemo.set(key, entry);
-  }
-  return entry;
-}
 
 /**
  * The Program's node for `call`, which may come from the syntax-only project.
@@ -1319,156 +732,6 @@ function programCallOf(call) {
     }
   }
   return null;
-}
-
-/**
- * What a hand-off's callee can be, through the shared resolver
- * (lib/function-resolver.mjs — the same rules check-rls-nesting uses): an
- * import, every production implementation of an injected interface member,
- * every member of a const table no code mutates, a class method and its
- * overrides, a parameter's production arguments. `unresolved` names why it
- * cannot be, and the hand-off then fails the run.
- */
-function calleeDeclarationsOf(call) {
-  const pcall = programCallOf(call);
-  if (!pcall) return { fns: [], external: false, unresolved: "call not found in the Program" };
-  let r = resolver.resolveCall(pcall);
-  // A parameter called here: its value is whatever the production callers pass.
-  if (r.param) r = mergeResolutions([{ ...r, param: null }, resolver.resolveParameterFromCallers(r.param)]);
-  return { fns: r.fns.filter((fn) => !helperImplementations.has(fn)), external: r.external, unresolved: r.unresolved, helper: r.fns.some((fn) => helperImplementations.has(fn)) };
-}
-
-/**
- * Why a hand-off cannot bind the client to one parameter of `fn`, or null when
- * it can: the argument's position must be fixed (no spread before it) and land
- * on a plain, non-rest parameter.
- */
-function handOffBindingProblem(call, fn, index, argIndex = index) {
-  const args = call.getArguments();
-  if (args.slice(0, argIndex).some((a) => a.getKind() === SyntaxKind.SpreadElement)) {
-    return "spread argument before the client";
-  }
-  const param = fn.getParameters()[index];
-  if (!param) return "no parameter at the client's position";
-  if (param.getDotDotDotToken()) return "client lands in a rest parameter";
-  return null;
-}
-
-/**
- * Models reached by `fn` when its parameter `index` (or that parameter's
- * property `path`) is a bypassed client — or, with `index` null, through the
- * ambient `prisma` alone — and every hand-off below it that could not be
- * followed. Memoised per (function, parameter, path).
- *
- * A function re-entered while still being followed contributes nothing at that
- * point, which is sound only for the function the cycle was entered at: the
- * others in the cycle are missing its models. So a result that depended on an
- * open key is not memoised, and is recomputed for the next caller that enters
- * the cycle elsewhere.
- */
-function followClientInto(fn, index, path = null) {
-  const sf = fn.getSourceFile();
-  const key = `${sf.getFilePath()}:${fn.getStart()}:${index}:${path}`;
-  const memo = handOffMemo.get(key);
-  if (memo) return memo;
-  if (followInProgress.has(key)) return { refs: [], unresolved: [], unfollowed: [], openKeys: new Set([key]) };
-  followInProgress.add(key);
-
-  const rel = toRelPosix(sf.getFilePath());
-  const { flow, bindingsFor } = fileIndexes(sf);
-  const { clients, modelRefs, unresolved: unresolvedKeys, callbackNodes, handedOff } =
-    clientBindingsIn(fn, flow, undefined, bindingsFor, index, path);
-  const refs = modelRefs.map(({ model, line }) => ({ model, at: `${rel}:${line}` }));
-  const unresolved = unresolvedKeys.map(({ line, text }) => ({ at: `${rel}:${line}`, text }));
-  for (const node of callbackNodes) {
-    const found = modelRefsIn(node, clients);
-    for (const { model, line } of found.refs) refs.push({ model, at: `${rel}:${line}` });
-    for (const { line, text } of found.unresolved) unresolved.push({ at: `${rel}:${line}`, text });
-  }
-  const result = { refs, unresolved, unfollowed: [], openKeys: new Set() };
-  mergeHandOffs(result, handedOff, rel);
-
-  followInProgress.delete(key);
-  result.openKeys.delete(key);
-  if (result.openKeys.size === 0) handOffMemo.set(key, result);
-  return result;
-}
-
-/** Follow each hand-off into its callee, folding what it reaches into `into`. */
-function mergeHandOffs(into, handedOff, rel) {
-  into.openKeys ??= new Set();
-  const fold = (sub) => {
-    into.refs.push(...sub.refs);
-    into.unresolved.push(...sub.unresolved);
-    into.unfollowed.push(...sub.unfollowed);
-    for (const k of sub.openKeys) into.openKeys.add(k);
-  };
-  for (const { line, call, positions, problem, ambient } of handedOff) {
-    const at = `${rel}:${line}`;
-    if (problem) {
-      into.unfollowed.push({ at, reason: problem });
-      continue;
-    }
-    const callee = calleeDeclarationsOf(call);
-    if (ambient) {
-      // Library code cannot name the app's `prisma`; an own callee that cannot
-      // be named might, so it fails like a hand-off would. Opening a nested
-      // context (a with*Rls helper) is check-rls-nesting's to reject.
-      if (callee.unresolved) into.unfollowed.push({ at, reason: callee.unresolved });
-      for (const fn of callee.fns) fold(followClientInto(fn, null));
-      continue;
-    }
-    if (callee.unresolved || (callee.fns.length === 0 && !callee.helper)) {
-      into.unfollowed.push({ at, reason: callee.unresolved ?? "client handed to library code" });
-      continue;
-    }
-    if (callee.external) {
-      into.unfollowed.push({ at, reason: "client handed to a callee that may be library code" });
-      continue;
-    }
-    for (const fn of callee.fns) {
-      for (const { index, path } of positions) {
-        const bindProblem = handOffBindingProblem(call, fn, index);
-        if (bindProblem) {
-          into.unfollowed.push({ at, reason: bindProblem });
-          continue;
-        }
-        fold(followClientInto(fn, index, path));
-      }
-    }
-  }
-}
-
-function modelRefsIn(node, clientNames) {
-  const refs = [];
-  // Both spellings of a member access: `tx.model` and `tx["model"]`. The
-  // receiver goes through clientKey, the same reduction the client argument
-  // uses — a cast on one side and a bare name on the other was how the last
-  // escape got through.
-  const accesses = [
-    ...node.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression),
-    ...node.getDescendantsOfKind(SyntaxKind.ElementAccessExpression),
-  ];
-  const unresolved = [];
-  for (const access of accesses) {
-    // Resolve the RECEIVER first. Dropping an unreadable index before knowing
-    // whose index it is discards exactly the case that matters: `tx[model]` on
-    // a bypassed client reaches some model, and which one is precisely what
-    // this gate cannot say — so it must say that, not stay silent.
-    const recvKey = clientKey(access.getExpression());
-    if (recvKey === null || !clientNames.has(recvKey)) continue;
-    const model =
-      access.getKind() === SyntaxKind.PropertyAccessExpression
-        ? access.getName()
-        : literalMemberName(access.getArgumentExpression());
-    if (model === null) {
-      unresolved.push({ line: access.getStartLineNumber(), text: access.getText() });
-      continue;
-    }
-    if (model.startsWith("$")) continue;
-    refs.push({ model, line: access.getStartLineNumber() });
-  }
-  return { refs, unresolved };
 }
 
 
@@ -2185,7 +1448,22 @@ if (sourceFiles.length === 0) {
 
 const program = buildProgram();
 const helperDecls = resolveHelperDeclarations(program);
-const resolver = createFunctionResolver({ program });
+const bypassDecl = program
+  .getSourceFile(join(process.cwd(), "src/lib/tenant-rls.ts"))
+  ?.getFunctions()
+  .find((fn) => fn.getName() === "withBypassRls" && fn.getBody());
+// The Prisma client's model accessors, read off withBypassRls's own client
+// parameter type.
+const MODEL_NAMES = prismaModelNames(bypassDecl?.getParameters()[0]?.getType());
+const resolver = createFunctionResolver({ program, modelNames: MODEL_NAMES });
+// The helpers' implementation nodes, as the resolver returns them: reach stops
+// at one of these: a nested context is check-rls-nesting's to reject.
+const helperImplementations = new Set();
+for (const { file, name } of HELPER_DECLARATIONS) {
+  for (const fn of program.getSourceFile(join(process.cwd(), file))?.getFunctions() ?? []) {
+    if (fn.getName() === name) helperImplementations.add(fn.getImplementation?.() ?? fn);
+  }
+}
 
 // ─── Purpose resolution (Check 2) ───────────────────────────────────────────
 const bypassPurposeDecl = program
@@ -2229,23 +1507,178 @@ function purposeOfExpression(arg) {
   return null;
 }
 
-function checkPurposeMember(file, line, member) {
-  const allowed = ALLOWED_PURPOSES.get(file);
-  if (allowed && !allowed.includes(member)) {
-    purposeViolations.push({ file, line, detail: `BYPASS_PURPOSE.${member} is not in ALLOWED_PURPOSES (${allowed.join(", ")})` });
+/** `member` against the pin of `file` and of every file a forwarder chain passed through. */
+function checkPurposeMember(file, line, member, chainPins = []) {
+  for (const pinned of new Set([file, ...chainPins])) {
+    const allowed = ALLOWED_PURPOSES.get(pinned);
+    if (allowed && !allowed.includes(member)) {
+      const where = pinned === file ? "" : ` (forwarded into ${pinned})`;
+      purposeViolations.push({ file, line, detail: `BYPASS_PURPOSE.${member} is not in ALLOWED_PURPOSES (${allowed.join(", ")})${where}` });
+    }
   }
 }
 
 /** Functions that pass their own purpose parameter on to withBypassRls, to be checked at their callers. */
 const forwarderQueue = [];
-// The helpers' implementation nodes, as the resolver returns them: a hand-off
-// into one of these is a nested context, check-rls-nesting's to reject.
-const helperImplementations = new Set();
-for (const { file, name } of HELPER_DECLARATIONS) {
-  for (const fn of program.getSourceFile(join(process.cwd(), file))?.getFunctions() ?? []) {
-    if (fn.getName() === name) helperImplementations.add(fn.getImplementation?.() ?? fn);
+
+// ─── Check 3: reach and types ───────────────────────────────────────────────
+const reachability = createReachability(resolver);
+const siteOf = (node) => `${toRelPosix(node.getSourceFile().getFilePath())}:${node.getStartLineNumber()}`;
+
+const bypassImpl = [...helperImplementations].find((fn) => fn.getName() === "withBypassRls");
+// Each helper's callback position, read off its declaration.
+const CALLBACK_INDEX = new Map(
+  [...helperImplementations].map((fn) => [fn.getName(), fn.getParameters().findIndex((p) => p.getType().getCallSignatures().length > 0)]),
+);
+for (const [name, index] of CALLBACK_INDEX) if (index < 0) programBuildFailed(`${name} declares no callback parameter`);
+const BYPASS_CALLBACK_INDEX = CALLBACK_INDEX.get("withBypassRls");
+// withBypassRls's purpose position: the parameter typed as the purpose union.
+const PURPOSE_INDEX = bypassImpl.getParameters().findIndex((p) => isPurposeType(p.getType()));
+if (PURPOSE_INDEX < 0) programBuildFailed("withBypassRls declares no purpose parameter");
+
+
+const isPrismaClientMember = (decls) =>
+  decls.some((d) => {
+    const owner = d.getParent();
+    const k = owner?.getKind();
+    return (k === SyntaxKind.ClassDeclaration || k === SyntaxKind.InterfaceDeclaration) && owner.getName?.() === "PrismaClient";
+  });
+const isClientType = (type) => type.getProperties().some((p) => isPrismaClientMember(p.getDeclarations()));
+const isExternalDecl = (d) => d.getSourceFile().isDeclarationFile() || d.getSourceFile().getFilePath().includes("/node_modules/");
+// A Prisma model delegate by its own shape: the client library declares its
+// query methods. Recognises a model read off any client-derived type — a rest
+// element, Pick/Omit, an index signature — where the member has no declaration.
+const isDelegateType = (type) =>
+  ["findMany", "count"].every((n) => (type.getProperty(n)?.getDeclarations() ?? []).some(isExternalDecl));
+const keyText = (nameNode) =>
+  nameNode.getKind() === SyntaxKind.StringLiteral || nameNode.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral
+    ? nameNode.getLiteralText()
+    : nameNode.getText();
+
+/** The model `name` read off a value of `type`, or null. An `any` value counts when the name is a model. */
+function modelNamed(type, name) {
+  if (name.startsWith("$")) return null;
+  const prop = type.getProperty(name);
+  if (prop && isPrismaClientMember(prop.getDeclarations())) return name;
+  if ((type.isAny() || type.isUnknown()) && MODEL_NAMES.has(name)) return name;
+  const memberType = prop?.getTypeAtLocation?.(bypassDecl) ?? type.getStringIndexType();
+  if (MODEL_NAMES.has(name) && memberType && isDelegateType(memberType)) return name;
+  return null;
+}
+
+/**
+ * `{ model }` when `node` reads a model delegate off a Prisma client —
+ * `tx.user`, `tx["user"]`, `const { user } = tx`, `({ user } = tx)` — or
+ * `{ dynamic }` for a computed key on a client, whose model cannot be named.
+ */
+function modelAccessOf(node) {
+  switch (node.getKind()) {
+    case SyntaxKind.PropertyAccessExpression: {
+      const decls = node.getNameNode().getSymbol()?.getDeclarations() ?? [];
+      const name = node.getName();
+      if (name.startsWith("$")) return null;
+      if (isPrismaClientMember(decls)) return { model: name };
+      const t = node.getExpression().getType();
+      if ((t.isAny() || t.isUnknown()) && MODEL_NAMES.has(name)) return { model: name };
+      return MODEL_NAMES.has(name) && isDelegateType(node.getType()) ? { model: name } : null;
+    }
+    case SyntaxKind.ElementAccessExpression: {
+      const t = node.getExpression().getType();
+      const key = literalKey(node.getArgumentExpression());
+      if (key !== null) {
+        const model = modelNamed(t, key);
+        return model ? { model } : null;
+      }
+      return isClientType(t) ? { dynamic: true, text: node.getText() } : null;
+    }
+    case SyntaxKind.BindingElement: {
+      const pattern = node.getParent();
+      if (pattern?.getKind() !== SyntaxKind.ObjectBindingPattern || node.getDotDotDotToken()) return null;
+      const holder = pattern.getParent();
+      const t =
+        holder?.getKind() === SyntaxKind.VariableDeclaration
+          ? holder.getInitializer()?.getType()
+          : holder?.getKind() === SyntaxKind.Parameter
+            ? holder.getType()
+            : null;
+      if (!t) return null;
+      const keyNode = node.getPropertyNameNode();
+      if (keyNode?.getKind() === SyntaxKind.ComputedPropertyName) {
+        const key = literalKey(keyNode.getExpression());
+        if (key === null) return isClientType(t) ? { dynamic: true, text: node.getText() } : null;
+        const model = modelNamed(t, key);
+        return model ? { model } : null;
+      }
+      const model = modelNamed(t, keyNode ? keyText(keyNode) : node.getName());
+      return model ? { model } : null;
+    }
+    case SyntaxKind.ShorthandPropertyAssignment:
+    case SyntaxKind.PropertyAssignment: {
+      // `({ user } = tx)`: an object literal on the left of an assignment.
+      const literal = node.getParent();
+      const assignment = literal?.getParent();
+      if (assignment?.getKind() !== SyntaxKind.BinaryExpression || assignment.getLeft() !== literal) return null;
+      const t = assignment.getRight().getType();
+      const nameNode = node.getNameNode();
+      if (nameNode.getKind() === SyntaxKind.ComputedPropertyName) {
+        const key = literalKey(nameNode.getExpression());
+        if (key === null) return isClientType(t) ? { dynamic: true, text: node.getText() } : null;
+        const model = modelNamed(t, key);
+        return model ? { model } : null;
+      }
+      const model = modelNamed(t, keyText(nameNode));
+      return model ? { model } : null;
+    }
+    default:
+      return null;
   }
 }
+
+/** The callbacks a withBypassRls call runs, or why they cannot be named. */
+function bypassRootsOf(pcall) {
+  const args = pcall.getArguments();
+  if (args.slice(0, BYPASS_CALLBACK_INDEX + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement)) {
+    return { roots: [], problem: "withBypassRls called with a spread argument before its callback" };
+  }
+  const arg = unwrap(args[BYPASS_CALLBACK_INDEX]);
+  if (!arg) return { roots: [], problem: "withBypassRls called without a callback" };
+  if (FN_KINDS.has(arg.getKind())) return { roots: [arg], problem: null };
+  let r = resolver.resolveValue(arg);
+  // A wrapper forwarding its own parameter(s): every production caller's callback.
+  if (r.params.length > 0) r = mergeResolutions([{ ...r, params: [] }, ...r.params.map((p) => resolver.resolveParameterFromCallers(p.param))]);
+  return { roots: r.fns, problem: r.unresolved ? `callback: ${r.unresolved}` : null };
+}
+
+const bypassReachHooks = {
+  stop: (unit) => helperImplementations.has(unit),
+  onParam: (param, _edge, _unit, root) => {
+    const owner = param.getParent();
+    if (owner === root) return "skip"; // the callback's own client
+    // A parameter of a function enclosing the callback (a wrapper's callback
+    // parameter): what its callers pass runs under this bypass.
+    if (root.getAncestors().includes(owner)) return "follow";
+    return undefined;
+  },
+};
+
+let bypassCallbacks = 0;
+let reachedUnits = 0;
+
+/** Record one model reached by a bypass in `file`: directly (at null) or through another unit `at`. */
+function judgeModel(file, line, model, at, allowedSet) {
+  if (at !== null) {
+    for (const v of ALLOWED_VIA.get(file) ?? []) if (at.startsWith(`${v.via}:`)) touchedVia.add(`${file}|${v.via}`);
+    const via = (ALLOWED_VIA.get(file) ?? []).find((v) => at.startsWith(`${v.via}:`) && v.models.includes(model));
+    if (via) {
+      usedVia.add(`${file}|${via.via}|${model}`);
+      return;
+    }
+  }
+  if (!usedModels.has(file)) usedModels.set(file, new Set());
+  usedModels.get(file).add(model);
+  if (!allowedSet.has(model)) modelViolations.push({ file, line, model, ...(at ? { via: at } : {}) });
+}
+
 const helperDeclKeys = buildHelperDeclKeySet(helperDecls);
 const checker = program.getTypeChecker();
 const aliasPrefix = resolveAliasPrefix(program.getCompilerOptions(), process.cwd());
@@ -2300,7 +1733,6 @@ const usedVia = new Set();
 /** "file|via" for every file whose followed reach entered the via module at all. */
 const touchedVia = new Set();
 const undecidableFiles = new Set();
-let handedOffSites = 0;
 /**
  * Files that make at least one real `withBypassRls` call, or hold a helper reference
  * this gate reports as unfollowable (round 13). The whole-entry check reads it: such a
@@ -2311,7 +1743,6 @@ const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
 const indirectHelperReferences = [];
-const unresolvedClients = [];
 const unresolvedModels = [];
 const unfollowedHandOffs = [];
 const f3UnusedTxViolations = [];
@@ -2402,9 +1833,15 @@ for (const file of sourceFiles) {
     for (const { call } of bypassCalls) {
       const pcall = programCallOf(call);
       const line = call.getStartLineNumber();
-      const purpose = pcall ? pcall.getArguments().map(purposeOfExpression).find(Boolean) : null;
+      // At the declared position only: a BYPASS_PURPOSE.X anywhere else is not
+      // what the helper receives.
+      const args = pcall?.getArguments() ?? [];
+      const spread = args.slice(0, PURPOSE_INDEX + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement);
+      const purpose = !spread && args[PURPOSE_INDEX] ? purposeOfExpression(args[PURPOSE_INDEX]) : null;
       if (purpose?.forwardedParam) {
-        forwarderQueue.push({ param: purpose.forwardedParam });
+        // The forwarding file's own pin travels with the parameter: a caller
+        // elsewhere must not run this file's bypass under another purpose.
+        forwarderQueue.push({ param: purpose.forwardedParam, pins: [file] });
       } else if (!purpose) {
         purposeViolations.push({ file, line, detail: "no BYPASS_PURPOSE.* argument" });
       } else {
@@ -2422,12 +1859,10 @@ for (const file of sourceFiles) {
   // an answer almost nobody asked for.
   let bindings = null;
   const bindingsFor = () => (bindings ??= bindingIndex(sf));
-  let flow = null;
-  const flowFor = () => (flow ??= flowIndex(sf));
 
   for (const { call, helper } of calls) {
     const line = call.getStartLineNumber();
-    const fn = callbackOf(call, bindingsFor);
+    const fn = callbackOf(call, bindingsFor, helper);
 
     if (!fn) {
       // Only the tx-client helpers carry a discipline this gate can check, so
@@ -2456,68 +1891,44 @@ for (const file of sourceFiles) {
       }
     }
 
-    // Check 3: model allowlist, for withBypassRls in a non-wildcard file. The
-    // callback is the scan node — which is the call's own subtree for an inline
-    // callback, and the resolved declaration for one passed by name.
+    // Check 3: model allowlist, for withBypassRls in a non-wildcard file —
+    // judged on REACH and TYPES, not on names. Everything that can run inside
+    // the callback is reached through the shared resolver; in each reached
+    // function, every access whose receiver is a Prisma client (by type) is a
+    // model reached under this bypass, however the client got there.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff } =
-      clientBindingsIn(fn, flowFor(), call.getArguments()[0], bindingsFor);
-    if (clientUnresolved) { unresolvedClients.push({ file, line }); undecidableFiles.add(file); }
-    const followed = { refs: [], unresolved: [], unfollowed: [] };
-    mergeHandOffs(followed, handedOff, file);
-    handedOffSites += handedOff.filter((h) => !h.ambient).length;
-    for (const u of followed.unfollowed) {
-      unfollowedHandOffs.push({ file, ...u });
-      undecidableFiles.add(file);
-    }
-    for (const u of followed.unresolved) {
-      unresolvedModels.push({ file, line, text: `${u.text}  (in ${u.at})` });
+    const pcall = programCallOf(call);
+    const located = pcall ? bypassRootsOf(pcall) : { roots: [], problem: "call not found in the Program" };
+    if (located.problem) {
+      unfollowedHandOffs.push({ file, at: `${file}:${line}`, reason: located.problem });
       undecidableFiles.add(file);
     }
     const seen = new Set();
-    // The call itself (its other arguments can hold model access) plus every
-    // callback the analyser reached, wherever each is declared. Overlap is
-    // harmless: reports are deduplicated by model and line.
-    const scanNodes = [call, ...callbackNodes];
-    const report = ({ model, line }) => {
-      const key = `${model}:${line}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      if (!usedModels.has(file)) usedModels.set(file, new Set());
-      usedModels.get(file).add(model);
-      if (!allowedSet.has(model)) modelViolations.push({ file, line, model });
-    };
-    // Delegates lifted straight off a client by destructuring, then every
-    // `<client>.<model>` reached through any identifier that carries the client.
-    for (const ref of modelRefs) report(ref);
-    for (const u of unresolved) {
-      unresolvedModels.push({ file, line: u.line, text: u.text });
-      undecidableFiles.add(file);
-    }
-    const followedSeen = new Set();
-    for (const { model, at } of followed.refs) {
-      const key = `${model}@${at}`;
-      if (followedSeen.has(key)) continue;
-      followedSeen.add(key);
-      for (const v of ALLOWED_VIA.get(file) ?? []) if (at.startsWith(`${v.via}:`)) touchedVia.add(`${file}|${v.via}`);
-      const via = (ALLOWED_VIA.get(file) ?? []).find((v) => at.startsWith(`${v.via}:`) && v.models.includes(model));
-      if (via) {
-        usedVia.add(`${file}|${via.via}|${model}`);
-        continue;
-      }
-      if (!usedModels.has(file)) usedModels.set(file, new Set());
-      usedModels.get(file).add(model);
-      if (!allowedSet.has(model)) modelViolations.push({ file, line, model, via: at });
-    }
-    for (const node of scanNodes) {
-      const { refs, unresolved } = modelRefsIn(node, clients);
-      for (const ref of refs) report(ref);
+    for (const root of located.roots) {
+      bypassCallbacks += 1;
+      const { info, unresolved } = reachability.reach(root, bypassReachHooks);
       for (const u of unresolved) {
-        const key = `?:${u.line}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        unresolvedModels.push({ file, line: u.line, text: u.text });
+        unfollowedHandOffs.push({ file, at: siteOf(u.node), reason: u.reason });
         undecidableFiles.add(file);
+      }
+      for (const unit of info.keys()) {
+        if (helperImplementations.has(unit)) continue;
+        reachedUnits += 1;
+        const direct = unit === root && toRelPosix(unit.getSourceFile().getFilePath()) === file;
+        for (const node of reachability.ownedNodes(unit)) {
+          const access = modelAccessOf(node);
+          if (!access) continue;
+          const at = siteOf(node);
+          if (access.dynamic) {
+            unresolvedModels.push({ file, line: node.getStartLineNumber(), text: `${access.text}  (in ${at})` });
+            undecidableFiles.add(file);
+            continue;
+          }
+          const key = `${access.model}@${at}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          judgeModel(file, direct ? node.getStartLineNumber() : line, access.model, direct ? null : at, allowedSet);
+        }
       }
     }
   }
@@ -2536,9 +1947,10 @@ for (const file of sourceFiles) {
 {
   const seenParams = new Set();
   while (forwarderQueue.length > 0) {
-    const { param } = forwarderQueue.shift();
-    if (seenParams.has(param)) continue;
-    seenParams.add(param);
+    const { param, pins } = forwarderQueue.shift();
+    const seenKey = `${param.getStart()}:${param.getSourceFile().getFilePath()}|${[...pins].sort().join(",")}`;
+    if (seenParams.has(seenKey)) continue;
+    seenParams.add(seenKey);
     const fn = param.getParent();
     const index = fn.getParameters().indexOf(param);
     const nameNode = fn.getNameNode?.() ?? fn.getParent()?.getNameNode?.();
@@ -2568,9 +1980,9 @@ for (const file of sourceFiles) {
         continue;
       }
       const purpose = args[index] ? purposeOfExpression(args[index]) : null;
-      if (purpose?.forwardedParam) forwarderQueue.push({ param: purpose.forwardedParam });
+      if (purpose?.forwardedParam) forwarderQueue.push({ param: purpose.forwardedParam, pins: [...new Set([...pins, refFile])] });
       else if (!purpose) purposeViolations.push({ file: refFile, line, detail: `${nameNode.getText()} called without a BYPASS_PURPOSE.* argument` });
-      else checkPurposeMember(refFile, line, purpose.member);
+      else checkPurposeMember(refFile, line, purpose.member, pins);
     }
   }
 }
@@ -2782,21 +2194,6 @@ if (unfollowedHandOffs.length > 0) {
   }
 }
 
-if (unresolvedClients.length > 0) {
-  failed = true;
-  console.error("");
-  console.error(
-    "withBypassRls was handed a client this gate cannot name — it reduces to",
-  );
-  console.error(
-    "neither an identifier nor a member access, so the callback's model access",
-  );
-  console.error(
-    "was NOT scanned against a complete client set. Pass the client directly:",
-  );
-  console.error("");
-  for (const { file, line } of unresolvedClients) console.error(`  ${file}:${line}`);
-}
 
 if (indirectCallbacks.length > 0) {
   failed = true;
@@ -2959,5 +2356,5 @@ const scannableCount = sourceFiles.filter(
 ).length;
 console.log(
   `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files; ` +
-    `${handedOffSites} call site(s) hand the client to a callee in another module, all followed)`,
+    `${bypassCallbacks} bypass callback(s) followed through ${reachedUnits} reached function(s))`,
 );

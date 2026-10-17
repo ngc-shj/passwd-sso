@@ -127,7 +127,7 @@ describe("check-rls-nesting: baseline", () => {
   it("passes the scaffold alone, and says what it examined", () => {
     const { code, stdout } = run([]);
     expect(code).toBe(0);
-    expect(stdout).toMatch(/check-rls-nesting: OK \(\d+ files, [1-9]\d* openers, [4-9] context functions/);
+    expect(stdout).toMatch(/check-rls-nesting: OK \(\d+ files, [4-9] context functions, [1-9]\d* context calls, [1-9]\d* callbacks checked\)/);
   });
 
   it("refuses an empty tree rather than reporting OK", () => {
@@ -439,7 +439,7 @@ export async function f(args: [typeof prisma, string]) {
 const cb: any = async () => { await opener(); };
 export const f = () => withTenantRls(prisma, T, cb);`]]);
     expect(code).toBe(1);
-    expect(stderr).toContain("callback is");
+    expect(stderr).toMatch(/src\/app\/an\.ts:\d+ .* calls opener/);
   });
 });
 
@@ -537,6 +537,217 @@ interface SmClient { send(command: unknown): Promise<unknown> }
 export type Unused = SmClient;`]]);
     expect(code).toBe(1);
     expect(stderr).toContain("src/lib/key-provider/aws-sm-provider.ts::SmClient");
+  });
+});
+
+// ─── Shapes found by the round-2 review, each executed as a bypass first ────
+
+const WRAPPER = (body) => `${USE_OPENER}
+async function withVault<T>(userId: string, fn: () => Promise<T>) {
+  return withUserTenantRls(userId, async () => { ${body} });
+}
+export const f = () => withVault("u", async () => opener());`;
+
+describe("check-rls-nesting: round 2 — a wrapper parameter by any spelling", () => {
+  it.each([
+    ["called directly", "return fn();"],
+    ["aliased", "const g = fn; return g();"],
+    ["through .call", "return fn.call(null);"],
+    ["held in an object", "const o = { run: fn }; return o.run();"],
+  ])("derives the wrapper when its parameter is %s", (_label, body) => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/wr.ts", WRAPPER(body)]]);
+    expect(code).toBe(1);
+    // Reported at the wrapper's CALL SITE: its literal argument is the root.
+    expect(stderr).toMatch(/src\/app\/wr\.ts:10 +\(inside the context opened at src\/app\/wr\.ts:10\) calls opener/);
+  });
+
+  it("derives the wrapper for an any-typed callback parameter", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/wa.ts", `${USE_OPENER}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function withVault(userId: string, fn: any) {
+  return withUserTenantRls(userId, async () => fn());
+}
+export const f = () => withVault("u", async () => opener());`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("calls opener");
+  });
+});
+
+describe("check-rls-nesting: user review — a wrapper callback chosen by an expression", () => {
+  it("derives every parameter a conditional can select as a wrapper callback position", () => {
+    const { code, stderr } = run([["src/app/sel.ts", `${HEAD}
+async function withSelected(first: () => Promise<unknown>, second: () => Promise<unknown>, useFirst: boolean) {
+  return withTenantRls(prisma, T, useFirst ? first : second);
+}
+export const f = () => withSelected(async () => null, async () => resolveTeamTenantId("team"), false);`]]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/src\/app\/sel\.ts:9 .* calls resolveTeamTenantId/);
+  });
+
+  it("passes when every selectable callback is clean", () => {
+    const { code, stdout } = run([["src/app/sel2.ts", `${HEAD}
+async function withSelected(first: () => Promise<unknown>, second: () => Promise<unknown>, useFirst: boolean) {
+  return withTenantRls(prisma, T, useFirst ? first : second);
+}
+export const f = () => withSelected(async () => null, async () => 1, false);`]]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});
+
+describe("check-rls-nesting: round 2 — library-typed values are judged on the declaration", () => {
+  it("fails an own function stored behind a library function type and read back by Map.get", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/mg.ts", `${USE_OPENER}
+const registry = new Map<string, VoidFunction>([["a", () => void opener()]]);
+export const f = () => withTenantRls(prisma, T, async () => { registry.get("a")?.(); });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("function returned by a library call");
+  });
+
+  it("fails an own function reaching a forEach callback parameter through a type parameter", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/fe.ts", `${USE_OPENER}
+const list: VoidFunction[] = [() => void opener()];
+export const f = () => withTenantRls(prisma, T, async () => { list.forEach((cb) => cb()); });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("function supplied to a callback's parameter");
+  });
+});
+
+describe("check-rls-nesting: round 2 — writes the resolver must see, however spelled", () => {
+  it.each([
+    ["a member assigned after the initializer", "const ops = { run: async () => 0 };\nexport function arm() { ops.run = opener; }", "await ops.run();", /src\/app\/wt\.ts:\d+ .* calls opener/],
+    ["a destructuring write", "let fn: () => Promise<number> = async () => 0;\nexport function arm() { [fn] = [opener]; }", "await fn();", /write other than a plain assignment/],
+    ["a compound assignment", "let fn: (() => Promise<number>) | null = null;\nexport function arm() { fn ||= opener; }", "await fn?.();", /write other than a plain assignment/],
+  ])("fails %s", (_label, decl, body, expected) => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/wt.ts", `${USE_OPENER}${decl}
+export const f = () => withTenantRls(prisma, T, async () => { ${body} });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(expected);
+  });
+
+  it("passes a const object whose members are only read", () => {
+    const { code, stdout } = run([["src/app/wr2.ts", `${HEAD}
+const ops = { run: async () => 0 };
+export const f = () => withTenantRls(prisma, T, async () => ops.run());`]]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});
+
+describe("check-rls-nesting: round 2 — class construction", () => {
+  it.each([
+    ["an inherited constructor", "class Base { constructor() { void opener(); } }\nclass Child extends Base {}", "new Child();"],
+    ["super()", "class Base { constructor() { void opener(); } }\nclass Child extends Base { constructor() { super(); } }", "new Child();"],
+    ["a field initializer", "class Holder { p = opener(); }", "new Holder();"],
+  ])("fails an opener run by %s", (_label, decl, body) => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/cc.ts", `${USE_OPENER}${decl}
+export const f = () => withTenantRls(prisma, T, async () => { ${body} });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+    expect(stderr).toContain("reaches opener");
+  });
+
+  it("passes constructing a class whose base is a library class", () => {
+    const { code, stdout } = run([["src/app/ce.ts", `${HEAD}
+class AppError extends Error { constructor(m: string) { super(m); } }
+export const f = () => withTenantRls(prisma, T, async () => { throw new AppError("x"); });`]]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});
+
+describe("check-rls-nesting: round 2 — resolver refusals each name themselves", () => {
+  const SETTER = `let hook: (() => Promise<number>) | null = null;
+export function setHook(h: () => Promise<number>) { hook = h; }
+export function setHooks(...hs: Array<() => Promise<number>>) { hook = hs[0]; }
+const runHook = () => hook?.();`;
+  it.each([
+    ["a setter referenced other than by a direct call", "const s = setHook; s(opener);", "function referenced other than by a direct call"],
+    ["a spread at the setter's parameter", "setHook(...([opener] as [() => Promise<number>]));", "spread argument at the parameter's position"],
+  ])("fails %s", (_label, arm, reason) => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/rs.ts", `${USE_OPENER}${SETTER}
+export function arm() { ${arm} }
+export const f = () => withTenantRls(prisma, T, async () => { await runHook(); });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(reason);
+  });
+
+  it("fails a function assigned from a rest parameter", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/rp.ts", `${USE_OPENER}
+let hook: (() => Promise<number>) | null = null;
+export function setHooks(...hs: Array<() => Promise<number>>) { hook = hs[0]; }
+export function arm() { setHooks(opener); }
+export const f = () => withTenantRls(prisma, T, async () => { await hook?.(); });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(UNFOLLOWED);
+  });
+});
+
+describe("check-rls-nesting: round 2 — remaining invocation forms and allowlist edges", () => {
+  it("fails an opener invoked through an own setter", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/st.ts", `${USE_OPENER}
+const svc = { set run(_v: number) { void opener(); } };
+export const f = () => withTenantRls(prisma, T, async () => { svc.run = 1; });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("calls run");
+  });
+
+  it("fails an awaited object whose then is a property assignment", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/app/tp.ts", `${USE_OPENER}
+const later = { then: (ok: (v: number) => void) => { void opener().then(ok); } };
+export const f = () => withTenantRls(prisma, T, async () => { await later; });`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("calls then");
+  });
+
+  it("passes a call through a listed SDK shape declared as a type alias", () => {
+    const { code, stdout } = run([["scripts/lib/assert-bypass-rls-active.ts", `${HEAD}
+type TxProbe = { $queryRawUnsafe<R = unknown>(sql: string): Promise<R> };
+export const f = (t: TxProbe) => withTenantRls(prisma, T, async () => t.$queryRawUnsafe("SELECT 1"));`]]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+
+  it("fails the conditional opener when tx is an optional parameter of an outer function", () => {
+    const { code, stderr } = run([
+      ["src/lib/auth/policy/passkey-enforcement.ts", `${HEAD}
+export async function derivePasskeyState(p: { userId: string; tx?: unknown }) {
+  return p.tx ? true : withBypassRls(prisma, async (tx) => tx.user.count(), BYPASS_PURPOSE.AUTH_FLOW);
+}`],
+      ["src/lib/mcp/oauth-server.ts", `${HEAD}
+import { derivePasskeyState } from "@/lib/auth/policy/passkey-enforcement";
+export const g = () => withBypassRls(prisma, async (tx) => derivePasskeyState({ userId: "u", tx }), BYPASS_PURPOSE.AUTH_FLOW);
+export async function outer(tx?: unknown) {
+  return withBypassRls(prisma, async () => derivePasskeyState({ userId: "u", tx }), BYPASS_PURPOSE.AUTH_FLOW);
+}`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/src\/lib\/mcp\/oauth-server\.ts:9 .* calls derivePasskeyState/);
+  });
+
+  it("passes a base helper imported under an alias and called directly", () => {
+    const { code, stdout } = run([["src/app/al.ts", `import { prisma } from "@/lib/prisma";
+import { withTenantRls as runInTenant } from "@/lib/tenant-rls";
+export const f = () => runInTenant(prisma, "11111111-1111-4111-8111-111111111111", async () => null);`]]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});
+
+describe("check-rls-nesting: round 2 — the production boundary", () => {
+  it("fails production code that imports a listed tooling script", () => {
+    const { code, stderr } = run([
+      ["scripts/env-allowlist.ts", "export const ALLOW = [] as string[];\n"],
+      ["src/app/tool.ts", `import { ALLOW } from "../../scripts/env-allowlist";\nexport const n = ALLOW.length;\n`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("production code imports scripts/env-allowlist.ts, which is not production");
+  });
+
+  it("fails listed tooling that imports the RLS helpers", () => {
+    const { code, stderr } = run([["scripts/env-allowlist.ts", `import { withTenantRls } from "../src/lib/tenant-rls";\nexport const w = withTenantRls;\n`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("scripts/env-allowlist.ts is listed as non-production tooling but imports src/lib/tenant-rls.ts");
   });
 });
 

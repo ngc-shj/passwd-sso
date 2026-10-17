@@ -218,3 +218,92 @@ Every remedy clause below was red-proven separately on a scratchpad copy. There 
 The one vitest failure is `crypto-auth-deps-manifest` (E). It is caused by the pre-existing uncommitted `passwd-sso-cli` dependency in `package.json`. Removing only that line in an isolated copy turns it green (51/51). It is not part of this branch.
 
 Runtime cost: check-rls-nesting takes about 43 s and check-bypass-rls about 40 s on the real tree.
+
+---
+
+# Round 2
+Date: 2026-10-17
+Diff reviewed: `85bb2cda8..dd1e8ce1b` (review(1)). Ollama was unavailable, so the merge was done by hand.
+
+## Changes from Previous Round
+- Round-1 status:
+  - Resolved: F2, F3, F6, F7/F8, S1-methods, S2-methods, S3, S5, S7, S8, T1–T3.
+  - Regressed: F1 (see N1).
+  - Partial: F4/S9 (see C1), F5 (see B2), S1 (see B1).
+- New findings: 12 Major, 9 Minor. Two of the Majors were seeded by the round-1 fix itself:
+  - N1, a regression against `85bb2cda8`;
+  - P1, a widening of the purpose pin (R43).
+- Of the 28 recorded mutations, the testing expert sampled 10 and confirmed 8 of them. M4 and M6 stayed green.
+
+## Merged findings (round 2)
+- **N1 [Major, regression]** The nesting gate drops a parameter result the wrapper fixpoint did not register. These forms now pass: an alias, `fn.call`, `{ run: fn }`, `fn: any`.
+- **B1 [Major]** A client handed inside an object is lost once the container is destructured, aliased, passed on, or held in a variable.
+- **B2 [Major]** Ambient following recognises only the identifier `prisma`. Import aliases and namespaces are missed; a live case is `emergency-access-server.ts`.
+- **P1 [Major, R43]** The forwarder pass ignores the forwarder file's own ALLOWED_PURPOSES.
+- **C1 = SN6 = T5 [Major]** (three perspectives) The conditional-opener exemption accepts any enclosing parameter as `tx`, including an optional outer one.
+- **SN1 [Major, R43]** `hasLibrarySignature` reads an own function stored behind a library-declared type (`VoidFunction` via `Map.get` or a `forEach` parameter) as library code.
+- **SN2 [Major]** Writes not spelled `x = …` are invisible in both gates: member assignment on a const object, destructuring assignment.
+- **SN3 [Major]** Inherited constructors, `super()` and field initializers are not followed.
+- **SN4 [Major, R48]** The bypass gate's ambient follow skips own functions handed to library calls as values. The nesting gate rejects the same shape.
+- **T4 [Major]** The ALLOWED_VIA site clause is unpinned (mutation M4 stays green).
+- **T6 [Major]** The forwarder chain and non-direct use are unpinned (G7, G8 green).
+- **T7 [Major]** The resolver's fail-closed reasons are unpinned (G3, G4, G12, G13 green).
+- **Minor:**
+  - SN5: NON_PRODUCTION_SCRIPTS imported by production code is not detected.
+  - SN7: the oauth-server grant should be ALLOWED_VIA through passkey-enforcement.ts.
+  - SA1: an aliased helper import is a false positive.
+  - M1: the read-only claim on ALLOWED_VIA is wrong.
+  - T8: setters are untested.
+  - T9: the via entry-level stale check is unpinned.
+  - T10: `thenOf` property path, type-alias shape and the `Function` clause are unpinned.
+
+## Root-cause note
+B1, B2, SN4 and N1 are members of the class round 1 tried to close: a predicate decided by a NAME (the bypass gate's name-keyed client set, the wrapper parameter's spelling). SN2 and SN3 are the resolver's remaining surface-form predicates (R47). The class has now expanded twice. Per Step 3-8, a class whose member set expands twice is closed only by changing the mechanism, not by adding cases.
+
+## Resolution Status (round 2)
+
+Decision (user, in the conversation): change the mechanism rather than add cases.
+
+Mechanism:
+- `lib/function-resolver.mjs` gains a shared REACHABILITY engine (`createReachability`). From a callback it reaches every invocation and every function-valued reference, through the shared resolver, and fails closed on what it cannot name.
+- check-bypass-rls Check 3 no longer tracks client NAMES. In every reached function, an access whose receiver is a Prisma client BY TYPE is a model reached. The type test: the member is declared by the generated `PrismaClient`, or the value is a delegate by shape, or an `any` receiver is accessed under a model name.
+- check-rls-nesting derives wrappers from parameter hits during reach, not from spellings.
+- The name-flow machinery was deleted: clientBindingsIn, followClientInto, mergeHandOffs, modelRefsIn, calleeFunctionOf.
+
+User review, received during this round. All three fixed:
+- **U1 (critical):** a wrapper callback chosen by a conditional. Resolver results now carry a `params` SET, so every selectable parameter becomes a wrapper position. Tests: deny and allow. Mutation: P1.
+- **U2 (critical):** a named callback handed to a library (`[1].map(readSession)`). Reach follows value references, and the type-based check charges `prisma.session`. Tests: map and Promise.all. Mutation: P2.
+- **U3 (medium):** purpose and callback were taken from any argument.
+  - Purpose is now read only at withBypassRls's declared purpose position.
+  - The callback is read only at the declared callback position, both in Check 3 roots and in `callbackOf` (C2/F3).
+  - 15 fixtures that wrote the arguments in a non-real order were moved to the real order.
+  - Mutations: P3 (purpose), P4 (callback roots), P23 (`callbackOf`). P4 was first green; its test now passes the real callback by reference so a decoy literal would be chosen by a "first function" picker.
+
+| Finding | Resolution | Mutation |
+|---|---|---|
+| N1 | Wrappers derived from reach (alias, `.call`, object member, `any` all derive); 5 tests | P12 |
+| B1 / B2 / SN4 | No name is tracked; container destructure, alias, rename, prebuilt args, import alias, namespace, and value-passed functions are all charged by type; 8 tests | P2, P6 |
+| P1 | Forwarder pins travel along the chain; a pinned file's forwarder called from an unpinned file is refused | P5 |
+| C1 / SN6 / T5 | Exempt only when `tx` is the root callback's own first parameter; an outer or optional parameter is refused (test) | — |
+| SN1 | Library values judged on the UNINSTANTIATED declaration: a type parameter (`Map.get`'s `V`, `forEach`'s `T`) is ours-possible and unresolved; a function type or concrete library type (Promise `resolve`, `NodeRequire`) is library. LIBRARY_FACTORY_ALLOWLIST and `hasLibrarySignature` were removed | P10, P11 |
+| SN2 | Writes classified by the language service (`isWriteAccess`); member writes merged; Object.assign / computed-key writes and non-plain writes unresolved | P9, P9b, P22 |
+| SN3 | Classes are construction units (instance field initializers, constructor, base chain); `super()` resolves to the base | P8, P8b |
+| SN5 | Production may not import a listed tooling script, and listed tooling may not import tenant-rls / tenant-context / prisma | P14 |
+| SN7 | oauth-server's passkey reads moved to ALLOWED_VIA via passkey-enforcement.ts. The newly visible reach of emergency-access/[id]/vault (user, auditOutbox through the in-tx audit) was added as ALLOWED_VIA, not file-wide | — |
+| SA1 | Aliased helper import passes (test) | — |
+| T4 | Via grant bound to the via module (test) | P15 |
+| T6 | Forwarder chain and aliased forwarder (tests) | P17, P18 |
+| T7 | Resolver refusals name themselves: compound/destructuring writes, non-direct setter, spread, rest (tests) | P22 |
+| T8 | Setter invocation (test) | P19 |
+| T9 | Via entry-level stale (test) | P16 |
+| T10 | `then` as a property assignment and type-alias SDK shape (tests). The `Function` clause was removed with `hasLibrarySignature` | P20, P21 |
+| M1 | ALLOWED_VIA comment corrected: the grant is site-based, not read-only | — |
+
+Removed as dead after mutation P13 stayed green: the optional/initializer clause of the conditional-opener check. withBypassRls always passes its client, so the root callback's first parameter is always defined.
+
+Mutation runs: 24 single-clause mutations (P1–P23, plus P8b/P9b). Each reddened its own test after the two test fixes above.
+
+Real-tree runs:
+- check-rls-nesting: OK — 1,046 files, 6 context functions, 594 callbacks, about 41 s.
+- check-bypass-rls: OK — 214 bypass callbacks followed through 958 reached functions, about 23 s. The only newly visible reach was emergency-access/[id]/vault, granted via its modules.
+

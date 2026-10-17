@@ -12,9 +12,10 @@
  * (RT7). The `predicate resolution` block is the newest set — one case per
  * predicate that used to decide a code question from raw text or from a name.
  *
- * Fixtures below write the helper's arguments in whichever order reads clearly;
- * the real signature is `withBypassRls(prisma, fn, purpose)`, and the gate finds
- * the callback by kind rather than by position, so both orders exercise it.
+ * Fixtures write the helper's arguments in the real order,
+ * `withBypassRls(prisma, fn, purpose)`: the gate reads the callback and the
+ * purpose at their DECLARED positions, so a function or a BYPASS_PURPOSE.X
+ * placed anywhere else is not what it checks.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -83,6 +84,11 @@ const REAL_TENANT_CONTEXT = readFileSync(join(REPO_ROOT, "src/lib/tenant-context
 // so \`user.email.toLowerCase()\` and \`memberships.filter(...)\` in the real
 // tenant-context.ts resolve to library methods — the cross-module pass follows
 // the ambient client into those functions and must be able to name each call.
+// One getter per schema model, as the generated client declares them: Check 3
+// recognises a model access by the PrismaClient member it resolves to.
+const MODEL_GETTERS = [...readFileSync(join(REPO_ROOT, "prisma/schema.prisma"), "utf8").matchAll(/^model (\w+) \{/gm)]
+  .map((m) => `    get ${m[1][0].toLowerCase()}${m[1].slice(1)}(): PrismaModelDelegate;`)
+  .join("\n");
 const PRISMA_CLIENT_STUB = `declare module "@prisma/client" {
   interface Row { [field: string]: Field }
   type Field = Row & string & Row[];
@@ -98,17 +104,29 @@ const PRISMA_CLIENT_STUB = `declare module "@prisma/client" {
     deleteMany(...args: unknown[]): Promise<{ count: number }>;
     upsert(...args: unknown[]): Promise<Row>;
     count(...args: unknown[]): Promise<number>;
+    createMany(...args: unknown[]): Promise<{ count: number }>;
+    aggregate(...args: unknown[]): Promise<Row>;
+    groupBy(...args: unknown[]): Promise<Row[]>;
   }
   export interface PrismaClientLike {
     [key: string]: PrismaModelDelegate;
   }
   export class PrismaClient implements PrismaClientLike {
     [key: string]: PrismaModelDelegate;
+${MODEL_GETTERS}
+    $transaction<T>(fn: (tx: PrismaClient) => Promise<T>): Promise<T>;
+    $transaction<T>(batch: Promise<T>[]): Promise<T[]>;
+    $executeRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<number>;
+    $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): Promise<T>;
+    $executeRawUnsafe(query: string, ...values: unknown[]): Promise<number>;
+    $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
   }
   export namespace Prisma {
-    type TransactionClient = PrismaClientLike;
+    type TransactionClient = PrismaClient;
   }
 }
+// Fixtures use \`prisma\` without importing it; typed so its accesses resolve.
+declare const prisma: import("@prisma/client").PrismaClient;
 `;
 const FIXTURE_TSCONFIG = JSON.stringify({
   compilerOptions: {
@@ -272,7 +290,7 @@ const F3_UNUSED_TX_ON_ALLOWLISTED_FILE = `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 async function h() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => drain());
+  return withBypassRls(prisma, async (tx) => drain(), BYPASS_PURPOSE.AUDIT);
 }`;
 
 // The sanctioned shape: tenant-context.ts is in F3_UNUSED_TX_ALLOWLIST,
@@ -282,24 +300,24 @@ async function h() {
 const TENANT_CONTEXT_ALLOWED = withRealTenantContextHelperDeclarations(`
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function withTenantContext(tenantId) {
-  return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) => {
+  return withBypassRls(prisma, async (tx) => {
     return tx.tenantMember.findFirst({ where: { tenantId } });
-  });
+  }, BYPASS_PURPOSE.CTX);
 }
 export async function withTeamContext(tenantId, fn) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) => fn(tenantId));
+  return withBypassRls(prisma, async (tx) => fn(tenantId), BYPASS_PURPOSE.CTX);
 }
 // Mirrors resolveTeamTenantId. Present because a fixture at an allowlisted path
 // must reach every model that path permits — see "allowlist over-breadth" below.
 export async function resolveTeamTenantId(teamId) {
-  return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) =>
-    tx.team.findUnique({ where: { id: teamId } }));
+  return withBypassRls(prisma, async (tx) =>
+    tx.team.findUnique({ where: { id: teamId } }), BYPASS_PURPOSE.CTX);
 }
 // Mirrors existingUserIdsByEmail, for the same reason.
 export async function existingUserIdsByEmail(emails) {
-  return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) =>
-    tx.user.findMany({ where: { email: { in: emails } }, select: { id: true } }));
+  return withBypassRls(prisma, async (tx) =>
+    tx.user.findMany({ where: { email: { in: emails } }, select: { id: true } }), BYPASS_PURPOSE.CTX);
 }`);
 
 // A brand-new (non-allowlisted) file that suppresses an unused tx — trips BOTH
@@ -309,7 +327,7 @@ const F3_UNUSED_TX_ON_NEW_FILE = `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 async function h() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  return withBypassRls(prisma, BYPASS_PURPOSE.X, async (tx) => doThing());
+  return withBypassRls(prisma, async (tx) => doThing(), BYPASS_PURPOSE.X);
 }`;
 
 describe("check-bypass-rls F3 unused-tx anti-drift", () => {
@@ -353,10 +371,10 @@ describe("call-extent scanning", () => {
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function drain() {
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+  return withBypassRls(prisma, async (tx) => {
 ${filler}
       return tx.tenantMember.findFirst({ where: { id: "x" } });
-  });
+  }, BYPASS_PURPOSE.AUDIT);
 }`);
     expect(code).toBe(1);
     expect(stderr).toContain("prisma.tenantMember");
@@ -371,10 +389,10 @@ ${filler}
     const { code } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function drain() {
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+  return withBypassRls(prisma, async (tx) => {
 ${filler}
       return tx.auditOutbox.findMany({ where: { status: "PENDING" } });
-  });
+  }, BYPASS_PURPOSE.AUDIT);
 }
 export async function unrelated() {
   return prisma.user.findFirst({ where: { id: "x" } });
@@ -390,9 +408,9 @@ export async function unrelated() {
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function drain() {
-  log("fallback path // see runbook"); return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+  log("fallback path // see runbook"); return withBypassRls(prisma, async (tx) => {
       return tx.tenantMember.findFirst({ where: { id: "x" } });
-  });
+  }, BYPASS_PURPOSE.AUDIT);
 }`);
     expect(code).toBe(1);
     expect(stderr).toContain("prisma.tenantMember");
@@ -405,7 +423,7 @@ export async function drain() {
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 // Emitting here would run logAuditAsync -> withBypassRls (nested), an R9 shape.
 export async function drain() {
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => tx.auditOutbox.findMany());
+  return withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT);
 }`);
     expect(code).toBe(0);
     expect(stderr).not.toContain("could not be parsed");
@@ -416,7 +434,7 @@ export async function drain() {
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 const HELP = "see withBypassRls(prisma, purpose, cb) for the pattern";
 export async function drain() {
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => tx.auditOutbox.findMany());
+  return withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT);
 }`);
     expect(code).toBe(0);
     expect(stderr).not.toContain("could not be parsed");
@@ -429,11 +447,11 @@ export async function drain() {
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function drain(id) {
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+  return withBypassRls(prisma, async (tx) => {
       log("closing paren ) inside a string");
       log(\`key:\${hash(id)}\`);
       return tx.tenantMember.findFirst({ where: { id } });
-  });
+  }, BYPASS_PURPOSE.AUDIT);
 }`);
     expect(code).toBe(1);
     expect(stderr).toContain("prisma.tenantMember");
@@ -448,9 +466,9 @@ export async function drain(id) {
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 const GLOB_RE = /[/*]/;
 export async function drain() {
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+  return withBypassRls(prisma, async (tx) => {
       return tx.tenantMember.findFirst({ where: { id: "x" } });
-  });
+  }, BYPASS_PURPOSE.AUDIT);
 }`);
     expect(code).toBe(1);
     expect(stderr).toContain("prisma.tenantMember");
@@ -462,10 +480,10 @@ export async function drain() {
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function drain(id) {
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+  return withBypassRls(prisma, async (tx) => {
       log(\`members=\${await tx.tenantMember.count()}\`);
       return tx.auditOutbox.findMany();
-  });
+  }, BYPASS_PURPOSE.AUDIT);
 }`);
     expect(code).toBe(1);
     expect(stderr).toContain("prisma.tenantMember");
@@ -480,7 +498,7 @@ export async function drain(id) {
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function drain() {
-  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+  return withBypassRls(prisma, async (tx) => {
       return tx.tenantMember.findFirst({ where: { id: "x" } });
 `);
     expect(code).toBe(1);
@@ -1585,20 +1603,20 @@ export const TABLE = {
     expect(followed.stderr).not.toContain("prisma.auditOutbox");
   });
 
-  it("refuses a client bound to `this` or placed after a spread", () => {
-    for (const [body, reason] of [
-      ["async (tx) => query.call(tx)", "client bound to `this`"],
-      ["async (tx) => query(...rest, tx)", "spread argument before the client"],
-    ]) {
+  it("judges what runs, however the client is bound: `.call`'s this, after a spread", () => {
+    // Reach is by what runs and models by type, so a client bound to `this` or
+    // placed after a spread is no blind spot: the function runs, and the model
+    // it reads is charged.
+    for (const body of ["async (tx) => query.call(tx)", "async (tx) => query(...rest, tx)"]) {
       const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 const rest: unknown[] = [];
-async function query(db) { return db.auditOutbox.findMany(); }
+async function query(db) { return db.tenantMember.findMany(); }
 export async function drain() {
   return withBypassRls(prisma, ${body}, BYPASS_PURPOSE.AUDIT);
 }`);
       expect(code).toBe(1);
-      expect(stderr).toContain(reason);
+      expect(stderr).toContain("prisma.tenantMember  (reached in src/lib/audit/audit-outbox.ts:4)");
     }
   });
 
@@ -1708,17 +1726,17 @@ export async function drain(key: string) {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
-  it("reports a client argument it cannot name instead of scanning without it", () => {
-    // `getClient()` reduces to no name, so the client set is incomplete and any
-    // access through the returned value is invisible. Scanning anyway would
-    // spell "could not read this callback" as "no violations".
+  it("judges the callback's models by type whatever the client argument is", () => {
+    // `getClient()` reduces to no name. No name is tracked any more: the
+    // callback's own parameter is typed by withBypassRls, so its models read.
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+declare function getClient(): import("@prisma/client").PrismaClient;
 export async function drain() {
-  return withBypassRls(getClient(), async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT);
+  return withBypassRls(getClient(), async (tx) => tx.tenantMember.findMany(), BYPASS_PURPOSE.AUDIT);
 }`);
     expect(code).toBe(1);
-    expect(stderr).toContain("cannot name");
+    expect(stderr).toContain("prisma.tenantMember");
   });
 
   it("follows a client supplied as a parameter default", () => {
@@ -1985,7 +2003,7 @@ export async function GET() {
       ["src/lib/elsewhere.ts", `export async function resolveSomething(db, id) { return db.teamPolicy.findMany({}); }`],
     ]);
     expect(code).toBe(0);
-    expect(stdout).toMatch(/[1-9]\d* call site\(s\) hand the client to a callee in another module, all followed/);
+    expect(stdout).toMatch(/[1-9]\d* bypass callback\(s\) followed through [1-9]\d* reached function\(s\)/);
   });
 
   it("does not fire on a file whose bypass reaches no model at all", () => {
@@ -2247,16 +2265,21 @@ export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbo
   });
 
   it.each([
-    ["a constructor", "new Repo(tx)", "client handed to a constructor"],
-    ["an array", "takeAll([tx])", "client inside an array argument"],
-    ["a nested object", "takeAll({ deps: { tx } })", "client nested inside an object argument"],
-  ])("refuses a client handed to %s", (_label, expr, reason) => {
+    ["a constructor", "new Repo(tx).list()"],
+    ["an array", "takeAll([tx])"],
+    ["a nested object", "takeAll({ deps: { tx } })"],
+  ])("follows a client handed to %s into what it reaches", (_label, expr) => {
+    // Formerly refused because a name-keyed client set could not bind them.
+    // Reach and types follow them: the model read inside is charged.
     const { code, stderr } = run(OUTBOX, `${HEAD_RLS}
-class Repo { constructor(private readonly db) {} }
-function takeAll(_x: unknown) { return 0; }
+import type { Prisma } from "@prisma/client";
+class Repo { constructor(private readonly db: Prisma.TransactionClient) {} list() { return this.db.tenantMember.count(); } }
+function takeAll(x: { deps: { tx: Prisma.TransactionClient } } | Prisma.TransactionClient[]) {
+  return Array.isArray(x) ? x[0].tenantMember.count() : x.deps.tx.tenantMember.count();
+}
 export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); return ${expr}; }, BYPASS_PURPOSE.AUDIT_WRITE);`);
     expect(code).toBe(1);
-    expect(stderr).toContain(reason);
+    expect(stderr).toContain("prisma.tenantMember");
   });
 
   it("follows a subclass override reached through a base-typed receiver", () => {
@@ -2372,6 +2395,201 @@ export const f = () => withBypassRls(prisma, async (tx) => tx.user.count(), BYPA
       expect(stdout).toContain("check-bypass-rls: OK");
     },
   );
+});
+
+// ─── Round 2 / user review: shapes a name-keyed client set missed ───────────
+//
+// Check 3 now reaches what runs and reads models by type, so none of these
+// depend on how the client is spelled. Each was executed as a bypass of the
+// previous mechanism first.
+
+describe("round 2: any spelling of the client is charged by type", () => {
+  it.each([
+    ["the container is destructured", "async function helper(p: Box) { const { db } = p; return db.tenantMember.count(); }", "helper({ db: tx })"],
+    ["the container is aliased", "async function helper(p: Box) { const q = p; return q.db.tenantMember.count(); }", "helper({ db: tx })"],
+    ["the container is passed on under another name", "async function inner(q: Box) { return q.db.tenantMember.count(); }\nasync function helper(p: Box) { return inner(p); }", "helper({ db: tx })"],
+    ["the object is built first", "async function helper(p: Box) { return p.db.tenantMember.count(); }", "(() => { const args = { db: tx }; return helper(args); })()"],
+  ])("charges a model when %s", (_label, decls, call) => {
+    const { code, stderr } = run(OUTBOX, `${HEAD_RLS}import type { Prisma } from "@prisma/client";
+type Box = { db: Prisma.TransactionClient };
+${decls}
+export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); return ${call}; }, BYPASS_PURPOSE.AUDIT_WRITE);`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it.each([
+    ["an import alias", 'import { prisma as db } from "@/lib/prisma";', "db.session.count()"],
+    ["a namespace import", 'import * as P from "@/lib/prisma";', "P.prisma.session.count()"],
+  ])("charges the ambient client reached through %s", (_label, imp, use) => {
+    const { code, stderr } = runMulti([
+      ["src/lib/zz/amb2.ts", `${imp}\nexport async function readIt() { return ${use}; }`],
+      [OUTBOX, `${HEAD_RLS}import { readIt } from "@/lib/zz/amb2";
+export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); return readIt(); }, BYPASS_PURPOSE.AUDIT_WRITE);`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.session  (reached in src/lib/zz/amb2.ts:2)");
+  });
+
+  it.each([
+    ["Array.prototype.map", "return [1].map(readSession);"],
+    ["Promise.all over a mapped array", "return Promise.all(['a'].map(readSession));"],
+  ])("charges an own function handed to %s as a value", (_label, body) => {
+    const { code, stderr } = runMulti([
+      ["src/lib/zz/rs.ts", `import { prisma } from "@/lib/prisma";\nexport const readSession = () => prisma.session.count();`],
+      [OUTBOX, `${HEAD_RLS}import { readSession } from "@/lib/zz/rs";
+export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); ${body} }, BYPASS_PURPOSE.AUDIT_WRITE);`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.session  (reached in src/lib/zz/rs.ts:2)");
+  });
+
+  it("charges a model a member written after its initializer reaches", () => {
+    const { code, stderr } = runMulti([
+      ["src/lib/zz/ops.ts", `import type { Prisma } from "@prisma/client";
+export const ops = { run: async (t: Prisma.TransactionClient) => t.auditOutbox.count() };
+export function arm() { ops.run = async (t: Prisma.TransactionClient) => t.user.deleteMany({}); }`],
+      [OUTBOX, `${HEAD_RLS}import { ops } from "@/lib/zz/ops";
+export const f = () => withBypassRls(prisma, async (tx) => ops.run(tx), BYPASS_PURPOSE.AUDIT_WRITE);`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.user  (reached in src/lib/zz/ops.ts:3)");
+  });
+
+  it("charges a model an inherited constructor reaches through the ambient client", () => {
+    const { code, stderr } = runMulti([
+      ["src/lib/zz/base.ts", `import { prisma } from "@/lib/prisma";
+export class Base { constructor() { void prisma.session.count(); } }
+export class Child extends Base {}`],
+      [OUTBOX, `${HEAD_RLS}import { Child } from "@/lib/zz/base";
+export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); new Child(); }, BYPASS_PURPOSE.AUDIT_WRITE);`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.session  (reached in src/lib/zz/base.ts:2)");
+  });
+});
+
+describe("round 2: callback and purpose are read at their declared positions", () => {
+  it("refuses a registered purpose placed after the purpose position", () => {
+    const { code, stderr } = run(OUTBOX, `${HEAD_RLS}
+export const f = () => withBypassRls(
+  prisma,
+  async (tx) => tx.auditOutbox.count(),
+  "not_a_registered_purpose" as never,
+  BYPASS_PURPOSE.AUDIT_WRITE as never,
+);`);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/src\/lib\/audit\/audit-outbox\.ts:3  no BYPASS_PURPOSE\.\* argument/);
+  });
+
+  it("does not take a function outside the callback position as the callback", () => {
+    // The real callback reaches tenantMember; a decoy function after the
+    // purpose must not stand in for it.
+    // The real callback is passed by reference and the decoy is a literal, so
+    // "the first function-looking argument" would pick the decoy.
+    const { code, stderr } = run(OUTBOX, `${HEAD_RLS}
+import type { Prisma } from "@prisma/client";
+const cb = async (tx: Prisma.TransactionClient) => tx.tenantMember.count();
+export const f = () => withBypassRls(
+  prisma,
+  cb,
+  BYPASS_PURPOSE.AUDIT_WRITE,
+  (async (tx: Prisma.TransactionClient) => tx.auditOutbox.count()) as never,
+);`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+});
+
+describe("round 2: the tx-less check reads the callback at its declared position", () => {
+  it("refuses a tx-less callback passed by reference even when a decoy literal follows", () => {
+    const { code, stderr } = run(OUTBOX, `${HEAD_RLS}
+import type { Prisma } from "@prisma/client";
+const cb = async () => prisma.auditOutbox.count();
+export const f = () => withBypassRls(
+  prisma,
+  cb,
+  BYPASS_PURPOSE.AUDIT_WRITE,
+  (async (tx: Prisma.TransactionClient) => tx.auditOutbox.count()) as never,
+);`);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/src\/lib\/audit\/audit-outbox\.ts:5/);
+    expect(stderr).toContain("tx");
+  });
+});
+
+describe("round 2: purpose pins hold across forwarders", () => {
+  const FORWARDER = `
+export async function fwd(p: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE]) {
+  return withBypassRls(prisma, async (tx) => tx.tenant.count(), p);
+}`;
+  it("holds a pinned file's own forwarder to its pin when called from an unpinned file", () => {
+    const { code, stderr } = runMulti([
+      [TENANT_DOMAIN, tenantDomainSource(FORWARDER)],
+      ["src/app/caller.ts", `import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { fwd } from "../../scripts/tenant-domain";
+export const c = () => fwd(BYPASS_PURPOSE.AUTH_FLOW);`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("BYPASS_PURPOSE.AUTH_FLOW is not in ALLOWED_PURPOSES (SYSTEM_MAINTENANCE) (forwarded into scripts/tenant-domain.ts)");
+  });
+
+  it("holds a chain of forwarders to the pin, and passes the allowed member through it", () => {
+    const chain = (member) => tenantDomainSource(`${FORWARDER}
+export async function outer(q: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE]) { return fwd(q); }
+export const c = () => outer(BYPASS_PURPOSE.${member});`);
+    const denied = run(TENANT_DOMAIN, chain("CROSS_TENANT_LOOKUP"));
+    expect(denied.code).toBe(1);
+    expect(denied.stderr).toContain("BYPASS_PURPOSE.CROSS_TENANT_LOOKUP is not in ALLOWED_PURPOSES (SYSTEM_MAINTENANCE)");
+    expect(run(TENANT_DOMAIN, chain("SYSTEM_MAINTENANCE")).code).toBe(0);
+  });
+
+  it("refuses a forwarder reached through an alias", () => {
+    const { code, stderr } = run(TENANT_DOMAIN, tenantDomainSource(`${FORWARDER}
+const alias = fwd;
+export const c = () => alias(BYPASS_PURPOSE.SYSTEM_MAINTENANCE);`));
+    expect(code).toBe(1);
+    expect(stderr).toContain("fwd forwards a bypass purpose and is used other than by a direct call");
+  });
+});
+
+describe("round 2: via grants are bound to the via module", () => {
+  const REALIGN = "src/lib/tenant/tenant-realignment.ts";
+  const stranded = () => {
+    const list = readFileSync(CHECKER, "utf8").match(/const STRANDED_ROW_MODELS = \[([^\]]*)\]/);
+    return [...list[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
+  };
+  const strandedModule = ["src/lib/tenant/stranded-rows.ts", `import type { Prisma } from "@prisma/client";
+export async function countStrandedRows(tx: Prisma.TransactionClient) {
+${stranded().map((m) => `  await tx.${m}.count();`).join("\n")}
+}`];
+  const realign = (extra, imports = "") => [REALIGN, `${HEAD_RLS}import { countStrandedRows } from "@/lib/tenant/stranded-rows";${imports}
+export const f = () => withBypassRls(prisma, async (tx) => {
+  await tx.tenantMember.count(); await tx.user.count(); await tx.auditOutbox.count();
+  await countStrandedRows(tx);${extra}
+}, BYPASS_PURPOSE.SYSTEM_MAINTENANCE);`];
+
+  it("refuses a stranded-row model reached through a module other than the via module", () => {
+    const { code, stderr } = runMulti([
+      strandedModule,
+      ["src/lib/zz/other.ts", `import type { Prisma } from "@prisma/client";\nexport const wipe = (tx: Prisma.TransactionClient) => tx.vaultKey.deleteMany({});`],
+      realign("\n  await wipe(tx);", '\nimport { wipe } from "@/lib/zz/other";'),
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.vaultKey  (reached in src/lib/zz/other.ts:2)");
+  });
+
+  it("refuses a via grant whose module the file's reach never enters", () => {
+    const { code, stderr } = runMulti([
+      strandedModule,
+      [REALIGN, `${HEAD_RLS}
+export const f = () => withBypassRls(prisma, async (tx) => {
+  await tx.tenantMember.count(); await tx.user.count(); await tx.auditOutbox.count();
+}, BYPASS_PURPOSE.SYSTEM_MAINTENANCE);`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("* (via src/lib/tenant/stranded-rows.ts: never reached)");
+  });
 });
 
 describe("a helper reference the gate cannot follow as a direct call is refused (audit-tenant-adjudicator round 13)", () => {
