@@ -503,6 +503,7 @@ docs/                     # ドキュメント（アーキテクチャ、セキ�
 | コマンド | 説明 |
 | --- | --- |
 | `npm run check:bypass-rls` | クエリ内の RLS バイパス検出 |
+| `npm run check:rls-nesting` | RLS コンテキスト内での別コンテキスト開始の検出 |
 | `npm run check:crypto-domains` | 暗号ドメイン分離の検証 |
 | `npm run licenses:check` | アプリ依存のライセンスチェック |
 | `npm run licenses:check:strict` | ライセンスチェック（strict / CI用） |

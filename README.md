@@ -528,6 +528,7 @@ docs/                     # Documentation (architecture, security, operations, s
 | Command | Description |
 | --- | --- |
 | `npm run check:bypass-rls` | Detect RLS bypass in queries |
+| `npm run check:rls-nesting` | Detect an RLS context opened inside another |
 | `npm run check:crypto-domains` | Validate crypto domain separation |
 | `npm run licenses:check` | Check app dependency licenses |
 | `npm run licenses:check:strict` | Strict license check (CI) |
