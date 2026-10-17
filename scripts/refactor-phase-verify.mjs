@@ -142,7 +142,6 @@ if (!skipMergeQueueGuards && !checkParallelRefactorBranches()) {
 // Script definitions
 /** @type {Array<{ label: string; cmd: string[] }>} */
 const scripts = [
-  { label: "check-team-auth-rls",                cmd: ["node", "scripts/checks/check-team-auth-rls.mjs"] },
   { label: "check-bypass-rls",                   cmd: ["node", "scripts/checks/check-bypass-rls.mjs"] },
   { label: "check-crypto-domains",               cmd: ["node", "scripts/checks/check-crypto-domains.mjs"] },
   { label: "check-migration-drift",              cmd: ["node", "scripts/checks/check-migration-drift.mjs"] },

@@ -411,7 +411,6 @@ fi
 # paths — see "Heavy web steps" below.
 queue_step "Static: env drift check"  npm run check:env-docs
 queue_step "Static: security-matrices drift check" npm run check:security-matrices
-queue_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
 queue_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
 # Complements bypass-rls, which is an allowlist over withBypassRls USAGE and so
 # cannot report a MISSING RLS context. This one does.

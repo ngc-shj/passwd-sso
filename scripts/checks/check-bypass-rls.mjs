@@ -48,10 +48,10 @@
  * this repo's module setting (TS1202). `import wb = rls.withBypassRls` is a
  * reference like any other (rounds 14 and 15).
  *
- *   - Check 2 (BYPASS_PURPOSE) is FILE-scoped, not call-scoped: one
- *     `BYPASS_PURPOSE.X` anywhere satisfies it for every call in the file, and
- *     its receiver test is name equality, so an aliased import is a false
- *     positive. Pre-existing granularity, unchanged by the AST move.
+ *   - Check 2 (BYPASS_PURPOSE) is call-scoped: each `withBypassRls` call must
+ *     pass a `BYPASS_PURPOSE.X` argument, and a file in ALLOWED_PURPOSES may
+ *     pass only the members listed there. Its receiver test is name equality,
+ *     so an aliased import is a false positive.
  *   - A re-export or an `export *` barrel, renamed or not; a load whose
  *     specifier is not a literal; a quoted or computed destructuring key; and
  *     a helper-named member read off an object this file cannot prove to be
@@ -74,39 +74,24 @@
  *     read, a specifier typed plain `string` with no literal reduction, and
  *     one residual UNVERIFIED case — an ambient `.d.ts` declaration that
  *     types a value as the helper module.
- *   - The scan root is `src/` only. `scripts/tenant-domain.ts` and
- *     `scripts/manual-tests/*.ts` call these helpers and are examined by nothing.
+ *   - The scan root is `src/` plus the files in EXTRA_SCAN_FILES
+ *     (`scripts/tenant-domain.ts`). `scripts/manual-tests/*.ts` call these
+ *     helpers and are examined by nothing.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
  *   - A client returned by a call is not followed: `const db = wrap(tx)`.
  *   - The client's propagation into a callee is followed only where the tree
- *     proves the mapping. Where it cannot, the call is SKIPPED, not reported —
- *     which is this gate's remaining fail-open class, and it is wider than
- *     "the callee is imported":
- *       · an imported callee — resolving it needs a Program. The count is
- *         MEASURED and printed on every run rather than stated here: the
- *         number this line used to carry was frozen prose about a moving
- *         subject, and it is the same count the over-breadth check below
- *         uses to decide which files it must not judge.
- *       · `this` — `query.call(tx)` where the body uses `this.model`. Binding it
- *         would mean adding `this` to a client set that is keyed by NAME with no
- *         per-function scope, so every `this.x` in every analysed function would
- *         read as a model access. The flat client set is the real limit here.
- *       · a spread before the client (`query(...rest, tx)`) — the argument's
- *         real position depends on `rest.length`, so the syntactic index binds
- *         the wrong parameter.
- *       · a receiver whose object this file cannot prove — `const helpers =
- *         actual`, or a `let` reassigned after its initializer. The binding is
- *         chosen first and then checked, so an unprovable one yields null
- *         rather than falling back to an outer declaration and analysing the
- *         wrong object.
- *     Some of these resolve a callee and then map it wrongly — `this` and the
- *     spread, where the function is known and the binding is not. Others are
- *     never resolved at all: an imported callee, and an unprovable receiver,
- *     which yields null by design. So a fail-closed rule keyed on either half
- *     alone leaves the other open. Closing the class means reporting any client
- *     propagation whose callee, argument position, `this` and spread mapping
- *     cannot ALL be proven.
+ *     proves the mapping. A callee in ANOTHER module is resolved through the
+ *     Program and followed (mergeHandOffs): an import, an injected interface
+ *     member (every implementation), a non-literal index into a const object
+ *     table (every member). A hand-off the Program cannot map to one parameter
+ *     of a function body FAILS the run (unfollowedHandOffs). The same report
+ *     covers a callee this file DOES resolve but cannot bind: the client passed
+ *     as `.call`'s `this` (the flat, name-keyed client set cannot bind `this`
+ *     per function), or a spread before the client (`query(...rest, tx)`,
+ *     whose real position depends on `rest.length`). A receiver this file
+ *     cannot prove (`const helpers = actual`, a reassigned `let`) yields null
+ *     locally and goes to the Program like an import.
  *
  *     Everything else decidable from the tree IS followed — see
  *     clientBindingsIn: the helper's own first argument, aliases and their
@@ -136,6 +121,19 @@ import {
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, extname, dirname, relative, resolve, sep } from "node:path";
 
+// The models `countStrandedRows` counts — the keys of STRANDED_COUNTERS in
+// src/lib/tenant/stranded-rows.ts. A realignment reaches every one of them
+// (read-only counts) under its caller's bypass. Kept in step by this gate
+// itself: a counter added there is reported as a model not on the allowlist,
+// one removed as a permission never reached.
+const STRANDED_ROW_MODELS = [
+  "account", "apiKey", "attachment", "delegationSession", "emergencyAccessGrant",
+  "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken",
+  "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification",
+  "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey",
+  "teamPasswordFavorite", "vaultKey", "webAuthnCredential",
+];
+
 // Per-file allowlist: file path → allowed Prisma model names.
 // "*" means any model is allowed (use sparingly, only for definitions or
 // complex transactional code that touches many models by design).
@@ -152,13 +150,15 @@ const ALLOWED_USAGE = new Map([
   // the owning column files under another tenant. Re-reads the membership it
   // follows — only while still ACTIVE in the tenant named — then moves the column
   // through `realignOwningTenantColumn` and records both sides.
-  ["src/lib/tenant/tenant-realignment.ts", ["tenantMember"]],
-  ["src/lib/auth/session/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
+  // Realignment: the membership read, then realignToMembershipInTxWith's
+  // owning-column move (user), stranded-row counts and the in-tx audit enqueue.
+  ["src/lib/tenant/tenant-realignment.ts", ["tenantMember", "user", "auditOutbox", ...STRANDED_ROW_MODELS]],
+  ["src/lib/auth/session/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember", "tenantClaim"]],
   // The Web-session cap (both sign-in creators route here): the tenant's
   // maxConcurrentSessions, then evict + create sessions under the per-user lock.
   ["src/lib/auth/session/session-concurrency.ts", ["session", "tenant"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
-  ["src/lib/audit/audit.ts", ["team", "user", "auditLog"]],
+  ["src/lib/audit/audit.ts", ["team", "user"]],
   ["src/lib/audit/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/audit/audit-user-lookup.ts", ["user"]],
   ["src/lib/auth/tokens/scim-token.ts", ["scimToken"]],
@@ -180,7 +180,7 @@ const ALLOWED_USAGE = new Map([
   // prior allowlist entry has been removed.
   ["src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts", ["passwordShare"]],
   ["src/app/api/maintenance/purge-history/route.ts", ["tenant", "passwordEntryHistory"]],
-  ["src/app/api/teams/route.ts", ["teamMember"]],
+  ["src/app/api/teams/route.ts", ["teamMember", "tenantMember"]],
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
   // Team key distribution: guest members require cross-tenant public-key lookup
   ["src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts", ["user"]],
@@ -206,7 +206,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],
   ["src/lib/auth/access/tenant-auth.ts", ["tenantMember"]],
   // Admin console: cross-tenant team membership query for scope selector
-  ["src/lib/auth/access/team-auth.ts", ["teamMember"]],
+  ["src/lib/auth/access/team-auth.ts", ["teamMember", "tenantMember"]],
   ["src/lib/vault/vault-reset.ts", ["*"]], // vault wipe: deletes across many tables in $transaction
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
   ["src/lib/auth/tokens/api-key.ts", ["apiKey", "tenantMember"]],
@@ -246,6 +246,14 @@ const ALLOWED_USAGE = new Map([
     "tenantWebhook", "teamWebhook",
   ]],
   ["src/app/api/tenant/policy/route.ts", ["tenant", "teamPolicy"]],
+  // Operator CLI (SSO tenant-claim registry, lockout recovery, owning-column
+  // realignment). Runs out of band with MIGRATION_DATABASE_URL and must read and
+  // repair rows across every tenant, which is the bypass itself. Its purpose is
+  // pinned to SYSTEM_MAINTENANCE by ALLOWED_PURPOSES below.
+  ["scripts/tenant-domain.ts", [
+    "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember", "user",
+    "auditOutbox", ...STRANDED_ROW_MODELS,
+  ]],
   ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],
   ["src/lib/team/team-policy.ts", ["tenant"]],
   // Team member display: cross-tenant user + home-tenant name hydration for guest members
@@ -410,6 +418,45 @@ const INDIRECT_CALLBACK_ALLOWLIST = new Set([
   "src/app/api/vault/unlock/data/route.ts",
 ]);
 
+// Per-file restriction on WHICH purpose a bypass may declare. A file listed here
+// may pass only these BYPASS_PURPOSE members; a file not listed may pass any.
+const ALLOWED_PURPOSES = new Map([
+  ["scripts/tenant-domain.ts", ["SYSTEM_MAINTENANCE"]],
+]);
+
+const PARAMETER_OWNER_KINDS = new Set([
+  ...FN_KINDS,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.Constructor,
+]);
+
+/**
+ * True when `arg` is an identifier naming a parameter of the nearest enclosing
+ * function that declares one by that name, and that parameter's type annotation
+ * is written in terms of BYPASS_PURPOSE. Nearest-first, so an outer parameter
+ * shadowed by an inner one is not mistaken for it.
+ */
+function isForwardedPurposeParameter(arg, call) {
+  if (arg.getKind() !== SyntaxKind.Identifier) return false;
+  const name = arg.getText();
+  for (const fn of call.getAncestors()) {
+    if (!PARAMETER_OWNER_KINDS.has(fn.getKind())) continue;
+    const param = fn.getParameters().find((p) => p.getName() === name);
+    if (!param) continue;
+    return /\bBYPASS_PURPOSE\b/.test(param.getTypeNode()?.getText() ?? "");
+  }
+  return false;
+}
+
+// Files outside `src/` that call the helpers and are scanned as if they were in
+// it. Listed one by one rather than widening the root to `scripts/`: the rest of
+// that tree is CI tooling and fixtures, and each operator script that opens a
+// bypass deserves its own ALLOWED_USAGE review. A listed file that is absent is
+// skipped like an absent ALLOWED_USAGE entry (the self-test runs on fixture
+// trees); the self-test asserts on the real repo that each one exists.
+const EXTRA_SCAN_FILES = ["scripts/tenant-domain.ts"];
+
 function getSourceFiles() {
   const files = [];
   for (const entry of readdirSync("src", { recursive: true, withFileTypes: true })) {
@@ -417,6 +464,9 @@ function getSourceFiles() {
     const ext = extname(entry.name);
     if (ext !== ".ts" && ext !== ".tsx") continue;
     files.push(join(entry.parentPath ?? entry.path, entry.name));
+  }
+  for (const file of EXTRA_SCAN_FILES) {
+    if (existsSync(file)) files.push(file);
   }
   return files;
 }
@@ -802,7 +852,7 @@ function flowIndex(sf) {
   };
 }
 
-function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
+function clientBindingsIn(fn, flow, clientArg, bindingsFor, clientIndex = 0) {
   // `prisma` by its conventional name, plus whatever the call actually handed
   // the helper — `withBypassRls(db, …)` after `import { prisma as db }`, or
   // `withBypassRls(clients.prisma, …)` from a namespace import, passes the
@@ -992,7 +1042,7 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
     progressed = true;
   };
 
-  enrol(fn, 0);
+  enrol(fn, clientIndex);
 
   while (progressed) {
     progressed = false;
@@ -1076,10 +1126,21 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
           // rather than merely skipped: the models it reaches over there are
           // reached under THIS bypass, so any question of the form "which models
           // does this file touch" has no answer here.
-          handedOff.push(inner.getStartLineNumber());
+          handedOff.push({ line: inner.getStartLineNumber(), call: inner, positions });
           continue;
         }
-        for (const index of positions) enrol(resolved.fn, index - resolved.argOffset);
+        for (const index of positions) {
+          const target = index - resolved.argOffset;
+          const problem =
+            target < 0
+              ? "client bound to `this` (.call's first argument)"
+              : handOffBindingProblem(inner, resolved.fn, target, index);
+          if (problem) {
+            handedOff.push({ line: inner.getStartLineNumber(), call: inner, positions: [], problem });
+            continue;
+          }
+          enrol(resolved.fn, target);
+        }
       }
     }
   }
@@ -1092,6 +1153,280 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
  * with the 1-based line of each reference. `$`-prefixed client meta-properties
  * ($transaction, $executeRaw, …) are not models.
  */
+/**
+ * Following the client across a module boundary.
+ *
+ * clientBindingsIn stops where a client is handed to a callee this file does
+ * not declare. Those callees are resolved through the Program (the same
+ * dependency-resolved project C3 builds) and analysed with the same
+ * clientBindingsIn, from the parameter the client lands in, recursively. What
+ * they reach is reached under the CALLER's bypass, so it is judged against the
+ * caller's ALLOWED_USAGE entry.
+ *
+ * A hand-off the Program cannot map to a function body with a known parameter
+ * — a callee typed only by a `.d.ts`, `.call`/`.apply`, a spread before the
+ * client, a rest parameter — is returned as unfollowed, and the caller reports
+ * it rather than exempting the file.
+ */
+const handOffMemo = new Map();
+const followInProgress = new Set();
+const fileIndexMemo = new Map();
+
+function fileIndexes(sf) {
+  const key = sf.getFilePath();
+  let entry = fileIndexMemo.get(key);
+  if (!entry) {
+    entry = { flow: flowIndex(sf), bindings: null };
+    entry.bindingsFor = () => (entry.bindings ??= bindingIndex(sf));
+    fileIndexMemo.set(key, entry);
+  }
+  return entry;
+}
+
+/**
+ * The Program's node for `call`, which may come from the syntax-only project.
+ * That project is in-memory and keys a file by its cwd-relative path under `/`,
+ * so the path is re-rooted at the cwd for the Program's lookup.
+ */
+function programCallOf(call) {
+  const path = call.getSourceFile().getFilePath();
+  const psf =
+    program.getSourceFile(path) ?? program.getSourceFile(join(process.cwd(), path.replace(/^\//, "")));
+  if (!psf) return null;
+  for (let node = psf.getDescendantAtPos(call.getStart()); node; node = node.getParent()) {
+    if (
+      node.getKind() === SyntaxKind.CallExpression &&
+      node.getStart() === call.getStart() &&
+      node.getEnd() === call.getEnd()
+    ) {
+      return node;
+    }
+  }
+  return null;
+}
+
+/**
+ * The body-carrying function a declaration names: a function or method with a
+ * body (the implementation of an overload set), or a variable/property whose
+ * initializer is a function or names one. null when it names no body this
+ * tree declares.
+ */
+function functionOfDeclaration(decl, seen = new Set()) {
+  if (!decl || seen.has(decl)) return null;
+  seen.add(decl);
+  const dsf = decl.getSourceFile();
+  if (dsf.isDeclarationFile() || dsf.getFilePath().includes("/node_modules/")) return null;
+  const kind = decl.getKind();
+  if (kind === SyntaxKind.FunctionDeclaration || kind === SyntaxKind.MethodDeclaration) {
+    const impl = decl.getImplementation?.() ?? decl;
+    return impl.getBody() ? impl : null;
+  }
+  if (FN_KINDS.has(kind)) return decl;
+  if (kind === SyntaxKind.VariableDeclaration || kind === SyntaxKind.PropertyAssignment) {
+    return functionOfExpression(decl.getInitializer(), seen);
+  }
+  if (kind === SyntaxKind.ShorthandPropertyAssignment) {
+    return functionOfSymbol(decl.getValueSymbol(), seen);
+  }
+  if (kind === SyntaxKind.ImportSpecifier) {
+    return functionOfSymbol(decl.getNameNode().getSymbol(), seen);
+  }
+  return null;
+}
+
+function functionOfSymbol(symbol, seen) {
+  if (!symbol) return null;
+  const target = symbol.isAlias() ? symbol.getAliasedSymbol() : symbol;
+  for (const decl of target?.getDeclarations() ?? []) {
+    const fn = functionOfDeclaration(decl, seen);
+    if (fn) return fn;
+  }
+  return null;
+}
+
+function functionOfExpression(expr, seen = new Set()) {
+  const value = unwrapExpression(expr);
+  if (!value) return null;
+  if (FN_KINDS.has(value.getKind())) return value;
+  if (value.getKind() === SyntaxKind.Identifier) return functionOfSymbol(value.getSymbol(), seen);
+  return null;
+}
+
+function isObjectMember(fn) {
+  const holder = fn.getKind() === SyntaxKind.MethodDeclaration ? fn : fn.getParent();
+  return holder?.getParent()?.getKind() === SyntaxKind.ObjectLiteralExpression;
+}
+
+/**
+ * True when every link of a member-access receiver names a value that cannot be
+ * rebound: a `const`, an import binding, or a namespace import. Anything else —
+ * a `let`/`var`, a parameter, a call result — may hold a different object than
+ * the one its declared type was inferred from.
+ */
+function hasStableReceiver(callee) {
+  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression &&
+      callee.getKind() !== SyntaxKind.ElementAccessExpression) {
+    return true;
+  }
+  const receiver = unwrapExpression(callee.getExpression());
+  if (!receiver) return false;
+  if (receiver.getKind() === SyntaxKind.PropertyAccessExpression) return hasStableReceiver(receiver);
+  if (receiver.getKind() !== SyntaxKind.Identifier) return false;
+  const decls = receiver.getSymbol()?.getDeclarations() ?? [];
+  if (decls.length !== 1) return false;
+  const decl = decls[0];
+  switch (decl.getKind()) {
+    case SyntaxKind.ImportSpecifier:
+    case SyntaxKind.ImportClause:
+    case SyntaxKind.NamespaceImport:
+      return true;
+    case SyntaxKind.VariableDeclaration:
+      return decl.getVariableStatement()?.getDeclarationKind() === "const";
+    default:
+      return false;
+  }
+}
+
+/**
+ * Every function a call may invoke, or null when any of them cannot be named.
+ * Three shapes, each answered by the Program rather than by spelling:
+ *   - a callee whose symbol has a body — an import, a namespace member, a
+ *     local alias;
+ *   - an interface member with no body (`deps.fn(tx)` for injected
+ *     dependencies) — every implementation the language service finds, since
+ *     any of them may be the one passed in;
+ *   - a non-literal index into a const object literal (`TABLE[key](tx)`) —
+ *     every function-valued member, since the key may select any.
+ * The last two over-approximate, which only adds models: the safe direction.
+ */
+function calleeDeclarationsOf(call) {
+  const pcall = programCallOf(call);
+  if (!pcall) return null;
+  const callee = unwrapExpression(pcall.getExpression());
+  if (!callee) return null;
+
+  if (
+    callee.getKind() === SyntaxKind.ElementAccessExpression &&
+    literalMemberName(callee.getArgumentExpression()) === null
+  ) {
+    if (!hasStableReceiver(callee)) return null;
+    const receiver = unwrapExpression(callee.getExpression());
+    let symbol = receiver?.getSymbol();
+    if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+    const decl = symbol?.getDeclarations().find((d) => d.getKind() === SyntaxKind.VariableDeclaration);
+    const table = unwrapExpression(decl?.getInitializer());
+    if (table?.getKind() !== SyntaxKind.ObjectLiteralExpression) return null;
+    const fns = [];
+    for (const prop of table.getProperties()) {
+      const fn = functionOfDeclaration(prop);
+      if (!fn) return null;
+      fns.push(fn);
+    }
+    return fns.length > 0 ? fns : null;
+  }
+
+  const direct = functionOfSymbol(callee.getSymbol(), new Set());
+  if (direct) {
+    // A member of an object value is that object's member only if the value
+    // cannot have been replaced: the checker answers from the DECLARED type,
+    // which for `let helpers = a; helpers = b` is `a`'s shape and `a`'s method.
+    if (isObjectMember(direct) && !hasStableReceiver(callee)) return null;
+    return [direct];
+  }
+
+  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return null;
+  const impls = callee.getNameNode().getImplementations();
+  if (impls.length === 0) return null;
+  const fns = [];
+  for (const impl of impls) {
+    const node = impl.getNode();
+    const fn =
+      functionOfDeclaration(node.getParent()) ??
+      (node.getKind() === SyntaxKind.Identifier ? functionOfSymbol(node.getSymbol(), new Set()) : null);
+    if (!fn) return null;
+    fns.push(fn);
+  }
+  return fns;
+}
+
+/**
+ * Why a hand-off cannot bind the client to one parameter of `fn`, or null when
+ * it can: the argument's position must be fixed (no spread before it) and land
+ * on a plain, non-rest parameter.
+ */
+function handOffBindingProblem(call, fn, index, argIndex = index) {
+  const args = call.getArguments();
+  if (args.slice(0, argIndex).some((a) => a.getKind() === SyntaxKind.SpreadElement)) {
+    return "spread argument before the client";
+  }
+  const param = fn.getParameters()[index];
+  if (!param) return "no parameter at the client's position";
+  if (param.getDotDotDotToken()) return "client lands in a rest parameter";
+  return null;
+}
+
+/**
+ * Models reached by `fn` when its parameter `index` is a bypassed client, and
+ * every hand-off below it that could not be followed. Memoised per
+ * (function, parameter); a cycle contributes nothing on its second visit, which
+ * is sound because the first visit is still collecting the same body.
+ */
+function followClientInto(fn, index) {
+  const sf = fn.getSourceFile();
+  const key = `${sf.getFilePath()}:${fn.getStart()}:${index}`;
+  const memo = handOffMemo.get(key);
+  if (memo) return memo;
+  if (followInProgress.has(key)) return { refs: [], unresolved: [], unfollowed: [] };
+  followInProgress.add(key);
+
+  const rel = toRelPosix(sf.getFilePath());
+  const { flow, bindingsFor } = fileIndexes(sf);
+  const { clients, modelRefs, unresolved: unresolvedKeys, callbackNodes, handedOff } =
+    clientBindingsIn(fn, flow, undefined, bindingsFor, index);
+  const refs = modelRefs.map(({ model, line }) => ({ model, at: `${rel}:${line}` }));
+  const unresolved = unresolvedKeys.map(({ line, text }) => ({ at: `${rel}:${line}`, text }));
+  for (const node of callbackNodes) {
+    const found = modelRefsIn(node, clients);
+    for (const { model, line } of found.refs) refs.push({ model, at: `${rel}:${line}` });
+    for (const { line, text } of found.unresolved) unresolved.push({ at: `${rel}:${line}`, text });
+  }
+  const result = { refs, unresolved, unfollowed: [] };
+  mergeHandOffs(result, handedOff, rel);
+
+  followInProgress.delete(key);
+  handOffMemo.set(key, result);
+  return result;
+}
+
+/** Follow each hand-off into its callee, folding what it reaches into `into`. */
+function mergeHandOffs(into, handedOff, rel) {
+  for (const { line, call, positions, problem } of handedOff) {
+    const at = `${rel}:${line}`;
+    if (problem) {
+      into.unfollowed.push({ at, reason: problem });
+      continue;
+    }
+    const callees = calleeDeclarationsOf(call);
+    if (!callees) {
+      into.unfollowed.push({ at, reason: "callee has no body the Program can resolve" });
+      continue;
+    }
+    for (const callee of callees) {
+      for (const index of positions) {
+        const problem = handOffBindingProblem(call, callee, index);
+        if (problem) {
+          into.unfollowed.push({ at, reason: problem });
+          continue;
+        }
+        const sub = followClientInto(callee, index);
+        into.refs.push(...sub.refs);
+        into.unresolved.push(...sub.unresolved);
+        into.unfollowed.push(...sub.unfollowed);
+      }
+    }
+  }
+}
+
 function modelRefsIn(node, clientNames) {
   const refs = [];
   // Both spellings of a member access: `tx.model` and `tx["model"]`. The
@@ -1182,8 +1517,9 @@ function toRelPosix(absPath) {
   return relative(process.cwd(), absPath).split(sep).join("/");
 }
 
-/** The scan root this whole file uses: `src/`, non-test (SC3, unchanged by C3). */
+/** The scan root this whole file uses: `src/` plus EXTRA_SCAN_FILES, non-test. */
 function isInScopeFile(rel) {
+  if (EXTRA_SCAN_FILES.includes(rel)) return true;
   return rel.startsWith("src/") && !rel.includes(".test.") && !rel.includes("__tests__");
 }
 
@@ -1901,6 +2237,7 @@ const indirectCallbacks = [];
 const indirectHelperReferences = [];
 const unresolvedClients = [];
 const unresolvedModels = [];
+const unfollowedHandOffs = [];
 const f3UnusedTxViolations = [];
 
 let parsedCount = 0;
@@ -1978,14 +2315,43 @@ for (const file of sourceFiles) {
     fileViolations.push(file);
   }
 
-  // Check 2: withBypassRls call sites must name their purpose with the
-  // BYPASS_PURPOSE constant, not a string literal. The definition file
-  // (tenant-rls.ts) is exempt — it defines, not consumes.
-  if (bypassCalls.length > 0 && file !== "src/lib/tenant-rls.ts") {
-    const usesPurpose = sf
-      .getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)
-      .some((a) => a.getExpression().getText() === "BYPASS_PURPOSE");
-    if (!usesPurpose) purposeViolations.push({ file, line: 0 });
+  // Check 2: every withBypassRls call must name its purpose with the
+  // BYPASS_PURPOSE constant, not a string literal, and — for a file in
+  // ALLOWED_PURPOSES — one of the members listed there. The argument is found by
+  // shape, not position, as the callback is. A helper that forwards its own
+  // BYPASS_PURPOSE-typed parameter (fetchUserDisplayMap) passes: its callers
+  // name the member. That form cannot satisfy ALLOWED_PURPOSES, since the
+  // member is not visible here. The definition file (tenant-rls.ts) is exempt —
+  // it defines, not consumes.
+  if (file !== "src/lib/tenant-rls.ts") {
+    const allowedPurposes = ALLOWED_PURPOSES.get(file);
+    for (const { call } of bypassCalls) {
+      const args = call.getArguments();
+      const purpose = args.find(
+        (a) =>
+          a.getKind() === SyntaxKind.PropertyAccessExpression &&
+          a.getExpression().getText() === "BYPASS_PURPOSE",
+      );
+      const forwarded = !purpose && args.some((a) => isForwardedPurposeParameter(a, call));
+      const line = call.getStartLineNumber();
+      if (forwarded) {
+        if (allowedPurposes) {
+          purposeViolations.push({
+            file,
+            line,
+            detail: `forwarded purpose parameter cannot be checked against ALLOWED_PURPOSES (${allowedPurposes.join(", ")})`,
+          });
+        }
+      } else if (!purpose) {
+        purposeViolations.push({ file, line, detail: "no BYPASS_PURPOSE.* argument" });
+      } else if (allowedPurposes && !allowedPurposes.includes(purpose.getName())) {
+        purposeViolations.push({
+          file,
+          line,
+          detail: `${purpose.getText()} is not in ALLOWED_PURPOSES (${allowedPurposes.join(", ")})`,
+        });
+      }
+    }
   }
 
   const allowedSet =
@@ -2038,8 +2404,15 @@ for (const file of sourceFiles) {
     const { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff } =
       clientBindingsIn(fn, flowFor(), call.getArguments()[0], bindingsFor);
     if (clientUnresolved) { unresolvedClients.push({ file, line }); undecidableFiles.add(file); }
-    if (handedOff.length > 0) {
-      handedOffSites += handedOff.length;
+    const followed = { refs: [], unresolved: [], unfollowed: [] };
+    mergeHandOffs(followed, handedOff, file);
+    handedOffSites += handedOff.length;
+    for (const u of followed.unfollowed) {
+      unfollowedHandOffs.push({ file, ...u });
+      undecidableFiles.add(file);
+    }
+    for (const u of followed.unresolved) {
+      unresolvedModels.push({ file, line, text: `${u.text}  (in ${u.at})` });
       undecidableFiles.add(file);
     }
     const seen = new Set();
@@ -2061,6 +2434,15 @@ for (const file of sourceFiles) {
     for (const u of unresolved) {
       unresolvedModels.push({ file, line: u.line, text: u.text });
       undecidableFiles.add(file);
+    }
+    const followedSeen = new Set();
+    for (const { model, at } of followed.refs) {
+      const key = `${model}@${at}`;
+      if (followedSeen.has(key)) continue;
+      followedSeen.add(key);
+      if (!usedModels.has(file)) usedModels.set(file, new Set());
+      usedModels.get(file).add(model);
+      if (!allowedSet.has(model)) modelViolations.push({ file, line, model, via: at });
     }
     for (const node of scanNodes) {
       const { refs, unresolved } = modelRefsIn(node, clients);
@@ -2167,8 +2549,8 @@ if (modelViolations.length > 0) {
     "Add the model to the file's entry in ALLOWED_USAGE after security review.",
   );
   console.error("");
-  for (const { file, line, model } of modelViolations) {
-    console.error(`  ${file}:${line}  prisma.${model}`);
+  for (const { file, line, model, via } of modelViolations) {
+    console.error(`  ${file}:${line}  prisma.${model}${via ? `  (reached in ${via})` : ""}`);
   }
 }
 
@@ -2203,14 +2585,17 @@ if (purposeViolations.length > 0) {
   failed = true;
   if (fileViolations.length > 0 || modelViolations.length > 0) console.error("");
   console.error(
-    "withBypassRls call sites missing BYPASS_PURPOSE constant.",
+    "withBypassRls call sites with a missing or disallowed BYPASS_PURPOSE.",
   );
   console.error(
-    "Use BYPASS_PURPOSE.* from @/lib/tenant-rls instead of string literals.",
+    "Pass BYPASS_PURPOSE.* from @/lib/tenant-rls (not a string literal or a variable),",
+  );
+  console.error(
+    "and for a file in ALLOWED_PURPOSES, one of the members listed there.",
   );
   console.error("");
-  for (const { file, line } of purposeViolations) {
-    console.error(`  ${file}:${line}`);
+  for (const { file, line, detail } of purposeViolations) {
+    console.error(`  ${file}:${line}  ${detail}`);
   }
 }
 
@@ -2252,6 +2637,25 @@ if (unresolvedModels.length > 0) {
   console.error("");
   for (const { file, line, text } of unresolvedModels) {
     console.error(`  ${file}:${line}  ${text}`);
+  }
+}
+
+// A client handed across a module boundary the Program could not map to one
+// parameter of a function body. What it reaches there is reached under this
+// bypass and judged by nothing, so it fails rather than exempting the file.
+if (unfollowedHandOffs.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("a bypassed client is handed to a callee this gate cannot follow, so the");
+  console.error("models reached there are unchecked. Pass the client to a function with a");
+  console.error("body (not a .d.ts-typed value), positionally, into a plain parameter:");
+  console.error("");
+  const printed = new Set();
+  for (const { file, at, reason } of unfollowedHandOffs) {
+    const lineText = `  ${file}  ${at}  ${reason}`;
+    if (printed.has(lineText)) continue;
+    printed.add(lineText);
+    console.error(lineText);
   }
 }
 
@@ -2432,6 +2836,5 @@ const scannableCount = sourceFiles.filter(
 ).length;
 console.log(
   `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files; ` +
-    `${handedOffSites} call site(s) hand the client to a callee outside the file, ` +
-    `so those files are exempt from the over-breadth check)`,
+    `${handedOffSites} call site(s) hand the client to a callee in another module, all followed)`,
 );

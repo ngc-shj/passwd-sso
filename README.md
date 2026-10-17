@@ -527,7 +527,6 @@ docs/                     # Documentation (architecture, security, operations, s
 
 | Command | Description |
 | --- | --- |
-| `npm run check:team-auth-rls` | Verify team auth + RLS patterns |
 | `npm run check:bypass-rls` | Detect RLS bypass in queries |
 | `npm run check:crypto-domains` | Validate crypto domain separation |
 | `npm run licenses:check` | Check app dependency licenses |

@@ -1207,11 +1207,10 @@ export async function drain() {
     // analysed: a wrong answer in both directions. Same for a `let` reassigned
     // after its initializer.
     //
-    // The fix returns null for a binding this file cannot prove. That is not
-    // detection — these calls are the D28 class, "a propagation whose mapping
-    // is unproven" — but it is the difference between saying nothing and saying
-    // something false, and it is the false-positive direction that is asserted
-    // here because that is what a wrong answer looks like from outside.
+    // A binding this file cannot prove goes to the Program. A `const` alias is
+    // resolved through its type to the object it names; a reassigned `let` is
+    // refused, because the checker answers from the DECLARED type — the first
+    // object — and following it would analyse the wrong function.
     const aliasedShadow = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 const helpers = { query: (db) => db.tenantMember.findMany() };
@@ -1230,8 +1229,10 @@ export function drain() {
   helpers = { query: (db) => db.auditOutbox.findMany() };
   return withBypassRls(prisma, (tx) => helpers.query(tx), BYPASS_PURPOSE.AUDIT);
 }`);
-    expect(reassigned.code).toBe(0);
-    expect(reassigned.stdout).toContain("check-bypass-rls: OK");
+    expect(reassigned.code).toBe(1);
+    expect(reassigned.stderr).toContain("handed to a callee this gate cannot follow");
+    // Not the first object's model: that would be the wrong answer this refuses.
+    expect(reassigned.stderr).not.toContain("prisma.tenantMember");
   });
 
   it("resolves the innermost object literal when a local one shadows a module one", () => {
@@ -1334,7 +1335,9 @@ const b = a;
 export async function drain() {
   return withBypassRls(prisma, async (tx) => a(tx), BYPASS_PURPOSE.AUDIT);
 }`);
-    expect(cyclic.code).toBe(0);
+    // Terminates, and a cycle names no function, so the hand-off is refused.
+    expect(cyclic.code).toBe(1);
+    expect(cyclic.stderr).toContain("handed to a callee this gate cannot follow");
   });
 
   it("treats the right operand of && as the client it yields", () => {
@@ -1463,18 +1466,94 @@ export async function drain() {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
-  it("does not fail loud on an imported helper, which is the declared gap", () => {
-    // The boundary of the case above. An imported callee cannot be resolved
-    // without a Program, and 38 such call sites exist today — reporting them
-    // would red the build on the shape the header documents as uncovered.
-    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+  it("follows an imported helper into its module and judges what it reaches", () => {
+    // Formerly the declared gap: 42 call sites handed the client across a
+    // module boundary and were exempted. The Program resolves them now.
+    const { code, stderr } = runMulti([
+      ["src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { queryMember } from "@/lib/elsewhere";
 export async function drain() {
   return withBypassRls(prisma, async (tx) => queryMember(tx), BYPASS_PURPOSE.AUDIT);
+}`],
+      ["src/lib/elsewhere.ts", `export async function queryMember(db) { return db.tenantMember.findMany(); }`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember  (reached in src/lib/elsewhere.ts:1)");
+  });
+
+  it("fails an imported helper the Program cannot resolve to a body", () => {
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { queryMember } from "@/lib/missing";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => queryMember(tx), BYPASS_PURPOSE.AUDIT);
 }`);
-    expect(code).toBe(0);
-    expect(stdout).toContain("check-bypass-rls: OK");
+    expect(code).toBe(1);
+    expect(stderr).toContain("handed to a callee this gate cannot follow");
+    expect(stderr).toContain("callee has no body the Program can resolve");
+  });
+
+  it("follows every implementation of an injected interface member", () => {
+    const { code, stderr } = runMulti([
+      ["src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { run, type Deps } from "@/lib/core";
+const deps: Deps = { count: (db) => db.tenantMember.count() };
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => run(deps, tx), BYPASS_PURPOSE.AUDIT);
+}`],
+      ["src/lib/core.ts", `
+export interface Deps { count(db: unknown): Promise<number> }
+export async function run(deps: Deps, tx: unknown) { return deps.count(tx); }`],
+    ]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("follows a non-literal index into a const table as every member", () => {
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { TABLE } from "@/lib/table";
+export async function drain(key: keyof typeof TABLE) {
+  return withBypassRls(prisma, async (tx) => TABLE[key](tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    // The table's module is absent from this tree, so the index is refused.
+    expect(code).toBe(1);
+    expect(stderr).toContain("callee has no body the Program can resolve");
+    const followed = runMulti([
+      ["src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { TABLE } from "@/lib/table";
+export async function drain(key: keyof typeof TABLE) {
+  return withBypassRls(prisma, async (tx) => TABLE[key](tx), BYPASS_PURPOSE.AUDIT);
+}`],
+      ["src/lib/table.ts", `
+export const TABLE = {
+  outbox: (db) => db.auditOutbox.count(),
+  member: (db) => db.tenantMember.count(),
+};`],
+    ]);
+    expect(followed.code).toBe(1);
+    expect(followed.stderr).toContain("prisma.tenantMember  (reached in src/lib/table.ts:4)");
+    expect(followed.stderr).not.toContain("prisma.auditOutbox");
+  });
+
+  it("refuses a client bound to `this` or placed after a spread", () => {
+    for (const [body, reason] of [
+      ["async (tx) => query.call(tx)", "client bound to `this`"],
+      ["async (tx) => query(...rest, tx)", "spread argument before the client"],
+    ]) {
+      const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const rest: unknown[] = [];
+async function query(db) { return db.auditOutbox.findMany(); }
+export async function drain() {
+  return withBypassRls(prisma, ${body}, BYPASS_PURPOSE.AUDIT);
+}`);
+      expect(code).toBe(1);
+      expect(stderr).toContain(reason);
+    }
   });
 
   it("accepts a parenthesised batch $transaction", () => {
@@ -1842,13 +1921,13 @@ export async function GET() {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
-  it("exempts a file that hands the client to a callee it cannot open", () => {
-    // The gate's own fail-open class. Over there the callee may reach every
-    // permitted model; "never reached" here would mean "not seen", and acting on
-    // it would delete a true permission. Eight of the fourteen candidates in the
-    // real tree were exactly this — `notification.ts` among them, whose `user`
-    // read had moved into the adjudicator it now hands `tx` to.
-    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+  it("counts a model reached in an imported callee as reached by the caller", () => {
+    // Formerly exempted: the callee could reach any permitted model, so "never
+    // reached" meant "not seen". `notification.ts` was the case — its `user`
+    // read had moved into the adjudicator it hands `tx` to. Followed now, the
+    // callee's read keeps the permission alive.
+    const { code, stdout } = runMulti([
+      ["src/app/api/tenant/policy/route.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveSomething } from "@/lib/elsewhere";
 export async function GET() {
@@ -1856,12 +1935,11 @@ export async function GET() {
     await tx.tenant.findUnique({ where: { id } });
     return resolveSomething(tx, id);
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-}`);
+}`],
+      ["src/lib/elsewhere.ts", `export async function resolveSomething(db, id) { return db.teamPolicy.findMany({}); }`],
+    ]);
     expect(code).toBe(0);
-    expect(stdout).toContain("check-bypass-rls: OK");
-    // The exemption is counted, not silent: a run that exempts everything and a
-    // run that exempts nothing must not print the same line.
-    expect(stdout).toMatch(/[1-9]\d* call site\(s\) hand the client/);
+    expect(stdout).toMatch(/[1-9]\d* call site\(s\) hand the client to a callee in another module, all followed/);
   });
 
   it("does not fire on a file whose bypass reaches no model at all", () => {
@@ -1913,6 +1991,119 @@ export async function drain(tx) {
     const files = [...block.matchAll(/\[\s*"([^"]+)",\s*\[/g)].map((m) => m[1]);
     // "Parsed nothing" must not read as "nothing missing".
     expect(files.length).toBeGreaterThan(50);
+    expect(files.filter((f) => !existsSync(join(repoRoot, f)))).toEqual([]);
+  });
+});
+
+// ─── Operator CLI scope and call-scoped purpose ───────────────────────────────
+//
+// scripts/tenant-domain.ts is outside `src/` and was examined by nothing. It is
+// now scanned (EXTRA_SCAN_FILES) and its purpose is pinned to SYSTEM_MAINTENANCE
+// (ALLOWED_PURPOSES). Check 2 used to be satisfied by ONE `BYPASS_PURPOSE.X`
+// anywhere in the file; it is now checked per call.
+
+const TENANT_DOMAIN = "scripts/tenant-domain.ts";
+
+/** The tenant-domain.ts entry's models, read from the gate so the fixture cannot drift. */
+function tenantDomainModels() {
+  const source = readFileSync(CHECKER, "utf8");
+  const stranded = source.match(/const STRANDED_ROW_MODELS = \[([^\]]*)\]/);
+  const entry = source.match(/\["scripts\/tenant-domain\.ts", \[([^\]]*)\]\]/);
+  const names = (text) => [...text.matchAll(/"(\w+)"/g)].map((m) => m[1]);
+  return [...names(entry[1]), ...(entry[1].includes("...STRANDED_ROW_MODELS") ? names(stranded[1]) : [])];
+}
+
+/** A tenant-domain.ts body reaching every permitted model, plus `extra` calls. */
+function tenantDomainSource(extra = "") {
+  const reads = tenantDomainModels().map((m) => `    await tx.${m}.count();`).join("\n");
+  return `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function list() {
+  return withBypassRls(prisma, async (tx) => {
+${reads}
+  }, BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+}
+${extra}`;
+}
+
+describe("operator CLI scope and call-scoped purpose", () => {
+  it("passes tenant-domain.ts reaching its permitted models under SYSTEM_MAINTENANCE", () => {
+    const { code, stdout } = run(TENANT_DOMAIN, tenantDomainSource());
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("fails a model outside tenant-domain.ts's entry, so the file is really scanned", () => {
+    const { code, stderr } = run(TENANT_DOMAIN, tenantDomainSource(`
+export async function leak() {
+  return withBypassRls(prisma, async (tx) => tx.teamPasswordEntry.findMany({}), BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+}`));
+    expect(code).toBe(1);
+    expect(stderr).toContain(`${TENANT_DOMAIN}:`);
+    expect(stderr).toContain("prisma.teamPasswordEntry");
+  });
+
+  it("fails a purpose outside ALLOWED_PURPOSES for tenant-domain.ts", () => {
+    const { code, stderr } = run(TENANT_DOMAIN, tenantDomainSource(`
+export async function lookup() {
+  return withBypassRls(prisma, async (tx) => tx.tenant.findMany({}), BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`));
+    expect(code).toBe(1);
+    expect(stderr).toContain("BYPASS_PURPOSE.CROSS_TENANT_LOOKUP is not in ALLOWED_PURPOSES (SYSTEM_MAINTENANCE)");
+  });
+
+  it("fails a forwarded purpose parameter in a file with ALLOWED_PURPOSES", () => {
+    const { code, stderr } = run(TENANT_DOMAIN, tenantDomainSource(`
+export async function lookup(purpose: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE]) {
+  return withBypassRls(prisma, async (tx) => tx.tenant.findMany({}), purpose);
+}`));
+    expect(code).toBe(1);
+    expect(stderr).toContain("forwarded purpose parameter cannot be checked against ALLOWED_PURPOSES");
+  });
+
+  it("fails a call with a string-literal purpose even when another call in the file names BYPASS_PURPOSE", () => {
+    // The file-scoped form passed this: the first call's BYPASS_PURPOSE.X
+    // satisfied the check for the second.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export const a = () => withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT_WRITE);
+export const b = () => withBypassRls(prisma, async (tx) => tx.auditOutbox.count(), "audit_write");
+`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts:4  no BYPASS_PURPOSE.* argument");
+    expect(stderr).not.toContain("src/lib/audit/audit-outbox.ts:3");
+  });
+
+  it("passes a helper forwarding its own BYPASS_PURPOSE-typed parameter", () => {
+    const { code, stdout } = run("src/lib/audit/audit-user-lookup.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function fetchUsers(ids: string[], purpose: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE]) {
+  return withBypassRls(prisma, (tx) => tx.user.findMany({ where: { id: { in: ids } } }), purpose);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("fails a forwarded parameter whose type does not name BYPASS_PURPOSE", () => {
+    const { code, stderr } = run("src/lib/audit/audit-user-lookup.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export const tag = BYPASS_PURPOSE.AUDIT_WRITE;
+export async function fetchUsers(ids: string[], purpose: string) {
+  return withBypassRls(prisma, (tx) => tx.user.findMany({ where: { id: { in: ids } } }), purpose);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("src/lib/audit/audit-user-lookup.ts:5  no BYPASS_PURPOSE.* argument");
+  });
+
+  it("names only files that exist, in the real repo's EXTRA_SCAN_FILES", () => {
+    // The gate skips an absent extra file (fixture trees lack it), so a rename
+    // that silently drops the file from scope is caught here instead.
+    const repoRoot = join(dirname(CHECKER), "..", "..");
+    const source = readFileSync(CHECKER, "utf8");
+    const match = source.match(/const EXTRA_SCAN_FILES = \[([^\]]*)\]/);
+    expect(match).not.toBeNull();
+    const files = [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(files).toContain(TENANT_DOMAIN);
     expect(files.filter((f) => !existsSync(join(repoRoot, f)))).toEqual([]);
   });
 });
