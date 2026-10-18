@@ -2224,8 +2224,9 @@ export const g = () => withBypassRls(prisma, async (tx) => { await tx.user.count
     const { code, stderr } = runMulti(files);
     expect(code).toBe(1);
     for (const file of [OUTBOX, USER_LOOKUP]) {
-      expect(stderr).toMatch(new RegExp(`${file.replace(/[/.]/g, "\\$&")}:\\d+  prisma\\.session`));
-      expect(stderr).toMatch(new RegExp(`${file.replace(/[/.]/g, "\\$&")}:\\d+  prisma\\.tenant`));
+      const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(stderr).toMatch(new RegExp(`${escaped}:\\d+  prisma\\.session`));
+      expect(stderr).toMatch(new RegExp(`${escaped}:\\d+  prisma\\.tenant`));
     }
   });
 
