@@ -619,3 +619,95 @@ Removed as dead, each after its mutation stayed green: the own-invoker argument 
 | `next build` | pass |
 | check-rls-nesting (real tree) | OK: 1,047 files, 600 context calls, 596 callbacks |
 | check-bypass-rls (real tree) | OK: 221 bypass callbacks through 1,063 reached functions |
+
+
+---
+
+# Round 5
+Date: 2026-10-18
+Diff reviewed: `77cb92b61..587e33307` (review(4), the enforced subset). Findings were merged by hand.
+
+## Changes from Previous Round
+- Mutation record: 24 of 25 recorded mutations reproduced red. N6 was recorded as equivalent, but its test was vacuous (R5-T6).
+- Round-4 claims that held only for the literal spelling: C1, C6, F3+T3, R4-O1, S6, S8 (N-T8), T8.
+- Three round-4 changes were regressions against `77cb92b61`:
+  - F4 = S1: the slot predicate.
+  - F5: a base class reached through an alias.
+  - S2: G2 recognised by name.
+
+## Merged findings (round 5)
+- **Functionality:**
+  - F1: widening hides function members from G1/G2.
+  - F2: library-built objects behind an interface.
+  - F3: structural stand-ins for a literal's or a class's type.
+  - F4 = S1 (regression): `unknown`/`any`/`Function` members and getters.
+  - F5 (regression): a const-aliased base.
+  - F6: a library-held listener.
+  - F7: a destructured delegate method.
+  - F8: static `this` dispatch.
+  - F9: a getter reached by element access or destructure.
+  - F10 = S7: createRequire loaders.
+- **Security:**
+  - S2 (regression): `Object.assign.call`.
+  - S3: library- or `.d.ts`-declared members our code implements.
+  - S4: a delegate narrowed to `Pick` or to an own interface.
+  - S5: the root `proxy.ts` was outside the scan set.
+  - S6: the docs overstated coverage.
+  - S8: an external shape with no own-implementer check.
+- **Testing:**
+  - T1–T5: unpinned clauses.
+  - T6: a vacuous optional-holder test.
+  - T7: the non-literal-load allowlist was file-keyed with no stale check.
+  - T8: the mutation record had no old→new text.
+  - T9: the nesting stub's delegates.
+  - T10: dead clauses.
+  - T11: coarse exception keys.
+  - ADJ1: the guard could be changed by forms other than `p.tx =`.
+  - ADJ2: a contradictory comment.
+
+## Decisions (user)
+- **Fix now:**
+  - Regressions F4/S1, F5, S2.
+  - Guard changes T-ADJ1: void the exemption only for operations that can change the guard.
+  - S5: deny-by-default scope, with stale detection and an impact list.
+  - T1–T11 and ADJ2.
+- **Approved:**
+  - G6 (F1).
+  - G7 (F2), on three conditions: registered per locally named SDK type plus supplier package, merged into `EXTERNAL_SHAPE_ALLOWLIST`, and detection of unused entries, supplier changes and own implementers.
+  - Tracking F3, F7/S4, F8/F9, F10 and S8.
+- **G8 redesigned:** the proposed global rule was rejected. Instead, a library-declared member our code implements is followed only on a receiver traced to the library, at reach time.
+- **F6 deferred:** #909, with a reproduction fixture. The impact is stated as the runtime guard refusing the nesting and logging it, while a swallowing caller silently skips the side effect.
+
+## Resolution Status (round 5)
+| Finding | Resolution |
+|---|---|
+| F4 = S1 | `mayHoldOwnCode` (callable, `any`, `unknown`, type parameter, `Function`, `object`, `{}`) answers "may this slot hold our code" for G1–G4, the member index and argument members. Getters are indexed. 15 real data-copy sites are listed in `FUNCTION_FLOW_ALLOWLIST` (user decision). |
+| F5 | G5 requires an `extends` name to resolve, through import renames only, to a class declaration. |
+| S2 | A mutator is found by the declaration a reference resolves to: a member name, a destructure, or an element access whose key is a literal or a literal union. A key typed `string` may name it and counts. Any use other than a direct call is refused. |
+| T-ADJ1 | The exemption is voided by a write to the guard or the parameter (plain, compound, destructuring, for-of, delete), by the parameter leaving as a value, or by reading a member of it that may be a function. Reads, copies and data members are allowed. |
+| S5 | Deny-by-default: every own Program file not in `NON_PRODUCTION` / `NON_PRODUCTION_SCRIPTS` is scanned, and an unused entry fails the run. Newly scanned files, with no violations: `proxy.ts`, `next.config.ts`, `instrumentation-client.ts`, `sentry.client.config.ts`, `prisma.config.ts`, `prisma/seed.ts`, `extension/src/lib/crypto.ts`, `extension/src/lib/crypto-team.ts`. The operator DB `.mjs` scripts are declared tooling. Both gates read the same 1,055 files. |
+| T7 | A load's specifier is evaluated from its value: literals, consts, conditionals, a parameter by what its callers pass, read through any assertion, never an asserted type. `crypto-client.ts`'s allowlist entry is gone. `NON_LITERAL_LOAD_ALLOWLIST` fails on an entry that stops matching. |
+| T11 | Exceptions are keyed by declaration kind and name, and each records its site count. |
+| F1 → G6 | An object holding own functions or accessors is not widened to a type naming none of its members, by any flow. `globalThis` is exempt by its declaration (the Prisma/Redis singleton idiom). Real-tree hits: 0. |
+| F2 → G7 | A value of unknown origin narrowed to a type holding functions is refused, except a registered shape given a value traced to its package. The trace follows `require`, createRequire loaders, a module-loading wrapper, member/call/`new` chains, consts and destructures. The blob stores' inline SDK types are now named and registered. `stream.ts` calls `transformToByteArray` without a cast. An own value or class taking a registered shape is refused (S8). |
+| S3 → reach-time | A library-declared member that an own object literal (by its contextual type) or class implements is followed only on a receiver traced to a library. |
+| F3 | An object-literal member resolves to its literal only on a receiver that provably holds it. Otherwise it resolves to every literal whose type is assignable to the type it is read off. A class member also takes literals of the class's shape. Real-tree reach is unchanged (1,063 functions, diffed). |
+| F7 / S4 | A delegate is charged where a member leaves it: an access, a destructure, `.bind`, or a string key. The model comes from the member's declaring `<Model>Delegate` (each member of a union). A client or delegate erased to a type that no longer says it is one is refused production-wide, except a narrowing to the client's raw-query API. |
+| F8 / F9 | A static member reached through `this` includes subclass statics. A getter read by a literal element access or a destructure is an invocation, and a non-literal key on a value with getters is refused. |
+| F10 = S7 | A createRequire loader is a module load in the scope and the resolver. An own module loaded that way is unresolved. |
+| F6 | Deferred to #909. A known-limit fixture pins the current pass, and the header lists the shape and its runtime impact. |
+| T1–T6, T9, T10, ADJ2 | Fixtures added per clause. The nesting stub declares per-model delegates. The dead default-value branch and the post-resolution data-extension test were removed. The comment was corrected. |
+| T8 | Mutation specs with old→new text: `rls-nesting-runtime-guard-and-bypass-scan-scope-mutations-round4.json` (69) and `…-round5.json` (105). |
+
+### Mutation record (round 5)
+`…-mutations-round5.json` lists every mutation: id, file, the exact old and new text, the test file, the `-t` filter and the result. All are red except four, each annotated in the file:
+- three clauses green and then removed as dead: the getter's returned value P5, the data extension after resolution U2, and the `as const`-only restriction Z1;
+- Q5, an allowlist entry pinned by the real-tree run rather than by a fixture.
+
+### Verification (round 5)
+| Check | Result |
+|---|---|
+| Fixture suites | 544 passed |
+| typecheck, lint, `git diff --check` | pass |
+| check-rls-nesting / check-bypass-rls (real tree) | OK: 1,055 files, 600 context calls, 221 bypass callbacks through 1,063 reached functions |
+| Rule check cost | about 10 s per gate run (was 2 s). The cost is the own-call argument flows of G6/G7. |

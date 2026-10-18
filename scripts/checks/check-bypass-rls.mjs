@@ -24,8 +24,11 @@
  * because no name is tracked. Anything reached that the resolver cannot name
  * fails the run (unfollowedHandOffs); a computed key on a client fails it too
  * (unresolvedModels). The resolver's answers rest on the decidable subset
- * lib/soundness.mjs enforces (G1-G5, the production import closure), which
- * this gate checks itself as well as check-rls-nesting.
+ * lib/soundness.mjs enforces (G1-G7, the deny-by-default scan set), which
+ * this gate checks itself as well as check-rls-nesting. A client or delegate
+ * given a type that no longer says it is one (`unknown`, an own interface, a
+ * Pick that drops the query methods) is refused anywhere in production; a
+ * narrowing to the client's raw-query API alone is raw SQL's to judge.
  *
  * Five rounds of review found defects here, every one the same defect: a
  * predicate that judged code by its spelling. A fixed 10-line radius stopped
@@ -107,7 +110,8 @@
  *     check-rls-nesting's header for the list), plus: a delegate whose type
  *     stays `any` all the way to its query is not charged (the query is a call
  *     on an `any` value, which fails the run only when it is a function value
- *     the resolver must name), and a library object built around the ambient
+ *     the resolver must name; a typed client erased to `any` is refused at the
+ *     erasure), and a library object built around the ambient
  *     client outside the reached code (`const repo = makeRepo(prisma)` at
  *     module level) is not seen. A client handed INTO a library call inside
  *     reached code — bare, in an object or array, returned by a closure, or
@@ -132,7 +136,7 @@ import {
 } from "./lib/scope-bindings.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createFunctionResolver, createReachability, isBindingWrite, isProductionPath, literalKey, prismaModelNames, unwrap } from "./lib/function-resolver.mjs";
-import { functionFlowViolations, productionScope } from "./lib/soundness.mjs";
+import { flowsOf, functionFlowViolations, productionScope } from "./lib/soundness.mjs";
 import { join, extname, dirname, relative, resolve, sep } from "node:path";
 
 // The models `countStrandedRows` counts — the keys of STRANDED_COUNTERS in
@@ -824,7 +828,7 @@ function toRelPosix(absPath) {
 }
 
 /**
- * The scan root this whole file uses: the production import closure
+ * The scan root this whole file uses: the deny-by-default production scope
  * (lib/soundness.mjs productionScope), set once the Program is built.
  */
 let scope = null;
@@ -1635,18 +1639,69 @@ function modelsOfDelegateType(type) {
 }
 
 /**
- * The models a query run on a delegate reaches — `users.deleteMany(…)` —
- * charged where the query RUNS, by the delegate's type. A delegate read in one
- * module and handed back to another is charged to the module that queries it,
- * so a via grant cannot be used for a write it never makes, and a delegate
- * whose read the type system lost (`(tx as any).user`) is still charged once
- * typed again.
+ * Whether a narrowed client type keeps only the client's raw-query API
+ * (`{ $executeRaw }`, a `$queryRawUnsafe` probe): every member is a `$` member
+ * the generated client declares. No model is reachable through it; raw SQL is
+ * check-raw-sql-usage's to judge.
+ */
+const CLIENT_TYPE = bypassDecl?.getParameters()[0]?.getType();
+function isRawQueryOnly(type) {
+  const props = type.getNonNullableType().getProperties();
+  return props.length > 0 && props.every((p) => {
+    const name = p.getName();
+    return name.startsWith("$") && isPrismaClientMember(CLIENT_TYPE?.getProperty(name)?.getDeclarations() ?? []);
+  });
+}
+
+/** Whether a type is, or each part of it is, a delegate the charge can name by its members' declarations. */
+function modelOfDelegateType(type) {
+  const t = type.getNonNullableType();
+  const parts = t.isUnion() ? t.getUnionTypes() : [t];
+  return parts.length > 0 && parts.every((u) => u.getProperties().length > 0 && u.getProperties().every((p) => modelsOfDelegateMember(p.getDeclarations())));
+}
+
+/** The models a delegate member's DECLARATIONS belong to: each owner is `<Model>Delegate` in the generated client. */
+function modelsOfDelegateMember(decls) {
+  // A union's member has one declaration per delegate: every one must name a model.
+  const models = decls.map((d) => {
+    if (!isExternalDecl(d)) return null;
+    const owner = d.getParent();
+    const m = owner?.getKind() === SyntaxKind.InterfaceDeclaration ? owner.getName().match(/^(\w+)Delegate$/) : null;
+    const model = m ? m[1][0].toLowerCase() + m[1].slice(1) : null;
+    return model && MODEL_NAMES.has(model) ? model : null;
+  });
+  return models.length > 0 && models.every(Boolean) ? [...new Set(models)] : null;
+}
+
+/**
+ * The models a member read off a delegate reaches — `users.deleteMany(…)`,
+ * `users.deleteMany.bind(users)`, `users["deleteMany"]`, `const { deleteMany }
+ * = users` — charged where the member LEAVES the delegate: by the delegate's
+ * `<Model>Delegate` type (each member of a union), or by the interface that
+ * declares the member (a `Pick<…Delegate, "deleteMany">`). A delegate read in
+ * one module and handed back to another is charged to the module that uses
+ * it, so a via grant cannot be used for a write it never makes.
  */
 function delegateOperationOf(node) {
-  if (node.getKind() !== SyntaxKind.CallExpression) return null;
-  const callee = unwrap(node.getExpression());
-  if (callee?.getKind() !== SyntaxKind.PropertyAccessExpression && callee?.getKind() !== SyntaxKind.ElementAccessExpression) return null;
-  const found = modelsOfDelegateType(callee.getExpression().getType());
+  const k = node.getKind();
+  let receiverType = null;
+  let memberDecls = [];
+  if (k === SyntaxKind.PropertyAccessExpression || k === SyntaxKind.ElementAccessExpression) {
+    receiverType = node.getExpression().getType();
+    memberDecls = (k === SyntaxKind.PropertyAccessExpression ? node.getNameNode().getSymbol() : node.getSymbol?.())?.getDeclarations() ?? [];
+  } else if (k === SyntaxKind.BindingElement) {
+    const holder = node.getParent()?.getParent();
+    const source = holder?.getKind() === SyntaxKind.VariableDeclaration ? holder.getInitializer() : null;
+    if (!source) return null;
+    receiverType = source.getType();
+    const key = node.getPropertyNameNode()?.getText() ?? node.getName();
+    memberDecls = receiverType.getProperty(key)?.getDeclarations() ?? [];
+  } else {
+    return null;
+  }
+  const byDecl = modelsOfDelegateMember(memberDecls);
+  if (byDecl) return { models: byDecl };
+  const found = modelsOfDelegateType(receiverType);
   if (!found) return null;
   return found.dynamic ? { dynamic: true, text: node.getText().slice(0, 80) } : { models: found.models };
 }
@@ -2338,15 +2393,38 @@ if (unfollowedHandOffs.length > 0) {
 
 
 // What Check 3's reach rests on (lib/soundness.mjs): a member holds only what
-// its declaration says, and the scan set is the production import closure.
+// its declaration says, and the scan set is every undeclared own file plus what it loads.
 // check-rls-nesting reports the same; each gate refuses on its own.
-const soundnessViolations = [...scope.violations, ...functionFlowViolations(program, scope)];
+const soundnessViolations = [...scope.violations, ...functionFlowViolations(program, scope, resolver.usedExternalShapes)];
 if (soundnessViolations.length > 0) {
   failed = true;
   console.error("");
   console.error("Check 3 cannot be trusted on this tree: production loads code the gates cannot read,");
   console.error("or puts a function where its declaration does not say (lib/soundness.mjs):");
   for (const v of soundnessViolations) console.error(`  ${v}`);
+}
+
+// A client erased to a type that no longer says it is one — `tx as unknown`,
+// an own parameter typed `unknown` or `Pick<…Delegate, "deleteMany">`, an own
+// interface it is assigned to — is then queried where neither a model read
+// nor a delegate type names it. Refused anywhere in production.
+const erasures = [];
+for (const path of scope.files) {
+  const sf = program.getSourceFile(path);
+  if (!sf) continue;
+  sf.forEachDescendant((node) => {
+    for (const { source, target } of flowsOf(node, checker, carriesClient)) {
+      if (!carriesClient(source.getType()) || carriesClient(target) || modelOfDelegateType(target) || isRawQueryOnly(target)) continue;
+      erasures.push(`${siteOf(source)}  a client or delegate erased to ${target.getText().replace(/\s+/g, " ").slice(0, 60)}`);
+    }
+  });
+}
+if (erasures.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("A Prisma client or delegate is given a type that no longer says it is one, so the");
+  console.error("queries run on it are charged to no model. Keep the client's own type:");
+  for (const e of [...new Set(erasures)]) console.error(`  ${e}`);
 }
 
 // A file on INDIRECT_CALLBACK_ALLOWLIST has its unresolvable callbacks

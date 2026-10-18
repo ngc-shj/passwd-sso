@@ -7,34 +7,32 @@ import { BLOB_CONTENT_TYPE } from "@/lib/blob-store/constants";
 import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-store/object-ref";
 import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
-let gcsBucketPromise: Promise<{
+// The @google-cloud/storage surface this store uses. Each is a library value's
+// shape, registered in check-bypass-rls's EXTERNAL_SHAPE_ALLOWLIST with its
+// supplying package.
+type GcsBucket = {
   file: (key: string) => {
     save: (data: Buffer, options?: unknown) => Promise<unknown>;
     download: () => Promise<[Buffer]>;
     delete: (options?: unknown) => Promise<unknown>;
   };
-}> | null = null;
+};
+type GcsModule = {
+  Storage: new () => {
+    bucket: (bucketName: string) => unknown;
+  };
+};
+
+let gcsBucketPromise: Promise<GcsBucket> | null = null;
 
 async function getGcsBucket() {
   if (!gcsBucketPromise) {
     gcsBucketPromise = (async () => {
       const moduleName = "@google-cloud/storage";
-      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as {
-        Storage: new () => {
-          bucket: (bucketName: string) => unknown;
-        };
-      };
+      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as GcsModule;
       const { bucket } = loadCloudBlobConfig(BLOB_STORAGE.GCS);
-      const storage = new mod.Storage() as {
-        bucket: (bucketName: string) => unknown;
-      };
-      return storage.bucket(bucket) as {
-        file: (key: string) => {
-          save: (data: Buffer, options?: unknown) => Promise<unknown>;
-          download: () => Promise<[Buffer]>;
-          delete: (options?: unknown) => Promise<unknown>;
-        };
-      };
+      const storage = new mod.Storage();
+      return storage.bucket(bucket) as GcsBucket;
     })();
   }
   return gcsBucketPromise;

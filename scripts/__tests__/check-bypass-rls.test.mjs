@@ -85,7 +85,22 @@ const REAL_TENANT_CONTEXT = readFileSync(join(REPO_ROOT, "src/lib/tenant-context
 // recognises a model access by the PrismaClient member it resolves to.
 const MODELS = [...readFileSync(join(REPO_ROOT, "prisma/schema.prisma"), "utf8").matchAll(/^model (\w+) \{/gm)].map((m) => m[1]);
 const MODEL_GETTERS = MODELS.map((m) => `    get ${m[0].toLowerCase()}${m.slice(1)}(): Prisma.${m}Delegate;`).join("\n");
-const MODEL_DELEGATES = MODELS.map((m) => `    interface ${m}Delegate extends PrismaModelDelegate {}`).join("\n");
+// Each delegate declares its own query methods, as the generated client does:
+// a method's declaring interface names its model.
+const DELEGATE_METHODS = `      findFirst(...args: unknown[]): Promise<Row | null>;
+      findMany(...args: unknown[]): Promise<Row[]>;
+      findUnique(...args: unknown[]): Promise<Row | null>;
+      create(...args: unknown[]): Promise<Row>;
+      update(...args: unknown[]): Promise<Row>;
+      updateMany(...args: unknown[]): Promise<{ count: number }>;
+      delete(...args: unknown[]): Promise<Row>;
+      deleteMany(...args: unknown[]): Promise<{ count: number }>;
+      upsert(...args: unknown[]): Promise<Row>;
+      count(...args: unknown[]): Promise<number>;
+      createMany(...args: unknown[]): Promise<{ count: number }>;
+      aggregate(...args: unknown[]): Promise<Row>;
+      groupBy(...args: unknown[]): Promise<Row[]>;`;
+const MODEL_DELEGATES = MODELS.map((m) => `    interface ${m}Delegate {\n${DELEGATE_METHODS}\n    }`).join("\n");
 const PRISMA_CLIENT_STUB = `declare module "@prisma/client" {
   interface Row { [field: string]: Field }
   type Field = Row & string & Row[];
@@ -3664,16 +3679,25 @@ export const f = () => withBypassRls(prisma, async (tx) => {
     expect(stderr).not.toContain("indexed by a name this gate cannot resolve");
   });
 
-  it("refuses a query on a delegate whose model its type does not name", () => {
-    const { code, stderr } = run(OUTBOX, `${HEAD_RLS}import type { Prisma } from "@prisma/client";
+  it("charges a delegate wrapped in another type by the interface that declares its method", () => {
+    const { code, stdout } = run(OUTBOX, `${HEAD_RLS}import type { Prisma } from "@prisma/client";
 export const f = () => withBypassRls(prisma, async (tx) => {
-  await tx.auditOutbox.count();
   const d = tx.auditOutbox as Prisma.AuditOutboxDelegate & { tag?: 1 };
   return d.count();
 }, BYPASS_PURPOSE.AUDIT_WRITE);`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("refuses a query on a delegate-shaped value whose model nothing names", () => {
+    const { code, stderr } = runMulti([["types/orm.d.ts", `declare module "orm" {
+  export interface GenericDelegate { findMany(...a: unknown[]): Promise<unknown[]>; count(...a: unknown[]): Promise<number> }
+  export function table(name: string): GenericDelegate;
+}`], [OUTBOX, `${HEAD_RLS}import { table } from "orm";
+export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); const d = table("x"); return d.count(); }, BYPASS_PURPOSE.AUDIT_WRITE);`]]);
     expect(code).toBe(1);
     expect(stderr).toContain("indexed by a name this gate cannot resolve");
-    expect(stderr).toContain("d.count()");
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts:3  d.count  (in src/lib/audit/audit-outbox.ts:3)");
   });
 });
 
@@ -3720,5 +3744,55 @@ export async function outer(q: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPO
 export const c = () => outer(BYPASS_PURPOSE.SYSTEM_MAINTENANCE);`));
     expect(code).toBe(1);
     expect(stderr).toContain("purpose parameter q is reassigned before it reaches fwd");
+  });
+});
+
+describe("round 5: a delegate is charged where a member leaves it, and is never erased (R5-F7 / R5-S4)", () => {
+  const REALIGN = "src/lib/tenant/tenant-realignment.ts";
+  const STRANDED = ["src/lib/tenant/stranded-rows.ts", `export function strandedDelegate(db: TX) { return db.session; }
+export async function countStrandedRows(db: TX) { return db.session.count(); }`];
+  it.each([
+    ["destructured", "const { deleteMany } = strandedDelegate(tx); await deleteMany({});"],
+    ["bound", "const del = strandedDelegate(tx).deleteMany.bind(strandedDelegate(tx)); await del({});"],
+    ["read through a string key", "await strandedDelegate(tx)[\"deleteMany\"]({});"],
+  ])("charges a via module's delegate method %s to the module that uses it", (_label, body) => {
+    const { code, stderr } = runMulti([STRANDED, [REALIGN, `${HEAD_RLS}import { strandedDelegate, countStrandedRows } from "@/lib/tenant/stranded-rows";
+export const f = () => withBypassRls(prisma, async (tx) => {
+  await countStrandedRows(tx);
+  ${body}
+}, BYPASS_PURPOSE.SYSTEM_MAINTENANCE);`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(`${REALIGN}:5  prisma.session`);
+  });
+
+  it("charges a delegate narrowed to a Pick of itself by the interface that declares the method", () => {
+    const { code, stderr } = runMulti([["src/lib/zz/entries.ts", `import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+export const entries: Pick<Prisma.PasswordEntryDelegate, "deleteMany"> = prisma.passwordEntry;`],
+      [OUTBOX, `${HEAD_RLS}import { entries } from "@/lib/zz/entries";
+export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); return entries.deleteMany({}); }, BYPASS_PURPOSE.AUDIT_WRITE);`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts:3  prisma.passwordEntry");
+  });
+
+  it.each([
+    ["an own interface", "interface Purger { deleteMany(...a: unknown[]): Promise<unknown> }\nexport const entries: Purger = prisma.passwordEntry;", "a client or delegate erased to Purger"],
+    ["an own parameter typed unknown", "export async function run(db: unknown) { return db; }\nexport const go = () => run(prisma);", "a client or delegate erased to unknown"],
+    ["a cast", "export const anyTx = prisma as unknown;", "a client or delegate erased to unknown"],
+  ])("refuses a client erased to %s", (_label, body, message) => {
+    const { code, stderr } = run("src/lib/zz/erase.ts", `import { prisma } from "@/lib/prisma";\n${body}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain(message);
+  });
+
+  it("passes a client narrowed to a Pick of itself, and to its raw-query API", () => {
+    const { code, stdout } = run("src/lib/zz/erase.ts", `import { prisma } from "@/lib/prisma";
+import type { PrismaClient } from "@prisma/client";
+type RawExecutor = { $executeRaw: PrismaClient["$executeRaw"] };
+export async function lookup(db: Pick<typeof prisma, "user">) { return db.user.count(); }
+export async function raw(db: RawExecutor) { return db; }
+export const go = () => [lookup(prisma), raw(prisma)];`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
   });
 });

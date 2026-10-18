@@ -28,13 +28,11 @@ export async function streamBodyToBuffer(body: unknown): Promise<Buffer> {
   if (typeof body !== "object") throw new Error("Unsupported object body type");
   const obj = body as Record<string | symbol, unknown>;
 
-  if (
-    "transformToByteArray" in obj &&
-    typeof obj.transformToByteArray === "function"
-  ) {
-    const bytes = await (
-      obj as unknown as { transformToByteArray: () => Promise<Uint8Array> }
-    ).transformToByteArray();
+  // The AWS SDK v3 body exposes transformToByteArray. Called on its own object
+  // rather than through a cast, so no own type is asserted onto a library value.
+  const transformToByteArray = obj.transformToByteArray;
+  if (typeof transformToByteArray === "function") {
+    const bytes = (await transformToByteArray.call(obj)) as Uint8Array;
     return Buffer.from(bytes);
   }
 

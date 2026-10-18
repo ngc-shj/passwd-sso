@@ -31,10 +31,18 @@
  * initializer, a class member is that member in the class and every subclass,
  * an interface member is every production member of that name. That is sound
  * only while nothing puts a function anywhere by other means, so the decidable
- * subset is enforced rather than assumed (lib/soundness.mjs, G1-G5): no write
- * of a function to a member after its declaration, no object mutator on what
- * may hold functions, no computed-key or parameter-property function member,
- * no class derivation the language service cannot enumerate. The scan set is
+ * subset is enforced rather than assumed (lib/soundness.mjs, G1-G7): no write
+ * of a function to a member after its declaration, no object mutator used but
+ * by a direct call on what cannot hold functions, no computed-key or
+ * parameter-property function member, no class derivation the language
+ * service cannot enumerate, no object holding functions widened to a type that
+ * names none of them, no value of unknown origin narrowed to one that holds
+ * functions but a registered external shape from its package. A member of an
+ * object literal is that literal's only on a receiver that provably holds it;
+ * otherwise every literal that can stand in for the receiver's type may be
+ * there. A library-declared member our code implements (an Adapter, a
+ * `Pick<Console, "log">`) is library code only on a receiver traced to the
+ * library. The scan set is
  * every own file not declared non-production and what it loads, and a module in it the gates cannot read
  * (own JavaScript, a declaration over it, a non-literal specifier outside
  * NON_LITERAL_LOAD_ALLOWLIST) is refused.
@@ -49,12 +57,15 @@
  * NOT covered, named so the next editor does not assume otherwise: the
  * iterator protocol (`for…of`/spread over an own iterable), implicit
  * conversions (toString/valueOf/Symbol.toPrimitive/toJSON), Proxy traps,
- * decorators, a getter reached through destructuring or a computed key, and an
- * own function a library was given OUTSIDE the reached code (an event listener
- * or timer registered at module level, a library object built around our code
- * there — `const repo = makeRepo(prisma)`) and invoked by that library from a
- * library call inside it. Inside the reached code, what is handed to a library
- * is reached.
+ * decorators, and an own function a library was given OUTSIDE the reached code
+ * (an event listener or timer registered at module level, a library object
+ * built around our code there — `const repo = makeRepo(prisma)`) and invoked
+ * by that library from a library call inside it (#909, pinned as a known-limit
+ * fixture). Inside the reached code, what is handed to a library is reached.
+ * For what is not covered, the runtime guard still refuses the nested context
+ * and logs rls.nesting_refused; a caller that swallows the error silently
+ * skips the work it guarded (a notification, a session invalidation, an audit
+ * write), and the structured log is how that is noticed.
  */
 import { SyntaxKind } from "ts-morph";
 import { createProgramProject, ProgramBuildError } from "./lib/ast-project.mjs";
@@ -486,7 +497,7 @@ for (const sf of scanFiles) {
 // that make a member hold only what its declaration says (lib/soundness.mjs).
 // check-bypass-rls checks the same itself, so each gate refuses on its own.
 const boundaryViolations = scope.violations;
-const flowViolations = functionFlowViolations(program, scope);
+const flowViolations = functionFlowViolations(program, scope, resolver.usedExternalShapes);
 
 const staleAllowlist = [
   ...conditionalEntries.map((e) => e.key).filter((k) => !usedConditional.has(k)),

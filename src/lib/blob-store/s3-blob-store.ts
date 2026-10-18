@@ -10,8 +10,19 @@ import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-sto
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
 import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
+// The @aws-sdk/client-s3 surface this store uses. Each is a library value's
+// shape, registered in check-bypass-rls's EXTERNAL_SHAPE_ALLOWLIST with its
+// supplying package.
+type S3SendClient = { send: (command: unknown) => Promise<unknown> };
+type S3Module = {
+  S3Client: new (options: { region: string }) => unknown;
+  PutObjectCommand: new (input: unknown) => unknown;
+  GetObjectCommand: new (input: unknown) => unknown;
+  DeleteObjectCommand: new (input: unknown) => unknown;
+};
+
 let s3ClientPromise: Promise<{
-  client: { send: (command: unknown) => Promise<unknown> };
+  client: S3SendClient;
   PutObjectCommand: new (input: unknown) => unknown;
   GetObjectCommand: new (input: unknown) => unknown;
   DeleteObjectCommand: new (input: unknown) => unknown;
@@ -21,14 +32,9 @@ async function getS3Client(region: string) {
   if (!s3ClientPromise) {
     s3ClientPromise = (async () => {
       const moduleName = "@aws-sdk/client-s3";
-      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as {
-        S3Client: new (options: { region: string }) => unknown;
-        PutObjectCommand: new (input: unknown) => unknown;
-        GetObjectCommand: new (input: unknown) => unknown;
-        DeleteObjectCommand: new (input: unknown) => unknown;
-      };
+      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as S3Module;
       return {
-        client: new mod.S3Client({ region }) as { send: (command: unknown) => Promise<unknown> },
+        client: new mod.S3Client({ region }) as S3SendClient,
         PutObjectCommand: mod.PutObjectCommand as new (input: unknown) => unknown,
         GetObjectCommand: mod.GetObjectCommand as new (input: unknown) => unknown,
         DeleteObjectCommand: mod.DeleteObjectCommand as new (input: unknown) => unknown,

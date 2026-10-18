@@ -10,19 +10,28 @@
  * (an alias, a cast, a nested path, Object.assign on `this`). These rules
  * refuse the forms instead, so the declaration is the whole answer:
  *
- *   G1  no write to an own member whose type may be a function, other than its
- *       declaration's initializer (`ops.run = f`, `this.run = f`, a
- *       destructuring target), and no write of a function through a key no
- *       declaration names (an index signature, an `any` object);
+ *   G1  no write to an own member that may hold a function (its type is
+ *       callable, `unknown`, `any`, `object`…), or of a function into any
+ *       member, other than its declaration's initializer (`ops.run = f`,
+ *       `this.run = f`, a destructuring, compound or for-of target), and no
+ *       write of a function through a key no declaration names;
  *   G2  no object mutator (Object.assign, defineProperty, setPrototypeOf,
- *       Reflect.set …, recognised by the declaration the call resolves to, not
- *       by spelling) on `this`, on an `any`/`unknown` value, or on an object
- *       with own members that may be functions;
- *   G3  no computed-key member that may be a function;
- *   G4  no constructor parameter property that may be a function;
+ *       Reflect.set …, recognised by the declaration a reference resolves to)
+ *       used other than by a direct call, nor on `this`, an `any`/`unknown`
+ *       value, or an object with own members that may hold functions;
+ *   G3  no computed-key member that may hold a function;
+ *   G4  no constructor parameter property that may hold a function;
  *   G5  no class expression with `extends`, and no `extends` of anything but
  *       the name of a class declaration (an import rename passes, a const
- *       alias does not) — derived classes are enumerated by name.
+ *       alias does not) — derived classes are enumerated by name;
+ *   G6  no object holding own functions (or accessors) widened to a type that
+ *       names none of its members (`any`, `unknown`, a type parameter,
+ *       `object`, `{}`, a record) — by a cast, an annotation, an assignment,
+ *       an argument to an own function or a return;
+ *   G7  no value of unknown origin (`any`, `unknown`, a record) narrowed by
+ *       those flows to a type holding functions, except a registered external
+ *       shape (EXTERNAL_SHAPE_ALLOWLIST) given a value traced to its supplying
+ *       package; no own value or class takes a registered shape.
  *
  * An interface member is resolved to every production member of that NAME
  * that may hold a function, so a cast or a structural assignment cannot hide
@@ -31,9 +40,9 @@
  * The scan set is deny-by-default: every own file the Program holds is
  * production unless NON_PRODUCTION / NON_PRODUCTION_SCRIPTS declares it
  * otherwise (lib/function-resolver.mjs), and so is every module production
- * code loads. A load's specifier is resolved from its literal text or its
- * string-literal type. A load the compiler cannot
- * resolve to TypeScript the gates can read — own JavaScript, a declaration
+ * code loads (`import()`, `require`, a createRequire loader). A load's
+ * specifier is evaluated from its value, never an asserted type. A load the
+ * compiler cannot resolve to TypeScript the gates can read — own JavaScript, a declaration
  * shim over own code, an own specifier that does not resolve, a non-literal
  * specifier — is refused, as is production loading declared tooling and
  * tooling whose closure reaches the RLS helpers or the database client.
@@ -41,7 +50,11 @@
 import { SyntaxKind, ts } from "ts-morph";
 import { existsSync } from "node:fs";
 import {
+  EXTERNAL_SHAPE_ALLOWLIST,
+  FN_KINDS,
   NON_PRODUCTION_SCRIPTS,
+  isModuleLoadCall,
+  originModules,
   isDeclaredNonProduction,
   isProductionPath,
   mayBeCallable,
@@ -98,10 +111,7 @@ function loadsOf(sf) {
     if (spec !== undefined) out.push({ node: decl, spec });
   }
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const callee = call.getExpression();
-    const isLoad =
-      callee.getKind() === SyntaxKind.ImportKeyword || (callee.getKind() === SyntaxKind.Identifier && callee.getText() === "require");
-    if (!isLoad) continue;
+    if (!isModuleLoadCall(call)) continue;
     const specs = specifiersOf(call.getArguments()[0]);
     if (specs) for (const spec of specs) out.push({ node: call, spec });
     else out.push({ node: call, spec: null });
@@ -228,6 +238,7 @@ const literalKeyOf = (access) => {
     ? arg.getLiteralText()
     : null;
 };
+const typeText = (t) => t.getText(undefined, ts.TypeFormatFlags.NoTruncation).replace(/\s+/g, " ").slice(0, 60);
 const isAssignmentOperator = (op) => op >= SyntaxKind.FirstAssignment && op <= SyntaxKind.LastAssignment;
 const isMemberTarget = (e) => e?.getKind() === SyntaxKind.PropertyAccessExpression || e?.getKind() === SyntaxKind.ElementAccessExpression;
 
@@ -262,6 +273,77 @@ function writeTargetsOf(node) {
     if (init && init.getKind() !== SyntaxKind.VariableDeclarationList) leaves(init);
   }
   return out;
+}
+
+/**
+ * Whether a TARGET type names none of a value's members: `any`, `unknown`, a
+ * type parameter (by its constraint), `object`, `{}`, an index-signature-only
+ * record. A union is loose when any member is.
+ */
+function isLooseTarget(t, depth = 0) {
+  if (depth > 3) return true;
+  if (t.isAny() || t.isUnknown()) return true;
+  if (t.isUnion()) return t.getUnionTypes().some((u) => !u.isNull() && !u.isUndefined() && isLooseTarget(u, depth + 1));
+  if (t.isTypeParameter()) {
+    const c = t.getConstraint();
+    return c ? isLooseTarget(c, depth + 1) : true;
+  }
+  if (t.getFlags() & ts.TypeFlags.NonPrimitive) return true;
+  if (t.isIntersection()) return t.getIntersectionTypes().every((u) => isLooseTarget(u, depth + 1));
+  return t.isObject() && !t.isArray() && !t.isTuple() && t.getProperties().length === 0 &&
+    t.getCallSignatures().length === 0 && t.getConstructSignatures().length === 0;
+}
+
+/**
+ * The value flows `node` makes, each as { source, target } with the target's
+ * declared type: a type assertion, an annotated initializer, an assignment,
+ * an argument to an own function (its parameter's DECLARED type, so a type
+ * parameter counts as such), a returned value against a declared return type.
+ */
+export function flowsOf(node, checker, holdsFunctions) {
+  const k = node.getKind();
+  if (k === SyntaxKind.AsExpression || k === SyntaxKind.TypeAssertionExpression) {
+    if (node.getTypeNode?.()?.getText() === "const") return [];
+    return [{ source: node.getExpression(), target: node.getType() }];
+  }
+  if (k === SyntaxKind.VariableDeclaration && node.getTypeNode?.() && node.getInitializer()) {
+    return [{ source: node.getInitializer(), target: node.getType() }];
+  }
+  if (k === SyntaxKind.BinaryExpression && node.getOperatorToken().getKind() === SyntaxKind.EqualsToken) {
+    const left = node.getLeft();
+    if (left.getKind() === SyntaxKind.ObjectLiteralExpression || left.getKind() === SyntaxKind.ArrayLiteralExpression) return [];
+    return [{ source: node.getRight(), target: left.getType() }];
+  }
+  if (k === SyntaxKind.CallExpression || k === SyntaxKind.NewExpression) {
+    // Typing the arguments is the costly step, so first the callee: only an
+    // own one is judged (a library is handed values; reach covers those).
+    const callee = unwrap(node.getExpression());
+    const nameNode = callee?.getKind() === SyntaxKind.PropertyAccessExpression ? callee.getNameNode() : callee;
+    let symbol = nameNode?.getSymbol?.();
+    if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+    const calleeDecls = symbol?.getDeclarations() ?? [];
+    if (calleeDecls.length > 0 && calleeDecls.every((d) => isExternalFile(d.getSourceFile()))) return [];
+    if (!(node.getArguments?.() ?? []).some((a) => holdsFunctions(a.getType()))) return [];
+    const decl = checker.getResolvedSignature(node)?.getDeclaration();
+    if (!decl || isExternalFile(decl.getSourceFile())) return [];
+    const params = decl.getParameters?.() ?? [];
+    if (params.length === 0) return [];
+    return (node.getArguments?.() ?? []).flatMap((arg, i) => {
+      const p = params[Math.min(i, params.length - 1)];
+      if (i >= params.length && !p.getDotDotDotToken()) return [];
+      const declared = p.getType();
+      const target = p.getDotDotDotToken() ? (declared.getArrayElementType?.() ?? declared) : declared;
+      return arg.getKind() === SyntaxKind.SpreadElement ? [] : [{ source: arg, target }];
+    });
+  }
+  if (k === SyntaxKind.ReturnStatement && node.getExpression()) {
+    const fn = node.getFirstAncestor((a) => FN_KINDS.has(a.getKind()));
+    if (!fn?.getReturnTypeNode?.()) return [];
+    let target = fn.getReturnType();
+    if (fn.isAsync?.() && target.getTypeArguments?.().length === 1) target = target.getTypeArguments()[0];
+    return [{ source: node.getExpression(), target }];
+  }
+  return [];
 }
 
 /** Whether a call resolves to one of the library's object mutators. */
@@ -333,7 +415,28 @@ function directCallOf(access) {
  * Violations of G1–G5 in the production files `scope` names, as
  * "file:line  description" strings.
  */
-export function functionFlowViolations(program, scope) {
+/** Whether `expr` is the library's `globalThis`, by its declaration. */
+function isGlobalObject(expr) {
+  const e = unwrap(expr);
+  if (e?.getKind() !== SyntaxKind.Identifier) return false;
+  const decls = e.getSymbol()?.getDeclarations() ?? [];
+  return e.getText() === "globalThis" && (decls.length === 0 || decls.every((d) => isExternalFile(d.getSourceFile())));
+}
+
+/** The EXTERNAL_SHAPE_ALLOWLIST key a type is declared as, or null. */
+function externalShapeKeyOf(type) {
+  const symbol = type.getAliasSymbol() ?? type.getSymbol();
+  for (const d of symbol?.getDeclarations() ?? []) {
+    const k = d.getKind();
+    if (k !== SyntaxKind.InterfaceDeclaration && k !== SyntaxKind.TypeAliasDeclaration) continue;
+    const key = `${toRelPosix(d.getSourceFile().getFilePath())}::${d.getName()}`;
+    if (EXTERNAL_SHAPE_ALLOWLIST.has(key)) return key;
+  }
+  return null;
+}
+
+export function functionFlowViolations(program, scope, usedShapes = new Set()) {
+  const checker = program.getTypeChecker();
   const isOwn = (node) => !isExternalFile(node.getSourceFile());
   const found = [];
   const excused = new Map(); // key -> sites seen
@@ -360,6 +463,31 @@ export function functionFlowViolations(program, scope) {
     const at = symbol.getValueDeclaration() ?? decls[0];
     return mayHoldOwnCode(symbol.getTypeAtLocation(at));
   };
+  // G6's source: own members typed callable. (A function in a member typed
+  // `unknown` got there by a write G1 refuses, or by an initializer whose
+  // literal type is callable.)
+  const callableMemo = new Map();
+  const hasCallableOwnMembers = (type, depth = 0) => {
+    if (depth > 2) return false;
+    const key = type.compilerType;
+    if (depth === 0 && callableMemo.has(key)) return callableMemo.get(key);
+    const result = hasCallableOwnMembersUncached(type, depth);
+    if (depth === 0) callableMemo.set(key, result);
+    return result;
+  };
+  const hasCallableOwnMembersUncached = (type, depth) => {
+    const t = type.getNonNullableType();
+    if (t.isUnion()) return t.getUnionTypes().some((u) => hasCallableOwnMembers(u, depth + 1));
+    if (t.isIntersection()) return t.getIntersectionTypes().some((u) => hasCallableOwnMembers(u, depth + 1));
+    return t.getProperties().some((p) => {
+      const decls = p.getDeclarations();
+      if (decls.length === 0 || !decls.some(isOwn)) return false;
+      // An accessor runs code when read, a constructor when called with new.
+      if (decls.some((d) => isOwn(d) && (d.getKind() === SyntaxKind.GetAccessor || d.getKind() === SyntaxKind.SetAccessor))) return true;
+      const pt = p.getTypeAtLocation(p.getValueDeclaration() ?? decls[0]);
+      return mayBeCallable(pt) || pt.getConstructSignatures().length > 0;
+    });
+  };
   const hasOwnFunctionMembers = (type, depth = 0) => {
     if (depth > 2) return false;
     const t = type.getNonNullableType();
@@ -380,6 +508,43 @@ export function functionFlowViolations(program, scope) {
           out.push(`${siteOf(node)}  G3: computed-key member holding a function`);
         }
         return;
+      }
+
+      // G6: an object holding own functions widened to a type that names
+      // none of its members. Through the wider type it can be written by key
+      // or by a mutator in ways G1/G2 judge by that type, and miss.
+      for (const { source, target } of flowsOf(node, checker, hasCallableOwnMembers)) {
+        const sourceType = source.getType();
+        currentNode = source;
+        // The global object holds the globals own code declares; a write to one
+        // resolves to that declaration and G1 judges it, so widening it hides nothing.
+        if (isLooseTarget(target) && hasCallableOwnMembers(sourceType) && !isGlobalObject(source)) {
+          out.push(`${siteOf(source)}  G6: object holding functions widened to ${typeText(target)}`);
+          continue;
+        }
+        // G7: a value nobody named, narrowed to a type that holds functions.
+        // Only a declared external shape may be, and only with a value from
+        // its package; no own value may take that type.
+        const shape = externalShapeKeyOf(target);
+        if (shape) {
+          usedShapes.add(shape);
+          if (!isLooseTarget(sourceType)) {
+            out.push(`${siteOf(source)}  G7: own value given the external shape ${shape}`);
+            continue;
+          }
+          const pkg = EXTERNAL_SHAPE_ALLOWLIST.get(shape);
+          const origin = originModules(source);
+          if (!origin || ![...origin].every((m) => m === pkg)) {
+            const from = origin ? [...origin].join(", ") : "nothing traceable";
+            out.push(pkg
+              ? `${siteOf(source)}  G7: ${shape} is supplied by ${pkg}, but this value comes from ${from}`
+              : `${siteOf(source)}  G7: ${shape} has no supplier; only a typed client may take it, and this value comes from ${from}`);
+          }
+          continue;
+        }
+        if (isLooseTarget(sourceType) && hasCallableOwnMembers(target)) {
+          out.push(`${siteOf(source)}  G7: value nobody named narrowed to ${typeText(target)}, which holds functions`);
+        }
       }
 
       // G1, by write site: every member a write lands on.
@@ -445,6 +610,10 @@ export function functionFlowViolations(program, scope) {
         return;
       }
       if (kind === SyntaxKind.ClassDeclaration) {
+        for (const impl of node.getImplements?.() ?? []) {
+          const shape = externalShapeKeyOf(impl.getType());
+          if (shape) out.push(`${siteOf(node)}  G7: own class implements the external shape ${shape}`);
+        }
         const base = node.getExtends?.();
         const e = base ? unwrap(base.getExpression()) : null;
         if (!e) return;

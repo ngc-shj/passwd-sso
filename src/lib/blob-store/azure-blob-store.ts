@@ -11,23 +11,30 @@ import { buildObjectKey, decodeObjectRef, encodeObjectRef } from "@/lib/blob-sto
 import { streamBodyToBuffer } from "@/lib/blob-store/stream";
 import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 
-let containerClientPromise: Promise<{
+// The @azure/storage-blob surface this store uses. Each is a library value's
+// shape, registered in check-bypass-rls's EXTERNAL_SHAPE_ALLOWLIST with its
+// supplying package.
+type AzureContainerClient = {
   getBlockBlobClient: (key: string) => {
     uploadData: (data: Buffer, options?: unknown) => Promise<unknown>;
     download: () => Promise<{ readableStreamBody?: unknown }>;
     deleteIfExists: () => Promise<unknown>;
   };
-}> | null = null;
+};
+type AzureBlobServiceClient = { getContainerClient: (containerName: string) => unknown };
+type AzureBlobModule = {
+  BlobServiceClient: {
+    fromConnectionString: (connectionString: string) => unknown;
+  } & (new (endpoint: string) => unknown);
+};
+
+let containerClientPromise: Promise<AzureContainerClient> | null = null;
 
 async function getAzureContainerClient() {
   if (!containerClientPromise) {
     containerClientPromise = (async () => {
       const moduleName = "@azure/storage-blob";
-      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as {
-        BlobServiceClient: {
-          fromConnectionString: (connectionString: string) => unknown;
-        } & (new (endpoint: string) => unknown);
-      };
+      const mod = requireOptionalModule<Record<string, unknown>>(moduleName) as AzureBlobModule;
       const { account, container } = loadCloudBlobConfig(BLOB_STORAGE.AZURE);
 
       const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING?.trim();
@@ -36,14 +43,8 @@ async function getAzureContainerClient() {
       if (connectionString) {
         const serviceClient = mod.BlobServiceClient.fromConnectionString(
           connectionString,
-        ) as { getContainerClient: (containerName: string) => unknown };
-        return serviceClient.getContainerClient(container) as {
-          getBlockBlobClient: (key: string) => {
-            uploadData: (data: Buffer, options?: unknown) => Promise<unknown>;
-            download: () => Promise<{ readableStreamBody?: unknown }>;
-            deleteIfExists: () => Promise<unknown>;
-          };
-        };
+        ) as AzureBlobServiceClient;
+        return serviceClient.getContainerClient(container) as AzureContainerClient;
       }
 
       if (sasToken) {
@@ -52,14 +53,8 @@ async function getAzureContainerClient() {
           : `?${sasToken}`;
         const serviceClient = new mod.BlobServiceClient(
           `https://${account}.blob.core.windows.net${normalizedSas}`,
-        ) as { getContainerClient: (containerName: string) => unknown };
-        return serviceClient.getContainerClient(container) as {
-          getBlockBlobClient: (key: string) => {
-            uploadData: (data: Buffer, options?: unknown) => Promise<unknown>;
-            download: () => Promise<{ readableStreamBody?: unknown }>;
-            deleteIfExists: () => Promise<unknown>;
-          };
-        };
+        ) as AzureBlobServiceClient;
+        return serviceClient.getContainerClient(container) as AzureContainerClient;
       }
 
       throw new Error(

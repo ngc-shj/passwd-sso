@@ -1,0 +1,1057 @@
+{
+ "round": 5,
+ "base": "working tree after e7ae2e2aa (steps 2-4)",
+ "how": "apply one entry to a scratch copy, then `npx vitest run <test> -t <filter>`; red = that run fails",
+ "mutations": [
+  {
+   "id": "P1",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "          if (mayHoldOwnCode(target.getType()) || (value && mayBeCallable(value.getType()))) {",
+   "new": "          if (mayBeCallable(target.getType()) || (value && mayBeCallable(value.getType()))) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "member declared unknown|member declared any|member declared object|member declared Function",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "P2",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "          if (mayHoldOwnCode(target.getType()) || (value && mayBeCallable(value.getType()))) {",
+   "new": "          if (mayHoldOwnCode(target.getType())) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "type only a function happens to satisfy",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "P3",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "          if (!mayHoldOwnCode(node.getType())) return;",
+   "new": "          if (!mayBeCallable(node.getType())) return;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "fills with an any-typed value",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "P4",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "              k === SyntaxKind.MethodDeclaration || k === SyntaxKind.GetAccessor);",
+   "new": "              k === SyntaxKind.MethodDeclaration);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "getter hands back",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "P5",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "        return merge([{ ...EMPTY, fns: [member] }, returnedValue(member)]);",
+   "new": "        return { ...EMPTY, fns: [member] };",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "getter hands back",
+   "base": "round-5",
+   "result": "green: removed as dead"
+  },
+  {
+   "id": "P6",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "        if (mayHoldOwnCode(pt)) {",
+   "new": "        if (mayBeCallable(pt)) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "member typed unknown",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "P7",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "  SyntaxKind.ObjectLiteralExpression, SyntaxKind.ArrayLiteralExpression,\n]);",
+   "new": "]);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "nested empty objects",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "P8",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (!decls.some((d) => d.getKind() === SyntaxKind.ClassDeclaration)) {",
+   "new": "        if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "base reached through a const alias",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "P9",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (decls.length > 0 && decls.every((d) => !isOwn(d))) return;\n        if (!decls.some",
+   "new": "        if (!decls.some",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "extends a library class",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "P10",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();\n        const decls = symbol?.getDeclarations() ?? [];\n        if (decls.length > 0 && decls.every((d) => !isOwn(d))) return;",
+   "new": "        const decls = symbol?.getDeclarations() ?? [];\n        if (decls.length > 0 && decls.every((d) => !isOwn(d))) return;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "base is an import rename",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Q1",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (mayBeCallable(target.getType()) || (value && mayHoldOwnCode(value.getType()))) {",
+   "new": "        if (mayBeCallable(target.getType()) || (value && mayBeCallable(value.getType()))) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "loose value written through an index-signature key",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Q2",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    return mayHoldOwnCode(symbol.getTypeAtLocation(at));",
+   "new": "    return mayBeCallable(symbol.getTypeAtLocation(at));",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "slot typed unknown",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Q3",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (node.getNameNode().getKind() === SyntaxKind.ComputedPropertyName && mayHoldOwnCode(node.getType())) {",
+   "new": "        if (node.getNameNode().getKind() === SyntaxKind.ComputedPropertyName && mayBeCallable(node.getType())) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "computed-key member holding a loose value",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Q4",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (mayHoldOwnCode(node.getType())) out.push(`${siteOf(node)}  G4:",
+   "new": "        if (mayBeCallable(node.getType())) out.push(`${siteOf(node)}  G4:",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "parameter property typed unknown",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Q5",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  [\"src/lib/security/sentry-scrub.ts::scrubObject::G1\", \"scrubbed Sentry event data\"],",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "listed conversion traps",
+   "base": "round-5",
+   "result": "green in fixtures by construction; pinned by the real-tree run (an entry removed fails the gate)"
+  },
+  {
+   "id": "U17",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  if (k === SyntaxKind.BinaryExpression && isAssignmentOperator(node.getOperatorToken().getKind())) {",
+   "new": "  if (k === SyntaxKind.BinaryExpression && node.getOperatorToken().getKind() === SyntaxKind.EqualsToken) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "a logical assignment",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U16",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (init && init.getKind() !== SyntaxKind.VariableDeclarationList) leaves(init);",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "a for-of target",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U14",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "      for (const el of e.getElements()) leaves(el.getKind() === SyntaxKind.SpreadElement ? el.getExpression() : el);",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "an array-pattern target",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U22",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  [\"ObjectConstructor\", new Set([\"assign\", \"defineProperty\", \"defineProperties\", \"setPrototypeOf\"])],",
+   "new": "  [\"ObjectConstructor\", new Set([\"assign\", \"defineProperty\"])],",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "Object.setPrototypeOf|Object.defineProperties",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U23",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  [\"Reflect\", new Set([\"set\", \"defineProperty\", \"setPrototypeOf\"])],",
+   "new": "  [\"Reflect\", new Set([\"set\"])],",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "Reflect.defineProperty",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U9",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (t.isUnion()) return t.getUnionTypes().some((u) => hasOwnFunctionMembers(u, depth + 1));",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "union of function holders",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U24",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "      if (kind === SyntaxKind.PropertyAssignment || kind === SyntaxKind.MethodDeclaration || kind === SyntaxKind.PropertyDeclaration) {",
+   "new": "      if (kind === SyntaxKind.PropertyAssignment) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "computed-key method|computed-key class field",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S2a",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (!call) {\n          out.push(",
+   "new": "        if (false) {\n          out.push(",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "R5-S2",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S2b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  } else if ((k === SyntaxKind.StringLiteral",
+   "new": "  } else if (false && (k === SyntaxKind.StringLiteral",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "through a string key",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S2c",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (parent?.getKind() === SyntaxKind.BindingElement && (parent.getPropertyNameNode() ?? parent.getNameNode()) === node) {",
+   "new": "    if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "through a destructure",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U1",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (spec === null && NON_LITERAL_LOAD_ALLOWLIST.has(rel)) {",
+   "new": "        if (NON_LITERAL_LOAD_ALLOWLIST.has(rel)) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "does not let NON_LITERAL_LOAD_ALLOWLIST excuse",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U5",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "      const impl = [\".js\", \".mjs\", \".cjs\", \".jsx\"]",
+   "new": "      const impl = [\".js\"]",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "d.mts over own .mjs",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U6",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (/\\.[cm]?jsx?$/.test(target)) {",
+   "new": "    if (/\\.js$/.test(target)) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "loading own .mjs",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "U2",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (DATA_EXTENSIONS.test(target)) return null;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "passes CSS and JSON imports",
+   "base": "round-5",
+   "result": "green: removed as dead"
+  },
+  {
+   "id": "U2b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "      if (DATA_EXTENSIONS.test(spec)) return null;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "passes CSS and JSON imports",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "T7a",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "  return parts.length > 0 && parts.every((u) => u.isStringLiteral()) ? parts.map((u) => u.getLiteralValue()) : null;",
+   "new": "  return null;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "literal type, at a path no allowlist names|literal-union specifier",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "T7b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (!usedNonLiteral.has(rel) && existsSync(rel)) {",
+   "new": "    if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "whose file has no unnamed load",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "T11a",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "          ? `method ${fn.getParent()?.getName?.() ?? \"<anonymous>\"}.${fn.getName()}`",
+   "new": "          ? `function ${fn.getName()}`",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "class method of the listed function",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "T11b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    else if (seen !== sites) found.push(",
+   "new": "    else if (false) found.push(",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "gains another write",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S5a",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (existsSync(path)) violations.push(",
+   "new": "    if (false) violations.push(",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "NON_PRODUCTION entry that matches no file",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S5b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (existsSync(tool) && !ownRels.includes(tool)) violations.push(",
+   "new": "    if (false) violations.push(",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "tooling entry that is not in the Program",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S5c",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "  return !isDeclaredNonProduction(rel);\n}",
+   "new": "  return rel.startsWith(\"src/\") && !isDeclaredNonProduction(rel);\n}",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "entry file at the root",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S5c2",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "  return !isDeclaredNonProduction(rel);\n}",
+   "new": "  return rel.startsWith(\"src/\") && !isDeclaredNonProduction(rel);\n}",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "entry file at the root",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S5d",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "  { prefix: \"e2e/\", why: \"Playwright end-to-end tests and their helpers\" },",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "file under a declared prefix",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "A1",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "  if (change) fail(",
+   "new": "  if (false) fail(",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "R5-ADJ1",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "A2",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "    case SyntaxKind.DeleteExpression:\n      return true;",
+   "new": "    case SyntaxKind.DeleteExpression:\n      return false;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "guard through delete",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "A3",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "      return holder?.getKind() === SyntaxKind.BinaryExpression && holder.getOperatorToken().getKind() === SyntaxKind.EqualsToken && holder.getLeft() === up;",
+   "new": "      return false;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "guard through a destructuring assignment",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "A4",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "      return `${name} leaves as a value at ${siteOf(ref)}`;",
+   "new": "      continue;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "Object.assign onto the parameter|alias that is then written|parameter passed on|through a computed key",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "A5",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "        if (member !== null && member !== guard) continue; // another member, read or written",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "writes another member",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "A6",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "      if (pk === SyntaxKind.SpreadAssignment || pk === SyntaxKind.SpreadElement) continue;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "writes another member",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "A7",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "      if (pk === SyntaxKind.VariableDeclaration && parent.getInitializer() === ref && parent.getNameNode().getKind() === SyntaxKind.ObjectBindingPattern) continue;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "writes another member",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "A8",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "      if (isBindingWrite(entry)) return `${name} is reassigned`;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "parameter reassigned",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "W8",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "    if (cond?.getKind() !== SyntaxKind.ConditionalExpression || cond.getWhenFalse() !== cur) return false;",
+   "new": "    if (cond?.getKind() !== SyntaxKind.ConditionalExpression) return false;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "an inverted branch",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "W10",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "      unwrap(test.getExpression())?.getSymbol()?.getDeclarations()[0] === params",
+   "new": "      true",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "another parameter",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "W9",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "      test.getName() === entry.guard &&",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "another member$",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "W2",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "  if (arg.getProperties().filter((p) => p.getName?.() === entry.guard).length !== 1) return false;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "names the guard twice",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "W3",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "    if (init?.getKind() === SyntaxKind.Identifier) valueDecl = init.getSymbol()?.getDeclarations()[0] ?? null;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "tx: tx",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "N6s",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "    if (!mayBeCallable(value.getType())) continue;",
+   "new": "    if (value.getType().getCallSignatures().length === 0) continue;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "held optionally",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "V5",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      if (op === SyntaxKind.QuestionQuestionToken || op === SyntaxKind.BarBarToken) {\n        return merge([resolveValue(e.getLeft()), resolveValue(e.getRight())]);",
+   "new": "      if (op === SyntaxKind.QuestionQuestionToken || op === SyntaxKind.BarBarToken) {\n        return resolveValue(e.getLeft());",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "unnameable function on the right side",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "V13",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "            (k === SyntaxKind.PropertyAssignment || k === SyntaxKind.ShorthandPropertyAssignment ||",
+   "new": "            (k === SyntaxKind.PropertyAssignment ||",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "filled by a shorthand",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "V14",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "            (k === SyntaxKind.MethodDeclaration || k === SyntaxKind.PropertyDeclaration || k === SyntaxKind.GetAccessor) &&",
+   "new": "            (k === SyntaxKind.MethodDeclaration || k === SyntaxKind.GetAccessor) &&",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "filled by a class field",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "V29",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "        } else if (d < 2) {",
+   "new": "        } else if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "nested member of what a library",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "V30",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      if (t.isUnion()) return t.getUnionTypes().forEach((u) => visitType(u, d));",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "member of a union handed",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "X1",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "  if (t.isUnion()) return t.getUnionTypes().some((u) => carriesClient(u, depth, seen));",
+   "new": "",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "conditional that may be the client|client-or-undefined",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "X2",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "  if (callee?.getKind() !== SyntaxKind.PropertyAccessExpression && callee?.getKind() !== SyntaxKind.ElementAccessExpression) return null;\n  const found = modelsOfDelegateType",
+   "new": "  if (callee?.getKind() !== SyntaxKind.PropertyAccessExpression) return null;\n  const found = modelsOfDelegateType",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "string key on a delegate",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "X10",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "      if (purpose?.reassignedParam) {\n        purposeViolations.push({ file: refFile",
+   "new": "      if (false) {\n        purposeViolations.push({ file: refFile",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "second-level forwarder",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Z1",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      return e.getTypeNode?.()?.getText() === \"const\" ? specifiersOf(e.getExpression(), seen) : null;",
+   "new": "      return specifiersOf(e.getExpression(), seen);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "asserted to a literal type",
+   "base": "round-5",
+   "result": "green: clause dropped, assertions are read through by value"
+  },
+  {
+   "id": "Z1b",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      return e.getTypeNode?.()?.getText() === \"const\" ? specifiersOf(e.getExpression(), seen) : null;",
+   "new": "      return null;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "built from literals through consts",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Z1c",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      return decl.getInitializer() ? specifiersOf(decl.getInitializer(), seen) : null;",
+   "new": "      return null;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "built from literals through consts",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Z2",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (parts.length === 0 || !parts.every((u) => u.isStringLiteral())) return { name: `${held[0]} (by a key that may name it)`, access: node };",
+   "new": "    if (parts.length === 0 || !parts.every((u) => u.isStringLiteral())) return null;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "a key typed string",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Z2b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    const name = parts.map((u) => first(receiver.getProperty(u.getLiteralValue())?.getDeclarations() ?? [])).find(Boolean);\n    return name ? { name, access: node } : null;",
+   "new": "    return null;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "a const literal key|a literal-union key|a keyof key",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "Z3",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "          if (mayHoldOwnCode(parent.getType())) return",
+   "new": "          if (false) return",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "a method of the parameter",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6a",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (isLooseTarget(target) && hasCallableOwnMembers(sourceType) && !isGlobalObject(source)) {",
+   "new": "        if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "G6, an object",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (isLooseTarget(target) && hasCallableOwnMembers(sourceType) && !isGlobalObject(source)) {",
+   "new": "        if (isLooseTarget(target) && hasCallableOwnMembers(sourceType)) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "global object widened for a singleton",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6c",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    return c ? isLooseTarget(c, depth + 1) : true;",
+   "new": "    return false;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "generic parameter of an own helper",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6d",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  if (t.getFlags() & ts.TypeFlags.NonPrimitive) return true;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "annotation as object",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6e",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  return t.isObject() && !t.isArray() && !t.isTuple() && t.getProperties().length === 0 &&\n    t.getCallSignatures().length === 0 && t.getConstructSignatures().length === 0;\n}",
+   "new": "  return false;\n}",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "cast to a record|by an assignment",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6f",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    return [{ source: node.getExpression(), target: node.getType() }];\n  }\n  if (k === SyntaxKind.VariableDeclaration",
+   "new": "    return [];\n  }\n  if (k === SyntaxKind.VariableDeclaration",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "cast to a record|cast to any",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6g",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    return [{ source: node.getInitializer(), target: node.getType() }];",
+   "new": "    return [];",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "annotation as object",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6h",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    return [{ source: node.getRight(), target: left.getType() }];",
+   "new": "    return [];",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "widened by an assignment",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6i",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "      return arg.getKind() === SyntaxKind.SpreadElement ? [] : [{ source: arg, target }];",
+   "new": "      return [];",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "generic parameter of an own helper",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6j",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    return [{ source: node.getExpression(), target }];\n  }\n  return [];\n}",
+   "new": "    return [];\n  }\n  return [];\n}",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "return typed unknown",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6l",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "      if (decls.some((d) => isOwn(d) && (d.getKind() === SyntaxKind.GetAccessor || d.getKind() === SyntaxKind.SetAccessor))) return true;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "getters widened to a record",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G6m",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "      return mayBeCallable(pt) || pt.getConstructSignatures().length > 0;",
+   "new": "      return mayBeCallable(pt);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "type with only constructors",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G7a",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "          if (!origin || ![...origin].every((m) => m === pkg)) {",
+   "new": "          if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "a value from another package|no traceable origin",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G7b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "          if (!isLooseTarget(sourceType)) {\n            out.push(",
+   "new": "          if (false) {\n            out.push(",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "registered shape given an own object",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G7c",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "          if (shape) out.push(`${siteOf(node)}  G7: own class",
+   "new": "          if (false) out.push(`${siteOf(node)}  G7: own class",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "registered shape given an own class",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G7d",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        if (isLooseTarget(sourceType) && hasCallableOwnMembers(target)) {",
+   "new": "        if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "G7, a value nobody named",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G7e",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "          usedShapes.add(shape);",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "given a value from its package",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G7f",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      const wrapped = moduleLoadingWrapperArgument(e, callee);",
+   "new": "      const wrapped = undefined;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "through a wrapper that loads",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F10",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "  return init?.getKind() === SyntaxKind.CallExpression && isCreateRequire(init.getExpression());",
+   "new": "  return false;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "createRequire loader is a module load",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G8a",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "    if (decls.some((d) => ownImplementedLibraryMembers().has(d))) {",
+   "new": "    if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "R5-S3",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G8b",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "          const bases = [...(node.getImplements?.() ?? []), ...(node.getExtends?.() ? [node.getExtends()] : [])].map((h) => h.getType());",
+   "new": "          const bases = [];",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "a class implementing a library type",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "G8c",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      if (!receiver || !originModules(receiver)) {",
+   "new": "      if (true) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "passes the library's own object",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F3a",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      if (!holdsLiteral(receiver, decl.getParent())) {",
+   "new": "      if (true) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "resolves a member exactly",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F3b",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "    if (isObjectLiteralMember(decl) && unwrap(site)?.getParent() !== decl) {",
+   "new": "    if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "type taken from another literal",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F3c",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      if (!member.isStatic?.()) results.push(...literalMembersStandingIn(",
+   "new": "      if (false) results.push(...literalMembersStandingIn(",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "class used as a type|assigned structurally",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F3d",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      return assignable(m.getParent().getType().compilerType, target.compilerType);",
+   "new": "      return true;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "cannot stand in for the receiver",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F3e",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      if (!hasStableReceiver(site)) return unresolvedResult(\"member of an object that may be rebound\");\n      const receiver = receiverOf(site);",
+   "new": "      const receiver = receiverOf(site);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "held in a let|parameter, which may hold any literal",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F3f",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "        return merge(literalMembersStandingIn(name, viaType ?? receiver.getType()).map(candidateValue));",
+   "new": "        return merge(literalMembersStandingIn(name, receiver.getType()).map(candidateValue));",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "nested member of what a library",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F3g",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "    if (isObjectLiteralMember(decl) && unwrap(site)?.getParent() !== decl) {",
+   "new": "    if (isObjectLiteralMember(decl)) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "shorthand member read through its own name",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F7a",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "  } else if (k === SyntaxKind.BindingElement) {",
+   "new": "  } else if (false) {",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "destructured to the module",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F7b",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "  if (byDecl) return { models: byDecl };",
+   "new": "",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "Pick of itself by the interface",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F7c",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "  return models.length > 0 && models.every(Boolean) ? [...new Set(models)] : null;",
+   "new": "  return models[0] ? [models[0]] : null;",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "union of delegates",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S4a",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "      if (!carriesClient(source.getType()) || carriesClient(target) || modelOfDelegateType(target) || isRawQueryOnly(target)) continue;",
+   "new": "      continue;",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "erased to",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "S4b",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "      if (!carriesClient(source.getType()) || carriesClient(target) || modelOfDelegateType(target) || isRawQueryOnly(target)) continue;",
+   "new": "      if (!carriesClient(source.getType()) || carriesClient(target) || modelOfDelegateType(target)) continue;",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "raw-query API",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F8a",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "          if (isStatic && !viaThis) continue;",
+   "new": "          if (isStatic) continue;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "reached through static this",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F8b",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "          if (isStatic && !viaThis) continue;",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "named through its class exactly",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F9a",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "        return resolver.accessorsReadBy(node);",
+   "new": "        return null;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "getter run through",
+   "base": "round-5",
+   "result": "red"
+  },
+  {
+   "id": "F9b",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      return any ? unresolvedResult(\"a getter may run through a key that is not a literal\") : null;",
+   "new": "      return null;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "key that is not a literal on a value with getters",
+   "base": "round-5",
+   "result": "red"
+  }
+ ]
+}

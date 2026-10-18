@@ -18,15 +18,20 @@
  *                argument is checked);
  *   - unresolved a reason, when the value cannot be named. Callers fail closed.
  *
- * PRODUCTION is the scope the gates pass in: the import closure of src/ and
- * scripts/ minus tests and the CI tooling (lib/soundness.mjs productionScope),
- * or, without one, those path prefixes. Implementations, assignments and
- * callers found outside it never run in production and are ignored.
+ * PRODUCTION is the scope the gates pass in (lib/soundness.mjs
+ * productionScope): every own file not declared in NON_PRODUCTION /
+ * NON_PRODUCTION_SCRIPTS, plus what it loads; without one, isProductionPath.
+ * Implementations, assignments and callers found outside it never run in
+ * production and are ignored.
  *
  * A function is named by its DECLARATION — a member by its initializer, a
- * class member by every subclass's member of that name, an interface member by
- * every production member of that name. That is sound only within the subset
- * lib/soundness.mjs enforces (G1-G5); the gates check it on every run.
+ * class member by every subclass's member of that name (a static one reached
+ * through `this` too), an interface member by every production member of that
+ * name, an object-literal member by that literal only on a receiver that
+ * provably holds it and otherwise by every literal that can stand in for the
+ * receiver's type. A library-declared member our code implements is library
+ * code only on a receiver traced to the library. That is sound only within the
+ * subset lib/soundness.mjs enforces (G1-G7); the gates check it on every run.
  */
 import { SyntaxKind, ts } from "ts-morph";
 import { relative, sep } from "node:path";
@@ -102,6 +107,100 @@ export function unmatchedNonProduction(rels) {
   return NON_PRODUCTION.filter((entry) => !entry.pattern && !rels.some((rel) => matchesEntry(entry, rel)));
 }
 
+/** The package a bare specifier names: `@scope/name/sub` → `@scope/name`. */
+const packageOf = (spec) => (spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0]);
+const isBareSpecifier = (spec) => !spec.startsWith(".") && !spec.startsWith("/") && !spec.startsWith("@/");
+
+/**
+ * The packages a value comes from, followed back through what it was made
+ * from: a module load (`require("pkg")`, a createRequire loader, an own
+ * wrapper that loads the module its parameter names), a call or `new` on such
+ * a value, a member of one, a const or a destructure of one. Null when any
+ * step is own code, a parameter, or anything else that cannot be traced.
+ */
+export function originModules(expr, seen = new Set()) {
+  let e = unwrap(expr);
+  while (e?.getKind() === SyntaxKind.AwaitExpression) e = unwrap(e.getExpression());
+  if (!e || seen.has(e)) return null;
+  seen.add(e);
+  switch (e.getKind()) {
+    case SyntaxKind.CallExpression: {
+      if (isModuleLoadCall(e)) {
+        const specs = specifiersOf(e.getArguments()[0]);
+        return specs && specs.every(isBareSpecifier) ? new Set(specs.map(packageOf)) : null;
+      }
+      const callee = unwrap(e.getExpression());
+      const wrapped = moduleLoadingWrapperArgument(e, callee);
+      if (wrapped !== undefined) {
+        const specs = wrapped ? specifiersOf(wrapped) : null;
+        return specs && specs.every(isBareSpecifier) ? new Set(specs.map(packageOf)) : null;
+      }
+      if (callee?.getKind() === SyntaxKind.PropertyAccessExpression) return originModules(callee.getExpression(), seen);
+      return callee?.getKind() === SyntaxKind.Identifier ? originModules(callee, seen) : null;
+    }
+    case SyntaxKind.NewExpression: {
+      const callee = unwrap(e.getExpression());
+      if (callee?.getKind() === SyntaxKind.PropertyAccessExpression) return originModules(callee.getExpression(), seen);
+      return callee?.getKind() === SyntaxKind.Identifier ? originModules(callee, seen) : null;
+    }
+    case SyntaxKind.PropertyAccessExpression:
+    case SyntaxKind.ElementAccessExpression:
+      return originModules(e.getExpression(), seen);
+    case SyntaxKind.Identifier: {
+      let symbol = e.getSymbol();
+      if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+      const decls = symbol?.getDeclarations() ?? [];
+      if (decls.length !== 1) return null;
+      const d = decls[0];
+      if (d.getKind() === SyntaxKind.VariableDeclaration && d.getVariableStatement?.()?.getDeclarationKind() === "const" && d.getInitializer()) {
+        return originModules(d.getInitializer(), seen);
+      }
+      if (d.getKind() === SyntaxKind.BindingElement) {
+        const holder = d.getParent()?.getParent();
+        return holder?.getKind() === SyntaxKind.VariableDeclaration && holder.getInitializer() ? originModules(holder.getInitializer(), seen) : null;
+      }
+      // An import from a package, or a global the library declares (`console`).
+      const importDecl = d.getFirstAncestorByKind?.(SyntaxKind.ImportDeclaration);
+      if (importDecl) {
+        const spec = importDecl.getModuleSpecifierValue();
+        return isBareSpecifier(spec) ? new Set([packageOf(spec)]) : null;
+      }
+      const sf = d.getSourceFile();
+      if (sf.isDeclarationFile() || sf.getFilePath().includes("/node_modules/")) return new Set(["<library global>"]);
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * For a call to an own function every return of which is a module load of
+ * one of its parameters (`requireOptionalModule(name)`), the argument at that
+ * position; null if such a wrapper's argument cannot be seen; undefined when
+ * the callee is no such wrapper.
+ */
+function moduleLoadingWrapperArgument(call, callee) {
+  if (callee?.getKind() !== SyntaxKind.Identifier) return undefined;
+  let symbol = callee.getSymbol();
+  if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+  const fn = (symbol?.getDeclarations() ?? []).find((d) => d.getKind() === SyntaxKind.FunctionDeclaration && d.getBody());
+  if (!fn || (fn.getSourceFile().isDeclarationFile() || fn.getSourceFile().getFilePath().includes("/node_modules/"))) return undefined;
+  const returns = fn.getDescendantsOfKind(SyntaxKind.ReturnStatement).filter((r) => r.getFirstAncestor((a) => FN_KINDS.has(a.getKind())) === fn);
+  let index = -1;
+  for (const r of returns) {
+    const loaded = unwrap(r.getExpression());
+    if (loaded?.getKind() !== SyntaxKind.CallExpression || !isModuleLoadCall(loaded)) return undefined;
+    const arg = unwrap(loaded.getArguments()[0]);
+    const decl = arg?.getKind() === SyntaxKind.Identifier ? arg.getSymbol()?.getDeclarations()[0] : null;
+    const i = decl?.getKind() === SyntaxKind.Parameter ? fn.getParameters().indexOf(decl) : -1;
+    if (i < 0 || (index >= 0 && i !== index)) return undefined;
+    index = i;
+  }
+  if (index < 0) return undefined;
+  return call.getArguments()[index] ?? null;
+}
+
 /**
  * Whether a reference entry (from findReferences) writes the binding. The
  * language service also marks `{ x }` in an object literal as a write — it
@@ -171,12 +270,97 @@ export function specifiersOf(arg, seen = new Set()) {
       if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
       const decls = symbol?.getDeclarations() ?? [];
       const decl = decls.length === 1 ? decls[0] : null;
+      if (decl?.getKind() === SyntaxKind.Parameter) return specifiersPassedTo(decl, seen);
       if (decl?.getKind() !== SyntaxKind.VariableDeclaration || decl.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
       return decl.getInitializer() ? specifiersOf(decl.getInitializer(), seen) : null;
     }
     default:
       return null;
   }
+}
+
+/**
+ * A parameter's specifiers: what every production caller passes at its
+ * position, each evaluated by value. Null when any reference to the function
+ * is not a direct call (its arguments cannot be seen) or any argument is not
+ * built from literals.
+ */
+function specifiersPassedTo(param, seen) {
+  const fn = param.getParent();
+  const index = fn.getParameters?.().indexOf(param) ?? -1;
+  const nameNode = fn.getNameNode?.() ?? fn.getParent()?.getNameNode?.();
+  if (index < 0 || !nameNode || param.getDotDotDotToken()) return null;
+  const out = [];
+  for (const ref of nameNode.findReferencesAsNodes()) {
+    if (ref === nameNode || isDeclaredNonProduction(toRelPosix(ref.getSourceFile().getFilePath()))) continue;
+    const parent = ref.getParent();
+    const pk = parent?.getKind();
+    if (pk === SyntaxKind.ImportSpecifier || pk === SyntaxKind.ExportSpecifier || pk === SyntaxKind.ImportClause) continue;
+    if (pk !== SyntaxKind.CallExpression || parent.getExpression() !== ref) return null;
+    const arg = parent.getArguments()[index];
+    if (!arg) continue;
+    const specs = specifiersOf(arg, seen);
+    if (!specs) return null;
+    out.push(...specs);
+  }
+  return out.length > 0 ? [...new Set(out)] : null;
+}
+
+const NODE_MODULE_SPECIFIERS = new Set(["node:module", "module"]);
+
+/** Whether `expr` names `createRequire` from node:module (import, destructure, or member of the module). */
+function isCreateRequire(expr) {
+  const e = unwrap(expr);
+  if (e?.getKind() === SyntaxKind.PropertyAccessExpression) {
+    return e.getName() === "createRequire" && loadsNodeModule(e.getExpression());
+  }
+  if (e?.getKind() !== SyntaxKind.Identifier) return false;
+  for (const d of e.getSymbol()?.getDeclarations() ?? []) {
+    if (d.getKind() === SyntaxKind.ImportSpecifier) {
+      const spec = d.getImportDeclaration().getModuleSpecifierValue();
+      // `import { createRequire as cr }`: getName() is the imported name.
+      if (NODE_MODULE_SPECIFIERS.has(spec) && d.getName() === "createRequire") return true;
+    }
+    if (d.getKind() === SyntaxKind.BindingElement && (d.getPropertyNameNode()?.getText() ?? d.getName()) === "createRequire") {
+      const holder = d.getParent()?.getParent();
+      if (holder?.getKind() === SyntaxKind.VariableDeclaration && loadsNodeModule(holder.getInitializer())) return true;
+    }
+  }
+  return false;
+}
+
+/** Whether `expr` is node:module itself: `require("node:module")`, `await import("module")`, or a namespace import of it. */
+function loadsNodeModule(expr) {
+  let e = unwrap(expr);
+  while (e?.getKind() === SyntaxKind.AwaitExpression) e = unwrap(e.getExpression());
+  if (e?.getKind() === SyntaxKind.CallExpression) {
+    const c = unwrap(e.getExpression());
+    const isLoad = c?.getKind() === SyntaxKind.ImportKeyword || (c?.getKind() === SyntaxKind.Identifier && c.getText() === "require");
+    return isLoad && (specifiersOf(e.getArguments()[0]) ?? []).some((spec) => NODE_MODULE_SPECIFIERS.has(spec));
+  }
+  if (e?.getKind() === SyntaxKind.Identifier) {
+    return (e.getSymbol()?.getDeclarations() ?? []).some(
+      (d) => d.getKind() === SyntaxKind.NamespaceImport && NODE_MODULE_SPECIFIERS.has(d.getParent()?.getParent()?.getModuleSpecifierValue?.()),
+    );
+  }
+  return false;
+}
+
+/**
+ * Whether `call` loads a module at run time: `import(…)`, `require(…)`, or a
+ * loader `createRequire` from node:module made (`const req =
+ * createRequire(x); req("…")`).
+ */
+export function isModuleLoadCall(call) {
+  const callee = unwrap(call.getExpression());
+  if (!callee) return false;
+  if (callee.getKind() === SyntaxKind.ImportKeyword) return true;
+  if (callee.getKind() !== SyntaxKind.Identifier) return false;
+  if (callee.getText() === "require") return true;
+  const decls = callee.getSymbol()?.getDeclarations() ?? [];
+  if (decls.length !== 1 || decls[0].getKind() !== SyntaxKind.VariableDeclaration) return false;
+  const init = unwrap(decls[0].getInitializer());
+  return init?.getKind() === SyntaxKind.CallExpression && isCreateRequire(init.getExpression());
 }
 
 export function literalKey(expr) {
@@ -189,11 +373,22 @@ export function literalKey(expr) {
 }
 
 /**
- * Interfaces declared in our code to type a value a LIBRARY produces, so no
- * code of ours implements them. A call through one of their members runs
- * library code. Keyed "file::Interface".
+ * Types declared in our code for a value a LIBRARY produces, each with the
+ * package that supplies it. A call through one of their members runs library
+ * code. A value may be narrowed to one only when it comes from that package
+ * (G7, lib/soundness.mjs), and no own value may take the type. Keyed
+ * "file::Type"; an entry nothing narrows to and nothing calls through is stale.
  */
 export const EXTERNAL_SHAPE_ALLOWLIST = new Map([
+  // The blob stores' SDK clients, loaded through requireOptionalModule so each
+  // SDK package stays optional.
+  ["src/lib/blob-store/azure-blob-store.ts::AzureBlobModule", "@azure/storage-blob"],
+  ["src/lib/blob-store/azure-blob-store.ts::AzureBlobServiceClient", "@azure/storage-blob"],
+  ["src/lib/blob-store/azure-blob-store.ts::AzureContainerClient", "@azure/storage-blob"],
+  ["src/lib/blob-store/gcs-blob-store.ts::GcsModule", "@google-cloud/storage"],
+  ["src/lib/blob-store/gcs-blob-store.ts::GcsBucket", "@google-cloud/storage"],
+  ["src/lib/blob-store/s3-blob-store.ts::S3Module", "@aws-sdk/client-s3"],
+  ["src/lib/blob-store/s3-blob-store.ts::S3SendClient", "@aws-sdk/client-s3"],
   // The cloud key providers' SDK clients, loaded lazily with require() so each
   // SDK package stays optional.
   ["src/lib/key-provider/aws-sm-provider.ts::SmClient", "@aws-sdk/client-secrets-manager"],
@@ -204,8 +399,9 @@ export const EXTERNAL_SHAPE_ALLOWLIST = new Map([
   ["src/lib/key-provider/gcp-sm-provider.ts::SmClient", "@google-cloud/secret-manager"],
   ["src/lib/key-provider/gcp-sm-provider.ts::GcpSmModule", "@google-cloud/secret-manager"],
   // The Prisma transaction client, narrowed to the one raw-query method the
-  // readback assertion uses.
-  ["scripts/lib/assert-bypass-rls-active.ts::TxProbe", "Prisma transaction client"],
+  // readback assertion uses. It is only ever given a typed client, so it has
+  // no supplier: a value of unknown origin narrowed to it is refused (G7).
+  ["scripts/lib/assert-bypass-rls-active.ts::TxProbe", null],
 ]);
 
 const EMPTY = Object.freeze({ fns: Object.freeze([]), external: false, params: Object.freeze([]), unresolved: null });
@@ -385,6 +581,62 @@ export function createFunctionResolver({ program, scope = null }) {
    * its declared type is whatever the library's user stored there
    * (`RefObject<T>.current: T`, a property typed `any`), which may be ours.
    */
+  /**
+   * Library-declared members our code supplies an implementation of: a member
+   * of an own object literal whose contextual type is a library type
+   * (`const sink: Pick<Console, "log"> = { log … }`, an Adapter), or of an own
+   * class that implements or extends one. A call through such a member may run
+   * our code, so it is library code only on a receiver that is the library's.
+   */
+  let ownImplemented = null;
+  function ownImplementedLibraryMembers() {
+    if (ownImplemented) return ownImplemented;
+    ownImplemented = new Set();
+    const addFrom = (type, name) => {
+      for (const d of type?.getProperty(name)?.getDeclarations() ?? []) if (isExternal(d)) ownImplemented.add(d);
+    };
+    for (const sf of program.getSourceFiles()) {
+      if (sf.isDeclarationFile() || sf.getFilePath().includes("/node_modules/") || isNonProduction(sf)) continue;
+      sf.forEachDescendant((node) => {
+        const k = node.getKind();
+        if (k === SyntaxKind.ObjectLiteralExpression) {
+          const contextual = node.getContextualType();
+          if (!contextual) return;
+          for (const prop of node.getProperties()) {
+            const name = prop.getSymbol?.()?.getName();
+            if (name && mayHoldOwnCode(prop.getType())) addFrom(contextual, name);
+          }
+        } else if (k === SyntaxKind.ClassDeclaration || k === SyntaxKind.ClassExpression) {
+          const bases = [...(node.getImplements?.() ?? []), ...(node.getExtends?.() ? [node.getExtends()] : [])].map((h) => h.getType());
+          if (bases.length === 0) return;
+          for (const member of node.getMembers()) {
+            const name = member.getName?.();
+            if (!name || member.isStatic?.()) continue;
+            for (const base of bases) addFrom(base, name);
+          }
+        }
+      });
+    }
+    return ownImplemented;
+  }
+
+  /**
+   * A library-declared member read at `site`: what libraryMemberValue says —
+   * unless our code implements that member somewhere, and then only when the
+   * receiver is traced to a library. Otherwise it may be our implementation.
+   */
+  function externalMemberAt(decls, site) {
+    if (decls.some((d) => ownImplementedLibraryMembers().has(d))) {
+      const e = unwrap(site);
+      const receiver =
+        e?.getKind() === SyntaxKind.PropertyAccessExpression || e?.getKind() === SyntaxKind.ElementAccessExpression ? e.getExpression() : null;
+      if (!receiver || !originModules(receiver)) {
+        return unresolvedResult("member a library declares and our code implements, on a receiver not traced to the library");
+      }
+    }
+    return libraryMemberValue(decls);
+  }
+
   function libraryMemberValue(decls) {
     const holdsUsersValue = decls.some((d) => {
       const k = d.getKind();
@@ -450,6 +702,13 @@ export function createFunctionResolver({ program, scope = null }) {
       if (op === SyntaxKind.AmpersandAmpersandToken) return resolveValue(e.getRight());
       return unresolvedResult("binary expression as a function value");
     }
+    if (kind === SyntaxKind.CallExpression && isModuleLoadCall(e) && unwrap(e.getExpression())?.getKind() !== SyntaxKind.ImportKeyword) {
+      // `require("…")` / `req("…")`: a library module is library code; an own
+      // module loaded this way is typed `any`, so its exports cannot be named.
+      const loaded = moduleLoadedBy(e);
+      if (loaded?.library) return LIBRARY_MODULE;
+      return unresolvedResult("own module loaded at run time through require; import it so its exports are typed");
+    }
     if (kind === SyntaxKind.CallExpression) {
       // `fn.bind(...)` is `fn` with its arguments fixed.
       const calleeExpr = unwrap(e.getExpression());
@@ -487,7 +746,7 @@ export function createFunctionResolver({ program, scope = null }) {
       const decls = e.getExpression().getType().getProperty(key)?.getDeclarations() ?? [];
       // A member a library declares (`tx["$transaction"]`) is library code
       // whatever holds the receiver; only an own member needs a stable one.
-      if (decls.length > 0 && decls.every(isExternal)) return libraryMemberValue(decls);
+      if (decls.length > 0 && decls.every(isExternal)) return externalMemberAt(decls, e);
       if (!hasStableReceiver(e)) return unresolvedResult("member of an object that may be rebound");
       return resolvePropertyOfType(e.getExpression().getType(), key, e);
     }
@@ -503,7 +762,7 @@ export function createFunctionResolver({ program, scope = null }) {
     if (symbol.isAlias()) symbol = symbol.getAliasedSymbol();
     const decls = symbol?.getDeclarations() ?? [];
     if (decls.length === 0) return unresolvedResult("callee has no declaration");
-    if (decls.every(isExternal)) return libraryMemberValue(decls);
+    if (decls.every(isExternal)) return externalMemberAt(decls, e);
     return merge(decls.filter((d) => !isExternal(d)).map((d) => resolveDeclaration(d, e)));
   }
 
@@ -657,7 +916,7 @@ export function createFunctionResolver({ program, scope = null }) {
     const decls = prop.getDeclarations();
     if (decls.length === 0) return unresolvedResult(`property ${name} has no declaration`);
     if (decls.every(isExternal)) return libraryMemberValue(decls);
-    return merge(decls.filter((d) => !isExternal(d)).map((d) => resolveDeclaration(d, site)));
+    return merge(decls.filter((d) => !isExternal(d)).map((d) => resolveDeclaration(d, site, type)));
   }
 
   /**
@@ -720,18 +979,27 @@ export function createFunctionResolver({ program, scope = null }) {
 
   /**
    * What a class member `name` may run: the member itself and every member of
-   * that name a production subclass declares, method or field alike.
+   * that name a production subclass declares, method or field alike. A static
+   * member reached through `this` is the static member of whichever subclass
+   * `this` is (`Base.load()` calling `this.fetchRows()`, run as `Scoped.load()`).
    */
-  function classMemberValue(member) {
+  function classMemberValue(member, site = null) {
     const cls = member.getParent();
     const name = member.getName?.();
     const results = [ownClassMemberValue(member)];
     if (name && cls?.getKind() === SyntaxKind.ClassDeclaration) {
+      const isStatic = Boolean(member.isStatic?.());
+      const viaThis = isStatic && site && unwrap(receiverOf(site))?.getKind() === SyntaxKind.ThisKeyword;
       for (const d of derivedClassesOf(cls)) {
         for (const m of d.getMembers()) {
-          if (m.getName?.() === name && !m.isStatic?.()) results.push(ownClassMemberValue(m));
+          if (m.getName?.() !== name || Boolean(m.isStatic?.()) !== isStatic) continue;
+          if (isStatic && !viaThis) continue;
+          results.push(ownClassMemberValue(m));
         }
       }
+      // A class is a type too: an object literal of its shape stands in for an
+      // instance (`const l: Loader = { load: … }`).
+      if (!member.isStatic?.()) results.push(...literalMembersStandingIn(name, cls.getType()).map(candidateValue));
     }
     return merge(results);
   }
@@ -760,11 +1028,7 @@ export function createFunctionResolver({ program, scope = null }) {
    */
   function moduleLoadedBy(call) {
     if (call?.getKind() !== SyntaxKind.CallExpression) return null;
-    const callee = unwrap(call.getExpression());
-    const isLoad =
-      callee?.getKind() === SyntaxKind.ImportKeyword ||
-      (callee?.getKind() === SyntaxKind.Identifier && callee.getText() === "require" && callee.getSymbol()?.getDeclarations().every(isExternal));
-    if (!isLoad) return null;
+    if (!isModuleLoadCall(call)) return null;
     const specs = specifiersOf(call.getArguments()[0]);
     if (!specs) return { sf: null };
     const loaded = specs.map((spec) => {
@@ -785,15 +1049,88 @@ export function createFunctionResolver({ program, scope = null }) {
     return merge(decls.map((d) => (isExternal(d) ? libraryMemberValue([d]) : resolveDeclaration(d, site))));
   }
 
-  function resolveDeclaration(decl, site) {
+  /**
+   * The expression a member is read off at `site`: the object of a member
+   * access, the source of a destructure, or the site itself when it is the
+   * object (an argument a library is handed).
+   */
+  function receiverOf(site) {
+    const e = unwrap(site);
+    if (!e) return null;
+    const k = e.getKind();
+    if (k === SyntaxKind.PropertyAccessExpression || k === SyntaxKind.ElementAccessExpression) return e.getExpression();
+    if (k === SyntaxKind.Identifier && e.getParent()?.getKind() === SyntaxKind.BindingElement) {
+      // The name a destructure binds: the member is read off its source.
+      const holder = e.getParent().getParent()?.getParent();
+      return holder?.getKind() === SyntaxKind.VariableDeclaration ? (holder.getInitializer() ?? null) : null;
+    }
+    return e; // the object itself (`Object.keys(TABLE)`, a literal handed on)
+  }
+
+  /** Whether `expr` provably holds `literal`: is it, a const initialised to it, a member initialised to it on a receiver that holds the outer literal, or `this` in its own method. */
+  function holdsLiteral(expr, literal, seen = new Set()) {
+    const x = unwrap(expr);
+    if (!x || seen.has(x)) return false;
+    seen.add(x);
+    if (x === literal) return true;
+    if (x.getKind() === SyntaxKind.ThisKeyword) {
+      const method = x.getFirstAncestor((a) => FN_KINDS.has(a.getKind()) && a.getKind() !== SyntaxKind.ArrowFunction);
+      return method?.getParent() === literal;
+    }
+    const nameNode = x.getKind() === SyntaxKind.PropertyAccessExpression ? x.getNameNode() : x.getKind() === SyntaxKind.Identifier ? x : null;
+    let symbol = nameNode?.getSymbol();
+    if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+    const decls = symbol?.getDeclarations() ?? [];
+    if (decls.length !== 1) return false;
+    const d = decls[0];
+    if (d.getKind() === SyntaxKind.VariableDeclaration && isConstVariable(d) && d.getInitializer()) {
+      return holdsLiteral(d.getInitializer(), literal, seen);
+    }
+    if (d.getKind() === SyntaxKind.PropertyAssignment && x.getKind() === SyntaxKind.PropertyAccessExpression) {
+      return unwrap(d.getInitializer()) === literal && holdsLiteral(x.getExpression(), d.getParent(), seen);
+    }
+    return false;
+  }
+
+  /**
+   * Object-literal members named `name` that can stand in for a value of
+   * `target`: their literal's type is assignable to it. (Only a cast through
+   * `unknown`/`any` puts a literal of another shape there, and G7 refuses that.)
+   */
+  function literalMembersStandingIn(name, target) {
+    const assignable = program.getTypeChecker().compilerObject.isTypeAssignableTo;
+    return membersNamed(name).filter((m) => {
+      if (m.getParent()?.getKind() !== SyntaxKind.ObjectLiteralExpression || isNonProduction(m)) return false;
+      return assignable(m.getParent().getType().compilerType, target.compilerType);
+    });
+  }
+
+  function resolveDeclaration(decl, site, viaType = null) {
     const kind = decl.getKind();
+    // A member of an object literal is that literal's member only on a
+    // receiver that provably holds the literal. Through any other receiver of
+    // that type (`typeof defaultRepo`, a parameter), every literal that can
+    // stand in for the receiver's type may be there.
+    // (`{ ask }` read through its own name is the local `ask`, not a member read.)
+    if (isObjectLiteralMember(decl) && unwrap(site)?.getParent() !== decl) {
+      if (!hasStableReceiver(site)) return unresolvedResult("member of an object that may be rebound");
+      const receiver = receiverOf(site);
+      if (!receiver) return resolveImplementations(site, decl);
+      if (!holdsLiteral(receiver, decl.getParent())) {
+        const name = decl.getSymbol()?.getName();
+        if (!name) return unresolvedResult("member with no name");
+        // The type the member is read off: given when known (a nested member
+        // of a library argument), else the receiver's.
+        return merge(literalMembersStandingIn(name, viaType ?? receiver.getType()).map(candidateValue));
+      }
+    }
     const fn = functionOfDeclaration(decl);
     if (fn) {
       if (isObjectLiteralMember(decl) && !hasStableReceiver(site)) {
         return unresolvedResult("member of an object that may be rebound");
       }
       if (isObjectLiteralMember(decl)) return { ...EMPTY, fns: [fn] };
-      if (kind === SyntaxKind.MethodDeclaration && isClassMember(decl)) return classMemberValue(decl);
+      if (kind === SyntaxKind.MethodDeclaration && isClassMember(decl)) return classMemberValue(decl, site);
       return { ...EMPTY, fns: [fn] };
     }
     switch (kind) {
@@ -826,10 +1163,10 @@ export function createFunctionResolver({ program, scope = null }) {
         // The construction unit: field initializers, the constructor, the base.
         return { ...EMPTY, fns: [decl] };
       case SyntaxKind.PropertyDeclaration:
-        return classMemberValue(decl);
+        return classMemberValue(decl, site);
       case SyntaxKind.MethodDeclaration:
         // No body: abstract, or an overload signature.
-        if (isClassMember(decl)) return classMemberValue(decl);
+        if (isClassMember(decl)) return classMemberValue(decl, site);
         return resolveImplementations(site, decl);
       case SyntaxKind.MethodSignature:
       case SyntaxKind.PropertySignature:
@@ -1027,6 +1364,43 @@ export function createFunctionResolver({ program, scope = null }) {
     return { ...EMPTY, fns };
   }
 
+  /** The own accessors among `decls` (a getter or setter with a body). */
+  function ownAccessors(decls) {
+    return decls.filter((d) => {
+      const k = d.getKind();
+      return (k === SyntaxKind.GetAccessor || k === SyntaxKind.SetAccessor) && !isExternal(d) && d.getBody?.();
+    });
+  }
+
+  /**
+   * The own accessors a read that is not a plain member access runs:
+   * `stats["memberCount"]`, `const { memberCount } = stats`. A key that is not
+   * a literal, on a value with own accessors, may run any of them.
+   */
+  function accessorsReadBy(node) {
+    const k = node.getKind();
+    let type = null;
+    let key = null;
+    if (k === SyntaxKind.ElementAccessExpression) {
+      type = node.getExpression().getType();
+      key = literalKey(node.getArgumentExpression());
+    } else if (k === SyntaxKind.BindingElement && node.getParent()?.getKind() === SyntaxKind.ObjectBindingPattern) {
+      const holder = node.getParent().getParent();
+      type = holder?.getKind() === SyntaxKind.VariableDeclaration ? holder.getInitializer()?.getType() : holder?.getType?.();
+      const keyNode = node.getPropertyNameNode();
+      key = keyNode ? (keyNode.getKind() === SyntaxKind.ComputedPropertyName ? literalKey(keyNode.getExpression()) : keyNode.getText()) : node.getName();
+    } else {
+      return null;
+    }
+    if (!type) return null;
+    if (key === null) {
+      const any = type.getProperties().some((p) => ownAccessors(p.getDeclarations()).length > 0);
+      return any ? unresolvedResult("a getter may run through a key that is not a literal") : null;
+    }
+    const fns = ownAccessors(type.getProperty(key)?.getDeclarations() ?? []);
+    return fns.length > 0 ? { ...EMPTY, fns } : null;
+  }
+
   /** True when a property access lands on an own accessor and is therefore an invocation. */
   function isAccessorInvocation(access) {
     return accessorsOf(access).fns.length > 0;
@@ -1039,6 +1413,7 @@ export function createFunctionResolver({ program, scope = null }) {
     resolveParameterFromCallers,
     functionOfDeclaration,
     isAccessorInvocation,
+    accessorsReadBy,
     isExternal,
     isNonProduction,
     usedExternalShapes,
@@ -1209,6 +1584,9 @@ export function createReachability(resolver) {
         const r = resolveCall(node);
         return r.fns.length > 0 ? r : null;
       }
+      case SyntaxKind.ElementAccessExpression:
+      case SyntaxKind.BindingElement:
+        return resolver.accessorsReadBy(node);
       case SyntaxKind.AwaitExpression:
         return thenOf(node);
       default:
