@@ -3417,8 +3417,9 @@ describe("C3 Program-backed reference cross-check", () => {
     });
 
     it("passes an identifier specifier with a literal type (crypto-client.ts shape)", () => {
+      // Not file-keyed: the specifier's literal type names the module.
       const { code, stdout, stderr } = run(
-        "src/lib/crypto/crypto-client.ts",
+        "src/app/consumer.ts",
         `export async function load() {\n  const moduleName = "hash-wasm";\n  const mod = await import(/* webpackIgnore: true */ moduleName);\n  return mod;\n}\n`,
       );
       expect(code, `${stdout}${stderr}`).toBe(0);
@@ -3673,5 +3674,51 @@ export const f = () => withBypassRls(prisma, async (tx) => {
     expect(code).toBe(1);
     expect(stderr).toContain("indexed by a name this gate cannot resolve");
     expect(stderr).toContain("d.count()");
+  });
+});
+
+describe("round 5: every own file is production unless declared (R5-S5)", () => {
+  it("holds an entry file at the root that nothing imports to the allowlist", () => {
+    const { code, stderr } = runMulti([["proxy.ts", `import { prisma } from "./src/lib/prisma";
+import { withBypassRls, BYPASS_PURPOSE } from "./src/lib/tenant-rls";
+export const handle = () => withBypassRls(prisma, async (tx) => tx.passwordEntry.findMany({}), BYPASS_PURPOSE.SYSTEM_MAINTENANCE);`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("withBypassRls usage found in files not on the allowlist");
+    expect(stderr).toMatch(/^\s+proxy\.ts$/m);
+  });
+});
+
+describe("round 5 testing review: one fixture per clause that had none", () => {
+  const ORM = ["types/orm.d.ts", `declare module "orm" { export function runDirect(c: unknown): Promise<void>; }`];
+  it.each([
+    ["a conditional that may be the client", "const maybe = Date.now() > 0 ? tx : undefined; await runDirect(maybe);"],
+    ["a parameter typed client-or-undefined", "const g = async (c: typeof tx | undefined) => { await runDirect(c); }; await g(tx);"],
+  ])("refuses a client handed to library code as %s (R5-T1)", (_label, body) => {
+    const { code, stderr } = runMulti([ORM, [OUTBOX, `${HEAD_RLS}import { runDirect } from "orm";
+export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); ${body} }, BYPASS_PURPOSE.AUDIT_WRITE);`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("client handed to library code (runDirect)");
+  });
+
+  it("charges a query run through a string key on a delegate (R5-T4)", () => {
+    const { code, stderr } = run(OUTBOX, `${HEAD_RLS}import type { Prisma } from "@prisma/client";
+export const f = () => withBypassRls(prisma, async (tx) => {
+  await tx.auditOutbox.count();
+  const users = (tx as any).user as Prisma.UserDelegate;
+  return users["deleteMany"]({});
+}, BYPASS_PURPOSE.AUDIT_WRITE);`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts:6  prisma.user");
+  });
+
+  it("refuses a second-level forwarder that rewrites its purpose (R5-T4)", () => {
+    const { code, stderr } = run(TENANT_DOMAIN, tenantDomainSource(`
+export async function fwd(purpose: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE]) {
+  return withBypassRls(prisma, async (tx) => tx.tenant.findMany({}), purpose);
+}
+export async function outer(q: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE]) { q = BYPASS_PURPOSE.AUTH_FLOW; return fwd(q); }
+export const c = () => outer(BYPASS_PURPOSE.SYSTEM_MAINTENANCE);`));
+    expect(code).toBe(1);
+    expect(stderr).toContain("purpose parameter q is reassigned before it reaches fwd");
   });
 });

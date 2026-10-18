@@ -28,8 +28,11 @@
  * that may hold a function, so a cast or a structural assignment cannot hide
  * an implementation: neither renames a member.
  *
- * The scan set is the production IMPORT CLOSURE, not a path prefix: every
- * module production code loads is production. A load the compiler cannot
+ * The scan set is deny-by-default: every own file the Program holds is
+ * production unless NON_PRODUCTION / NON_PRODUCTION_SCRIPTS declares it
+ * otherwise (lib/function-resolver.mjs), and so is every module production
+ * code loads. A load's specifier is resolved from its literal text or its
+ * string-literal type. A load the compiler cannot
  * resolve to TypeScript the gates can read — own JavaScript, a declaration
  * shim over own code, an own specifier that does not resolve, a non-literal
  * specifier — is refused, as is production loading declared tooling and
@@ -42,7 +45,9 @@ import {
   isDeclaredNonProduction,
   isProductionPath,
   mayBeCallable,
+  unmatchedNonProduction,
   mayHoldOwnCode,
+  specifiersOf,
   toRelPosix,
   unwrap,
 } from "./function-resolver.mjs";
@@ -51,28 +56,29 @@ import {
 // load. The specifier cannot be resolved, so each entry is a reviewed claim.
 export const NON_LITERAL_LOAD_ALLOWLIST = new Map([
   ["src/i18n/messages.ts", "next-intl message JSON under messages/"],
-  ["src/lib/crypto/crypto-client.ts", "a browser-side module URL (webpackIgnore), never server code"],
 ]);
 
-// Reviewed exceptions to G1-G5, keyed "file::enclosing function::rule". Each
-// must still match a violation, or the run fails as stale.
+// Reviewed exceptions to G1-G5, keyed "file::function <name>::rule" or
+// "file::method <Class>.<name>::rule" by the declaration the violation is in,
+// with the number of sites it excuses. A different count — a new write in the
+// same function, or one gone — fails the run, as does an entry that matches nothing.
 export const FUNCTION_FLOW_ALLOWLIST = new Map([
   // Conversion traps on a null-prototype object. They run only through an
   // implicit conversion (String(x), JSON.stringify), which neither gate
   // follows, and throwOnConversion only throws.
-  ["src/lib/prisma/raw-sql.ts::createGenuineObject::G1", "conversion traps: toJSON and Symbol.toPrimitive"],
+  ["src/lib/prisma/raw-sql.ts::function createGenuineObject::G1", { sites: 2, why: "conversion traps: toJSON and Symbol.toPrimitive" }],
   // Data copied key by key into a record. The values are `unknown` because
   // they are request, event or row data, never one of our functions; the
   // records are serialised or sent, never called through.
-  ["src/lib/security/sentry-scrub.ts::scrubObject::G1", "scrubbed Sentry event data"],
-  ["src/lib/security/sentry-scrub.ts::scrubSentryEvent::G1", "scrubbed Sentry event data"],
-  ["src/lib/security/sentry-scrub.ts::scrubSpanData::G1", "scrubbed Sentry span data"],
-  ["src/lib/security/sentry-scrub.ts::scrubStreamedAttributes::G1", "scrubbed Sentry span attributes"],
-  ["src/lib/constants/auth/share-permission.ts::applySharePermissions::G1", "share payload fields filtered by permission"],
-  ["src/lib/vault/entry-save-core.ts::buildEncryptedEntryBody::G1", "request body fields of an entry save"],
-  ["src/workers/retention-gc-worker/sweep.ts::sweepAuditProvenanceEntry::G1", "provenance column values of a swept row"],
-  ["src/app/api/tenant/policy/route.ts::handlePATCH::G1", "policy columns of a Prisma update"],
-  ["src/components/settings/developer/service-account-card.tsx::ServiceAccountCard::G3", "React state keyed by service-account id"],
+  ["src/lib/security/sentry-scrub.ts::function scrubObject::G1", { sites: 1, why: "scrubbed Sentry event data" }],
+  ["src/lib/security/sentry-scrub.ts::function scrubSentryEvent::G1", { sites: 5, why: "scrubbed Sentry event data" }],
+  ["src/lib/security/sentry-scrub.ts::function scrubSpanData::G1", { sites: 1, why: "scrubbed Sentry span data" }],
+  ["src/lib/security/sentry-scrub.ts::function scrubStreamedAttributes::G1", { sites: 1, why: "scrubbed Sentry span attributes" }],
+  ["src/lib/constants/auth/share-permission.ts::function applySharePermissions::G1", { sites: 3, why: "share payload fields filtered by permission" }],
+  ["src/lib/vault/entry-save-core.ts::function buildEncryptedEntryBody::G1", { sites: 1, why: "request body fields of an entry save" }],
+  ["src/workers/retention-gc-worker/sweep.ts::function sweepAuditProvenanceEntry::G1", { sites: 1, why: "provenance column values of a swept row" }],
+  ["src/app/api/tenant/policy/route.ts::function handlePATCH::G1", { sites: 1, why: "policy columns of a Prisma update" }],
+  ["src/components/settings/developer/service-account-card.tsx::function ServiceAccountCard::G3", { sites: 1, why: "React state keyed by service-account id" }],
 ]);
 
 // Tooling must not reach these: it is excluded from the scan on the premise
@@ -96,9 +102,9 @@ function loadsOf(sf) {
     const isLoad =
       callee.getKind() === SyntaxKind.ImportKeyword || (callee.getKind() === SyntaxKind.Identifier && callee.getText() === "require");
     if (!isLoad) continue;
-    const arg = call.getArguments()[0];
-    const k = arg?.getKind();
-    out.push({ node: call, spec: k === SyntaxKind.StringLiteral || k === SyntaxKind.NoSubstitutionTemplateLiteral ? arg.getLiteralText() : null });
+    const specs = specifiersOf(call.getArguments()[0]);
+    if (specs) for (const spec of specs) out.push({ node: call, spec });
+    else out.push({ node: call, spec: null });
   }
   return out;
 }
@@ -109,9 +115,22 @@ function loadsOf(sf) {
  */
 export function productionScope(program) {
   const options = program.getCompilerOptions();
-  const seeds = program.getSourceFiles().filter((sf) => !isExternalFile(sf) && isProductionPath(toRelPosix(sf.getFilePath())));
+  const own = program.getSourceFiles().filter((sf) => !isExternalFile(sf));
+  const seeds = own.filter((sf) => isProductionPath(toRelPosix(sf.getFilePath())));
   const files = new Set(seeds.map((sf) => sf.getFilePath()));
   const violations = [];
+
+  // The declarations must still name something: an entry that matches no file
+  // in the Program (and whose path exists — fixture trees lack most of them)
+  // would excuse the next file that lands at it without review.
+  const ownRels = own.map((sf) => toRelPosix(sf.getFilePath()));
+  for (const entry of unmatchedNonProduction(ownRels)) {
+    const path = entry.prefix ?? entry.file;
+    if (existsSync(path)) violations.push(`${path}  NON_PRODUCTION entry matches no file in the Program; remove it`);
+  }
+  for (const tool of NON_PRODUCTION_SCRIPTS) {
+    if (existsSync(tool) && !ownRels.includes(tool)) violations.push(`${tool}  NON_PRODUCTION_SCRIPTS entry is not in the Program; remove it`);
+  }
 
   /** The own TypeScript module a load resolves to, null for a library or data, or { problem }. */
   function resolveLoad(sf, spec) {
@@ -124,7 +143,6 @@ export function productionScope(program) {
     }
     const target = resolved.resolvedFileName;
     if (resolved.isExternalLibraryImport || target.includes("/node_modules/")) return null;
-    if (DATA_EXTENSIONS.test(target)) return null;
     if (/\.[cm]?jsx?$/.test(target)) {
       return { problem: `loads ${toRelPosix(target)}, own JavaScript the gates cannot read` };
     }
@@ -141,6 +159,7 @@ export function productionScope(program) {
   }
 
   const queue = [...seeds];
+  const usedNonLiteral = new Set();
   while (queue.length > 0) {
     const sf = queue.shift();
     const rel = toRelPosix(sf.getFilePath());
@@ -148,7 +167,10 @@ export function productionScope(program) {
       const r = resolveLoad(sf, spec);
       if (!r) continue;
       if (r.problem) {
-        if (spec === null && NON_LITERAL_LOAD_ALLOWLIST.has(rel)) continue;
+        if (spec === null && NON_LITERAL_LOAD_ALLOWLIST.has(rel)) {
+          usedNonLiteral.add(rel);
+          continue;
+        }
         violations.push(`${siteOf(node)}  production code ${r.problem}`);
         continue;
       }
@@ -161,6 +183,12 @@ export function productionScope(program) {
         files.add(r.sf.getFilePath());
         queue.push(r.sf);
       }
+    }
+  }
+
+  for (const rel of NON_LITERAL_LOAD_ALLOWLIST.keys()) {
+    if (!usedNonLiteral.has(rel) && existsSync(rel)) {
+      violations.push(`${rel}  NON_LITERAL_LOAD_ALLOWLIST entry matches no load the specifier's type leaves unnamed; remove it`);
     }
   }
 
@@ -221,9 +249,8 @@ function writeTargetsOf(node) {
       }
     } else if (e?.getKind() === SyntaxKind.ArrayLiteralExpression) {
       for (const el of e.getElements()) leaves(el.getKind() === SyntaxKind.SpreadElement ? el.getExpression() : el);
-    } else if (e?.getKind() === SyntaxKind.BinaryExpression && e.getOperatorToken().getKind() === SyntaxKind.EqualsToken) {
-      leaves(e.getLeft()); // a default: `({ x: a.b = d } = o)`
     }
+    // A default (`({ x: a.b = d } = o)`) is an `=` the traversal visits on its own.
   };
   const k = node.getKind();
   if (k === SyntaxKind.BinaryExpression && isAssignmentOperator(node.getOperatorToken().getKind())) {
@@ -244,33 +271,9 @@ const MUTATOR_OWNERS = new Map([
 ]);
 const MUTATOR_NAMES = new Set([...MUTATOR_OWNERS.values()].flatMap((names) => [...names]));
 
-/** The name a callee goes by, looking one step through a const alias or a renamed destructure. */
-function calleeNames(callee) {
-  const e = unwrap(callee);
-  if (e?.getKind() === SyntaxKind.PropertyAccessExpression) return [e.getName()];
-  if (e?.getKind() !== SyntaxKind.Identifier) return [];
-  const names = [e.getText()];
-  for (const d of e.getSymbol()?.getDeclarations() ?? []) {
-    if (d.getKind() === SyntaxKind.BindingElement) names.push(d.getPropertyNameNode()?.getText() ?? d.getName());
-    const init = d.getKind() === SyntaxKind.VariableDeclaration ? unwrap(d.getInitializer()) : null;
-    if (init?.getKind() === SyntaxKind.PropertyAccessExpression) names.push(init.getName());
-    if (init?.getKind() === SyntaxKind.CallExpression) {
-      // `const assign = Object.assign.bind(Object)`
-      const c = unwrap(init.getExpression());
-      if (c?.getKind() === SyntaxKind.PropertyAccessExpression && c.getName() === "bind") {
-        const t = unwrap(c.getExpression());
-        if (t?.getKind() === SyntaxKind.PropertyAccessExpression) names.push(t.getName());
-      }
-    }
-  }
-  return names;
-}
-
-/** The library mutator `call` resolves to, as "Owner.name", or null. */
-function objectMutatorOf(call, checker) {
-  if (!calleeNames(call.getExpression()).some((n) => MUTATOR_NAMES.has(n))) return null;
-  const decl = checker.getResolvedSignature(call)?.getDeclaration();
-  if (!decl || !isExternalFile(decl.getSourceFile())) return false;
+/** "Owner.name" when `decl` is one of the library's object mutators, else null. */
+function libraryMutatorName(decl) {
+  if (!decl || !isExternalFile(decl.getSourceFile())) return null;
   const name = decl.getName?.();
   let owner = decl.getParent();
   if (owner?.getKind() === SyntaxKind.ModuleBlock) owner = owner.getParent();
@@ -279,21 +282,74 @@ function objectMutatorOf(call, checker) {
 }
 
 /**
+ * The library mutator a node REFERS to, by the declaration it resolves to,
+ * as { name, access }: `Object.assign` (the name of a member access),
+ * `Object[key]` with a key whose type is a literal or a literal union, a
+ * destructure `const { assign } = Object`. A key on an object holding a
+ * mutator that is not reduced to literals may name one, and counts. Names
+ * only pre-filter.
+ */
+function mutatorReferencedBy(node) {
+  const k = node.getKind();
+  const parent = node.getParent();
+  const first = (decls) => decls.map(libraryMutatorName).find(Boolean) ?? null;
+  if (k === SyntaxKind.Identifier && MUTATOR_NAMES.has(node.getText())) {
+    if (parent?.getKind() === SyntaxKind.BindingElement && (parent.getPropertyNameNode() ?? parent.getNameNode()) === node) {
+      const holder = parent.getParent()?.getParent();
+      const source = holder?.getKind() === SyntaxKind.VariableDeclaration ? holder.getInitializer() : null;
+      const name = first(source?.getType().getProperty(node.getText())?.getDeclarations() ?? []);
+      return name ? { name, access: parent } : null;
+    }
+    if (parent?.getKind() === SyntaxKind.PropertyAccessExpression && parent.getNameNode() === node) {
+      let symbol = node.getSymbol();
+      if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+      const name = first(symbol?.getDeclarations() ?? []);
+      return name ? { name, access: parent } : null;
+    }
+    return null;
+  }
+  if (k === SyntaxKind.ElementAccessExpression) {
+    const receiver = node.getExpression().getType();
+    const held = [...MUTATOR_NAMES].map((n) => first(receiver.getProperty(n)?.getDeclarations() ?? [])).filter(Boolean);
+    if (held.length === 0) return null; // not an object that holds a mutator
+    const keyType = node.getArgumentExpression()?.getType();
+    const parts = keyType ? (keyType.isUnion() ? keyType.getUnionTypes() : [keyType]) : [];
+    if (parts.length === 0 || !parts.every((u) => u.isStringLiteral())) return { name: `${held[0]} (by a key that may name it)`, access: node };
+    const name = parts.map((u) => first(receiver.getProperty(u.getLiteralValue())?.getDeclarations() ?? [])).find(Boolean);
+    return name ? { name, access: node } : null;
+  }
+  return null;
+}
+
+/** The call a member reference is the direct callee of, through parentheses, or null. */
+function directCallOf(access) {
+  let cur = access;
+  while (cur.getParent()?.getKind() === SyntaxKind.ParenthesizedExpression) cur = cur.getParent();
+  const call = cur.getParent();
+  return call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === cur ? call : null;
+}
+
+/**
  * Violations of G1–G5 in the production files `scope` names, as
  * "file:line  description" strings.
  */
 export function functionFlowViolations(program, scope) {
-  const checker = program.getTypeChecker();
   const isOwn = (node) => !isExternalFile(node.getSourceFile());
   const found = [];
-  const usedAllowance = new Set();
+  const excused = new Map(); // key -> sites seen
   const out = {
     push(line) {
       const node = currentNode;
       const rule = line.match(/ (G\d):/)?.[1];
       const fn = node.getFirstAncestor((a) => a.getKind() === SyntaxKind.FunctionDeclaration || a.getKind() === SyntaxKind.MethodDeclaration);
-      const key = `${toRelPosix(node.getSourceFile().getFilePath())}::${fn?.getName?.() ?? "<module>"}::${rule}`;
-      if (FUNCTION_FLOW_ALLOWLIST.has(key)) usedAllowance.add(key);
+      const owner =
+        fn?.getKind() === SyntaxKind.MethodDeclaration
+          ? `method ${fn.getParent()?.getName?.() ?? "<anonymous>"}.${fn.getName()}`
+          : fn
+            ? `function ${fn.getName() ?? "<anonymous>"}`
+            : "<module>";
+      const key = `${toRelPosix(node.getSourceFile().getFilePath())}::${owner}::${rule}`;
+      if (FUNCTION_FLOW_ALLOWLIST.has(key)) excused.set(key, (excused.get(key) ?? 0) + 1);
       else found.push(line);
     },
   };
@@ -355,9 +411,18 @@ export function functionFlowViolations(program, scope) {
       }
       if (targets.length > 0) return;
 
-      const mutator = kind === SyntaxKind.CallExpression ? objectMutatorOf(node, checker) : null;
-      if (mutator) {
-        const target = unwrap(node.getArguments()[0]);
+      const referenced = mutatorReferencedBy(node);
+      if (referenced) {
+        // Called directly, its target is judged. Any other use — `.call`,
+        // `.apply`, `.bind`, an alias, a destructure, an argument — would let
+        // it run on a target nobody can see, and is refused.
+        const { name: mutator, access } = referenced;
+        const call = access.getKind() === SyntaxKind.BindingElement ? null : directCallOf(access);
+        if (!call) {
+          out.push(`${siteOf(node)}  G2: object mutator ${mutator} used other than by a direct call`);
+          return;
+        }
+        const target = unwrap(call.getArguments()[0]);
         if (!target) return;
         // Object.assign onto a fresh literal builds a new object from members
         // that keep their names. The others put a value under a key a
@@ -365,7 +430,7 @@ export function functionFlowViolations(program, scope) {
         if (target.getKind() === SyntaxKind.ObjectLiteralExpression && mutator === "ObjectConstructor.assign") return;
         const t = target.getType();
         if (target.getKind() === SyntaxKind.ThisKeyword || t.isAny() || t.isUnknown() || hasOwnFunctionMembers(t)) {
-          out.push(`${siteOf(node)}  G2: object mutator on a value that holds or may hold functions`);
+          out.push(`${siteOf(call)}  G2: object mutator on a value that holds or may hold functions`);
         }
         return;
       }
@@ -403,9 +468,11 @@ export function functionFlowViolations(program, scope) {
     });
   }
   // An entry for a file absent from the tree scanned (a fixture) is not judged.
-  for (const key of FUNCTION_FLOW_ALLOWLIST.keys()) {
-    if (usedAllowance.has(key) || !existsSync(key.split("::")[0])) continue;
-    found.push(`${key}  FUNCTION_FLOW_ALLOWLIST entry matches no violation; remove it`);
+  for (const [key, { sites }] of FUNCTION_FLOW_ALLOWLIST) {
+    if (!existsSync(key.split("::")[0])) continue;
+    const seen = excused.get(key) ?? 0;
+    if (seen === 0) found.push(`${key}  FUNCTION_FLOW_ALLOWLIST entry matches no violation; remove it`);
+    else if (seen !== sites) found.push(`${key}  FUNCTION_FLOW_ALLOWLIST entry excuses ${sites} site(s), but ${seen} were found; review the new ones`);
   }
   return [...new Set(found)];
 }

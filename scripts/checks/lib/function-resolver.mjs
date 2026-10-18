@@ -42,12 +42,25 @@ export const FN_KINDS = new Set([
 ]);
 export const LITERAL_FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
 
-const PRODUCTION_ROOTS = ["src/", "scripts/"];
-// Under a production root but not production: the gates themselves, their
-// fixtures and tests, the hand-run manual test scripts, and the dev/CI tooling
-// at scripts/ top level. A script not listed here is production — a new one
-// is judged by both gates until someone says otherwise.
-const NON_PRODUCTION_PREFIXES = ["scripts/checks/", "scripts/__tests__/", "scripts/__fixtures__/", "scripts/manual-tests/"];
+// Own files that are not production. Every other own code file the Program
+// holds is production and scanned by both gates — a new file, at the root or
+// anywhere else, is judged until someone declares otherwise here with a
+// reason. An entry that matches no file in the Program fails the run
+// (productionScope), so the list cannot outlive what it names.
+export const NON_PRODUCTION = [
+  { prefix: "scripts/checks/", why: "the CI gates and their libraries" },
+  { prefix: "scripts/__tests__/", why: "the gates' tests" },
+  { prefix: "scripts/__fixtures__/", why: "fixtures for the gates' tests" },
+  { prefix: "scripts/manual-tests/", why: "hand-run manual test scripts" },
+  { prefix: "e2e/", why: "Playwright end-to-end tests and their helpers" },
+  { prefix: ".next/", why: "route types Next.js generates" },
+  { file: "vitest.config.ts", why: "test runner configuration" },
+  { file: "vitest.integration.config.ts", why: "test runner configuration" },
+  { pattern: /\.(test|spec)\.[cm]?[jt]sx?$/, why: "test files" },
+  { pattern: /(^|\/)__tests__\//, why: "test directories" },
+];
+// Tooling: declared non-production, and held to that — its import closure
+// must not reach the RLS helpers or the database client (productionScope).
 export const NON_PRODUCTION_SCRIPTS = [
   "scripts/check-env-docs.ts",
   "scripts/check-state-mutation-centralization.ts",
@@ -55,33 +68,38 @@ export const NON_PRODUCTION_SCRIPTS = [
   "scripts/env-descriptions.ts",
   "scripts/generate-env-example.ts",
   "scripts/generate-security-matrices.ts",
-  "scripts/generate-team-key-fixture.ts",
   "scripts/init-env.ts",
   "scripts/regenerate-account-token-legacy-fixture.ts",
+  // Operator DB-role tooling: connects with its own role through `pg`, runs
+  // no application code.
+  "scripts/audit-db-grants.mjs",
+  "scripts/bootstrap-rds-roles.mjs",
+  "scripts/lib/denied-privileges.mjs",
 ];
+
+const CODE_FILE = /\.([cm]?[jt]sx?)$/;
 
 export function toRelPosix(absPath) {
   return relative(process.cwd(), absPath).split(sep).join("/");
 }
 
-/**
- * A cwd-relative path explicitly declared non-production: tests, the CI
- * tooling, the manual-test scripts. (A file merely outside src/ and scripts/ —
- * a root `sentry.server.config.ts` — is neither scanned nor declared.)
- */
+const matchesEntry = (entry, rel) =>
+  entry.prefix ? rel.startsWith(entry.prefix) : entry.file ? rel === entry.file : entry.pattern.test(rel);
+
+/** A cwd-relative path declared non-production: in NON_PRODUCTION, or listed tooling. */
 export function isDeclaredNonProduction(rel) {
-  if (NON_PRODUCTION_PREFIXES.some((prefix) => rel.startsWith(prefix))) return true;
-  if (NON_PRODUCTION_SCRIPTS.includes(rel)) return true;
-  return /\.(test|spec)\.[cm]?[jt]sx?$/.test(rel) || rel.includes("__tests__/");
+  return NON_PRODUCTION.some((entry) => matchesEntry(entry, rel)) || NON_PRODUCTION_SCRIPTS.includes(rel);
 }
 
-/** A cwd-relative path that is production TypeScript. */
+/** A cwd-relative path that is production code: an own code file nothing declares otherwise. */
 export function isProductionPath(rel) {
-  if (!PRODUCTION_ROOTS.some((root) => rel.startsWith(root))) return false;
-  if (NON_PRODUCTION_PREFIXES.some((prefix) => rel.startsWith(prefix))) return false;
-  if (NON_PRODUCTION_SCRIPTS.includes(rel)) return false;
-  if (!/\.tsx?$/.test(rel) || rel.endsWith(".d.ts")) return false;
-  return !/\.(test|spec)\.tsx?$/.test(rel) && !rel.includes("__tests__");
+  if (!CODE_FILE.test(rel) || /\.d\.[cm]?ts$/.test(rel)) return false;
+  return !isDeclaredNonProduction(rel);
+}
+
+/** The NON_PRODUCTION entries no path in `rels` matches (pattern entries are never stale). */
+export function unmatchedNonProduction(rels) {
+  return NON_PRODUCTION.filter((entry) => !entry.pattern && !rels.some((rel) => matchesEntry(entry, rel)));
 }
 
 /**
@@ -117,6 +135,47 @@ export function unwrap(expr) {
       return unwrap(expr.getExpression());
     default:
       return expr;
+  }
+}
+
+/**
+ * The module specifiers a load's argument can be, read off its VALUE: a
+ * literal, a const whose initializer is one, or a conditional between them
+ * (`const m = which ? "a" : "b"`), through any assertion. The TYPE is never
+ * read: `input as "hash-wasm"` is `input`, a value nobody named.
+ * Null when the value is not built from literals.
+ */
+export function specifiersOf(arg, seen = new Set()) {
+  const e = arg;
+  if (!e || seen.has(e)) return null;
+  seen.add(e);
+  switch (e.getKind()) {
+    case SyntaxKind.StringLiteral:
+    case SyntaxKind.NoSubstitutionTemplateLiteral:
+      return [e.getLiteralText()];
+    case SyntaxKind.ParenthesizedExpression:
+    case SyntaxKind.NonNullExpression:
+    case SyntaxKind.SatisfiesExpression:
+    case SyntaxKind.AsExpression:
+    case SyntaxKind.TypeAssertionExpression:
+      // An assertion changes the type, never the value: what is read is the
+      // expression inside it.
+      return specifiersOf(e.getExpression(), seen);
+    case SyntaxKind.ConditionalExpression: {
+      const a = specifiersOf(e.getWhenTrue(), seen);
+      const b = specifiersOf(e.getWhenFalse(), seen);
+      return a && b ? [...a, ...b] : null;
+    }
+    case SyntaxKind.Identifier: {
+      let symbol = e.getSymbol();
+      if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+      const decls = symbol?.getDeclarations() ?? [];
+      const decl = decls.length === 1 ? decls[0] : null;
+      if (decl?.getKind() !== SyntaxKind.VariableDeclaration || decl.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
+      return decl.getInitializer() ? specifiersOf(decl.getInitializer(), seen) : null;
+    }
+    default:
+      return null;
   }
 }
 
@@ -706,12 +765,17 @@ export function createFunctionResolver({ program, scope = null }) {
       callee?.getKind() === SyntaxKind.ImportKeyword ||
       (callee?.getKind() === SyntaxKind.Identifier && callee.getText() === "require" && callee.getSymbol()?.getDeclarations().every(isExternal));
     if (!isLoad) return null;
-    const spec = literalKey(call.getArguments()[0]);
-    if (spec === null) return { sf: null };
-    const resolved = ts.resolveModuleName(spec, call.getSourceFile().getFilePath(), program.getCompilerOptions(), ts.sys).resolvedModule;
-    if (!resolved) return spec.startsWith(".") || spec.startsWith("@/") ? { sf: null } : { library: true };
-    if (resolved.isExternalLibraryImport || resolved.resolvedFileName.includes("/node_modules/")) return { library: true };
-    return { sf: program.getSourceFile(resolved.resolvedFileName) ?? null };
+    const specs = specifiersOf(call.getArguments()[0]);
+    if (!specs) return { sf: null };
+    const loaded = specs.map((spec) => {
+      const resolved = ts.resolveModuleName(spec, call.getSourceFile().getFilePath(), program.getCompilerOptions(), ts.sys).resolvedModule;
+      if (!resolved) return spec.startsWith(".") || spec.startsWith("@/") ? { sf: null } : { library: true };
+      if (resolved.isExternalLibraryImport || resolved.resolvedFileName.includes("/node_modules/")) return { library: true };
+      return { sf: program.getSourceFile(resolved.resolvedFileName) ?? null };
+    });
+    // One own module, or library modules only; anything else cannot be named.
+    if (loaded.every((l) => l.library)) return { library: true };
+    return loaded.length === 1 ? loaded[0] : { sf: null };
   }
 
   function resolveExport(sf, name, site) {

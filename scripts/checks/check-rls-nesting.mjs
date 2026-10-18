@@ -35,7 +35,7 @@
  * of a function to a member after its declaration, no object mutator on what
  * may hold functions, no computed-key or parameter-property function member,
  * no class derivation the language service cannot enumerate. The scan set is
- * the production import closure, and a module in it the gates cannot read
+ * every own file not declared non-production and what it loads, and a module in it the gates cannot read
  * (own JavaScript, a declaration over it, a non-literal specifier outside
  * NON_LITERAL_LOAD_ALLOWLIST) is refused.
  *
@@ -64,7 +64,9 @@ import {
   createFunctionResolver,
   createReachability,
   isBindingWrite,
+  literalKey,
   mayBeCallable,
+  mayHoldOwnCode,
   toRelPosix,
   unwrap,
 } from "./lib/function-resolver.mjs";
@@ -247,7 +249,7 @@ const conditionalEntries = CONDITIONAL_OPENER_ALLOWLIST.filter((entry) => exists
   const calleeFn = program.getSourceFile(join(process.cwd(), entry.calleeFile))?.getFunction(entry.callee);
   if (!calleeFn) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: ${entry.calleeFile} declares no function ${entry.callee}.`);
   const params = calleeFn.getParameters()[0];
-  if (!params || isWritten(params)) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: the guard's parameter is missing or reassigned.`);
+  if (!params) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: ${entry.callee} has no parameter to guard on.`);
   const guarded = calleeFn.getDescendantsOfKind(SyntaxKind.CallExpression).filter((call) => {
     if (!resolveCall(call).fns.some((f) => baseHelpers.has(f))) return false;
     let cur = call;
@@ -262,14 +264,89 @@ const conditionalEntries = CONDITIONAL_OPENER_ALLOWLIST.filter((entry) => exists
     );
   });
   if (guarded.length !== 1) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: expected one opener guarded by ${params.getName()}.${entry.guard}, found ${guarded.length}.`);
-  // A write to the guard member inside the callee would undo the guard.
-  const guardWritten = calleeFn.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).some(
-    (pa) => pa.getName() === entry.guard && unwrap(pa.getExpression())?.getSymbol()?.getDeclarations()[0] === params &&
-      pa.getParent()?.getKind() === SyntaxKind.BinaryExpression && pa.getParent().getLeft() === pa,
-  );
-  if (guardWritten) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: ${params.getName()}.${entry.guard} is written inside ${entry.callee}.`);
+  const change = guardChange(calleeFn, params, entry.guard);
+  if (change) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: ${change} inside ${entry.callee}, so its guard can change.`);
   return { ...entry, key, calleeFn, guardedCall: guarded[0] };
 });
+
+/**
+ * How the guard `<params>.<guard>` can change inside `fn`, or null. Reading
+ * the parameter (`params.userId`), copying it (`{ ...params }`) and
+ * destructuring it are fine. What can change the guard: an assignment to the
+ * member or the parameter (plain, compound, a destructuring target, a for-of
+ * target), a `delete`, or the parameter leaving as a value (passed on,
+ * aliased, returned), where anything could write it — an object mutator
+ * included.
+ */
+function guardChange(fn, params, guard) {
+  const name = params.getName();
+  const inside = (node) => node.getAncestors().includes(fn);
+  for (const group of params.getNameNode().findReferences()) {
+    for (const entry of group.getReferences()) {
+      const ref = entry.getNode();
+      if (ref === params.getNameNode() || !inside(ref)) continue;
+      if (isBindingWrite(entry)) return `${name} is reassigned`;
+      const parent = ref.getParent();
+      const pk = parent?.getKind();
+      if ((pk === SyntaxKind.PropertyAccessExpression || pk === SyntaxKind.ElementAccessExpression) && parent.getExpression() === ref) {
+        const member = pk === SyntaxKind.PropertyAccessExpression ? parent.getName() : literalKey(parent.getArgumentExpression());
+        if (member !== null && member !== guard) {
+          // A member that may be a function runs with the parameter as `this`
+          // (or closes over it) wherever it is called: read as a function, the
+          // parameter leaves as a value. Any other member is data.
+          if (mayHoldOwnCode(parent.getType())) return `${name}.${member}, which may be a function, is read at ${siteOf(parent)}`;
+          continue;
+        }
+        if (isWriteTarget(parent)) return member === null ? `${name} is written through a computed key` : `${name}.${guard} is written`;
+        continue;
+      }
+      if (pk === SyntaxKind.SpreadAssignment || pk === SyntaxKind.SpreadElement) continue;
+      if (pk === SyntaxKind.VariableDeclaration && parent.getInitializer() === ref && parent.getNameNode().getKind() === SyntaxKind.ObjectBindingPattern) continue;
+      return `${name} leaves as a value at ${siteOf(ref)}`;
+    }
+  }
+  return null;
+}
+
+/** Whether a member access is written: assigned, compound-assigned, deleted, incremented, or a destructuring/for-of target. */
+function isWriteTarget(access) {
+  let cur = access;
+  while (cur.getParent()?.getKind() === SyntaxKind.ParenthesizedExpression) cur = cur.getParent();
+  const parent = cur.getParent();
+  switch (parent?.getKind()) {
+    case SyntaxKind.BinaryExpression: {
+      const op = parent.getOperatorToken().getKind();
+      if (op >= SyntaxKind.FirstAssignment && op <= SyntaxKind.LastAssignment && parent.getLeft() === cur) return true;
+      return false;
+    }
+    case SyntaxKind.DeleteExpression:
+      return true;
+    case SyntaxKind.PrefixUnaryExpression:
+    case SyntaxKind.PostfixUnaryExpression: {
+      const op = parent.getOperatorToken();
+      return op === SyntaxKind.PlusPlusToken || op === SyntaxKind.MinusMinusToken;
+    }
+    case SyntaxKind.ForOfStatement:
+    case SyntaxKind.ForInStatement:
+      return parent.getInitializer() === cur;
+    case SyntaxKind.PropertyAssignment:
+    case SyntaxKind.ShorthandPropertyAssignment:
+    case SyntaxKind.ArrayLiteralExpression:
+    case SyntaxKind.SpreadElement:
+    case SyntaxKind.SpreadAssignment: {
+      // A leaf of a destructuring assignment: `({ tx: p.tx } = o)`, `[p.tx] = a`.
+      let up = parent;
+      while ([SyntaxKind.PropertyAssignment, SyntaxKind.ShorthandPropertyAssignment, SyntaxKind.ObjectLiteralExpression,
+        SyntaxKind.ArrayLiteralExpression, SyntaxKind.SpreadElement, SyntaxKind.SpreadAssignment].includes(up.getParent()?.getKind())) {
+        up = up.getParent();
+      }
+      const holder = up.getParent();
+      return holder?.getKind() === SyntaxKind.BinaryExpression && holder.getOperatorToken().getKind() === SyntaxKind.EqualsToken && holder.getLeft() === up;
+    }
+    default:
+      return false;
+  }
+}
 
 /** Whether `edge`, from the context callback `root`, is an exempt call to `entry`'s callee. */
 function isExemptCall(entry, edge, unit, root) {
@@ -407,7 +484,7 @@ for (const sf of scanFiles) {
 
 // What the resolver's answers rest on: the production boundary, and the rules
 // that make a member hold only what its declaration says (lib/soundness.mjs).
-// Checked here once for both gates.
+// check-bypass-rls checks the same itself, so each gate refuses on its own.
 const boundaryViolations = scope.violations;
 const flowViolations = functionFlowViolations(program, scope);
 
@@ -448,9 +525,9 @@ if (unfollowed.length > 0) {
 if (boundaryViolations.length > 0) {
   failed = true;
   console.error("");
-  console.error("The production boundary does not hold. Production is the import closure of src/ and");
-  console.error("scripts/ minus declared tooling (lib/soundness.mjs); every module in it must be");
-  console.error("TypeScript the gates can read:");
+  console.error("The production boundary does not hold. Production is every own file not declared");
+  console.error("non-production (NON_PRODUCTION / NON_PRODUCTION_SCRIPTS), and every module it loads;");
+  console.error("each must be code the gates can read, and each declaration must name a real file:");
   for (const v of boundaryViolations) console.error(`  ${v}`);
 }
 

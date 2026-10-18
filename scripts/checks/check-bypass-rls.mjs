@@ -94,11 +94,13 @@
  *     read, a specifier typed plain `string` with no literal reduction, and
  *     one residual UNVERIFIED case — an ambient `.d.ts` declaration that
  *     types a value as the helper module.
- *   - The scan root is the production import closure: src/ and scripts/
- *     minus tests, the CI tooling and scripts/manual-tests, plus every module
- *     they load (lib/soundness.mjs productionScope). The manual-test scripts
- *     call these helpers and are examined by nothing; listed tooling whose
- *     imports reach the RLS helpers or the client is refused.
+ *   - The scan root is deny-by-default: every own file in the Program that
+ *     NON_PRODUCTION / NON_PRODUCTION_SCRIPTS (lib/function-resolver.mjs) does
+ *     not declare, plus every module they load (lib/soundness.mjs
+ *     productionScope). The manual-test scripts call these helpers and are
+ *     examined by nothing; listed tooling whose imports reach the RLS helpers
+ *     or the client is refused. A file the tsconfig excludes (extension/, cli/)
+ *     is outside the Program and read by neither gate.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
  *   - Check 3's coverage limits are the shared reachability's (see
@@ -1481,12 +1483,12 @@ if (sourceFiles.length === 0) {
 
 const program = buildProgram();
 scope = productionScope(program);
-// The closure can add a module outside src/ and scripts/ that production loads
-// (a root sentry.server.config.ts); scan it like the rest.
-for (const abs of scope.files) {
-  const rel = toRelPosix(abs);
-  if (!sourceFiles.includes(rel)) sourceFiles.push(rel);
-}
+// What is scanned is the production scope, the same set check-rls-nesting
+// reads: every own Program file not declared non-production, plus what they
+// load. (The directory walk above only proves there is something to examine;
+// a file the tsconfig excludes is not in the Program and is read by neither gate.)
+sourceFiles.length = 0;
+for (const abs of scope.files) sourceFiles.push(toRelPosix(abs));
 const helperDecls = resolveHelperDeclarations(program);
 const bypassDecl = program
   .getSourceFile(join(process.cwd(), "src/lib/tenant-rls.ts"))
