@@ -711,3 +711,56 @@ Diff reviewed: `77cb92b61..587e33307` (review(4), the enforced subset). Findings
 | typecheck, lint, `git diff --check` | pass |
 | check-rls-nesting / check-bypass-rls (real tree) | OK: 1,055 files, 600 context calls, 221 bypass callbacks through 1,063 reached functions |
 | Rule check cost | about 10 s per gate run (was 2 s). The cost is the own-call argument flows of G6/G7. |
+
+# Round 6 (convergence round)
+
+Reviewed `587e33307..944a867bd` with three experts (functionality, security, testing). Both gates passed on the real tree throughout; every finding below is a fixture the gates passed or a clause no test pinned.
+
+## Findings (merged)
+- **A — regressions and false claims of round 5:**
+  - F1: a literal member read through a narrowed receiver resolved to nothing (one-way assignability). Regression.
+  - F9: the bypass gate stopped scanning tsconfig-excluded files; `.mts`/`.js` entries were never scanned (S9 part). Regression and continuing.
+  - S1: a registered external shape held inside another type (`{ client: S3SendClient }`, a callback parameter, a Promise) hid an own implementer. Regression.
+  - T1: G7 was never applied to an argument to an own function (the argument pre-filter required functions).
+  - F2: a smaller literal cast down to a class or literal type was invisible; the code comment claimed only a cast through `unknown` could do it.
+  - S2: the raw-query exemption admitted any `$` member, `$transaction` included.
+  - S3: the `globalThis` G6 exemption admitted a widening to a record.
+  - T8: five round-5 mutation entries (T7a, Z1b, S2b, A5, X2) and Q5 named text absent from the committed code.
+  - S9: docs and gate headers overstated coverage. F15 = S10 = T10: "G1-G5" printed for G6/G7.
+- **B — clauses no test pinned:** T2 (the element-access path of the library-member check: a real miss), T3–T7, T9, T11, T13; T6 a vacuous allow test.
+- **C — shapes the analysis does not follow, present before this round:** F3 = S4, F4, F5, F6, F7, F8, F10, F11, F12, F13 = S6, F14, S5, S7, S8, T12.
+
+## Decisions (user)
+- Round 6 is the convergence round: no round 7, no exploratory review.
+- Settle the guarantee wording first. Nesting: the runtime guard is the boundary; the static gate is a limited development aid. Bypass: nothing at runtime checks purpose or models; model tracking is a partial static preventive control, not a tenant boundary.
+- Fix A. Where a fix would need a new general analysis mechanism, narrow the guarantee instead.
+- B: pin meaningful contracts with representative deny/allow fixtures; T2 is mandatory; turning every mutation red is not a goal.
+- C: record as known limits, nesting and bypass model tracking separately, with impact. The long-term fix for the latter is a runtime model restriction (a per-purpose capability client), not more analysis rules. No new G rules after this round.
+
+## Resolution Status (round 6)
+| Finding | Resolution |
+|---|---|
+| Wording | `docs/security/security-review.md`, `tenant-boundary-matrix.md`, `threat-model.md`, both gate headers, the resolver and soundness docblocks, the `tenant-rls.ts` docblock. Verified first: no migration or policy reads `app.bypass_purpose`. |
+| F1, F2 | A literal stands in for a type when the two are comparable in either direction, the literal's type widened (its fresh form relates to nothing larger). The comment is corrected. A stand-in re-entering its own resolution (the real tree's hook-result shorthands) adds nothing and is guarded (C1). Real-tree reach unchanged: 1,063 functions. |
+| S1 | A registered shape's member resolves to library code plus every own member of that name on a comparable type, so the route the value took no longer matters. No real-tree change. |
+| T1 | An argument is typed when it holds functions or is loose, so G7 judges it. Gate time unchanged. |
+| S2 | The exemption is the four raw-query methods. |
+| S3 | `globalThis` is exempt only when cast on to a type whose members are all named and none may hold a function. Removing the exemption outright fails `src/lib/prisma.ts` and `src/lib/redis.ts` (the reviewer's "unused" was not reproduced). |
+| F9 | Production is every own code file on disk (`git ls-files --cached --others --exclude-standard`, or a walk outside a work tree) not declared non-production; one the Program does not hold fails the run. 155 such files were declared: `cli/`, `extension/`, `load-test/`, `docs/`, three root configs, and ten out-of-Program scripts as tooling, whose import closure (JavaScript included) is now parsed and checked. |
+| T8 | The six entries re-derived against `944a867bd`; each run passes before the change and fails after. `base` is the commit. |
+| F15/S10/T10 | G1-G7. |
+| T2 | Deny `sink["log"]()` and allow `console["log"]()`. |
+| T3–T7, T9, T11, T13 | One representative case per contract: G6 through a union, a rest parameter, an async return, and its constrained-generic allow; G7's no-supplier branch; G1 for a type parameter and `Object`, with a string-record allow; a namespace-imported createRequire loader; a conditional specifier with a non-literal side; `this` in a literal method; the conditional opener's string-key write allow; the #909 inside-context control; every non-production declaration existing in the repository. T6's test now asserts the charge. |
+| C | #910 (nesting: the runtime guard refuses; a swallowing caller skips its work) and #911 (bypass model tracking: future code can reach an ungranted model unchecked; direction: a per-purpose capability client or policies reading `app.bypass_purpose`). T12 (the nesting stub's shared delegate base) is listed in the PR as a follow-up. |
+
+### Mutation record (round 6)
+`…-mutations-round6.json`: 27 entries, every one red. The runner now checks that the targeted run passes before each change; an entry whose base run fails is void. One fixture (the tooling closure through an out-of-Program module) failed before that check existed: the closure skipped own JavaScript, which is now read.
+
+### Verification (round 6)
+| Check | Result |
+|---|---|
+| Fixture suites | 572 passed |
+| Full vitest | 17,248 passed; 1 failure, `crypto-auth-deps-manifest` (E), caused by the uncommitted `passwd-sso-cli` dependency in `package.json`, which is kept out of this branch |
+| typecheck, lint, `next build`, `git diff --check` | pass |
+| check-rls-nesting / check-bypass-rls (real tree) | OK: 1,053 files, 600 context calls, 221 bypass callbacks through 1,063 reached functions |
+| Gate wall time | about 28 s (nesting) and 34 s (bypass). Round 5's "about 10 s" was the rule check alone, not a run; the reviewers measured 25→28 s and 31→35 s across round 5. |

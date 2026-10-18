@@ -96,13 +96,16 @@ call site in production code. It enforces three invariants:
    `withBypassRls` only if it appears in the map; `"*"` means any Prisma model is permitted
    (reserved for the definition file and a few `$transaction`-heavy call sites that touch many
    models by design, e.g. vault reset).
-2. **Per-file model allowlist** — for files with an explicit model list, every `prisma.<model>` /
-   `tx.<model>` reference within `SCAN_RADIUS` (10 lines) of the call site must be in that file's list.
+2. **Per-file model allowlist** — for files with an explicit model list, every model reached from a
+   bypass callback (followed through the functions it calls, by type) must be in that file's list.
+   This is a partial, development-time preventive control, not a tenant boundary: nothing at runtime
+   checks a bypass's purpose or the models it touches, so code the analysis does not follow can reach
+   an ungranted model unchecked. See the gate's header and #911 for the known shapes.
 3. **`BYPASS_PURPOSE` constant usage** — every call site (except the definition file) must reference
    a `BYPASS_PURPOSE.*` constant rather than a string literal, and the tx-less callback shape
    (`() => prisma.x` instead of `(tx) => tx.x`) is banned for both `withBypassRls` and `withTenantRls`.
 
-As of this writing, `ALLOWED_USAGE` has **94 entries** (`grep -c '^\s*\["' scripts/checks/check-bypass-rls.mjs`).
+As of this writing, `ALLOWED_USAGE` has **101 entries** (the `ALLOWED_USAGE` map in `scripts/checks/check-bypass-rls.mjs`; the file holds other maps, so a whole-file line count overstates it).
 This document does not copy the list — `scripts/checks/check-bypass-rls.mjs` is the SSoT and is
 CI-enforced on every push; consult it directly for the current file × model grant.
 

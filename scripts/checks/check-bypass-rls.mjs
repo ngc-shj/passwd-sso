@@ -6,6 +6,15 @@
  * Any new usage of withBypassRls must be explicitly added to ALLOWED_USAGE
  * after security review. This prevents accidental RLS bypass in new code.
  *
+ * Model tracking (Check 3) is a partial, development-time preventive control,
+ * not a tenant boundary. Nothing at runtime checks a bypass's purpose or the
+ * models it touches: the client inside a bypass reaches every model, and
+ * `app.bypass_purpose` is set but read by no policy. Code this analysis does
+ * not follow (the shapes recorded in #911 and #910, and future ones) can
+ * reach a model the allowlist does not grant with nothing to stop it. A
+ * runtime restriction — a per-purpose capability client exposing only the
+ * granted delegates — is the durable fix.
+ *
  * Call sites and callbacks are read from the parse tree; raw text decides only
  * which files are worth parsing — see HELPER_MENTION_RE.
  *
@@ -23,12 +32,13 @@
  * `prisma` Proxy, a destructuring, a cast to `any` — no longer matters,
  * because no name is tracked. Anything reached that the resolver cannot name
  * fails the run (unfollowedHandOffs); a computed key on a client fails it too
- * (unresolvedModels). The resolver's answers rest on the decidable subset
- * lib/soundness.mjs enforces (G1-G7, the deny-by-default scan set), which
- * this gate checks itself as well as check-rls-nesting. A client or delegate
+ * (unresolvedModels). The resolver's answers rest on the forms
+ * lib/soundness.mjs refuses (G1-G7, the deny-by-default scan set), which this
+ * gate checks itself as well as check-rls-nesting; those rules keep the
+ * analysis tractable, not complete. A client or delegate
  * given a type that no longer says it is one (`unknown`, an own interface, a
  * Pick that drops the query methods) is refused anywhere in production; a
- * narrowing to the client's raw-query API alone is raw SQL's to judge.
+ * narrowing to the client's four raw-query methods alone is raw SQL's to judge.
  *
  * Five rounds of review found defects here, every one the same defect: a
  * predicate that judged code by its spelling. A fixed 10-line radius stopped
@@ -1640,16 +1650,19 @@ function modelsOfDelegateType(type) {
 
 /**
  * Whether a narrowed client type keeps only the client's raw-query API
- * (`{ $executeRaw }`, a `$queryRawUnsafe` probe): every member is a `$` member
- * the generated client declares. No model is reachable through it; raw SQL is
- * check-raw-sql-usage's to judge.
+ * (`{ $executeRaw }`, a `$queryRawUnsafe` probe): every member is one of the
+ * four raw-query methods the generated client declares. No model is reachable
+ * through them; raw SQL is check-raw-sql-usage's to judge. The client's other
+ * `$` members are not: `$transaction` hands its callback a client, `$extends`
+ * returns one.
  */
 const CLIENT_TYPE = bypassDecl?.getParameters()[0]?.getType();
+const RAW_QUERY_METHODS = new Set(["$executeRaw", "$executeRawUnsafe", "$queryRaw", "$queryRawUnsafe"]);
 function isRawQueryOnly(type) {
   const props = type.getNonNullableType().getProperties();
   return props.length > 0 && props.every((p) => {
     const name = p.getName();
-    return name.startsWith("$") && isPrismaClientMember(CLIENT_TYPE?.getProperty(name)?.getDeclarations() ?? []);
+    return RAW_QUERY_METHODS.has(name) && isPrismaClientMember(CLIENT_TYPE?.getProperty(name)?.getDeclarations() ?? []);
   });
 }
 

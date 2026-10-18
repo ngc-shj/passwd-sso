@@ -1,6 +1,9 @@
 /**
- * What makes the shared resolver's answers SOUND, checked over all production
- * code rather than assumed.
+ * The forms that would make the shared resolver's answers wrong, refused over
+ * all production code rather than assumed absent. They keep the analysis
+ * tractable; they do not make it complete, and no further rule is to be added
+ * to chase completeness — the runtime guards are the boundary (see the gates'
+ * headers).
  *
  * The resolver names a function by its declaration: a member holds what its
  * declaration initialises it to, an interface member is one of the production
@@ -37,9 +40,9 @@
  * that may hold a function, so a cast or a structural assignment cannot hide
  * an implementation: neither renames a member.
  *
- * The scan set is deny-by-default: every own file the Program holds is
- * production unless NON_PRODUCTION / NON_PRODUCTION_SCRIPTS declares it
- * otherwise (lib/function-resolver.mjs), and so is every module production
+ * The scan set is deny-by-default: every own code file on disk is production
+ * unless NON_PRODUCTION / NON_PRODUCTION_SCRIPTS declares it otherwise
+ * (lib/function-resolver.mjs), and must be in the Program; so is every module production
  * code loads (`import()`, `require`, a createRequire loader). A load's
  * specifier is evaluated from its value, never an asserted type. A load the
  * compiler cannot resolve to TypeScript the gates can read — own JavaScript, a declaration
@@ -47,9 +50,12 @@
  * specifier — is refused, as is production loading declared tooling and
  * tooling whose closure reaches the RLS helpers or the database client.
  */
-import { SyntaxKind, ts } from "ts-morph";
-import { existsSync } from "node:fs";
+import { Project, SyntaxKind, ts } from "ts-morph";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import {
+  CODE_FILE,
   EXTERNAL_SHAPE_ALLOWLIST,
   FN_KINDS,
   NON_PRODUCTION_SCRIPTS,
@@ -71,7 +77,7 @@ export const NON_LITERAL_LOAD_ALLOWLIST = new Map([
   ["src/i18n/messages.ts", "next-intl message JSON under messages/"],
 ]);
 
-// Reviewed exceptions to G1-G5, keyed "file::function <name>::rule" or
+// Reviewed exceptions to G1-G7, keyed "file::function <name>::rule" or
 // "file::method <Class>.<name>::rule" by the declaration the violation is in,
 // with the number of sites it excuses. A different count — a new write in the
 // same function, or one gone — fails the run, as does an entry that matches nothing.
@@ -119,6 +125,30 @@ function loadsOf(sf) {
   return out;
 }
 
+const SKIPPED_DIRS = new Set(["node_modules", ".git", ".next"]);
+
+/**
+ * Every own code file on disk, cwd-relative: what git tracks or would track
+ * (`--exclude-standard`), or, outside a work tree, a walk of the directory.
+ */
+function ownCodeFilesOnDisk() {
+  if (existsSync(".git")) {
+    const listed = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    return listed.split("\n").filter((f) => CODE_FILE.test(f) && existsSync(f));
+  }
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIPPED_DIRS.has(entry.name)) continue;
+      const rel = dir === "." ? entry.name : `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walk(rel);
+      else if (CODE_FILE.test(entry.name)) out.push(rel);
+    }
+  };
+  walk(".");
+  return out;
+}
+
 /**
  * The production scan set and the boundary violations found building it.
  * Returns { files: Set<absolute path>, isProduction(node), violations }.
@@ -130,20 +160,41 @@ export function productionScope(program) {
   const files = new Set(seeds.map((sf) => sf.getFilePath()));
   const violations = [];
 
-  // The declarations must still name something: an entry that matches no file
-  // in the Program (and whose path exists — fixture trees lack most of them)
-  // would excuse the next file that lands at it without review.
-  const ownRels = own.map((sf) => toRelPosix(sf.getFilePath()));
-  for (const entry of unmatchedNonProduction(ownRels)) {
-    const path = entry.prefix ?? entry.file;
-    if (existsSync(path)) violations.push(`${path}  NON_PRODUCTION entry matches no file in the Program; remove it`);
-  }
-  for (const tool of NON_PRODUCTION_SCRIPTS) {
-    if (existsSync(tool) && !ownRels.includes(tool)) violations.push(`${tool}  NON_PRODUCTION_SCRIPTS entry is not in the Program; remove it`);
+  // The denominator is the disk, not the Program: a production file the
+  // Program does not hold (excluded by tsconfig, an extension `include` does
+  // not match, an entry nothing imports) is code neither gate reads.
+  const onDisk = ownCodeFilesOnDisk();
+  const ownRels = new Set(own.map((sf) => toRelPosix(sf.getFilePath())));
+  for (const rel of onDisk) {
+    if (isProductionPath(rel) && !ownRels.has(rel)) {
+      violations.push(`${rel}  production code the gates cannot read: the Program does not hold it (add it to tsconfig, or declare it in NON_PRODUCTION with a reason)`);
+    }
   }
 
+  // The declarations must still name something: an entry that matches no file
+  // on disk or in the Program (generated, gitignored) would excuse the next file that lands at it without review. (A
+  // path absent altogether is a fixture tree's; the repository test pins
+  // that every entry exists in the real one.)
+  for (const entry of unmatchedNonProduction([...onDisk, ...ownRels])) {
+    const path = entry.prefix ?? entry.file;
+    if (existsSync(path)) violations.push(`${path}  NON_PRODUCTION entry matches no file; remove it`);
+  }
+  for (const tool of NON_PRODUCTION_SCRIPTS) {
+    if (existsSync(tool) && !onDisk.includes(tool)) violations.push(`${tool}  NON_PRODUCTION_SCRIPTS entry is not an own code file; remove it`);
+  }
+
+  // Tooling outside the Program is parsed on its own for its closure check.
+  let side = null;
+  const parsedAt = (abs) =>
+    program.getSourceFile(abs) ??
+    (side ??= new Project({
+      skipAddingFilesFromTsConfig: true,
+      skipFileDependencyResolution: true,
+      compilerOptions: { allowJs: true, jsx: ts.JsxEmit.ReactJSX },
+    })).addSourceFileAtPathIfExists(abs);
+
   /** The own TypeScript module a load resolves to, null for a library or data, or { problem }. */
-  function resolveLoad(sf, spec) {
+  function resolveLoad(sf, spec, lookup = (abs) => program.getSourceFile(abs), { readsJs = false } = {}) {
     if (spec === null) return { problem: "loads a module through a non-literal specifier" };
     const resolved = ts.resolveModuleName(spec, sf.getFilePath(), options, ts.sys).resolvedModule;
     if (!resolved) {
@@ -154,6 +205,8 @@ export function productionScope(program) {
     const target = resolved.resolvedFileName;
     if (resolved.isExternalLibraryImport || target.includes("/node_modules/")) return null;
     if (/\.[cm]?jsx?$/.test(target)) {
+      // Tooling's closure is read whatever it is written in.
+      if (readsJs) return lookup(target) ? { sf: lookup(target) } : { problem: `loads ${toRelPosix(target)}, which cannot be read` };
       return { problem: `loads ${toRelPosix(target)}, own JavaScript the gates cannot read` };
     }
     if (/\.d\.[cm]?ts$/.test(target)) {
@@ -163,7 +216,7 @@ export function productionScope(program) {
       const impl = [".js", ".mjs", ".cjs", ".jsx"].map((e) => stem + e).find((f) => existsSync(f));
       return impl ? { problem: `loads ${toRelPosix(target)}, a declaration over own JavaScript (${toRelPosix(impl)}) the gates cannot read` } : null;
     }
-    const targetSf = program.getSourceFile(target);
+    const targetSf = lookup(target);
     if (!targetSf) return { problem: `loads ${toRelPosix(target)}, which is not in the Program` };
     return { sf: targetSf };
   }
@@ -204,14 +257,14 @@ export function productionScope(program) {
 
   // Tooling: its own closure must stay clear of the RLS helpers and the client.
   for (const toolRel of NON_PRODUCTION_SCRIPTS) {
-    const tool = program.getSourceFiles().find((sf) => toRelPosix(sf.getFilePath()) === toolRel);
-    if (!tool) continue;
+    if (!existsSync(toolRel)) continue;
+    const tool = parsedAt(resolve(toolRel));
     const seen = new Set([tool.getFilePath()]);
     const toolQueue = [{ sf: tool, via: null }];
     while (toolQueue.length > 0) {
       const { sf, via } = toolQueue.shift();
       for (const { node, spec } of loadsOf(sf)) {
-        const r = resolveLoad(sf, spec);
+        const r = resolveLoad(sf, spec, parsedAt, { readsJs: true });
         if (!r || r.problem) continue;
         const targetRel = toRelPosix(r.sf.getFilePath());
         const from = via ?? siteOf(node);
@@ -411,18 +464,6 @@ function directCallOf(access) {
   return call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === cur ? call : null;
 }
 
-/**
- * Violations of G1–G5 in the production files `scope` names, as
- * "file:line  description" strings.
- */
-/** Whether `expr` is the library's `globalThis`, by its declaration. */
-function isGlobalObject(expr) {
-  const e = unwrap(expr);
-  if (e?.getKind() !== SyntaxKind.Identifier) return false;
-  const decls = e.getSymbol()?.getDeclarations() ?? [];
-  return e.getText() === "globalThis" && (decls.length === 0 || decls.every((d) => isExternalFile(d.getSourceFile())));
-}
-
 /** The EXTERNAL_SHAPE_ALLOWLIST key a type is declared as, or null. */
 function externalShapeKeyOf(type) {
   const symbol = type.getAliasSymbol() ?? type.getSymbol();
@@ -433,6 +474,31 @@ function externalShapeKeyOf(type) {
     if (EXTERNAL_SHAPE_ALLOWLIST.has(key)) return key;
   }
   return null;
+}
+
+/**
+ * Violations of G1–G7 in the production files `scope` names, as
+ * "file:line  description" strings.
+ */
+/**
+ * The global-singleton idiom: `globalThis as unknown as { prisma?: PrismaClient }`
+ * — the library's `globalThis`, by its declaration, cast on to a type whose
+ * members are all named and none may hold a function. A write through it
+ * lands on one of those members and G1 judges it. Cast on to a record or any
+ * other loose type, it is a plain widening.
+ */
+function isGlobalSingletonHolder(source) {
+  const e = unwrap(source);
+  if (e?.getKind() !== SyntaxKind.Identifier || e.getText() !== "globalThis") return false;
+  const decls = e.getSymbol()?.getDeclarations() ?? [];
+  if (decls.length > 0 && !decls.every((d) => isExternalFile(d.getSourceFile()))) return false;
+  let outer = e.getParent();
+  while (outer?.getKind() === SyntaxKind.ParenthesizedExpression) outer = outer.getParent();
+  let cur = outer?.getParent();
+  while (cur?.getKind() === SyntaxKind.ParenthesizedExpression) cur = cur.getParent();
+  if (cur?.getKind() !== SyntaxKind.AsExpression) return false;
+  const props = cur.getType().getProperties();
+  return props.length > 0 && props.every((p) => !mayHoldOwnCode(p.getTypeAtLocation(cur)));
 }
 
 export function functionFlowViolations(program, scope, usedShapes = new Set()) {
@@ -513,12 +579,12 @@ export function functionFlowViolations(program, scope, usedShapes = new Set()) {
       // G6: an object holding own functions widened to a type that names
       // none of its members. Through the wider type it can be written by key
       // or by a mutator in ways G1/G2 judge by that type, and miss.
-      for (const { source, target } of flowsOf(node, checker, hasCallableOwnMembers)) {
+      // An argument is worth typing when it holds functions (G6) or nobody
+      // named it (G7: `use(built)` with `built: any` narrows as surely as a cast).
+      for (const { source, target } of flowsOf(node, checker, (t) => hasCallableOwnMembers(t) || isLooseTarget(t))) {
         const sourceType = source.getType();
         currentNode = source;
-        // The global object holds the globals own code declares; a write to one
-        // resolves to that declaration and G1 judges it, so widening it hides nothing.
-        if (isLooseTarget(target) && hasCallableOwnMembers(sourceType) && !isGlobalObject(source)) {
+        if (isLooseTarget(target) && hasCallableOwnMembers(sourceType) && !isGlobalSingletonHolder(source)) {
           out.push(`${siteOf(source)}  G6: object holding functions widened to ${typeText(target)}`);
           continue;
         }

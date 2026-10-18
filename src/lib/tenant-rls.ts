@@ -128,8 +128,8 @@ function assertOpenableTenantContext(tenantId: string): void {
  * instead, which is why a missed site is not uniformly "a denied request".
  * The error log below is what keeps a swallowed refusal visible. It names only
  * the two helpers: no tenant id, SQL or caller argument reaches it. This guard
- * is the boundary; check-rls-nesting reports the nesting at development time,
- * within the subset it can decide and the coverage its header lists.
+ * is the boundary; check-rls-nesting is a limited development aid that
+ * reports the nesting it can see, with the coverage its header lists.
  */
 function assertNoActiveRlsContext(opening: "withTenantRls" | "withBypassRls"): void {
   const ctx = getTenantRlsContext();

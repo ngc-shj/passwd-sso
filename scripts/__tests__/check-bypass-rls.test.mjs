@@ -3680,13 +3680,14 @@ export const f = () => withBypassRls(prisma, async (tx) => {
   });
 
   it("charges a delegate wrapped in another type by the interface that declares its method", () => {
-    const { code, stdout } = run(OUTBOX, `${HEAD_RLS}import type { Prisma } from "@prisma/client";
-export const f = () => withBypassRls(prisma, async (tx) => {
-  const d = tx.auditOutbox as Prisma.AuditOutboxDelegate & { tag?: 1 };
-  return d.count();
-}, BYPASS_PURPOSE.AUDIT_WRITE);`);
-    expect(code).toBe(0);
-    expect(stdout).toContain("check-bypass-rls: OK");
+    // Read outside the bypass, so the query is the only place the model is named.
+    const { code, stderr } = runMulti([["src/lib/zz/wrapped.ts", `import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+export const users = prisma.user as Prisma.UserDelegate & { tag?: 1 };`],
+      [OUTBOX, `${HEAD_RLS}import { users } from "@/lib/zz/wrapped";
+export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbox.count(); return users.count(); }, BYPASS_PURPOSE.AUDIT_WRITE);`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts:3  prisma.user");
   });
 
   it("refuses a query on a delegate-shaped value whose model nothing names", () => {
@@ -3779,6 +3780,8 @@ export const f = () => withBypassRls(prisma, async (tx) => { await tx.auditOutbo
     ["an own interface", "interface Purger { deleteMany(...a: unknown[]): Promise<unknown> }\nexport const entries: Purger = prisma.passwordEntry;", "a client or delegate erased to Purger"],
     ["an own parameter typed unknown", "export async function run(db: unknown) { return db; }\nexport const go = () => run(prisma);", "a client or delegate erased to unknown"],
     ["a cast", "export const anyTx = prisma as unknown;", "a client or delegate erased to unknown"],
+    // R6-S2: `$transaction` hands its callback a client; only the raw-query methods are raw SQL's.
+    ["an own type holding $transaction", "type Runner = { $transaction: (fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> };\nexport const runner: Runner = prisma;", "a client or delegate erased to Runner"],
   ])("refuses a client erased to %s", (_label, body, message) => {
     const { code, stderr } = run("src/lib/zz/erase.ts", `import { prisma } from "@/lib/prisma";\n${body}`);
     expect(code).toBe(1);

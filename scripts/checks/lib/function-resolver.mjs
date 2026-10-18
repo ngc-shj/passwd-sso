@@ -29,9 +29,12 @@
  * through `this` too), an interface member by every production member of that
  * name, an object-literal member by that literal only on a receiver that
  * provably holds it and otherwise by every literal that can stand in for the
- * receiver's type. A library-declared member our code implements is library
- * code only on a receiver traced to the library. That is sound only within the
- * subset lib/soundness.mjs enforces (G1-G7); the gates check it on every run.
+ * receiver's type (a registered external shape's member: the library and
+ * every own member of a comparable type). A library-declared member our code
+ * implements is library code only on a receiver traced to the library. These
+ * answers rest on the forms lib/soundness.mjs refuses (G1-G7), checked on
+ * every run; they are a development aid's, not a proof (see the gates'
+ * headers for what the runtime does and does not enforce).
  */
 import { SyntaxKind, ts } from "ts-morph";
 import { relative, sep } from "node:path";
@@ -47,12 +50,19 @@ export const FN_KINDS = new Set([
 ]);
 export const LITERAL_FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
 
-// Own files that are not production. Every other own code file the Program
-// holds is production and scanned by both gates — a new file, at the root or
-// anywhere else, is judged until someone declares otherwise here with a
-// reason. An entry that matches no file in the Program fails the run
-// (productionScope), so the list cannot outlive what it names.
+// Own files that are not production. Every other own code file on disk is
+// production: the Program must hold it, and both gates scan it — a new file,
+// at the root or anywhere else, in any code extension, is judged until someone
+// declares otherwise here with a reason. An entry that matches no file on
+// disk fails the run (productionScope), so the list cannot outlive what it names.
 export const NON_PRODUCTION = [
+  { prefix: "cli/", why: "the CLI package: its own tsconfig and build, reaches the server over HTTP" },
+  { prefix: "extension/", why: "the browser extension: its own tsconfig and build, runs in the browser" },
+  { prefix: "load-test/", why: "k6 scenarios run against a deployed server over HTTP" },
+  { prefix: "docs/", why: "probes kept with archived review records" },
+  { file: "eslint.config.mjs", why: "lint configuration" },
+  { file: "eslint.extension.config.mjs", why: "lint configuration" },
+  { file: "postcss.config.mjs", why: "CSS build configuration" },
   { prefix: "scripts/checks/", why: "the CI gates and their libraries" },
   { prefix: "scripts/__tests__/", why: "the gates' tests" },
   { prefix: "scripts/__fixtures__/", why: "fixtures for the gates' tests" },
@@ -80,9 +90,20 @@ export const NON_PRODUCTION_SCRIPTS = [
   "scripts/audit-db-grants.mjs",
   "scripts/bootstrap-rds-roles.mjs",
   "scripts/lib/denied-privileges.mjs",
+  // Repository maintenance and fixture generators, outside the Program.
+  "scripts/check-blame-ignore-revs.mjs",
+  "scripts/check-codeowners-drift.mjs",
+  "scripts/coverage-diff.mjs",
+  "scripts/generate-team-key-fixture.ts",
+  "scripts/generate-vault-unlock-fixture.mjs",
+  "scripts/lib/hex-leak-scan.mjs",
+  "scripts/move-and-rewrite-imports.mjs",
+  "scripts/refactor-phase-verify.mjs",
+  "scripts/verify-allowlist-rename-only.mjs",
+  "scripts/verify-move-only-diff.mjs",
 ];
 
-const CODE_FILE = /\.([cm]?[jt]sx?)$/;
+export const CODE_FILE = /\.([cm]?[jt]sx?)$/;
 
 export function toRelPosix(absPath) {
   return relative(process.cwd(), absPath).split(sep).join("/");
@@ -999,7 +1020,7 @@ export function createFunctionResolver({ program, scope = null }) {
       }
       // A class is a type too: an object literal of its shape stands in for an
       // instance (`const l: Loader = { load: … }`).
-      if (!member.isStatic?.()) results.push(...literalMembersStandingIn(name, cls.getType()).map(candidateValue));
+      if (!member.isStatic?.()) results.push(...literalMembersStandingIn(name, cls.getType()).map(standingInValue));
     }
     return merge(results);
   }
@@ -1094,15 +1115,43 @@ export function createFunctionResolver({ program, scope = null }) {
 
   /**
    * Object-literal members named `name` that can stand in for a value of
-   * `target`: their literal's type is assignable to it. (Only a cast through
-   * `unknown`/`any` puts a literal of another shape there, and G7 refuses that.)
+   * `target`: every literal whose type is comparable to the target's in either
+   * direction. `as` and a type guard need only that, so a literal of a smaller
+   * shape can be cast down to a larger type, and a narrowing (`in`, a type
+   * guard, a declared subtype) leaves a literal under a type it is no longer
+   * assignable to.
    */
   function literalMembersStandingIn(name, target) {
-    const assignable = program.getTypeChecker().compilerObject.isTypeAssignableTo;
     return membersNamed(name).filter((m) => {
       if (m.getParent()?.getKind() !== SyntaxKind.ObjectLiteralExpression || isNonProduction(m)) return false;
-      return assignable(m.getParent().getType().compilerType, target.compilerType);
+      return comparable(m.getParent().getType(), target);
     });
+  }
+
+  // A stand-in's value can read a member that stands in for it in turn (a
+  // shorthand of a const whose initializer reads the same name). The outer
+  // resolution already unions every stand-in, so a re-entry adds nothing.
+  const standingIn = new Set();
+  function standingInValue(member) {
+    if (standingIn.has(member)) return EMPTY;
+    standingIn.add(member);
+    try {
+      return candidateValue(member);
+    } finally {
+      standingIn.delete(member);
+    }
+  }
+
+  /**
+   * Whether either type is assignable to the other — what `as` and a type
+   * guard require. An object literal's own type is compared widened: its
+   * fresh form is related to nothing larger.
+   */
+  function comparable(a, b) {
+    const checker = program.getTypeChecker().compilerObject;
+    const x = checker.getWidenedType(a.compilerType);
+    const y = checker.getWidenedType(b.compilerType);
+    return checker.isTypeAssignableTo(x, y) || checker.isTypeAssignableTo(y, x);
   }
 
   function resolveDeclaration(decl, site, viaType = null) {
@@ -1121,7 +1170,7 @@ export function createFunctionResolver({ program, scope = null }) {
         if (!name) return unresolvedResult("member with no name");
         // The type the member is read off: given when known (a nested member
         // of a library argument), else the receiver's.
-        return merge(literalMembersStandingIn(name, viaType ?? receiver.getType()).map(candidateValue));
+        return merge(literalMembersStandingIn(name, viaType ?? receiver.getType()).map(standingInValue));
       }
     }
     const fn = functionOfDeclaration(decl);
@@ -1286,12 +1335,22 @@ export function createFunctionResolver({ program, scope = null }) {
     const nameNode =
       e.getKind() === SyntaxKind.PropertyAccessExpression ? e.getNameNode() : e.getKind() === SyntaxKind.Identifier ? e : null;
     const shape = nameNode ? externalShapeOf(nameNode) : null;
-    if (shape) {
-      // Declared by us to type a library value; nothing of ours implements it.
-      usedExternalShapes.add(shape);
-      return { ...EMPTY, external: true };
-    }
     const name = decl.getSymbol()?.getName();
+    if (shape) {
+      // Declared by us to type a library value. G7 refuses an own value
+      // flowing to it directly, but one can reach it held in another type
+      // (`{ client: S3SendClient }`, a callback's parameter, a Promise), so
+      // every own member of that name on an object or class of a comparable
+      // type runs too.
+      usedExternalShapes.add(shape);
+      if (!name) return unresolvedResult("member with no name to search");
+      const shapeType = decl.getParent()?.getType();
+      const own = membersNamed(name).filter((m) => {
+        const holder = m.getParent()?.getType();
+        return !isNonProduction(m) && Boolean(shapeType && holder) && comparable(holder, shapeType);
+      });
+      return merge([{ ...EMPTY, external: true }, ...own.map(candidateValue)]);
+    }
     if (!name) return unresolvedResult("member with no name to search");
     const all = membersNamed(name);
     const candidates = all.filter((m) => !isNonProduction(m));

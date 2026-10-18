@@ -1,0 +1,250 @@
+{
+ "round": 6,
+ "base": "the commit that adds this file",
+ "how": "apply one entry to a scratch copy; the `npx vitest run <test> -t <filter>` run must pass before the change (else the entry is void) and fail after it: red",
+ "mutations": [
+  {
+   "id": "F2a",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "return checker.isTypeAssignableTo(x, y) || checker.isTypeAssignableTo(y, x);",
+   "new": "return checker.isTypeAssignableTo(x, y);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "smaller literal cast down",
+   "result": "red"
+  },
+  {
+   "id": "F2b",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "const x = checker.getWidenedType(a.compilerType);",
+   "new": "const x = a.compilerType;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "smaller literal cast down",
+   "result": "red"
+  },
+  {
+   "id": "S1a",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "return merge([{ ...EMPTY, external: true }, ...own.map(candidateValue)]);",
+   "new": "return { ...EMPTY, external: true };",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "own member held in another type",
+   "result": "red"
+  },
+  {
+   "id": "S1b",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "return !isNonProduction(m) && Boolean(shapeType && holder) && comparable(holder, shapeType);",
+   "new": "return !isNonProduction(m);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "no own member of a comparable type",
+   "result": "red"
+  },
+  {
+   "id": "T1",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "(t) => hasCallableOwnMembers(t) || isLooseTarget(t)",
+   "new": "hasCallableOwnMembers",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "narrowed by an argument to an own function",
+   "result": "red"
+  },
+  {
+   "id": "S3a",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  return props.length > 0 && props.every((p) => !mayHoldOwnCode(p.getTypeAtLocation(cur)));",
+   "new": "  return props.every((p) => !mayHoldOwnCode(p.getTypeAtLocation(cur)));",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "global object widened to a record",
+   "result": "red"
+  },
+  {
+   "id": "S3b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  return props.length > 0 && props.every((p) => !mayHoldOwnCode(p.getTypeAtLocation(cur)));",
+   "new": "  return true;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "global object widened to a record",
+   "result": "red"
+  },
+  {
+   "id": "S3c",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  return props.length > 0 && props.every((p) => !mayHoldOwnCode(p.getTypeAtLocation(cur)));",
+   "new": "  return false;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "global object widened for a singleton",
+   "result": "red"
+  },
+  {
+   "id": "F9a",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (isProductionPath(rel) && !ownRels.has(rel)) {",
+   "new": "    if (false) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "R6-F9",
+   "result": "red"
+  },
+  {
+   "id": "S2",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "return RAW_QUERY_METHODS.has(name) && isPrismaClientMember",
+   "new": "return name.startsWith(\"$\") && isPrismaClientMember",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "own type holding",
+   "result": "red"
+  },
+  {
+   "id": "S2allow",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "return RAW_QUERY_METHODS.has(name) && isPrismaClientMember",
+   "new": "return false && isPrismaClientMember",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "raw-query API",
+   "result": "red"
+  },
+  {
+   "id": "F1",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "return checker.isTypeAssignableTo(x, y) || checker.isTypeAssignableTo(y, x);",
+   "new": "return checker.isTypeAssignableTo(x, y);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "narrowed below the literal",
+   "result": "red"
+  },
+  {
+   "id": "T2",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "if (decls.length > 0 && decls.every(isExternal)) return externalMemberAt(decls, e);",
+   "new": "if (decls.length > 0 && decls.every(isExternal)) return libraryMemberValue(decls);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "read by a string key",
+   "result": "red"
+  },
+  {
+   "id": "F9b",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "        const r = resolveLoad(sf, spec, parsedAt, { readsJs: true });",
+   "new": "        const r = resolveLoad(sf, spec, parsedAt, { readsJs: false });",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "closure through modules the Program does not hold",
+   "result": "red"
+  },
+  {
+   "id": "B-M1",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "  if (t.isUnion()) return t.getUnionTypes().some((u) => !u.isNull() && !u.isUndefined() && isLooseTarget(u, depth + 1));",
+   "new": "  if (t.isUnion()) return false;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "union with a loose member",
+   "result": "red"
+  },
+  {
+   "id": "B-M11",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "const target = p.getDotDotDotToken() ? (declared.getArrayElementType?.() ?? declared) : declared;",
+   "new": "const target = declared;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "through a rest parameter",
+   "result": "red"
+  },
+  {
+   "id": "B-M14",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    if (fn.isAsync?.() && target.getTypeArguments?.().length === 1) target = target.getTypeArguments()[0];\n",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "by an async return",
+   "result": "red"
+  },
+  {
+   "id": "B-M4",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "    return c ? isLooseTarget(c, depth + 1) : true;",
+   "new": "    return true;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "constrained to its members",
+   "result": "red"
+  },
+  {
+   "id": "B-M28",
+   "file": "scripts/checks/lib/soundness.mjs",
+   "old": "          if (!origin || ![...origin].every((m) => m === pkg)) {",
+   "new": "          if (pkg && (!origin || ![...origin].every((m) => m === pkg))) {",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "has no supplier",
+   "result": "red"
+  },
+  {
+   "id": "B-R26",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "    if (u.isAny() || u.isUnknown() || u.isTypeParameter()) return true;",
+   "new": "    if (u.isAny() || u.isUnknown()) return true;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "typed by a type parameter",
+   "result": "red"
+  },
+  {
+   "id": "B-R27",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "const LOOSE_FUNCTION_TYPES = new Set([\"Function\", \"CallableFunction\", \"NewableFunction\", \"Object\"]);",
+   "new": "const LOOSE_FUNCTION_TYPES = new Set([\"Function\", \"CallableFunction\", \"NewableFunction\"]);",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "typed Object",
+   "result": "red"
+  },
+  {
+   "id": "B-R28",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": " && !u.getStringIndexType() && !u.getNumberIndexType();",
+   "new": ";",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "record of strings",
+   "result": "red"
+  },
+  {
+   "id": "B-R16",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      (d) => d.getKind() === SyntaxKind.NamespaceImport && NODE_MODULE_SPECIFIERS.has(",
+   "new": "      (d) => false && NODE_MODULE_SPECIFIERS.has(",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "namespace import",
+   "result": "red"
+  },
+  {
+   "id": "B-R22",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "      return method?.getParent() === literal;",
+   "new": "      return false;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "this in a literal's method",
+   "result": "red"
+  },
+  {
+   "id": "B-B9",
+   "file": "scripts/checks/check-bypass-rls.mjs",
+   "old": "  if (byDecl) return { models: byDecl };",
+   "new": "  if (byDecl) return null;",
+   "test": "scripts/__tests__/check-bypass-rls.test.mjs",
+   "filter": "wrapped in another type",
+   "result": "red"
+  },
+  {
+   "id": "B-N5",
+   "file": "scripts/checks/check-rls-nesting.mjs",
+   "old": "const member = pk === SyntaxKind.PropertyAccessExpression ? parent.getName() : literalKey(parent.getArgumentExpression());",
+   "new": "const member = pk === SyntaxKind.PropertyAccessExpression ? parent.getName() : null;",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "reads, copies and destructures",
+   "result": "red"
+  },
+  {
+   "id": "C1",
+   "file": "scripts/checks/lib/function-resolver.mjs",
+   "old": "    if (standingIn.has(member)) return EMPTY;\n",
+   "new": "",
+   "test": "scripts/__tests__/check-rls-nesting.test.mjs",
+   "filter": "through another stand-in",
+   "result": "red"
+  }
+ ]
+}

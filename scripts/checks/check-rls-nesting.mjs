@@ -8,8 +8,9 @@
  * fail-closed only for a caller that propagates the error: one that swallows it
  * — `invalidateUserSessions(...).catch(() => null)`, the best-effort
  * notification and lockout-audit paths — skips a security side effect, and no
- * test notices unless it drives that exact nesting. This gate is the
- * development-time check for that class, with the coverage stated below.
+ * test notices unless it drives that exact nesting. This gate is a limited
+ * development aid that reports the nesting it can see before it ships; it is
+ * not a proof that none exists. What it misses is the runtime guard's.
  *
  * Mechanism: REACHABILITY, answered by the type-checked Program through
  * lib/function-resolver.mjs (shared with check-bypass-rls), not by spelling.
@@ -29,9 +30,10 @@
  *
  * The resolver names a function by its DECLARATION: a member holds its
  * initializer, a class member is that member in the class and every subclass,
- * an interface member is every production member of that name. That is sound
- * only while nothing puts a function anywhere by other means, so the decidable
- * subset is enforced rather than assumed (lib/soundness.mjs, G1-G7): no write
+ * an interface member is every production member of that name. That answer
+ * holds only while nothing puts a function anywhere by other means, so the
+ * common ways of doing so are refused (lib/soundness.mjs, G1-G7). The rules
+ * keep the analysis tractable; they do not make it complete: no write
  * of a function to a member after its declaration, no object mutator used but
  * by a direct call on what cannot hold functions, no computed-key or
  * parameter-property function member, no class derivation the language
@@ -42,10 +44,10 @@
  * otherwise every literal that can stand in for the receiver's type may be
  * there. A library-declared member our code implements (an Adapter, a
  * `Pick<Console, "log">`) is library code only on a receiver traced to the
- * library. The scan set is
- * every own file not declared non-production and what it loads, and a module in it the gates cannot read
- * (own JavaScript, a declaration over it, a non-literal specifier outside
- * NON_LITERAL_LOAD_ALLOWLIST) is refused.
+ * library. The scan set is every own code file on disk not declared
+ * non-production and what it loads; one the Program does not hold, or a module
+ * the gates cannot read (own JavaScript, a declaration over it, a non-literal
+ * specifier outside NON_LITERAL_LOAD_ALLOWLIST), is refused.
  *
  * Fail-closed: anything reached that the resolver cannot name — an
  * invocation, a function value, a parameter whose supplier is unknown, a value
@@ -61,7 +63,9 @@
  * (an event listener or timer registered at module level, a library object
  * built around our code there — `const repo = makeRepo(prisma)`) and invoked
  * by that library from a library call inside it (#909, pinned as a known-limit
- * fixture). Inside the reached code, what is handed to a library is reached.
+ * fixture), and own code that reaches a library-typed slot or a typed flow in
+ * a form G1-G7 do not name (#910). Inside
+ * the reached code, what is handed to a library is reached.
  * For what is not covered, the runtime guard still refuses the nested context
  * and logs rls.nesting_refused; a caller that swallows the error silently
  * skips the work it guarded (a notification, a session invalidation, an audit
@@ -546,7 +550,7 @@ if (flowViolations.length > 0) {
   failed = true;
   console.error("");
   console.error("A function is put somewhere its declaration does not say, so neither RLS gate can");
-  console.error("tell what runs there (lib/soundness.mjs G1-G5). Give the member its value where it");
+  console.error("tell what runs there (lib/soundness.mjs G1-G7). Give the member its value where it");
   console.error("is declared, or make it a method:");
   for (const v of flowViolations) console.error(`  ${v}`);
 }
