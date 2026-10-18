@@ -18,34 +18,43 @@
  *     declared callback position, or at a wrapper's derived one.
  *   - From a root, everything that can run is reached: invocations (calls,
  *     `new` — its field initializers, constructor and base classes — tagged
- *     templates, own getter/setter accesses, `await` of an own `then`) and every
- *     function handed on as a value, wherever it is written. A root that
- *     reaches a base helper nests.
+ *     templates, own getter/setter accesses, `await` of an own `then`), every
+ *     function handed on as a value, wherever it is written (a name, a call's
+ *     result, a conditional), and the own functions an argument to library code
+ *     carries as members. A root that reaches a base helper nests.
  *   - A WRAPPER is a function whose own parameter is reached from a context
  *     callback inside it, by whatever spelling (`fn()`, `const g = fn`,
  *     `fn.call`, `{ run: fn }`). Its argument at that position is a root at
  *     each call site. Derived to a fixpoint.
  *
+ * The resolver names a function by its DECLARATION: a member holds its
+ * initializer, a class member is that member in the class and every subclass,
+ * an interface member is every production member of that name. That is sound
+ * only while nothing puts a function anywhere by other means, so the decidable
+ * subset is enforced rather than assumed (lib/soundness.mjs, G1-G5): no write
+ * of a function to a member after its declaration, no object mutator on what
+ * may hold functions, no computed-key or parameter-property function member,
+ * no class derivation the language service cannot enumerate. The scan set is
+ * the production import closure, and a module in it the gates cannot read
+ * (own JavaScript, a declaration over it, a non-literal specifier outside
+ * NON_LITERAL_LOAD_ALLOWLIST) is refused.
+ *
  * Fail-closed: anything reached that the resolver cannot name — an
- * invocation, a function value, a parameter whose supplier is unknown — is
+ * invocation, a function value, a parameter whose supplier is unknown, a value
+ * a library holds or returns that may be ours, a callee typed `any` — is
  * reported. So is a context function used as a value rather than called
  * directly (`withTenantRls.apply(…)`, passed to a library), and a context call
  * whose callback position follows a spread argument.
  *
- * Production code only — src/ and scripts/ minus tests, the CI tooling and
- * scripts/manual-tests (see isProductionPath).
- *
  * NOT covered, named so the next editor does not assume otherwise: the
  * iterator protocol (`for…of`/spread over an own iterable), implicit
  * conversions (toString/valueOf/Symbol.toPrimitive/toJSON), Proxy traps,
- * decorators, a getter reached through destructuring or a computed key, an
- * own function registered with a library earlier (an event listener, a timer)
- * and invoked by that library later — the library call that triggers it is
- * library code to this gate — a library object holding our code built OUTSIDE
- * the reached code (`const repo = makeRepo(prisma)` at module level), an object
- * literal's member written through an alias of an object that is returned
- * rather than held in a variable, and a module loaded through a non-literal
- * specifier (the production-boundary check reads literal ones only).
+ * decorators, a getter reached through destructuring or a computed key, and an
+ * own function a library was given OUTSIDE the reached code (an event listener
+ * or timer registered at module level, a library object built around our code
+ * there — `const repo = makeRepo(prisma)`) and invoked by that library from a
+ * library call inside it. Inside the reached code, what is handed to a library
+ * is reached.
  */
 import { SyntaxKind } from "ts-morph";
 import { createProgramProject, ProgramBuildError } from "./lib/ast-project.mjs";
@@ -54,29 +63,33 @@ import {
   LITERAL_FN_KINDS,
   createFunctionResolver,
   createReachability,
-  NON_PRODUCTION_SCRIPTS,
-  isDeclaredNonProduction,
-  isProductionPath,
+  isBindingWrite,
+  mayBeCallable,
   toRelPosix,
   unwrap,
 } from "./lib/function-resolver.mjs";
+import { functionFlowViolations, productionScope } from "./lib/soundness.mjs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const HELPER_FILE = "src/lib/tenant-rls.ts";
 const BASE_HELPERS = ["withTenantRls", "withBypassRls"];
 
-// Callees that open a context only on a branch a call can opt out of. A call is
-// exempt only when it is in the listed file, sits directly in a context
-// callback, and passes that callback's own client as the `tx` property
-// of its first argument — `derivePasskeyState({ …, tx })` inside
-// `withBypassRls(prisma, async (tx) => …)`. Anything else (`tx` omitted,
-// `tx: undefined`, an outer or optional parameter, a different file) is judged
-// as the opener it is. An entry no call satisfies fails the run.
+// Callees that open a context only on a branch a call can opt out of. What is
+// exempt is ONE edge inside the callee — the opener that is the false branch of
+// `<first parameter>.<guard> ? … : opener(…)` — and only while every way the
+// callee is entered in that context is an exempt call: in the listed file,
+// directly in a context callback, passing that callback's own client (never
+// reassigned) as the `<guard>` member of a plain object literal. The rest of
+// the callee is checked as usual. An entry whose guarded opener is gone, or
+// that no call uses, fails the run.
 const CONDITIONAL_OPENER_ALLOWLIST = [
-  // derivePasskeyState opens withBypassRls only when `params.tx` is absent
-  // (src/lib/auth/policy/passkey-enforcement.ts).
-  { file: "src/lib/mcp/oauth-server.ts", callee: "derivePasskeyState" },
+  {
+    file: "src/lib/mcp/oauth-server.ts",
+    callee: "derivePasskeyState",
+    calleeFile: "src/lib/auth/policy/passkey-enforcement.ts",
+    guard: "tx",
+  },
 ];
 
 function fail(message) {
@@ -94,7 +107,8 @@ try {
   throw error;
 }
 
-const scanFiles = program.getSourceFiles().filter((sf) => isProductionPath(toRelPosix(sf.getFilePath())));
+const scope = productionScope(program);
+const scanFiles = program.getSourceFiles().filter((sf) => scope.files.has(sf.getFilePath()));
 if (scanFiles.length === 0) {
   fail("no production source files under src/ or scripts/. Nothing was examined, so this is not a pass.");
 }
@@ -102,7 +116,7 @@ if (scanFiles.length === 0) {
 const helperSf = program.getSourceFile(join(process.cwd(), HELPER_FILE));
 if (!helperSf) fail(`${HELPER_FILE} is not in the Program; the base helpers cannot be resolved.`);
 
-const resolver = createFunctionResolver({ program });
+const resolver = createFunctionResolver({ program, scope });
 const { resolveValue, resolveCall } = resolver;
 const { reach, chainTo } = createReachability(resolver);
 
@@ -223,25 +237,54 @@ while (grew) {
 // ─── Conditional openers ────────────────────────────────────────────────────
 
 const usedConditional = new Set();
+const isWritten = (decl) =>
+  decl.getNameNode().findReferences().some((g) => g.getReferences().some((r) => isBindingWrite(r) && r.getNode() !== decl.getNameNode()));
 
-/**
- * The fns an edge must not count: a listed conditional opener called directly
- * in the context callback `root`, passing root's own first parameter as `tx`.
- */
-function conditionallyExempt(edge, unit, root) {
-  if (unit !== root || edge.kind !== "call" || edge.node.getKind() !== SyntaxKind.CallExpression) return [];
-  const file = toRelPosix(edge.node.getSourceFile().getFilePath());
+/** The callee and its guarded inner opener call for each entry, or a failure. */
+const conditionalEntries = CONDITIONAL_OPENER_ALLOWLIST.filter((entry) => existsSync(entry.calleeFile)).map((entry) => {
+  // (An entry whose callee's file is absent from the tree scanned — a fixture — is not judged.)
+  const key = `${entry.file}::${entry.callee}`;
+  const calleeFn = program.getSourceFile(join(process.cwd(), entry.calleeFile))?.getFunction(entry.callee);
+  if (!calleeFn) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: ${entry.calleeFile} declares no function ${entry.callee}.`);
+  const params = calleeFn.getParameters()[0];
+  if (!params || isWritten(params)) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: the guard's parameter is missing or reassigned.`);
+  const guarded = calleeFn.getDescendantsOfKind(SyntaxKind.CallExpression).filter((call) => {
+    if (!resolveCall(call).fns.some((f) => baseHelpers.has(f))) return false;
+    let cur = call;
+    while ([SyntaxKind.AwaitExpression, SyntaxKind.ParenthesizedExpression].includes(cur.getParent()?.getKind())) cur = cur.getParent();
+    const cond = cur.getParent();
+    if (cond?.getKind() !== SyntaxKind.ConditionalExpression || cond.getWhenFalse() !== cur) return false;
+    const test = unwrap(cond.getCondition());
+    return (
+      test?.getKind() === SyntaxKind.PropertyAccessExpression &&
+      test.getName() === entry.guard &&
+      unwrap(test.getExpression())?.getSymbol()?.getDeclarations()[0] === params
+    );
+  });
+  if (guarded.length !== 1) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: expected one opener guarded by ${params.getName()}.${entry.guard}, found ${guarded.length}.`);
+  // A write to the guard member inside the callee would undo the guard.
+  const guardWritten = calleeFn.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).some(
+    (pa) => pa.getName() === entry.guard && unwrap(pa.getExpression())?.getSymbol()?.getDeclarations()[0] === params &&
+      pa.getParent()?.getKind() === SyntaxKind.BinaryExpression && pa.getParent().getLeft() === pa,
+  );
+  if (guardWritten) fail(`CONDITIONAL_OPENER_ALLOWLIST ${key}: ${params.getName()}.${entry.guard} is written inside ${entry.callee}.`);
+  return { ...entry, key, calleeFn, guardedCall: guarded[0] };
+});
+
+/** Whether `edge`, from the context callback `root`, is an exempt call to `entry`'s callee. */
+function isExemptCall(entry, edge, unit, root) {
+  if (unit !== root || edge.kind !== "call" || edge.node.getKind() !== SyntaxKind.CallExpression) return false;
+  if (toRelPosix(edge.node.getSourceFile().getFilePath()) !== entry.file) return false;
   const client = root.getParameters?.()[0];
-  // The helper always passes its client to the callback, so the callback's
-  // first parameter is defined at run time however it is declared.
-  if (!client) return [];
+  // The helper always passes its client, so the first parameter is defined;
+  // reassigning it could replace it with anything.
+  if (!client || isWritten(client)) return false;
   const arg = unwrap(edge.node.getArguments()[0]);
-  if (arg?.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
-  // A spread can override `tx` (`...(c ? { tx: undefined } : {})`), and a
-  // second `tx` replaces the first: only one plain member decides.
-  if (arg.getProperties().some((p) => p.getKind() === SyntaxKind.SpreadAssignment)) return [];
-  if (arg.getProperties().filter((p) => p.getName?.() === "tx").length !== 1) return [];
-  const prop = arg.getProperty("tx");
+  if (arg?.getKind() !== SyntaxKind.ObjectLiteralExpression) return false;
+  // A spread can override the member, and a second one replaces the first.
+  if (arg.getProperties().some((p) => p.getKind() === SyntaxKind.SpreadAssignment)) return false;
+  if (arg.getProperties().filter((p) => p.getName?.() === entry.guard).length !== 1) return false;
+  const prop = arg.getProperty(entry.guard);
   let valueDecl = null;
   if (prop?.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
     valueDecl = prop.getValueSymbol?.()?.getDeclarations()[0] ?? null;
@@ -249,27 +292,42 @@ function conditionallyExempt(edge, unit, root) {
     const init = unwrap(prop.getInitializer());
     if (init?.getKind() === SyntaxKind.Identifier) valueDecl = init.getSymbol()?.getDeclarations()[0] ?? null;
   }
-  if (valueDecl !== client) return [];
-  const exempt = [];
-  for (const fn of edge.r.fns) {
-    const name = fn.getName?.() ?? fn.getParent()?.getName?.();
-    const entry = CONDITIONAL_OPENER_ALLOWLIST.find((e) => e.file === file && e.callee === name);
-    if (!entry) continue;
-    usedConditional.add(`${entry.file}::${entry.callee}`);
-    exempt.push(fn);
-  }
-  return exempt;
+  return valueDecl === client;
 }
 
-const reachHooks = {
-  stop: (unit) => baseHelpers.has(unit),
-  onParam: (param, _edge, _unit, root) => {
-    if (param.getParent() === root) return "skip"; // the callback's own client
-    if (enclosingParamHit(param, root)) return "skip"; // a wrapper; its callers' arguments are roots
-    return undefined;
-  },
-  skipEdge: conditionallyExempt,
-};
+/** Reach hooks for one root; `state` records how each listed callee was entered. */
+function hooksFor(state) {
+  return {
+    stop: (unit) => baseHelpers.has(unit),
+    onParam: (param, _edge, _unit, root) => {
+      if (param.getParent() === root) return "skip"; // the callback's own client
+      if (enclosingParamHit(param, root)) return "skip"; // a wrapper; its callers' arguments are roots
+      return undefined;
+    },
+    skipEdge: (edge, unit, root) => {
+      for (const entry of conditionalEntries) {
+        if (!edge.r.fns.includes(entry.calleeFn)) continue;
+        if (!state.disabled && isExemptCall(entry, edge, unit, root)) {
+          state.exempt.add(entry.calleeFn);
+          usedConditional.add(entry.key);
+        } else {
+          state.plain.add(entry.calleeFn);
+        }
+      }
+      if (state.disabled) return [];
+      const entry = conditionalEntries.find((e) => e.calleeFn === unit && e.guardedCall === edge.node);
+      return entry && state.exempt.has(unit) ? edge.r.fns.filter((f) => baseHelpers.has(f)) : [];
+    },
+  };
+}
+
+/** Reach from `root`; once more without exemptions if a listed callee was also entered plainly. */
+function reachRoot(root) {
+  const state = { exempt: new Set(), plain: new Set(), disabled: false };
+  const result = reach(root, hooksFor(state));
+  if (![...state.exempt].some((fn) => state.plain.has(fn))) return result;
+  return reach(root, hooksFor({ exempt: new Set(), plain: new Set(), disabled: true }));
+}
 
 // ─── Check every root ───────────────────────────────────────────────────────
 
@@ -294,7 +352,7 @@ for (const call of calls) {
   if (located.problem) unfollowed.push({ site: siteOf(call), outer: siteOf(call), reason: located.problem });
   for (const root of located.roots) {
     callbackCount += 1;
-    const { info, unresolved } = reach(root, reachHooks);
+    const { info, unresolved } = reachRoot(root);
     for (const unit of info.keys()) {
       if (!baseHelpers.has(unit) || unit === root) continue;
       const { site, text } = describeChain(info, unit);
@@ -336,7 +394,7 @@ for (const sf of scanFiles) {
       else if (!["bind", "call", "apply"].includes(parent.getName())) continue;
     }
     if (calleeNodes.has(value)) continue;
-    if (value.getType().getCallSignatures().length === 0) continue;
+    if (!mayBeCallable(value.getType())) continue;
     const fns = resolveValue(value).fns.filter((f) => contextFns.has(f));
     if (fns.length === 0) continue;
     unfollowed.push({
@@ -347,50 +405,14 @@ for (const sf of scanFiles) {
   }
 }
 
-// The production boundary both gates rely on: production code must not import
-// a module outside it (a listed tooling script would then run in production
-// unexamined), and listed tooling must not open RLS contexts or reach the
-// database client (it is excluded on the premise that it does not).
-const boundaryViolations = [];
-for (const sf of program.getSourceFiles()) {
-  const rel = toRelPosix(sf.getFilePath());
-  const production = isProductionPath(rel);
-  const tooling = NON_PRODUCTION_SCRIPTS.includes(rel);
-  if (!production && !tooling) continue;
-  const loads = sf
-    .getDescendantsOfKind(SyntaxKind.CallExpression)
-    .filter((c) => {
-      const callee = c.getExpression();
-      return callee.getKind() === SyntaxKind.ImportKeyword || (callee.getKind() === SyntaxKind.Identifier && callee.getText() === "require");
-    });
-  const targets = [
-    ...[...sf.getImportDeclarations(), ...sf.getExportDeclarations()].map((decl) => ({ decl, target: decl.getModuleSpecifierSourceFile?.() })),
-    // `await import("…")` / `require("…")`: the module a literal specifier loads.
-    ...loads.map((decl) => {
-      const spec = decl.getArguments()[0];
-      if (spec?.getKind() !== SyntaxKind.StringLiteral && spec?.getKind() !== SyntaxKind.NoSubstitutionTemplateLiteral) {
-        return { decl, unresolvable: true };
-      }
-      const resolved = spec.getSymbol?.()?.getDeclarations()[0]?.getSourceFile?.() ?? null;
-      return { decl, target: resolved };
-    }),
-  ];
-  for (const { decl, target, unresolvable } of targets) {
-    // A non-literal load is not followed (named in the header).
-    if (unresolvable || !target) continue;
-    const targetRel = toRelPosix(target.getFilePath());
-    if (target.isDeclarationFile() || targetRel.includes("node_modules/")) continue;
-    if (production && isDeclaredNonProduction(targetRel)) {
-      boundaryViolations.push(`${siteOf(decl)}  production code imports ${targetRel}, which is declared non-production`);
-    }
-    if (tooling && (targetRel === HELPER_FILE || targetRel === "src/lib/tenant-context.ts" || targetRel === "src/lib/prisma.ts")) {
-      boundaryViolations.push(`${siteOf(decl)}  ${rel} is listed as non-production tooling but imports ${targetRel}`);
-    }
-  }
-}
+// What the resolver's answers rest on: the production boundary, and the rules
+// that make a member hold only what its declaration says (lib/soundness.mjs).
+// Checked here once for both gates.
+const boundaryViolations = scope.violations;
+const flowViolations = functionFlowViolations(program, scope);
 
 const staleAllowlist = [
-  ...CONDITIONAL_OPENER_ALLOWLIST.map((e) => `${e.file}::${e.callee}`).filter((k) => !usedConditional.has(k)),
+  ...conditionalEntries.map((e) => e.key).filter((k) => !usedConditional.has(k)),
   ...[...EXTERNAL_SHAPE_ALLOWLIST.keys()].filter((k) => !resolver.usedExternalShapes.has(k)),
 ].filter((k) => existsSync(k.split("::")[0]));
 
@@ -426,8 +448,19 @@ if (unfollowed.length > 0) {
 if (boundaryViolations.length > 0) {
   failed = true;
   console.error("");
-  console.error("The production boundary (isProductionPath / NON_PRODUCTION_SCRIPTS) does not hold:");
+  console.error("The production boundary does not hold. Production is the import closure of src/ and");
+  console.error("scripts/ minus declared tooling (lib/soundness.mjs); every module in it must be");
+  console.error("TypeScript the gates can read:");
   for (const v of boundaryViolations) console.error(`  ${v}`);
+}
+
+if (flowViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("A function is put somewhere its declaration does not say, so neither RLS gate can");
+  console.error("tell what runs there (lib/soundness.mjs G1-G5). Give the member its value where it");
+  console.error("is declared, or make it a method:");
+  for (const v of flowViolations) console.error(`  ${v}`);
 }
 
 if (staleAllowlist.length > 0) {

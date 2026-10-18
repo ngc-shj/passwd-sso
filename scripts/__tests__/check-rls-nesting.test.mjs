@@ -13,6 +13,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Project, SyntaxKind } from "ts-morph";
 
 const CHECKER = fileURLToPath(new URL("../checks/check-rls-nesting.mjs", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -40,17 +41,15 @@ const STUBS = {
     findFirst(...args: unknown[]): Promise<Row | null>;
     count(...args: unknown[]): Promise<number>;
   }
-  export interface TransactionClientLike {
-    [model: string]: Delegate;
-  }
+  // As generated: one getter per model, no string index signature, and a
+  // transaction client that is the client minus its runtime methods.
   export class PrismaClient {
 ${MODEL_GETTERS}
-    [model: string]: Delegate;
-    $transaction<T>(fn: (tx: TransactionClientLike) => Promise<T>, options?: unknown): Promise<T>;
+    $transaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>, options?: unknown): Promise<T>;
     $executeRaw(...args: unknown[]): Promise<number>;
   }
   export namespace Prisma {
-    type TransactionClient = TransactionClientLike;
+    type TransactionClient = Omit<PrismaClient, "$transaction">;
   }
 }
 declare module "node:async_hooks" {
@@ -89,6 +88,7 @@ const FIXTURE_TSCONFIG = JSON.stringify({
     moduleResolution: "bundler",
     strict: true,
     noImplicitAny: false,
+    allowJs: true, // as the real tsconfig: own JavaScript resolves, and must be refused as such
     skipLibCheck: true,
     paths: {
       "@/*": ["./src/*"],
@@ -403,7 +403,7 @@ const TABLE: Record<string, () => Promise<unknown>> = { a: async () => null };
 TABLE.b = opener;
 export const f = (k: string) => withTenantRls(prisma, T, async () => TABLE[k]());`]]);
     expect(code).toBe(1);
-    expect(stderr).toContain("table TABLE is mutated or escapes");
+    expect(stderr).toContain("src/app/tbl.ts:8  G1: write of a function through a key no declaration names");
   });
 
   it("passes a const table that is only read", () => {
@@ -526,13 +526,15 @@ export const f = () => withBypassRls(prisma, async (tx) => tx.user.count(), BYPA
 interface Resolver { resolve(id: string): Promise<unknown> }
 export const f = (r: Resolver) => withTenantRls(prisma, T, async () => r.resolve("t"));`]]);
     expect(code).toBe(1);
-    expect(stderr).toContain("member with no body and no implementation");
+    expect(stderr).toContain("member resolve with no body and no member of that name");
   });
 
   it("passes a call through a listed SDK-shaped interface", () => {
+    // Both shapes the real file lists, each called through, so neither entry is stale.
     const { code, stdout } = run([["src/lib/key-provider/aws-sm-provider.ts", `${HEAD}
 interface SmClient { send(command: unknown): Promise<unknown> }
-export const f = (c: SmClient) => withTenantRls(prisma, T, async () => c.send({}));`]]);
+interface AwsSmModule { SecretsManagerClient: new (config: { region: string }) => SmClient }
+export const f = (c: SmClient, m: AwsSmModule) => withTenantRls(prisma, T, async () => { new m.SecretsManagerClient({ region: "r" }); return c.send({}); });`]]);
     expect(code).toBe(0);
     expect(stdout).toContain("check-rls-nesting: OK");
   });
@@ -621,7 +623,7 @@ export const f = () => withTenantRls(prisma, T, async () => { list.forEach((cb) 
 
 describe("check-rls-nesting: round 2 — writes the resolver must see, however spelled", () => {
   it.each([
-    ["a member assigned after the initializer", "const ops = { run: async () => 0 };\nexport function arm() { ops.run = opener; }", "await ops.run();", /src\/app\/wt\.ts:\d+ .* calls opener/],
+    ["a member assigned after the initializer", "const ops = { run: async () => 0 };\nexport function arm() { ops.run = opener; }", "await ops.run();", /src\/app\/wt\.ts:\d+  G1: write to member run, which may hold a function/],
     ["a destructuring write", "let fn: () => Promise<number> = async () => 0;\nexport function arm() { [fn] = [opener]; }", "await fn();", /write other than a plain assignment/],
     ["a compound assignment", "let fn: (() => Promise<number>) | null = null;\nexport function arm() { fn ||= opener; }", "await fn?.();", /write other than a plain assignment/],
   ])("fails %s", (_label, decl, body, expected) => {
@@ -755,7 +757,7 @@ describe("check-rls-nesting: round 2 — the production boundary", () => {
   it("fails listed tooling that imports the RLS helpers", () => {
     const { code, stderr } = run([["scripts/env-allowlist.ts", `import { withTenantRls } from "../src/lib/tenant-rls";\nexport const w = withTenantRls;\n`]]);
     expect(code).toBe(1);
-    expect(stderr).toContain("scripts/env-allowlist.ts is listed as non-production tooling but imports src/lib/tenant-rls.ts");
+    expect(stderr).toContain("scripts/env-allowlist.ts is listed as non-production tooling but its imports reach src/lib/tenant-rls.ts");
   });
 });
 
@@ -824,14 +826,373 @@ export const f = () => withTenantRls(prisma, T, async () => registryGet({}));`]]
 });
 
 describe("check-rls-nesting: real repo", () => {
-  it("names only files that exist in its allowlists", () => {
+  it("names only files that exist in its allowlists", async () => {
     // The stale-entry checks skip an entry whose file is absent (fixture trees
-    // lack them), so absence is asserted here against the real tree.
-    const resolverSource = readFileSync(join(REPO_ROOT, "scripts/checks/lib/function-resolver.mjs"), "utf8");
-    const shapeFiles = [...resolverSource.matchAll(/\["([^"]+)::(\w+)",/g)].map((m) => m[1]);
-    const conditionalFiles = [...readFileSync(CHECKER, "utf8").matchAll(/\{ file: "([^"]+)", callee: "\w+" \}/g)].map((m) => m[1]);
-    expect(shapeFiles.length).toBeGreaterThanOrEqual(4);
-    expect(conditionalFiles.length).toBeGreaterThanOrEqual(1);
-    expect([...shapeFiles, ...conditionalFiles].filter((f) => !existsSync(join(REPO_ROOT, f)))).toEqual([]);
+    // lack them), so absence is asserted here against the real tree. The lists
+    // are read as values (imported, or off the gate's syntax tree), not by
+    // matching their text.
+    const { EXTERNAL_SHAPE_ALLOWLIST } = await import("../checks/lib/function-resolver.mjs");
+    const { FUNCTION_FLOW_ALLOWLIST, NON_LITERAL_LOAD_ALLOWLIST } = await import("../checks/lib/soundness.mjs");
+    const gate = new Project({ useInMemoryFileSystem: true }).createSourceFile("gate.ts", readFileSync(CHECKER, "utf8"));
+    const entries = gate
+      .getVariableDeclarationOrThrow("CONDITIONAL_OPENER_ALLOWLIST")
+      .getInitializerIfKindOrThrow(SyntaxKind.ArrayLiteralExpression)
+      .getElements();
+    const conditionalFiles = entries.flatMap((e) =>
+      ["file", "calleeFile"].map((k) => e.asKindOrThrow(SyntaxKind.ObjectLiteralExpression).getPropertyOrThrow(k).getInitializer().getLiteralText()),
+    );
+    const files = [
+      ...[...EXTERNAL_SHAPE_ALLOWLIST.keys(), ...FUNCTION_FLOW_ALLOWLIST.keys()].map((k) => k.split("::")[0]),
+      ...NON_LITERAL_LOAD_ALLOWLIST.keys(),
+      ...conditionalFiles,
+    ];
+    expect(entries.length).toBeGreaterThanOrEqual(1);
+    expect(files.length).toBe(EXTERNAL_SHAPE_ALLOWLIST.size + FUNCTION_FLOW_ALLOWLIST.size + NON_LITERAL_LOAD_ALLOWLIST.size + 2 * entries.length);
+    expect(files.filter((f) => !existsSync(join(REPO_ROOT, f)))).toEqual([]);
+  });
+});
+
+// ─── Round 4: a decidable subset, refused outside it ────────────────────────
+//
+// The resolver names a function by its declaration; lib/soundness.mjs refuses
+// every way to put a different function where a declaration says (G1-G5), and
+// the scan set is the production import closure. Each deny case below passed
+// the round-3 gate; each allow case is real code that must keep passing.
+
+const FLOW = "A function is put somewhere its declaration does not say";
+const BOUNDARY = "The production boundary does not hold";
+const R4 = (body) => ["src/app/r4.ts", `${USE_OPENER}${body}`];
+
+describe("check-rls-nesting: round 4 — a member holds what its declaration says (G1-G5)", () => {
+  it.each([
+    ["a function written into an any object", "const o: any = {};\nexport function arm() { o.run = opener; }", "src/app/r4.ts:7  G1: write of a function through a key no declaration names"],
+    ["a destructuring assignment onto a member", "const ops = { run: async () => 0 };\nexport function arm(o: { run: () => Promise<number> }) { ({ run: ops.run } = o); }", "src/app/r4.ts:7  G1: write to member run"],
+    ["a field set in the constructor", "export class Job { run: () => Promise<number> = async () => 0;\n  constructor(f: () => Promise<number>) { this.run = f; } }", "src/app/r4.ts:7  G1: write to member run"],
+    ["Object.assign onto this", "export class Job { run: () => Promise<number> = async () => 0;\n  constructor(o: Partial<Job>) { Object.assign(this, o); } }", "src/app/r4.ts:7  G2: object mutator"],
+    ["Object.assign through a renamed alias", "const put = Object.assign;\nconst ops = { run: async () => 0 };\nexport function arm() { put(ops, { run: opener }); }", "src/app/r4.ts:8  G2: object mutator"],
+    ["Object.defineProperty onto a fresh literal", "export const o = Object.defineProperty({ run: async () => 0 }, \"run\", { value: opener });", "src/app/r4.ts:6  G2: object mutator"],
+    ["Reflect.set", "const ops = { run: async () => 0 };\nexport function arm() { Reflect.set(ops, \"run\", opener); }", "src/app/r4.ts:7  G2: object mutator"],
+    ["a computed-key member", "const k = String(Date.now());\nexport const t = { [k]: opener };", "src/app/r4.ts:7  G3: computed-key member holding a function"],
+    ["a callable parameter property", "export class P { constructor(private cb: () => Promise<number>) {} go() { return this.cb(); } }", "src/app/r4.ts:6  G4: constructor parameter property holding a function"],
+    ["a class expression that extends", "class A { run() { return 0; } }\nexport const B = class extends A {};", "src/app/r4.ts:7  G5: class expression with extends"],
+    ["a mixin base", "class A { run() { return 0; } }\nconst mix = <T extends new () => object>(b: T) => b;\nexport class C extends mix(A) {}", "src/app/r4.ts:8  G5: extends an expression that is not a class name"],
+  ])("refuses %s", (_label, body, message) => {
+    const { code, stderr } = run([OPENER_MODULE, R4(body)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(FLOW);
+    expect(stderr).toContain(message);
+  });
+
+  it("passes object mutators on data, and Object.assign onto a fresh literal", () => {
+    // The fresh literal holds a function member; Object.assign's sources keep
+    // their member names, so the result's run is still a declared member.
+    const { code, stdout } = run([OPENER_MODULE, R4(`const data: { a: number; b?: string } = { a: 1 };
+export function fill() { Object.assign(data, { b: "x" }); return Object.assign({ run: async () => 0 }, { run: opener }); }`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+
+  it("passes a function written into a member a library declares", () => {
+    const { code, stdout } = run([OPENER_MODULE, ["types/img.d.ts", `declare module "imglib" {
+  export interface Img { onload: (() => void) | null }
+  export function makeImg(): Img;
+}`], R4(`import { makeImg } from "imglib";
+export function load() { const img = makeImg(); img.onload = () => {}; return img; }`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});
+
+describe("check-rls-nesting: round 4 — an interface member is every production member of its name", () => {
+  it("fails an opener behind an object literal that implements the interface only structurally", () => {
+    const { code, stderr } = run([OPENER_MODULE, R4(`interface Runner { run(): Promise<number> }
+const structural = { run: opener };
+export function use(r: Runner) { return withTenantRls(prisma, T, async () => r.run()); }
+export const x = use(structural);`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+    expect(stderr).toMatch(/src\/app\/r4\.ts:8 .*opener/);
+  });
+
+  it("fails an opener behind a class that implements the interface only structurally", () => {
+    const { code, stderr } = run([OPENER_MODULE, R4(`interface Runner { run(): Promise<number> }
+class C { run() { return opener(); } }
+export function use(r: Runner) { return withTenantRls(prisma, T, async () => r.run()); }
+export const x = use(new C());`)]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/src\/app\/r4\.ts:8 .*calls run .*reaches opener/);
+  });
+
+  it("passes an interface member only a test supplies", () => {
+    const { code, stdout } = run([OPENER_MODULE, R4(`export interface Hooks { onDone?: () => Promise<number> }
+export function use(h: Hooks) { return withTenantRls(prisma, T, async () => h.onDone?.()); }`),
+    ["src/app/r4.test.ts", `import { use } from "./r4";\nimport { opener } from "@/lib/opener";\nexport const t = use({ onDone: opener });`]]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+
+  it("fails a subclass field that overrides the base's", () => {
+    const { code, stderr } = run([OPENER_MODULE, R4(`class A { run: () => Promise<number> = async () => 0; }
+class B extends A { override run = opener; }
+export const svc: A = new B();
+export const f = () => withTenantRls(prisma, T, async () => { await svc.run(); });`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+    expect(stderr).toMatch(/src\/app\/r4\.ts:9 .*opener/);
+  });
+});
+
+describe("check-rls-nesting: round 4 — values a library holds, returns or is handed", () => {
+  const LIB = ["types/r4lib.d.ts", `declare module "r4lib" {
+  export interface Box<T> { current: T }
+  export function box<T>(v: T): Box<T>;
+  export function invoke(f: () => Promise<number>): Promise<number>;
+  export function runAll(fns: Array<() => Promise<number>>): Promise<void>;
+  export class Stream { constructor(source: { start(): void }); }
+  export function first<T>(xs: T[]): NonNullable<T>;
+}
+declare function require(id: string): any;`];
+
+  it.each([
+    ["a function held in a library member typed by what was stored", `import { box } from "r4lib";
+const b = box(opener);
+export const f = () => withTenantRls(prisma, T, async () => b.current());`, "function held in a library member typed by what its user stored"],
+    ["an any-typed function a library returns, invoked later", `const registry = new Map<string, any>([["a", opener]]);
+export const f = () => withTenantRls(prisma, T, async () => { const h = registry.get("a"); await h(); });`, "function returned by a library call"],
+    ["a library result handed straight to an own invoker", `async function retry(cb: () => Promise<number>) { return cb(); }
+const registry = new Map<string, () => Promise<number>>([["a", opener]]);
+export const f = () => withTenantRls(prisma, T, async () => retry(registry.get("a")!));`, "function returned by a library call"],
+    ["an array of functions handed to a library", `import { runAll } from "r4lib";
+const fns = [opener];
+export const f = () => withTenantRls(prisma, T, async () => runAll(fns));`, "array of functions handed to library code"],
+    ["a function a library builds from the caller's type", `import { first } from "r4lib";
+const arr = [opener];
+export const f = () => withTenantRls(prisma, T, async () => first(arr)());`, "function returned by a library call"],
+  ])("refuses %s", (_label, body, reason) => {
+    const { code, stderr } = run([OPENER_MODULE, LIB, R4(body)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(UNFOLLOWED);
+    expect(stderr).toContain(reason);
+  });
+
+  it.each([
+    ["an own object handed to a library that calls its members", `import { Stream } from "r4lib";
+const source = { start() { void opener(); } };
+export const f = () => withTenantRls(prisma, T, async () => { new Stream(source); });`],
+    ["a private field handed on", `import { invoke } from "r4lib";
+class Svc { #run = opener; go() { return invoke(this.#run); } }
+const svc = new Svc();
+export const f = () => withTenantRls(prisma, T, async () => svc.go());`],
+    ["an element-access receiver of .bind", `import { invoke } from "r4lib";
+const TBL = { a: opener };
+export const f = () => withTenantRls(prisma, T, async () => invoke(TBL["a"].bind(null)));`],
+    ["a function destructured from an own module's import()", `export const f = () => withTenantRls(prisma, T, async () => { const { opener: o } = await import("@/lib/opener"); await o(); });`],
+    ["a function destructured from an own module's require()", `export const f = () => withTenantRls(prisma, T, async () => { const { opener: o } = require("../lib/opener"); await o(); });`],
+  ])("fails %s", (_label, body) => {
+    const { code, stderr } = run([OPENER_MODULE, LIB, R4(body)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+    expect(stderr).toContain("opener (src/lib/opener.ts");
+  });
+
+  it("passes a function destructured from a library module, though typed any", () => {
+    const { code, stdout } = run([OPENER_MODULE, LIB, R4(`export const f = () => withTenantRls(prisma, T, async () => { const { join } = require("node:path"); return join("a", "b"); });`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+
+  it("passes an own invoker that tests its optional callback before calling it", () => {
+    const { code, stdout } = run([OPENER_MODULE, R4(`async function invoke(cb?: (op: () => Promise<number>) => Promise<number>) {
+  if (cb) return cb(async () => 1);
+  return 0;
+}
+export const f = () => withTenantRls(prisma, T, async () => invoke((op) => op()));`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});
+
+describe("check-rls-nesting: round 4 — the scan set is the production import closure", () => {
+  it("scans a module outside src/ and scripts/ that production imports", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["root-helper.ts", `import { opener } from "./src/lib/opener";\nexport const helper = () => opener();\n`],
+      R4(`import { helper } from "../../root-helper";\nexport const f = () => withTenantRls(prisma, T, async () => helper());`)]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/calls helper \(root-helper\.ts:2\) reaches opener/);
+  });
+
+  it("counts an interface member a module outside src/ implements", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["root-runner.ts", `import { opener } from "./src/lib/opener";\nexport const runner = { run: opener };\n`],
+      R4(`import { runner } from "../../root-runner";
+interface Runner { run(): Promise<number> }
+export function use(r: Runner) { return withTenantRls(prisma, T, async () => r.run()); }
+export const x = use(runner);`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+  });
+
+  it("holds a module outside src/ that production imports to G1-G5", () => {
+    const { code, stderr } = run([["root-ops.ts", `export const ops = { run: async () => 0 };\nexport function arm(f: () => Promise<number>) { ops.run = f; }\n`],
+      ["src/app/r4.ts", `import { ops } from "../../root-ops";\nexport const y = ops;`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("root-ops.ts:2  G1: write to member run");
+  });
+
+  it.each([
+    ["own JavaScript", [["src/lib/legacy.js", "export const x = 1;\n"]], `import { x } from "@/lib/legacy.js";\nexport const y = x;`, "loads src/lib/legacy.js, own JavaScript the gates cannot read"],
+    ["a declaration over own JavaScript", [["src/lib/shim.js", "export const x = 1;\n"], ["src/lib/shim.d.ts", "export declare const x: number;\n"]], `import { x } from "@/lib/shim";\nexport const y = x;`, "a declaration over own JavaScript (src/lib/shim.js)"],
+    ["listed tooling through require()", [["scripts/env-allowlist.ts", "export const ALLOW = [];\n"], ["types/req.d.ts", "declare function require(id: string): any;\n"]], `export const load = () => require("../../scripts/env-allowlist");`, "production code imports scripts/env-allowlist.ts, which is declared non-production"],
+    ["a test module through a side-effect import()", [["src/lib/__tests__/helper.ts", "export const h = 1;\n"]], `export const load = () => { void import("../lib/__tests__/helper"); };`, "production code imports src/lib/__tests__/helper.ts, which is declared non-production"],
+    ["a non-literal specifier", [], `export const load = (m: string) => import(m);`, "production code loads a module through a non-literal specifier"],
+    ["an own specifier that does not resolve", [], `export const load = () => import("@/lib/missing");`, "loads @/lib/missing, which does not resolve"],
+  ])("refuses production loading %s", (_label, extra, body, message) => {
+    const { code, stderr } = run([...extra, ["src/app/r4.ts", body]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(BOUNDARY);
+    expect(stderr).toContain(message);
+  });
+
+  it("refuses listed tooling whose imports reach the RLS helpers through a re-export", () => {
+    const { code, stderr } = run([["src/lib/db.ts", `export { withTenantRls } from "@/lib/tenant-rls";\n`],
+      ["scripts/init-env.ts", `import { withTenantRls } from "../src/lib/db";\nexport const w = withTenantRls;\n`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("scripts/init-env.ts is listed as non-production tooling but its imports reach src/lib/tenant-rls.ts");
+  });
+});
+
+describe("check-rls-nesting: round 4 — the conditional opener exempts one edge", () => {
+  const passkey = (extra = "") => ["src/lib/auth/policy/passkey-enforcement.ts", `${HEAD}
+export async function derivePasskeyState(p: { userId: string; tx?: unknown }) {
+  ${extra}
+  return p.tx ? true : withBypassRls(prisma, async (tx) => tx.user.count(), BYPASS_PURPOSE.AUTH_FLOW);
+}`];
+  const OAUTH = (body) => ["src/lib/mcp/oauth-server.ts", `${HEAD}
+import { derivePasskeyState } from "@/lib/auth/policy/passkey-enforcement";
+export const f = () => withBypassRls(prisma, async (tx) => { ${body} }, BYPASS_PURPOSE.AUTH_FLOW);`];
+
+  it("fails an unconditional opener added to the exempt callee", () => {
+    const { code, stderr } = run([passkey("await withTenantRls(prisma, \"t\", async () => null);"), OAUTH("return derivePasskeyState({ userId: \"u\", tx });")]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/oauth-server\.ts:\d+ .* calls derivePasskeyState .* reaches withTenantRls/);
+  });
+
+  it("fails when the callee is also entered without the guard in the same context", () => {
+    const { code, stderr } = run([passkey(), OAUTH("await derivePasskeyState({ userId: \"u\", tx }); return derivePasskeyState({ userId: \"u\" });")]);
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/oauth-server\.ts:\d+ .* calls derivePasskeyState .* reaches withBypassRls/);
+  });
+
+  it("fails when the callback's client is reassigned before it is passed", () => {
+    const { code, stderr } = run([passkey(), ["src/lib/mcp/oauth-server.ts", `${HEAD}
+import { derivePasskeyState } from "@/lib/auth/policy/passkey-enforcement";
+export const f = () => withBypassRls(prisma, async (tx: unknown) => { if (Date.now() < 0) tx = undefined; return derivePasskeyState({ userId: "u", tx }); }, BYPASS_PURPOSE.AUTH_FLOW);`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+  });
+
+  it("refuses to run when the guarded opener is gone from the callee", () => {
+    const { code, stderr } = run([["src/lib/auth/policy/passkey-enforcement.ts", `${HEAD}
+export async function derivePasskeyState(p: { userId: string; tx?: unknown }) {
+  return withBypassRls(prisma, async (tx) => tx.user.count(), BYPASS_PURPOSE.AUTH_FLOW);
+}`], OAUTH("return derivePasskeyState({ userId: \"u\", tx });")]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("expected one opener guarded by p.tx, found 0");
+  });
+});
+
+describe("check-rls-nesting: round 4 — each refusal by the clause that makes it", () => {
+  const LIB = ["types/r4lib.d.ts", `declare module "r4lib" {
+  export const anyThing: any;
+  export function pair<T>(v: T): [T];
+}
+declare function require(id: string): any;`];
+
+  it.each([
+    ["Object.defineProperty onto this, in a class with no function members", "export class Job { constructor() { Object.defineProperty(this, \"run\", { value: opener }); } }", "src/app/r4.ts:6  G2: object mutator"],
+    ["Object.defineProperty onto an any value", "export function arm(o: any) { Object.defineProperty(o, \"run\", { value: opener }); }", "src/app/r4.ts:6  G2: object mutator"],
+  ])("refuses %s", (_label, body, message) => {
+    const { code, stderr } = run([OPENER_MODULE, R4(body)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(message);
+  });
+
+  it("refuses an any-typed library value called as a function", () => {
+    const { code, stderr } = run([OPENER_MODULE, LIB, R4(`import { anyThing } from "r4lib";
+export const f = () => withTenantRls(prisma, T, async () => anyThing());`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("function value typed any or unknown");
+  });
+
+  it("refuses a function taken from an array a library returns built from the caller's value", () => {
+    const { code, stderr } = run([OPENER_MODULE, LIB, R4(`import { pair } from "r4lib";
+export const f = () => withTenantRls(prisma, T, async () => { const [fn] = pair(opener); await fn(); });`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("function from an array pattern");
+  });
+
+  it("passes a chain through a library module's createRequire, typed any", () => {
+    const { code, stdout } = run([OPENER_MODULE, LIB, R4(`interface Sdk { make(): number }
+export const f = () => withTenantRls(prisma, T, async () => {
+  const { createRequire } = require("node:module");
+  const req = createRequire("x");
+  const sdk = req("some-sdk") as Sdk;
+  return sdk;
+});`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+
+  it("refuses a context function named in a value position, though it is then held optionally", () => {
+    const { code, stderr } = run([R4(`const w: typeof withTenantRls | undefined = Date.now() > 0 ? withTenantRls : undefined;
+export const f = () => [1].forEach(w!);`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("used as a value; the callback it receives cannot be checked");
+  });
+
+  it("refuses to run when the exempt callee writes its own guard", () => {
+    const { code, stderr } = run([["src/lib/auth/policy/passkey-enforcement.ts", `${HEAD}
+export async function derivePasskeyState(p: { userId: string; tx?: unknown }) {
+  if (p.userId === "") p.tx = undefined;
+  return p.tx ? true : withBypassRls(prisma, async (tx) => tx.user.count(), BYPASS_PURPOSE.AUTH_FLOW);
+}`], ["src/lib/mcp/oauth-server.ts", `${HEAD}
+import { derivePasskeyState } from "@/lib/auth/policy/passkey-enforcement";
+export const f = () => withBypassRls(prisma, async (tx) => derivePasskeyState({ userId: "u", tx }), BYPASS_PURPOSE.AUTH_FLOW);`]]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("p.tx is written inside derivePasskeyState");
+  });
+});
+
+describe("check-rls-nesting: round 4 — reviewed exceptions to G1-G5", () => {
+  const RAW = (body) => ["src/lib/prisma/raw-sql.ts", `function throwOnConversion(): never { throw new TypeError("x"); }
+${body}`];
+
+  it("passes the listed conversion traps in createGenuineObject", () => {
+    const { code, stdout } = run([RAW(`export function createGenuineObject(): object {
+  const obj = Object.create(null) as Record<PropertyKey, unknown>;
+  obj[Symbol.toPrimitive] = throwOnConversion;
+  return obj;
+}`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+
+  it("fails the entry once createGenuineObject writes no function", () => {
+    const { code, stderr } = run([RAW(`export function createGenuineObject(): object { return Object.create(null); }`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("src/lib/prisma/raw-sql.ts::createGenuineObject::G1  FUNCTION_FLOW_ALLOWLIST entry matches no violation");
+  });
+
+  it("does not excuse the same write in another function of the file", () => {
+    const { code, stderr } = run([RAW(`export function createGenuineObject(): object {
+  const obj = Object.create(null) as Record<PropertyKey, unknown>;
+  obj[Symbol.toPrimitive] = throwOnConversion;
+  return obj;
+}
+export function other(): object {
+  const obj = Object.create(null) as Record<PropertyKey, unknown>;
+  obj.toJSON = throwOnConversion;
+  return obj;
+}`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("src/lib/prisma/raw-sql.ts:9  G1: write of a function through a key no declaration names");
   });
 });

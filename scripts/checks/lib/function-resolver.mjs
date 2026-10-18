@@ -18,11 +18,17 @@
  *                argument is checked);
  *   - unresolved a reason, when the value cannot be named. Callers fail closed.
  *
- * PRODUCTION is src/ and scripts/ minus tests and the CI tooling itself.
- * Implementations, assignments and callers found outside it never run in
- * production and are ignored; everything inside it is scanned by both gates.
+ * PRODUCTION is the scope the gates pass in: the import closure of src/ and
+ * scripts/ minus tests and the CI tooling (lib/soundness.mjs productionScope),
+ * or, without one, those path prefixes. Implementations, assignments and
+ * callers found outside it never run in production and are ignored.
+ *
+ * A function is named by its DECLARATION — a member by its initializer, a
+ * class member by every subclass's member of that name, an interface member by
+ * every production member of that name. That is sound only within the subset
+ * lib/soundness.mjs enforces (G1-G5); the gates check it on every run.
  */
-import { SyntaxKind } from "ts-morph";
+import { SyntaxKind, ts } from "ts-morph";
 import { relative, sep } from "node:path";
 
 export const FN_KINDS = new Set([
@@ -78,6 +84,29 @@ export function isProductionPath(rel) {
   return !/\.(test|spec)\.tsx?$/.test(rel) && !rel.includes("__tests__");
 }
 
+/**
+ * Whether a reference entry (from findReferences) writes the binding. The
+ * language service also marks `{ x }` in an object literal as a write — it
+ * writes the new object's member, and only reads `x` — unless that literal is
+ * itself an assignment target (`({ x } = o)`).
+ */
+export function isBindingWrite(entry) {
+  if (!entry.isWriteAccess()) return false;
+  const parent = entry.getNode().getParent();
+  if (parent?.getKind() !== SyntaxKind.ShorthandPropertyAssignment) return true;
+  let literal = parent.getParent();
+  while (literal?.getParent()?.getKind() === SyntaxKind.ObjectLiteralExpression ||
+    literal?.getParent()?.getKind() === SyntaxKind.PropertyAssignment ||
+    literal?.getParent()?.getKind() === SyntaxKind.ArrayLiteralExpression) {
+    literal = literal.getParent();
+  }
+  const holder = literal?.getParent();
+  return (
+    (holder?.getKind() === SyntaxKind.BinaryExpression && holder.getLeft() === literal) ||
+    holder?.getKind() === SyntaxKind.ForOfStatement || holder?.getKind() === SyntaxKind.ForInStatement
+  );
+}
+
 export function unwrap(expr) {
   switch (expr?.getKind()) {
     case SyntaxKind.ParenthesizedExpression:
@@ -109,8 +138,12 @@ export const EXTERNAL_SHAPE_ALLOWLIST = new Map([
   // The cloud key providers' SDK clients, loaded lazily with require() so each
   // SDK package stays optional.
   ["src/lib/key-provider/aws-sm-provider.ts::SmClient", "@aws-sdk/client-secrets-manager"],
+  ["src/lib/key-provider/aws-sm-provider.ts::AwsSmModule", "@aws-sdk/client-secrets-manager"],
   ["src/lib/key-provider/azure-kv-provider.ts::KvSecretClient", "@azure/keyvault-secrets"],
+  ["src/lib/key-provider/azure-kv-provider.ts::AzureKvModule", "@azure/keyvault-secrets"],
+  ["src/lib/key-provider/azure-kv-provider.ts::AzureIdentityModule", "@azure/identity"],
   ["src/lib/key-provider/gcp-sm-provider.ts::SmClient", "@google-cloud/secret-manager"],
+  ["src/lib/key-provider/gcp-sm-provider.ts::GcpSmModule", "@google-cloud/secret-manager"],
   // The Prisma transaction client, narrowed to the one raw-query method the
   // readback assertion uses.
   ["scripts/lib/assert-bypass-rls-active.ts::TxProbe", "Prisma transaction client"],
@@ -122,13 +155,17 @@ const NON_FUNCTION_KINDS = new Set([
   SyntaxKind.BigIntLiteral, SyntaxKind.StringLiteral, SyntaxKind.NoSubstitutionTemplateLiteral,
   SyntaxKind.TemplateExpression, SyntaxKind.RegularExpressionLiteral, SyntaxKind.VoidExpression,
 ]);
-// Library calls known to read an object without keeping or writing it.
-const READ_ONLY_OBJECT_CALLEES = new Set(["Object.keys", "Object.values", "Object.entries", "JSON.stringify", "Object.freeze"]);
-const OBJECT_MUTATORS = new Set(["Object.assign", "Object.defineProperty", "Object.defineProperties", "Object.setPrototypeOf", "Reflect.set", "Reflect.defineProperty"]);
 const unresolvedResult = (reason) => ({ ...EMPTY, unresolved: reason });
+// A value taken from a library module by `require`/`import()`: library code,
+// even where `require` erased its type to `any`.
+const LIBRARY_MODULE = Object.freeze({ ...EMPTY, external: true, libraryModule: true });
 
 export function merge(results) {
   const out = { fns: [], external: false, params: [], unresolved: null };
+  // Library code known by the module it was loaded from, though typed `any`:
+  // kept only while every library part of the union is.
+  const libraryParts = results.filter((r) => r.external);
+  if (libraryParts.length > 0 && libraryParts.every((r) => r.libraryModule)) out.libraryModule = true;
   for (const r of results) {
     for (const fn of r.fns) if (!out.fns.includes(fn)) out.fns.push(fn);
     out.external ||= r.external;
@@ -143,7 +180,7 @@ export function prismaModelNames(clientType) {
   return new Set((clientType?.getProperties() ?? []).map((p) => p.getName()).filter((n) => !n.startsWith("$")));
 }
 
-export function createFunctionResolver({ program }) {
+export function createFunctionResolver({ program, scope = null }) {
   const usedExternalShapes = new Set();
   const valueMemo = new Map();
   const callMemo = new Map();
@@ -158,7 +195,8 @@ export function createFunctionResolver({ program }) {
 
   /** Own code outside PRODUCTION — tests and fixtures, which never run there. */
   function isNonProduction(node) {
-    return !isExternal(node) && !isProductionPath(toRelPosix(node.getSourceFile().getFilePath()));
+    if (isExternal(node)) return false;
+    return scope ? !scope.isProduction(node) : !isProductionPath(toRelPosix(node.getSourceFile().getFilePath()));
   }
 
   function isConstVariable(decl) {
@@ -280,6 +318,22 @@ export function createFunctionResolver({ program }) {
     return isLibraryMadeTypeNode(cbType.getParameters()[paramIndex]?.getTypeNode());
   }
 
+  /**
+   * A member a library declares, read as a function. Library code — unless
+   * its declared type is whatever the library's user stored there
+   * (`RefObject<T>.current: T`, a property typed `any`), which may be ours.
+   */
+  function libraryMemberValue(decls) {
+    const holdsUsersValue = decls.some((d) => {
+      const k = d.getKind();
+      if (k !== SyntaxKind.PropertySignature && k !== SyntaxKind.PropertyDeclaration) return false;
+      return !isLibraryMadeTypeNode(d.getTypeNode?.());
+    });
+    return holdsUsersValue
+      ? unresolvedResult("function held in a library member typed by what its user stored")
+      : { ...EMPTY, external: true };
+  }
+
   function resolveValue(expr) {
     const e = unwrap(expr);
     if (!e) return unresolvedResult("empty expression");
@@ -294,18 +348,6 @@ export function createFunctionResolver({ program }) {
     } finally {
       resolving.delete(e);
     }
-  }
-
-  /** A call's result used as a function: invoked, or handed to another call. */
-  function isInvokedOrHandedOn(call) {
-    let node = call;
-    while (node.getParent()?.getKind() === SyntaxKind.ParenthesizedExpression || node.getParent()?.getKind() === SyntaxKind.NonNullExpression) {
-      node = node.getParent();
-    }
-    const parent = node.getParent();
-    const k = parent?.getKind();
-    if ((k === SyntaxKind.CallExpression || k === SyntaxKind.NewExpression) && parent.getExpression() === node) return true;
-    return (k === SyntaxKind.CallExpression || k === SyntaxKind.NewExpression) && parent.getArguments().includes(node);
   }
 
   /** Own functions handed to a call as arguments, literal or by reference. */
@@ -366,12 +408,14 @@ export function createFunctionResolver({ program }) {
         // be named. Judged on the declared return type, not the instantiated one.
         // A library value invoked as a function (`Reflect.get(o, "f")()`) or
         // callable after removing undefined (`registry.get(k)?.()`).
+        // A value is resolved only where it is used as a function, so an
+        // `any`/`unknown` result here may be one.
         const t = e.getType();
-        const returnsFunction = mayBeCallable(t) || ((t.isAny() || t.isUnknown()) && isInvokedOrHandedOn(e));
-        if (returnsFunction && !libraryReturnIsLibraryMade(e)) {
+        const returnsFunction = mayBeCallable(t) || t.isAny() || t.isUnknown();
+        if (returnsFunction && !callee.libraryModule && !libraryReturnIsLibraryMade(e)) {
           return unresolvedResult("function returned by a library call");
         }
-        return merge([{ ...EMPTY, external: true }, ...functionArgsOf(e)]);
+        return merge([callee.libraryModule ? LIBRARY_MODULE : { ...EMPTY, external: true }, ...functionArgsOf(e)]);
       }
       return merge(callee.fns.map((fn) => returnedValue(fn)));
     }
@@ -381,7 +425,7 @@ export function createFunctionResolver({ program }) {
       const decls = e.getExpression().getType().getProperty(key)?.getDeclarations() ?? [];
       // A member a library declares (`tx["$transaction"]`) is library code
       // whatever holds the receiver; only an own member needs a stable one.
-      if (decls.length > 0 && decls.every(isExternal)) return { ...EMPTY, external: true };
+      if (decls.length > 0 && decls.every(isExternal)) return libraryMemberValue(decls);
       if (!hasStableReceiver(e)) return unresolvedResult("member of an object that may be rebound");
       return resolvePropertyOfType(e.getExpression().getType(), key, e);
     }
@@ -397,7 +441,7 @@ export function createFunctionResolver({ program }) {
     if (symbol.isAlias()) symbol = symbol.getAliasedSymbol();
     const decls = symbol?.getDeclarations() ?? [];
     if (decls.length === 0) return unresolvedResult("callee has no declaration");
-    if (decls.every(isExternal)) return { ...EMPTY, external: true };
+    if (decls.every(isExternal)) return libraryMemberValue(decls);
     return merge(decls.filter((d) => !isExternal(d)).map((d) => resolveDeclaration(d, e)));
   }
 
@@ -440,7 +484,7 @@ export function createFunctionResolver({ program }) {
     const out = [];
     for (const group of nameNode.findReferences()) {
       for (const entry of group.getReferences()) {
-        if (!entry.isWriteAccess()) continue;
+        if (!isBindingWrite(entry)) continue;
         const node = entry.getNode();
         if (node === nameNode || isNonProduction(node) || isExternal(node)) continue;
         if (entry.isInString?.()) continue;
@@ -460,153 +504,6 @@ export function createFunctionResolver({ program }) {
       }
     }
     return out;
-  }
-
-  /**
-   * A member of an object literal holds its initializer and every production
-   * write to that member (`ops.run = opener`, found through the member's symbol
-   * however the object is reached). A container handed to Object.assign /
-   * defineProperty, or written through a computed key, may hold anything.
-   */
-  const memberMemo = new Map();
-  function objectMemberValue(memberDecl, initial) {
-    const hit = memberMemo.get(memberDecl);
-    if (hit) return hit;
-    const result = objectMemberValueUncached(memberDecl, initial);
-    memberMemo.set(memberDecl, result);
-    return result;
-  }
-
-  function objectMemberValueUncached(memberDecl, initial) {
-    const results = [initial];
-    results.push(...writesTo(memberDecl.getNameNode(), (node) => {
-      const access = node.getParent();
-      if (access?.getKind() !== SyntaxKind.PropertyAccessExpression || access.getNameNode() !== node) return null;
-      const assignment = access.getParent();
-      return assignment?.getKind() === SyntaxKind.BinaryExpression && assignment.getLeft() === access ? assignment : null;
-    }));
-    const memberName = memberDecl.getName?.() ?? memberDecl.getNameNode().getText();
-    for (const use of objectUses(memberDecl.getParent())) results.push(...writesThroughUse(use, memberName));
-    return merge(results);
-  }
-
-  function containerVariableOf(literal) {
-    const holder = literal?.getParent();
-    return holder?.getKind() === SyntaxKind.VariableDeclaration && unwrap(holder.getInitializer()) === literal ? holder : null;
-  }
-
-  /**
-   * Every production expression that evaluates to the object `literal`
-   * builds: through the variable holding it (or an outer object's member path,
-   * `cfg.inner`), its const aliases, and own functions it is handed to (their
-   * parameter's uses). Each use is checked for writes the member symbol does
-   * not show: Object.assign and friends, a computed or string-keyed element
-   * write, a library call that could keep it.
-   */
-  function objectUses(literal) {
-    const uses = [];
-    const seenParams = new Set();
-    const seenVars = new Set();
-    const viaParameter = (fnNode, index, path) => {
-      const p = fnNode?.getParameters?.()[index];
-      if (!p || seenParams.has(p)) return;
-      seenParams.add(p);
-      if (p.getNameNode().getKind() !== SyntaxKind.Identifier) {
-        uses.push({ problem: "object handed to a parameter that destructures it" });
-        return;
-      }
-      fromVariable(p, path);
-    };
-    const handedTo = (expr, path) => {
-      const call = expr.getParent();
-      if (call?.getKind() !== SyntaxKind.CallExpression && call?.getKind() !== SyntaxKind.NewExpression) return false;
-      if (call.getExpression?.() === expr) return false;
-      const index = call.getArguments().indexOf(expr);
-      if (index < 0) return false;
-      const callee = unwrap(call.getExpression());
-      const text = callee?.getText();
-      if (OBJECT_MUTATORS.has(text)) {
-        uses.push({ problem: `object handed to ${text} at ${toRelPosix(expr.getSourceFile().getFilePath())}:${expr.getStartLineNumber()}` });
-        return true;
-      }
-      if (READ_ONLY_OBJECT_CALLEES.has(text)) return true;
-      const r = resolveCall(call);
-      if (r.fns.length > 0 && !r.external && !r.unresolved) {
-        for (const fn of r.fns) viaParameter(fn, index, path);
-      } else {
-        uses.push({ problem: `object handed to a callee that may keep or write it at ${toRelPosix(expr.getSourceFile().getFilePath())}:${expr.getStartLineNumber()}` });
-      }
-      return true;
-    };
-    function fromVariable(decl, path) {
-      if (seenVars.has(decl)) return;
-      seenVars.add(decl);
-      // `const { run } = ops` reads members; it cannot write the object.
-      if (decl.getNameNode().getKind() !== SyntaxKind.Identifier) return;
-      for (const ref of decl.getNameNode().findReferencesAsNodes()) {
-        if (ref === decl.getNameNode() || isNonProduction(ref) || isExternal(ref)) continue;
-        // Walk the member path (`cfg.inner`) up from the reference.
-        let expr = ref;
-        let matched = true;
-        for (const key of path) {
-          const parent = expr.getParent();
-          const k = parent?.getKind();
-          const name =
-            k === SyntaxKind.PropertyAccessExpression && parent.getExpression() === expr
-              ? parent.getName()
-              : k === SyntaxKind.ElementAccessExpression && parent.getExpression() === expr
-                ? literalKey(parent.getArgumentExpression())
-                : null;
-          if (name !== key) {
-            matched = false;
-            break;
-          }
-          expr = parent;
-        }
-        if (!matched) continue;
-        uses.push({ expr });
-        if (handedTo(expr, [])) continue;
-        const holder = expr.getParent();
-        if (holder?.getKind() === SyntaxKind.VariableDeclaration && holder.getInitializer() === expr) {
-          if (isConstVariable(holder)) fromVariable(holder, []);
-          else uses.push({ problem: "object aliased by a let/var" });
-        }
-      }
-    }
-    // Find the variable (or member path under one) holding the literal.
-    const path = [];
-    let node = literal;
-    while (node.getParent()?.getKind() === SyntaxKind.PropertyAssignment && node.getParent().getParent()?.getKind() === SyntaxKind.ObjectLiteralExpression) {
-      path.unshift(node.getParent().getName());
-      node = node.getParent().getParent();
-    }
-    const holder = containerVariableOf(node);
-    if (holder) {
-      fromVariable(holder, path);
-    } else if (path.length === 0) {
-      // A literal handed straight to a call: the callee's parameter uses.
-      handedTo(node, []);
-    }
-    return uses;
-  }
-
-  /** The writes a use of an object makes to member `memberName`, or the reason they cannot be seen. */
-  function writesThroughUse(use, memberName) {
-    if (use.problem) return [unresolvedResult(use.problem)];
-    const { expr } = use;
-    const access = expr.getParent();
-    if (access?.getKind() !== SyntaxKind.ElementAccessExpression || access.getExpression() !== expr) return [];
-    const assignment = access.getParent();
-    if (assignment?.getKind() !== SyntaxKind.BinaryExpression || assignment.getLeft() !== access) return [];
-    const key = literalKey(access.getArgumentExpression());
-    if (key === null) {
-      return [unresolvedResult(`object written through a computed key at ${toRelPosix(expr.getSourceFile().getFilePath())}:${expr.getStartLineNumber()}`)];
-    }
-    if (key !== memberName) return [];
-    if (assignment.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) {
-      return [unresolvedResult(`write other than a plain assignment at ${toRelPosix(expr.getSourceFile().getFilePath())}:${expr.getStartLineNumber()}`)];
-    }
-    return [resolveValue(assignment.getRight())];
   }
 
   /** A parameter's value: the argument at its position in every production call. */
@@ -659,9 +556,10 @@ export function createFunctionResolver({ program }) {
       const argIndex = holder.getArguments().indexOf(owner);
       const paramIndex = owner.getParameters().indexOf(param);
       if (invoker.fns.length > 0 && !invoker.external && !invoker.unresolved) {
-        // Our own function invokes the literal: the value is whatever it
-        // passes at that position wherever it calls the parameter.
-        return merge(invoker.fns.map((fn) => argumentsPassedTo(fn, argIndex, paramIndex)));
+        // Our own function invokes the literal. Whatever it passes is a value
+        // in the invoker's body, which this call reaches: that value is an
+        // edge there, so nothing is added here.
+        return { ...EMPTY };
       }
       return invoker.external && !invoker.unresolved && libraryCallbackParamIsLibraryMade(holder, argIndex, paramIndex)
         ? { ...EMPTY, external: true }
@@ -669,40 +567,6 @@ export function createFunctionResolver({ program }) {
     }
     if (directOwnerOf(site) === owner) return { ...EMPTY, params: [{ param, ownInvoker: false }] };
     return resolveParameterFromCallers(param);
-  }
-
-  /**
-   * What `fn` passes as argument `paramIndex` wherever it calls its own
-   * parameter `argIndex`. A use of that parameter other than a direct call
-   * (handed on, stored) hides the arguments, and is unresolved.
-   */
-  function argumentsPassedTo(fn, argIndex, paramIndex) {
-    const p = fn.getParameters?.()[argIndex];
-    if (!p) return unresolvedResult("invoker has no parameter at the callback's position");
-    if (p.getNameNode().getKind() !== SyntaxKind.Identifier) return unresolvedResult("invoker destructures its callback parameter");
-    const results = [];
-    for (const ref of p.getNameNode().findReferencesAsNodes()) {
-      if (ref === p.getNameNode() || isNonProduction(ref) || isExternal(ref)) continue;
-      const call = ref.getParent();
-      if (call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === ref) {
-        const arg = call.getArguments()[paramIndex];
-        if (call.getArguments().slice(0, paramIndex + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement)) {
-          results.push(unresolvedResult("invoker spreads the callback's arguments"));
-        } else if (arg) {
-          results.push(resolveValue(arg));
-        }
-        continue;
-      }
-      if (call?.getKind() === SyntaxKind.PropertyAccessExpression && call.getExpression() === ref) {
-        const member = call.getName();
-        if (member === "call" || member === "apply" || member === "bind") {
-          results.push(unresolvedResult(`invoker calls its callback through .${member}`));
-        }
-        continue;
-      }
-      results.push(unresolvedResult("invoker hands its callback on, so what it is passed is unknown"));
-    }
-    return merge(results);
   }
 
   /** The function a node runs in, climbing past function literals passed inline to calls. */
@@ -730,16 +594,14 @@ export function createFunctionResolver({ program }) {
     if (!prop) return unresolvedResult(`no property ${name} on the value`);
     const decls = prop.getDeclarations();
     if (decls.length === 0) return unresolvedResult(`property ${name} has no declaration`);
-    if (decls.every(isExternal)) return { ...EMPTY, external: true };
+    if (decls.every(isExternal)) return libraryMemberValue(decls);
     return merge(decls.filter((d) => !isExternal(d)).map((d) => resolveDeclaration(d, site)));
   }
 
   /**
    * The const object literal a non-literal index reads, or the reason it
-   * cannot be one. Every production reference to the table must only READ a
-   * member or enumerate its keys; one that assigns a member, or hands the table
-   * somewhere that could (`Object.assign`, any call), means a member may exist
-   * that the literal does not spell.
+   * cannot be one. Its members hold only what the literal spells: the
+   * soundness rules (G1-G3) refuse every other way to put a function in it.
    */
   function tableOf(receiverExpr) {
     let symbol = unwrap(receiverExpr)?.getSymbol();
@@ -750,53 +612,19 @@ export function createFunctionResolver({ program }) {
     if (init?.getKind() !== SyntaxKind.ObjectLiteralExpression) {
       return "non-literal index into something other than a const object literal";
     }
-    for (const ref of decl.getNameNode().findReferencesAsNodes()) {
-      if (isNonProduction(ref) || isExternal(ref) || ref === decl.getNameNode()) continue;
-      if (!isReadOnlyTableUse(ref)) {
-        return `table ${decl.getName()} is mutated or escapes at ${toRelPosix(ref.getSourceFile().getFilePath())}:${ref.getStartLineNumber()}`;
-      }
-    }
     return init;
-  }
-
-  function isReadOnlyTableUse(ref) {
-    const parent = ref.getParent();
-    const k = parent?.getKind();
-    if (k === SyntaxKind.ImportSpecifier || k === SyntaxKind.ExportSpecifier || k === SyntaxKind.TypeQuery) return true;
-    if (ref.getFirstAncestorByKind(SyntaxKind.TypeQuery)) return true;
-    if (
-      (k === SyntaxKind.PropertyAccessExpression || k === SyntaxKind.ElementAccessExpression) &&
-      parent.getExpression() === ref
-    ) {
-      const outer = parent.getParent();
-      const assigned =
-        outer?.getKind() === SyntaxKind.BinaryExpression &&
-        outer.getLeft() === parent &&
-        outer.getOperatorToken().getKind() >= SyntaxKind.FirstAssignment &&
-        outer.getOperatorToken().getKind() <= SyntaxKind.LastAssignment;
-      const deleted = outer?.getKind() === SyntaxKind.DeleteExpression;
-      return !assigned && !deleted;
-    }
-    if (k === SyntaxKind.CallExpression && parent.getExpression() !== ref) {
-      const callee = parent.getExpression().getText();
-      return callee === "Object.keys" || callee === "Object.values" || callee === "Object.entries";
-    }
-    return false;
   }
 
   function resolveMember(prop) {
     switch (prop.getKind()) {
       case SyntaxKind.MethodDeclaration:
       case SyntaxKind.GetAccessor:
-        return objectMemberValue(prop, { ...EMPTY, fns: [prop] });
+        return { ...EMPTY, fns: [prop] };
       case SyntaxKind.PropertyAssignment:
-        return objectMemberValue(prop, resolveValue(prop.getInitializer()));
+        return resolveValue(prop.getInitializer());
       case SyntaxKind.ShorthandPropertyAssignment: {
         const valueDecl = prop.getValueSymbol?.()?.getDeclarations()[0];
-        return objectMemberValue(
-          prop,
-          valueDecl ? resolveDeclaration(valueDecl, prop.getNameNode()) : unresolvedResult("shorthand with no value"),
-        );
+        return valueDecl ? resolveDeclaration(valueDecl, prop.getNameNode()) : unresolvedResult("shorthand with no value");
       }
       case SyntaxKind.SpreadAssignment:
         return unresolvedResult("spread member of a table");
@@ -805,16 +633,89 @@ export function createFunctionResolver({ program }) {
     }
   }
 
-  /** A class method with a body, and every production override of it. */
-  function withOverrides(method) {
-    const out = [method];
-    for (const impl of method.getNameNode().getImplementations()) {
-      const node = impl.getNode();
-      if (isExternal(node) || isNonProduction(node)) continue;
-      const fn = node.getParent() ? functionOfDeclaration(node.getParent()) : null;
-      if (fn && !out.includes(fn)) out.push(fn);
+  /**
+   * Every production class deriving from `cls`, transitively. Derivation is
+   * by name only (G5 refuses class expressions and computed bases), so the
+   * language service's references to the class name find them all.
+   */
+  const derivedMemo = new Map();
+  function derivedClassesOf(cls) {
+    let out = derivedMemo.get(cls);
+    if (out) return out;
+    out = [];
+    const queue = [cls];
+    while (queue.length > 0) {
+      const c = queue.shift();
+      for (const d of c.getDerivedClasses?.() ?? []) {
+        if (isExternal(d) || isNonProduction(d) || out.includes(d)) continue;
+        out.push(d);
+        queue.push(d);
+      }
     }
+    derivedMemo.set(cls, out);
     return out;
+  }
+
+  /**
+   * What a class member `name` may run: the member itself and every member of
+   * that name a production subclass declares, method or field alike.
+   */
+  function classMemberValue(member) {
+    const cls = member.getParent();
+    const name = member.getName?.();
+    const results = [ownClassMemberValue(member)];
+    if (name && cls?.getKind() === SyntaxKind.ClassDeclaration) {
+      for (const d of derivedClassesOf(cls)) {
+        for (const m of d.getMembers()) {
+          if (m.getName?.() === name && !m.isStatic?.()) results.push(ownClassMemberValue(m));
+        }
+      }
+    }
+    return merge(results);
+  }
+
+  function ownClassMemberValue(member) {
+    const fn = functionOfDeclaration(member);
+    if (fn) return { ...EMPTY, fns: [fn] };
+    if (member.getKind() === SyntaxKind.PropertyDeclaration) {
+      // A field holds its initializer; G1 refuses every other write.
+      return member.getInitializer() ? resolveValue(member.getInitializer()) : { ...EMPTY };
+    }
+    if (member.getKind() === SyntaxKind.MethodDeclaration) return { ...EMPTY }; // abstract or an overload
+    return unresolvedResult(`class member ${member.getKindName()}`);
+  }
+
+  function unwrapAwait(expr) {
+    let e = unwrap(expr);
+    while (e?.getKind() === SyntaxKind.AwaitExpression) e = unwrap(e.getExpression());
+    return e;
+  }
+
+  /**
+   * The module an `import("…")` / `require("…")` call loads: { library: true },
+   * { sf } for an own module, or null when the call is not a module load. A
+   * non-literal or unresolvable own specifier is a module nobody can name.
+   */
+  function moduleLoadedBy(call) {
+    if (call?.getKind() !== SyntaxKind.CallExpression) return null;
+    const callee = unwrap(call.getExpression());
+    const isLoad =
+      callee?.getKind() === SyntaxKind.ImportKeyword ||
+      (callee?.getKind() === SyntaxKind.Identifier && callee.getText() === "require" && callee.getSymbol()?.getDeclarations().every(isExternal));
+    if (!isLoad) return null;
+    const spec = literalKey(call.getArguments()[0]);
+    if (spec === null) return { sf: null };
+    const resolved = ts.resolveModuleName(spec, call.getSourceFile().getFilePath(), program.getCompilerOptions(), ts.sys).resolvedModule;
+    if (!resolved) return spec.startsWith(".") || spec.startsWith("@/") ? { sf: null } : { library: true };
+    if (resolved.isExternalLibraryImport || resolved.resolvedFileName.includes("/node_modules/")) return { library: true };
+    return { sf: program.getSourceFile(resolved.resolvedFileName) ?? null };
+  }
+
+  function resolveExport(sf, name, site) {
+    if (!sf) return unresolvedResult("function from a module this gate cannot resolve");
+    const decls = sf.getExportedDeclarations().get(name) ?? [];
+    if (decls.length === 0) return unresolvedResult(`module ${toRelPosix(sf.getFilePath())} exports no ${name}`);
+    return merge(decls.map((d) => (isExternal(d) ? libraryMemberValue([d]) : resolveDeclaration(d, site))));
   }
 
   function resolveDeclaration(decl, site) {
@@ -824,8 +725,8 @@ export function createFunctionResolver({ program }) {
       if (isObjectLiteralMember(decl) && !hasStableReceiver(site)) {
         return unresolvedResult("member of an object that may be rebound");
       }
-      if (isObjectLiteralMember(decl)) return objectMemberValue(decl, { ...EMPTY, fns: [fn] });
-      if (kind === SyntaxKind.MethodDeclaration && isClassMember(decl)) return { ...EMPTY, fns: withOverrides(fn) };
+      if (isObjectLiteralMember(decl)) return { ...EMPTY, fns: [fn] };
+      if (kind === SyntaxKind.MethodDeclaration && isClassMember(decl)) return classMemberValue(decl);
       return { ...EMPTY, fns: [fn] };
     }
     switch (kind) {
@@ -847,65 +748,50 @@ export function createFunctionResolver({ program }) {
         return resolveValue(decl.getInitializer());
       case SyntaxKind.PropertyAssignment:
         if (!hasStableReceiver(site)) return unresolvedResult("member of an object that may be rebound");
-        return objectMemberValue(decl, resolveValue(decl.getInitializer()));
+        return resolveValue(decl.getInitializer());
       case SyntaxKind.ShorthandPropertyAssignment: {
         if (!hasStableReceiver(site)) return unresolvedResult("member of an object that may be rebound");
         const valueDecl = decl.getValueSymbol?.()?.getDeclarations()[0];
-        return objectMemberValue(
-          decl,
-          valueDecl ? resolveDeclaration(valueDecl, decl.getNameNode()) : unresolvedResult("shorthand with no value"),
-        );
+        return valueDecl ? resolveDeclaration(valueDecl, decl.getNameNode()) : unresolvedResult("shorthand with no value");
       }
       case SyntaxKind.ClassDeclaration:
       case SyntaxKind.ClassExpression:
         // The construction unit: field initializers, the constructor, the base.
         return { ...EMPTY, fns: [decl] };
-      case SyntaxKind.PropertyDeclaration: {
-        // A class field holding a function: its initializer and every write.
-        const initial = decl.getInitializer() ? resolveValue(decl.getInitializer()) : { ...EMPTY };
-        return merge([
-          initial,
-          ...writesTo(decl.getNameNode(), (node) => {
-            const access = node.getParent();
-            if (access?.getKind() !== SyntaxKind.PropertyAccessExpression || access.getNameNode() !== node) return null;
-            const assignment = access.getParent();
-            return assignment?.getKind() === SyntaxKind.BinaryExpression && assignment.getLeft() === access ? assignment : null;
-          }),
-        ]);
-      }
+      case SyntaxKind.PropertyDeclaration:
+        return classMemberValue(decl);
+      case SyntaxKind.MethodDeclaration:
+        // No body: abstract, or an overload signature.
+        if (isClassMember(decl)) return classMemberValue(decl);
+        return resolveImplementations(site, decl);
       case SyntaxKind.MethodSignature:
       case SyntaxKind.PropertySignature:
-      case SyntaxKind.MethodDeclaration:
-        return resolveImplementations(site);
+        return resolveImplementations(site, decl);
       case SyntaxKind.BindingElement: {
         const pattern = decl.getParent();
-        if (pattern?.getKind() === SyntaxKind.ArrayBindingPattern) {
-          // `const [v, setV] = useState()`: an element of a library value is
-          // library code; of anything else, it cannot be named.
-          const holder = pattern.getParent();
-          if (holder?.getKind() === SyntaxKind.VariableDeclaration && isConstVariable(holder) && holder.getInitializer()) {
-            const source = resolveValue(holder.getInitializer());
-            if (source.external && !source.unresolved && source.params.length === 0) return source;
-          }
-          return unresolvedResult("function from an array pattern");
-        }
-        if (pattern?.getKind() !== SyntaxKind.ObjectBindingPattern) return unresolvedResult("function from a binding pattern");
-        const name = decl.getPropertyNameNode()?.getText() ?? decl.getName();
-        const holder = pattern.getParent();
+        const holder = pattern?.getParent();
         if (holder?.getKind() === SyntaxKind.VariableDeclaration && !isConstVariable(holder)) {
           return unresolvedResult("function destructured into a let/var");
         }
         if (holder?.getKind() !== SyntaxKind.VariableDeclaration && holder?.getKind() !== SyntaxKind.Parameter) {
           return unresolvedResult("function destructured from a nested pattern");
         }
-        if (holder.getKind() === SyntaxKind.VariableDeclaration && holder.getInitializer()) {
-          const source = resolveValue(holder.getInitializer());
-          // Destructured off a library value (`require("node:module")`):
-          // library code, plus anything of ours that value was built from.
-          if (source.external && !source.unresolved && source.params.length === 0) return source;
+        const init = holder.getKind() === SyntaxKind.VariableDeclaration ? holder.getInitializer() : null;
+        if (pattern.getKind() === SyntaxKind.ArrayBindingPattern) {
+          // `const [v, setV] = useState()`: an element of what a library call
+          // returns is library code only when the library makes it.
+          const call = init ? unwrapAwait(init) : null;
+          if (call?.getKind() === SyntaxKind.CallExpression && resolveCall(call).external && libraryReturnIsLibraryMade(call)) {
+            return { ...EMPTY, external: true };
+          }
+          return unresolvedResult("function from an array pattern");
         }
-        const sourceType =
-          holder.getKind() === SyntaxKind.VariableDeclaration ? holder.getInitializer()?.getType() : holder.getType();
+        if (pattern.getKind() !== SyntaxKind.ObjectBindingPattern) return unresolvedResult("function from a binding pattern");
+        const name = decl.getPropertyNameNode()?.getText() ?? decl.getName();
+        // `const { f } = await import("…")` / `require("…")`: the module's export.
+        const loaded = init ? moduleLoadedBy(unwrapAwait(init)) : null;
+        if (loaded) return loaded.library ? LIBRARY_MODULE : resolveExport(loaded.sf, name, decl.getNameNode());
+        const sourceType = init ? init.getType() : holder.getType();
         if (!sourceType) return unresolvedResult("destructured const with no initializer");
         return resolvePropertyOfType(sourceType, name, decl.getNameNode());
       }
@@ -928,63 +814,97 @@ export function createFunctionResolver({ program }) {
     return null;
   }
 
-  function memberNameOf(e) {
-    return e.getKind() === SyntaxKind.PropertyAccessExpression ? e.getName() : e.getText();
-  }
-
-  function resolveObjectMember(literal, name) {
-    if (literal.getProperties().some((p) => p.getKind() === SyntaxKind.SpreadAssignment)) {
-      return unresolvedResult("object literal with a spread supplies the member");
+  /**
+   * Every production member that may hold a function, keyed by name: object
+   * literal members and instance class members. An interface member can be
+   * any of them — a structural assignment or a cast decides which object
+   * stands behind an interface, and neither renames a member — so dispatch
+   * through one is the union over its name. (The language service's
+   * implementations miss an object literal or class that matches only
+   * structurally.)
+   */
+  let membersByName = null;
+  function membersNamed(name) {
+    if (!membersByName) {
+      membersByName = new Map();
+      for (const sf of program.getSourceFiles()) {
+        if (sf.isDeclarationFile() || sf.getFilePath().includes("/node_modules/")) continue;
+        sf.forEachDescendant((node) => {
+          const k = node.getKind();
+          const pk = node.getParent()?.getKind();
+          const inLiteral =
+            pk === SyntaxKind.ObjectLiteralExpression &&
+            (k === SyntaxKind.PropertyAssignment || k === SyntaxKind.ShorthandPropertyAssignment || k === SyntaxKind.MethodDeclaration);
+          const inClass =
+            (pk === SyntaxKind.ClassDeclaration || pk === SyntaxKind.ClassExpression) &&
+            (k === SyntaxKind.MethodDeclaration || k === SyntaxKind.PropertyDeclaration) &&
+            !node.isStatic?.();
+          if (!inLiteral && !inClass) return;
+          if (node.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) return; // G3
+          if (!mayBeCallable(node.getType())) return;
+          const key = node.getSymbol()?.getName();
+          if (!key) return;
+          const list = membersByName.get(key) ?? [];
+          list.push(node);
+          membersByName.set(key, list);
+        });
+      }
     }
-    const prop = literal.getProperty(name);
-    return prop ? resolveMember(prop) : EMPTY;
+    return membersByName.get(name) ?? [];
   }
 
-  /** A member with no body here: every production implementation the language service finds. */
-  function resolveImplementations(site) {
+  function candidateValue(member) {
+    switch (member.getKind()) {
+      case SyntaxKind.MethodDeclaration:
+        return isClassMember(member) ? ownClassMemberValue(member) : { ...EMPTY, fns: [member] };
+      case SyntaxKind.PropertyDeclaration:
+        return ownClassMemberValue(member);
+      case SyntaxKind.PropertyAssignment:
+        return resolveValue(member.getInitializer());
+      case SyntaxKind.ShorthandPropertyAssignment: {
+        const valueDecl = member.getValueSymbol?.()?.getDeclarations()[0];
+        return valueDecl ? resolveDeclaration(valueDecl, member.getNameNode()) : unresolvedResult("shorthand with no value");
+      }
+      default:
+        return unresolvedResult(`member ${member.getKindName()}`);
+    }
+  }
+
+  /** A member with no body here (an interface or type member): every production member of its name. */
+  function resolveImplementations(site, decl) {
     const e = unwrap(site);
     const nameNode =
       e.getKind() === SyntaxKind.PropertyAccessExpression ? e.getNameNode() : e.getKind() === SyntaxKind.Identifier ? e : null;
-    if (!nameNode) return unresolvedResult("member with no body and no name to search");
-    const impls = nameNode.getImplementations();
-    if (impls.length === 0) {
-      const shape = externalShapeOf(nameNode);
-      if (shape) {
-        usedExternalShapes.add(shape);
-        return { ...EMPTY, external: true };
-      }
-      return unresolvedResult("member with no body and no implementation");
+    const shape = nameNode ? externalShapeOf(nameNode) : null;
+    if (shape) {
+      // Declared by us to type a library value; nothing of ours implements it.
+      usedExternalShapes.add(shape);
+      return { ...EMPTY, external: true };
     }
-    const results = [];
-    for (const impl of impls) {
-      const node = impl.getNode();
-      // Supplied only by tests: production never passes one.
-      if (isExternal(node) || isNonProduction(node)) continue;
-      const parent = node.getParent();
-      const fn = parent ? functionOfDeclaration(parent) : null;
-      if (fn) {
-        results.push({ ...EMPTY, fns: [fn] });
-      } else if (parent?.getKind() === SyntaxKind.PropertyAssignment) {
-        results.push(objectMemberValue(parent, resolveValue(parent.getInitializer())));
-      } else if (parent?.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
-        const valueDecl = parent.getValueSymbol?.()?.getDeclarations()[0];
-        results.push(valueDecl ? resolveDeclaration(valueDecl, node) : unresolvedResult("shorthand with no value"));
-      } else if (node.getKind() === SyntaxKind.Identifier) {
-        results.push(resolveValue(node));
-      } else if (parent?.getKind() === SyntaxKind.ObjectLiteralExpression) {
-        // A whole object literal implementing the type (`options = {}`): only
-        // the member it actually spells supplies a value.
-        results.push(resolveObjectMember(parent, memberNameOf(e)));
-      } else {
-        results.push(
-          unresolvedResult(
-            `implementation ${node.getKindName()} at ${toRelPosix(node.getSourceFile().getFilePath())}:${node.getStartLineNumber()}`,
-          ),
-        );
-      }
+    const name = decl.getSymbol()?.getName();
+    if (!name) return unresolvedResult("member with no name to search");
+    const all = membersNamed(name);
+    const candidates = all.filter((m) => !isNonProduction(m));
+    if (candidates.length === 0) {
+      // Only tests supply one (an injected seam): production never does.
+      return all.length > 0 ? { ...EMPTY } : unresolvedResult(`member ${name} with no body and no member of that name`);
     }
-    return merge(results);
+    const hit = dispatchMemo.get(name);
+    if (hit) return hit;
+    // Re-entered while its own candidates are being resolved (a member whose
+    // value is the same interface member): fail closed, as resolveValue does.
+    if (dispatching.has(name)) return unresolvedResult("cyclic definition");
+    dispatching.add(name);
+    try {
+      const result = merge(candidates.map(candidateValue));
+      dispatchMemo.set(name, result);
+      return result;
+    } finally {
+      dispatching.delete(name);
+    }
   }
+  const dispatchMemo = new Map();
+  const dispatching = new Set();
 
   /**
    * What an invocation runs: a call or `new`, a tagged template's tag, or a
@@ -1011,6 +931,13 @@ export function createFunctionResolver({ program }) {
       } else {
         hit = resolveValue(callee);
       }
+      // A function value typed `any`/`unknown` that resolves to no own code:
+      // whatever was stored in it is unknown, however the `any` arrived.
+      const k = callee?.getKind();
+      if (!hit.unresolved && !hit.libraryModule && hit.fns.length === 0 && hit.params.length === 0 && k !== SyntaxKind.ImportKeyword && k !== SyntaxKind.SuperKeyword) {
+        const t = callee.getType();
+        if (t.isAny() || t.isUnknown()) hit = unresolvedResult("function value typed any or unknown");
+      }
     }
     callMemo.set(node, hit);
     return hit;
@@ -1035,6 +962,7 @@ export function createFunctionResolver({ program }) {
   return {
     resolveValue,
     resolveCall,
+    resolvePropertyOfType,
     resolveParameterFromCallers,
     functionOfDeclaration,
     isAccessorInvocation,
@@ -1072,6 +1000,15 @@ export function mayBeCallable(t) {
   const types = t.isUnion() ? t.getUnionTypes() : [t];
   return types.some((u) => u.getNonNullableType().getCallSignatures().length > 0);
 }
+
+const WRAPPER_KINDS = new Set([
+  SyntaxKind.ParenthesizedExpression, SyntaxKind.NonNullExpression, SyntaxKind.AsExpression,
+  SyntaxKind.SatisfiesExpression, SyntaxKind.TypeAssertionExpression,
+]);
+// Expressions whose value may be a function without being a name.
+const COMPUTED_VALUE_KINDS = new Set([
+  SyntaxKind.CallExpression, SyntaxKind.ConditionalExpression, SyntaxKind.BinaryExpression, SyntaxKind.AwaitExpression,
+]);
 
 const isTypePosition = (node) =>
   node.getKind() >= SyntaxKind.FirstTypeNode && node.getKind() <= SyntaxKind.LastTypeNode;
@@ -1210,9 +1147,10 @@ export function createReachability(resolver) {
     let value = id;
     if (pk === SyntaxKind.PropertyAccessExpression) {
       if (parent.getNameNode() === id) value = parent;
-      // The receiver of `a.b` is not handed on by the access — except
-      // `fn.bind/.call/.apply`, which hand `fn` itself to the runtime.
-      else if (!["bind", "call", "apply"].includes(parent.getName())) return null;
+      // The receiver of `a.b` is not handed on by the access. (`fn.bind(…)`
+      // hands on a call's result, an edge where it is used; `fn.call(…)` is an
+      // invocation of `fn`.)
+      else return null;
     }
     if (calleeNodes.has(value)) return null;
     let symbol = value.getSymbol?.();
@@ -1221,6 +1159,81 @@ export function createReachability(resolver) {
     if (decls.length === 0 || decls.every(isExternal)) return null;
     if (!mayBeCallable(value.getType())) return null;
     return value;
+  }
+
+  /**
+   * Whether `node`, climbing past parentheses and casts, is used as a value
+   * that leaves the expression: an argument, an initializer, a returned or
+   * assigned value, an element. Not a callee, a receiver or a condition.
+   */
+  function isHandedOn(node) {
+    let cur = node;
+    while (WRAPPER_KINDS.has(cur.getParent()?.getKind())) cur = cur.getParent();
+    const parent = cur.getParent();
+    switch (parent?.getKind()) {
+      case SyntaxKind.CallExpression:
+      case SyntaxKind.NewExpression:
+        return (parent.getArguments?.() ?? []).includes(cur);
+      case SyntaxKind.VariableDeclaration:
+      case SyntaxKind.PropertyAssignment:
+      case SyntaxKind.PropertyDeclaration:
+        return parent.getInitializer?.() === cur;
+      case SyntaxKind.ReturnStatement:
+      case SyntaxKind.ArrayLiteralExpression:
+      case SyntaxKind.SpreadElement:
+      case SyntaxKind.YieldExpression:
+        return true;
+      case SyntaxKind.ArrowFunction:
+        return parent.getBody() === cur;
+      case SyntaxKind.BinaryExpression: {
+        const op = parent.getOperatorToken().getKind();
+        return op === SyntaxKind.EqualsToken && parent.getRight() === cur;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Edges to the own functions an argument carries as members, found through
+   * its TYPE (bounded depth): a member whose declaration is production code
+   * and may hold a function. An array or tuple of functions handed to library
+   * code is unnameable unless it is written inline (its elements are then
+   * values in reach).
+   */
+  function memberFunctionEdges(arg, depth = 0, seen = new Set()) {
+    const e = unwrap(arg);
+    if (!e || depth > 2) return [];
+    if (LITERAL_FN_KINDS.has(e.getKind())) return [];
+    const out = [];
+    const visitType = (type, d) => {
+      const t = type.getNonNullableType();
+      if (seen.has(t.compilerType)) return;
+      seen.add(t.compilerType);
+      if (t.isUnion()) return t.getUnionTypes().forEach((u) => visitType(u, d));
+      if (t.isIntersection()) return t.getIntersectionTypes().forEach((u) => visitType(u, d));
+      if (t.getCallSignatures().length > 0) return; // the argument itself: a value edge already
+      const element = t.getArrayElementType?.() ?? null;
+      const tuple = t.isTuple?.() ? t.getTupleElements() : null;
+      for (const el of element ? [element] : tuple ?? []) {
+        if (mayBeCallable(el) && e.getKind() !== SyntaxKind.ArrayLiteralExpression) {
+          out.push({ node: e, r: { fns: [], external: false, params: [], unresolved: "array of functions handed to library code" }, kind: "value" });
+        }
+      }
+      for (const prop of t.getProperties()) {
+        const decls = prop.getDeclarations();
+        if (!decls.some((dcl) => !isExternal(dcl) && !resolver.isNonProduction(dcl))) continue;
+        const at = prop.getValueDeclaration() ?? decls[0];
+        const pt = prop.getTypeAtLocation(at);
+        if (mayBeCallable(pt)) {
+          out.push({ node: e, r: resolver.resolvePropertyOfType(t, prop.getName(), e), kind: "value" });
+        } else if (d < 2) {
+          visitType(pt, d + 1);
+        }
+      }
+    };
+    visitType(e.getType(), depth);
+    return out;
   }
 
   /** { node, r, kind: "call" | "value" } for every edge out of `unit`. */
@@ -1237,18 +1250,32 @@ export function createReachability(resolver) {
     for (const node of owned) {
       const r = invocationOf(node);
       if (r) edges.push({ node, r, kind: "call" });
-      if (node.getKind() === SyntaxKind.Identifier) {
+      if (node.getKind() === SyntaxKind.Identifier || node.getKind() === SyntaxKind.PrivateIdentifier) {
         const value = referenceValueOf(node, calleeNodes);
         if (value && !(value !== node && invocationOf(value))) edges.push({ node: value, r: resolveValue(value), kind: "value" });
       } else if (node.getKind() === SyntaxKind.ElementAccessExpression && !calleeNodes.has(node)) {
         // `TBL["a"]`, `TBL[k]` handed on as a value.
         const parent = node.getParent();
         const isWriteTarget = parent?.getKind() === SyntaxKind.BinaryExpression && parent.getLeft() === node;
+        // A receiver is read, not handed on. (`TBL["a"].bind(…)` hands on the
+        // bound function, a call's result, which is an edge where it is used.)
         const isReceiver =
           (parent?.getKind() === SyntaxKind.PropertyAccessExpression || parent?.getKind() === SyntaxKind.ElementAccessExpression) &&
           parent.getExpression() === node;
         if (!isWriteTarget && !isReceiver && mayBeCallable(node.getType())) {
           edges.push({ node, r: resolveValue(node), kind: "value" });
+        }
+      } else if (COMPUTED_VALUE_KINDS.has(node.getKind()) && isHandedOn(node) && mayBeCallable(node.getType())) {
+        // A function value that is not a name: a call's result, a
+        // conditional, an `await` — `retry(registry.get("a")!)`.
+        edges.push({ node, r: resolveValue(node), kind: "value" });
+      }
+      if (node.getKind() === SyntaxKind.CallExpression || node.getKind() === SyntaxKind.NewExpression) {
+        // Library code may call any function an argument carries as a member:
+        // `new ReadableStream(source)`, `lib(opts)`.
+        const r = invocationOf(node);
+        if (r && r.external && !r.unresolved) {
+          for (const arg of node.getArguments?.() ?? []) edges.push(...memberFunctionEdges(arg));
         }
       }
     }

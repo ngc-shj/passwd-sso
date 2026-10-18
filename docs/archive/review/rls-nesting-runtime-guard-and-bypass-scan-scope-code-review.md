@@ -409,3 +409,213 @@ Each mutation changes one clause in a copy of the gates and runs `npx vitest run
 | ADJ-A2 | function-resolver | `functionArgsOf` in the library-result merge | bypass | `result is typed Function` | red |
 | ADJ-A3 | function-resolver | `isPackageModuleLoad` | both, all tests | — | green → removed |
 | ADJ-A4 | function-resolver | `.bind/.call/.apply` receiver as a value reference | nesting | `bound with .bind` | red |
+
+
+---
+
+# Round 4
+Date: 2026-10-17
+Diff reviewed: `47d53b9e6..77cb92b61` (review(3)). Ollama was not used; the findings were merged by hand.
+
+## Changes from Previous Round
+- Round-3 status:
+  - Confirmed by execution: R3-S1, R3-S2 (resolveValue site only), R3-S3, F4 (identifier receiver), F8, F10 (base-class field only).
+  - Partly false: F5, F9, F11 (`require()` half), R3-S5, N-T8.
+  - Not recorded: the round-3 change to the production boundary predicate.
+- Mutation record: 29 of 31 re-ran as recorded. R3-M2 / M2b do not reproduce as described. The union split and `getNonNullableType` each cover the other, so dropping either one stays green.
+- Three round-3 changes are regressions against `47d53b9e6`: F1 = S1, F2 = S2, and S4. A fourth change, F11, adds a false positive.
+
+## Merged findings (round 4)
+- **R4-C1 = F1 + S1 [Critical, regression]** A class field resolves to its own initializer plus its property writes. The F10 change dropped implementation lookup. Missed shapes: a subclass override (`override run = opener`) and the constructor idiom `Object.assign(this, opts)`. Both were refused at `47d53b9e6`.
+- **R4-C2 = F2 + S2 [Critical, regression, R43]** The boundary was narrowed from "not production" to "declared non-production". Production may now import a root `.ts`, a `.js` under `src/`, or a `.js` behind its own `.d.ts`. Neither gate scans those files. The real tree is green under the old predicate. S2 asks for the remedy to be decided at contract level: the scan set should be the import closure, not a path prefix.
+- **R4-C3 = S3 [Critical, continuing]** `const { f } = await import("@/lib/own")` is judged library code by both gates. Production uses this idiom: webhook-dispatcher, audit-outbox-worker, instrumentation.
+- **R4-C4 = T1 [Critical]** The strict-callability fix is unpinned at `referenceValueOf` and the element-access edge (O23, O24).
+- **R4-C5 = T2 [Critical]** The delegate property-access arm of `modelAccessOf` is unpinned (O36).
+- **R4-C6 = T-A1 [Critical]** A nested object replaced by plain assignment (`cfg.inner = { run }`, `Object.assign(cfg, { inner })`) is invisible to both gates.
+- **R4-C7 = T-A2 [Critical]** A library result handed straight to an own invoker is never resolved: `retry(registry.get("a")!)`, `[1].forEach(Reflect.get(o, "f"))`.
+- **Major:**
+  - F3 + T3: object writes through `as`/`()`/`!`, a let alias, a container alias, the nested path, a library mutator, and the other OBJECT_MUTATORS. An unrecognised use defaults to a read.
+  - F4: an own object with function members, built outside and handed to a library inside reached code.
+  - F5 + S5: a client handed to a library inside an object, an array, a spread, a closure return, or a mixed own/library callee.
+  - F6 + S8: the boundary skips `require()` in `.ts` files and side-effect `import()`.
+  - S4 (regression): `(tx as any).user` is not charged.
+  - S6: via-granted models can be written by the caller through a returned delegate.
+  - S7: the conditional-opener entry exempts the whole callee.
+  - S9: the tooling boundary compares direct-import paths and is defeated by a re-export.
+  - S10: `["*"]` on `src/auth.ts` and `vault-reset.ts`.
+  - S11: the docs say the gates fail closed.
+  - T4: the `bypassRootsOf` arms are unreachable, so the N-T8 defence claim is false. The disjointness test parses the source by regex.
+  - T5, T6: further unpinned deny arms.
+- **Minor:** F7–F10, S12, S13 (UNVERIFIED), T7, T8, the stale "77 files" count in security-review.md.
+- **F11 [Minor, regression, false positive]** `if (cb) cb(...)` in an own invoker is refused.
+
+## Root-cause note
+This is the fourth round in which the member set of "code the gate cannot see" has grown:
+- Round 1 enumerated spellings.
+- Round 2 introduced the shared resolver.
+- Round 3 moved to reach and types.
+- Round 4 found a further 7 Critical findings. Three of them are regressions seeded by the round-3 fixes.
+
+The pattern matches the stopping rule for a class that expands under fixes: more rounds of case-adding do not converge. Two directions are left:
+- Restrict the reached code to a subset the gate can decide, and refuse everything outside it.
+- Narrow the gate's claim and rely on the runtime guard, which is the stated boundary.
+
+The user decides between them.
+
+## Decision (round 4)
+The user chose to restrict the analysis to a subset it can decide, and to refuse what falls outside it. The real-tree cost was measured before committing to that.
+
+### Measured cost
+- **Reach.** The resolver was instrumented to tag each edge with the data-flow followers it passed through. Then both gates were run on the real tree.
+  - check-rls-nesting: 56 of 2,673 reached edges use any follower.
+  - check-bypass-rls: 49 of 1,342 reached edges use any follower.
+  - Edges where a follower supplies an own function:
+    - interface implementations: 14
+    - object-literal members: 8
+    - returned functions: 4
+  - Followers no real edge uses: class-field writes, parameter-from-callers, own-invoker arguments, element access, subclass overrides, `.call`/`.apply`.
+- **Global rules.** These would make declaration-based resolution sound. The scan covered 1,046 production files:
+  - G1, a write to an own property whose type may be callable: 0
+  - G2, an object mutator on `this`, `any`, or an object with own callable members: 0
+  - G3, a computed-key member holding a function: 0
+  - G4, a callable constructor parameter property: 0
+
+  A scratch tree with one injected violation per rule reports each of them, so the zero is not vacuous. The 41 writes to callable-typed members on the real tree all target library-declared properties: React ref `.current`, DOM `onload`/`onerror`, `Object.prototype.toString`/`valueOf`.
+- **New finding (R4-O1).** `getImplementations` does not return an object literal or a class that implements an interface only structurally. Verified on a scratch tree: of `const a: Runner = {…}`, `const s = { run }` and `class C { run() {} }`, only the first is returned. The checker's `isTypeAssignableTo` is available.
+
+### Mechanism
+1. **Global rules G1–G4**, enforced over all production code. A function stored in an object or class member then holds only what its declaration says. This replaces the write-following machinery (`objectUses`, `writesThroughUse`, class-field `writesTo`, the mutation scan in `tableOf`). Closes F3/T3, T-A1 and the `Object.assign(this, …)` half of C1 by construction.
+2. **Every function value in reached code must resolve.** Any expression of callable type in a value position counts, not only identifiers and element accesses. Closes T-A2, F7, F9 and T1. An own object with callable members, or a client inside an argument, is found by walking the argument's type. Closes F4, F5 and S5.
+3. **Library-held own values.** A library property typed by a type parameter (`RefObject<T>.current`) is unresolved. So is an `any`/`unknown` callee at the invocation (F8).
+4. **Interface dispatch.** The candidate set is every production member of that name whose owner type is assignable to the receiver type (R4-O1). Subclass overrides, of fields and methods alike, come from derived-class enumeration (C1).
+5. **Scan set.** The scan set is the production import closure. Module resolution goes through the compiler, which makes `require()` and side-effect `import()` visible. The tooling boundary is judged over the closure. Closes C2, S8 and S9. A destructure from an own module's `import()` resolves through the property declaration (S3).
+6. **Bypass gate:**
+   - charge at the operation by the delegate's type (S4, S6);
+   - measured lists replace `*` (S10);
+   - the conditional exemption becomes per edge, with no writes to `tx` (S7, F10);
+   - forwarder purpose parameters must not be written (S12);
+   - list disjointness is checked inside the gate (T4).
+7. **Mutation record.** Clauses that can never fire are deleted. Every remaining clause is pinned by its own mutation, recorded with the exact old→new text.
+
+## Resolution Status (round 4)
+
+Every finding is addressed by the mechanism above, not by an added case. The table names where each one is now decided.
+
+| Finding | Resolution | Mutation |
+|---|---|---|
+| R4-C1 = F1 + S1 | A class member is that member in the class and in every production subclass (`classMemberValue`, derived classes by name). A field holds its initializer; G1 refuses any other write and G2 refuses `Object.assign(this, …)` | R2, R3, S1, S5 |
+| R4-C2 = F2 + S2 | The scan set is the production import closure (`productionScope`). A module production loads is scanned and held to G1-G5 (root `sentry.server.config.ts` is now scanned). Own JavaScript and a declaration over own JavaScript are refused | S11, S12, S15, S15b, B5 |
+| R4-C3 = S3 | A destructure from `import()`/`require()` resolves the module through the compiler and reads the export's declaration. A package is library code | R7 |
+| R4-C4 = T1 | `mayBeCallable` at the value-reference and element-access sites is pinned by tests that exist only under strict | R15 |
+| R4-C5 = T2 | Pinned by a deny test (`repo.user`) and an allow test (a non-delegate `user`). The query is also charged where it runs | B1 |
+| R4-C6 = T-A1 | G1: a write of a function to an own member after its declaration is refused, whatever the path (`cfg.inner = …`) | S1, S4 |
+| R4-C7 = T-A2 | Every function value in reached code is an edge, not only a name: a call's result, a conditional, an `await` | R10 |
+| F3 + T3 | G1 and G2 replace the write-following machinery (`objectUses`, `writesThroughUse`, field `writesTo`, the table mutation scan). Casts, aliases and nested paths no longer matter | S1–S6 |
+| F4 | The own functions an argument to library code carries as members are edges (`memberFunctionEdges`). A non-literal array of functions handed to a library is refused | R11, R11b |
+| F5 + S5 | `carriesClient` walks unions, arrays, tuples, closure returns and own object members. A mixed own/library callee is checked | B2, B2b, B2c, B2d, B2f |
+| F6 + S8 | Module loads resolve through `ts.resolveModuleName`, so `require()` in `.ts` and a side-effect `import()` count. A non-literal specifier outside `NON_LITERAL_LOAD_ALLOWLIST` is refused, and so is an own specifier that does not resolve | S10, S13, S13b, S14 |
+| S4 | The query is charged where it runs, by its `<Model>Delegate` type, each member of a union. A delegate type with no model name is refused | B1, B1b, B7 |
+| S6 | The operation-site charge applies to a via grant too: a delegate handed back is charged to the module that queries it | B1 |
+| S7 + F10 | The conditional-opener entry exempts one guarded edge inside the callee. The rest of the callee is reached. The callee entered without the guard in the same context voids the exemption, and so does a reassigned client. A missing guarded site, or a written guard, stops the run | N1–N5 |
+| S9 | The tooling boundary is judged over each tool's import closure | S16 |
+| S10 | `src/auth.ts` and `vault-reset.ts` carry measured model lists. Stranded-row counts and the audit enqueue are granted through ALLOWED_VIA. Check 3 now runs for both | (real tree) |
+| S11 | The docs now say what the gate decides and what it refuses. They no longer claim a blanket fail-closed | — |
+| S12 | A forwarder's purpose parameter that is written is refused | B3 |
+| S13 | Moot: the read-only callee list was removed with the write-following machinery. G2 identifies a mutator by the declaration the call resolves to, reached through its name or a one-step alias | S5, S5b |
+| T4 | INDIRECT_CALLBACK_ALLOWLIST / ALLOWED_USAGE disjointness is checked inside the gate (B4) and replaces the regex test. The unreachable `bypassRootsOf` arms were removed. The two alternation assertions now pin one message each | B4 |
+| T5, T6 | Covered by the clauses above, each with its own mutation. The own-invoker argument logic (`argumentsPassedTo`, O9–O13) was removed as redundant: everything an own invoker passes is a value in its reached body | — |
+| T7 | `isInvokedOrHandedOn`, `memberNameOf`, `resolveObjectMember`, the `.bind`/`.call` receiver exceptions and `isPackageModuleLoad` were removed. The value-flow edges cover what they did | — |
+| T8 | Both fixture stubs now follow the generated client: per-model `<Model>Delegate` types, no string index signature, no callable delegate. The bypass fixtures carry the real `stranded-rows.ts` | — |
+| F7, F9 | Both are value edges now (an element-access receiver of `.bind`, a private field) | R12 |
+| F8 | An `any`/`unknown` callee that resolves to no own code is refused. A value from a known library module is the exception (`LIBRARY_MODULE`) | R5, R6, R6b |
+| F11 | The false positive went away with `argumentsPassedTo` | — |
+| R4-O1 | An interface member is every production member of that name. A member only tests supply resolves to nothing in production | R1x, R1b, R1c |
+| ADJ1 | The security-review count is now 101 entries | — |
+
+New allowlist entries the real tree needed, each reviewed:
+- `EXTERNAL_SHAPE_ALLOWLIST`: `AwsSmModule`, `AzureKvModule`, `AzureIdentityModule`, `GcpSmModule`. These are the SDK module shapes the key providers cast `require()` results to.
+- `FUNCTION_FLOW_ALLOWLIST`: `src/lib/prisma/raw-sql.ts::createGenuineObject::G1`. These are conversion traps that run only through implicit conversion, and `throwOnConversion` only throws.
+- `NON_LITERAL_LOAD_ALLOWLIST`: `src/i18n/messages.ts` (message JSON) and `src/lib/crypto/crypto-client.ts` (a browser-side module URL).
+
+### Mutation record (round 4)
+
+Each mutation changes one clause in a scratch copy and runs `npx vitest run <file> -t "<filter>"`. Bypass = `check-bypass-rls.test.mjs`, nesting = `check-rls-nesting.test.mjs`.
+
+| ID | File | Clause | Test file | `-t` filter | Result |
+|---|---|---|---|---|---|
+| S1 | soundness | G1 own-member write | nesting | `a field set in the constructor` | red |
+| S2 | soundness | G1 write through an undeclared key | nesting | `a function written into an any object` | red |
+| S2b | soundness | G1 value-side test | nesting | `a function written into an any object` | red |
+| S3 | soundness | library-member exemption | nesting | `member a library declares` | red |
+| S4 | soundness | destructuring-assignment leaves | nesting | `destructuring assignment onto a member` | red |
+| S5 | soundness | mutator name prefilter | nesting | `Object.assign onto this` | red |
+| S5b | soundness | one-step alias name | nesting | `Object.assign through a renamed alias` | red (after renaming the alias; green while it shared the name) |
+| S5c | soundness | Reflect owner | nesting | `refuses Reflect.set` | red |
+| S6 | soundness | `this` target | nesting | `defineProperty onto this` | red |
+| S6b | soundness | `any` target | nesting | `defineProperty onto an any value` | red |
+| S6c | soundness | own-function-member target | nesting | `Object.assign through an alias\|Reflect.set` | red |
+| S6d | soundness | fresh literal exempt for Object.assign | nesting | `Object.assign onto a fresh literal` | red |
+| S6e | soundness | fresh literal exempt for Object.assign only | nesting | `defineProperty onto a fresh literal` | red (the first version exempted every mutator, a hole found by this run) |
+| S7 | soundness | G3 | nesting | `computed-key member` | red |
+| S8 | soundness | G4 | nesting | `callable parameter property` | red |
+| S9 | soundness | G5 class expression | nesting | `class expression that extends` | red |
+| S9b | soundness | G5 non-name base | nesting | `mixin base` | red |
+| S10 | soundness | declared non-production target | nesting | `listed tooling through require\|test module through a side-effect` | red |
+| S11 | soundness | own JavaScript | nesting | `loading own JavaScript` | red (after adding allowJs to the fixture, as the real tsconfig has) |
+| S12 | soundness | declaration over own JavaScript | nesting | `declaration over own JavaScript` | red |
+| S13 | soundness | non-literal specifier | nesting | `non-literal specifier` | red |
+| S13b | soundness | NON_LITERAL_LOAD_ALLOWLIST | bypass | `messages.ts shape\|crypto-client.ts shape` | red |
+| S14 | soundness | own specifier that does not resolve | nesting | `does not resolve` | red |
+| S15 | soundness | closure adds the module | nesting | `outside src/ implements\|outside src/ that production imports to G1` | red |
+| S15b | soundness | same | bypass | `scans a module outside src` | red |
+| S16 | soundness | tooling closure is transitive | nesting | `through a re-export` | red |
+| S17 | soundness | FUNCTION_FLOW_ALLOWLIST excuses | nesting | `listed conversion traps` | red |
+| S17b | soundness | stale entry | nesting | `once createGenuineObject writes no function` | red |
+| S17c | soundness | entry keyed by enclosing function | nesting | `another function of the file` | red |
+| R1x | resolver | name-based candidates | nesting | `implements the interface only structurally` | red |
+| R1b | resolver | test-only member resolves empty | nesting | `member only a test supplies` | red |
+| R1c | resolver | external shape first | nesting | `listed SDK-shaped interface` | red |
+| R2 | resolver | derived-class members | nesting | `subclass field that overrides\|subclass override that opens` | red |
+| R3 | resolver | field initializer | nesting | `field initializer\|subclass field` | red |
+| R4 | resolver | library member typed by stored value | nesting | `library member typed by what was stored` | red |
+| R5 | resolver | `any` callee refused | nesting | `any-typed library value called as a function` | red |
+| R6 | resolver | library-module exemption at the callee | nesting | `library module, though typed any\|createRequire` | red |
+| R6b | resolver | library-module exemption at the return | nesting | `createRequire` | red |
+| R7 | resolver | module load in a destructure | nesting | `own module's import\|own module's require` | red |
+| R8 | resolver | array pattern only when library-made | nesting | `array a library returns` | red |
+| R10 | resolver | computed function values are edges | nesting | `library result handed straight` | red |
+| R11 | resolver | member functions of library arguments | nesting | `own object handed to a library` | red |
+| R11b | resolver | non-literal function array to library | nesting | `array of functions handed` | red |
+| R12 | resolver | private identifiers | nesting | `private field handed on` | red (after building the instance outside the callback) |
+| R14 | resolver | shorthand is not a binding write | nesting | `listed conditional opener when the call passes the outer tx` | red |
+| R15 | resolver | `mayBeCallable` union and non-null | bypass | `optional function handed on` | red |
+| N1 | nesting | drop the guarded edge | nesting | `listed conditional opener when the call passes the outer tx` | red |
+| N2 | nesting | rerun without exemption when entered plainly | nesting | `also entered without the guard` | red |
+| N3 | nesting | reassigned client | nesting | `client is reassigned` | red |
+| N4 | nesting | guarded site must exist | nesting | `guarded opener is gone` | red |
+| N5 | nesting | guard not written | nesting | `writes its own guard` | red |
+| N6 | nesting | `mayBeCallable` in the context-as-value scan | nesting | `context function named in a value position` | green: equivalent. The name of a context function in value position is reported where it is written, before any holder's type matters |
+| B1 | bypass | operation-site charge | bypass | `erased to any\|via module hands back\|union of delegates` | red |
+| B1b | bypass | each member of a delegate union | bypass | `union of delegates` | red (after erasing the reads, so only the query names the models) |
+| B2 | bypass | mixed own/library callee | bypass | `own or library` | red |
+| B2b | bypass | closure return | bypass | `returned by a closure` | red |
+| B2c | bypass | array element | bypass | `client handed in an array` | red |
+| B2d | bypass | own object member | bypass | `inside an object` | red |
+| B2f | bypass | delegate as a client | bypass | `as a delegate` | red |
+| B3 | bypass | written purpose parameter | bypass | `rewrites its purpose parameter` | red |
+| B4 | bypass | list disjointness | bypass | `on both INDIRECT_CALLBACK_ALLOWLIST` | red |
+| B5 | bypass | closure files scanned | bypass | `scans a module outside src` | red |
+| B6 | bypass | soundness checked in this gate | bypass | `member written after its initializer\|written through` | red |
+| B7 | bypass | unnameable delegate refused | bypass | `model its type does not name` | red |
+
+Removed as dead, each after its mutation stayed green: the own-invoker argument logic (R9, R9b), the `.bind`/`.call` receiver exceptions (R13), `getNonNullableType` in `carriesClient` (B2e). R1 named no code (its clause is R1x).
+
+### Verification (round 4)
+| Check | Result |
+|---|---|
+| vitest | 17,089 passed, 1 failed (the known `crypto-auth-deps-manifest` (E), the uncommitted `passwd-sso-cli`) |
+| check-rls-nesting / check-bypass-rls fixture suites | 413 passed |
+| typecheck, lint | pass |
+| `next build` | pass |
+| check-rls-nesting (real tree) | OK: 1,047 files, 600 context calls, 596 callbacks |
+| check-bypass-rls (real tree) | OK: 221 bypass callbacks through 1,063 reached functions |

@@ -17,11 +17,15 @@
  * callers' callbacks — and in every reached function each access whose
  * receiver is a Prisma client BY TYPE (its member is declared by the
  * generated PrismaClient, or the value has a model delegate's shape) is a
- * model reached under this bypass. How the client got there — a
- * parameter, an object property, an alias, the ambient `prisma` Proxy, a
- * destructuring — no longer matters, because no name is tracked. Anything
- * reached that the resolver cannot name fails the run (unfollowedHandOffs);
- * a computed key on a client fails it too (unresolvedModels).
+ * model reached under this bypass, and so is every query RUN on a delegate,
+ * charged by the delegate's `<Model>Delegate` type where it runs. How the
+ * client got there — a parameter, an object property, an alias, the ambient
+ * `prisma` Proxy, a destructuring, a cast to `any` — no longer matters,
+ * because no name is tracked. Anything reached that the resolver cannot name
+ * fails the run (unfollowedHandOffs); a computed key on a client fails it too
+ * (unresolvedModels). The resolver's answers rest on the decidable subset
+ * lib/soundness.mjs enforces (G1-G5, the production import closure), which
+ * this gate checks itself as well as check-rls-nesting.
  *
  * Five rounds of review found defects here, every one the same defect: a
  * predicate that judged code by its spelling. A fixed 10-line radius stopped
@@ -90,20 +94,22 @@
  *     read, a specifier typed plain `string` with no literal reduction, and
  *     one residual UNVERIFIED case — an ambient `.d.ts` declaration that
  *     types a value as the helper module.
- *   - The scan root is production code: src/ and scripts/ minus tests, the CI
- *     tooling and scripts/manual-tests (isProductionPath in
- *     lib/function-resolver.mjs). The manual-test scripts call these helpers
- *     and are examined by nothing.
+ *   - The scan root is the production import closure: src/ and scripts/
+ *     minus tests, the CI tooling and scripts/manual-tests, plus every module
+ *     they load (lib/soundness.mjs productionScope). The manual-test scripts
+ *     call these helpers and are examined by nothing; listed tooling whose
+ *     imports reach the RLS helpers or the client is refused.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
  *   - Check 3's coverage limits are the shared reachability's (see
- *     check-rls-nesting's header for the list), plus: a client whose type is
- *     erased to `any` is not recognised as a client at all (a call on it
- *     fails the run as unnameable, but a bare `any.user` read is not charged),
- *     and a library object built around the ambient client outside the
- *     reached code (`const repo = makeRepo(prisma)` at module level) is not
- *     seen. A client handed INTO a library call inside reached code fails the
- *     run.
+ *     check-rls-nesting's header for the list), plus: a delegate whose type
+ *     stays `any` all the way to its query is not charged (the query is a call
+ *     on an `any` value, which fails the run only when it is a function value
+ *     the resolver must name), and a library object built around the ambient
+ *     client outside the reached code (`const repo = makeRepo(prisma)` at
+ *     module level) is not seen. A client handed INTO a library call inside
+ *     reached code — bare, in an object or array, returned by a closure, or
+ *     to a callee that may be library code — fails the run.
  *
  * Treat this list as the current best enumeration, not a closed one: eleven
  * successive external reviews each found a member missing from it, which is the
@@ -123,7 +129,8 @@ import {
   unwrapExpression,
 } from "./lib/scope-bindings.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { createFunctionResolver, createReachability, isProductionPath, literalKey, prismaModelNames, unwrap } from "./lib/function-resolver.mjs";
+import { createFunctionResolver, createReachability, isBindingWrite, isProductionPath, literalKey, prismaModelNames, unwrap } from "./lib/function-resolver.mjs";
+import { functionFlowViolations, productionScope } from "./lib/soundness.mjs";
 import { join, extname, dirname, relative, resolve, sep } from "node:path";
 
 // The models `countStrandedRows` counts — the keys of STRANDED_COUNTERS in
@@ -162,7 +169,15 @@ const ALLOWED_USAGE = new Map([
   // The Web-session cap (both sign-in creators route here): the tenant's
   // maxConcurrentSessions, then evict + create sessions under the per-user lock.
   ["src/lib/auth/session/session-concurrency.ts", ["session", "tenant"]],
-  ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
+  // Session callbacks and the sign-in realignment: tenant, user and membership
+  // reads, the account/vault wipe on a tenant move ($transaction), the claim
+  // registry (tenant-management). Stranded-row counts and the audit enqueue
+  // are granted via their modules (ALLOWED_VIA).
+  ["src/auth.ts", [
+    "account", "apiKey", "attachment", "emergencyAccessGrant", "emergencyAccessKeyPair", "extensionToken",
+    "folder", "notification", "passwordEntry", "passwordEntryHistory", "passwordShare", "session",
+    "shareAccessLog", "tag", "tenant", "tenantClaim", "tenantMember", "user", "vaultKey", "webAuthnCredential",
+  ]],
   ["src/lib/audit/audit.ts", ["team", "user"]],
   ["src/lib/audit/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/audit/audit-user-lookup.ts", ["user"]],
@@ -212,7 +227,13 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/access/tenant-auth.ts", ["tenantMember"]],
   // Admin console: cross-tenant team membership query for scope selector
   ["src/lib/auth/access/team-auth.ts", ["teamMember", "tenantMember"]],
-  ["src/lib/vault/vault-reset.ts", ["*"]], // vault wipe: deletes across many tables in $transaction
+  // Vault wipe: deletes across the vault's tables in one $transaction, the
+  // attachment blobs' rows, the emergency-access grants it ends. The audit
+  // enqueue is granted via its module (ALLOWED_VIA).
+  ["src/lib/vault/vault-reset.ts", [
+    "attachment", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag",
+    "teamMember", "teamMemberKey", "user", "vaultKey",
+  ]],
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
   ["src/lib/auth/tokens/api-key.ts", ["apiKey", "tenantMember"]],
   ["src/lib/auth/webauthn/webauthn-authorize.ts", ["webAuthnCredential"]],
@@ -453,6 +474,11 @@ const ALLOWED_VIA = new Map([
     { via: "src/lib/tenant-context.ts", models: ["user"] },
     { via: "src/lib/audit/audit-outbox-in-tx.ts", models: ["auditOutbox"] },
   ]],
+  ["src/auth.ts", [
+    { via: "src/lib/tenant/stranded-rows.ts", models: STRANDED_ROW_MODELS },
+    { via: "src/lib/audit/audit-outbox-in-tx.ts", models: ["auditOutbox"] },
+  ]],
+  ["src/lib/vault/vault-reset.ts", [{ via: "src/lib/audit/audit-outbox-in-tx.ts", models: ["auditOutbox"] }]],
 ]);
 
 /**
@@ -795,9 +821,13 @@ function toRelPosix(absPath) {
   return relative(process.cwd(), absPath).split(sep).join("/");
 }
 
-/** The scan root this whole file uses: production code (isProductionPath). */
+/**
+ * The scan root this whole file uses: the production import closure
+ * (lib/soundness.mjs productionScope), set once the Program is built.
+ */
+let scope = null;
 function isInScopeFile(rel) {
-  return isProductionPath(rel);
+  return scope.files.has(join(process.cwd(), rel));
 }
 
 function programBuildFailed(message) {
@@ -1450,6 +1480,13 @@ if (sourceFiles.length === 0) {
 }
 
 const program = buildProgram();
+scope = productionScope(program);
+// The closure can add a module outside src/ and scripts/ that production loads
+// (a root sentry.server.config.ts); scan it like the rest.
+for (const abs of scope.files) {
+  const rel = toRelPosix(abs);
+  if (!sourceFiles.includes(rel)) sourceFiles.push(rel);
+}
 const helperDecls = resolveHelperDeclarations(program);
 const bypassDecl = program
   .getSourceFile(join(process.cwd(), "src/lib/tenant-rls.ts"))
@@ -1458,7 +1495,7 @@ const bypassDecl = program
 // The Prisma client's model accessors, read off withBypassRls's own client
 // parameter type.
 const MODEL_NAMES = prismaModelNames(bypassDecl?.getParameters()[0]?.getType());
-const resolver = createFunctionResolver({ program });
+const resolver = createFunctionResolver({ program, scope });
 // The helpers' implementation nodes, as the resolver returns them: reach stops
 // at one of these: a nested context is check-rls-nesting's to reject.
 const helperImplementations = new Set();
@@ -1505,7 +1542,13 @@ function purposeOfExpression(arg) {
   }
   if (e?.getKind() === SyntaxKind.Identifier) {
     const decl = e.getSymbol()?.getDeclarations()[0];
-    if (decl?.getKind() === SyntaxKind.Parameter && isPurposeType(decl.getType())) return { forwardedParam: decl };
+    if (decl?.getKind() === SyntaxKind.Parameter && isPurposeType(decl.getType())) {
+      // Reassigned inside the forwarder, it no longer carries what its callers passed.
+      const written = decl.getNameNode().findReferences().some((g) =>
+        g.getReferences().some((r) => isBindingWrite(r) && r.getNode() !== decl.getNameNode()),
+      );
+      return written ? { reassignedParam: decl } : { forwardedParam: decl };
+    }
   }
   return null;
 }
@@ -1566,6 +1609,44 @@ function modelNamed(type, name) {
   const memberType = prop?.getTypeAtLocation?.(bypassDecl) ?? type.getStringIndexType();
   if (MODEL_NAMES.has(name) && memberType && isDelegateType(memberType)) return name;
   return null;
+}
+
+/**
+ * The models a delegate TYPE belongs to: the generated client names each one
+ * `<Model>Delegate`, and a union (`cond ? tx.user : tx.session`) is each of
+ * its members. Null when the type is not a delegate, `{ dynamic }` when one
+ * part is a delegate whose model cannot be named.
+ */
+function modelsOfDelegateType(type) {
+  const t = type.getNonNullableType();
+  const parts = t.isUnion() ? t.getUnionTypes() : [t];
+  if (!parts.some(isDelegateType)) return null;
+  const models = [];
+  for (const part of parts) {
+    if (!isDelegateType(part)) continue;
+    const m = ((part.getAliasSymbol() ?? part.getSymbol())?.getName() ?? "").match(/^(\w+)Delegate$/);
+    const model = m ? m[1][0].toLowerCase() + m[1].slice(1) : null;
+    if (!model || !MODEL_NAMES.has(model)) return { dynamic: true };
+    models.push(model);
+  }
+  return { models };
+}
+
+/**
+ * The models a query run on a delegate reaches — `users.deleteMany(…)` —
+ * charged where the query RUNS, by the delegate's type. A delegate read in one
+ * module and handed back to another is charged to the module that queries it,
+ * so a via grant cannot be used for a write it never makes, and a delegate
+ * whose read the type system lost (`(tx as any).user`) is still charged once
+ * typed again.
+ */
+function delegateOperationOf(node) {
+  if (node.getKind() !== SyntaxKind.CallExpression) return null;
+  const callee = unwrap(node.getExpression());
+  if (callee?.getKind() !== SyntaxKind.PropertyAccessExpression && callee?.getKind() !== SyntaxKind.ElementAccessExpression) return null;
+  const found = modelsOfDelegateType(callee.getExpression().getType());
+  if (!found) return null;
+  return found.dynamic ? { dynamic: true, text: node.getText().slice(0, 80) } : { models: found.models };
 }
 
 /**
@@ -1646,29 +1727,54 @@ function clientHandedToLibrary(node) {
     const receiverType = callee.getExpression().getType();
     if (isClientType(receiverType) || isDelegateType(receiverType)) return null;
   }
+  // Any library part of the callee — a mixed own/library union included.
   const r = resolver.resolveCall(node);
-  if (!r.external || r.fns.length > 0) return null;
-  for (const arg of node.getArguments()) {
-    const t = arg.getType().getNonNullableType();
-    if (isClientType(t) || isDelegateType(t)) return `client handed to library code (${callee?.getText().slice(0, 60)})`;
+  if (!r.external) return null;
+  for (const arg of node.getArguments?.() ?? []) {
+    if (carriesClient(arg.getType())) return `client handed to library code (${callee?.getText().slice(0, 60)})`;
   }
   return null;
 }
 
-/** The callbacks a withBypassRls call runs, or why they cannot be named. */
+/**
+ * Whether a value of `type` is, or carries, a Prisma client or delegate: as
+ * itself, a union member, an array or tuple element, an own object's member,
+ * or what a function returns (`() => tx`). Library-declared object types are
+ * not opened (their members are the library's own); depth is bounded.
+ */
+function carriesClient(type, depth = 0, seen = new Set()) {
+  const t = type; // an optional client is a union, walked below
+  if (depth > 3 || seen.has(t.compilerType)) return false;
+  seen.add(t.compilerType);
+  if (isClientType(t) || isDelegateType(t)) return true;
+  if (t.isUnion()) return t.getUnionTypes().some((u) => carriesClient(u, depth, seen));
+  if (t.isIntersection()) return t.getIntersectionTypes().some((u) => carriesClient(u, depth, seen));
+  const element = t.getArrayElementType?.();
+  if (element) return carriesClient(element, depth + 1, seen);
+  if (t.isTuple?.()) return t.getTupleElements().some((u) => carriesClient(u, depth + 1, seen));
+  if (t.getCallSignatures().some((sig) => carriesClient(sig.getReturnType(), depth + 1, seen))) return true;
+  const props = t.getProperties();
+  const declaredOwn = props.some((p) => p.getDeclarations().some((d) => !isExternalDecl(d)));
+  if (!declaredOwn) return false;
+  return props.some((p) => {
+    const at = p.getValueDeclaration() ?? p.getDeclarations()[0];
+    return at ? carriesClient(p.getTypeAtLocation(at), depth + 1, seen) : false;
+  });
+}
+
+/**
+ * The callbacks a withBypassRls call runs, in the Program. Check 3 runs only
+ * for a call whose callback `callbackOf` already located (a function literal or
+ * a const alias of one), so a spread, a missing callback and a forwarded
+ * parameter never get here: C2 reports them, and a file on
+ * INDIRECT_CALLBACK_ALLOWLIST may not hold an ALLOWED_USAGE entry (checked
+ * below), so no bypass callback is excused from Check 3 that way.
+ */
 function bypassRootsOf(pcall) {
-  const args = pcall.getArguments();
-  if (args.slice(0, BYPASS_CALLBACK_INDEX + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement)) {
-    return { roots: [], problem: "withBypassRls called with a spread argument before its callback" };
-  }
-  const arg = unwrap(args[BYPASS_CALLBACK_INDEX]);
-  if (!arg) return { roots: [], problem: "withBypassRls called without a callback" };
+  const arg = unwrap(pcall.getArguments()[BYPASS_CALLBACK_INDEX]);
   if (FN_KINDS.has(arg.getKind())) return { roots: [arg], problem: null };
   const r = resolver.resolveValue(arg);
-  // A wrapper forwarding its own parameter is refused as an indirect callback
-  // (Check C2's INDIRECT_CALLBACK_ALLOWLIST); no root is guessed here.
-  const problem = r.unresolved ? `callback: ${r.unresolved}` : r.params.length > 0 ? "callback is a parameter of the enclosing function" : null;
-  return { roots: r.fns, problem };
+  return { roots: r.fns, problem: r.unresolved ? `callback: ${r.unresolved}` : null };
 }
 
 const bypassReachHooks = {
@@ -1860,7 +1966,9 @@ for (const file of sourceFiles) {
       const args = pcall?.getArguments() ?? [];
       const spread = args.slice(0, PURPOSE_INDEX + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement);
       const purpose = !spread && args[PURPOSE_INDEX] ? purposeOfExpression(args[PURPOSE_INDEX]) : null;
-      if (purpose?.forwardedParam) {
+      if (purpose?.reassignedParam) {
+        purposeViolations.push({ file, line, detail: `purpose parameter ${purpose.reassignedParam.getName()} is reassigned before it reaches withBypassRls` });
+      } else if (purpose?.forwardedParam) {
         // The forwarding file's own pin travels with the parameter: a caller
         // elsewhere must not run this file's bypass under another purpose.
         forwarderQueue.push({ param: purpose.forwardedParam, pins: [file] });
@@ -1943,18 +2051,21 @@ for (const file of sourceFiles) {
             unfollowedHandOffs.push({ file, at: siteOf(node), reason: handOff });
             undecidableFiles.add(file);
           }
-          const access = modelAccessOf(node);
-          if (!access) continue;
           const at = siteOf(node);
-          if (access.dynamic) {
-            unresolvedModels.push({ file, line: node.getStartLineNumber(), text: `${access.text}  (in ${at})` });
-            undecidableFiles.add(file);
-            continue;
+          for (const access of [modelAccessOf(node), delegateOperationOf(node)]) {
+            if (!access) continue;
+            if (access.dynamic) {
+              unresolvedModels.push({ file, line: node.getStartLineNumber(), text: `${access.text}  (in ${at})` });
+              undecidableFiles.add(file);
+              continue;
+            }
+            for (const model of access.models ?? [access.model]) {
+              const key = `${model}@${at}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              judgeModel(file, direct ? node.getStartLineNumber() : line, model, direct ? null : at, allowedSet);
+            }
           }
-          const key = `${access.model}@${at}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          judgeModel(file, direct ? node.getStartLineNumber() : line, access.model, direct ? null : at, allowedSet);
         }
       }
     }
@@ -1988,7 +2099,7 @@ for (const file of sourceFiles) {
     }
     for (const ref of nameNode.findReferencesAsNodes()) {
       const refFile = toRelPosix(ref.getSourceFile().getFilePath());
-      if (ref === nameNode || !isProductionPath(refFile)) continue;
+      if (ref === nameNode || !isInScopeFile(refFile)) continue;
       const holder = ref.getParent();
       const hk = holder?.getKind();
       if (hk === SyntaxKind.ImportSpecifier || hk === SyntaxKind.ExportSpecifier || hk === SyntaxKind.ImportClause) continue;
@@ -2007,7 +2118,9 @@ for (const file of sourceFiles) {
         continue;
       }
       const purpose = args[index] ? purposeOfExpression(args[index]) : null;
-      if (purpose?.forwardedParam) forwarderQueue.push({ param: purpose.forwardedParam, pins: [...new Set([...pins, refFile])] });
+      if (purpose?.reassignedParam) {
+        purposeViolations.push({ file: refFile, line, detail: `purpose parameter ${purpose.reassignedParam.getName()} is reassigned before it reaches ${nameNode.getText()}` });
+      } else if (purpose?.forwardedParam) forwarderQueue.push({ param: purpose.forwardedParam, pins: [...new Set([...pins, refFile])] });
       else if (!purpose) purposeViolations.push({ file: refFile, line, detail: `${nameNode.getText()} called without a BYPASS_PURPOSE.* argument` });
       else checkPurposeMember(refFile, line, purpose.member, pins);
     }
@@ -2221,6 +2334,30 @@ if (unfollowedHandOffs.length > 0) {
   }
 }
 
+
+// What Check 3's reach rests on (lib/soundness.mjs): a member holds only what
+// its declaration says, and the scan set is the production import closure.
+// check-rls-nesting reports the same; each gate refuses on its own.
+const soundnessViolations = [...scope.violations, ...functionFlowViolations(program, scope)];
+if (soundnessViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("Check 3 cannot be trusted on this tree: production loads code the gates cannot read,");
+  console.error("or puts a function where its declaration does not say (lib/soundness.mjs):");
+  for (const v of soundnessViolations) console.error(`  ${v}`);
+}
+
+// A file on INDIRECT_CALLBACK_ALLOWLIST has its unresolvable callbacks
+// excused, and Check 3 reads only callbacks it can locate: the same file with
+// an ALLOWED_USAGE entry would have its bypass callbacks judged by nothing.
+const listOverlap = [...INDIRECT_CALLBACK_ALLOWLIST].filter((f) => ALLOWED_USAGE.has(f));
+if (listOverlap.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("A file is on both INDIRECT_CALLBACK_ALLOWLIST and ALLOWED_USAGE. Its bypass callbacks");
+  console.error("would reach no model check. Pass the callback inline, or remove one entry:");
+  for (const f of listOverlap) console.error(`  ${f}`);
+}
 
 if (indirectCallbacks.length > 0) {
   failed = true;
