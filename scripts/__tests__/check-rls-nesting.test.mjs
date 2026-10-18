@@ -856,8 +856,10 @@ describe("check-rls-nesting: real repo", () => {
   // them); in the real tree every one must name something.
   it("names only paths that exist in the repository with its non-production declarations", async () => {
     const { NON_PRODUCTION, NON_PRODUCTION_SCRIPTS } = await import("../checks/lib/function-resolver.mjs");
-    const paths = [...NON_PRODUCTION.filter((e) => !e.pattern).map((e) => e.prefix ?? e.file), ...NON_PRODUCTION_SCRIPTS];
-    expect(paths.length).toBe(NON_PRODUCTION.filter((e) => !e.pattern).length + NON_PRODUCTION_SCRIPTS.length);
+    // A generated path (.next/) exists only after a build; a fresh checkout lacks it.
+    const named = NON_PRODUCTION.filter((e) => !e.pattern && !e.generated);
+    const paths = [...named.map((e) => e.prefix ?? e.file), ...NON_PRODUCTION_SCRIPTS];
+    expect(paths.length).toBe(named.length + NON_PRODUCTION_SCRIPTS.length);
     expect(paths.filter((p) => !existsSync(join(REPO_ROOT, p)))).toEqual([]);
   });
 });
