@@ -21,7 +21,8 @@
  *   G3  no computed-key member that may be a function;
  *   G4  no constructor parameter property that may be a function;
  *   G5  no class expression with `extends`, and no `extends` of anything but
- *       a name — derived classes are enumerated by name.
+ *       the name of a class declaration (an import rename passes, a const
+ *       alias does not) — derived classes are enumerated by name.
  *
  * An interface member is resolved to every production member of that NAME
  * that may hold a function, so a cast or a structural assignment cannot hide
@@ -41,6 +42,7 @@ import {
   isDeclaredNonProduction,
   isProductionPath,
   mayBeCallable,
+  mayHoldOwnCode,
   toRelPosix,
   unwrap,
 } from "./function-resolver.mjs";
@@ -59,6 +61,18 @@ export const FUNCTION_FLOW_ALLOWLIST = new Map([
   // implicit conversion (String(x), JSON.stringify), which neither gate
   // follows, and throwOnConversion only throws.
   ["src/lib/prisma/raw-sql.ts::createGenuineObject::G1", "conversion traps: toJSON and Symbol.toPrimitive"],
+  // Data copied key by key into a record. The values are `unknown` because
+  // they are request, event or row data, never one of our functions; the
+  // records are serialised or sent, never called through.
+  ["src/lib/security/sentry-scrub.ts::scrubObject::G1", "scrubbed Sentry event data"],
+  ["src/lib/security/sentry-scrub.ts::scrubSentryEvent::G1", "scrubbed Sentry event data"],
+  ["src/lib/security/sentry-scrub.ts::scrubSpanData::G1", "scrubbed Sentry span data"],
+  ["src/lib/security/sentry-scrub.ts::scrubStreamedAttributes::G1", "scrubbed Sentry span attributes"],
+  ["src/lib/constants/auth/share-permission.ts::applySharePermissions::G1", "share payload fields filtered by permission"],
+  ["src/lib/vault/entry-save-core.ts::buildEncryptedEntryBody::G1", "request body fields of an entry save"],
+  ["src/workers/retention-gc-worker/sweep.ts::sweepAuditProvenanceEntry::G1", "provenance column values of a swept row"],
+  ["src/app/api/tenant/policy/route.ts::handlePATCH::G1", "policy columns of a Prisma update"],
+  ["src/components/settings/developer/service-account-card.tsx::ServiceAccountCard::G3", "React state keyed by service-account id"],
 ]);
 
 // Tooling must not reach these: it is excluded from the scan on the premise
@@ -288,7 +302,7 @@ export function functionFlowViolations(program, scope) {
     const decls = symbol.getDeclarations();
     if (decls.length === 0 || !decls.some(isOwn)) return false;
     const at = symbol.getValueDeclaration() ?? decls[0];
-    return mayBeCallable(symbol.getTypeAtLocation(at));
+    return mayHoldOwnCode(symbol.getTypeAtLocation(at));
   };
   const hasOwnFunctionMembers = (type, depth = 0) => {
     if (depth > 2) return false;
@@ -306,7 +320,7 @@ export function functionFlowViolations(program, scope) {
       currentNode = node;
 
       if (kind === SyntaxKind.PropertyAssignment || kind === SyntaxKind.MethodDeclaration || kind === SyntaxKind.PropertyDeclaration) {
-        if (node.getNameNode().getKind() === SyntaxKind.ComputedPropertyName && mayBeCallable(node.getType())) {
+        if (node.getNameNode().getKind() === SyntaxKind.ComputedPropertyName && mayHoldOwnCode(node.getType())) {
           out.push(`${siteOf(node)}  G3: computed-key member holding a function`);
         }
         return;
@@ -326,11 +340,16 @@ export function functionFlowViolations(program, scope) {
         const decls = symbol?.getDeclarations() ?? [];
         if (decls.length > 0 && decls.every((d) => !isOwn(d))) continue; // a library member (`ref.current`, `img.onload`)
         if (decls.length > 0) {
-          if (mayBeCallable(target.getType())) out.push(`${siteOf(target)}  G1: write to member ${symbol.getName()}, which may hold a function`);
+          // The slot's declared type, or the value written: a member declared
+          // `unknown`/`any`/`object` holds a function as well as one declared callable.
+          if (mayHoldOwnCode(target.getType()) || (value && mayBeCallable(value.getType()))) {
+            out.push(`${siteOf(target)}  G1: write to member ${symbol.getName()}, which may hold a function`);
+          }
           continue;
         }
         // No declaration names the key: an index signature, an `any` object.
-        if (mayBeCallable(target.getType()) || (value && mayBeCallable(value.getType()))) {
+        // The value decides: a loose one (`unknown`, `any`) may be a function.
+        if (mayBeCallable(target.getType()) || (value && mayHoldOwnCode(value.getType()))) {
           out.push(`${siteOf(target)}  G1: write of a function through a key no declaration names`);
         }
       }
@@ -352,7 +371,7 @@ export function functionFlowViolations(program, scope) {
       }
 
       if (kind === SyntaxKind.Parameter && node.getParent()?.getKind() === SyntaxKind.Constructor && node.isParameterProperty?.()) {
-        if (mayBeCallable(node.getType())) out.push(`${siteOf(node)}  G4: constructor parameter property holding a function`);
+        if (mayHoldOwnCode(node.getType())) out.push(`${siteOf(node)}  G4: constructor parameter property holding a function`);
         return;
       }
 
@@ -363,8 +382,21 @@ export function functionFlowViolations(program, scope) {
       if (kind === SyntaxKind.ClassDeclaration) {
         const base = node.getExtends?.();
         const e = base ? unwrap(base.getExpression()) : null;
-        if (e && e.getKind() !== SyntaxKind.Identifier && e.getKind() !== SyntaxKind.PropertyAccessExpression) {
+        if (!e) return;
+        if (e.getKind() !== SyntaxKind.Identifier && e.getKind() !== SyntaxKind.PropertyAccessExpression) {
           out.push(`${siteOf(node)}  G5: extends an expression that is not a class name`);
+          return;
+        }
+        // Derived classes are found through references to the base CLASS's
+        // name; an own base reached through a const (`const B = Base`) hides
+        // them. Import renames are references and pass; a library base is
+        // the library's.
+        let symbol = e.getKind() === SyntaxKind.PropertyAccessExpression ? e.getNameNode().getSymbol() : e.getSymbol();
+        if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+        const decls = symbol?.getDeclarations() ?? [];
+        if (decls.length > 0 && decls.every((d) => !isOwn(d))) return;
+        if (!decls.some((d) => d.getKind() === SyntaxKind.ClassDeclaration)) {
+          out.push(`${siteOf(node)}  G5: extends ${e.getText()}, which is not declared as a class`);
         }
         return;
       }

@@ -1196,3 +1196,126 @@ export function other(): object {
     expect(stderr).toContain("src/lib/prisma/raw-sql.ts:9  G1: write of a function through a key no declaration names");
   });
 });
+
+// ─── Round 5: what a slot may hold, and how a subclass is found ─────────────
+
+describe("check-rls-nesting: round 5 — a slot loose enough to hold a function (R5-F4 / R5-S1)", () => {
+  it.each([
+    ["a member declared unknown", "export class Job { handler: unknown = null; }\nexport const job = new Job();\nexport function arm() { job.handler = held as never; }", "src/app/r4.ts:9  G1: write to member handler"],
+    ["a member declared any", "export class Job { handler: any = null; }\nexport const job = new Job();\nexport function arm() { job.handler = held as never; }", "src/app/r4.ts:9  G1: write to member handler"],
+    ["a member declared object", "export const holder: { slot: object } = { slot: {} };\nexport function arm() { holder.slot = held as never; }", "src/app/r4.ts:8  G1: write to member slot"],
+    ["a member declared Function", "export const holder: { slot: Function } = { slot: () => 0 };\nexport function arm() { holder.slot = held as never; }", "src/app/r4.ts:8  G1: write to member slot"],
+    ["a member whose type only a function happens to satisfy", "export const job = { meta: { name: \"x\" } as { name: string } };\nexport function arm() { job.meta = opener; }", "src/app/r4.ts:8  G1: write to member meta"],
+  ])("refuses a write of a function into %s", (_label, body, message) => {
+    // The first four write a value typed never, so only the member's declared
+    // type can refuse them; the fifth writes a function into a slot that is not.
+    const { code, stderr } = run([OPENER_MODULE, R4(`const held: unknown = opener;\n${body}`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(FLOW);
+    expect(stderr).toContain(message);
+  });
+
+  it("passes a write of data into a data member", () => {
+    const { code, stdout } = run([OPENER_MODULE, R4(`export const stats = { count: 0, label: "x" as unknown };
+export function bump() { stats.count = 1; }`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+
+  it("fails an opener behind an interface member a literal fills with an any-typed value", () => {
+    const { code, stderr } = run([OPENER_MODULE, R4(`interface Runner { run(): Promise<number> }
+const held: any = opener;
+const impl: Runner = { run: held };
+export const f = () => withTenantRls(prisma, T, async () => impl.run());`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+    expect(stderr).toContain("opener (src/lib/opener.ts");
+  });
+
+  it("fails an opener a getter hands back through an interface member", () => {
+    const { code, stderr } = run([OPENER_MODULE, R4(`interface Runner { readonly run: () => Promise<number> }
+const viaGetter: Runner = { get run() { return opener; } };
+export const f = () => withTenantRls(prisma, T, async () => viaGetter.run());`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+    expect(stderr).toContain("opener (src/lib/opener.ts");
+  });
+});
+
+describe("check-rls-nesting: round 5 — a subclass is found through its base's name (R5-F5)", () => {
+  it("refuses a base reached through a const alias", () => {
+    const { code, stderr } = run([OPENER_MODULE, R4(`class Base { run(): unknown { return 0; } }
+export const DefaultBase = Base;
+export class Scoped extends DefaultBase { override run() { return opener(); } }
+const worker: Base = new Scoped();
+export const f = () => withBypassRls(prisma, async () => worker.run(), BYPASS_PURPOSE.AUDIT_WRITE);`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(FLOW);
+    expect(stderr).toContain("src/app/r4.ts:8  G5: extends DefaultBase, which is not declared as a class");
+  });
+
+  it("finds a subclass whose base is an import rename", () => {
+    const { code, stderr } = run([OPENER_MODULE, ["src/lib/base.ts", `export class Base { run(): unknown { return 0; } }\n`], R4(`import { Base as B } from "@/lib/base";
+export class Scoped extends B { override run() { return opener(); } }
+const worker: B = new Scoped();
+export const f = () => withTenantRls(prisma, T, async () => worker.run());`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+    expect(stderr).toMatch(/calls run \(src\/app\/r4\.ts:7\) reaches opener/);
+    expect(stderr).not.toContain(FLOW);
+  });
+
+  it("passes a class that extends a library class", () => {
+    const { code, stdout } = run([OPENER_MODULE, R4(`export class NotFound extends Error { constructor() { super("x"); } }`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});
+
+describe("check-rls-nesting: round 5 — members of what is handed to library code", () => {
+  const KEEP = ["types/keep.d.ts", `declare module "keeplib" { export function keep(o: unknown): void; }`];
+
+  it("fails an opener a library is handed in a member typed unknown", () => {
+    const { code, stderr } = run([OPENER_MODULE, KEEP, R4(`import { keep } from "keeplib";
+const source: { start: unknown } = { start: opener };
+export const f = () => withTenantRls(prisma, T, async () => keep(source));`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(NESTED);
+    expect(stderr).toContain("opener (src/lib/opener.ts");
+  });
+
+  it("passes plain data, nested empty objects included, handed to library code", () => {
+    const { code, stdout } = run([OPENER_MODULE, KEEP, R4(`import { keep } from "keeplib";
+const options = { tls: {}, hosts: [] as string[], lazy: true };
+export const f = () => withTenantRls(prisma, T, async () => keep(options));`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});
+
+describe("check-rls-nesting: round 5 — a loose value in every G-rule (R5-F4 review)", () => {
+  // Each value is typed unknown, so only the loose-type test of its own rule can refuse it.
+  it.each([
+    ["a loose value written through an index-signature key", "const bag: Record<string, unknown> = {};\nexport function arm() { bag[\"run\"] = heldUnknown; }", "src/app/r4.ts:8  G1: write of a function through a key no declaration names"],
+    ["Object.assign onto an object with a slot typed unknown", "const holderWithUnknownSlot: { slot: unknown } = { slot: null };\nexport function arm() { Object.assign(holderWithUnknownSlot, { slot: heldUnknown }); }", "src/app/r4.ts:8  G2: object mutator"],
+    ["a computed-key member holding a loose value", "const computedKey = String(Date.now());\nexport const holder = { [computedKey]: heldUnknown };", "src/app/r4.ts:8  G3: computed-key member holding a function"],
+    ["a parameter property typed unknown", "export class Job { constructor(public handler: unknown) {} }", "src/app/r4.ts:7  G4: constructor parameter property holding a function"],
+  ])("refuses %s", (_label, body, message) => {
+    const { code, stderr } = run([OPENER_MODULE, R4(`const heldUnknown: unknown = opener;\n${body}`)]);
+    expect(code).toBe(1);
+    expect(stderr).toContain(FLOW);
+    expect(stderr).toContain(message);
+  });
+
+  it("passes the same shapes holding data", () => {
+    const { code, stdout } = run([OPENER_MODULE, R4(`const bag: Record<string, number> = {};
+export function arm() { bag["run"] = 1; }
+const holder: { slot: string } = { slot: "" };
+export function fill() { Object.assign(holder, { slot: "x" }); }
+const computedKey = String(Date.now());
+export const tagged = { [computedKey]: 1 };
+export class Job { constructor(public label: string) {} }`)]);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-rls-nesting: OK");
+  });
+});

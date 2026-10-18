@@ -154,6 +154,9 @@ const NON_FUNCTION_KINDS = new Set([
   SyntaxKind.NullKeyword, SyntaxKind.TrueKeyword, SyntaxKind.FalseKeyword, SyntaxKind.NumericLiteral,
   SyntaxKind.BigIntLiteral, SyntaxKind.StringLiteral, SyntaxKind.NoSubstitutionTemplateLiteral,
   SyntaxKind.TemplateExpression, SyntaxKind.RegularExpressionLiteral, SyntaxKind.VoidExpression,
+  // An object or array literal is never itself a function (its members are
+  // reached as members).
+  SyntaxKind.ObjectLiteralExpression, SyntaxKind.ArrayLiteralExpression,
 ]);
 const unresolvedResult = (reason) => ({ ...EMPTY, unresolved: reason });
 // A value taken from a library module by `require`/`import()`: library code,
@@ -834,14 +837,16 @@ export function createFunctionResolver({ program, scope = null }) {
           const pk = node.getParent()?.getKind();
           const inLiteral =
             pk === SyntaxKind.ObjectLiteralExpression &&
-            (k === SyntaxKind.PropertyAssignment || k === SyntaxKind.ShorthandPropertyAssignment || k === SyntaxKind.MethodDeclaration);
+            (k === SyntaxKind.PropertyAssignment || k === SyntaxKind.ShorthandPropertyAssignment ||
+              k === SyntaxKind.MethodDeclaration || k === SyntaxKind.GetAccessor);
           const inClass =
             (pk === SyntaxKind.ClassDeclaration || pk === SyntaxKind.ClassExpression) &&
-            (k === SyntaxKind.MethodDeclaration || k === SyntaxKind.PropertyDeclaration) &&
+            (k === SyntaxKind.MethodDeclaration || k === SyntaxKind.PropertyDeclaration || k === SyntaxKind.GetAccessor) &&
             !node.isStatic?.();
           if (!inLiteral && !inClass) return;
           if (node.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) return; // G3
-          if (!mayBeCallable(node.getType())) return;
+          // What the member may hold, by its declared type: a getter's is what it returns.
+          if (!mayHoldOwnCode(node.getType())) return;
           const key = node.getSymbol()?.getName();
           if (!key) return;
           const list = membersByName.get(key) ?? [];
@@ -855,6 +860,10 @@ export function createFunctionResolver({ program, scope = null }) {
 
   function candidateValue(member) {
     switch (member.getKind()) {
+      case SyntaxKind.GetAccessor:
+        // Read as `r.run`, the getter runs; what it returns is a value in its
+        // body, an edge once the body is reached.
+        return { ...EMPTY, fns: [member] };
       case SyntaxKind.MethodDeclaration:
         return isClassMember(member) ? ownClassMemberValue(member) : { ...EMPTY, fns: [member] };
       case SyntaxKind.PropertyDeclaration:
@@ -999,6 +1008,31 @@ export function isInlineArgument(fn) {
 export function mayBeCallable(t) {
   const types = t.isUnion() ? t.getUnionTypes() : [t];
   return types.some((u) => u.getNonNullableType().getCallSignatures().length > 0);
+}
+
+const LOOSE_FUNCTION_TYPES = new Set(["Function", "CallableFunction", "NewableFunction", "Object"]);
+
+/**
+ * Whether a SLOT declared with type `t` may hold one of our functions: a
+ * callable type, or one loose enough to hold anything — `any`, `unknown`, a
+ * type parameter, `Function`, `object`, `{}`. The question G1 and the member
+ * index ask of a declaration; `mayBeCallable` is the question asked of a value
+ * about to be called.
+ */
+export function mayHoldOwnCode(t) {
+  if (mayBeCallable(t)) return true;
+  const types = t.isUnion() ? t.getUnionTypes() : [t];
+  return types.some((u) => {
+    if (u.isAny() || u.isUnknown() || u.isTypeParameter()) return true;
+    if (u.getFlags() & ts.TypeFlags.NonPrimitive) return true; // `object`
+    const name = u.getSymbol()?.getName();
+    if (name && LOOSE_FUNCTION_TYPES.has(name) && (u.getSymbol().getDeclarations() ?? []).every((d) => d.getSourceFile().isDeclarationFile())) {
+      return true;
+    }
+    // `{}`: an object type that names nothing.
+    return u.isObject() && !u.isArray() && !u.isTuple() && u.getProperties().length === 0 &&
+      u.getCallSignatures().length === 0 && u.getConstructSignatures().length === 0 && !u.getStringIndexType() && !u.getNumberIndexType();
+  });
 }
 
 const WRAPPER_KINDS = new Set([
@@ -1225,7 +1259,7 @@ export function createReachability(resolver) {
         if (!decls.some((dcl) => !isExternal(dcl) && !resolver.isNonProduction(dcl))) continue;
         const at = prop.getValueDeclaration() ?? decls[0];
         const pt = prop.getTypeAtLocation(at);
-        if (mayBeCallable(pt)) {
+        if (mayHoldOwnCode(pt)) {
           out.push({ node: e, r: resolver.resolvePropertyOfType(t, prop.getName(), e), kind: "value" });
         } else if (d < 2) {
           visitType(pt, d + 1);

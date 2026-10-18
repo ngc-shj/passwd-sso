@@ -1958,28 +1958,30 @@ export default async function Page() {
 
 describe("allowlist over-breadth", () => {
   it("fails an entry naming a model the file never reaches", () => {
-    // tenant/policy allows tenant + teamPolicy. This fixture reaches only the
+    // session-concurrency allows session + tenant. This fixture reaches only the
     // first, so the second is a permission with nothing behind it.
-    const { code, stderr } = run("src/app/api/tenant/policy/route.ts", `
+    const { code, stderr } = run("src/lib/auth/session/session-concurrency.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const id = "t";
 export async function GET() {
   return withBypassRls(prisma, async (tx) => tx.tenant.findUnique({ where: { id } }), BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }`);
     expect(code).toBe(1);
     expect(stderr).toContain("permits a model the file never reaches");
-    expect(stderr).toContain("prisma.teamPolicy");
+    expect(stderr).toContain("prisma.session");
     // The one it DOES reach must not be reported alongside it, or the message
     // stops naming what to remove.
     expect(stderr).not.toContain("prisma.tenant\n");
   });
 
   it("passes when every permitted model is reached", () => {
-    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+    const { code, stdout } = run("src/lib/auth/session/session-concurrency.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const id = "t";
 export async function GET() {
   return withBypassRls(prisma, async (tx) => {
     await tx.tenant.findUnique({ where: { id } });
-    return tx.teamPolicy.findMany({});
+    return tx.session.findMany({});
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }`);
     expect(code).toBe(0);
@@ -1992,16 +1994,17 @@ export async function GET() {
     // read had moved into the adjudicator it hands `tx` to. Followed now, the
     // callee's read keeps the permission alive.
     const { code, stdout } = runMulti([
-      ["src/app/api/tenant/policy/route.ts", `
+      ["src/lib/auth/session/session-concurrency.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveSomething } from "@/lib/elsewhere";
+const id = "t";
 export async function GET() {
   return withBypassRls(prisma, async (tx) => {
     await tx.tenant.findUnique({ where: { id } });
     return resolveSomething(tx, id);
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }`],
-      ["src/lib/elsewhere.ts", `export async function resolveSomething(db: TX, id) { return db.teamPolicy.findMany({}); }`],
+      ["src/lib/elsewhere.ts", `export async function resolveSomething(db: TX, id) { return db.session.findMany({}); }`],
     ]);
     expect(code).toBe(0);
     expect(stdout).toMatch(/[1-9]\d* bypass callback\(s\) followed through [1-9]\d* reached function\(s\)/);
@@ -2010,7 +2013,7 @@ export async function GET() {
   it("does not fire on a file whose bypass reaches no model at all", () => {
     // A raw-SQL bypass touches no model. Reporting every permitted model as
     // unused there would make the check fire loudest where it knows least.
-    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+    const { code, stdout } = run("src/lib/auth/session/session-concurrency.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function GET() {
   return withBypassRls(prisma, async (tx) => tx.$executeRaw\`SELECT 1\`, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -2024,13 +2027,13 @@ export async function GET() {
     // under a comment that called it "Check 1's business" — Check 1 fires only in
     // the other direction. The real tree held two: the MCP token route and the 410
     // DCR-cleanup stub, neither of which bypasses anything now.
-    const { code, stderr } = run("src/app/api/tenant/policy/route.ts", `
+    const { code, stderr } = run("src/lib/auth/session/session-concurrency.ts", `
 export async function GET() {
   return new Response(null, { status: 410 });
 }`);
     expect(code).toBe(1);
     expect(stderr).toContain("makes no withBypassRls call");
-    expect(stderr).toContain("src/app/api/tenant/policy/route.ts");
+    expect(stderr).toContain("src/lib/auth/session/session-concurrency.ts");
   });
 
   it("does not judge a file that bypasses through raw SQL", () => {
