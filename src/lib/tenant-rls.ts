@@ -54,6 +54,22 @@ export class RlsSentinelContextRefused extends Error {
 }
 
 /**
+ * Log a guard's refusal without letting the logger decide the outcome. The
+ * guards below throw their own error after logging; a logger that throws
+ * (`getLogger()` itself, or `.error`) would otherwise replace that error with
+ * its own, and a caller matching on the refusal would no longer see one. The
+ * refusal is the security control and always reaches the caller; a failed log
+ * line is dropped.
+ */
+function logRefusal(fields: Record<string, string>, message: string): void {
+  try {
+    getLogger().error(fields, message);
+  } catch {
+    // Logging must not change what the guard throws.
+  }
+}
+
+/**
  * The one caller-supplied `set_config('app.tenant_id', …)` in the tree.
  *
  * `SYSTEM_TENANT_ID` is the encoding of "no owning tenant" and is the FK target
@@ -101,7 +117,7 @@ function assertOpenableTenantContext(tenantId: string): void {
   const refusal = canonical
     ? RLS_CONTEXT_REFUSAL.SENTINEL
     : RLS_CONTEXT_REFUSAL.NON_CANONICAL_UUID;
-  getLogger().error(
+  logRefusal(
     { event: "rls.sentinel_context_refused", refusal },
     "withTenantRls refused to open an RLS context",
   );
@@ -135,7 +151,7 @@ function assertNoActiveRlsContext(opening: "withTenantRls" | "withBypassRls"): v
   const ctx = getTenantRlsContext();
   if (ctx === undefined) return;
   const active = ctx.bypass ? "withBypassRls" : "withTenantRls";
-  getLogger().error(
+  logRefusal(
     { event: "rls.nesting_refused", opening, active },
     "RLS context refused: another RLS context is active",
   );
