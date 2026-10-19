@@ -492,10 +492,16 @@ refused.
 `BYPASS_GRANT`, or stop the path from reaching the table. Do this before
 enforce mode is turned on.
 
-CloudWatch: the `RlsBypassNotGranted` metric (one filter each on the
-app, audit-outbox-worker and retention-gc-worker log groups,
-`infra/terraform/monitoring.tf`). Operator scripts write the same record
+CloudWatch: the `RlsBypassNotGranted` metric. There is one filter each on
+the app, audit-outbox-worker and retention-gc-worker log groups, and the
+`rls-bypass-not-granted` alarm fires on `Sum >= 1` in 5 minutes
+(`infra/terraform/monitoring.tf`). Operator scripts write the same record
 to stderr.
+
+**Not covered:** the audit-anchor-publisher has no Terraform-managed log
+group, so its reports reach no metric. Wherever it runs, collect its stdout
+and match the same `_logType`. A log group, a filter and a positive canary
+for it are preconditions of enforce mode.
 
 Datadog: `{ _logType="rls.bypass_not_granted" }`
 

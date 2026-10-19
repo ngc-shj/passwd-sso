@@ -58,14 +58,20 @@ export function resetBypassNoticeRateLimit(): void {
   lastLogged.clear();
 }
 
+// SQLSTATE of a plain RAISE WARNING. Matched instead of `severity`, which is
+// the localized S field: under a non-English lc_messages it is not "WARNING".
+const WARNING_SQLSTATE = "01000";
+
 /**
- * Turn one server notice into a report, or drop it. Only a WARNING raised by
+ * Turn one server notice into a report, or drop it. Only a warning raised by
  * `rls_bypass_admits` whose text matches the report exactly is accepted;
  * anything else — statement logging, other functions' notices — is dropped
- * without any part of it being logged.
+ * without any part of it being logged. Every field compared is
+ * locale-independent: the SQLSTATE, the function name (substituted into the
+ * localized context line), and the message the function formats itself.
  */
-export function handleServerNotice(notice: { severity?: string; message?: string; where?: string }): void {
-  if (notice.severity !== "WARNING" || !notice.where?.includes(REPORT_SOURCE)) return;
+export function handleServerNotice(notice: { code?: string; message?: string; where?: string }): void {
+  if (notice.code !== WARNING_SQLSTATE || !notice.where?.includes(REPORT_SOURCE)) return;
   const match = REPORT_RE.exec(notice.message ?? "");
   if (!match) {
     getLogger().warn({ _logType: "rls.bypass_notice_unparsed" }, "rls.bypass_notice_unparsed");

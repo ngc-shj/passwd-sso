@@ -43,7 +43,7 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
     registerBypassNoticeSink(null);
     resetBypassNoticeRateLimit();
     handleServerNotice({
-      severity: "WARNING",
+      code: "01000",
       message: "rls_bypass_not_granted table=sessions purpose=auth_flow",
       where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
     });

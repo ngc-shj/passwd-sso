@@ -116,6 +116,28 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   tags          = local.tags
 }
 
+# Any RLS bypass report. Report mode admits the statement, so without this
+# alarm an ungranted reach is visible only to someone reading the metric. All
+# three filters publish to the same metric, so one alarm covers them; the log
+# line names the table and purpose.
+resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
+  count               = var.enable_monitoring ? 1 : 0
+  alarm_name          = "${local.name_prefix}-rls-bypass-not-granted"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "RlsBypassNotGranted"
+  namespace           = "${local.name_prefix}/App"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  alarm_description   = "An RLS bypass reached a table outside its grant (rls.bypass_not_granted); see docs/operations/alerts.md"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alarms[0].arn]
+  ok_actions    = [aws_sns_topic.alarms[0].arn]
+  tags          = local.tags
+}
+
 # Health check failure alarm (from log metric filter)
 resource "aws_cloudwatch_metric_alarm" "health_check_failure" {
   count               = var.enable_monitoring ? 1 : 0

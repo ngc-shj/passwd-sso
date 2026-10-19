@@ -17,7 +17,8 @@ import {
 } from "@/lib/db/pool-factory";
 
 const WHERE = "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE";
-const report = (message: string, where = WHERE, severity = "WARNING") => ({ severity, message, where });
+// A plain RAISE WARNING carries SQLSTATE 01000; LOG-level messages carry 00000.
+const report = (message: string, where = WHERE, code = "01000") => ({ severity: "WARNING", code, message, where });
 
 beforeEach(() => {
   mockWarn.mockReset();
@@ -45,6 +46,20 @@ describe("handleServerNotice", () => {
     expect(seen).toEqual([{ table: "oauth2_grants", purpose: "<invalid>" }]);
   });
 
+  it("accepts a report whose severity and context line are localized", () => {
+    // Under lc_messages=ja_JP the S field and the context line are translated;
+    // the SQLSTATE, the function name and the function's own text are not.
+    const seen: BypassNotice[] = [];
+    registerBypassNoticeSink((n) => seen.push(n));
+    handleServerNotice({
+      severity: "警告",
+      code: "01000",
+      message: "rls_bypass_not_granted table=sessions purpose=auth_flow",
+      where: "PL/pgSQL関数rls_bypass_admits(text)の17行目 - RAISE",
+    });
+    expect(seen).toEqual([{ table: "sessions", purpose: "auth_flow" }]);
+  });
+
   it("logs to the production sink when nothing is registered", () => {
     handleServerNotice(report("rls_bypass_not_granted table=sessions purpose=token_lifecycle"));
     expect(mockWarn).toHaveBeenCalledWith(
@@ -54,10 +69,10 @@ describe("handleServerNotice", () => {
   });
 
   it.each([
-    ["a notice below WARNING", report("rls_bypass_not_granted table=sessions purpose=x", WHERE, "LOG")],
+    ["a notice below WARNING", report("rls_bypass_not_granted table=sessions purpose=x", WHERE, "00000")],
     ["a WARNING from another function", report("rls_bypass_not_granted table=sessions purpose=x", "PL/pgSQL function other_fn(text) line 1 at RAISE")],
-    ["a WARNING with no source", { severity: "WARNING", message: "rls_bypass_not_granted table=sessions purpose=x" }],
-    ["statement logging carrying a secret", report("statement: SELECT 'secret-param-value'", "", "LOG")],
+    ["a WARNING with no source", { severity: "WARNING", code: "01000", message: "rls_bypass_not_granted table=sessions purpose=x" }],
+    ["statement logging carrying a secret", report("statement: SELECT 'secret-param-value'", "", "00000")],
   ])("drops %s without logging any part of it", (_label, notice) => {
     const seen: BypassNotice[] = [];
     registerBypassNoticeSink((n) => seen.push(n));

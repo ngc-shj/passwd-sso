@@ -36,6 +36,8 @@ Covers the deployment-facing parts of this change:
 ## Expected result
 - No request fails because of this change: report mode admits everything.
 - Every `RlsBypassNotGranted` metric is 0 under normal traffic, and each increments for its canary.
+- The `rls-bypass-not-granted` alarm goes to ALARM for the canary and notifies the alarms SNS topic, then returns to OK.
+- Not covered here: the audit-anchor-publisher has no Terraform log group, so its reports reach no metric (an SC5 precondition).
 
 ## Rollback
 - **Code:** roll back the task definition. Report mode is admit-only, so older code keeps working.
