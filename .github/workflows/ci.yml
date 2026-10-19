@@ -341,8 +341,8 @@ jobs:
       # tsc --noEmit typechecks test files too (vitest does not; next build
       # excludes them), catching mock/type drift that would otherwise rot.
       - run: npm run typecheck
-      - run: npm run check:team-auth-rls
       - run: npm run check:bypass-rls
+      - run: npm run check:rls-nesting
       - run: npm run check:crypto-domains
       - run: npm run check:migration-drift
       - name: Check state-mutation centralization
@@ -354,7 +354,13 @@ jobs:
       # coverage run carries the same pass/fail signal and the coverage
       # report is already produced (no artifact upload, but the report stays
       # available in the job log for spot inspection).
-      - run: npm run test:coverage
+      # The RLS gates' fixture suites run in their own job (rls-gate-fixtures):
+      # each case spawns a type-checked gate run, ~19 CPU-minutes in all, and
+      # they carry no coverage (scripts/ is outside coverage.include).
+      - run: >-
+          npm run test:coverage --
+          --exclude scripts/__tests__/check-rls-nesting.test.mjs
+          --exclude scripts/__tests__/check-bypass-rls.test.mjs
       - run: npm run build
 
       - name: Build with basePath
@@ -374,6 +380,37 @@ jobs:
             echo "ERROR: Found fetch() calls that should use fetchApi()"
             exit 1
           fi
+
+  # ─── RLS gates: fixture suites ────────────────────────────
+  # Split from app-ci, which runs every other suite: these two spawn one
+  # type-checked gate run per case (~11 and ~8 minutes on a runner) and,
+  # inside test:coverage, pushed app-ci past its 20m cap.
+  rls-gate-fixtures:
+    name: "RLS: Gate fixture suites"
+    runs-on: ubuntu-latest
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+      SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
+      AUTH_URL: "http://localhost:3000"
+      VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - run: npx vitest run scripts/__tests__/check-rls-nesting.test.mjs scripts/__tests__/check-bypass-rls.test.mjs
 
   # ─── Chrome Extension: Test → Build ───────────────────────
   extension-ci:

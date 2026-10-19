@@ -90,9 +90,9 @@ TB8: iOS Host App <-> AutoFill Extension (App Group + shared Keychain)
 | S3: Attacker replays extension token | TB5 | Token hashed (SHA-256) before DB storage; expiry enforced; single-use refresh | Token window between issue and expiry |
 | S4: Attacker spoofs WebAuthn assertion | TB6 | Origin and RP ID validation; challenge freshness; signature verification | None (WebAuthn protocol provides strong anti-spoofing) |
 | S6: Malicious page spoofs rpId in passkey bridge message | TB7 | SW reads sender URL from Chrome runtime (`sender.tab.url`), not from message payload; `isSenderAuthorizedForRpId` validates rpId is a registrable suffix of page hostname | MAIN world attacker can send arbitrary postMessage payload — rpId payload is untrusted by design |
-| S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 52 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 77 allowlisted files (CI-guarded) |
+| S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 52 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 101 allowlisted files (CI-guarded); inside a bypass every model is reachable at runtime, and the per-file model grants are a partial static check only |
 
-> **RLS enforcement**: The application runtime connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS), ensuring RLS policies are enforced in all environments including development. Migrations run as `passwd_user` (SUPERUSER) which owns the tables. The `app.bypass_rls` GUC is used by 77 allowlisted code paths for cross-tenant operations (CI-guarded by `scripts/checks/check-bypass-rls.mjs`). See [deployment guide](../operations/deployment.md) for production role setup.
+> **RLS enforcement**: The application runtime connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS), ensuring RLS policies are enforced in all environments including development. Migrations run as `passwd_user` (SUPERUSER) which owns the tables. The `app.bypass_rls` GUC is used by 101 allowlisted files for cross-tenant operations (CI-guarded by `scripts/checks/check-bypass-rls.mjs`; its model tracking is a partial development-time control, not a runtime restriction). See [deployment guide](../operations/deployment.md) for production role setup.
 
 ### 3.2 Tampering
 

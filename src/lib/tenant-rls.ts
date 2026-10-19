@@ -126,11 +126,19 @@ function assertOpenableTenantContext(tenantId: string): void {
  * This is fail-closed for callers that propagate. Callers that swallow — the
  * best-effort notification and lockout paths — see a skipped side effect
  * instead, which is why a missed site is not uniformly "a denied request".
+ * The error log below is what keeps a swallowed refusal visible. It names only
+ * the two helpers: no tenant id, SQL or caller argument reaches it. This guard
+ * is the boundary; check-rls-nesting is a limited development aid that
+ * reports the nesting it can see, with the coverage its header lists.
  */
 function assertNoActiveRlsContext(opening: "withTenantRls" | "withBypassRls"): void {
   const ctx = getTenantRlsContext();
   if (ctx === undefined) return;
   const active = ctx.bypass ? "withBypassRls" : "withTenantRls";
+  getLogger().error(
+    { event: "rls.nesting_refused", opening, active },
+    "RLS context refused: another RLS context is active",
+  );
   throw new Error(
     `INVALID_RLS_NESTING: ${opening} inside ${active} is forbidden`,
   );

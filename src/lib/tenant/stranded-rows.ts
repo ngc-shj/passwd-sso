@@ -73,9 +73,12 @@ export async function countStrandedRows(
   userId: string,
   tenantId: string,
 ): Promise<Record<string, number>> {
-  const entries = Object.entries(STRANDED_COUNTERS);
-  const counts = await Promise.all(entries.map(([, count]) => count(db, userId, tenantId)));
+  // Indexed rather than iterated as entries: check-bypass-rls follows a client
+  // into `TABLE[key](db)` as every member of the table, and into nothing
+  // reached through a destructured entry.
+  const models = Object.keys(STRANDED_COUNTERS) as (keyof typeof STRANDED_COUNTERS)[];
+  const counts = await Promise.all(models.map((model) => STRANDED_COUNTERS[model](db, userId, tenantId)));
   return Object.fromEntries(
-    entries.map(([model], i) => [model, counts[i]] as const).filter(([, n]) => n > 0),
+    models.map((model, i) => [model, counts[i]] as const).filter(([, n]) => n > 0),
   );
 }

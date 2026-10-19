@@ -43,8 +43,9 @@ jobs:
       - run: npm ci
 
       # check-bypass-rls resolves Prisma model types to prove which receivers
-      # can reach a with*Rls helper; without the generated client they are
-      # any/unknown and the gate fails closed. `generate` never connects, so a
+      # can reach a with*Rls helper, and check-rls-nesting resolves every
+      # `tx.<model>.<op>()` callee to the client's declarations; without the
+      # generated client they are any/unknown and both gates fail closed. `generate` never connects, so a
       # dummy URL satisfies prisma.config.ts's env("DATABASE_URL").
       - name: Generate Prisma client
         run: npx prisma generate

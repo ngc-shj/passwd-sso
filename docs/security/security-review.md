@@ -258,8 +258,9 @@ Evidence:
 Status: `PASS`
 Evidence:
 - Migration applies `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to all 52 tables.
-- `scripts/checks/check-bypass-rls.mjs` CI guard enforces allowlist (77 files) for `withBypassRls` usage.
-- `scripts/checks/check-team-auth-rls.mjs` CI guard prevents nested team-auth under RLS wrappers.
+- `scripts/checks/check-bypass-rls.mjs` CI guard enforces an allowlist (101 entries in `ALLOWED_USAGE`, one of them the `*` for the helper's own definition) for `withBypassRls` usage, pins each file's purposes (`ALLOWED_PURPOSES`), and tracks the models each bypass reaches. Model tracking is a partial, development-time preventive control, not a tenant boundary: nothing at runtime checks a bypass's purpose or the models it touches (`app.bypass_purpose` is set but no policy reads it), so code the guard's analysis does not follow can reach a model the allowlist does not grant, and nothing stops it. The known shapes are recorded in #911.
+- `assertNoActiveRlsContext` in `src/lib/tenant-rls.ts` refuses to open an RLS context while another is active, so team auth (`requireTeamMember` opens its own `withTeamTenantRls`) cannot run nested under an RLS wrapper; pinned by `src/lib/auth/access/team-auth.rls-nesting.test.ts`. That runtime guard is the enforcement boundary for nesting. A refusal is logged (`rls.nesting_refused`) so a caller that swallows it stays visible. The `scripts/checks/check-rls-nesting.mjs` CI guard is a limited development aid that reports nesting it can see before it reaches runtime; code it does not follow (#909, #910) is left to the runtime guard. A nested context it misses fails the request, never crosses a tenant; a caller that swallows the error silently skips the work it guarded (a notification, a session invalidation, an audit write), and the structured log is how that is noticed.
+- Both CI guards resolve calls through the type-checked Program over every own code file on disk not declared non-production, and refuse a set of forms that would hide what a call runs (`scripts/checks/lib/soundness.mjs`, G1-G7). Those rules make the guards' analysis tractable; they do not make it complete. The guards do not follow, among others, the iterator protocol, implicit conversions, Proxy traps, decorators, an own function a library was given and invokes later, or own code reached through a library-typed slot in forms the rules do not name.
 
 2. Tenant context is set via session-local variable
 Status: `PASS`
@@ -291,7 +292,8 @@ Evidence:
 - `src/lib/auth/session/auth-adapter.ts` sets `isBootstrap: true` on bootstrap tenant creation.
 
 ### Notes / residual risk
-- `withBypassRls` is used in 77 files (allowlisted in `scripts/checks/check-bypass-rls.mjs`). Each bypasses RLS intentionally for cross-tenant operations (audit writes, tenant resolution, admin key rotation, passkey sign-in, etc.).
+- `withBypassRls` is allowlisted for 101 files (`ALLOWED_USAGE` in `scripts/checks/check-bypass-rls.mjs`). Each bypasses RLS intentionally for cross-tenant operations (audit writes, tenant resolution, admin key rotation, passkey sign-in, etc.).
+- Inside a bypass, the database client can reach every model. The per-file model grants are checked only by the CI guard's static analysis, which future code can evade (see above). Restricting models at runtime — a per-purpose capability client exposing only the granted delegates — is the durable fix (#911).
 - `tenants` table itself has no RLS (intentional: it is the tenant resolution entry point).
 - Bootstrap tenant migration assumes single-user tenants. Multi-user bootstrap tenants are not supported.
 
