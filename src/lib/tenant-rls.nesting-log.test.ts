@@ -6,13 +6,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 
-const { mockError } = vi.hoisted(() => ({ mockError: vi.fn() }));
+const { mockError, mockGetLogger, workingLogger } = vi.hoisted(() => {
+  const mockError = vi.fn();
+  const workingLogger = () => ({ error: mockError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() });
+  return { mockError, mockGetLogger: vi.fn(workingLogger), workingLogger };
+});
 
-vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ error: mockError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
-}));
+vi.mock("@/lib/logger", () => ({ getLogger: mockGetLogger }));
 
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls, BYPASS_PURPOSE, RlsSentinelContextRefused } from "@/lib/tenant-rls";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 const TENANT_ID = "77777777-7777-4777-8777-777777777777";
 
@@ -24,7 +27,9 @@ function makePrisma() {
 }
 
 beforeEach(() => {
-  mockError.mockClear();
+  mockError.mockReset();
+  mockGetLogger.mockReset();
+  mockGetLogger.mockImplementation(workingLogger);
 });
 
 describe("RLS nesting refusal log", () => {
@@ -64,5 +69,37 @@ describe("RLS nesting refusal log", () => {
     });
     // Nothing the caller supplied reaches the log.
     expect(JSON.stringify(mockError.mock.calls)).not.toContain(TENANT_ID);
+  });
+});
+
+// The refusal is the control; the log is its record. A logger that fails must
+// not replace the refusal with its own error, or a caller matching on it (or
+// on RlsSentinelContextRefused) would no longer see one.
+const LOGGER_STATES: [string, () => void][] = [
+  ["the logger works", () => {}],
+  ["getLogger() throws", () => mockGetLogger.mockImplementation(() => { throw new Error("logger unavailable"); })],
+  ["logger.error throws", () => mockError.mockImplementation(() => { throw new Error("log sink failed"); })],
+];
+
+describe("a logger failure does not change the refusal", () => {
+  it.each(LOGGER_STATES)("refuses a nested context with INVALID_RLS_NESTING when %s, and never opens it", async (_label, arrange) => {
+    arrange();
+    const prisma = makePrisma();
+    const inner = vi.fn(async () => undefined);
+    await expect(
+      withTenantRls(prisma, TENANT_ID, () => withBypassRls(prisma, inner, BYPASS_PURPOSE.AUDIT_WRITE)),
+    ).rejects.toThrow("INVALID_RLS_NESTING: withBypassRls inside withTenantRls is forbidden");
+    // Only the outer context's transaction was opened.
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(inner).not.toHaveBeenCalled();
+  });
+
+  it.each(LOGGER_STATES)("refuses the sentinel tenant with RlsSentinelContextRefused when %s, and opens no transaction", async (_label, arrange) => {
+    arrange();
+    const prisma = makePrisma();
+    const fn = vi.fn(async () => undefined);
+    await expect(withTenantRls(prisma, SYSTEM_TENANT_ID, fn)).rejects.toBeInstanceOf(RlsSentinelContextRefused);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(fn).not.toHaveBeenCalled();
   });
 });
