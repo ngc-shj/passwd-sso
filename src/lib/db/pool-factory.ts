@@ -1,4 +1,5 @@
 import pg from "pg";
+import ConnectionParameters from "pg/lib/connection-parameters";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { getLogger } from "@/lib/logger";
@@ -63,8 +64,10 @@ export function resetBypassNoticeRateLimit(): void {
 const WARNING_SQLSTATE = "01000";
 
 /**
- * Turn one server notice into a report, or drop it. Only a warning raised by
- * `rls_bypass_admits` whose text matches the report exactly is accepted;
+ * Turn one server notice into a report, or drop it. Only a 01000 warning whose
+ * context names `rls_bypass_admits` and whose text matches the report exactly
+ * is accepted (code that can issue arbitrary SQL can still raise a look-alike,
+ * which is outside this control);
  * anything else — statement logging, other functions' notices — is dropped
  * without any part of it being logged. Every field compared is
  * locale-independent: the SQLSTATE, the function name (substituted into the
@@ -84,25 +87,27 @@ function attachNoticeListener(client: pg.Client | pg.PoolClient): void {
   client.on("notice", handleServerNotice);
 }
 
-const CLIENT_MIN_MESSAGES_RE = /client_min_messages/i;
+// PostgreSQL's option parser folds `-` into `_`, so `client-min-messages`
+// sets the same parameter.
+const CLIENT_MIN_MESSAGES_RE = /client[-_]min[-_]messages/i;
 
 /**
  * Refuse a configuration that would raise `client_min_messages` above WARNING
- * for these connections and so silence the reports. Covers the config's
- * `options`, the connection string's `options`, and PGOPTIONS; a role-level
- * setting is not visible here (SC5's canary detects it).
+ * for these connections and so silence the reports. The startup `options` are
+ * read the way pg reads them — pg's own ConnectionParameters for the
+ * connection string (which accepts strings `new URL` rejects) and for
+ * PGOPTIONS — and every source is checked, a superset of the one pg applies.
+ * A connection string pg cannot parse throws here, as it would on connect. A
+ * role-level setting is not visible here (SC5's canary detects it).
  */
 function assertReportsNotSuppressed(config: pg.ClientConfig): void {
-  const fromUrl = (() => {
-    if (!config.connectionString) return "";
-    try {
-      return new URL(config.connectionString).searchParams.get("options") ?? "";
-    } catch {
-      return "";
-    }
-  })();
-  for (const source of [config.options ?? "", fromUrl, process.env.PGOPTIONS ?? ""]) {
-    if (CLIENT_MIN_MESSAGES_RE.test(source)) {
+  const sources = [
+    config.options,
+    config.connectionString ? new ConnectionParameters(config.connectionString).options : undefined,
+    new ConnectionParameters().options,
+  ];
+  for (const source of sources) {
+    if (source && CLIENT_MIN_MESSAGES_RE.test(source)) {
       throw new Error("database connection options must not set client_min_messages: it would silence RLS bypass reports");
     }
   }

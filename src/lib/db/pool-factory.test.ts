@@ -124,6 +124,11 @@ describe("createPool / createClient refuse to silence the reports", () => {
   it.each([
     ["the config's options", { options: "-c client_min_messages=error" }],
     ["the connection string's options", { connectionString: "postgresql://u:p@localhost:5432/db?options=-c%20client_min_messages%3Derror" }],
+    // PostgreSQL folds `-` into `_` in option names.
+    ["the config's options, dashed", { options: "-c client-min-messages=error" }],
+    ["the connection string's options, dashed", { connectionString: "postgresql://u:p@localhost:5432/db?options=-c%20client-min-messages%3Derror" }],
+    // `new URL` rejects a host-less URL; pg parses it and applies its options.
+    ["a host-less connection string's options", { connectionString: "postgres://u:p@/db?options=-c%20client_min_messages%3Derror" }],
   ])("rejects client_min_messages in %s", (_label, config) => {
     expect(() => createPool(config)).toThrow("must not set client_min_messages");
     expect(() => createClient(config)).toThrow("must not set client_min_messages");
@@ -131,6 +136,11 @@ describe("createPool / createClient refuse to silence the reports", () => {
 
   it("rejects client_min_messages in PGOPTIONS", () => {
     vi.stubEnv("PGOPTIONS", "-c client_min_messages=error");
+    expect(() => createPool({ connectionString: "postgresql://u:p@localhost:5432/db" })).toThrow("must not set client_min_messages");
+  });
+
+  it("rejects a dashed client-min-messages in PGOPTIONS", () => {
+    vi.stubEnv("PGOPTIONS", "-c client-min-messages=error");
     expect(() => createPool({ connectionString: "postgresql://u:p@localhost:5432/db" })).toThrow("must not set client_min_messages");
   });
 

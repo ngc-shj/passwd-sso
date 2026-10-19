@@ -456,6 +456,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_ap
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
+-- Every RLS policy calls these. Migration 20261019000000 grants them only to
+-- roles that exist when it runs, so a role created after migrating needs them
+-- here (run after `prisma migrate deploy`; the functions must exist).
+GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text), public.rls_bypass_enforced() TO passwd_app;
 ```
 
 **Environment variables:**
