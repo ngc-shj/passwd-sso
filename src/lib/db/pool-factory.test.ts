@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { EventEmitter } from "node:events";
+import type pg from "pg";
 
 const { mockWarn } = vi.hoisted(() => ({ mockWarn: vi.fn() }));
 vi.mock("@/lib/logger", () => ({
@@ -101,6 +103,21 @@ describe("productionBypassNoticeSink", () => {
     expect(mockWarn).toHaveBeenCalledTimes(2);
   });
 
+  it("logs the same pair again once the window has passed", () => {
+    vi.useFakeTimers();
+    try {
+      productionBypassNoticeSink({ table: "sessions", purpose: "auth_flow" });
+      vi.advanceTimersByTime(59_999);
+      productionBypassNoticeSink({ table: "sessions", purpose: "auth_flow" });
+      expect(mockWarn).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      productionBypassNoticeSink({ table: "sessions", purpose: "auth_flow" });
+      expect(mockWarn).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps its rate-limit map bounded under many distinct pairs", () => {
     for (let i = 0; i < 1_500; i++) productionBypassNoticeSink({ table: `t${i}`, purpose: "p" });
     expect(mockWarn).toHaveBeenCalledTimes(1_500);
@@ -117,6 +134,33 @@ describe("stderrBypassNoticeSink", () => {
     stderrBypassNoticeSink({ table: "users", purpose: "system_maintenance" });
     expect(write).toHaveBeenCalledWith('{"_logType":"rls.bypass_not_granted","table":"users","purpose":"system_maintenance"}\n');
     write.mockRestore();
+  });
+});
+
+describe("createPool / createClient attach the report listener", () => {
+  const notice = report("rls_bypass_not_granted table=users purpose=auth_flow");
+
+  it("routes a notice on a pooled connection to the sink", async () => {
+    const seen: BypassNotice[] = [];
+    registerBypassNoticeSink((n) => seen.push(n));
+    const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db" });
+    try {
+      // What pg emits for each new physical connection.
+      const connection = new EventEmitter();
+      pool.emit("connect", connection as unknown as pg.PoolClient);
+      connection.emit("notice", notice);
+      expect(seen).toEqual([{ table: "users", purpose: "auth_flow" }]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("routes a notice on a single client to the sink", () => {
+    const seen: BypassNotice[] = [];
+    registerBypassNoticeSink((n) => seen.push(n));
+    const client = createClient({ connectionString: "postgresql://u:p@localhost:5432/db" });
+    client.emit("notice", notice);
+    expect(seen).toEqual([{ table: "users", purpose: "auth_flow" }]);
   });
 });
 

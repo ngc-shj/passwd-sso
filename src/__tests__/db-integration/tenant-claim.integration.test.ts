@@ -33,12 +33,12 @@ import {
   storableClaimSchema,
 } from "@/lib/tenant/tenant-claim-registry";
 import { withBypassRls } from "@/lib/tenant-rls";
-import { defineGrant } from "@/lib/tenant-rls-grants";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
-// findOrCreateTenantForClaim's own reach: tenant_claims (lookup/create) and
-// tenants (create), under the same purpose src/auth.ts's claim flow uses.
-const CLAIM_RESOLUTION_GRANT = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["tenant", "tenantClaim"]);
+// The narrowest production grant findOrCreateTenantForClaim runs under (the
+// auth adapter's user creation; sign-in's AUTH_TENANT_CLAIM_MEMBERSHIP is a
+// superset), so the database reports a table the production grant is missing.
+const CLAIM_RESOLUTION_GRANT = BYPASS_GRANT.AUTH_CREATE_USER;
 // The SAME loader the bootstrap and the audit use, so the probe role's grant
 // cannot drift from the declaration production converges to.
 import { loadDeniedPolicy } from "../../../scripts/lib/denied-privileges.mjs";

@@ -110,12 +110,19 @@ try {
   // The RLS policies call these for every reading role; without EXECUTE every
   // statement on an RLS table fails with "permission denied for function"
   // (a role created after the migration misses its grant).
-  const { rows: exec } = await probe.query<{ ok: boolean }>(
-    `SELECT has_function_privilege(current_user, 'public.rls_bypass_admits(text)', 'EXECUTE')
-        AND has_function_privilege(current_user, 'public.rls_bypass_enforced()', 'EXECUTE') AS ok`,
+  // Checked for every role the suite connects as (the app role, and the
+  // worker roles where they exist), not only this connection's.
+  const { rows: exec } = await probe.query<{ role: string }>(
+    `SELECT r.rolname AS role
+       FROM pg_roles r
+      WHERE (r.rolname = current_user OR r.rolname IN ('passwd_outbox_worker', 'passwd_retention_gc_worker'))
+        AND NOT (has_function_privilege(r.rolname, 'public.rls_bypass_admits(text)', 'EXECUTE')
+             AND has_function_privilege(r.rolname, 'public.rls_bypass_enforced()', 'EXECUTE'))`,
   );
-  if (!exec[0]?.ok) {
-    throw new Error("the application role lacks EXECUTE on public.rls_bypass_admits / rls_bypass_enforced");
+  if (exec.length > 0) {
+    throw new Error(
+      `role(s) lacking EXECUTE on public.rls_bypass_admits / rls_bypass_enforced: ${exec.map((r) => r.role).join(", ")}`,
+    );
   }
 } finally {
   await probe.end().catch(() => {});

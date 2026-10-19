@@ -2,7 +2,7 @@
 # rls-cross-tenant-negative-test.sh — gate self-check
 #
 # Runs a Case 0 pre-flight calibration (canonical policy → exit 0) plus
-# 13 distinct failure shapes against an ephemeral throwaway table to verify
+# 14 distinct failure shapes against an ephemeral throwaway table to verify
 # the cross-tenant verify SQL correctly detects each:
 #   0. canonical policy + correct manifest (sanity: harness calibrated)
 #   1. permissive symmetric → [E-RLS-COUNT-A]
@@ -18,6 +18,7 @@
 #   11. pre-#911 admit-everything COALESCE branch → [E-RLS-BYPASS-TABLE]
 #   12. bare call, no scalar sub-SELECT wrapper → [E-RLS-BYPASS-TABLE]
 #   13. tenant branch casts app.tenant_id outside a sub-SELECT → [E-RLS-TENANT-INITPLAN]
+#   14. the same cast commuted to the left of `=` → [E-RLS-TENANT-INITPLAN]
 #
 # Codes NOT exercised here (acceptable coverage gaps):
 #   - [E-RLS-COUNT-B]: structurally identical to [E-RLS-COUNT-A] (Block 3 mirrors Block 2).
@@ -385,6 +386,12 @@ run_negative_case 12 \
 # [E-RLS-TENANT-INITPLAN].
 run_negative_case 13 \
   "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((SELECT public.rls_bypass_admits('rls_negative_test')) OR tenant_id = current_setting('app.tenant_id', true)::uuid) WITH CHECK ((SELECT public.rls_bypass_admits('rls_negative_test')) OR tenant_id = current_setting('app.tenant_id', true)::uuid)" \
+  "[E-RLS-TENANT-INITPLAN]" \
+  "no" || total_failures=$((total_failures + 1))
+
+# Case 14: the same bare cast on the left of `=` → Block 1 [E-RLS-TENANT-INITPLAN].
+run_negative_case 14 \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((SELECT public.rls_bypass_admits('rls_negative_test')) OR current_setting('app.tenant_id', true)::uuid = tenant_id) WITH CHECK ((SELECT public.rls_bypass_admits('rls_negative_test')) OR current_setting('app.tenant_id', true)::uuid = tenant_id)" \
   "[E-RLS-TENANT-INITPLAN]" \
   "no" || total_failures=$((total_failures + 1))
 

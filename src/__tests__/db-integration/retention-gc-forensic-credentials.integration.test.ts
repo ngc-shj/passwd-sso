@@ -23,7 +23,7 @@ import {
   type TestContext,
   inRetentionSweepTx,
 } from "./helpers";
-import { sweepAuditProvenanceEntry } from "@/workers/retention-gc-worker/sweep";
+import { sweepAuditProvenanceEntry, grantForEntry } from "@/workers/retention-gc-worker/sweep";
 import {
   RETENTION_REGISTRY,
   type AuditProvenanceEntry,
@@ -164,7 +164,7 @@ describe("retention-gc forensic-credential GC (SC4/C6)", () => {
     // Positive: worker role runs the full capture→emit→delete.
     await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepAuditProvenanceEntry(tx, extEntry, 100);
-    });
+    }, grantForEntry(extEntry));
     expect(await extTokenExists(tok)).toBe(false);
 
     // Negative: worker role still cannot directly DELETE audit_logs.

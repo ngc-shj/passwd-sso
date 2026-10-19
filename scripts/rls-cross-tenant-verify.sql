@@ -156,14 +156,17 @@ BEGIN
   --    planner cannot fold, so a bare `current_setting('app.tenant_id')::uuid`
   --    is evaluated while planning a bypassed statement, and on a connection
   --    whose app.tenant_id reverted to '' it raises 22P02 for the bypass.
+  --    A regex, not a LIKE: the bare cast is any occurrence not inside the
+  --    sub-SELECT, on either side of `=` (a LIKE on `::uuid)` misses
+  --    `current_setting(...)::uuid = tenant_id`).
   ASSERT NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_policy p
     JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = 'public'
       AND (
-        pg_get_expr(p.polqual, p.polrelid) LIKE '%(current_setting(''app.tenant_id''::text, true))::uuid)%'
-        OR pg_get_expr(p.polwithcheck, p.polrelid) LIKE '%(current_setting(''app.tenant_id''::text, true))::uuid)%'
+        pg_get_expr(p.polqual, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
+        OR pg_get_expr(p.polwithcheck, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
       )
   ),
     format('[E-RLS-TENANT-INITPLAN] policies casting app.tenant_id outside a sub-SELECT: %s', (
@@ -173,8 +176,8 @@ BEGIN
       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public'
         AND (
-          pg_get_expr(p.polqual, p.polrelid) LIKE '%(current_setting(''app.tenant_id''::text, true))::uuid)%'
-          OR pg_get_expr(p.polwithcheck, p.polrelid) LIKE '%(current_setting(''app.tenant_id''::text, true))::uuid)%'
+          pg_get_expr(p.polqual, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
+          OR pg_get_expr(p.polwithcheck, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
         )
     ));
 

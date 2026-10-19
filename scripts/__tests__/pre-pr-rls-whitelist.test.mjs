@@ -81,9 +81,25 @@ function runWith(output, code, blockSource = block) {
 }
 
 describe("pre-pr rls-cross-tenant whitelist", () => {
+  // A run that completed emits every RLS-MARKER region rls-verify-run.sh checks.
+  const CLEAN_RUN = [
+    "DO",
+    "NOTICE:  RLS-MARKER:block=4-start",
+    "NOTICE:  RLS-MARKER:block=4-end",
+    "NOTICE:  RLS-MARKER:block=report table=users",
+    "WARNING:  rls_bypass_not_granted table=users purpose=system_maintenance",
+    "NOTICE:  RLS-MARKER:block=report-end",
+    "DO",
+  ].join("\n");
+
   it("passes a clean run", () => {
-    const r = runWith("DO\nDO\nDO", 0);
+    const r = runWith(CLEAN_RUN, 0);
     expect(r.status).toBe(0);
+  });
+
+  it("fails a run that exits 0 without emitting the marker regions", () => {
+    const r = runWith("DO\nDO\nDO", 0);
+    expect(r.status).not.toBe(0);
   });
 
   // ALLOW side: the seed-dependent row-count blocks cannot pass against a

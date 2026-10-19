@@ -68,3 +68,14 @@ Departures from the plan (revision 4.1) made during implementation, and why.
 - **Observed:** the integration run reported grants missing tables that are reached only through relations: nested `select`/`include`, relation filters in `where`, nested writes. Adding those tables to their grants then failed the gate's stale-model check, because the gate could not see them reached.
 - **Decision (user):** the gate follows relations. The walker in `check-required-user-relation.mjs` is generalised into a shared lib, and `check-bypass-rls` Check 3 counts relation-reached models as reach. A call with an argument the walker cannot read is undecidable for staleness, like raw SQL.
 - **Effect:** relation paths no test exercises are also checked in CI, and the stale-model check stays accurate. The test-time WARNINGs remain a second, DB-adjudicated source.
+
+## Anti-Deferral entries (Phase 2 self-R-check, Minor)
+
+- **RT1, retention-GC bypass-state fakes** (`retention-gc-tx-fakes.ts`, `sweep-dispatch-bypass.test.ts`): they answer the four-column read by call order and always return `tenant_id`/`tables` as null, so the `enqueueAuditInWorkerTx` allow arm (bypass off, tenant id matching) is not reachable through them.
+  - Why deferred: making the fakes compute the state from what `setBypassGucs` wrote means rewriting a shared fake used by about 40 cells.
+  - Covered meanwhile: `audit-outbox-worker.test.ts`'s fake already computes from its arguments, and the integration suite (retention-GC cells, on the real database) runs the allow arm.
+  - Follow-up: listed with the SC issues.
+- **RT8, C5 coverage against the database:** row absence is checked only for `withTenantRls` as the outer context with `withBypassRls` inside. The other three combinations, `fn`-error precedence and no sibling leak are unit-tested on a mock transaction.
+  - Why accepted: both helpers run their callback through one `runContext`, so the transaction-rollback mechanism is the same code for all four combinations, and the one database cell exercises it.
+- **RT11, notice sink attribution:** the buffer carries no test id. A report from detached work that lands after its test's `afterEach` fails the next test, or the file's `afterAll`, under that test's name.
+  - Why accepted: reports are attributed by table and purpose, which name the grant to fix, so the wrong test name does not hide the defect. Per-test ids would need the ALS context at notice time, and a `pg` notice event does not carry it.

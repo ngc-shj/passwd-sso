@@ -66,6 +66,25 @@ describe("withTenantRls", () => {
     expect(mockExecuteRaw).toHaveBeenCalled();
   });
 
+  it("pins the bypass off and clears the grant before the callback runs", async () => {
+    // A tenant transaction must not inherit a bypass (or a grant) set earlier
+    // in the same transaction by code outside the helpers.
+    const sql: string[] = [];
+    const mockExecuteRaw = vi.fn((strings: TemplateStringsArray) => {
+      sql.push(strings.join("$"));
+      return Promise.resolve(0);
+    });
+    const { prisma } = makeMockPrisma({ $executeRaw: mockExecuteRaw });
+    let seenBeforeCallback: string[] = [];
+    await withTenantRls(prisma, "33333333-3333-4333-8333-333333333333", async () => {
+      seenBeforeCallback = [...sql];
+      return undefined;
+    });
+    const pin = seenBeforeCallback.find((q) => q.includes("set_config('app.bypass_rls', 'off', true)"));
+    expect(pin).toBeDefined();
+    expect(pin).toContain("set_config('app.bypass_tables', '', true)");
+  });
+
   it("context is cleared after the call completes (no leak)", async () => {
     const { prisma } = makeMockPrisma();
     await withTenantRls(prisma, "11111111-1111-4111-8111-111111111111", async () => undefined);

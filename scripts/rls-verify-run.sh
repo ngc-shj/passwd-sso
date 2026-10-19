@@ -93,6 +93,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   printf '%s\n' "$out"
 
   mismatch=$(rls_verify_check "$out")
+  # The region checks are no-ops when their markers are absent, which is right
+  # for a run that failed in Block 1-4 but would pass a run that completed
+  # without emitting them (a marker edited out of the SQL, or NOTICEs
+  # suppressed). A run that succeeded must have produced every region.
+  if [[ "$ec" -eq 0 ]]; then
+    for m in 'RLS-MARKER:block=4-start' 'RLS-MARKER:block=4-end' 'RLS-MARKER:block=report table=' 'RLS-MARKER:block=report-end'; do
+      if ! grep -q "$m" <<<"$out"; then
+        mismatch+=$'\n'"verify succeeded but never emitted '$m': the WARNING-set checks did not run"
+      fi
+    done
+  fi
   if [[ -n "$mismatch" ]]; then
     printf '\nrls-verify-run.sh: WARNING-set mismatch:%s\n' "$mismatch" >&2
     exit 1

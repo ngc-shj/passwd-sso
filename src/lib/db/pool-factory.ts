@@ -3,6 +3,7 @@ import ConnectionParameters from "pg/lib/connection-parameters";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { getLogger } from "@/lib/logger";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 /**
  * The only place production code builds a database pool, client or Prisma
@@ -22,7 +23,7 @@ const REPORT_SOURCE = "rls_bypass_admits";
 
 // Per process, at most one line per (table, purpose) per window; the map is
 // bounded so a flood of distinct pairs cannot grow it without limit.
-const RATE_WINDOW_MS = 60_000;
+const RATE_WINDOW_MS = MS_PER_MINUTE;
 const RATE_MAP_MAX = 1_000;
 const lastLogged = new Map<string, number>();
 

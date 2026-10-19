@@ -24,7 +24,7 @@ import {
   type TestContext,
   inRetentionSweepTx,
 } from "./helpers";
-import { sweepAuditProvenanceEntry } from "@/workers/retention-gc-worker/sweep";
+import { sweepAuditProvenanceEntry, grantForEntry } from "@/workers/retention-gc-worker/sweep";
 import { RETENTION_REGISTRY } from "@/workers/retention-gc-worker/registry";
 
 const grantEntry = RETENTION_REGISTRY.find(
@@ -207,7 +207,7 @@ describe("retention-gc emergency-access-grant GC (SC6b)", () => {
 
     await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepAuditProvenanceEntry(tx, grantEntry, 100);
-    });
+    }, grantForEntry(grantEntry));
     expect(await grantExists(revoked)).toBe(false);
 
     await expect(

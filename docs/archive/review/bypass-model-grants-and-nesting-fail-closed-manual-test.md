@@ -1,7 +1,7 @@
 # Manual test: bypass-model-grants-and-nesting-fail-closed
 
 Covers the deployment-facing parts of this change:
-- the migration `20261019000000_rls_bypass_admits_report_mode`;
+- the migrations `20261019000000_rls_bypass_admits_report_mode` and `20261019000001_rls_tenant_branch_initplan`;
 - the `rls_bypass_not_granted` metric filters in `infra/terraform/monitoring.tf`;
 - the EXECUTE grants added to `bootstrap-rds-roles.mjs` and `ci-integration.yml`.
 
@@ -34,7 +34,7 @@ Covers the deployment-facing parts of this change:
 5. Old code on the new schema: run the previous image's app task against the migrated database. Requests succeed. Reports go only to the RDS server log, which is not exported.
 
 ## Expected result
-- No request fails because of this change: report mode admits everything.
+- No request fails because of the grants: report mode admits every bypassed row. The one deliberate failure is C5. A request that opens a nested RLS context, which was refused before too, now fails as a whole instead of committing the outer transaction (see the Deploy note).
 - Every `RlsBypassNotGranted` metric is 0 under normal traffic, and each increments for its canary.
 - The `rls-bypass-not-granted` alarm goes to ALARM for the canary and notifies the alarms SNS topic, then returns to OK.
 - Not covered here: the audit-anchor-publisher has no Terraform log group, so its reports reach no metric (an SC5 precondition).

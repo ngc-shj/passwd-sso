@@ -500,6 +500,7 @@ const ALLOWED_PURPOSES = new Map([
 // does not follow (the database reports what such a site reaches outside its
 // grant).
 const GRANTS_FILE = "src/lib/tenant-rls-grants.ts";
+const HELPER_FILE = "src/lib/tenant-rls.ts";
 const PURPOSE_FILE = "src/lib/tenant-rls-purpose.ts";
 // The retention worker builds its per-entry grants from the registry's table
 // column (grantForEntry → grantForTables): resolved by construction, recorded
@@ -507,7 +508,7 @@ const PURPOSE_FILE = "src/lib/tenant-rls-purpose.ts";
 const DYNAMIC_GRANT_DIR = "src/workers/retention-gc-worker/";
 const DYNAMIC_GRANT_BUILDERS = new Set(["grantForTables", "grantForEntry"]);
 // The two modules whose raw SQL may write session settings (the writer rule).
-const WRITER_EXEMPT_FILES = new Set(["src/lib/tenant-rls.ts", GRANTS_FILE]);
+const WRITER_EXEMPT_FILES = new Set([HELPER_FILE, GRANTS_FILE]);
 
 /**
  * Production TypeScript under src/ and scripts/ (isProductionPath: tests, the
@@ -838,8 +839,8 @@ function declaresUnusedTx(fn) {
 // literal member read, an `any` receiver with a non-literal key — the case is
 // REFUSED (reported), not followed.
 const HELPER_DECLARATIONS = [
-  { file: "src/lib/tenant-rls.ts", name: "withBypassRls" },
-  { file: "src/lib/tenant-rls.ts", name: "withTenantRls" },
+  { file: HELPER_FILE, name: "withBypassRls" },
+  { file: HELPER_FILE, name: "withTenantRls" },
   { file: "src/lib/tenant-context.ts", name: "withUserTenantRls" },
   { file: "src/lib/tenant-context.ts", name: "withTeamTenantRls" },
 ];
@@ -1517,7 +1518,7 @@ sourceFiles.length = 0;
 for (const abs of scope.files) sourceFiles.push(toRelPosix(abs));
 const helperDecls = resolveHelperDeclarations(program);
 const bypassDecl = program
-  .getSourceFile(join(process.cwd(), "src/lib/tenant-rls.ts"))
+  .getSourceFile(join(process.cwd(), HELPER_FILE))
   ?.getFunctions()
   .find((fn) => fn.getName() === "withBypassRls" && fn.getBody());
 // The Prisma client's model accessors, read off withBypassRls's own client
@@ -2259,7 +2260,7 @@ for (const file of sourceFiles) {
   // definition file (tenant-rls.ts) is exempt — it defines, not consumes.
   /** call start → the call's resolved grant argument */
   const grantOfCall = new Map();
-  if (file !== "src/lib/tenant-rls.ts") {
+  if (file !== HELPER_FILE) {
     for (const { call } of bypassCalls) {
       const pcall = programCallOf(call);
       const line = call.getStartLineNumber();
@@ -2326,7 +2327,7 @@ for (const file of sourceFiles) {
     // function, every access whose receiver is a Prisma client (by type) is a
     // model reached under this bypass, however the client got there, and it
     // must be one the call's grant lists.
-    if (helper !== "withBypassRls" || !allowed || file === "src/lib/tenant-rls.ts") continue;
+    if (helper !== "withBypassRls" || !allowed || file === HELPER_FILE) continue;
     const grant = grantOfCall.get(call.getStart());
     const pcall = programCallOf(call);
     const located = pcall ? bypassRootsOf(pcall) : { roots: [], problem: "call not found in the Program" };
@@ -2578,7 +2579,7 @@ const selfSettingFiles = new Set(selfSettingSites.map(({ file }) => file));
 const unparseableFileSet = new Set(unparseableFiles.map(({ file }) => file));
 const staleEntries = [];
 for (const file of ALLOWED_USAGE) {
-  if (file === "src/lib/tenant-rls.ts" || bypassCallFiles.has(file) || unparseableFileSet.has(file)) continue;
+  if (file === HELPER_FILE || bypassCallFiles.has(file) || unparseableFileSet.has(file)) continue;
   if (!existsSync(file)) continue;
   if (selfSettingFiles.has(file)) continue;
   staleEntries.push(file);

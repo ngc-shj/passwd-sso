@@ -4,6 +4,7 @@ import { NIL_UUID } from "@/lib/constants/app";
 import {
   MODEL_TABLE,
   defineGrant,
+  grantForTables,
   readBypassState,
   setBypassGucs,
   setLockTimeout,
@@ -43,6 +44,18 @@ describe("defineGrant", () => {
   });
 });
 
+describe("grantForTables", () => {
+  it("maps tables back to models", () => {
+    expect(grantForTables(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["sessions", "users"]).tables).toBe("sessions,users");
+  });
+
+  it("refuses a table no model maps to", () => {
+    expect(() => grantForTables(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["sessions", "no_such_table"])).toThrow(
+      'no model maps to table "no_such_table"',
+    );
+  });
+});
+
 describe("setBypassGucs", () => {
   it("sets the four bypass GUCs transaction-locally in one statement", async () => {
     const { calls, tx } = captureRaw();
@@ -50,6 +63,8 @@ describe("setBypassGucs", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].sql).toContain("set_config('app.bypass_rls', 'on', true)");
     expect(calls[0].sql).toContain("set_config('app.bypass_tables', $, true)");
+    expect(calls[0].sql).toContain("set_config('app.bypass_purpose', $, true)");
+    expect(calls[0].sql).toContain("set_config('app.tenant_id', $, true)");
     expect(calls[0].values).toEqual(["token_lifecycle", NIL_UUID, "api_keys,sessions"]);
   });
 

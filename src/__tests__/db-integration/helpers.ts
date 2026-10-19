@@ -151,19 +151,21 @@ export async function setBypassRlsGucs(
 }
 
 /**
- * Run `fn` in a transaction whose first statement sets the tx-local RLS
- * bypass, as retention-gc's module-private inSweepTx does for a globalDelete
- * or per-tenant entry (#874). The sweeps only assert the bypass, so a test
- * calling one directly must set it the way the dispatcher does; inSweepTx
- * itself stays unexported.
+ * Run `fn` in a transaction that sets the tx-local RLS bypass for `grant`
+ * first, as retention-gc's module-private inSweepTx does (#874); a null grant
+ * runs without it. The sweeps only assert the bypass, so a test calling one
+ * directly must set it the way the dispatcher does; inSweepTx itself stays
+ * unexported. `grant` is required and should be the production one —
+ * `grantForEntry(entry)` or the named BYPASS_GRANT the dispatcher passes — so
+ * the database reports a table the production grant is missing.
  */
 export async function inRetentionSweepTx<T>(
   client: PrismaClient,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
-  grant: BypassGrant = TEST_SETUP_GRANT,
+  grant: BypassGrant | null,
 ): Promise<T> {
   return client.$transaction(async (tx) => {
-    await setBypassGucs(tx, grant);
+    if (grant) await setBypassGucs(tx, grant);
     return fn(tx);
   });
 }
