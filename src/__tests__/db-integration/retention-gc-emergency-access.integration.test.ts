@@ -212,7 +212,7 @@ describe("retention-gc emergency-access-grant GC (SC6b)", () => {
 
     await expect(
       ctx.retentionWorker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
           tenantId,

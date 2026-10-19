@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // ─── Grace-period decision ────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ export function passkeyEnforcementBlocks(p: {
  * RLS context:
  *  - When `params.tx` is provided (caller already holds a `withBypassRls`
  *    transaction), it is used directly — no new bypass is opened.
- *  - When no `tx` is provided, a new `withBypassRls(..., BYPASS_PURPOSE.AUTH_FLOW)`
+ *  - When no `tx` is provided, a new `withBypassRls(..., BYPASS_GRANT.PASSKEY_ENFORCEMENT_STATE)`
  *    transaction is opened (matching the pattern in auth.ts:400/418).
  *
  * FAIL-CLOSED (S13): this helper does NOT catch DB errors. It throws on failure;
@@ -100,7 +101,7 @@ export async function derivePasskeyState(params: {
 
   const { credCount, tenant } = params.tx
     ? await run(params.tx)
-    : await withBypassRls(prisma, run, BYPASS_PURPOSE.AUTH_FLOW);
+    : await withBypassRls(prisma, run, BYPASS_GRANT.PASSKEY_ENFORCEMENT_STATE);
 
   // FAIL-CLOSED: a missing tenant row means we cannot determine the policy.
   // tenantId comes from a server-trusted source (token row / session) backed by

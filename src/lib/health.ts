@@ -18,7 +18,8 @@ import { getRedis } from "@/lib/redis";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { MS_PER_SECOND } from "@/lib/constants/time";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
 import { errorLogFields } from "@/lib/logger/error-fields";
 
@@ -45,7 +46,7 @@ export interface HealthResponse {
  * Exported so the tests can assert the outbox transaction's `maxWait + timeout`
  * against the real value instead of re-typing 3000 — a re-typed bound lets the
  * expectation and the production constant drift apart while agreeing with each
- * other, which is the same reason BYPASS_PURPOSE is imported rather than
+ * other, which is the same reason BYPASS_GRANT is imported rather than
  * literal in both health suites.
  */
 export const CHECK_TIMEOUT_MS = 3 * MS_PER_SECOND;
@@ -150,7 +151,7 @@ export async function readAuditOutboxDepth(
         FROM audit_outbox
         WHERE status = 'PENDING'
       `,
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    BYPASS_GRANT.AUDIT_OUTBOX_OPERATOR_ACCESS,
     { timeout: OUTBOX_DEPTH_TIMEOUT_MS, maxWait: OUTBOX_DEPTH_MAX_WAIT_MS },
   );
   return {

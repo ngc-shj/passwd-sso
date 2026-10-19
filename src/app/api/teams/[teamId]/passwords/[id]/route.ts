@@ -13,13 +13,13 @@ import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { displayIdentityOf, displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -48,7 +48,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   // Identity is hydrated after the team context closes; see listTeamPasswords.
   const users = await fetchUserDisplayMap(
     [entry.createdById, entry.updatedById],
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
 
   return NextResponse.json({

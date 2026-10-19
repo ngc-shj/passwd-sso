@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { checkAuth } from "@/lib/auth/session/check-auth";
@@ -50,7 +51,7 @@ async function handleGET(request: NextRequest) {
           })
         : null;
       return { credCount, tenant };
-    }, BYPASS_PURPOSE.AUTH_FLOW);
+    }, BYPASS_GRANT.AUTH_SESSION_PASSKEY_STATUS);
 
     const hasPasskey = data.credCount > 0;
     const required = data.tenant?.requirePasskey ?? false;

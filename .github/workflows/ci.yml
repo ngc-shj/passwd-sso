@@ -734,7 +734,7 @@ jobs:
       - name: Cross-tenant RLS predicate verify (NOSUPERUSER)
         run: |
           EXPECTED_TABLES=$(awk 'NF && $1 !~ /^#/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); print}' scripts/rls-cross-tenant-tables.manifest | paste -sd,)
-          psql -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" \
+          scripts/rls-verify-run.sh -- psql -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" \
             "postgresql://passwd_app:${PASSWD_APP_PASSWORD}@localhost:5432/passwd_sso" \
             -f scripts/rls-cross-tenant-verify.sql
 

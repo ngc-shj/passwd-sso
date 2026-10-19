@@ -8,7 +8,8 @@ import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-acc
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 
@@ -29,7 +30,7 @@ async function handlePOST(
       where: { id },
       select: { granteeEmail: true, ownerId: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.EMERGENCY_ACCESS_GRANT_LOOKUP);
 
   if (!grant) {
     return notFound();
@@ -47,7 +48,7 @@ async function handlePOST(
       to: EA_STATUS.REJECTED,
       actor: EA_ACTOR.GRANTEE,
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.EMERGENCY_ACCESS_GRANT_LOOKUP);
 
   if (!transitionResult.ok) {
     return errorResponse(API_ERROR.GRANT_NOT_PENDING);
@@ -66,7 +67,7 @@ async function handlePOST(
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
   if (owner?.email) {
     const granteeName = session.user.name ?? session.user.email ?? "";
     const { subject, html, text } = emergencyGrantDeclinedEmail(resolveUserLocale(owner.locale), granteeName);

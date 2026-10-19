@@ -7,7 +7,8 @@ import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { INVITATION_STATUS } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { parseBody } from "@/lib/http/parse-body";
 import { invitationAcceptSchema } from "@/lib/validations";
@@ -46,7 +47,7 @@ async function handlePOST(req: NextRequest) {
       where: { token },
       include: { team: { select: { id: true, name: true, slug: true, tenantId: true } } },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TEAM_INVITATION_ACCEPT);
 
   if (!invitation) {
     return errorResponse(API_ERROR.INVALID_INVITATION);

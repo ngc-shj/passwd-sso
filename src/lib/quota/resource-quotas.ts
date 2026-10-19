@@ -15,7 +15,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 export type QuotaResource =
   | "passwords"
@@ -98,7 +99,7 @@ async function currentUsage(
         }
       }
     },
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    BYPASS_GRANT.QUOTA_USAGE_SCAN,
   );
 }
 

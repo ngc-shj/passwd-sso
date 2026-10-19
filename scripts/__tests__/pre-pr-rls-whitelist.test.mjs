@@ -104,6 +104,16 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
   );
 
   // DENY side: Block 1 needs no seed, so these are real control regressions.
+  //
+  // BYPASS-TABLE is also Block 1 (pure pg_catalog inspection) — a policy
+  // whose bypass branch reverted to the pre-#911 app.bypass_rls form, named
+  // the wrong table, or dropped the sub-SELECT wrapper. REPORT and INITPLAN
+  // (Block 4b) are seed-dependent in the other direction from COUNT-A/
+  // COUNT-B/BYPASS: ON_ERROR_STOP=1 means Block 4b is reachable at all only
+  // once Block 2/3/4 (which themselves need the cross-tenant seed) already
+  // passed, so seeing either code here means the DB was effectively fully
+  // seeded and Block 4b still failed — a real regression, never the
+  // unseeded-dev-DB shape this whitelist exists to tolerate.
   it.each([
     "FORCE",
     "SECDEF",
@@ -114,6 +124,9 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
     "DISCOVER",
     "MANIFEST-EXTRA",
     "MANIFEST-MISSING",
+    "BYPASS-TABLE",
+    "REPORT",
+    "INITPLAN",
   ])("stays fatal on the seed-independent code [E-RLS-%s]", (code) => {
     const r = runWith(`ERROR:  [E-RLS-${code}] regression detected`, 3);
     expect(r.status).not.toBe(0);

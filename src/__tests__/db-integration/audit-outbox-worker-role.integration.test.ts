@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { createTestContext, type TestContext } from "./helpers";
+import { createTestContext, type TestContext, setBypassRlsGucs } from "./helpers";
 
 describe("audit-outbox worker role privileges", () => {
   let ctx: TestContext;
@@ -97,7 +97,7 @@ describe("audit-outbox worker role privileges", () => {
   it("cannot INSERT into password_entries table", async () => {
     await expect(
       ctx.worker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         await tx.$executeRawUnsafe(
@@ -112,7 +112,7 @@ describe("audit-outbox worker role privileges", () => {
   it("cannot INSERT into users table", async () => {
     await expect(
       ctx.worker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         await tx.$executeRawUnsafe(

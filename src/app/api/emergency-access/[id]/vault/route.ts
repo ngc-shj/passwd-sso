@@ -5,7 +5,8 @@ import { personalAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EA_STATUS } from "@/lib/constants";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/http/api-response";
 import { autoPromoteIfElapsed } from "@/lib/emergency-access/vault-auto-promote";
@@ -38,7 +39,7 @@ async function handleGET(
         owner: { select: { name: true, email: true } },
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.EMERGENCY_ACCESS_GRANT_LOOKUP);
 
   if (!grant || grant.granteeId !== session.user.id) {
     return notFound();
@@ -59,7 +60,7 @@ async function handleGET(
           now: new Date(),
           auditBase: personalAuditBase(req, session.user.id),
         }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.EMERGENCY_ACCESS_VAULT_READ,
     );
 
     if (result.ok) {

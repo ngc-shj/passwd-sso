@@ -328,4 +328,13 @@ INSERT INTO delegation_sessions (id, tenant_id, user_id, mcp_token_id, expires_a
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', '00000000-0000-0000-0000-0000000000A5', NOW() + interval '1 hour'),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', '00000000-0000-0000-0000-0000000000B5', NOW() + interval '1 hour');
 
+-- ---------------------------------------------------------------------------
+-- system_settings: bypass-only policy table, no tenant_id (not part of the
+-- tenant A/B manifest). Seeded here, not rls-smoke-seed.sql, because the
+-- report block that reads it (rls-cross-tenant-verify.sql Block 4b) runs in
+-- this job after this seed, not after the rls-smoke job's seed.
+-- ---------------------------------------------------------------------------
+INSERT INTO system_settings (key, value, updated_at) VALUES
+  ('rls-x-smoke', 'seeded-for-rls-cross-tenant-verify', NOW());
+
 RESET app.bypass_rls;

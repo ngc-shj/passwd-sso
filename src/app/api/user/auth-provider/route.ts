@@ -4,7 +4,8 @@ import { unauthorized, errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { getSessionToken } from "@/app/api/sessions/helpers";
 import { canRecoverSessionWithPasskey } from "@/lib/auth/session/recent-current-auth-method";
 
@@ -24,7 +25,7 @@ async function handleGET(req: NextRequest) {
         where: { userId: session.user.id },
         select: { provider: true },
       }),
-      BYPASS_PURPOSE.AUTH_FLOW,
+      BYPASS_GRANT.AUTH_ACCOUNT_LOOKUP,
     );
 
     // User can use passkey sign-in if:

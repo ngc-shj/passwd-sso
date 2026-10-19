@@ -19,7 +19,8 @@
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import { logAuditInTx } from "@/lib/audit/audit";
 import { countStrandedRows, realignOwningTenantColumn } from "@/lib/tenant-context";
-import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { realignToMembershipInTxWith, type RealignmentCause } from "@/lib/tenant/tenant-realignment-core";
 
 export {
@@ -66,5 +67,5 @@ export async function realignAfterActivation(
     });
     if (!member) return null;
     return realignToMembershipInTx(tx, { userId, memberId: member.id, tenantId, cause });
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.TENANT_REALIGN_AFTER_ACTIVATION);
 }

@@ -10,7 +10,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import type { NotificationType } from "@prisma/client";
 import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
@@ -79,7 +80,7 @@ export function createNotification(params: CreateNotificationParams): void {
           metadata: (safeMetadata ?? undefined) as Parameters<typeof tx.notification.create>[0]["data"]["metadata"],
         },
       });
-    }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    }, BYPASS_GRANT.NOTIFICATION_CROSS_TENANT_CREATE);
   })().catch(() => {
     // Silently swallow — notification creation must never break the app
   });

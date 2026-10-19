@@ -7,7 +7,8 @@ import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -127,7 +128,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       where: { id: actor.tenantId },
       select: { jitTokenDefaultTtlSec: true, jitTokenMaxTtlSec: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TENANT_POLICY_LOOKUP);
 
   const defaultTtlSec = tenant?.jitTokenDefaultTtlSec ?? SEC_PER_HOUR;
   const maxTtlSec = Math.min(tenant?.jitTokenMaxTtlSec ?? JIT_TOKEN_TTL_MAX, JIT_TOKEN_TTL_MAX);

@@ -13,7 +13,6 @@ import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import type { UserPatchResult } from "@/lib/scim/patch-parser";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 
 // ── Input types ───────────────────────────────────────────────
@@ -75,6 +74,7 @@ export class ScimUserNotFoundError extends Error {
 
 import { ScimOwnerProtectedError } from "@/lib/scim/errors";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 export { ScimOwnerProtectedError };
 
 export class ScimExternalIdConflictError extends Error {
@@ -168,7 +168,7 @@ export async function toScimUserResource(
   snapshot: ScimUserSnapshot,
   baseUrl: string,
 ): Promise<ScimUserResource | null> {
-  const users = await fetchUserDisplayMap([snapshot.userId], BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  const users = await fetchUserDisplayMap([snapshot.userId], BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
   const user = users.get(snapshot.userId);
   if (!user?.email) return null;
 

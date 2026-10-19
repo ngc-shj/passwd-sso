@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
-import { withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 export const runtime = "nodejs";
 
@@ -69,7 +70,7 @@ async function handleGET(req: NextRequest) {
 
   const userById = await fetchUserDisplayMap(
     members.map((m) => m.userId),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
 
   const result = members.map((m) => ({

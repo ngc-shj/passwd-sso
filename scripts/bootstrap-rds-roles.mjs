@@ -398,6 +398,18 @@ async function main() {
       );
     }
 
+    // The RLS policies call these functions for every role that reads an RLS
+    // table; the migration that creates them grants EXECUTE to the roles that
+    // exist then, and this grants it to roles created afterwards. Guarded per
+    // function so a run before that migration converges on the next run.
+    for (const fn of ["public.rls_bypass_enforced()", "public.rls_bypass_admits(text)"]) {
+      const { rows } = await client.query("SELECT to_regprocedure($1) IS NOT NULL AS present", [fn]);
+      if (!rows[0]?.present) continue;
+      for (const { name } of ROLES) {
+        await client.query(`GRANT EXECUTE ON FUNCTION ${fn} TO ${name}`);
+      }
+    }
+
     await client.query("COMMIT");
     console.log("bootstrap-rds-roles: done");
   } catch (e) {

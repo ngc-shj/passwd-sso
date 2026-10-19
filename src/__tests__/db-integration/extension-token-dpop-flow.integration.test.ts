@@ -307,7 +307,8 @@ describe(
       // Directly rotate via Prisma (simulates what the refresh route does).
       // The refresh route carries cnfJkt forward from the validated token.
       const { generateShareToken } = await import("@/lib/crypto/crypto-server");
-      const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
+      const { withBypassRls } = await import("@/lib/tenant-rls");
+      const { BYPASS_GRANT } = await import("@/lib/tenant-rls-grants");
       const { prisma } = await import("@/lib/prisma");
 
       const newPlaintext = generateShareToken();
@@ -333,7 +334,7 @@ describe(
             },
             select: { cnfJkt: true },
           }),
-        BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+        BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE,
       );
 
       expect(newToken.cnfJkt).toBe(kp.jkt);

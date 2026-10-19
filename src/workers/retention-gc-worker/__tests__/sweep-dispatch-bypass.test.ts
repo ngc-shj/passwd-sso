@@ -19,7 +19,7 @@ vi.mock("@/lib/logger", () => ({
 import { sweepOnce } from "../sweep";
 import { RETENTION_REGISTRY } from "../registry";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
-import { isAssertRead, isBypassSetConfig, isEnqueueContextRead, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
+import { isBypassSetConfig, isBypassStateRead, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 const ROWS_PER_WRITE = 5;
 const TRASH_TENANT_ID = "11111111-1111-4111-8111-111111111111";
@@ -54,8 +54,9 @@ function makeDispatchPrisma(opts: { failDeleteOn?: string; inheritedBypass?: str
       }),
       $queryRaw: record("$queryRaw", async (strings: TemplateStringsArray, ..._values: unknown[]) => {
         const text = sqlText(strings);
-        if (isEnqueueContextRead(text)) return [{ bypass_rls: state.bypass, tenant_id: null }];
-        if (isAssertRead(text)) return [{ bypass_rls: state.bypass }];
+        // Both assertSweepBypass and enqueueAuditInWorkerTx read the same
+        // readBypassState query; this tx's own state answers either.
+        if (isBypassStateRead(text)) return [{ bypass_rls: state.bypass, purpose: null, tenant_id: null, tables: null }];
         if (text.includes("SELECT EXISTS")) return [{ ok: true }];
         return []; // the trash SELECT, audit_log_purge
       }),
@@ -149,7 +150,7 @@ describe("sweepOnce dispatch sets the bypass each entry declares (C1)", () => {
     expect(tokenTxs).toHaveLength(1);
     expect(tokenTxs[0].calls.filter((c) => c.name === "$executeRaw")).toEqual([]);
     // It still read the state (and found the bypass off) before the DELETE.
-    expect(isAssertRead(sqlText(tokenTxs[0].calls[0].args[0]))).toBe(true);
+    expect(isBypassStateRead(sqlText(tokenTxs[0].calls[0].args[0]))).toBe(true);
     expect(counts.verification_tokens).toBe(ROWS_PER_WRITE);
   });
 

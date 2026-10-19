@@ -20,7 +20,8 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, logAuditInTx, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { withBypassRls, withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import {
@@ -197,7 +198,7 @@ async function handlePOST(
             },
             data: { revokedAt: new Date() },
           }),
-        BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+        BYPASS_GRANT.MASTER_KEY_ROTATION_SHARE_UPDATE,
       );
       revokedShares = shareResult.count;
     } catch (err) {

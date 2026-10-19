@@ -9,7 +9,8 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/http/api-response";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
@@ -38,7 +39,7 @@ async function handlePOST(
       where: { id },
       select: { granteeId: true, ownerId: true, waitDays: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.EMERGENCY_ACCESS_GRANT_LOOKUP);
 
   if (!grant || grant.granteeId !== session.user.id) {
     return notFound();
@@ -57,7 +58,7 @@ async function handlePOST(
       actor: EA_ACTOR.GRANTEE,
       extraData: { requestedAt: now, waitExpiresAt },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.EMERGENCY_ACCESS_GRANT_LOOKUP);
 
   if (!transitionResult.ok) {
     return errorResponse(API_ERROR.INVALID_STATUS);
@@ -77,13 +78,13 @@ async function handlePOST(
         where: { id: grant.ownerId },
         select: { email: true, name: true, locale: true },
       }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP),
     withBypassRls(prisma, async (tx) =>
       tx.user.findUnique({
         where: { id: session.user.id },
         select: { name: true, email: true },
       }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP),
   ]);
   if (owner?.email) {
     const granteeName = grantee?.name ?? grantee?.email ?? "";

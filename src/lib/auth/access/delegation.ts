@@ -9,7 +9,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   encryptServerData,
   decryptServerData,
@@ -252,7 +253,7 @@ export async function findActiveDelegationSession(
       select: { id: true, expiresAt: true },
       orderBy: { createdAt: "desc" },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 }
 
 export async function revokeAllDelegationSessions(
@@ -269,7 +270,7 @@ export async function revokeAllDelegationSessions(
       },
       select: { id: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 
   if (sessions.length === 0) return 0;
 
@@ -289,7 +290,7 @@ export async function revokeAllDelegationSessions(
       },
       data: { revokedAt: new Date() },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 
   if (result.count > 0 && tenantId) {
     await logAuditAsyncBothScopes({
@@ -318,7 +319,7 @@ export async function revokeDelegationSession(
       },
       data: { revokedAt: new Date() },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 
   // Evict Redis keys (best-effort; TTL handles cleanup if this fails)
   await evictDelegationRedisKeys(userId, sessionId).catch(() => {});

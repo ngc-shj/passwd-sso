@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, advisoryXactLock, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
@@ -17,6 +17,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
 import { serviceAccountCreateSchema } from "@/lib/validations/service-account";
 import { MS_PER_HOUR } from "@/lib/constants/time";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const saCreateLimiter = createRateLimiter({
   windowMs: MS_PER_HOUR,
@@ -78,7 +79,7 @@ async function handleGET(req: NextRequest) {
   // null for that account — measured: Prisma does not throw.
   const users = await fetchUserDisplayMap(
     rows.map((r) => r.createdById),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
   const accounts = rows.map(({ createdById, ...account }) => ({
     ...account,

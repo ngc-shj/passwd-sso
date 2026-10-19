@@ -1,7 +1,8 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { MCP_SCOPES, isAcceptableRedirectUri } from "@/lib/constants/auth/mcp";
 import { getTranslations } from "next-intl/server";
@@ -41,7 +42,7 @@ export default async function McpConsentPage({
   // Look up client (bypass RLS — DCR clients may not have a tenant yet)
   const client = await withBypassRls(prisma, async (tx) =>
     tx.mcpClient.findFirst({ where: { clientId, isActive: true } }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.MCP_CLIENT_CONSENT);
 
   if (!client) {
     return (
@@ -79,7 +80,7 @@ export default async function McpConsentPage({
   // of them is the one the user sees.
   const userTenantId = await withBypassRls(prisma, async (tx) =>
     resolveOwningTenantIdFromClient(tx, session.user.id),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
   if (!userTenantId || (client.tenantId && client.tenantId !== userTenantId)) {
     return (
       <div className="flex items-center justify-center min-h-screen">

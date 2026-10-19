@@ -13,9 +13,7 @@
  *     npx tsx scripts/migrate-webhook-secrets-v1-to-v2.ts [--dry-run]
  */
 
-import { PrismaClient, type Prisma } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
+import type { PrismaClient, Prisma } from "@prisma/client";
 import { createDecipheriv, createCipheriv, randomBytes } from "node:crypto";
 import { config } from "dotenv";
 import { resolve } from "node:path";
@@ -25,7 +23,9 @@ import {
 } from "@/lib/crypto/crypto-server";
 import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
 import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const ALGORITHM = "aes-256-gcm";
@@ -117,7 +117,7 @@ export async function migrateWebhookSecrets(
       await assertBypassRlsActive(tx, "migrate-webhook-secrets-v1-to-v2");
       return migrateInTx(tx, options, stats);
     },
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    BYPASS_GRANT.WEBHOOK_SECRET_MIGRATION,
     { timeout: TX_TIMEOUT_MS },
   );
 }
@@ -236,9 +236,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
-  const adapter = new PrismaPg(pool);
-  const prisma = new PrismaClient({ adapter });
+  const pool = createPool({ connectionString: databaseUrl });
+  const prisma = createPrismaClient(pool);
 
   try {
     console.log(`webhook secret migration v1 → v2 (dry-run=${dryRun})`);
@@ -260,6 +259,7 @@ if (
   (process.argv[1].endsWith("migrate-webhook-secrets-v1-to-v2.ts") ||
     process.argv[1].endsWith("migrate-webhook-secrets-v1-to-v2.js"))
 ) {
+  registerBypassNoticeSink(stderrBypassNoticeSink);
   main().catch((err) => {
     console.error(err);
     process.exit(1);

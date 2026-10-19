@@ -2,7 +2,7 @@
 /**
  * CI guard (AST, ts-morph): a read or write against an RLS-protected table from
  * a worker or one-shot script must run inside a transaction that established an
- * RLS context — `$transaction` + `setBypassRlsGucs`, `withBypassRls`, or
+ * RLS context — `$transaction` + `setBypassGucs`, `withBypassRls`, or
  * `withTenantRls`. A statement issued on the top-level client instead is
  * evaluated with `app.tenant_id` unset (or reverted to '' after an earlier
  * transaction on that pooled connection), and the tenant_isolation policy then
@@ -39,7 +39,7 @@
  *            ["findMany"]`); a method or accessor DETACHED by destructuring
  *            (`const { findMany } = prisma.auditOutbox`, `const { auditOutbox }
  *            = prisma`, and the renamed form `{ findMany: fm }`)
- *   PASSES   context helpers; `$transaction` + setBypassRlsGucs; a parameter
+ *   PASSES   context helpers; `$transaction` + setBypassGucs; a parameter
  *            typed TransactionClient/TxClient/RawExecutor on a function or
  *            method DECLARATION (a function value — arrow or function
  *            expression — never takes that shortcut, and is accepted only when
@@ -47,9 +47,10 @@
  *            the innermost binding of the name decides — #874); every indirect
  *            spelling above when the chain ends at a context binding
  *   MISSED   a client reached through a data structure, a computed key
- *            (`prisma[name]`), or a returned closure; a GUC established through
- *            an element-access raw call (`tx["$executeRaw"]`) — fail-CLOSED, it
- *            reports rather than accepts; `.mjs`/`.js` files, which the shared
+ *            (`prisma[name]`), or a returned closure; a GUC established by raw
+ *            SQL rather than setBypassGucs — fail-CLOSED, it reports rather
+ *            than accepts (check-bypass-rls's writer rule refuses such SQL
+ *            outside src/lib/tenant-rls*.ts); `.mjs`/`.js` files, which the shared
  *            AST helper does not treat as scannable (no `.mjs` in the scan
  *            roots issues a Prisma statement today)
  *
@@ -165,23 +166,11 @@ const CONTEXT_HELPERS = new Set([
 // re-admit the class this gate exists to close, so it is checked separately.
 const TX_OPENING = "$transaction";
 
-// Matches set_config on an RLS GUC and captures the VALUE argument.
-const GUC_SQL_RE =
-  /set_config\s*\(\s*['"`]app\.(bypass_rls|tenant_id)['"`]\s*,\s*([^,]*?)\s*,/;
-
-/**
- * True when the SQL sets an RLS GUC to something other than the empty string.
- * The empty case is excluded deliberately: `set_config('app.tenant_id','',true)`
- * IS the reverted-GUC state this gate exists to catch, not an establishment of
- * context. Checked as a captured value rather than a lookahead — `\s*,\s*`
- * backtracks past the space, so a lookahead for `''` silently misses.
- */
-function setsGucNonEmpty(sql) {
-  const m = GUC_SQL_RE.exec(sql);
-  if (!m) return false;
-  const value = m[2].trim();
-  return value !== "''" && value !== '""' && value !== "``" && value !== "";
-}
+// The one production writer of the bypass GUCs (src/lib/tenant-rls-grants.ts).
+// A raw `set_config` no longer establishes a context here: check-bypass-rls's
+// writer rule refuses one outside src/lib/tenant-rls*.ts, so accepting it would
+// only vouch for SQL that gate already fails.
+const GUC_WRITER = "setBypassGucs";
 
 const MODEL_METHODS = new Set([
   "findMany", "findFirst", "findFirstOrThrow", "findUnique",
@@ -263,37 +252,15 @@ function gucEstablishedOn(callback, recvText, beforeNode) {
   const limit = beforeNode.getStart();
   let sawUndecidable = false;
 
-  // setBypassRlsGucs(<recvText>) — the shared worker helper.
+  // setBypassGucs(<recvText>, grant) — the single writer of the bypass GUCs.
   for (const call of callback.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     if (call.getStart() >= limit) continue;
     const callee = call.getExpression();
-    if (callee.getText() !== "setBypassRlsGucs") continue;
+    if (callee.getText() !== GUC_WRITER) continue;
     const arg0 = call.getArguments()[0];
     if (!arg0) continue;
     if (arg0.getText() === recvText) return "established";
     // Right helper, different binding: says nothing about this one.
-  }
-
-  // <recvText>.$executeRaw`... set_config('app.tenant_id', ...) ...`
-  const rawNodes = [
-    ...callback.getDescendantsOfKind(SyntaxKind.CallExpression),
-    ...callback.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression),
-  ];
-  for (const n of rawNodes) {
-    if (n.getStart() >= limit) continue;
-    const isTagged = n.getKind() === SyntaxKind.TaggedTemplateExpression;
-    const expr = isTagged ? n.getTag() : n.getExpression();
-    if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
-    if (!RAW_METHODS.has(expr.getName())) continue;
-    if (expr.getExpression().getText() !== recvText) continue;
-    const sqlNode = isTagged ? n.getTemplate() : n.getArguments()[0];
-    const sql = sqlNode?.getText() ?? "";
-    if (setsGucNonEmpty(sql)) return "established";
-    // A raw statement on this binding whose SQL we cannot read could be the
-    // setter. Do not conclude "absent" from it.
-    if (!/set_config/.test(sql) && /^[A-Za-z_$][\w$]*$/.test(sql.trim())) {
-      sawUndecidable = true;
-    }
   }
 
   // A call passing this binding to some other function may establish the GUC
@@ -301,7 +268,7 @@ function gucEstablishedOn(callback, recvText, beforeNode) {
   for (const call of callback.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     if (call.getStart() >= limit) continue;
     const callee = call.getExpression().getText();
-    if (callee === "setBypassRlsGucs") continue;
+    if (callee === GUC_WRITER) continue;
     if (RAW_METHODS.has(call.getExpression().getLastChildByKind?.(SyntaxKind.Identifier)?.getText() ?? "")) continue;
     if (call.getArguments().some((a) => a.getText() === recvText)) {
       sawUndecidable = true;
@@ -568,7 +535,7 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
 
   // BOTH node kinds. `prisma.$queryRaw`...`` is a TaggedTemplateExpression, not
   // a CallExpression — walking only calls silently skipped the dominant raw form
-  // in this repo (every set_config line, and src/lib/health.ts).
+  // in this repo (src/lib/health.ts, the workers' raw statements).
   const statements = [
     ...sf.getDescendantsOfKind(SyntaxKind.CallExpression),
     ...sf.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression),
@@ -666,7 +633,7 @@ if (violations.length > 0) {
   console.error(
     `\nWith no RLS context these run with app.tenant_id unset or '' — the policy
 returns zero rows with no error, or raises 22P02. Wrap the statement in
-$transaction + setBypassRlsGucs (workers), or withTenantRls/withBypassRls.\n`,
+$transaction + setBypassGucs (workers), or withTenantRls/withBypassRls.\n`,
   );
   process.exit(1);
 }

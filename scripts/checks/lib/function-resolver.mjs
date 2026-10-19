@@ -420,10 +420,6 @@ export const EXTERNAL_SHAPE_ALLOWLIST = new Map([
   ["src/lib/key-provider/azure-kv-provider.ts::AzureIdentityModule", "@azure/identity"],
   ["src/lib/key-provider/gcp-sm-provider.ts::SmClient", "@google-cloud/secret-manager"],
   ["src/lib/key-provider/gcp-sm-provider.ts::GcpSmModule", "@google-cloud/secret-manager"],
-  // The Prisma transaction client, narrowed to the one raw-query method the
-  // readback assertion uses. It is only ever given a typed client, so it has
-  // no supplier: a value of unknown origin narrowed to it is refused (G7).
-  ["scripts/lib/assert-bypass-rls-active.ts::TxProbe", null],
 ]);
 
 const EMPTY = Object.freeze({ fns: Object.freeze([]), external: false, params: Object.freeze([]), unresolved: null });

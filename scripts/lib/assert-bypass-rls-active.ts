@@ -1,3 +1,6 @@
+import type { Prisma } from "@prisma/client";
+import { readBypassState } from "@/lib/tenant-rls-grants";
+
 /**
  * Readback assertion for one-shot migrations that rewrite rows in
  * RLS-protected tables.
@@ -11,10 +14,11 @@
  * Why a GUC readback and NOT a role-attribute check: the tenant_isolation
  * policies are
  *
- *   COALESCE(current_setting('app.bypass_rls', true), '') = 'on'
+ *   (SELECT public.rls_bypass_admits('<table>'))
  *     OR tenant_id = current_setting('app.tenant_id', true)::uuid
  *
- * so what actually decides visibility is the GUC, which any role may set —
+ * and `rls_bypass_admits` is decided by `app.bypass_rls` (and the grant's
+ * `app.bypass_tables`), so what actually decides visibility is the GUC, which any role may set —
  * not `rolsuper`/`rolbypassrls`. Testing the role attributes instead would
  * refuse on a normal AWS RDS deployment, where the master user is a member of
  * `rds_superuser` but carries neither attribute (`rds_superuser` is a role
@@ -28,9 +32,7 @@
  */
 
 /** Minimal shape shared by Prisma's TransactionClient and a query helper. */
-type TxProbe = {
-  $queryRawUnsafe<T = unknown>(sql: string, ...values: unknown[]): Promise<T>;
-};
+type TxProbe = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 /**
  * Throws unless `app.bypass_rls` is active on THIS transaction. Call as the
@@ -41,10 +43,7 @@ export async function assertBypassRlsActive(
   tx: TxProbe,
   scriptName: string,
 ): Promise<void> {
-  const rows = await tx.$queryRawUnsafe<Array<{ bypass: string | null }>>(
-    `SELECT current_setting('app.bypass_rls', true) AS bypass`,
-  );
-  const bypass = rows[0]?.bypass ?? null;
+  const bypass = (await readBypassState(tx))?.bypassRls ?? null;
   if (bypass !== "on") {
     throw new Error(
       `RLS_BYPASS_NOT_ACTIVE: ${scriptName} expected app.bypass_rls='on' on this ` +

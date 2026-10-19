@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
@@ -79,7 +80,7 @@ async function handlePOST(req: NextRequest) {
       });
       return { row, credential };
     },
-    BYPASS_PURPOSE.AUTH_FLOW,
+    BYPASS_GRANT.AUTH_SESSION_PASSKEY_RECOVERY,
   );
 
   if (!gate.row) {

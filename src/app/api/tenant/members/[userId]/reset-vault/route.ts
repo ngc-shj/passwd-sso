@@ -13,7 +13,7 @@ import {
   isTenantRoleAbove,
 } from "@/lib/auth/access/tenant-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { withTenantRls, advisoryXactLock, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
@@ -33,6 +33,7 @@ import {
   computeApproveEligibility,
   type ApproveEligibility,
 } from "@/lib/vault/admin-reset-eligibility";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 export const runtime = "nodejs";
 
@@ -332,7 +333,7 @@ async function handleGET(
 
   const users = await fetchUserDisplayMap(
     resets.flatMap((r) => [r.initiatedById, r.approvedById]),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
   // Deactivated/missing target → no admin can be strictly above them, so
   // every row's eligibility collapses to insufficient_role (UI hides the

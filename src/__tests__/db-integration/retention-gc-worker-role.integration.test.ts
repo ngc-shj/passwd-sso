@@ -64,7 +64,7 @@ describe("retention-gc-worker role privileges (C7/C10/RT5/T5/T11)", () => {
 
     // As retentionWorker: BEGIN tx, set bypass_rls, DELETE, COMMIT
     await ctx.retentionWorker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `DELETE FROM sessions
          WHERE (id) IN (
@@ -91,7 +91,7 @@ describe("retention-gc-worker role privileges (C7/C10/RT5/T5/T11)", () => {
   it("NEGATIVE: cannot DELETE FROM audit_logs (no DELETE grant — S5/F5)", async () => {
     await expect(
       ctx.retentionWorker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
           tenantId,
@@ -105,7 +105,7 @@ describe("retention-gc-worker role privileges (C7/C10/RT5/T5/T11)", () => {
   it("NEGATIVE: cannot DELETE FROM tenants (no DELETE grant)", async () => {
     await expect(
       ctx.retentionWorker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `DELETE FROM tenants WHERE id = $1::uuid`,
           tenantId,
@@ -133,7 +133,7 @@ describe("retention-gc-worker role privileges (C7/C10/RT5/T5/T11)", () => {
     });
 
     await ctx.retentionWorker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${SYSTEM_TENANT_ID}, true)`;
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at)

@@ -84,7 +84,11 @@ import {
   extractRequestMeta,
   resolveActorType,
 } from "@/lib/audit/audit";
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
+import { defineGrant } from "@/lib/tenant-rls-grants";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
+
+const TEST_BYPASS_GRANT = defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["user"]);
 // The mocked client the openers run against; its $transaction invokes the
 // callback with itself, which is what lets the real openers execute here.
 import { prisma as mockedPrisma } from "@/lib/prisma";
@@ -695,7 +699,7 @@ describe("logAuditAsync — refusal inside an RLS context (C2)", () => {
     // The shape the one live in-context emit had before C0 converted it.
     await withBypassRls(mockedPrisma as never, async () => {
       await logAuditAsync(emitParams());
-    }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    }, TEST_BYPASS_GRANT);
 
     expect(mockEnqueueAudit).not.toHaveBeenCalled();
     expect(mockRefusedWarn).toHaveBeenCalledTimes(1);

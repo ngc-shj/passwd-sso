@@ -8,8 +8,8 @@ import { TEAM_ROLE, SHARE_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { isValidCursorId } from "@/lib/audit/audit-query";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // GET /api/share-links/mine
 // - Personal context (no `team`): links created by current user, personal entries only
@@ -107,7 +107,7 @@ async function handleGET(req: NextRequest) {
   const nextCursor = hasMore ? items[items.length - 1].id : null;
   const creators = await fetchUserDisplayMap(
     items.map((s) => s.createdById),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
   const sharedByOf = (userId: string) => {
     const creator = displayUserOf(creators, userId);

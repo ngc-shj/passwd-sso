@@ -87,7 +87,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 }));
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/route";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
 
@@ -153,7 +153,7 @@ describe("GET /api/tenant/service-accounts", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 

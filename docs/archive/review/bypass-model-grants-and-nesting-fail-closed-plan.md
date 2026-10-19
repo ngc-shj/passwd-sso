@@ -372,3 +372,63 @@ C6. Mutations; each needs a green base first, and each must turn its named test 
 | C6 | Tests and CI (report mode) | locked |
 | C7 | Notice capture: pool factory, sinks, metric filters | locked |
 | C8 | Docs, deploy note, issues | locked |
+
+## Implementation Checklist
+
+Derived at `63808a812` (Phase 2-1). The commands are in the review artifact.
+
+### Batches
+1. **Foundation (C1, C2, C5, C7):**
+   - migration `prisma/migrations/<ts>_rls_bypass_admits_report_mode/`: both functions, REVOKE/GRANT, rewrite of the 57 policies, in-migration catalog assertion;
+   - `src/lib/tenant-rls-grants.ts`;
+   - `src/lib/tenant-rls.ts`: `withBypassRls` takes a grant; `withTenantRls` pins bypass off; `refusedNesting`;
+   - `src/lib/db/pool-factory.ts`: `createPool`, `createClient`, `createPrismaClient`, notice listener, sink registry, production sink;
+   - unit tests.
+2. **Call sites (C2):**
+   - 226 `withBypassRls` calls in 99 files, each converted to a named grant;
+   - grants are generated from the static gate's per-call reach (a dump mode is added to `check-bypass-rls`), plus raw-SQL tables, definer callers and trigger bodies;
+   - the `audit-user-lookup.ts` forwarders take `BypassGrant`.
+3. **Self-setting paths (C3):**
+   - GUC writers moved to `setBypassGucs`:
+     - `audit-outbox.ts:37-39,55-57`
+     - `audit-outbox-worker.ts:78-80` (26 call sites)
+     - `audit-anchor-publisher.ts:96-98,154-156,401-403`
+     - `retention-gc-worker/sweep.ts:176`
+     - `scripts/manual-tests/mcp-replay-audit-verification.ts:49-51`
+   - `lock_timeout` moved to `setLockTimeout`: `account-lockout.ts:222`, `audit-outbox-worker.ts:350`.
+   - Readers moved to `readBypassState`: `audit-outbox-in-tx.ts`, `audit-outbox.ts`, `sweep.ts`, `audit-outbox-worker.ts`, `assert-bypass-rls-active.ts`.
+   - Pools moved to the factory:
+     - `src/lib/prisma.ts:77,146`
+     - `retention-gc-worker/index.ts:143,161`
+     - `audit-outbox-worker.ts:1982,2006`
+     - `audit-anchor-publisher.ts:469,487`
+     - `scripts/audit-chain-verify-worker.ts:366`
+     - `scripts/tenant-domain.ts:189`
+     - `scripts/migrate-webhook-secrets-v1-to-v2.ts:239`
+     - `scripts/migrate-account-tokens-to-encrypted.ts:109`
+     - `scripts/manual-tests/mcp-replay-audit-verification.ts:36`
+     - `src/__tests__/db-integration/helpers.ts:120,126`
+     - `tenant-claim.integration.test.ts` probes
+   - Pools allowlisted: `setup.ts:74`, `bootstrap-rds-roles.mjs:280,298`, `audit-db-grants.mjs:468`, the superuser clients in two integration tests, and the old-code cell.
+4. **Gate (C4):**
+   - `check-bypass-rls.mjs`: per-call grant check, writer, pool and function rules;
+   - `check-rls-read-context.mjs`;
+   - fixtures in `scripts/__tests__/check-bypass-rls.test.mjs`.
+5. **Tests, CI, docs (C6, C8):**
+   - integration cells and `setup.ts` assertions; rls-smoke SQL, `scripts/rls-verify-run.sh` and the negative test;
+   - `ci-integration.yml` bootstrap grant and path filters; `ci.yml` and `pre-pr.sh` runner;
+   - `bootstrap-rds-roles.mjs` grant; `db-grants-manifest.json`; `monitoring.tf`;
+   - docs.
+
+### CI gate parity
+`extract-ci-checks.sh` lists 18 gates. All are run by `pre-pr.sh`, except two that need a live database. Those are run locally by hand before push:
+- the integration suite (with the dev workers stopped);
+- rls-smoke.
+
+### Reuse
+- `getLogger` (`src/lib/logger`);
+- `assertRlsApplies` (`helpers.ts:89`);
+- `createTestContext`;
+- `BYPASS_PURPOSE`;
+- `NIL_UUID` / `SYSTEM_TENANT_ID` (`src/lib/constants/app`);
+- the existing AST project helpers in `scripts/checks/lib`.

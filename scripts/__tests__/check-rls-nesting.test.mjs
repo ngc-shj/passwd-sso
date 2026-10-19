@@ -18,7 +18,13 @@ import { Project, SyntaxKind } from "ts-morph";
 const CHECKER = fileURLToPath(new URL("../checks/check-rls-nesting.mjs", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
-const REAL_FILES = ["src/lib/tenant-rls.ts", "src/lib/tenant-context.ts"];
+// tenant-rls.ts imports the purposes and the grant registry: both real too.
+const REAL_FILES = [
+  "src/lib/tenant-rls.ts",
+  "src/lib/tenant-context.ts",
+  "src/lib/tenant-rls-grants.ts",
+  "src/lib/tenant-rls-purpose.ts",
+];
 
 // Stubs for what the two real files import. Typed, so nothing they call
 // widens to `any` and reads as an unresolvable callee.
@@ -712,10 +718,14 @@ export const f = () => withTenantRls(prisma, T, async () => { await later; });`]
   });
 
   it("passes a call through a listed SDK shape declared as a type alias", () => {
-    const { code, stdout } = run([["scripts/lib/assert-bypass-rls-active.ts", `${HEAD}
-type TxProbe = { $queryRawUnsafe<R = unknown>(sql: string): Promise<R> };
-export const f = (t: TxProbe) => withTenantRls(prisma, T, async () => t.$queryRawUnsafe("SELECT 1"));`]]);
-    expect(code).toBe(0);
+    // The file's other listed shape is used too, or its entry reads as stale.
+    const { code, stdout, stderr } = run([["types/req.d.ts", "declare function require(id: string): any;\n"], ["src/lib/blob-store/s3-blob-store.ts", `${HEAD}
+type S3SendClient = { send: (command: unknown) => Promise<unknown> };
+type S3Module = { S3Client: new (options: { region: string }) => unknown };
+const mod = require("@aws-sdk/client-s3") as S3Module;
+export const client = new mod.S3Client({ region: "r" }) as S3SendClient;
+export const f = (t: S3SendClient) => withTenantRls(prisma, T, async () => t.send({}));`]]);
+    expect(code, stderr).toBe(0);
     expect(stdout).toContain("check-rls-nesting: OK");
   });
 
@@ -2087,15 +2097,6 @@ describe("check-rls-nesting: round 6 — one representative case per contract (R
 export const a = () => keep(job);`)]);
     expect(code).toBe(0);
     expect(stdout).toContain("check-rls-nesting: OK");
-  });
-
-  it("refuses a value nobody named given a registered shape that has no supplier (G7)", () => {
-    const { code, stderr } = run([["scripts/lib/assert-bypass-rls-active.ts", `export type TxProbe = { $queryRawUnsafe: (q: string) => Promise<unknown> };
-declare const raw: any;
-export const probe = raw as TxProbe;
-`]]);
-    expect(code).toBe(1);
-    expect(stderr).toContain("G7: scripts/lib/assert-bypass-rls-active.ts::TxProbe has no supplier");
   });
 
   it.each([

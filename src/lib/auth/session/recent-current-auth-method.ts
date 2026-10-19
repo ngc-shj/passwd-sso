@@ -4,7 +4,8 @@ import { getSessionToken } from "@/app/api/sessions/helpers";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   STEP_UP_WINDOW_MS,
   type RequireRecentSessionOptions,
@@ -58,7 +59,7 @@ export async function evaluateStepUpFreshness(
           authCredentialId: true,
         },
       }),
-    BYPASS_PURPOSE.AUTH_FLOW,
+    BYPASS_GRANT.AUTH_SESSION_LIFECYCLE,
   );
 
   if (!sessionRow) return STEP_UP_FRESHNESS.INVALID;
@@ -117,7 +118,7 @@ export async function canRecoverSessionWithPasskey(
       });
       return boundCredential !== null;
     },
-    BYPASS_PURPOSE.AUTH_FLOW,
+    BYPASS_GRANT.AUTH_SESSION_PASSKEY_RECOVERY,
   );
 }
 

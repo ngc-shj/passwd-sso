@@ -26,7 +26,8 @@ import {
 } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
@@ -214,7 +215,7 @@ async function handlePOST(req: NextRequest) {
       targetId: share.id,
       metadata: { expiresIn, maxViews: maxViews ?? null },
     });
-  }, BYPASS_PURPOSE.AUDIT_WRITE);
+  }, BYPASS_GRANT.AUDIT_WRITE_DIRECT_OUTBOX);
 
   return NextResponse.json({
     id: share.id,

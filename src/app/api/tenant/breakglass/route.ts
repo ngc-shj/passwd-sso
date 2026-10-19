@@ -5,7 +5,7 @@ import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { GRANT_STATUS } from "@/lib/constants/integrations/breakglass";
 import type { GrantStatus } from "@/lib/constants/integrations/breakglass";
-import { withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
@@ -22,6 +22,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 export const runtime = "nodejs";
 
@@ -261,7 +262,7 @@ async function handleGET(_req: NextRequest) {
 
   const users = await fetchUserDisplayMap(
     grants.flatMap((g) => [g.requesterId, g.targetUserId]),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
   const now = new Date();
 

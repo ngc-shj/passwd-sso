@@ -41,6 +41,8 @@ const CODE_ROOTS: Record<string, string[]> = {
     "src/lib/crypto",
     "src/lib/auth",
     "src/lib/prisma.ts",
+    // Where the database driver adapter is constructed (every pool goes through it).
+    "src/lib/db/pool-factory.ts",
     "src/lib/email",
     "src/auth.ts",
     "src/auth.config.ts",

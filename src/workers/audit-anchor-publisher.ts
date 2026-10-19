@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod/v4";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import pg from "pg";
+import type { PrismaClient } from "@prisma/client";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import {
@@ -11,7 +9,8 @@ import {
   ACTOR_TYPE,
 } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT, setBypassGucs } from "@/lib/tenant-rls-grants";
+import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
 import { logAuditAsync } from "@/lib/audit/audit";
 import {
   buildManifest,
@@ -93,9 +92,7 @@ export class AuditAnchorPublisher {
     const prisma = this.prisma;
 
     await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-      await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_ANCHOR_PUBLISH}, true)`;
-      await tx.$executeRaw`SELECT set_config('app.tenant_id', ${SYSTEM_TENANT_ID}, true)`;
+      await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
 
       // Insert if not exists
       await tx.$executeRaw`
@@ -151,9 +148,7 @@ export class AuditAnchorPublisher {
     try {
       const outcome = await this.prisma.$transaction(async (tx) => {
         // Step 1: Set bypass RLS
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-        await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_ANCHOR_PUBLISH}, true)`;
-        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${SYSTEM_TENANT_ID}, true)`;
+        await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
 
         // Step 2: Acquire advisory lock
         const lockRows = await tx.$queryRaw<{ acquired: boolean }[]>`
@@ -398,9 +393,7 @@ export class AuditAnchorPublisher {
       if (uploadFailedReason && tenantsInManifest.length > 0) {
         try {
           await this.prisma.$transaction(async (tx2) => {
-            await tx2.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-            await tx2.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_ANCHOR_PUBLISH}, true)`;
-            await tx2.$executeRaw`SELECT set_config('app.tenant_id', ${SYSTEM_TENANT_ID}, true)`;
+            await setBypassGucs(tx2, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
             // Pause cap formula (closes plan F3): LEAST(now + 1× cadence,
             // GREATEST(anchor.updatedAt, now) + N× cadence).
             const pauseUntil = new Date(
@@ -466,7 +459,7 @@ export function createPublisher(config: PublisherConfig): {
   prisma: PrismaClient;
   shutdown: () => Promise<void>;
 } {
-  const pool = new pg.Pool({
+  const pool = createPool({
     connectionString: config.databaseUrl,
     max: 3,
     idleTimeoutMillis: WORKER_POOL_IDLE_TIMEOUT_MS,
@@ -484,8 +477,7 @@ export function createPublisher(config: PublisherConfig): {
     );
   });
 
-  const adapter = new PrismaPg(pool);
-  const prisma = new PrismaClient({ adapter });
+  const prisma = createPrismaClient(pool);
   const publisher = new AuditAnchorPublisher({ prisma, config });
 
   async function shutdown(): Promise<void> {

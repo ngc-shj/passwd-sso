@@ -84,7 +84,7 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 }));
 
 import { GET, POST } from "./route";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
@@ -277,7 +277,7 @@ describe("GET /api/scim/v2/Users", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.SCIM_USER_MAPPING_LOOKUP,
     );
   });
 });

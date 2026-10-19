@@ -41,7 +41,7 @@ import {
   createSessionUnderConcurrencyCap,
   reportSessionEviction,
 } from "./session-concurrency";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 function makeTx() {
   return {
@@ -288,7 +288,7 @@ describe("createCappedSession", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.AUTH_FLOW,
+      BYPASS_GRANT.AUTH_SESSION_CAPPING,
     );
     expect(mockCheckNewDeviceAndNotify).toHaveBeenCalledWith("u-1", {
       ip: "9.9.9.9",

@@ -7,7 +7,8 @@ import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
 import { BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
@@ -141,7 +142,7 @@ export function createCustomAdapter(): Adapter {
           where: { id },
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
         }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      BYPASS_GRANT.AUTH_USER_LOOKUP);
       if (!user?.email) return null;
       return { id: user.id, name: user.name, email: user.email, image: user.image, emailVerified: user.emailVerified };
     },
@@ -152,7 +153,7 @@ export function createCustomAdapter(): Adapter {
           where: { email },
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
         }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      BYPASS_GRANT.AUTH_USER_LOOKUP);
       if (!user?.email) return null;
       return { id: user.id, name: user.name, email: user.email, image: user.image, emailVerified: user.emailVerified };
     },
@@ -182,7 +183,7 @@ export function createCustomAdapter(): Adapter {
             },
           },
         }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      BYPASS_GRANT.AUTH_ACCOUNT_LOOKUP);
       if (!account?.user?.email) return null;
       return {
         id: account.user.id,
@@ -219,7 +220,7 @@ export function createCustomAdapter(): Adapter {
             },
           },
         }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
       if (!result || !result.user.email) return null;
 
       return {
@@ -372,7 +373,7 @@ export function createCustomAdapter(): Adapter {
         });
 
         return createdUser;
-      }, BYPASS_PURPOSE.AUTH_FLOW).catch(async (error: unknown) => {
+      }, BYPASS_GRANT.AUTH_CREATE_USER).catch(async (error: unknown) => {
         // Round-2 M1's other half. Aborting the transaction closes the write
         // side, but on a first-ever sign-in nothing reports the refusal:
         // src/auth.ts's signIn callback returns early when no user row exists
@@ -483,7 +484,7 @@ export function createCustomAdapter(): Adapter {
           },
           select: { id: true },
         });
-      }, BYPASS_PURPOSE.AUTH_FLOW);
+      }, BYPASS_GRANT.AUTH_LINK_ACCOUNT);
     },
 
     async createSession(
@@ -508,7 +509,7 @@ export function createCustomAdapter(): Adapter {
       const tenantId = await withBypassRls(
         prisma,
         async (tx) => resolveTenantIdForUser(session.userId, tx),
-        BYPASS_PURPOSE.AUTH_FLOW,
+        BYPASS_GRANT.AUTH_USER_LOOKUP,
       );
 
       const created = await createCappedSession({
@@ -540,7 +541,7 @@ export function createCustomAdapter(): Adapter {
           data: rest,
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
         }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      BYPASS_GRANT.AUTH_USER_LOOKUP);
       if (!updated.email) throw new Error("USER_EMAIL_MISSING");
       return { id: updated.id, name: updated.name, email: updated.email, image: updated.image, emailVerified: updated.emailVerified };
     },
@@ -561,7 +562,7 @@ export function createCustomAdapter(): Adapter {
             targetSessions.map((s) => s.sessionToken),
           );
         }
-      }, BYPASS_PURPOSE.AUTH_FLOW);
+      }, BYPASS_GRANT.AUTH_DELETE_USER);
     },
 
     async unlinkAccount(providerAccountId: Pick<AdapterAccount, "provider" | "providerAccountId">) {
@@ -574,7 +575,7 @@ export function createCustomAdapter(): Adapter {
             },
           },
         }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      BYPASS_GRANT.AUTH_ACCOUNT_LOOKUP);
     },
 
     async deleteSession(sessionToken: string) {
@@ -583,7 +584,7 @@ export function createCustomAdapter(): Adapter {
       const digest = hashSessionToken(sessionToken);
       await withBypassRls(prisma, async (tx) =>
         tx.session.delete({ where: { sessionToken: digest } }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
       // R3: invalidation runs only if the delete didn't throw — preserves
       // the "DB write commits before cache evict" invariant.
       await invalidateCachedSessions([digest]);
@@ -612,7 +613,7 @@ export function createCustomAdapter(): Adapter {
             session_state: true,
           },
         }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      BYPASS_GRANT.AUTH_ACCOUNT_LOOKUP);
       if (!account) return null;
 
       // Decrypt the at-rest envelope. Stored values without the `psoenc1:`
@@ -712,7 +713,7 @@ export function createCustomAdapter(): Adapter {
               provider: true,
             },
           }),
-        BYPASS_PURPOSE.AUTH_FLOW);
+        BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
 
         if (!current) return null;
 
@@ -731,7 +732,7 @@ export function createCustomAdapter(): Adapter {
             tx.session.delete({
               where: { sessionToken: digest },
             }),
-          BYPASS_PURPOSE.AUTH_FLOW);
+          BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
           await invalidateCachedSessions([digest]);
           return null;
         }
@@ -743,7 +744,7 @@ export function createCustomAdapter(): Adapter {
             tx.session.delete({
               where: { sessionToken: digest },
             }),
-          BYPASS_PURPOSE.AUTH_FLOW);
+          BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
           await invalidateCachedSessions([digest]);
           await logAuditAsync({
             scope: AUDIT_SCOPE.PERSONAL,
@@ -775,7 +776,7 @@ export function createCustomAdapter(): Adapter {
               expires: true,
             },
           }),
-        BYPASS_PURPOSE.AUTH_FLOW);
+        BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
 
         return {
           // Return the RAW token so Auth.js keeps the cookie value whose digest

@@ -2,7 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
@@ -163,7 +164,7 @@ async function handlePOST(req: NextRequest) {
         },
         select: { id: true, clientId: true, createdAt: true },
       });
-    }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    }, BYPASS_GRANT.MCP_CLIENT_CONSENT);
   } catch (err) {
     if (err instanceof CapExceededError) {
       return NextResponse.json(

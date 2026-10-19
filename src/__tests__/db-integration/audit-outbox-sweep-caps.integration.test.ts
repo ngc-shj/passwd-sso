@@ -608,7 +608,7 @@ describe("audit-outbox sweep caps (C8)", () => {
       {
         label: "a different bypass purpose",
         set: async (tx) => {
-          await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+          await setBypassRlsGucs(tx);
           await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.SYSTEM_MAINTENANCE}, true)`;
         },
       },

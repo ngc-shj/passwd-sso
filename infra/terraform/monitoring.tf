@@ -61,6 +61,33 @@ resource "aws_cloudwatch_log_metric_filter" "high_latency" {
   }
 }
 
+# RLS bypass reports (#911, report mode): a bypassed statement reached a table
+# outside its grant. One filter per log group that carries a pool built by
+# src/lib/db/pool-factory.ts; the line is emitted with this _logType there.
+# The enforce flip waits for these to read zero over a window, after a canary
+# has shown each one counting.
+locals {
+  rls_bypass_report_log_groups = {
+    app                 = aws_cloudwatch_log_group.app.name
+    audit_outbox_worker = aws_cloudwatch_log_group.audit_outbox_worker.name
+    retention_gc_worker = aws_cloudwatch_log_group.retention_gc_worker.name
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "rls_bypass_not_granted" {
+  for_each       = var.enable_monitoring ? local.rls_bypass_report_log_groups : {}
+  name           = "${local.name_prefix}-rls-bypass-not-granted-${each.key}"
+  log_group_name = each.value
+  pattern        = "{ $._logType = \"rls.bypass_not_granted\" }"
+
+  metric_transformation {
+    name          = "RlsBypassNotGranted"
+    namespace     = "${local.name_prefix}/App"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
 ################################################################################
 # CloudWatch Alarms
 ################################################################################

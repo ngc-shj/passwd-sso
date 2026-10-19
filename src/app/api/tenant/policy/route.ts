@@ -17,7 +17,8 @@ import {
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES, RATE_WINDOW_MS } from "@/lib/validations/common.server";
@@ -139,7 +140,7 @@ async function handleGET(_req: NextRequest) {
         },
       }),
     };
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.TENANT_POLICY_LOOKUP);
 
   return NextResponse.json({
     maxConcurrentSessions: user?.tenant?.maxConcurrentSessions ?? null,
@@ -718,7 +719,7 @@ async function handlePATCH(req: NextRequest) {
             extensionTokenIdleTimeoutMinutes: true,
           },
         }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
+      BYPASS_GRANT.TENANT_POLICY_LOOKUP)
     : null;
 
   // Validate tailscaleTailnet: required when tailscaleEnabled is true
@@ -1072,7 +1073,7 @@ async function handlePATCH(req: NextRequest) {
       },
     });
     },
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TENANT_TEAM_POLICY_LOOKUP);
 
   // Bust the tenant policy cache so access restriction picks up new values immediately
   invalidateTenantPolicyCache(membership.tenantId);

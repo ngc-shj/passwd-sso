@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT, type BypassGrant } from "@/lib/tenant-rls-grants";
 
 export interface AuditUserInfo {
   id: string;
@@ -20,7 +21,7 @@ export interface AuditUserInfo {
 export async function fetchAuditUserMap(
   userIds: Array<string | null | undefined>,
 ): Promise<Map<string, AuditUserInfo>> {
-  return fetchUserDisplayMap(userIds, BYPASS_PURPOSE.AUDIT_WRITE);
+  return fetchUserDisplayMap(userIds, BYPASS_GRANT.AUDIT_USER_DISPLAY_LOOKUP);
 }
 
 /**
@@ -39,7 +40,7 @@ export async function fetchAuditUserMap(
  */
 export async function fetchUserDisplayMap(
   userIds: Array<string | null | undefined>,
-  purpose: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE],
+  grant: BypassGrant,
 ): Promise<Map<string, AuditUserInfo>> {
   const uniqueIds = [...new Set(userIds.filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id)))];
   if (uniqueIds.length === 0) return new Map();
@@ -50,7 +51,7 @@ export async function fetchUserDisplayMap(
         where: { id: { in: uniqueIds } },
         select: { id: true, name: true, email: true, image: true },
       }),
-    purpose,
+    grant,
   );
   return new Map(users.map((u) => [u.id, u]));
 }
@@ -95,7 +96,7 @@ export interface UserContact {
  */
 export async function fetchUserContact(
   userId: string,
-  purpose: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE],
+  grant: BypassGrant,
 ): Promise<UserContact | null> {
   return withBypassRls(
     prisma,
@@ -104,6 +105,6 @@ export async function fetchUserContact(
         where: { id: userId },
         select: { email: true, name: true, locale: true },
       }),
-    purpose,
+    grant,
   );
 }

@@ -17,7 +17,8 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import {
   getSessionCookieName,
@@ -109,7 +110,7 @@ async function handlePOST(req: NextRequest) {
       select: { isBootstrap: true },
     });
     return { tenantId, tenant };
-  }, BYPASS_PURPOSE.AUTH_FLOW);
+  }, BYPASS_GRANT.AUTH_SIGNIN_TENANT_LOOKUP);
   if (!existingUser?.tenantId || !existingUser.tenant || !existingUser.tenant.isBootstrap) {
     return errorResponse(API_ERROR.AUTHENTICATION_FAILED);
   }

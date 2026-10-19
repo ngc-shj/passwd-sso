@@ -32,7 +32,8 @@ import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, zodValidationError } from "@/lib/http/api-response";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { extractRequestMeta, logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -230,7 +231,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
           userAgent: meta.userAgent?.slice(0, MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH) ?? null,
         },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.MOBILE_BRIDGE_CODE_LIFECYCLE,
   );
 
   // Audit the device-pairing initiation (step 1). deviceJkt is a public JWK

@@ -41,7 +41,8 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "@/lib/auth/policy/access-restriction";
-import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
 import { emitBridgeCodeIssueFailure } from "@/lib/audit/bridge-code-failure";
@@ -313,7 +314,7 @@ async function handlePOST(req: NextRequest) {
           userAgent: meta.userAgent?.slice(0, EXTENSION_BRIDGE_CODE_USER_AGENT_MAX_LENGTH) ?? null,
         },
       });
-    }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+    }, BYPASS_GRANT.EXTENSION_BRIDGE_CODE_LIFECYCLE);
   } catch (err) {
     await emitBridgeCodeIssueFailure({
       req,

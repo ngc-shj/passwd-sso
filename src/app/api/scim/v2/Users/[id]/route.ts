@@ -5,7 +5,8 @@ import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
 import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { usersOwnedByAnotherTenant } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import {
@@ -135,7 +136,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   const resolvedUserId = await withBypassRls(
     prisma,
     (tx) => resolveUserId(tenantId, id, tx),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.SCIM_USER_MAPPING_LOOKUP,
   );
   if (!resolvedUserId) return scimError(404, "User not found");
   if (active !== false) {
@@ -240,7 +241,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   const resolvedUserId = await withBypassRls(
     prisma,
     (tx) => resolveUserId(tenantId, id, tx),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.SCIM_USER_MAPPING_LOOKUP,
   );
   if (!resolvedUserId) return scimError(404, "User not found");
   // `=== true`, not `!== false`, because PATCH and PUT reach the transition
@@ -365,7 +366,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
   // and answering it with a 500 left SCIM_USER_DELETE unwritten (round-5 F2).
   let contact: Awaited<ReturnType<typeof fetchUserContact>> = null;
   try {
-    contact = await fetchUserContact(userId, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    contact = await fetchUserContact(userId, BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
   } catch (error) {
     getLogger().error({ tenantId, userId, error: errorLogFields(error) }, "scim.delete-contact-read-failed");
   }

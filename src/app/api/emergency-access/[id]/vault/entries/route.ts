@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -33,7 +34,7 @@ async function handleGET(
     tx.emergencyAccessGrant.findUnique({
       where: { id },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.EMERGENCY_ACCESS_GRANT_LOOKUP);
 
   if (!grant || grant.granteeId !== session.user.id) {
     return notFound();
@@ -68,7 +69,7 @@ async function handleGET(
       },
       orderBy: { updatedAt: "desc" },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.VAULT_ENTRY_CROSS_TENANT_READ);
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),

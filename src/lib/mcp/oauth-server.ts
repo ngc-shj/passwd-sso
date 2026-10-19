@@ -12,7 +12,8 @@ import { randomBytes, createHash, randomUUID, timingSafeEqual } from "node:crypt
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { getLogger } from "@/lib/logger";
 import {
   MCP_TOKEN_PREFIX,
@@ -118,7 +119,7 @@ export async function createAuthorizationCode(
         expiresAt,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.MCP_AUTH_CODE_LIFECYCLE);
 
   return { code: plainCode, expiresAt };
 }
@@ -188,7 +189,7 @@ export async function resolveCodeTenantId(code: string): Promise<string | null> 
       });
       return row?.tenantId ?? null;
     },
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.MCP_AUTH_CODE_LIFECYCLE,
   );
 }
 
@@ -221,7 +222,7 @@ export async function resolveRefreshTokenGate(
       if (!row) return null;
       return { tenantId: row.tenantId, alreadyRotated: row.rotatedAt !== null };
     },
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.MCP_REFRESH_TOKEN_LIFECYCLE,
   );
 }
 
@@ -338,7 +339,7 @@ export async function exchangeCodeForToken(
       userId: authCode.userId,
       serviceAccountId: authCode.serviceAccountId,
     };
-  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  }, BYPASS_GRANT.MCP_CODE_EXCHANGE);
 
   if ("error" in result) {
     return {
@@ -403,7 +404,7 @@ export async function createRefreshToken(params: {
         expiresAt,
       },
     });
-  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  }, BYPASS_GRANT.MCP_REFRESH_TOKEN_LIFECYCLE);
 
   return { refreshToken: token, expiresAt };
 }
@@ -639,7 +640,7 @@ export async function exchangeRefreshToken(
         userId: rt.userId,
       };
     },
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.MCP_REFRESH_EXCHANGE,
   );
 
   // Phase 2: handle outcomes
@@ -731,7 +732,7 @@ async function revokeFamilyOutOfBand(
           });
         }
       },
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+      BYPASS_GRANT.MCP_TOKEN_REVOCATION,
     );
   } catch (err) {
     getLogger().error(
@@ -793,7 +794,7 @@ export async function validateMcpToken(
         lastUsedAt: true,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.MCP_ACCESS_TOKEN_VALIDATE);
 
   if (!record) return { ok: false, error: "invalid_token" };
   if (record.revokedAt) return { ok: false, error: "token_revoked" };
@@ -815,7 +816,7 @@ export async function validateMcpToken(
   if (record.userId !== null) {
     const active = await withBypassRls(prisma, (tx) =>
       checkTenantMembership(tx, record.tenantId, record.userId as string),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+    BYPASS_GRANT.TOKEN_TENANT_MEMBERSHIP_CHECK);
     if (!active) return { ok: false, error: "invalid_token" };
   }
 
@@ -829,7 +830,7 @@ export async function validateMcpToken(
         where: { id: record.id },
         data: { lastUsedAt: new Date() },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch((err) => {
+    BYPASS_GRANT.MCP_ACCESS_TOKEN_VALIDATE).catch((err) => {
       getLogger().warn({ err }, "mcp.token.lastUsedAt.update_failed");
     });
   }
@@ -920,5 +921,5 @@ export async function revokeToken(params: {
     }
 
     // Unknown/already revoked token → silent success per RFC 7009
-  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  }, BYPASS_GRANT.MCP_TOKEN_REVOCATION);
 }

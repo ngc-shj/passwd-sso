@@ -170,7 +170,7 @@ describe("retention-gc forensic-credential GC (SC4/C6)", () => {
     // Negative: worker role still cannot directly DELETE audit_logs.
     await expect(
       ctx.retentionWorker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
           tenantId,

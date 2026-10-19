@@ -20,7 +20,7 @@
  * ─── Why the predicate is "unconstrained", not "reads User.tenantId" ───
  *
  * Most reads of that column are fine. `users_tenant_isolation` is
- * `bypass_rls='on' OR tenant_id = current_setting('app.tenant_id')::uuid`, so a
+ * `rls_bypass_admits('users') OR tenant_id = app.tenant_id`, so a
  * read inside a TENANT-SCOPED context can only return the context's own tenant —
  * RLS enforces the agreement and there is nothing to fix. Only a read that is
  * NOT inside such a context returns the stale copy verbatim. That distinction is

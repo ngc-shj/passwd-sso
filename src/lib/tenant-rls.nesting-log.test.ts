@@ -14,10 +14,13 @@ const { mockError, mockGetLogger, workingLogger } = vi.hoisted(() => {
 
 vi.mock("@/lib/logger", () => ({ getLogger: mockGetLogger }));
 
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE, RlsSentinelContextRefused } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls, RlsSentinelContextRefused } from "@/lib/tenant-rls";
+import { defineGrant } from "@/lib/tenant-rls-grants";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 const TENANT_ID = "77777777-7777-4777-8777-777777777777";
+const GRANT = defineGrant(BYPASS_PURPOSE.AUDIT_WRITE, ["auditLog"]);
 
 function makePrisma() {
   const tx = { $executeRaw: vi.fn().mockResolvedValue(undefined) };
@@ -42,7 +45,7 @@ describe("RLS nesting refusal log", () => {
     const prisma = makePrisma();
     await expect(
       withTenantRls(prisma, TENANT_ID, () =>
-        withBypassRls(prisma, async () => undefined, BYPASS_PURPOSE.AUDIT_WRITE),
+        withBypassRls(prisma, async () => undefined, GRANT),
       ),
     ).rejects.toThrow("INVALID_RLS_NESTING: withBypassRls inside withTenantRls is forbidden");
 
@@ -54,13 +57,19 @@ describe("RLS nesting refusal log", () => {
 
   it("logs the refusal even when the caller swallows the error", async () => {
     const prisma = makePrisma();
-    await withBypassRls(
-      prisma,
-      async () => {
-        await withTenantRls(prisma, TENANT_ID, async () => undefined).catch(() => null);
-      },
-      BYPASS_PURPOSE.AUDIT_WRITE,
-    );
+    // The caller catches the INNER rejection, but runContext (C5) still fails
+    // the OUTER transaction it was refused inside of — a caught refusal must
+    // not let the outer callback commit work that skipped what the nested
+    // context was for. The log fires regardless of either outcome.
+    await expect(
+      withBypassRls(
+        prisma,
+        async () => {
+          await withTenantRls(prisma, TENANT_ID, async () => undefined).catch(() => null);
+        },
+        GRANT,
+      ),
+    ).rejects.toThrow("INVALID_RLS_NESTING: a nested RLS context was refused inside this withBypassRls");
     expect(mockError).toHaveBeenCalledOnce();
     expect(mockError.mock.calls[0][0]).toEqual({
       event: "rls.nesting_refused",
@@ -87,7 +96,7 @@ describe("a logger failure does not change the refusal", () => {
     const prisma = makePrisma();
     const inner = vi.fn(async () => undefined);
     await expect(
-      withTenantRls(prisma, TENANT_ID, () => withBypassRls(prisma, inner, BYPASS_PURPOSE.AUDIT_WRITE)),
+      withTenantRls(prisma, TENANT_ID, () => withBypassRls(prisma, inner, GRANT)),
     ).rejects.toThrow("INVALID_RLS_NESTING: withBypassRls inside withTenantRls is forbidden");
     // Only the outer context's transaction was opened.
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);

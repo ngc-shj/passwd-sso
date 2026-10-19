@@ -3,7 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { unauthorized } from "@/lib/http/api-response";
 import { TEAM_ROLE } from "@/lib/constants";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 
 // GET /api/teams/pending-key-distributions
@@ -25,7 +26,7 @@ async function handleGET() {
       },
       select: { teamId: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TEAM_PENDING_KEY_DISTRIBUTION);
 
   if (adminMemberships.length === 0) {
     return NextResponse.json([]);
@@ -60,7 +61,7 @@ async function handleGET() {
         },
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TEAM_PENDING_KEY_DISTRIBUTION);
 
   const result = pendingMembers.map((m) => ({
     memberId: m.id,

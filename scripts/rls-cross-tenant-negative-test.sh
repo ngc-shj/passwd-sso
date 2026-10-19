@@ -2,18 +2,22 @@
 # rls-cross-tenant-negative-test.sh — gate self-check
 #
 # Runs a Case 0 pre-flight calibration (canonical policy → exit 0) plus
-# 9 distinct failure shapes against an ephemeral throwaway table to verify
+# 13 distinct failure shapes against an ephemeral throwaway table to verify
 # the cross-tenant verify SQL correctly detects each:
 #   0. canonical policy + correct manifest (sanity: harness calibrated)
 #   1. permissive symmetric → [E-RLS-COUNT-A]
 #   2. asymmetric USING/WITH CHECK → [E-RLS-SYM]
 #   3. NULL USING clause (FOR INSERT-only) → [E-RLS-NULL]
-#   4. dropped bypass clause → [E-RLS-BYPASS]
+#   4. bypass branch neutered (AND false) → [E-RLS-BYPASS]
 #   5. manifest drift (canonical policy + manifest missing throwaway) → [E-RLS-MANIFEST-MISSING]
 #   6. manifest contains a name not in DB → [E-RLS-MANIFEST-EXTRA]
 #   7. column-parity probe (tenant_id column without policy) → [E-RLS-COLPARITY]
 #   8. FORCE ROW LEVEL SECURITY dropped on a tenant_isolation table → [E-RLS-FORCE]
 #   9. SECURITY DEFINER function created in public schema → [E-RLS-SECDEF]
+#   10. bypass branch names the wrong table → [E-RLS-BYPASS-TABLE]
+#   11. pre-#911 admit-everything COALESCE branch → [E-RLS-BYPASS-TABLE]
+#   12. bare call, no scalar sub-SELECT wrapper → [E-RLS-BYPASS-TABLE]
+#   13. tenant branch casts app.tenant_id outside a sub-SELECT → [E-RLS-TENANT-INITPLAN]
 #
 # Codes NOT exercised here (acceptable coverage gaps):
 #   - [E-RLS-COUNT-B]: structurally identical to [E-RLS-COUNT-A] (Block 3 mirrors Block 2).
@@ -58,6 +62,11 @@ MANIFEST_FILE="$SCRIPT_DIR/rls-cross-tenant-tables.manifest"
 VERIFY_SQL="$SCRIPT_DIR/rls-cross-tenant-verify.sql"
 # shellcheck source=lib/psql-safe.sh
 source "$SCRIPT_DIR/lib/psql-safe.sh"
+# shellcheck source=rls-verify-run.sh
+# Sourced (not executed) for its rls_verify_check function — see that file's
+# header for why this script applies it to output it already captured
+# through psql_safe rather than calling rls-verify-run.sh as a subprocess.
+source "$SCRIPT_DIR/rls-verify-run.sh"
 
 # Trap-based cleanup: idempotent DROP. Fires on EXIT/ERR/INT/TERM (not SIGKILL).
 # Drops BOTH the negative-test policy target AND the colparity probe table
@@ -94,11 +103,13 @@ INSERT INTO rls_negative_test (tenant_id) VALUES
   ('00000000-0000-0000-0000-0000000000B0');
 SQL
 
-# Canonical policy: exactly the shape every real tenant_isolation policy uses.
+# Canonical policy: exactly the shape every real tenant_isolation policy uses
+# post-#911 (migration 20261019000000) — the bypass branch is a scalar
+# sub-SELECT naming the throwaway table itself.
 # Case 0 (pre-flight) asserts a verify run under this policy + the
 # manifest-with-throwaway exits 0. Case 5 reuses this so only manifest-parity
 # fires (NOT cross-fired by stale Case 4 state).
-CANONICAL_POLICY_SQL="CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((current_setting('app.bypass_rls', true) = 'on') OR tenant_id = current_setting('app.tenant_id', true)::uuid) WITH CHECK ((current_setting('app.bypass_rls', true) = 'on') OR tenant_id = current_setting('app.tenant_id', true)::uuid)"
+CANONICAL_POLICY_SQL="CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((SELECT public.rls_bypass_admits('rls_negative_test')) OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)) WITH CHECK ((SELECT public.rls_bypass_admits('rls_negative_test')) OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid))"
 
 # Build the manifest entries (whitespace-trimmed, comments stripped).
 manifest_entries=$(awk 'NF && $1 !~ /^#/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); print}' \
@@ -132,6 +143,17 @@ run_negative_case() {
   verify_output=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
     -v expected_tables="$expected_tables" \
     -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+
+  # Through the wrapper (scripts/rls-verify-run.sh): asserts the WARNING set
+  # each RLS-MARKER-delimited region of verify.sql promises. A no-op when no
+  # marker appears in $verify_output, which is every case except Case 0 —
+  # ON_ERROR_STOP=1 means a broken-policy case fails well before Block 4/4b.
+  local marker_mismatch
+  marker_mismatch=$(rls_verify_check "$verify_output")
+  if [[ -n "$marker_mismatch" ]]; then
+    printf 'FAIL case %s: WARNING-set mismatch:%s\n' "$case_id" "$marker_mismatch"
+    return 1
+  fi
 
   if [[ -z "$expected_code" ]]; then
     # Case 0: expect exit 0 (calibration).
@@ -170,15 +192,19 @@ run_negative_case 0 \
   "no" || total_failures=$((total_failures + 1))
 
 # Case 1: permissive symmetric → Block 2 count fails for tenant A
-# (USING (true) admits both A and B rows under SET LOCAL app.tenant_id=A).
+# (the OR true admits both A and B rows under SET LOCAL app.tenant_id=A).
+# Keeps the sub-SELECT form so BYPASS-TABLE passes and the mutation reaches
+# Block 2 as intended (R5-M1).
 run_negative_case 1 \
-  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING (true) WITH CHECK (true)" \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((SELECT public.rls_bypass_admits('rls_negative_test')) OR true) WITH CHECK ((SELECT public.rls_bypass_admits('rls_negative_test')) OR true)" \
   "[E-RLS-COUNT-A]" \
   "no" || total_failures=$((total_failures + 1))
 
-# Case 2: asymmetric USING vs WITH CHECK → Block 1 [E-RLS-SYM].
+# Case 2: asymmetric USING vs WITH CHECK → Block 1 [E-RLS-SYM]. [E-RLS-SYM]
+# runs before [E-RLS-BYPASS-TABLE] in Block 1, so WITH CHECK (true) (which
+# would also fail BYPASS-TABLE) never gets that far.
 run_negative_case 2 \
-  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING (tenant_id = current_setting('app.tenant_id', true)::uuid OR current_setting('app.bypass_rls', true) = 'on') WITH CHECK (true)" \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING (tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid) OR (SELECT public.rls_bypass_admits('rls_negative_test'))) WITH CHECK (true)" \
   "[E-RLS-SYM]" \
   "no" || total_failures=$((total_failures + 1))
 
@@ -190,9 +216,14 @@ run_negative_case 3 \
   "[E-RLS-NULL]" \
   "no" || total_failures=$((total_failures + 1))
 
-# Case 4: bypass clause dropped → Block 4 count fails (count=0 with bypass=on).
+# Case 4: bypass clause neutered → Block 4 count fails (count=0 with
+# bypass=on, tenant_id=nil-sentinel). Keeps the sub-SELECT call (so
+# BYPASS-TABLE passes) but ANDs it with false, so the bypass branch
+# structurally exists yet never actually admits; the OR tenant-filter tail
+# is kept so Block 2/3 (which use a real tenant_id, not bypass) still pass
+# and the mutation reaches Block 4 as intended (R5-M1).
 run_negative_case 4 \
-  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING (tenant_id = current_setting('app.tenant_id', true)::uuid) WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid)" \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING (((SELECT public.rls_bypass_admits('rls_negative_test')) AND false) OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)) WITH CHECK (((SELECT public.rls_bypass_admits('rls_negative_test')) AND false) OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid))" \
   "[E-RLS-BYPASS]" \
   "no" || total_failures=$((total_failures + 1))
 
@@ -327,6 +358,35 @@ run_case_9_secdef() {
   printf 'PASS case 9 (matched [E-RLS-SECDEF])\n'
 }
 run_case_9_secdef || total_failures=$((total_failures + 1))
+
+# Case 10: bypass branch names the wrong table → Block 1 [E-RLS-BYPASS-TABLE].
+# Mutates only rls_negative_test's own policy; never public.rls_bypass_admits.
+run_negative_case 10 \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((SELECT public.rls_bypass_admits('wrong_table')) OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)) WITH CHECK ((SELECT public.rls_bypass_admits('wrong_table')) OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid))" \
+  "[E-RLS-BYPASS-TABLE]" \
+  "no" || total_failures=$((total_failures + 1))
+
+# Case 11: pre-#911 admit-everything COALESCE branch (never rewritten by the
+# migration, or reverted by a later hand-edit) → Block 1 [E-RLS-BYPASS-TABLE].
+run_negative_case 11 \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((COALESCE(current_setting('app.bypass_rls', true), '') = 'on') OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)) WITH CHECK ((COALESCE(current_setting('app.bypass_rls', true), '') = 'on') OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid))" \
+  "[E-RLS-BYPASS-TABLE]" \
+  "no" || total_failures=$((total_failures + 1))
+
+# Case 12: bare call, no scalar sub-SELECT wrapper (loses the InitPlan
+# materialization #911 relies on) → Block 1 [E-RLS-BYPASS-TABLE].
+run_negative_case 12 \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING (public.rls_bypass_admits('rls_negative_test') OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)) WITH CHECK (public.rls_bypass_admits('rls_negative_test') OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid))" \
+  "[E-RLS-BYPASS-TABLE]" \
+  "no" || total_failures=$((total_failures + 1))
+
+# Case 13: tenant branch casts app.tenant_id outside a sub-SELECT. Planning a
+# bypassed statement then evaluates ''::uuid on a used connection → Block 1
+# [E-RLS-TENANT-INITPLAN].
+run_negative_case 13 \
+  "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((SELECT public.rls_bypass_admits('rls_negative_test')) OR tenant_id = current_setting('app.tenant_id', true)::uuid) WITH CHECK ((SELECT public.rls_bypass_admits('rls_negative_test')) OR tenant_id = current_setting('app.tenant_id', true)::uuid)" \
+  "[E-RLS-TENANT-INITPLAN]" \
+  "no" || total_failures=$((total_failures + 1))
 
 if (( total_failures > 0 )); then
   printf '\n%d negative-test cases failed.\n' "$total_failures"

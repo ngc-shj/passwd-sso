@@ -76,6 +76,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { GET, POST } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const TEAM_ID = "team-123";
 const TENANT_ID = "tenant-456";
@@ -184,7 +185,11 @@ describe("GET /api/teams/[teamId]/members", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
-    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), expect.any(String));
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_GRANT.TEAM_MEMBER_DISPLAY_LOOKUP,
+    );
   });
 
   it("excludes members whose user profile is not visible in the bypass lookup", async () => {

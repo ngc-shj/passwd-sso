@@ -11,7 +11,8 @@ import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, AR_STATUS } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
@@ -180,7 +181,7 @@ async function handlePOST(req: NextRequest) {
         where: { id: serviceAccountId },
         select: { isActive: true, createdById: true, tenantId: true },
       }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    BYPASS_GRANT.SERVICE_ACCOUNT_LOOKUP);
     if (!sa) {
       return errorResponse(API_ERROR.SA_NOT_FOUND);
     }
@@ -276,7 +277,7 @@ async function handlePOST(req: NextRequest) {
         createdAt: true,
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.ACCESS_REQUEST_LOOKUP);
 
   await logAuditAsync({
     ...tenantAuditBase(req, userId, tenantId),

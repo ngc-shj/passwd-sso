@@ -49,6 +49,7 @@ import {
   withTeamTenantRls,
 } from "@/lib/tenant-context";
 import { prisma } from "@/lib/prisma";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // ─── Tests ──────────────────────────────────────────────────
 
@@ -291,7 +292,7 @@ describe("resolveUserTenantId", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       prisma,
       expect.any(Function),
-      expect.any(String),
+      BYPASS_GRANT.TENANT_MEMBERSHIP_LOOKUP,
     );
     expect(mockFindMany).toHaveBeenCalled();
   });
@@ -309,7 +310,7 @@ describe("resolveTeamTenantId", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       prisma,
       expect.any(Function),
-      expect.any(String),
+      BYPASS_GRANT.TEAM_TENANT_LOOKUP,
     );
     expect(mockFindUnique).toHaveBeenCalledWith({
       where: { id: "team-1" },
@@ -436,7 +437,11 @@ describe("usersOwnedByAnotherTenant", () => {
         },
       },
     });
-    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), "cross_tenant_lookup");
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
+    );
   });
 
   it("names a user filed under another tenant and active nowhere, and not one filed here", async () => {
@@ -505,7 +510,7 @@ describe("resolveExistingUsersForTenant", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      "cross_tenant_lookup",
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 

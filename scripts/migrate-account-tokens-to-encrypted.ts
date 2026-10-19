@@ -24,15 +24,15 @@
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
 
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { pathToFileURL } from "node:url";
 import {
   encryptAccountToken,
   isEncryptedAccountToken,
 } from "@/lib/crypto/account-token-crypto";
 import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {
   sqlIdentifier,
@@ -105,9 +105,9 @@ async function main(): Promise<void> {
     );
   }
 
-  const prisma = new PrismaClient({
-    adapter: new PrismaPg({ connectionString: url }),
-  });
+  registerBypassNoticeSink(stderrBypassNoticeSink);
+  const pool = createPool({ connectionString: url });
+  const prisma = createPrismaClient(pool);
 
   let cursorId: string | null = null;
   let scanned = 0;
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
           cursorId = batch[batch.length - 1].id;
           return false;
         },
-        BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+        BYPASS_GRANT.ACCOUNT_TOKEN_MIGRATION,
         { timeout: TX_TIMEOUT_MS },
       );
       if (done) break;

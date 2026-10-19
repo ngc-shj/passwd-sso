@@ -12,12 +12,12 @@ vi.mock("@/lib/prisma", () => ({
 // we let the inner function run directly so we can observe the prisma call.
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
-  BYPASS_PURPOSE: { AUDIT_WRITE: "audit_write" },
 }));
 
 import { fetchAuditUserMap } from "./audit-user-lookup";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { ANONYMOUS_ACTOR_ID, SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const REAL_USER_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -136,12 +136,12 @@ describe("fetchAuditUserMap", () => {
     expect(map.get(REAL_USER_ID_2)).toBeUndefined();
   });
 
-  it("invokes withBypassRls with AUDIT_WRITE purpose", async () => {
+  it("invokes withBypassRls with the AUDIT_USER_DISPLAY_LOOKUP grant", async () => {
     mockedFindMany.mockResolvedValue([]);
     await fetchAuditUserMap([REAL_USER_ID]);
 
     expect(mockedBypass).toHaveBeenCalledOnce();
-    const purpose = mockedBypass.mock.calls[0]?.[2];
-    expect(purpose).toBe(BYPASS_PURPOSE.AUDIT_WRITE);
+    const grant = mockedBypass.mock.calls[0]?.[2];
+    expect(grant).toBe(BYPASS_GRANT.AUDIT_USER_DISPLAY_LOOKUP);
   });
 });

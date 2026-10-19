@@ -52,19 +52,28 @@ const {
   );
 
   // Every transaction handed to a $transaction callback models the RLS GUC
-  // state of that one transaction: the seams' bypass assert (a tagged $queryRaw
-  // over current_setting) reads back only what set_config wrote on the SAME tx,
-  // so a wrapper that skips setBypassRlsGucs fails here as it would in Postgres.
-  // $executeRaw still delegates to the tx's own mock, so call-recording tests
-  // keep observing it.
+  // state of that one transaction: the seams' bypass assert (readBypassState's
+  // tagged $queryRaw over current_setting) reads back only what setBypassGucs
+  // wrote on the SAME tx, so a wrapper that skips setBypassGucs fails here as
+  // it would in Postgres. $executeRaw still delegates to the tx's own mock, so
+  // call-recording tests keep observing it.
   function withGucState<T extends { $executeRaw: (...args: never[]) => unknown }>(tx: T) {
     const gucs = new Map<string, unknown>();
     const executeRaw = tx.$executeRaw as unknown as (...args: unknown[]) => unknown;
     return {
       ...tx,
       $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => {
-        const match = /set_config\('([^']+)', (?:'([^']*)'|\$)/.exec(strings.join("$"));
-        if (match) gucs.set(match[1], match[2] ?? values[0]);
+        // setBypassGucs (and pinBypassOff) write every GUC in ONE statement —
+        // `SELECT set_config('<name>', <literal|$>, true), set_config(...), ...`
+        // — so every set_config in the text is captured, mapping each `$`
+        // placeholder to the next positional value in order.
+        const text = strings.join("$");
+        const re = /set_config\('([^']+)',\s*(?:'([^']*)'|\$)/g;
+        let valueIndex = 0;
+        for (const match of text.matchAll(re)) {
+          const [, name, literal] = match;
+          gucs.set(name, literal !== undefined ? literal : values[valueIndex++]);
+        }
         return executeRaw(strings, ...values);
       },
       $queryRaw: async (strings: TemplateStringsArray) => {
@@ -72,9 +81,12 @@ const {
         if (!sql.includes("current_setting('app.bypass_rls'")) {
           throw new Error(`unmodelled $queryRaw in test mock: ${sql}`);
         }
+        // readBypassState's one combined read: bypass_rls, purpose, tenant_id, tables.
         return [{
           bypass_rls: gucs.get("app.bypass_rls") ?? null,
-          bypass_purpose: gucs.get("app.bypass_purpose") ?? null,
+          purpose: gucs.get("app.bypass_purpose") ?? null,
+          tenant_id: gucs.get("app.tenant_id") ?? null,
+          tables: gucs.get("app.bypass_tables") ?? null,
         }];
       },
     };
@@ -680,9 +692,9 @@ describe("claimBatch", () => {
   }, 15000);
 });
 
-// ─── setBypassRlsGucs ─────────────────────────────────────────────────────────
+// ─── setBypassGucs ────────────────────────────────────────────────────────────
 
-describe("setBypassRlsGucs", () => {
+describe("setBypassGucs", () => {
   beforeEach(resetMocks);
 
   it("sets bypass GUCs via $executeRaw tagged template in each transaction", async () => {
@@ -701,14 +713,15 @@ describe("setBypassRlsGucs", () => {
       .filter((sql) => sql.includes("set_config"));
     expect(gucCalls.length).toBeGreaterThanOrEqual(3);
     expect(gucCalls.some((s) => s.includes("bypass_rls"))).toBe(true);
-    // bypass_purpose and tenant_id are interpolated values ($1, $2), not in the template strings
-    // Verify they were passed as the second argument
+    // setBypassGucs writes every GUC in ONE statement, so bypass_purpose and
+    // tenant_id are its 2nd and 3rd interpolated values (after the tagged
+    // template's strings array), not in the template strings themselves.
     const purposeCall = mockExecuteRaw.mock.calls.find(
       (call) => call[1] === BYPASS_PURPOSE.AUDIT_WRITE,
     );
     expect(purposeCall).toBeDefined();
     const tenantIdCall = mockExecuteRaw.mock.calls.find(
-      (call) => call[1] === NIL_UUID,
+      (call) => call[2] === NIL_UUID,
     );
     expect(tenantIdCall).toBeDefined();
   }, 15000);

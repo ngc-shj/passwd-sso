@@ -19,7 +19,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 
 import { requireMaintenanceOperator } from "./maintenance-auth";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 describe("requireMaintenanceOperator", () => {
   beforeEach(() => {
@@ -130,13 +130,13 @@ describe("requireMaintenanceOperator", () => {
     );
   });
 
-  it("uses BYPASS_PURPOSE.SYSTEM_MAINTENANCE for the RLS bypass", async () => {
+  it("uses the MAINTENANCE_OPERATOR_CHECK grant for the RLS bypass", async () => {
     mockFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: TENANT_ROLE.ADMIN });
 
     await requireMaintenanceOperator("user-1");
 
-    // Second arg to withBypassRls is the function, third is the purpose.
-    const purpose = mockWithBypassRls.mock.calls[0][2];
-    expect(purpose).toBe(BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+    // Second arg to withBypassRls is the function, third is the grant.
+    const grant = mockWithBypassRls.mock.calls[0][2];
+    expect(grant).toBe(BYPASS_GRANT.MAINTENANCE_OPERATOR_CHECK);
   });
 });

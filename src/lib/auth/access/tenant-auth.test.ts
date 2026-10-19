@@ -35,6 +35,7 @@ import {
 } from "./tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // ─── Tests ──────────────────────────────────────────────────
 
@@ -186,7 +187,7 @@ describe("getTenantMembership", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      expect.any(String),
+      BYPASS_GRANT.TENANT_MEMBERSHIP_LOOKUP,
     );
   });
 });

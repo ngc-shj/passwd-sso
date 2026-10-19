@@ -11,7 +11,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT, setLockTimeout } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
@@ -81,7 +82,7 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
             lockoutDuration3Minutes: true,
           },
         }),
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP,
     );
 
     if (!tenant) {
@@ -152,7 +153,7 @@ export async function checkLockout(userId: string): Promise<LockoutStatus> {
       where: { id: userId },
       select: { accountLockedUntil: true },
     }),
-  BYPASS_PURPOSE.AUTH_FLOW);
+  BYPASS_GRANT.AUTH_USER_LOOKUP);
 
   if (!user?.accountLockedUntil) {
     return { locked: false, lockedUntil: null };
@@ -202,7 +203,7 @@ export async function recordFailure(
       (await withBypassRls(
         prisma,
         (tx) => resolveOwningTenantIdFromClient(tx, userId),
-        BYPASS_PURPOSE.AUTH_FLOW,
+        BYPASS_GRANT.AUTH_USER_LOOKUP,
       )) ?? undefined;
   }
 
@@ -219,7 +220,7 @@ export async function recordFailure(
     // The prisma proxy re-uses the bypass transaction for nested $transaction calls.
     const result = await withBypassRls(prisma, async (tx) => {
       // Set lock_timeout to prevent indefinite waits
-      await tx.$executeRaw`SET LOCAL lock_timeout = '200ms'`;
+      await setLockTimeout(tx, 200);
 
       // Acquire row-level exclusive lock
       // NOTE: Table "users" (@@map), columns use @map snake_case names
@@ -300,7 +301,7 @@ export async function recordFailure(
         lockMinutes,
         thresholdCrossed,
       };
-    }, BYPASS_PURPOSE.AUTH_FLOW);
+    }, BYPASS_GRANT.AUTH_USER_LOOKUP);
 
     // Atomic audit: VAULT_UNLOCK_FAILED (every failure)
     try {
@@ -315,7 +316,7 @@ export async function recordFailure(
             ip: meta.ip,
             userAgent: meta.userAgent,
           });
-        }, BYPASS_PURPOSE.AUDIT_WRITE);
+        }, BYPASS_GRANT.AUDIT_WRITE_DIRECT_OUTBOX);
       } else {
         await logAuditAsync({
           scope: AUDIT_SCOPE.PERSONAL,
@@ -348,7 +349,7 @@ export async function recordFailure(
               ip: meta.ip,
               userAgent: meta.userAgent,
             });
-          }, BYPASS_PURPOSE.AUDIT_WRITE);
+          }, BYPASS_GRANT.AUDIT_WRITE_DIRECT_OUTBOX);
         } else {
           await logAuditAsync({
             scope: AUDIT_SCOPE.PERSONAL,
@@ -437,7 +438,7 @@ export async function resetLockout(userId: string): Promise<void> {
           accountLockedUntil: null,
         },
       }),
-    BYPASS_PURPOSE.AUTH_FLOW);
+    BYPASS_GRANT.AUTH_USER_LOOKUP);
   } catch (err) {
     getLogger().error({ error: errorLogFields(err), userId }, "vault.lockout.resetLockout.error");
     // Swallow — do not block successful unlock

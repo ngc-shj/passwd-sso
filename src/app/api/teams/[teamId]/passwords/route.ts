@@ -10,11 +10,11 @@ import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, EX
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { displayIdentityOf, displayUserOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -63,7 +63,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   // Identity is hydrated after the team context closes; see listTeamPasswords.
   const users = await fetchUserDisplayMap(
     entries.flatMap((e) => [e.createdById, e.updatedById]),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
 
   return NextResponse.json(

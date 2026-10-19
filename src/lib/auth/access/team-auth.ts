@@ -12,7 +12,8 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withTeamTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withTeamIpRestriction, PolicyViolationError } from "@/lib/team/team-policy";
 import type { TeamRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
@@ -180,7 +181,7 @@ export async function getAdminTeamMemberships(userId: string) {
         isCrossTenant: membership.team.tenant.id !== userTenantId,
       },
     }));
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.TEAM_ADMIN_MEMBERSHIP_LOOKUP);
 }
 
 // ─── Error Class ────────────────────────────────────────────────

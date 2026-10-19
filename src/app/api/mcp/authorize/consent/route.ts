@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import {
@@ -133,7 +134,7 @@ export async function POST(req: NextRequest) {
   // Validate client (must happen before redirect to prevent open redirect)
   const foundClient = await withBypassRls(prisma, async (tx) =>
     tx.mcpClient.findFirst({ where: { clientId, isActive: true } }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.MCP_CLIENT_CONSENT);
 
   if (!foundClient) {
     return NextResponse.json({ error: "invalid_client" }, { status: 400 });
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
   // active membership in.
   const userTenantId = await withBypassRls(prisma, async (tx) =>
     resolveOwningTenantIdFromClient(tx, session.user.id),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
   if (!userTenantId || (foundClient.tenantId && foundClient.tenantId !== userTenantId)) {
     return NextResponse.json({ error: "access_denied" }, { status: 403 });
   }
@@ -313,7 +314,7 @@ export async function POST(req: NextRequest) {
           }
           return { error: null as null };
         },
-        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+        BYPASS_GRANT.MCP_CLIENT_CONSENT,
       );
     } catch (err) {
       // C7: a concurrent foreign claim can win the race and cause a P2002 unique
@@ -344,7 +345,7 @@ export async function POST(req: NextRequest) {
     if (claimResult.error === "already_claimed") {
       const refetched = await withBypassRls(prisma, async (tx) =>
         tx.mcpClient.findUnique({ where: { id: clientIdDb } }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+      BYPASS_GRANT.MCP_CLIENT_CONSENT);
       if (!refetched || refetched.tenantId !== userTenantId) {
         return NextResponse.json({ error: "access_denied" }, { status: 403 });
       }

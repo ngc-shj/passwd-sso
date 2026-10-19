@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
@@ -110,7 +111,7 @@ export async function resolveEffectiveSessionTimeouts(
       if (!tenant || !memberships) return null;
       return { tenantId, tenant, teamMemberships: memberships.teamMemberships };
     },
-    BYPASS_PURPOSE.AUTH_FLOW,
+    BYPASS_GRANT.AUTH_SIGNIN_TENANT_LOOKUP,
   );
 
   if (!user) {

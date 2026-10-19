@@ -1,24 +1,21 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { NIL_UUID, SYSTEM_TENANT_ID, UUID_RE } from "@/lib/constants/app";
+import { SYSTEM_TENANT_ID, UUID_RE } from "@/lib/constants/app";
 import { getLogger } from "@/lib/logger";
+import { pinBypassOff, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
 
-export const BYPASS_PURPOSE = {
-  AUTH_FLOW: "auth_flow",
-  CROSS_TENANT_LOOKUP: "cross_tenant_lookup",
-  SYSTEM_MAINTENANCE: "system_maintenance",
-  AUDIT_WRITE: "audit_write",
-  WEBHOOK_DISPATCH: "webhook_dispatch",
-  TOKEN_LIFECYCLE: "token_lifecycle",
-  AUDIT_ANCHOR_PUBLISH: "audit-anchor-publish",
-} as const;
-
-export type BypassPurpose = (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE];
+export { BYPASS_PURPOSE, type BypassPurpose } from "@/lib/tenant-rls-purpose";
 
 type TenantRlsContext = {
   tx: Prisma.TransactionClient;
   tenantId: string | null;
   bypass: boolean;
+  /**
+   * Set when a nested context was refused inside this one. The context's own
+   * helper then fails its transaction, so a caller that caught the refusal
+   * cannot commit work that skipped what the nested context was for.
+   */
+  refusedNesting: boolean;
 };
 
 export const tenantRlsStorage = new AsyncLocalStorage<TenantRlsContext>();
@@ -139,18 +136,21 @@ function assertOpenableTenantContext(tenantId: string): void {
  * The message names both halves so a failure says which nesting occurred, and
  * keeps the `INVALID_RLS_NESTING:` prefix the existing assertions match on.
  *
- * This is fail-closed for callers that propagate. Callers that swallow — the
- * best-effort notification and lockout paths — see a skipped side effect
- * instead, which is why a missed site is not uniformly "a denied request".
- * The error log below is what keeps a swallowed refusal visible. It names only
- * the two helpers: no tenant id, SQL or caller argument reaches it. This guard
- * is the boundary; check-rls-nesting is a limited development aid that
- * reports the nesting it can see, with the coverage its header lists.
+ * A caller that swallows the refusal no longer skips its work silently: the
+ * refusal marks the active context, and that context's own helper fails its
+ * transaction when its callback returns (runContext), so the request fails
+ * instead. Two cases stay detection-only, through the error log below: work
+ * detached from the callback that opens a context after the outer one
+ * committed, and an outer call that is itself caught. The log names only the
+ * two helpers: no tenant id, SQL or caller argument reaches it. This guard is
+ * the boundary; check-rls-nesting is a limited development aid that reports
+ * the nesting it can see, with the coverage its header lists.
  */
 function assertNoActiveRlsContext(opening: "withTenantRls" | "withBypassRls"): void {
   const ctx = getTenantRlsContext();
   if (ctx === undefined) return;
   const active = ctx.bypass ? "withBypassRls" : "withTenantRls";
+  ctx.refusedNesting = true;
   logRefusal(
     { event: "rls.nesting_refused", opening, active },
     "RLS context refused: another RLS context is active",
@@ -158,6 +158,26 @@ function assertNoActiveRlsContext(opening: "withTenantRls" | "withBypassRls"): v
   throw new Error(
     `INVALID_RLS_NESTING: ${opening} inside ${active} is forbidden`,
   );
+}
+
+/**
+ * Run `fn` as the context's body and fail if a nested context was refused
+ * inside it, even when `fn` caught that refusal. Throwing here, inside the
+ * `$transaction` callback, rolls the transaction back. An error from `fn`
+ * itself takes precedence: it already rolls back and names the real cause.
+ *
+ * Limits: work detached from `fn` (`void (async () => …)()`) that opens a
+ * context after `fn` resolved is refused and logged but cannot fail a
+ * transaction that already committed; and an outer call that is itself caught
+ * still lets its caller continue.
+ */
+async function runContext<T>(ctx: TenantRlsContext, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  const result = await tenantRlsStorage.run(ctx, () => fn(ctx.tx));
+  if (ctx.refusedNesting) {
+    const helper = ctx.bypass ? "withBypassRls" : "withTenantRls";
+    throw new Error(`INVALID_RLS_NESTING: a nested RLS context was refused inside this ${helper}`);
+  }
+  return result;
 }
 
 export function getTenantRlsContext(): TenantRlsContext | undefined {
@@ -185,7 +205,10 @@ export async function withTenantRls<T>(
   assertOpenableTenantContext(tenantId);
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-    return tenantRlsStorage.run({ tx, tenantId, bypass: false }, () => fn(tx));
+    // A bypass GUC left on the connection by anything else must not turn this
+    // tenant transaction into a bypass.
+    await pinBypassOff(tx);
+    return runContext({ tx, tenantId, bypass: false, refusedNesting: false }, fn);
   }, options);
 }
 
@@ -193,7 +216,8 @@ export async function withTenantRls<T>(
 export async function withBypassRls<T>(
   prisma: PrismaClient,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
-  purpose: BypassPurpose,
+  // The purpose and the tables this bypass may reach (src/lib/tenant-rls-grants.ts).
+  grant: BypassGrant,
   // Additive and optional, same contract as withTenantRls: every existing
   // caller keeps Prisma's defaults (5s timeout / 2s maxWait). One-shot
   // migrations that rewrite a batch inside a single bypass transaction need an
@@ -203,11 +227,8 @@ export async function withBypassRls<T>(
 ): Promise<T> {
   assertNoActiveRlsContext("withBypassRls");
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-    await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${purpose}, true)`;
-    // Set a valid UUID to prevent cast errors when PG evaluates both OR branches
-    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
-    return tenantRlsStorage.run({ tx, tenantId: null, bypass: true }, () => fn(tx));
+    await setBypassGucs(tx, grant);
+    return runContext({ tx, tenantId: null, bypass: true, refusedNesting: false }, fn);
   }, options);
 }
 

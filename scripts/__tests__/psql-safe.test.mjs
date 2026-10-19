@@ -20,10 +20,17 @@ const LIB = resolve(SCRIPTS, "lib", "psql-safe.sh");
 const SENTINEL = "s3ntinel-pw";
 
 // Scripts outside the class, each with the reason it is outside:
-//   pre-pr.sh    — runs psql through `docker exec` in the db container, where
-//                  the operator's ~/.psqlrc does not exist and no URL is used.
-//   backup-db.sh — has its own passfile and `psql -X` handling (#755).
-const EXEMPT = new Set(["pre-pr.sh", "backup-db.sh"]);
+//   pre-pr.sh        — runs psql through `docker exec` in the db container,
+//                       where the operator's ~/.psqlrc does not exist and no
+//                       URL is used.
+//   backup-db.sh     — has its own passfile and `psql -X` handling (#755).
+//   rls-verify-run.sh — a generic wrapper that execs an arbitrary caller-
+//                       supplied command (`rls-verify-run.sh -- <command...>`);
+//                       it never itself constructs a psql invocation, so -X/
+//                       passfile safety is the caller's, same as pre-pr.sh.
+//                       Its own docstring mentions `psql` in prose and usage
+//                       examples, which is what trips BARE_PSQL below.
+const EXEMPT = new Set(["pre-pr.sh", "backup-db.sh", "rls-verify-run.sh"]);
 
 const SOURCES_LIB = /^source "\$SCRIPT_DIR\/lib\/psql-safe\.sh"$/m;
 const BARE_PSQL = /(^|[^a-z_])psql /;

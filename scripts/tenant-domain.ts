@@ -84,10 +84,12 @@
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
 
-import { PrismaClient, Prisma } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import type { PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { pathToFileURL } from "node:url";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 import {
   normalizeTenantClaim,
   storableClaimSchema,
@@ -186,12 +188,12 @@ function missingUrlResult(): CmdResult {
 //     with no limit (round 10, F-R10-5). No query outlasts its transaction anyway.
 export const migrationClientFactory = {
   create(connectionString: string): PrismaClient {
-    const adapter = new PrismaPg({
+    const pool = createPool({
       connectionString,
       connectionTimeoutMillis: envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5 * MS_PER_SECOND, { min: 1, max: MS_PER_MINUTE }),
       query_timeout: confirmationTransaction.options().timeout,
     });
-    return new PrismaClient({ adapter });
+    return createPrismaClient(pool);
   },
 };
 
@@ -367,7 +369,7 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
 
         return { ok: true, code: 0, rows, message };
       },
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.TENANT_CLAIM_LIST,
     );
   } finally {
     await prisma.$disconnect();
@@ -650,7 +652,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
 
         return { ok: true, code: 0, rows, message };
       },
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.TENANT_DOMAIN_UNMAPPED_REPORT,
     );
   } finally {
     await prisma.$disconnect();
@@ -1120,7 +1122,7 @@ export async function cmdAdd(args: {
 
         return { ok: true, code: 0, tenantId: tenant.id, claim };
       },
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.TENANT_CLAIM_REGISTER,
       confirmationTransaction.options(),
     );
   } catch (e) {
@@ -1253,7 +1255,7 @@ export async function cmdRemove(args: {
         console.log(`Revoked claim "${escapeUnsafeDisplayChars(claim)}" for tenant ${tenant.id}.`);
         return { ok: true, code: 0, tenantId: tenant.id, claim };
       },
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.TENANT_CLAIM_REGISTER,
       confirmationTransaction.options(),
     );
   } catch (e) {
@@ -1532,7 +1534,7 @@ export async function cmdHistory(args: {
 
         return { ok: true, code: 0, rows, message };
       },
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.TENANT_CLAIM_HISTORY,
     );
   } finally {
     await prisma.$disconnect();
@@ -1701,7 +1703,7 @@ export async function cmdRealign(args: {
             "Their membership there is still deactivated; that tenant can now reactivate it.",
         };
       },
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.TENANT_REALIGN_MEMBERSHIP,
       confirmationTransaction.options(),
     );
   } catch (e) {
@@ -1780,7 +1782,7 @@ export async function cmdMeasure(): Promise<CmdResult> {
           message: `divergent=${divergent} multiActive=${multiActive} zeroActive=${zeroActive}`,
         };
       },
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.TENANT_DOMAIN_DIVERGENCE_READ,
     );
   } finally {
     await prisma.$disconnect();
@@ -2022,7 +2024,7 @@ export async function cmdBackfillOwningColumn(args: {
     const candidates = await withBypassRls(
       prisma,
       (tx) => listDivergentCandidates(tx, limit),
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.TENANT_DOMAIN_DIVERGENCE_READ,
     );
 
     printCandidates(candidates);
@@ -2054,7 +2056,7 @@ export async function cmdBackfillOwningColumn(args: {
       const outcome = await withBypassRls(
         prisma,
         (tx) => applyOneCandidate(tx, candidate.userId, args.by),
-        BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+        BYPASS_GRANT.TENANT_DOMAIN_BACKFILL_APPLY,
       );
       outcomes.push(outcome);
       console.log(
@@ -2249,6 +2251,7 @@ async function main(): Promise<void> {
 // command functions without the module connecting to a DB on import
 // (bootstrap-rds-roles.mjs's shape — round-3 M26).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  registerBypassNoticeSink(stderrBypassNoticeSink);
   main().catch((err) => {
     console.error(err);
     process.exitCode = 1;

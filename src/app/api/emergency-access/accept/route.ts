@@ -13,7 +13,8 @@ import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -49,7 +50,7 @@ async function handlePOST(req: NextRequest) {
     tx.emergencyAccessGrant.findUnique({
       where: { tokenHash: hashToken(token) },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.EMERGENCY_ACCESS_GRANT_LOOKUP);
 
   if (!grant) {
     return notFound();
@@ -95,7 +96,7 @@ async function handlePOST(req: NextRequest) {
       },
     });
     return { ok: true as const };
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.EMERGENCY_ACCESS_KEY_EXCHANGE);
 
   if (!txResult.ok) {
     return errorResponse(API_ERROR.INVITATION_ALREADY_USED);
@@ -114,7 +115,7 @@ async function handlePOST(req: NextRequest) {
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
   if (owner?.email) {
     const granteeName = session.user.name ?? session.user.email ?? "";
     const { subject, html, text } = emergencyGrantAcceptedEmail(resolveUserLocale(owner.locale), granteeName);

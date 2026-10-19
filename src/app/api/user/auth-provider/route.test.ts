@@ -24,6 +24,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { GET } from "./route";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const ROUTE_URL = "http://localhost:3000/api/user/auth-provider";
 
@@ -99,13 +100,13 @@ describe("GET /api/user/auth-provider", () => {
     expect(res.status).toBe(500);
   });
 
-  it("uses withBypassRls with AUTH_FLOW purpose", async () => {
+  it("uses withBypassRls with the AUTH_ACCOUNT_LOOKUP grant", async () => {
     mockPrismaAccount.findMany.mockResolvedValue([]);
     await GET(makeRequest());
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      "auth_flow",
+      BYPASS_GRANT.AUTH_ACCOUNT_LOOKUP,
     );
   });
 

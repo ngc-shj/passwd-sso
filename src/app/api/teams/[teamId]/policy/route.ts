@@ -16,7 +16,8 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, errorResponseWithMessage, notFound, unauthorized } from "@/lib/http/api-response";
 import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -107,7 +108,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         },
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TEAM_TENANT_LOOKUP);
 
   if (!teamTenant) return notFound();
 

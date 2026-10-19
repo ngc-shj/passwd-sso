@@ -47,7 +47,8 @@ import {
 } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
@@ -128,7 +129,7 @@ async function handlePOST(req: NextRequest) {
         where: { codeHash },
         select: { userId: true, tenantId: true, scope: true, cnfJkt: true },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.EXTENSION_BRIDGE_CODE_LIFECYCLE,
   );
 
   if (!consumed) {
@@ -208,7 +209,7 @@ async function handlePOST(req: NextRequest) {
         },
         data: { usedAt: now },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.EXTENSION_BRIDGE_CODE_LIFECYCLE,
   );
 
   if (consumeResult.count === 0) {

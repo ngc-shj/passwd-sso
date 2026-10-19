@@ -4,7 +4,8 @@ import { unauthorized, rateLimited, errorResponse } from "@/lib/http/api-respons
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
@@ -43,7 +44,7 @@ async function handleGET(_req: NextRequest) {
       },
       orderBy: { name: "asc" },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.MCP_CLIENT_CONSENT);
 
   return NextResponse.json({
     clients: clients.map((c) => ({
@@ -171,7 +172,7 @@ async function handleDELETE(_req: NextRequest) {
         delegationSessionIds: sessions.map((s) => s.id),
       };
     },
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.MCP_TOKEN_REVOKE_WITH_AUDIT,
   );
 
   // Post-commit: evict Redis delegation keys (best-effort)

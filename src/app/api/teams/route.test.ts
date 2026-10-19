@@ -51,6 +51,7 @@ vi.mock("@/lib/auth/access/tenant-auth", () => ({
 
 import { GET, POST } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const now = new Date("2025-01-01T00:00:00Z");
 
@@ -193,7 +194,11 @@ describe("GET /api/teams", () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([]);
     await GET(makeReq());
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
-    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), expect.any(String));
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_GRANT.TEAM_ADMIN_MEMBERSHIP_LOOKUP,
+    );
   });
 
   it("accepts extension Bearer token via checkAuth", async () => {
