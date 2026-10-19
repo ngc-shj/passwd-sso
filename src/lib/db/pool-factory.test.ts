@@ -51,12 +51,14 @@ describe("handleServerNotice", () => {
     // the SQLSTATE, the function name and the function's own text are not.
     const seen: BypassNotice[] = [];
     registerBypassNoticeSink((n) => seen.push(n));
-    handleServerNotice({
+    // As pg-protocol builds it: `severity` is set from the localized S field.
+    const localized = {
       severity: "警告",
       code: "01000",
       message: "rls_bypass_not_granted table=sessions purpose=auth_flow",
       where: "PL/pgSQL関数rls_bypass_admits(text)の17行目 - RAISE",
-    });
+    };
+    handleServerNotice(localized);
     expect(seen).toEqual([{ table: "sessions", purpose: "auth_flow" }]);
   });
 
