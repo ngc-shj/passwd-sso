@@ -4177,8 +4177,8 @@ describe("relation reach: models a query's argument reaches are charged to the g
   // through staleness: AUTH_USER_LOOKUP lists user + tenantMember, so a readable
   // `tx.user` call reaching no relation leaves tenantMember stale (exit 1), while
   // an unreadable one is not judged stale and is named on stdout (exit 0).
-  const typed = (params, body, grant) =>
-    run(SESSION_CAP, `${HEAD_RLS}export const f = (${params}) => withBypassRls(prisma, async (tx) => ${body}, BYPASS_GRANT.${grant});`);
+  const typed = (params, body, grant, typeParams = "") =>
+    run(SESSION_CAP, `${HEAD_RLS}export const f = ${typeParams}(${params}) => withBypassRls(prisma, async (tx) => ${body}, BYPASS_GRANT.${grant});`);
   const UNREADABLE = `  unreadable relation argument: ${SESSION_CAP}:2`;
   const STALE_TENANT_MEMBER = /BYPASS_GRANT\.AUTH_USER_LOOKUP  prisma\.tenantMember\n/;
   const expectReadableReachingNothing = ({ code, stdout, stderr }) => {
@@ -4199,6 +4199,10 @@ describe("relation reach: models a query's argument reaches are charged to the g
     ["a conditional spread of the argument itself", `tx.session.findMany({ ...(c ? { include: { user: true } } : {}) })`, "user", "Session.user"],
     ["a const bound to a conditional, spread", `(() => { const extra = c ? { user: { email: "x" } } : {}; return tx.session.findMany({ where: { ...extra } }); })()`, "user", "Session.where.user"],
     ["a conditional array spread inside OR", `tx.session.findMany({ where: { OR: [...(c ? [{ user: { email: "x" } }] : [])] } })`, "user", "Session.where.OR.user"],
+    // An angle-bracket assertion states a type, as `as` does: the literal under it is what is read.
+    ["a spread under an angle-bracket assertion", `tx.session.findMany({ where: { ...<{ sessionToken: string }><unknown>{ user: { email: "x" } } } })`, "user", "Session.where.user"],
+    ["a const holding an angle-bracket assertion", `(() => { const w = <{ sessionToken: string }><unknown>{ user: { email: "x" } }; return tx.session.findMany({ where: { ...w } }); })()`, "user", "Session.where.user"],
+    ["a cursor", `tx.session.findMany({ cursor: { id: "s", user: { email: "x" } } })`, "user", "Session.cursor.user"],
   ])("charges a relation in %s", (_label, body, model, path) => {
     const { code, stderr } = typed("c: boolean", body, "AUTH_SESSION_CAPPING");
     expect(code, stderr).toBe(1);
@@ -4227,8 +4231,23 @@ describe("relation reach: models a query's argument reaches are charged to the g
     ["an index signature beside a named key", "w: { email: string; [k: string]: string }", `tx.user.findMany({ where: { ...w } })`],
     ["an empty object type", "w: {}", `tx.user.findMany({ where: { ...w } })`],
     ["a union with a relation key in one member", "w: { email: string } | { tenantMemberships: { some: { tenantId: string } } }", `tx.user.findMany({ where: { ...w } })`],
+    ["a cursor key in an argument spread", "a: { cursor?: { id: string } }", `tx.user.findMany({ ...a })`],
   ])("keeps a spread typed with %s unreadable", (_label, params, body) => {
     expectUnreadable(typed(params, body, "AUTH_USER_LOOKUP"));
+  });
+
+  const REL = "{ email: string; tenantMemberships: { some: { tenantId: string } } }";
+  it.each([
+    // T can be instantiated with a relation key; the mapped type's keys are T's.
+    ["an inline mapped type over a type parameter", "w: { [K in keyof T]: T[K] }", `tx.user.findMany({ where: { ...w } })`, "<T extends { email: string }>"],
+    // An alias with no type arguments of its own, mapping over the enclosing function's T.
+    ["a local alias mapping over a type parameter", "_t: T", `(() => { type M = { [K in keyof T]: T[K] }; const g = (w: M) => tx.user.findMany({ where: { ...w } }); return g(null as never); })()`, "<T extends { email: string }>"],
+    ["a let rebound to a wider object", `rel: ${REL}`, `(() => { let w = { email: "y" }; w = rel; return tx.user.findMany({ where: { ...w } }); })()`, ""],
+    ["a parameter rebound to a wider object", `w: { email: string }, rel: ${REL}`, `(() => { w = rel; return tx.user.findMany({ where: { ...w } }); })()`, ""],
+    // The guard narrows to the scalar member; the value is still the declared union.
+    ["a value narrowed by a user type guard", `w: { email: string } | { tenantMemberships: { some: { tenantId: string } } }`, `(() => { const isEmail = (x: unknown): x is { email: string } => true; if (!isEmail(w)) return null; return tx.user.findMany({ where: { ...w } }); })()`, ""],
+  ])("keeps %s unreadable", (_label, params, body, typeParams) => {
+    expectUnreadable(typed(params, body, "AUTH_USER_LOOKUP", typeParams));
   });
 
   it.each([

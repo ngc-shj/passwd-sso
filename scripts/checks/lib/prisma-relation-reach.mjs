@@ -108,6 +108,16 @@ export function loadPrismaSchema(abs) {
   return { models, handles };
 }
 
+/**
+ * unwrapExpression plus the angle-bracket assertion `<T>x`, which (like `as`)
+ * states a type the value need not have. Kept apart from the shared helper so
+ * the gates that use that one read exactly what they did.
+ */
+function unwrapAssertions(expr) {
+  const value = unwrapExpression(expr);
+  return value?.getKind() === SyntaxKind.TypeAssertionExpression ? unwrapAssertions(value.getExpression()) : value;
+}
+
 const asObject = (node) => (node && node.getKind() === SyntaxKind.ObjectLiteralExpression ? node : null);
 const initializerOf = (prop) => prop?.getInitializer?.() ?? null;
 const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
@@ -209,7 +219,7 @@ export function walkCallArgs(args, model, method, { models, visitor, ctx, full =
 }
 
 /** Argument keys the walk reads a relation through; a typed argument spread holding one is unreadable. */
-const ARG_KEYS = new Set(["select", "include", "where", "orderBy", "data", "create", "update"]);
+const ARG_KEYS = new Set(["select", "include", "where", "cursor", "orderBy", "data", "create", "update"]);
 const F = ts.TypeFlags;
 /** Types whose property set depends on a type argument not known here. */
 const GENERIC = F.TypeParameter | F.IndexedAccess | F.Index | F.Conditional | F.Substitution;
@@ -233,6 +243,17 @@ function objectKeys(type, checker) {
   if (checker.getIndexInfosOfType(type).length > 0) return null;
   // No property at all is `{}`/`object`, which any value is assignable to.
   const props = checker.getPropertiesOfType(type);
+  if (type.flags & F.Object && type.objectFlags & ts.ObjectFlags.Mapped) {
+    // A mapped type written inline (`{ [K in keyof T]: T[K] }`) carries no alias
+    // whose arguments isGeneric could check, and its key set is whatever T is
+    // instantiated with. Only an alias's instantiation is read; its constraint
+    // and modifiers types, once the property read above has resolved them,
+    // must not hold a type variable either.
+    if (!type.aliasSymbol) return null;
+    for (const part of [type.constraintType, type.modifiersType]) {
+      if (part && isGeneric(part, checker)) return null;
+    }
+  }
   return props.length > 0 ? props.map((p) => p.getName()) : null;
 }
 
@@ -271,7 +292,7 @@ function createWalker(models, visitor, ctx, full) {
    * type is readable only if no key it can hold does.
    */
   function readValue(node, opensKey, spread = false, seen = new Set()) {
-    const value = unwrapExpression(node);
+    const value = unwrapAssertions(node);
     if (!value) return null;
     switch (value.getKind()) {
       case SyntaxKind.ObjectLiteralExpression:
@@ -292,6 +313,10 @@ function createWalker(models, visitor, ctx, full) {
         }
         // Something assigns into it: neither its initializer nor its declared type says what it holds.
         if (assignedInto(name, binding, ctx)) return null;
+        // Nor for a name rebound after its declaration: `w = other` is checked
+        // only for assignability, and a wider object is assignable.
+        if (binding.getKind() === SyntaxKind.VariableDeclaration && binding.getParent()?.getDeclarationKind?.() !== "const") return null;
+        if (rebound(name, binding)) return null;
         // A destructured name (`const { w } = …`) is indexed under its whole
         // declaration, whose initializer is not what the name holds.
         if (
@@ -308,8 +333,58 @@ function createWalker(models, visitor, ctx, full) {
     }
     const checker = ctx.checker;
     if (!checker) return null;
-    const keys = finiteKeys(checker.getTypeAtLocation(value.compilerNode), checker, spread);
+    const type = declaredType(value, checker);
+    const keys = type && finiteKeys(type, checker, spread);
     return keys && ![...keys].some(opensKey) ? [] : null;
+  }
+
+  /**
+   * The type a value is declared with — not the flow-narrowed type at the use
+   * site, which a user-defined type guard can narrow to anything. A name or a
+   * member read answers with its symbol's declared type; a call with a
+   * non-generic signature's return type. Anything else (a generic call, whose
+   * inference reads its arguments' narrowed types, `await w`, `w ?? x`, …) is
+   * null.
+   */
+  function declaredType(value, checker) {
+    const kind = value.getKind();
+    if (kind === SyntaxKind.Identifier || kind === SyntaxKind.PropertyAccessExpression) {
+      let symbol = checker.getSymbolAtLocation(value.compilerNode);
+      if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      return symbol ? checker.getTypeOfSymbol(symbol) : null;
+    }
+    if (kind === SyntaxKind.CallExpression) {
+      const signature = checker.getResolvedSignature(value.compilerNode);
+      if (!signature || signature.getDeclaration()?.typeParameters?.length) return null;
+      return checker.getReturnTypeOfSignature(signature);
+    }
+    return null;
+  }
+
+  /** Is `name` (bound at `binding`) the target of a plain or destructuring assignment, or a for-in/of head? */
+  function rebound(name, binding) {
+    const refersHere = (node) =>
+      node?.getKind() === SyntaxKind.Identifier &&
+      node.getText() === name &&
+      sameNode(visibleBinding(name, node, ctx.bindingsFor), binding);
+    const targets = (left) => {
+      const l = unwrapAssertions(left);
+      if (refersHere(l)) return true;
+      const k = l?.getKind();
+      if (k !== SyntaxKind.ObjectLiteralExpression && k !== SyntaxKind.ArrayLiteralExpression) return false;
+      return l.getDescendantsOfKind(SyntaxKind.Identifier).some(refersHere);
+    };
+    const sf = binding.getSourceFile();
+    for (const bin of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+      const op = bin.getOperatorToken().getKind();
+      if (op >= SyntaxKind.FirstAssignment && op <= SyntaxKind.LastAssignment && targets(bin.getLeft())) return true;
+    }
+    for (const kind of [SyntaxKind.ForOfStatement, SyntaxKind.ForInStatement]) {
+      for (const loop of sf.getDescendantsOfKind(kind)) {
+        if (targets(loop.getInitializer())) return true;
+      }
+    }
+    return false;
   }
 
   /** (`full` only.) The elements an array literal holds, spreads of array literals (or conditionals of them) flattened; null otherwise. */
@@ -353,6 +428,7 @@ function createWalker(models, visitor, ctx, full) {
       }
     }
     if (FILTERING.has(method)) whereOf(args, model, trail);
+    if (full && FILTERING.has(method)) cursorOf(args, model, trail);
     if (full && ORDERING.has(method)) {
       const order = propertyValue(args, "orderBy");
       if (order) orderBy(order, model, [...trail, "orderBy"]);
@@ -363,6 +439,15 @@ function createWalker(models, visitor, ctx, full) {
         if (value) data(value, model, [...trail, key]);
       }
     }
+  }
+
+  /** (`full` only.) A `cursor` is a unique filter, which can name relations like a `where`. */
+  function cursorOf(node, model, trail) {
+    const value = propertyValue(node, "cursor");
+    if (!value) return;
+    const cursors = readValue(value, whereKey(model));
+    if (cursors) for (const c of cursors) where(c, model, [...trail, "cursor"]);
+    else visitor.unreadable({ trail, model, kind: "where" });
   }
 
   /** Scan the `where` held by `node` (a projection argument or a call's args), or report it unreadable. */
@@ -428,6 +513,7 @@ function createWalker(models, visitor, ctx, full) {
       const nested = asObject(initializerOf(prop));
       if (!nested) continue;
       whereOf(nested, declared.type, here);
+      if (full) cursorOf(nested, declared.type, here);
       for (const root of ["select", "include"]) {
         const sub = initializerOf(nested.getProperty(root));
         if (!sub) continue;
