@@ -4218,6 +4218,8 @@ describe("relation reach: models a query's argument reaches are charged to the g
     ["an optional spread", "w?: { email: string }", `tx.user.findMany({ where: { ...w } })`],
     ["a whole where", "w: { email: string } | { name: string }", `tx.user.findMany({ where: w })`],
     ["a data spread", "d: { name: string }", `tx.user.update({ where: { id: "u" }, data: { ...d } })`],
+    ["a member read off a parameter", "o: { w: { email: string } }", `tx.user.findMany({ where: { ...o.w } })`],
+    ["a call with an annotated return type", "c: boolean", `(() => { const mk = (): { email: string } => ({ email: "x" }); return tx.user.findMany({ where: { ...mk() } }); })()`],
   ])("reads %s typed with scalar keys only", (_label, params, body) => {
     expectReadableReachingNothing(typed(params, body, "AUTH_USER_LOOKUP"));
   });
@@ -4237,6 +4239,8 @@ describe("relation reach: models a query's argument reaches are charged to the g
   });
 
   const REL = "{ email: string; tenantMemberships: { some: { tenantId: string } } }";
+  // Not a subtype of { email: string }, so a guard for that type narrows it away.
+  const REL_ONLY = "{ tenantMemberships: { some: { tenantId: string } } }";
   it.each([
     // T can be instantiated with a relation key; the mapped type's keys are T's.
     ["an inline mapped type over a type parameter", "w: { [K in keyof T]: T[K] }", `tx.user.findMany({ where: { ...w } })`, "<T extends { email: string }>"],
@@ -4246,6 +4250,12 @@ describe("relation reach: models a query's argument reaches are charged to the g
     ["a parameter rebound to a wider object", `w: { email: string }, rel: ${REL}`, `(() => { w = rel; return tx.user.findMany({ where: { ...w } }); })()`, ""],
     // The guard narrows to the scalar member; the value is still the declared union.
     ["a value narrowed by a user type guard", `w: { email: string } | { tenantMemberships: { some: { tenantId: string } } }`, `(() => { const isEmail = (x: unknown): x is { email: string } => true; if (!isEmail(w)) return null; return tx.user.findMany({ where: { ...w } }); })()`, ""],
+    // A call's inferred return type is whatever its body returned, cast or narrowing included.
+    ["a call whose inferred return type is a cast", "c: boolean", `(() => { const mk = () => ({ email: "x", tenantMemberships: { some: { tenantId: "t" } } } as { email: string }); return tx.user.findMany({ where: { ...mk() } }); })()`, ""],
+    ["a call returning a narrowed value", `w: { email: string } | ${REL_ONLY}`, `(() => { const isEmail = (x: unknown): x is { email: string } => true; if (!isEmail(w)) return null; const g = () => w; return tx.user.findMany({ where: { ...g() } }); })()`, ""],
+    // The member is looked up on the root's declared type, not on the narrowed receiver.
+    ["a member read off a receiver narrowed by a type guard", `o: { w: { email: string } } | { w: ${REL_ONLY} }`, `(() => { const isA = (x: unknown): x is { w: { email: string } } => true; if (!isA(o)) return null; return tx.user.findMany({ where: { ...o.w } }); })()`, ""],
+    ["a member written through a cast", "o: { w: { email: string } }", `(() => { (o as any).w = { tenantMemberships: { some: { tenantId: "t" } } }; return tx.user.findMany({ where: { ...o.w } }); })()`, ""],
   ])("keeps %s unreadable", (_label, params, body, typeParams) => {
     expectUnreadable(typed(params, body, "AUTH_USER_LOOKUP", typeParams));
   });

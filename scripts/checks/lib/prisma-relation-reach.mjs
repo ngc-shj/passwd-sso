@@ -333,32 +333,77 @@ function createWalker(models, visitor, ctx, full) {
     }
     const checker = ctx.checker;
     if (!checker) return null;
-    const type = declaredType(value, checker);
-    const keys = type && finiteKeys(type, checker, spread);
-    return keys && ![...keys].some(opensKey) ? [] : null;
+    const types = declaredTypes(value, checker);
+    if (!types) return null;
+    const keys = new Set();
+    for (const type of types) {
+      const own = finiteKeys(type, checker, spread);
+      if (!own) return null;
+      for (const k of own) keys.add(k);
+    }
+    return ![...keys].some(opensKey) ? [] : null;
   }
 
   /**
-   * The type a value is declared with — not the flow-narrowed type at the use
-   * site, which a user-defined type guard can narrow to anything. A name or a
-   * member read answers with its symbol's declared type; a call with a
-   * non-generic signature's return type. Anything else (a generic call, whose
-   * inference reads its arguments' narrowed types, `await w`, `w ?? x`, …) is
-   * null.
+   * The types a value is declared with — never the flow-narrowed type at the
+   * use site, which a user-defined type guard can narrow to anything — or null.
+   *   - A name, or a chain of plain property reads off one: the root's declared
+   *     type, each property looked up on every non-nullish member of the type
+   *     before it (any member lacking it: null). The root must be a binding in
+   *     this file that nothing assigns into, rebinds, or (for `let`/`var`)
+   *     could rebind, since a member's type says nothing about a value
+   *     written through a cast.
+   *   - A call through such a chain: the return type of every call signature
+   *     of the callee's declared types, each of which must be non-generic and
+   *     carry an explicit return-type annotation (an inferred one is whatever
+   *     the body returned, narrowing included).
+   * Anything else (`await w`, `w ?? x`, an element access, …) is null.
    */
-  function declaredType(value, checker) {
-    const kind = value.getKind();
-    if (kind === SyntaxKind.Identifier || kind === SyntaxKind.PropertyAccessExpression) {
-      let symbol = checker.getSymbolAtLocation(value.compilerNode);
-      if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-      return symbol ? checker.getTypeOfSymbol(symbol) : null;
+  function declaredTypes(value, checker) {
+    if (value.getKind() === SyntaxKind.CallExpression) {
+      const callees = declaredTypes(unwrapAssertions(value.getExpression()), checker);
+      if (!callees) return null;
+      const out = [];
+      for (const callee of callees) {
+        const signatures = checker.getSignaturesOfType(callee, ts.SignatureKind.Call);
+        if (signatures.length === 0) return null;
+        for (const signature of signatures) {
+          const decl = signature.getDeclaration();
+          if (!decl?.type || decl.typeParameters?.length || signature.getTypeParameters()?.length) return null;
+          out.push(checker.getReturnTypeOfSignature(signature));
+        }
+      }
+      return out;
     }
-    if (kind === SyntaxKind.CallExpression) {
-      const signature = checker.getResolvedSignature(value.compilerNode);
-      if (!signature || signature.getDeclaration()?.typeParameters?.length) return null;
-      return checker.getReturnTypeOfSignature(signature);
+    const names = [];
+    let root = value;
+    while (root.getKind() === SyntaxKind.PropertyAccessExpression) {
+      names.unshift(root.getName());
+      root = root.getExpression();
     }
-    return null;
+    if (root.getKind() !== SyntaxKind.Identifier) return null;
+    const binding = visibleBinding(root.getText(), root, ctx.bindingsFor);
+    if (!binding) return null;
+    if (assignedInto(root.getText(), binding, ctx) || rebound(root.getText(), binding)) return null;
+    if (binding.getKind() === SyntaxKind.VariableDeclaration && binding.getParent()?.getDeclarationKind?.() !== "const") return null;
+    let symbol = checker.getSymbolAtLocation(root.compilerNode);
+    if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (!symbol) return null;
+    const nullish = F.Undefined | F.Null | F.Void;
+    let types = [checker.getTypeOfSymbol(symbol)];
+    for (const name of names) {
+      const next = [];
+      for (const type of types) {
+        for (const member of type.flags & F.Union ? type.types : [type]) {
+          if (member.flags & nullish) continue;
+          const prop = checker.getPropertyOfType(member, name);
+          if (!prop) return null;
+          next.push(checker.getTypeOfSymbol(prop));
+        }
+      }
+      types = next;
+    }
+    return types;
   }
 
   /** Is `name` (bound at `binding`) the target of a plain or destructuring assignment, or a for-in/of head? */
