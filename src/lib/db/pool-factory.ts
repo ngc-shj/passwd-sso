@@ -125,28 +125,44 @@ const STARTUP_STRING_PARAMS = [
 ] as const;
 
 /**
- * Refuse a configuration that would raise `client_min_messages` above WARNING
- * for these connections and so silence the reports: a startup parameter
- * carrying a NUL, or `options` naming the parameter. Values are read the way pg
- * reads them — pg's own ConnectionParameters for the connection string (which
- * accepts strings `new URL` rejects) and for the PG* environment — and every
- * source is checked, a superset of the one pg applies. A connection string pg
- * cannot parse throws here, as it would on connect. A role-level setting is
- * not visible here (SC5's canary detects it).
+ * Take the configuration pg will use, once, and refuse it if it would raise
+ * `client_min_messages` above WARNING for these connections and so silence the
+ * reports: a startup parameter carrying a NUL, or `options` naming the
+ * parameter.
+ *
+ * The check runs on a snapshot (`{ ...config }`, so a getter runs once) whose
+ * startup string parameters must already be primitives — a string, or for
+ * `replication` a string or boolean — and the SAME snapshot is what pg gets. A
+ * value checked one way and serialised another (`String(x)` reads `toString`,
+ * pg's `'' + x` reads `valueOf`; a getter read twice) therefore cannot differ
+ * from what is sent. pg throws on a non-string in the other parameters anyway.
+ *
+ * Values are read the way pg reads them — pg's own ConnectionParameters for the
+ * connection string (which accepts strings `new URL` rejects) and for the PG*
+ * environment — and every source is checked, a superset of the one pg applies.
+ * A connection string pg cannot parse throws here, as it would on connect. A
+ * role-level setting is not visible here (SC5's canary detects it).
  */
-function assertReportsNotSuppressed(config: pg.ClientConfig): void {
+function checkedConfig<T extends pg.ClientConfig>(config: T): T {
+  const snapshot = { ...config };
+  const fields = snapshot as Record<string, unknown>;
+  for (const name of STARTUP_STRING_PARAMS) {
+    const value = fields[name];
+    if (value === undefined || value === null) continue;
+    const allowed = typeof value === "string" || (name === "replication" && typeof value === "boolean");
+    if (!allowed) {
+      throw new Error(`database connection parameter ${name} must be a string${name === "replication" ? " or boolean" : ""}`);
+    }
+  }
   const sources: Record<string, unknown>[] = [
-    config as Record<string, unknown>,
-    ...(config.connectionString ? [new ConnectionParameters(config.connectionString) as unknown as Record<string, unknown>] : []),
+    fields,
+    ...(snapshot.connectionString ? [new ConnectionParameters(snapshot.connectionString) as unknown as Record<string, unknown>] : []),
     new ConnectionParameters() as unknown as Record<string, unknown>,
   ];
   for (const source of sources) {
     for (const name of STARTUP_STRING_PARAMS) {
-      // Coerced as pg coerces before writing (`'' + params.replication`), so a
-      // non-string value whose string form carries a NUL is caught too.
-      const raw = source[name];
-      const value = raw === undefined || raw === null ? undefined : String(raw);
-      if (value?.includes("\0")) {
+      const value = source[name];
+      if (typeof value === "string" && value.includes("\0")) {
         throw new Error(`database connection parameter ${name} must not contain a NUL byte: it can inject startup settings`);
       }
     }
@@ -155,18 +171,17 @@ function assertReportsNotSuppressed(config: pg.ClientConfig): void {
       throw new Error("database connection options must not set client_min_messages: it would silence RLS bypass reports");
     }
   }
+  return snapshot;
 }
 
 export function createPool(config: pg.PoolConfig): pg.Pool {
-  assertReportsNotSuppressed(config);
-  const pool = new pg.Pool(config);
+  const pool = new pg.Pool(checkedConfig(config));
   pool.on("connect", attachNoticeListener);
   return pool;
 }
 
 export function createClient(config: pg.ClientConfig): pg.Client {
-  assertReportsNotSuppressed(config);
-  const client = new pg.Client(config);
+  const client = new pg.Client(checkedConfig(config));
   attachNoticeListener(client);
   return client;
 }

@@ -245,12 +245,41 @@ describe("createPool / createClient refuse to silence the reports", () => {
     ["a NUL as the last character", { connectionString: "postgresql://u:p@localhost:5432/db", application_name: "app\0" }],
     ["options", { connectionString: "postgresql://u:p@localhost:5432/db", options: "-c statement_timeout=5\0client_min_messages\0error" }],
     ["fallback_application_name", { connectionString: "postgresql://u:p@localhost:5432/db", fallback_application_name: "x\0client_min_messages\0error" }],
-    // pg sends replication as `'' + value`: a non-string carries its string form.
-    ["an object replication value", { connectionString: "postgresql://u:p@localhost:5432/db", replication: { toString: (): string => "x\0client_min_messages\0error" } }],
-    ["an array replication value", { connectionString: "postgresql://u:p@localhost:5432/db", replication: ["x\0client_min_messages\0error"] }],
+
   ])("rejects a NUL byte in %s, which injects a startup setting", (_label, config) => {
     expect(() => createPool(config)).toThrow("must not contain a NUL byte");
     expect(() => createClient(config)).toThrow("must not contain a NUL byte");
+  });
+
+  it.each([
+    // pg writes replication as `'' + value` (valueOf first): an object could show
+    // a check one string and send another, so only primitives are taken.
+    ["an object replication value", { replication: { toString: (): string => "x\0client_min_messages\0error" } }, "replication must be a string or boolean"],
+    ["an array replication value", { replication: ["x\0client_min_messages\0error"] }, "replication must be a string or boolean"],
+    ["a valueOf/toString split", { replication: { valueOf: (): string => "x\0client_min_messages\0error", toString: (): string => "database" } }, "replication must be a string or boolean"],
+    ["a non-string user", { user: { toString: (): string => "u" } }, "user must be a string"],
+  ])("rejects %s", (_label, extra, message) => {
+    const config = { connectionString: "postgresql://u:p@localhost:5432/db", ...extra } as unknown as pg.PoolConfig;
+    expect(() => createPool(config)).toThrow(message);
+    expect(() => createClient(config as pg.ClientConfig)).toThrow(message);
+  });
+
+  it("checks the value pg is given, reading a getter once", async () => {
+    // A getter clean on the first read and injecting on the second: what was
+    // checked must be what the pool holds.
+    let reads = 0;
+    const config = { connectionString: "postgresql://u:p@localhost:5432/db" } as pg.PoolConfig;
+    Object.defineProperty(config, "application_name", {
+      enumerable: true,
+      get: () => (++reads === 1 ? "clean" : "x\0client_min_messages\0error"),
+    });
+    const pool = createPool(config);
+    try {
+      expect(reads).toBe(1);
+      expect((pool as unknown as { options: { application_name?: string } }).options.application_name).toBe("clean");
+    } finally {
+      await pool.end();
+    }
   });
 
   it.each([

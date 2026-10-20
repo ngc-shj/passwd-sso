@@ -287,3 +287,26 @@ State-tightening writes inside RLS-context files: token, credential and lockout 
 ### T3-2
 - Action: a direct `expect` after advancing exactly `DEBOUNCE_MS`.
 - Red-proven: no advance, and an advance of `DEBOUNCE_MS - 1`, both fail at the final assertion.
+
+---
+
+# Round 4 (fixes since 55a6036d7: b84870577)
+
+## Findings
+- **F4-1 / S4-1 / T4-1 [Minor; Major as a coverage gap]** All three experts found the same issue: `String(raw)` reads `toString` first, but pg writes `replication` as `'' + raw`, which reads `valueOf` first. So `{ valueOf: NUL payload, toString: "database" }` passed the check and injected a GUC.
+- **S4-1 also:** a getter on the config is evaluated again by pg after the check (TOCTOU).
+
+## Resolution Status
+### F4-1 / S4-1 / T4-1
+- **Mechanism change.** This was the third bypass of this check. Instead of matching a third coercion rule, `checkedConfig()` now does three things:
+  - takes one snapshot of the config (`{ ...config }`, so a getter is read once);
+  - accepts only primitives for the startup string parameters (a string, or a string or boolean for `replication`; pg throws on anything else anyway);
+  - checks the snapshot, and passes that same snapshot to `pg.Pool` / `pg.Client`.
+- What was checked is then what pg serialises.
+- **Tests:**
+  - deny cells for an object, an array, a `valueOf`/`toString` split, and a non-string `user`;
+  - a getter that is clean on its first read and injects on its second, which must be read once and leave the pool holding the clean value.
+- **Red proofs:**
+  - passing the original config to pg after checking the snapshot turns the getter cell red;
+  - dropping the primitive check turns the four deny cells red.
+- **Verified:** unit 17426, integration 787, lint, build.
