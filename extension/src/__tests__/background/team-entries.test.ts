@@ -668,8 +668,10 @@ describe("team entries in background", () => {
         expect(res.entries.find((e) => e.id === "team-pw-1")?.teamId).toBe("team-2");
         expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
 
+        // No waitFor here: under fake timers it would advance the clock itself,
+        // and the advance below would stop being the step the rebuild needs.
         await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
-        await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+        expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }

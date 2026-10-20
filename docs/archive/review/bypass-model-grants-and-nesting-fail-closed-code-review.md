@@ -260,3 +260,30 @@ State-tightening writes inside RLS-context files: token, credential and lockout 
 - unescaping the config source only;
 - a no-op connect handler;
 - `2>&1 >/dev/null`.
+
+---
+
+# Round 3 (fixes since 0b3022bca: c0d713aa0, 55a6036d7)
+
+## Changes from Previous Round
+- Functionality: no findings.
+- Security and testing verified every Round 2 fix. The testing expert red-proved 26 mutations.
+- Three new findings, all Minor.
+
+## Findings
+- **S3-1 [Minor]** The NUL check skipped non-string values, but pg sends `replication` as `'' + value`. A `replication` object or array whose string form carries a NUL injected a startup GUC (verified offline with `serialize.startup`).
+- **T3-1 [Minor]** Only `user`, `database` and `application_name` had NUL cells. Removing `fallback_application_name`, `replication` or `options` from `STARTUP_STRING_PARAMS` left the suite green.
+- **T3-2 [Minor]** In the extension cell, `vi.waitFor` advances fake timers itself, so the `advanceTimersByTimeAsync(DEBOUNCE_MS)` it depends on was not pinned.
+
+## Resolution Status
+### S3-1
+- Action: each startup parameter is coerced with `String(raw)`, as pg does, before testing for a NUL.
+- Tests: deny cells for an object and an array `replication`. Both were red against the string-only check.
+
+### T3-1
+- Action: deny cells for `options` and `fallback_application_name`. Allow cells for `replication: true`, `replication: "database"`, an ordinary `fallback_application_name`, and an empty `application_name`.
+- Red-proven: refusing every non-string value turns `replication: true` red.
+
+### T3-2
+- Action: a direct `expect` after advancing exactly `DEBOUNCE_MS`.
+- Red-proven: no advance, and an advance of `DEBOUNCE_MS - 1`, both fail at the final assertion.

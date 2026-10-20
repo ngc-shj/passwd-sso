@@ -142,8 +142,11 @@ function assertReportsNotSuppressed(config: pg.ClientConfig): void {
   ];
   for (const source of sources) {
     for (const name of STARTUP_STRING_PARAMS) {
-      const value = source[name];
-      if (typeof value === "string" && value.includes("\0")) {
+      // Coerced as pg coerces before writing (`'' + params.replication`), so a
+      // non-string value whose string form carries a NUL is caught too.
+      const raw = source[name];
+      const value = raw === undefined || raw === null ? undefined : String(raw);
+      if (value?.includes("\0")) {
         throw new Error(`database connection parameter ${name} must not contain a NUL byte: it can inject startup settings`);
       }
     }

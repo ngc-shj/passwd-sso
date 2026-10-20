@@ -243,9 +243,26 @@ describe("createPool / createClient refuse to silence the reports", () => {
     ["the URL's user", { connectionString: "postgres://u%00client_min_messages%00error:p@localhost:5432/db" }],
     ["the URL's database", { connectionString: "postgres://u:p@localhost:5432/db%00client_min_messages%00error" }],
     ["a NUL as the last character", { connectionString: "postgresql://u:p@localhost:5432/db", application_name: "app\0" }],
+    ["options", { connectionString: "postgresql://u:p@localhost:5432/db", options: "-c statement_timeout=5\0client_min_messages\0error" }],
+    ["fallback_application_name", { connectionString: "postgresql://u:p@localhost:5432/db", fallback_application_name: "x\0client_min_messages\0error" }],
+    // pg sends replication as `'' + value`: a non-string carries its string form.
+    ["an object replication value", { connectionString: "postgresql://u:p@localhost:5432/db", replication: { toString: (): string => "x\0client_min_messages\0error" } }],
+    ["an array replication value", { connectionString: "postgresql://u:p@localhost:5432/db", replication: ["x\0client_min_messages\0error"] }],
   ])("rejects a NUL byte in %s, which injects a startup setting", (_label, config) => {
     expect(() => createPool(config)).toThrow("must not contain a NUL byte");
     expect(() => createClient(config)).toThrow("must not contain a NUL byte");
+  });
+
+  it.each([
+    ["replication: true", { replication: true }],
+    ['replication: "database"', { replication: "database" }],
+    ["an ordinary fallback_application_name", { fallback_application_name: "passwd-sso" }],
+    ["an empty application_name", { application_name: "" }],
+  ])("accepts %s", async (_label, extra) => {
+    // The NUL check coerces as pg does; it must not refuse a non-string or an
+    // empty value that carries no NUL.
+    const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db", ...extra });
+    await pool.end();
   });
 
   it("accepts an ordinary application_name", async () => {
