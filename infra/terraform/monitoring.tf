@@ -23,7 +23,7 @@ resource "aws_cloudwatch_log_metric_filter" "app_5xx" {
   count          = var.enable_monitoring ? 1 : 0
   name           = "${local.name_prefix}-5xx-errors"
   log_group_name = aws_cloudwatch_log_group.app.name
-  pattern        = "{ $._logType = \"app\" && $.msg = \"request.end\" && $.status >= 500 }"
+  pattern        = "{ $._stream = \"app\" && $.msg = \"request.end\" && $.status >= 500 }"
 
   metric_transformation {
     name          = "App5xxErrors"
@@ -37,7 +37,7 @@ resource "aws_cloudwatch_log_metric_filter" "health_check_failures" {
   count          = var.enable_monitoring ? 1 : 0
   name           = "${local.name_prefix}-health-check-failures"
   log_group_name = aws_cloudwatch_log_group.app.name
-  pattern        = "{ $._logType = \"app\" && $.path = \"/api/health/ready\" && $.status = 503 }"
+  pattern        = "{ $._stream = \"app\" && $.path = \"/api/health/ready\" && $.status = 503 }"
 
   metric_transformation {
     name          = "HealthCheckFailures"
@@ -51,7 +51,7 @@ resource "aws_cloudwatch_log_metric_filter" "high_latency" {
   count          = var.enable_monitoring ? 1 : 0
   name           = "${local.name_prefix}-high-latency"
   log_group_name = aws_cloudwatch_log_group.app.name
-  pattern        = "{ $._logType = \"app\" && $.msg = \"request.end\" && $.durationMs >= ${var.alarm_latency_threshold_ms} }"
+  pattern        = "{ $._stream = \"app\" && $.msg = \"request.end\" && $.durationMs >= ${var.alarm_latency_threshold_ms} }"
 
   metric_transformation {
     name          = "HighLatencyRequests"
