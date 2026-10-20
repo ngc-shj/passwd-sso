@@ -4158,7 +4158,8 @@ describe("relation reach: models a query's argument reaches are charged to the g
 
   it("does not judge a grant stale when a query's argument cannot be read, and counts the call", () => {
     // The literal partner is the deny half of the cell above.
-    const { code, stdout, stderr } = run(SESSION_CAP, `${HEAD_RLS}export const f = (w: { email?: string }) => withBypassRls(prisma, async (tx) => tx.user.findMany({ where: w }), BYPASS_GRANT.AUTH_USER_LOOKUP);`);
+    // An index-signature type: the keys it can hold are not a known set.
+    const { code, stdout, stderr } = run(SESSION_CAP, `${HEAD_RLS}export const f = (w: Record<string, unknown>) => withBypassRls(prisma, async (tx) => tx.user.findMany({ where: w }), BYPASS_GRANT.AUTH_USER_LOOKUP);`);
     expect(code, stderr).toBe(0);
     expect(stdout).toMatch(/; [1-9]\d* call\(s\) run a query whose argument the relation walk cannot read/);
     // Each such call is named, so a reviewer can check its reach by hand.
@@ -4166,9 +4167,78 @@ describe("relation reach: models a query's argument reaches are charged to the g
   });
 
   it("still charges what it can read beside an unreadable part", () => {
-    const { code, stderr } = run(SESSION_CAP, `${HEAD_RLS}export const f = (w: { email?: string }) => withBypassRls(prisma, async (tx) => tx.user.findMany({ where: w, select: { sessions: true } }), BYPASS_GRANT.AUTH_USER_LOOKUP);`);
+    const { code, stderr } = run(SESSION_CAP, `${HEAD_RLS}export const f = (w: Record<string, unknown>) => withBypassRls(prisma, async (tx) => tx.user.findMany({ where: w, select: { sessions: true } }), BYPASS_GRANT.AUTH_USER_LOOKUP);`);
     expect(code).toBe(1);
     expect(stderr).toContain(`${SESSION_CAP}:2  prisma.session  (relation User.sessions)  not in BYPASS_GRANT.AUTH_USER_LOOKUP`);
+  });
+
+  // Issue #926: spreads, and where/data values that are not literals, read by
+  // their branches or by their type. The readable/unreadable split is measured
+  // through staleness: AUTH_USER_LOOKUP lists user + tenantMember, so a readable
+  // `tx.user` call reaching no relation leaves tenantMember stale (exit 1), while
+  // an unreadable one is not judged stale and is named on stdout (exit 0).
+  const typed = (params, body, grant) =>
+    run(SESSION_CAP, `${HEAD_RLS}export const f = (${params}) => withBypassRls(prisma, async (tx) => ${body}, BYPASS_GRANT.${grant});`);
+  const UNREADABLE = `  unreadable relation argument: ${SESSION_CAP}:2`;
+  const STALE_TENANT_MEMBER = /BYPASS_GRANT\.AUTH_USER_LOOKUP  prisma\.tenantMember\n/;
+  const expectReadableReachingNothing = ({ code, stdout, stderr }) => {
+    expect(code, stderr).toBe(1);
+    expect(stderr).toMatch(STALE_TENANT_MEMBER);
+    expect(stdout).not.toContain(UNREADABLE);
+  };
+  const expectUnreadable = ({ code, stdout, stderr }) => {
+    expect(code, stderr).toBe(0);
+    expect(stdout).toContain(UNREADABLE);
+  };
+
+  it.each([
+    ["the true branch of a where spread", `tx.session.findMany({ where: { ...(c ? { user: { email: "x" } } : {}) } })`, "user", "Session.where.user"],
+    ["the false branch of a where spread", `tx.session.findMany({ where: { ...(c ? undefined : { user: { email: "x" } }) } })`, "user", "Session.where.user"],
+    ["a conditional spread in data", `tx.session.create({ data: { sessionToken: "s", ...(c ? { user: { connect: { id: "u" } } } : null) } })`, "user", "Session.data.user"],
+    ["a conditional spread in a projection", `tx.session.findMany({ include: { ...(c ? {} : { user: true }) } })`, "user", "Session.user"],
+    ["a conditional spread of the argument itself", `tx.session.findMany({ ...(c ? { include: { user: true } } : {}) })`, "user", "Session.user"],
+    ["a const bound to a conditional, spread", `(() => { const extra = c ? { user: { email: "x" } } : {}; return tx.session.findMany({ where: { ...extra } }); })()`, "user", "Session.where.user"],
+    ["a conditional array spread inside OR", `tx.session.findMany({ where: { OR: [...(c ? [{ user: { email: "x" } }] : [])] } })`, "user", "Session.where.OR.user"],
+  ])("charges a relation in %s", (_label, body, model, path) => {
+    const { code, stderr } = typed("c: boolean", body, "AUTH_SESSION_CAPPING");
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain(`${SESSION_CAP}:2  prisma.${model}  (relation ${path})  not in BYPASS_GRANT.AUTH_SESSION_CAPPING`);
+  });
+
+  it("reads a conditional spread whose branches are scalar-only, and charges nothing", () => {
+    expectReadableReachingNothing(typed("c: boolean", `tx.user.findMany({ where: { ...(c ? { email: "x" } : {}), ...(c ? null : { name: "n" }) } })`, "AUTH_USER_LOOKUP"));
+  });
+
+  it.each([
+    ["a spread", "w: { email?: string; name: string | null }", `tx.user.findMany({ where: { id: "u", ...w } })`],
+    ["an optional spread", "w?: { email: string }", `tx.user.findMany({ where: { ...w } })`],
+    ["a whole where", "w: { email: string } | { name: string }", `tx.user.findMany({ where: w })`],
+    ["a data spread", "d: { name: string }", `tx.user.update({ where: { id: "u" }, data: { ...d } })`],
+  ])("reads %s typed with scalar keys only", (_label, params, body) => {
+    expectReadableReachingNothing(typed(params, body, "AUTH_USER_LOOKUP"));
+  });
+
+  it.each([
+    ["a relation key", "w: { email?: string; tenantMemberships?: { some: { tenantId: string } } }", `tx.user.findMany({ where: { ...w } })`],
+    ["a logical key", "w: { OR?: { email: string }[] }", `tx.user.findMany({ where: { ...w } })`],
+    ["a relation key in a data spread", "d: { name: string; sessions?: { create: { sessionToken: string } } }", `tx.user.update({ where: { id: "u" }, data: { ...d } })`],
+    ["an include key in an argument spread", "a: { include?: { sessions: true } }", `tx.user.findMany({ ...a })`],
+    ["any", "w: any", `tx.user.findMany({ where: { ...w } })`],
+    ["an index signature beside a named key", "w: { email: string; [k: string]: string }", `tx.user.findMany({ where: { ...w } })`],
+    ["an empty object type", "w: {}", `tx.user.findMany({ where: { ...w } })`],
+    ["a union with a relation key in one member", "w: { email: string } | { tenantMemberships: { some: { tenantId: string } } }", `tx.user.findMany({ where: { ...w } })`],
+  ])("keeps a spread typed with %s unreadable", (_label, params, body) => {
+    expectUnreadable(typed(params, body, "AUTH_USER_LOOKUP"));
+  });
+
+  it.each([
+    ["a branch that names a relation filter", `tx.user.findMany({ where: { tenantMemberships: { ...(c ? { some: { tenantId: "t" } } : {}) } } })`],
+    ["a spread beside a relation filter", `tx.user.findMany({ where: { tenantMemberships: { some: { tenantId: "t" }, ...(c ? { none: {} } : {}) } } })`],
+    ["a const that something assigns into", `(() => { const extra = c ? { email: "x" } : {}; (extra as Record<string, unknown>).name = "n"; return tx.user.findMany({ where: { ...extra } }); })()`],
+  ])("keeps %s unreadable", (_label, body) => {
+    // The relation-filter cells reach tenantMember either way; their point is the unreadable report.
+    const { stdout } = typed("c: boolean", body, "AUTH_USER_LOOKUP");
+    expect(stdout).toContain(UNREADABLE);
   });
 
   it("fails named when the tree has no prisma/schema.prisma", () => {
