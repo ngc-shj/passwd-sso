@@ -234,6 +234,39 @@ describe("audit-db-grants (real DB)", () => {
     }
   });
 
+  // A session default on a role or database applies to every connection and is
+  // invisible to the connection's own options — a role-level
+  // client_min_messages = error would silence the RLS bypass reports. work_mem
+  // stands in: the audit keys every setting alike, and a harmless one cannot
+  // disturb integration files running alongside.
+  it("T8b: detects a session default set on an audited role", async () => {
+    try {
+      await su.query("ALTER ROLE passwd_outbox_worker SET work_mem = '4MB'");
+
+      const r = runAudit(manifestPath);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("UNEXPECTED_GRANT: ROLESETTING:passwd_outbox_worker * work_mem=4MB");
+    } finally {
+      await su.query("ALTER ROLE passwd_outbox_worker RESET work_mem");
+    }
+  });
+
+  it("T8c: detects a session default set on this database for every role", async () => {
+    const { rows } = await su.query<{ db: string }>("SELECT current_database() AS db");
+    const db = rows[0].db;
+    try {
+      await su.query(`ALTER DATABASE "${db}" SET work_mem = '4MB'`);
+
+      const r = runAudit(manifestPath);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`UNEXPECTED_GRANT: ROLESETTING:* ${db} work_mem=4MB`);
+    } finally {
+      await su.query(`ALTER DATABASE "${db}" RESET work_mem`);
+    }
+  });
+
   it("T9: detects a default privilege pre-authorising future tables", async () => {
     // Default ACLs apply to objects created LATER, so they grant access to
     // tables that do not exist yet — invisible to any "what can this role touch
