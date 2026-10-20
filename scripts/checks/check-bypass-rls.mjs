@@ -2975,7 +2975,14 @@ function createdRoutinesOf(input) {
  * text this looks for. Separators are whitespace and SQL comments; a quote or
  * backslash before the next word is skipped.
  */
-const CREATE_ROUTINE_TEXT_RE = /\bCREATE(?:\s|\/\*[\s\S]*?\*\/|--[^\n]*\n)+(?:OR(?:\s|\/\*[\s\S]*?\*\/|--[^\n]*\n)+REPLACE(?:\s|\/\*[\s\S]*?\*\/|--[^\n]*\n)+)?(?:FUNCTION|PROCEDURE)\b(?:\s|["'`\\])*([A-Za-z_][\w.$]*)?/gi;
+// One separator run. A block comment ends at its first `*/`
+// (`(?:[^*]|\*(?!\/))*`), so no input has two ways through it: the lazy
+// `[\s\S]*?` it replaces backtracked exponentially on repeated `*//*`.
+const SQL_WORD_SEP = String.raw`(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/|--[^\n]*\n)+`;
+const CREATE_ROUTINE_TEXT_RE = new RegExp(
+  String.raw`\bCREATE${SQL_WORD_SEP}(?:OR${SQL_WORD_SEP}REPLACE${SQL_WORD_SEP})?(?:FUNCTION|PROCEDURE)\b(?:\s|["'` + "`" + String.raw`\\])*([A-Za-z_][\w.$]*)?`,
+  "gi",
+);
 
 // Routines created outside prisma/migrations (R5-M2). A file entry names the
 // routine it may create; an entry that matches nothing fails the run.
