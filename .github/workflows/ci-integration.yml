@@ -179,11 +179,15 @@ jobs:
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app;
           GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
-          -- The RLS policies call these for every reading role. The migration
-          -- that creates them ran before passwd_app existed here, so its
-          -- IF EXISTS grant skipped it.
+          -- The migrations that create these routines ran before passwd_app
+          -- existed here, so their IF EXISTS grants skipped it. The RLS policies
+          -- call the rls_bypass_* functions for every reading role; the two
+          -- SECURITY DEFINER audit routines are the app role's only write path
+          -- to audit_logs (same set as bootstrap-rds-roles.mjs ROUTINE_EXECUTE).
           GRANT EXECUTE ON FUNCTION public.rls_bypass_enforced() TO passwd_app;
           GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text) TO passwd_app;
+          GRANT EXECUTE ON FUNCTION public.audit_log_purge(uuid, timestamptz) TO passwd_app;
+          GRANT EXECUTE ON PROCEDURE public.audit_log_tenant_migrate(uuid, uuid, uuid) TO passwd_app;
           EOF
 
       # The GRANT above is table-blind and runs AFTER `prisma migrate deploy`, so
