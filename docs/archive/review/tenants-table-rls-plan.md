@@ -261,3 +261,37 @@ visible under a tenant scope therefore already has `tenant_id = app.tenant_id`, 
 | C5 | bootstrap trigger branch unchanged | locked |
 | C6 | gates and verify scripts know `tenants` | locked |
 | C7 | operator runbook SQL | locked |
+
+## Implementation Checklist
+
+Files (by contract):
+
+- C1: `prisma/migrations/20261022000000_tenants_rls/migration.sql` (new; after #922's `20261021000000`).
+- C2: `src/workers/retention-gc-worker/sweep.ts` (`listTrashRetentionTenants`, `sweepTrashEntry`);
+  tests `src/workers/retention-gc-worker/__tests__/sweep-trash.test.ts`, `sweep-isolation.test.ts`,
+  `sweep-dispatch-bypass.test.ts`, `sweep-bypass-assert.test.ts`; integration cell
+  (`retention-gc-trash-purge.integration.test.ts`, as `passwd_retention_gc_worker`).
+- C3: `scripts/audit-chain-verify-worker.ts`; `scripts/checks/check-bypass-rls.mjs` (ALLOWED_USAGE);
+  `scripts/checks/worker-policy-manifest.json` (reason text); `scripts/__tests__/audit-chain-verify-heartbeat.test.mjs`;
+  `docs/operations/alerts.md` (coverage-alert text); integration cell.
+- C4: `src/lib/audit/audit-outbox-in-tx.ts`; `src/workers/retention-gc-worker/sweep.ts` (twin comment);
+  `scripts/checks/raw-sql-usage.txt`; `src/__tests__/audit-outbox.test.ts`; integration cell.
+- C5: integration cell only.
+- C6: `scripts/checks/check-rls-read-context.mjs` + `scripts/__tests__/check-rls-read-context.test.mjs`;
+  `scripts/checks/check-migration-drift.mjs` + its self-test; `scripts/rls-cross-tenant-verify.sql`;
+  `scripts/rls-cross-tenant-negative-test.sh`; `scripts/pre-pr.sh` (allow-list);
+  `scripts/rls-cross-tenant-coverage.sql` / manifest comment (text);
+  `src/__tests__/db-integration/rls-bypass-grants.integration.test.ts` (four `toContainEqual` → exact).
+- C7: `docs/operations/alerts.md`, `docs/operations/deployment.md`.
+- New: `src/__tests__/db-integration/tenants-rls.integration.test.ts` (C1, C4, C5 cells).
+
+Reuse (do not reimplement): `withBypassRls`, `setBypassGucs`, `setTenantGucs`, `readBypassState`,
+`BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP` (`src/lib/tenant-rls*.ts`); `inSweepTx`,
+`grantForTables`, `assertSweepBypass` (`sweep.ts`); integration helpers `createTestContext`,
+`createPrismaForRole`, `expectBypassNotices`, `assertRlsApplies`, app/worker connection strings
+(`src/__tests__/db-integration/helpers.ts`); `SYSTEM_TENANT_ID` (`src/lib/constants/app.ts`);
+the policy shape and post-condition DO blocks of `20261019000000_rls_bypass_admits_report_mode`.
+
+CI gate parity: every CI gate touched here runs in `scripts/pre-pr.sh` except
+`rls-cross-tenant-negative-test.sh`, which is CI-only by design (it commits ALTERs on a throwaway
+database). Deferred parity gap: run it locally only against a throwaway database.
