@@ -310,3 +310,15 @@ State-tightening writes inside RLS-context files: token, credential and lockout 
   - passing the original config to pg after checking the snapshot turns the getter cell red;
   - dropping the primitive check turns the four deny cells red.
 - **Verified:** unit 17426, integration 787, lint, build.
+
+### Extension cell, second pre-pr flake (after Round 4)
+- **Observed:** pre-pr failed on the Round 2 positive control (`removeAll` "not called before the debounce", called 3 times). A real-timer rebuild scheduled before fake timers were turned on fired inside the observed window under load.
+- **Action:**
+  - Fake timers now cover the whole cell, so no real debounce exists;
+  - the unlock wait is `vi.waitFor`, which advances the fake clock;
+  - every pending timer is run out (`runAllTimersAsync`) before `removeAll` is cleared;
+  - the window still ends with a direct `expect` after advancing exactly `DEBOUNCE_MS`.
+- **Verified:**
+  - 5/5 runs alone;
+  - two full extension suites and the web `src/lib` suite in parallel, all exit 0;
+  - red-proven by dropping `teamId` from `sameMenuView`, and by advancing `DEBOUNCE_MS - 1`. Both fail at the final assertion.
