@@ -355,3 +355,21 @@ State-tightening writes inside RLS-context files: token, credential and lockout 
 - **Action:** the comment describes the over-blocking guard.
 
 **Verified:** web unit 17427, extension 2699, extension `tsc`, lint, build. Production code is unchanged in this round, so the integration suite was not rerun.
+
+---
+
+# Round 6 (fixes since 996205f9d: 22f974dd2)
+
+## Result
+All three experts: **No findings.**
+- **Functionality:** only tests and the review doc changed. The teardown masks no production defect: a service worker holds one module instance, and its timers end with it. The Round 5 entries are accurate.
+- **Security:** no production or security code changed. The `createClient` getter cell proves that pg.Client holds the checked value. No widening.
+- **Testing:**
+  - Instrumentation showed that the `afterEach` import returns the instance each test loaded (41/41).
+  - Under 16 parallel runs: no teardown gave 733 stale timer events and 3/16 failures; with the teardown, 0 and 0.
+  - Two full extension suites in parallel: both green.
+  - Red proofs: the debounce at 0 and at `DEBOUNCE_MS - 1` fail the control; dropping `teamId` fails the final assertion; the client-only config mutation fails both of the `createClient` cell's assertions independently.
+
+## Termination
+- The loop ended at Round 6, with all experts returning "No findings", within the 10-round cap.
+- No R42 class expanded twice or more. The startup-parameter injection class (S-1 escaped options → S2-1 NUL → S3-1 coercion → S4-1 valueOf/getter) was closed by a mechanism change in Round 4: check one snapshot of primitives and hand pg that same snapshot. Rounds 5 and 6 confirmed it closed, and found no new member.
