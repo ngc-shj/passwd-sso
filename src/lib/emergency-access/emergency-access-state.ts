@@ -127,6 +127,17 @@ export function canTransition(
   return MATRIX[from][to].includes(actor);
 }
 
+/**
+ * The keys a single-row transition may filter on: the row id and the
+ * per-resource scope. Narrower than the full WhereInput on purpose — no
+ * relation filter or AND/OR/NOT can be passed, so check-bypass-rls reads the
+ * spread below by its type (`#926`).
+ */
+type TransitionWhere = Pick<
+  Prisma.EmergencyAccessGrantWhereInput,
+  "id" | "ownerId" | "granteeId" | "granteeEmail" | "tokenHash"
+>;
+
 function hasResourceScope(where: Prisma.EmergencyAccessGrantWhereInput): boolean {
   return (
     where.ownerId !== undefined ||
@@ -146,7 +157,7 @@ function hasResourceScope(where: Prisma.EmergencyAccessGrantWhereInput): boolean
  */
 export async function transition(args: {
   db: TxOrPrisma;
-  where: Prisma.EmergencyAccessGrantWhereInput;
+  where: TransitionWhere;
   to: EmergencyAccessStatus;
   actor: EaActor;
   // UncheckedUpdateManyInput allows scalar FK fields (granteeId, ownerId, etc.)
