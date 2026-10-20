@@ -19,7 +19,7 @@ Baseline: `main` branch
 |---|--------|------|------|------|
 | 1.1 | Required | Build CI/CD pipeline | Done | GitHub Actions with 4 parallel jobs (app-ci / extension-ci / audit-app / audit-ext). ESLint native flat-config migration completed. PR #18 |
 | 1.2 | Required | External audit-log forwarding (pino + Fluent Bit) | Done | Structured JSON audit events to stdout -> Fluent Bit -> arbitrary sink. Defense in depth (`sanitizeMetadata` + pino redact). PR #14 |
-| 1.3 | Required | Application structured logging | Done | Generic pino app logger (`_logType: "app"`) + `withRequestLog()` wrapper for requestId/latency. Phase 1 coverage: vault/passwords/auth/csp-report. CSP report body sanitized. PR #20 |
+| 1.3 | Required | Application structured logging | Done | Generic pino app logger (`_stream: "app"`) + `withRequestLog()` wrapper for requestId/latency. Phase 1 coverage: vault/passwords/auth/csp-report. CSP report body sanitized. PR #20 |
 | 1.4 | Required | Health-check endpoints | Done | `/api/health/live` (fixed 200 liveness) + `/api/health/ready` (DB + Redis readiness; unhealthy -> 503). `HEALTH_REDIS_REQUIRED=true` to fail on Redis outage. PR #22 |
 | 1.5 | Required | Monitoring/alerting foundation | Done | Terraform: CloudWatch metric filters (5xx, health failures, high latency) + 4 alarms + EventBridge ECS stop detection + SNS notifications. App code remains vendor-neutral. PR #22 |
 | 1.6 | Strongly Recommended | Error tracking (Sentry etc.) | Not started | Client + server error collection and notifications |

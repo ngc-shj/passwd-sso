@@ -10,13 +10,12 @@ import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { sweepExpiredAccessRequests } from "../sweep";
 import { MATRIX, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
-import { isBypassStateRead, makeQueryRaw, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
+import { isBypassStateRead, makeGucTx, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 function makeTx(updatedCount: number) {
-  const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config
   const executeRawUnsafe = vi.fn().mockResolvedValue(updatedCount); // UPDATE
   // The status sweep always runs under the dispatcher's bypass.
-  const queryRaw = makeQueryRaw({ bypass: "on" });
+  const { executeRaw, queryRaw } = makeGucTx({ bypass_rls: "on" });
   const tx = {
     $executeRaw: executeRaw,
     $executeRawUnsafe: executeRawUnsafe,

@@ -19,7 +19,7 @@ vi.mock("@/lib/logger", () => ({
 import { sweepOnce } from "../sweep";
 import { RETENTION_REGISTRY } from "../registry";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
-import { isBypassSetConfig, isBypassStateRead, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
+import { applySetConfigs, isBypassSetConfig, isBypassStateRead, sqlText, type GucState } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 const ROWS_PER_WRITE = 5;
 const TRASH_TENANT_ID = "11111111-1111-4111-8111-111111111111";
@@ -31,14 +31,17 @@ interface RecordedCall {
 
 interface FakeTxState {
   calls: RecordedCall[];
-  bypass: string | null;
+  gucs: GucState;
 }
 
 function makeDispatchPrisma(opts: { failDeleteOn?: string; inheritedBypass?: string } = {}) {
   const txs: FakeTxState[] = [];
 
   function makeTx() {
-    const state: FakeTxState = { calls: [], bypass: opts.inheritedBypass ?? null };
+    const state: FakeTxState = {
+      calls: [],
+      gucs: { bypass_rls: opts.inheritedBypass ?? null, purpose: null, tenant_id: null, tables: null },
+    };
     txs.push(state);
     const record =
       <A extends unknown[], R>(name: string, impl: (...args: A) => Promise<R>) =>
@@ -47,16 +50,15 @@ function makeDispatchPrisma(opts: { failDeleteOn?: string; inheritedBypass?: str
         return impl(...args);
       };
     return {
-      $executeRaw: record("$executeRaw", async (strings: TemplateStringsArray) => {
-        const set = /set_config\(\s*'app\.bypass_rls'\s*,\s*'([^']*)'/.exec(sqlText(strings));
-        if (set) state.bypass = set[1];
+      $executeRaw: record("$executeRaw", async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        applySetConfigs(state.gucs, strings, values);
         return 1;
       }),
       $queryRaw: record("$queryRaw", async (strings: TemplateStringsArray, ..._values: unknown[]) => {
         const text = sqlText(strings);
         // Both assertSweepBypass and enqueueAuditInWorkerTx read the same
         // readBypassState query; this tx's own state answers either.
-        if (isBypassStateRead(text)) return [{ bypass_rls: state.bypass, purpose: null, tenant_id: null, tables: null }];
+        if (isBypassStateRead(text)) return [{ ...state.gucs }];
         if (text.includes("SELECT EXISTS")) return [{ ok: true }];
         return []; // the trash SELECT, audit_log_purge
       }),

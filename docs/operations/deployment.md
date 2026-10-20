@@ -430,6 +430,7 @@ Manifest keys:
 | `DATABASE:<grantee> <db> <priv>` | `CONNECT`/`CREATE`/`TEMP` |
 | `DEFAULTACL:<owner> <schema> <type> <acl>` | pre-authorises objects that do not exist yet |
 | `ROLEATTR:<role> <attr> <value>` | `SUPERUSER`/`BYPASSRLS`/`REPLICATION`/`CREATEDB`/`CREATEROLE`/`LOGIN` |
+| `ROLESETTING:<role\|*> <db\|*> <name>=<value>` | a session default from `ALTER ROLE/DATABASE … SET` (`*` = every role / every database). It applies to every connection, invisibly to the connection's own options. Settings named `app.*`, `client_min_messages`, `log_min_messages` or `row_security` are refused outright (`DENIED_SETTING_*`), live and in the manifest |
 
 Columns are keyed individually on purpose: a table that legitimately carries
 `UPDATE (fail_count)` must still fail the audit if `UPDATE (secret_encrypted)` is
