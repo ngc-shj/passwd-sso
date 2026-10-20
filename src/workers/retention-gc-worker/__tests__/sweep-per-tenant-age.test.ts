@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { sweepPerTenantAge } from "../sweep";
 import type { PerTenantAgeEntry } from "../registry";
-import { makeQueryRaw } from "@/__tests__/workers/retention-gc-tx-fakes";
+import { makeGucTx } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 const ENTRY: PerTenantAgeEntry = {
   kind: "PER_TENANT_AGE",
@@ -30,12 +30,11 @@ function makeTx(
   tenants: Array<Record<string, string | number | null>>,
   deletedPerTenant: number,
 ) {
-  const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config
   const executeRawUnsafe = vi.fn().mockResolvedValue(deletedPerTenant); // DELETE
   const findMany = vi.fn().mockResolvedValue(tenants);
   const auditOutbox = { create: vi.fn().mockResolvedValue(undefined) };
   // PER_TENANT_AGE always runs under the dispatcher's bypass.
-  const queryRaw = makeQueryRaw({ bypass: "on" });
+  const { executeRaw, queryRaw } = makeGucTx({ bypass_rls: "on" });
   const tx = {
     $executeRaw: executeRaw,
     $executeRawUnsafe: executeRawUnsafe,

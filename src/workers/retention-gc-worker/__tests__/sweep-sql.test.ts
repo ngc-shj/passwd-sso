@@ -15,18 +15,18 @@
 
 import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
-import { sweepExpiryEntry, sweepGuardedExpiryEntry, sweepAuditProvenanceEntry } from "../sweep";
+import { sweepExpiryEntry, sweepGuardedExpiryEntry, sweepAuditProvenanceEntry, enqueueAuditInWorkerTx } from "../sweep";
 import type { ExpiryEntry, GuardedExpiryEntry, AuditProvenanceEntry } from "../registry";
-import { declaredBypass, makeQueryRaw } from "@/__tests__/workers/retention-gc-tx-fakes";
+import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";
+import { declaredBypass, makeGucTx, type GucState } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 /**
  * A fake TransactionClient capturing the DELETE. Its bypass_rls read answers
  * with the state the entry declares, as the dispatcher would have set it.
  */
 function makeFakeTx(entry: { globalDelete?: true }) {
-  const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config(...)
+  const { executeRaw, queryRaw } = makeGucTx({ bypass_rls: declaredBypass(entry) });
   const executeRawUnsafe = vi.fn().mockResolvedValue(7); // DELETE → rows affected
-  const queryRaw = makeQueryRaw({ bypass: declaredBypass(entry) });
   const tx = {
     $executeRaw: executeRaw,
     $executeRawUnsafe: executeRawUnsafe,
@@ -201,16 +201,15 @@ describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
 describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)", () => {
   function makeProvenanceTx(
     rows: Record<string, unknown>[],
-    reads: { bypass: string | null; enqueueBypass?: string | null } = { bypass: "on" },
+    gucs: Partial<GucState> = { bypass_rls: "on" },
   ) {
-    const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config
     // The DELETE ... RETURNING goes through $queryRawUnsafe (needs row results).
     const queryRawUnsafe = vi.fn().mockResolvedValue(rows);
     const executeRawUnsafe = vi.fn().mockResolvedValue(undefined); // unused by this fn
     const auditOutbox = { create: vi.fn().mockResolvedValue(undefined) };
     // The assert's read, enqueueAuditInWorkerTx's ctx read and its tenant-exists
-    // read, each answered by its SQL text.
-    const queryRaw = makeQueryRaw(reads);
+    // read, answered from one GUC state.
+    const { executeRaw, queryRaw } = makeGucTx(gucs);
     const tx = {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
@@ -407,39 +406,38 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     expect(deleteParams).toEqual([100, 30]);
   });
 
-  // T7(b): GUC-guard failure direction. enqueueAuditInWorkerTx's own bypass_rls
-  // check must reject when the GUC context is "off" and tenant_id does not
-  // match the row's tenant — proving the guard is not a silent no-op.
-  it("rejects when the bypass_rls GUC context reads 'off' (T7 GUC-guard failure direction)", async () => {
-    const entry: AuditProvenanceEntry = {
-      kind: "EXPIRY_AUDIT_PROVENANCE",
-      table: "extension_tokens",
-      cutoffColumn: "expires_at",
-      provenanceColumns: ["tenant_id", "user_id"],
-      auditAction: "CREDENTIAL_RETENTION_PURGED",
-      globalDelete: true,
-    };
-    const deletedRow = {
-      id: "11111111-1111-4111-8111-111111111111",
-      tenant_id: "22222222-2222-4222-8222-222222222222",
-      user_id: "33333333-3333-4333-8333-333333333333",
-    };
-    // The sweep's own assert reads "on" (so it passes); enqueueAuditInWorkerTx's
-    // GUC context read sees "off" and a tenant_id that does not match the row's
-    // tenant — it must throw rather than silently write the outbox row.
-    const { tx, queryRawUnsafe, auditOutbox } = makeProvenanceTx([deletedRow], {
-      bypass: "on",
-      enqueueBypass: "off",
-    });
+});
 
-    await expect(sweepAuditProvenanceEntry(tx, entry, 100)).rejects.toThrow(
-      /bypass_rls scope/,
-    );
+// T7(b): enqueueAuditInWorkerTx's own guard, driven directly. Within one
+// transaction the GUC state is the same for the sweep's assert and for the
+// enqueue, so the guard is exercised on the state a caller could be in.
+describe("enqueueAuditInWorkerTx bypass_rls guard (T7)", () => {
+  const TENANT = "22222222-2222-4222-8222-222222222222";
+  const OTHER_TENANT = "44444444-4444-4444-8444-444444444444";
+  const PAYLOAD = { action: "CREDENTIAL_RETENTION_PURGED" } as unknown as AuditOutboxPayload;
 
-    // The DELETE was still issued once (it precedes the per-row GUC check in
-    // the same tx) — the guard failure surfaces via a rejected promise, and
-    // callers run this inside $transaction so the DELETE is rolled back.
-    expect(queryRawUnsafe).toHaveBeenCalledTimes(1);
+  function guardTx(gucs: Partial<GucState>) {
+    const { executeRaw, queryRaw } = makeGucTx(gucs);
+    const auditOutbox = { create: vi.fn().mockResolvedValue(undefined) };
+    const tx = { $executeRaw: executeRaw, $queryRaw: queryRaw, auditOutbox } as unknown as Prisma.TransactionClient;
+    return { tx, auditOutbox };
+  }
+
+  it("rejects outside a bypass when the context names another tenant", async () => {
+    const { tx, auditOutbox } = guardTx({ bypass_rls: "off", tenant_id: OTHER_TENANT });
+    await expect(enqueueAuditInWorkerTx(tx, TENANT, PAYLOAD)).rejects.toThrow(/bypass_rls scope/);
     expect(auditOutbox.create).not.toHaveBeenCalled();
+  });
+
+  it("enqueues outside a bypass when the context is the row's own tenant", async () => {
+    const { tx, auditOutbox } = guardTx({ bypass_rls: "off", tenant_id: TENANT });
+    await enqueueAuditInWorkerTx(tx, TENANT, PAYLOAD);
+    expect(auditOutbox.create).toHaveBeenCalledWith({ data: { tenantId: TENANT, payload: PAYLOAD } });
+  });
+
+  it("enqueues under the bypass for any tenant", async () => {
+    const { tx, auditOutbox } = guardTx({ bypass_rls: "on", tenant_id: OTHER_TENANT });
+    await enqueueAuditInWorkerTx(tx, TENANT, PAYLOAD);
+    expect(auditOutbox.create).toHaveBeenCalledTimes(1);
   });
 });
