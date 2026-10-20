@@ -189,3 +189,74 @@ State-tightening writes inside RLS-context files: token, credential and lockout 
 - `verify-references.sh --base main --strict`: the code-review, deviation and manual-test docs are clean.
 - The 37 hits are in the plan (27) and the plan-review log (10). They cite main as it stood when the plan was written, mostly as a basename plus a line number. They are the record of what the plan was reviewed against, not living claims about the branch, so they are left unchanged. The plan's living statements (C1–C8) cite by subject.
 
+
+---
+
+# Round 2 (fixes since c2cdcdcf6; Round 1 fixes in 0b3022bca)
+
+## Changes from Previous Round
+- All three experts verified the Round 1 fixes as correct and complete, and found no R43 widening.
+- New findings: one security Minor, four functionality Minors, and one testing Major plus six testing Minors.
+
+## Findings
+- **S2-1 [Minor]** A NUL byte in a startup parameter injects a GUC the guard never sees. pg writes `user` / `database` / `application_name` / `options` as C strings, and the server applies an unrecognised name as a GUC. Verified on the dev server: `application_name=x%00client_min_messages%00error` gives `SHOW client_min_messages` = `error`.
+- **F2-1 [Minor]** The migration's tenant-cast assertion used a LIKE that misses the commuted form the verify gate's regex catches.
+- **F2-2 [Minor]** The tenant-claim integration comments still said the tenant cast "is folded at planning time".
+- **F2-3 [Minor]** The alarm's comment and `alarm_description` did not cover the unparsed filter.
+- **F2-4 [Minor]** The runbook and the Datadog query did not cover unparsed reports, which are now counted.
+- **T9 [Major]** `withTenantRls`'s tenant-id binding was unasserted: a constant-tenant mutation survived the full unit suite.
+- **T10 [Minor]** The unparsed rate-limit cell repeated one message, so per-message keying survived.
+- **T11 [Minor]** The base-logger context cell covered only the parsed path.
+- **T12 [Minor]** "Same metric" was pinned by name only: namespace and `log_group_name` mutations survived.
+- **T13 [Minor]** The escaped `client_min_messages` cells covered `config.options` only.
+- **T14 [Minor]** The singleton unit cell accepted any connect handler.
+- **T15 [Minor]** The wrapper fake's stdout was unasserted, so stderr-only capture survived.
+
+## Resolution Status
+### S2-1
+- Action: `assertReportsNotSuppressed` refuses a NUL in any of `user`, `database`, `application_name`, `fallback_application_name`, `options` and `replication`. It checks the config, the connection string (pg's ConnectionParameters) and the PG* environment.
+- Tests: 5 deny cells (application_name in the URL and in the config, the URL's user, the URL's database, a NUL as the last character) and 1 allow cell (an ordinary application_name with spaces). The 5 deny cells were red-proven.
+
+### F2-1
+- Action: the assertion uses the same `(?<!SELECT )` regex as `[E-RLS-TENANT-INITPLAN]`.
+- Dev DB checksum updated; fresh-DB apply verified (56 sub-SELECT tenant branches).
+
+### F2-2
+- Action: both comments describe the sub-SELECT (execution-time) form. The fresh connection is kept, because it makes the cell independent of evaluation order.
+
+### F2-3
+- Action: the alarm comment and `alarm_description` name both `_logType`s.
+
+### F2-4
+- Action: alerts.md states that unparsed reports are counted, alarm and are rate-limited, and the Datadog query includes them.
+- Also: the `ownsPool` docstring warns that a query after `$disconnect` reconnects through an adapter-built pool, without the listener.
+
+### T9
+- Action: the cell pairs each written GUC with its bound value for two different tenant ids.
+
+### T10
+- Action: two distinct unparsed messages log once; the window boundary logs again (allow side); an unparsed line does not consume a parsed report's slot.
+
+### T11
+- Action: the unparsed line under a request context carries no request id.
+
+### T12
+- Action: both filters' `metric_transformation` (name and namespace) is derived from the alarm block, and `log_group_name = each.value` is asserted for the unparsed filter.
+
+### T13
+- Action: escaped cells for connection-string options and PGOPTIONS, plus an allow cell for connection-string options with an escape.
+
+### T14
+- Action: the captured connect handler is driven with a fake connection, and a report reaches the registered sink.
+
+### T15
+- Action: the passing cell asserts that the wrapper's output holds both stdout ("DO") and the stderr marker lines.
+
+**Red proofs:** all seven testing fixes were red-proven, one mutation each, on an rsync copy with only `node_modules` linked:
+- a constant tenant;
+- per-message rate keying;
+- `getLogger` on the unparsed path;
+- a changed namespace;
+- unescaping the config source only;
+- a no-op connect handler;
+- `2>&1 >/dev/null`.

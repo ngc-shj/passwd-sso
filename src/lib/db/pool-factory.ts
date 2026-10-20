@@ -111,23 +111,44 @@ function unescapeStartupOptions(options: string): string {
   return options.replace(/\\(.)/gs, "$1");
 }
 
+// The string startup parameters pg sends. The packet is a run of NUL-terminated
+// name/value pairs, and the server applies an unrecognised name as a GUC, so a
+// NUL inside any of these values injects a parameter of the sender's choosing
+// (`application_name=x%00client_min_messages%00error` sets it; verified).
+const STARTUP_STRING_PARAMS = [
+  "user",
+  "database",
+  "application_name",
+  "fallback_application_name",
+  "options",
+  "replication",
+] as const;
+
 /**
  * Refuse a configuration that would raise `client_min_messages` above WARNING
- * for these connections and so silence the reports. The startup `options` are
- * read the way pg reads them — pg's own ConnectionParameters for the
- * connection string (which accepts strings `new URL` rejects) and for
- * PGOPTIONS — and every source is checked, a superset of the one pg applies.
- * A connection string pg cannot parse throws here, as it would on connect. A
- * role-level setting is not visible here (SC5's canary detects it).
+ * for these connections and so silence the reports: a startup parameter
+ * carrying a NUL, or `options` naming the parameter. Values are read the way pg
+ * reads them — pg's own ConnectionParameters for the connection string (which
+ * accepts strings `new URL` rejects) and for the PG* environment — and every
+ * source is checked, a superset of the one pg applies. A connection string pg
+ * cannot parse throws here, as it would on connect. A role-level setting is
+ * not visible here (SC5's canary detects it).
  */
 function assertReportsNotSuppressed(config: pg.ClientConfig): void {
-  const sources = [
-    config.options,
-    config.connectionString ? new ConnectionParameters(config.connectionString).options : undefined,
-    new ConnectionParameters().options,
+  const sources: Record<string, unknown>[] = [
+    config as Record<string, unknown>,
+    ...(config.connectionString ? [new ConnectionParameters(config.connectionString) as unknown as Record<string, unknown>] : []),
+    new ConnectionParameters() as unknown as Record<string, unknown>,
   ];
   for (const source of sources) {
-    if (source && CLIENT_MIN_MESSAGES_RE.test(unescapeStartupOptions(source))) {
+    for (const name of STARTUP_STRING_PARAMS) {
+      const value = source[name];
+      if (typeof value === "string" && value.includes("\0")) {
+        throw new Error(`database connection parameter ${name} must not contain a NUL byte: it can inject startup settings`);
+      }
+    }
+    const options = source.options;
+    if (typeof options === "string" && CLIENT_MIN_MESSAGES_RE.test(unescapeStartupOptions(options))) {
       throw new Error("database connection options must not set client_min_messages: it would silence RLS bypass reports");
     }
   }
@@ -152,7 +173,9 @@ export function createClient(config: pg.ClientConfig): pg.Client {
  * external pool open by default, and pg's idle timer then holds the process
  * for idleTimeoutMillis — right for the app and the workers, which end their
  * pools themselves on shutdown (ending twice throws), wrong for a script that
- * only calls `$disconnect()`.
+ * only calls `$disconnect()`. With `ownsPool`, do not query after
+ * `$disconnect()`: the adapter would reconnect through a pool it builds itself,
+ * which has neither the notice listener nor the options check.
  */
 export function createPrismaClient(
   pool: pg.Pool,

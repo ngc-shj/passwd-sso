@@ -36,6 +36,24 @@ function filterBlock(name = "rls_bypass_not_granted"): string {
   return TF.slice(start, end);
 }
 
+/** The metric_transformation's name and namespace in a block. */
+function metricOf(block: string): { name?: string; namespace?: string } {
+  // Up to the block's own closing brace: values like "${local.name_prefix}/App"
+  // contain braces of their own.
+  const t = /metric_transformation \{\n([\s\S]*?)\n {2}\}/.exec(block)?.[1] ?? "";
+  return {
+    name: /\bname\s*=\s*"([^"]+)"/.exec(t)?.[1],
+    namespace: /\bnamespace\s*=\s*"([^"]+)"/.exec(t)?.[1],
+  };
+}
+
+/** The alarm block on the report metric. */
+function alarmBlock(): string {
+  const start = TF.indexOf('resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted"');
+  expect(start).toBeGreaterThanOrEqual(0);
+  return TF.slice(start, TF.indexOf("\n}\n", start));
+}
+
 describe("rls.bypass_not_granted line vs its metric filter", () => {
   let line: string;
 
@@ -77,6 +95,17 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
     );
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).not.toContain("earlier-request");
+    // The unparsed path logs through the same base logger.
+    requestContext.run(base.child({ requestId: "earlier-request" }), () =>
+      handleServerNotice({
+        code: "01000",
+        message: "rls_bypass_not_granted tbl=users",
+        where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+      }),
+    );
+    expect(chunks).toHaveLength(2);
+    expect(chunks[1]).toContain("rls.bypass_notice_unparsed");
+    expect(chunks[1]).not.toContain("earlier-request");
   });
 
   it("counts an unparsed report on the same metric, so a format drift is not read as zero", () => {
@@ -93,8 +122,20 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
     expect(pattern).not.toBeNull();
     const [, key, value] = pattern as RegExpExecArray;
     expect(JSON.parse(chunks[0])[key]).toBe(value);
-    expect(block).toMatch(/name\s*=\s*"RlsBypassNotGranted"/);
     expect(block).toMatch(/for_each\s*=\s*var\.enable_monitoring \? local\.rls_bypass_report_log_groups : \{\}/);
+    expect(block).toMatch(/log_group_name\s*=\s*each\.value/);
+  });
+
+  it("publishes both filters to the metric the alarm watches", () => {
+    const alarm = alarmBlock();
+    const alarmMetric = {
+      name: /metric_name\s*=\s*"([^"]+)"/.exec(alarm)?.[1],
+      namespace: /namespace\s*=\s*"([^"]+)"/.exec(alarm)?.[1],
+    };
+    expect(alarmMetric.name).toBeDefined();
+    expect(alarmMetric.namespace).toBeDefined();
+    expect(metricOf(filterBlock())).toEqual(alarmMetric);
+    expect(metricOf(filterBlock("rls_bypass_notice_unparsed"))).toEqual(alarmMetric);
   });
 
   it("binds one filter to each service log group that can emit the line", () => {

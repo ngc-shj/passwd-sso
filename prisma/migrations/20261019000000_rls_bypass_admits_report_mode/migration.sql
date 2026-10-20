@@ -159,8 +159,10 @@ BEGIN
   SELECT string_agg(tablename || '.' || policyname, ', ') INTO bad
   FROM pg_policies
   WHERE schemaname = 'public'
-    AND (qual LIKE '%(current_setting(''app.tenant_id''::text, true))::uuid)%'
-      OR with_check LIKE '%(current_setting(''app.tenant_id''::text, true))::uuid)%');
+    -- Any cast not inside the sub-SELECT, on either side of `=` (the same
+    -- regex as rls-cross-tenant-verify.sql's [E-RLS-TENANT-INITPLAN]).
+    AND (qual ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
+      OR with_check ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid');
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION 'policies still cast app.tenant_id outside a sub-SELECT: %', bad;
   END IF;

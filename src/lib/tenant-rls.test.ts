@@ -66,25 +66,36 @@ describe("withTenantRls", () => {
     expect(mockExecuteRaw).toHaveBeenCalled();
   });
 
-  it("pins the bypass off and clears the grant before the callback runs", async () => {
+  it("binds the caller's tenant, pins the bypass off and clears the grant before the callback runs", async () => {
     // A tenant transaction must not inherit a bypass (or a grant) set earlier
     // in the same transaction by code outside the helpers.
-    const sql: string[] = [];
-    const mockExecuteRaw = vi.fn((strings: TemplateStringsArray) => {
-      sql.push(strings.join("$"));
-      return Promise.resolve(0);
-    });
-    const { prisma } = makeMockPrisma({ $executeRaw: mockExecuteRaw });
-    let seenBeforeCallback: string[] = [];
-    await withTenantRls(prisma, "33333333-3333-4333-8333-333333333333", async () => {
-      seenBeforeCallback = [...sql];
-      return undefined;
-    });
-    // One statement opens the context: tenant id, bypass off, grant cleared.
-    expect(seenBeforeCallback).toHaveLength(1);
-    expect(seenBeforeCallback[0]).toContain("set_config('app.tenant_id', $, true)");
-    expect(seenBeforeCallback[0]).toContain("set_config('app.bypass_rls', 'off', true)");
-    expect(seenBeforeCallback[0]).toContain("set_config('app.bypass_tables', '', true)");
+    async function gucsBeforeCallback(tenantId: string): Promise<Record<string, unknown>[]> {
+      const calls: { sql: string; values: unknown[] }[] = [];
+      const mockExecuteRaw = vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
+        calls.push({ sql: strings.join("$"), values });
+        return Promise.resolve(0);
+      });
+      const { prisma } = makeMockPrisma({ $executeRaw: mockExecuteRaw });
+      let seen: typeof calls = [];
+      await withTenantRls(prisma, tenantId, async () => {
+        seen = [...calls];
+        return undefined;
+      });
+      // Each set_config's GUC paired with what it writes ($ = the next bound value).
+      return seen.map(({ sql, values }) => {
+        const queue = [...values];
+        const out: Record<string, unknown> = {};
+        for (const m of sql.matchAll(/set_config\('([^']+)', (\$|'[^']*'), true\)/g)) {
+          out[m[1]] = m[2] === "$" ? queue.shift() : m[2].slice(1, -1);
+        }
+        return out;
+      });
+    }
+    const a = "33333333-3333-4333-8333-333333333333";
+    const b = "44444444-4444-4444-8444-444444444444";
+    // One statement opens the context.
+    expect(await gucsBeforeCallback(a)).toEqual([{ "app.tenant_id": a, "app.bypass_rls": "off", "app.bypass_tables": "" }]);
+    expect(await gucsBeforeCallback(b)).toEqual([{ "app.tenant_id": b, "app.bypass_rls": "off", "app.bypass_tables": "" }]);
   });
 
   it("context is cleared after the call completes (no leak)", async () => {

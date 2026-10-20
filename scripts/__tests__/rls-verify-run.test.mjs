@@ -35,12 +35,16 @@ function run(output, code = 0) {
   const r = spawnSync("bash", [WRAPPER, "--", "bash", "-c", 'printf "DO\\n"; printf "%s\\n" "$1" >&2; exit "$2"', "fake", output, String(code)], {
     encoding: "utf8",
   });
-  return { status: r.status, stderr: r.stderr };
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
 describe("rls-verify-run.sh (standalone)", () => {
   it("passes a complete run whose regions raise exactly their own table", () => {
-    expect(run(completeRun()).status).toBe(0);
+    const { status, stdout } = run(completeRun());
+    expect(status).toBe(0);
+    // Both of psql's streams are merged into what the wrapper prints.
+    expect(stdout).toContain("DO");
+    expect(stdout).toContain("RLS-MARKER:block=report-end");
   });
 
   it("fails a run that succeeded without emitting the markers", () => {

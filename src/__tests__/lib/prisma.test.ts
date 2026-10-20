@@ -113,10 +113,30 @@ describe("prisma pool configuration", () => {
 
   it("attaches the RLS bypass report listener to each new connection", async () => {
     // Built through createPool (src/lib/db/pool-factory.ts); without this the
-    // app's reports would never reach a log line.
+    // app's reports would never reach a log line. The handler must be the
+    // factory's: a notice on the connection it is given reaches the sink.
     await import("@/lib/prisma");
+    const { registerBypassNoticeSink } = await import("@/lib/db/pool-factory");
+    const { EventEmitter } = await import("node:events");
 
-    expect(mockOn).toHaveBeenCalledWith("connect", expect.any(Function));
+    const connectHandler = mockOn.mock.calls.find(([event]) => event === "connect")?.[1] as
+      | ((client: InstanceType<typeof EventEmitter>) => void)
+      | undefined;
+    expect(connectHandler).toBeDefined();
+    const seen: unknown[] = [];
+    registerBypassNoticeSink((n) => seen.push(n));
+    try {
+      const connection = new EventEmitter();
+      connectHandler?.(connection);
+      connection.emit("notice", {
+        code: "01000",
+        message: "rls_bypass_not_granted table=users purpose=auth_flow",
+        where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+      });
+      expect(seen).toEqual([{ table: "users", purpose: "auth_flow" }]);
+    } finally {
+      registerBypassNoticeSink(null);
+    }
   });
 
   it("registers error handler on pool", async () => {

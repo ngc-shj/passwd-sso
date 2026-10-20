@@ -97,12 +97,36 @@ describe("handleServerNotice", () => {
 });
 
 describe("unparsed reports", () => {
-  it("logs one constant line per window, however many arrive", () => {
-    const unparsed = report("rls_bypass_not_granted tbl=users");
-    handleServerNotice(unparsed);
-    handleServerNotice(unparsed);
+  it("logs one constant line per window, however many distinct ones arrive", () => {
+    handleServerNotice(report("rls_bypass_not_granted tbl=users"));
+    handleServerNotice(report("rls_bypass_not_granted tbl=sessions"));
     expect(mockWarn).toHaveBeenCalledTimes(1);
     expect(mockWarn).toHaveBeenCalledWith({ _logType: "rls.bypass_notice_unparsed" }, "rls.bypass_notice_unparsed");
+  });
+
+  it("logs again once the window has passed (the boundary logs)", () => {
+    vi.useFakeTimers();
+    try {
+      handleServerNotice(report("rls_bypass_not_granted tbl=users"));
+      vi.advanceTimersByTime(59_999);
+      handleServerNotice(report("rls_bypass_not_granted tbl=users"));
+      expect(mockWarn).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      handleServerNotice(report("rls_bypass_not_granted tbl=users"));
+      expect(mockWarn).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not use up a parsed report's slot", () => {
+    handleServerNotice(report("rls_bypass_not_granted tbl=users"));
+    handleServerNotice(report("rls_bypass_not_granted table=users purpose=auth_flow"));
+    expect(mockWarn).toHaveBeenCalledTimes(2);
+    expect(mockWarn).toHaveBeenLastCalledWith(
+      { _logType: "rls.bypass_not_granted", table: "users", purpose: "auth_flow" },
+      "rls.bypass_not_granted",
+    );
   });
 });
 
@@ -185,6 +209,7 @@ describe("createPool / createClient refuse to silence the reports", () => {
     // The server drops a backslash and keeps the next character (pg_split_opts).
     ["the config's options, backslash-escaped", { options: "-c client\\_min\\_messages=error" }],
     ["the config's options, an escaped letter", { options: "-c clien\\t_min_messages=error" }],
+    ["the connection string's options, backslash-escaped", { connectionString: "postgresql://u:p@localhost:5432/db?options=-c%20client%5C_min%5C_messages%3Derror" }],
     // `new URL` rejects a host-less URL; pg parses it and applies its options.
     ["a host-less connection string's options", { connectionString: "postgres://u:p@/db?options=-c%20client_min_messages%3Derror" }],
   ])("rejects client_min_messages in %s", (_label, config) => {
@@ -197,9 +222,35 @@ describe("createPool / createClient refuse to silence the reports", () => {
     expect(() => createPool({ connectionString: "postgresql://u:p@localhost:5432/db" })).toThrow("must not set client_min_messages");
   });
 
+  it("rejects a backslash-escaped client_min_messages in PGOPTIONS", () => {
+    vi.stubEnv("PGOPTIONS", "-c client\\_min\\_messages=error");
+    expect(() => createPool({ connectionString: "postgresql://u:p@localhost:5432/db" })).toThrow("must not set client_min_messages");
+  });
+
+  it("accepts connection-string options carrying backslash escapes", async () => {
+    const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db?options=-c%20application_name%3Da%5C%20b" });
+    await pool.end();
+  });
+
   it("rejects a dashed client-min-messages in PGOPTIONS", () => {
     vi.stubEnv("PGOPTIONS", "-c client-min-messages=error");
     expect(() => createPool({ connectionString: "postgresql://u:p@localhost:5432/db" })).toThrow("must not set client_min_messages");
+  });
+
+  it.each([
+    ["application_name in the URL", { connectionString: "postgres://u:p@localhost:5432/db?application_name=x%00client_min_messages%00error" }],
+    ["application_name in the config", { connectionString: "postgresql://u:p@localhost:5432/db", application_name: "x\0client_min_messages\0error" }],
+    ["the URL's user", { connectionString: "postgres://u%00client_min_messages%00error:p@localhost:5432/db" }],
+    ["the URL's database", { connectionString: "postgres://u:p@localhost:5432/db%00client_min_messages%00error" }],
+    ["a NUL as the last character", { connectionString: "postgresql://u:p@localhost:5432/db", application_name: "app\0" }],
+  ])("rejects a NUL byte in %s, which injects a startup setting", (_label, config) => {
+    expect(() => createPool(config)).toThrow("must not contain a NUL byte");
+    expect(() => createClient(config)).toThrow("must not contain a NUL byte");
+  });
+
+  it("accepts an ordinary application_name", async () => {
+    const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db", application_name: "passwd-sso worker 1" });
+    await pool.end();
   });
 
   it("accepts other options carrying backslash escapes", async () => {

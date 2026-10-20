@@ -134,9 +134,10 @@ resource "aws_cloudwatch_log_metric_filter" "rls_bypass_notice_unparsed" {
 }
 
 # Any RLS bypass report. Report mode admits the statement, so without this
-# alarm an ungranted reach is visible only to someone reading the metric. All
-# three filters publish to the same metric, so one alarm covers them; the log
-# line names the table and purpose.
+# alarm an ungranted reach is visible only to someone reading the metric. Both
+# filter resources (reports and unparsed reports, one filter per log group
+# each) publish to the same metric, so one alarm covers them; a report line
+# names the table and purpose.
 resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
   count               = var.enable_monitoring ? 1 : 0
   alarm_name          = "${local.name_prefix}-rls-bypass-not-granted"
@@ -147,7 +148,7 @@ resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
   period              = 300
   statistic           = "Sum"
   threshold           = 1
-  alarm_description   = "An RLS bypass reached a table outside its grant (rls.bypass_not_granted); see docs/operations/alerts.md"
+  alarm_description   = "An RLS bypass reached a table outside its grant (rls.bypass_not_granted), or a report could not be parsed (rls.bypass_notice_unparsed); see docs/operations/alerts.md"
   treat_missing_data  = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alarms[0].arn]

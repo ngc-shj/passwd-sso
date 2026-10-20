@@ -563,11 +563,13 @@ describe("tenant_claims (C1)", () => {
       try {
         // A FRESH connection, not one from the pool.
         //
-        // `tenant_claims` carries FORCE ROW LEVEL SECURITY, and its policy's OR
-        // is not short-circuited, so `current_setting('app.tenant_id', true)::uuid`
-        // is folded at planning time. On a pooled connection that GUC is the
-        // EMPTY STRING (some earlier test set it), and ''::uuid raises 22P02
-        // BEFORE the ACL check — the privilege denial never surfaces. `RESET`
+        // `tenant_claims` carries FORCE ROW LEVEL SECURITY. Before migration
+        // 20261019000000 its policy's `current_setting('app.tenant_id', true)::uuid`
+        // was folded at planning time; it now sits in a sub-SELECT evaluated at
+        // execution, after the ACL check. A fresh connection keeps this cell
+        // independent of that ordering: on a pooled connection that GUC is the
+        // EMPTY STRING (some earlier test set it), and wherever ''::uuid is
+        // evaluated first it raises 22P02 and the privilege denial never surfaces. `RESET`
         // does not help: it restores the session default, which for a custom GUC
         // already touched in that session is '' rather than unset. Only a
         // connection that has never had the GUC set leaves
@@ -620,11 +622,13 @@ describe("tenant_claims (C1)", () => {
       try {
         // A FRESH connection, not one from the pool.
         //
-        // `tenant_claims` carries FORCE ROW LEVEL SECURITY, and its policy's OR
-        // is not short-circuited, so `current_setting('app.tenant_id', true)::uuid`
-        // is folded at planning time. On a pooled connection that GUC is the
-        // EMPTY STRING (some earlier test set it), and ''::uuid raises 22P02
-        // BEFORE the ACL check — the privilege denial never surfaces. `RESET`
+        // `tenant_claims` carries FORCE ROW LEVEL SECURITY. Before migration
+        // 20261019000000 its policy's `current_setting('app.tenant_id', true)::uuid`
+        // was folded at planning time; it now sits in a sub-SELECT evaluated at
+        // execution, after the ACL check. A fresh connection keeps this cell
+        // independent of that ordering: on a pooled connection that GUC is the
+        // EMPTY STRING (some earlier test set it), and wherever ''::uuid is
+        // evaluated first it raises 22P02 and the privilege denial never surfaces. `RESET`
         // does not help: it restores the session default, which for a custom GUC
         // already touched in that session is '' rather than unset. Only a
         // connection that has never had the GUC set leaves

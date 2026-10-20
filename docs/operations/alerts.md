@@ -503,12 +503,14 @@ group, so its reports reach no metric. Wherever it runs, collect its stdout
 and match the same `_logType`. A log group, a filter and a positive canary
 for it are preconditions of enforce mode.
 
-Datadog: `{ _logType="rls.bypass_not_granted" }`
+Datadog: `{ _logType="rls.bypass_not_granted" OR _logType="rls.bypass_notice_unparsed" }`
 
 A line `rls.bypass_notice_unparsed` means a WARNING came from
 `rls_bypass_admits` but did not match the expected text. The listener
-logs it with no content. The likely cause is that the function and the
-listener disagree on the message format.
+logs it with no content, at most once per process per minute. The likely
+cause is that the function and the listener disagree on the message
+format. It is counted on the same `RlsBypassNotGranted` metric and fires
+the same alarm, so a format drift is not read as zero reports.
 
 ## `csp.violation`
 
