@@ -3,12 +3,18 @@ import {
   getTenantRlsContext,
   withTenantRls,
   withBypassRls,
-  BYPASS_PURPOSE,
   RLS_CONTEXT_REFUSAL,
   RlsSentinelContextRefused,
 } from "@/lib/tenant-rls";
+import { defineGrant } from "@/lib/tenant-rls-grants";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 import type { PrismaClient } from "@prisma/client";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+
+// Inert markers for the nesting-guard tests below — only "a grant was passed"
+// and "which of two" matter here, never the models.
+const GRANT_A = defineGrant(BYPASS_PURPOSE.AUDIT_WRITE, ["auditLog"]);
+const GRANT_B = defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["user"]);
 
 function makeMockPrisma(overrides?: Partial<{ $executeRaw: ReturnType<typeof vi.fn> }>) {
   const mockTx = {
@@ -58,6 +64,38 @@ describe("withTenantRls", () => {
     await withTenantRls(prisma, "33333333-3333-4333-8333-333333333333", async () => undefined);
     // The tagged template is called with a TemplateStringsArray + interpolated value
     expect(mockExecuteRaw).toHaveBeenCalled();
+  });
+
+  it("binds the caller's tenant, pins the bypass off and clears the grant before the callback runs", async () => {
+    // A tenant transaction must not inherit a bypass (or a grant) set earlier
+    // in the same transaction by code outside the helpers.
+    async function gucsBeforeCallback(tenantId: string): Promise<Record<string, unknown>[]> {
+      const calls: { sql: string; values: unknown[] }[] = [];
+      const mockExecuteRaw = vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
+        calls.push({ sql: strings.join("$"), values });
+        return Promise.resolve(0);
+      });
+      const { prisma } = makeMockPrisma({ $executeRaw: mockExecuteRaw });
+      let seen: typeof calls = [];
+      await withTenantRls(prisma, tenantId, async () => {
+        seen = [...calls];
+        return undefined;
+      });
+      // Each set_config's GUC paired with what it writes ($ = the next bound value).
+      return seen.map(({ sql, values }) => {
+        const queue = [...values];
+        const out: Record<string, unknown> = {};
+        for (const m of sql.matchAll(/set_config\('([^']+)', (\$|'[^']*'), true\)/g)) {
+          out[m[1]] = m[2] === "$" ? queue.shift() : m[2].slice(1, -1);
+        }
+        return out;
+      });
+    }
+    const a = "33333333-3333-4333-8333-333333333333";
+    const b = "44444444-4444-4444-8444-444444444444";
+    // One statement opens the context.
+    expect(await gucsBeforeCallback(a)).toEqual([{ "app.tenant_id": a, "app.bypass_rls": "off", "app.bypass_tables": "" }]);
+    expect(await gucsBeforeCallback(b)).toEqual([{ "app.tenant_id": b, "app.bypass_rls": "off", "app.bypass_tables": "" }]);
   });
 
   it("context is cleared after the call completes (no leak)", async () => {
@@ -150,7 +188,7 @@ describe("withTenantRls sentinel refusal", () => {
         prisma,
         async () =>
           withTenantRls(prisma, "00000000-0000-4000-8000-000000000002", async () => undefined),
-        BYPASS_PURPOSE.AUDIT_WRITE,
+        GRANT_A,
       ),
     ).rejects.toThrow("INVALID_RLS_NESTING");
   });
@@ -160,7 +198,7 @@ describe("withBypassRls", () => {
   it("runs the callback inside a transaction", async () => {
     const { prisma } = makeMockPrisma();
     const fn = vi.fn().mockResolvedValue("bypass-result");
-    const result = await withBypassRls(prisma, fn, BYPASS_PURPOSE.AUDIT_WRITE);
+    const result = await withBypassRls(prisma, fn, GRANT_A);
     expect(result).toBe("bypass-result");
     expect(fn).toHaveBeenCalledOnce();
   });
@@ -171,7 +209,7 @@ describe("withBypassRls", () => {
     await withBypassRls(prisma, async () => {
       capturedCtx = getTenantRlsContext();
       return undefined;
-    }, BYPASS_PURPOSE.AUDIT_WRITE);
+    }, GRANT_A);
     expect(capturedCtx).toMatchObject({
       tenantId: null,
       bypass: true,
@@ -181,7 +219,7 @@ describe("withBypassRls", () => {
 
   it("context is cleared after the call completes (no leak)", async () => {
     const { prisma } = makeMockPrisma();
-    await withBypassRls(prisma, async () => undefined, BYPASS_PURPOSE.AUDIT_WRITE);
+    await withBypassRls(prisma, async () => undefined, GRANT_A);
     const ctx = getTenantRlsContext();
     expect(ctx).toBeUndefined();
   });
@@ -191,14 +229,14 @@ describe("withBypassRls", () => {
     await expect(
       withBypassRls(prisma, async () => {
         throw new Error("bypass inner error");
-      }, BYPASS_PURPOSE.AUDIT_WRITE)
+      }, GRANT_A)
     ).rejects.toThrow("bypass inner error");
   });
 
   it("calls set_config with bypass_rls flag", async () => {
     const mockExecuteRaw = vi.fn().mockResolvedValue(undefined);
     const { prisma } = makeMockPrisma({ $executeRaw: mockExecuteRaw });
-    await withBypassRls(prisma, async () => undefined, BYPASS_PURPOSE.AUDIT_WRITE);
+    await withBypassRls(prisma, async () => undefined, GRANT_A);
     expect(mockExecuteRaw).toHaveBeenCalled();
   });
 });
@@ -240,7 +278,7 @@ describe("RLS nesting guards (C1)", () => {
           // Unreachable; this line exists so the catch above is the only exit.
           throw new Error("unexpected: inner call did not throw");
         },
-        BYPASS_PURPOSE.AUDIT_WRITE,
+        GRANT_A,
       ),
     ).rejects.toThrow(/INVALID_RLS_NESTING/);
 
@@ -272,7 +310,7 @@ describe("RLS nesting guards (C1)", () => {
             innerTransaction(); // should never run
             return undefined;
           },
-          BYPASS_PURPOSE.AUDIT_WRITE,
+          GRANT_A,
         );
         throw new Error("unexpected: inner call did not throw");
       }),
@@ -284,9 +322,11 @@ describe("RLS nesting guards (C1)", () => {
     expect((prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
 
     // The inner set_config('app.bypass_rls', 'on', ...) must NOT have fired.
+    // Quoted 'on' specifically — a bare /on/ also matches "set_config" on the
+    // setTenantGucs call withTenantRls's own open already made (off, not on).
     for (const call of mockTx.$executeRaw.mock.calls) {
       const flatArgs = JSON.stringify(call);
-      expect(flatArgs).not.toMatch(/bypass_rls.*on/);
+      expect(flatArgs).not.toMatch(/bypass_rls[^]*?'on'/);
     }
   });
 
@@ -342,9 +382,9 @@ describe("RLS nesting guards (C1)", () => {
         await withBypassRls(prisma, async () => {
           innerTransaction();
           return undefined;
-        }, BYPASS_PURPOSE.AUDIT_WRITE);
+        }, GRANT_A);
         throw new Error("unexpected: inner call did not throw");
-      }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+      }, GRANT_B),
     ).rejects.toThrow(/INVALID_RLS_NESTING: withBypassRls inside withBypassRls/);
 
     expect(innerTransaction).not.toHaveBeenCalled();
@@ -367,9 +407,9 @@ describe("RLS nesting guards (C1)", () => {
 
   it("does NOT reject a sequential withBypassRls pair (same kind)", async () => {
     const { prisma } = makeMockPrisma();
-    await withBypassRls(prisma, async () => "first", BYPASS_PURPOSE.AUDIT_WRITE);
+    await withBypassRls(prisma, async () => "first", GRANT_A);
     await expect(
-      withBypassRls(prisma, async () => "second", BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+      withBypassRls(prisma, async () => "second", GRANT_B),
     ).resolves.toBe("second");
   });
 
@@ -418,7 +458,7 @@ describe("RLS nesting guards (C1)", () => {
 
   it("does NOT reject sequential calls — guard only fires on active nesting", async () => {
     const { prisma } = makeMockPrisma();
-    await withBypassRls(prisma, async () => undefined, BYPASS_PURPOSE.AUDIT_WRITE);
+    await withBypassRls(prisma, async () => undefined, GRANT_A);
     // After the first call exits, context is cleared. Second call must
     // succeed without throwing INVALID_RLS_NESTING.
     await expect(

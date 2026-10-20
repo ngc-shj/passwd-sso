@@ -127,7 +127,8 @@ export async function POST(request: NextRequest) {
   // The userId predicate (from the authenticated token, never the body)
   // prevents cross-user IDOR: a keyId owned by another user returns entry_not_found.
   const { prisma } = await import("@/lib/prisma");
-  const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
+  const { withBypassRls } = await import("@/lib/tenant-rls");
+  const { BYPASS_GRANT } = await import("@/lib/tenant-rls-grants");
 
   const entry = await withBypassRls(
     prisma,
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
         },
         select: { id: true },
       }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.VAULT_ENTRY_CROSS_TENANT_READ,
   );
 
   const actorType = resolveActorType(authResult);

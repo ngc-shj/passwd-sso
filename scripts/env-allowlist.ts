@@ -220,6 +220,17 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
   },
   {
     type: "literal",
+    key: "PGOPTIONS",
+    justification:
+      "libpq's own variable, not app configuration: node-postgres applies it to every connection. " +
+      "src/lib/db/pool-factory.ts reads it only to refuse a value that sets client_min_messages, " +
+      "which would silence the rls_bypass_admits reports. The app never sets or documents it.",
+    consumers: ["src/lib/db/pool-factory.ts", "src/lib/db/pool-factory.test.ts"],
+    reviewedAt: "2026-10-20",
+    readByApp: true,
+  },
+  {
+    type: "literal",
     key: "SENTRY_AUTH_TOKEN",
     justification:
       "Build-time-only: consumed by the Sentry webpack plugin during npm run build for source-map upload. " +

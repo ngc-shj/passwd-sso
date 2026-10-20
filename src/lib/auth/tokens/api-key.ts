@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   API_KEY_PREFIX,
   API_KEY_SCOPE,
@@ -91,7 +92,7 @@ export async function validateApiKey(
         lastUsedAt: true,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.API_KEY_VALIDATE);
 
   if (!key) {
     return { ok: false, error: "API_KEY_INVALID" };
@@ -110,7 +111,7 @@ export async function validateApiKey(
       where: { tenantId_userId: { tenantId: key.tenantId, userId: key.userId } },
       select: { deactivatedAt: true },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.TOKEN_TENANT_MEMBERSHIP_CHECK);
   if (!member || member.deactivatedAt !== null) {
     return { ok: false, error: "API_KEY_INVALID" };
   }
@@ -125,7 +126,7 @@ export async function validateApiKey(
         where: { id: key.id },
         data: { lastUsedAt: new Date() },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch(() => {});
+    BYPASS_GRANT.API_KEY_VALIDATE).catch(() => {});
   }
 
   return {

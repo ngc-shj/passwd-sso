@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { createTestContext, type TestContext } from "./helpers";
+import { createTestContext, type TestContext, setBypassRlsGucs } from "./helpers";
 
 const SKIP = !process.env.DATABASE_URL;
 
@@ -36,7 +36,7 @@ async function issueBridgeCode(
   useLock: boolean,
 ): Promise<void> {
   await client.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`SELECT set_config('app.bypass_rls', 'on', true)`);
+    await setBypassRlsGucs(tx);
     if (useLock) {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
@@ -91,7 +91,7 @@ async function issueApiKey(
   useLock: boolean,
 ): Promise<void> {
   await client.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`SELECT set_config('app.bypass_rls', 'on', true)`);
+    await setBypassRlsGucs(tx);
     if (useLock) {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
@@ -159,7 +159,7 @@ describe.skipIf(SKIP)("count-then-create TOCTOU — advisory lock", () => {
     userId = await ctx.createUser(tenantId);
     // Pre-seed one active code so the cap of 1 is already met.
     await ctx.su.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(`SELECT set_config('app.bypass_rls', 'on', true)`);
+      await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `INSERT INTO extension_bridge_codes
            (id, code_hash, user_id, tenant_id, scope, expires_at, created_at, cnf_jkt)

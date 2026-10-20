@@ -1,24 +1,57 @@
 #!/usr/bin/env node
 /**
- * CI guard: ensure withBypassRls is only called from approved files,
- * and only accesses approved Prisma models within each file.
+ * CI guard: ensure withBypassRls is only called from approved files (Check 1),
+ * that every call names a grant from src/lib/tenant-rls-grants.ts (Check 2),
+ * and that each call reaches only the Prisma models its grant lists (Check 3).
+ * Three further rules keep the bypass settings behind that registry: the
+ * writer, pool and function rules (below).
  *
  * Any new usage of withBypassRls must be explicitly added to ALLOWED_USAGE
  * after security review. This prevents accidental RLS bypass in new code.
  *
- * Model tracking (Check 3) is a partial, development-time preventive control,
- * not a tenant boundary. Nothing at runtime checks a bypass's purpose or the
- * models it touches: the client inside a bypass reaches every model, and
- * `app.bypass_purpose` is set but read by no policy. Code this analysis does
- * not follow (the shapes recorded in #911 and #910, and future ones) can
- * reach a model the allowlist does not grant with nothing to stop it. A
- * runtime restriction — a per-purpose capability client exposing only the
- * granted delegates — is the durable fix.
+ * Check 3 is a per-call grant comparison: the models a call's callback can
+ * reach (directly, or through a forwarder whose BypassGrant parameter the
+ * call's production callers fill) against the models of the BYPASS_GRANT
+ * member it names, read off the registry's AST (`NAME: defineGrant(
+ * BYPASS_PURPOSE.X, [models])`). A reached model the grant does not list
+ * fails; a grant no call or self-setting site names fails as stale, and so
+ * does a model a grant lists that no call naming it reaches (grants are
+ * shared, so it is judged across all of them).
+ *
+ * This is a partial, development-time preventive control, not a tenant
+ * boundary. Code this analysis does not follow (the shapes recorded in #911
+ * and #910, and future ones) can reach a model its grant does not list. The
+ * database is the adjudicator: a bypassed statement that examines a row of an
+ * RLS table outside `app.bypass_tables` is reported now (report mode, a
+ * WARNING the pool factory's listener logs) and will be refused once SC5
+ * flips `public.rls_bypass_enforced()`. This gate catches the honest mistake
+ * before that report does.
+ *
+ * Writer rule: raw-SQL string and template arguments ($executeRaw/$queryRaw
+ * and their Unsafe forms, Prisma.sql/Prisma.raw, a pg `query` call), with
+ * literal concatenation and const bindings constant-folded, are lexed as SQL.
+ * Outside src/lib/tenant-rls.ts and the grants module, a statement-leading
+ * SET/RESET, ALTER … SET, a DO block, EXECUTE, or any `set_config` identifier
+ * (plain, quoted, `pg_catalog.`-qualified, U&-escaped) fails the run: the
+ * bypass is turned on through setBypassGucs only. SQL built at run time from
+ * values this gate cannot fold is outside its reach.
+ *
+ * Pool rule: `new pg.Pool`, `new Pool`, `new pg.Client`, `new Client` and `new
+ * PrismaPg` (by spelling or by a binding from "pg"/the adapter package) appear
+ * only in src/lib/db/pool-factory.ts, whose pools carry the notice listener;
+ * read by AST over every code file under src/ and scripts/, tests included.
+ * POOL_RULE_ALLOWLIST names the superuser and no-bypass exceptions.
+ *
+ * Function rule: no literal in a code file under src/ or scripts/, and no text
+ * file under src/, scripts/ or .github/, holds a `CREATE [OR REPLACE]
+ * FUNCTION|PROCEDURE` token sequence — a routine body or a function-level
+ * SET clause writes settings where the writer rule cannot see. Routines are
+ * created in prisma/migrations; FUNCTION_RULE_ALLOWLIST names the exceptions.
  *
  * Call sites and callbacks are read from the parse tree; raw text decides only
  * which files are worth parsing — see HELPER_MENTION_RE.
  *
- * The model allowlist (Check 3) is decided by REACH and TYPES through the
+ * Reach (Check 3) is decided by REACH and TYPES through the
  * type-checked Program and lib/function-resolver.mjs (shared with
  * check-rls-nesting): everything that can run inside a bypass callback is
  * reached — calls, `new` (field initializers, constructor, base classes),
@@ -38,7 +71,9 @@
  * analysis tractable, not complete. A client or delegate
  * given a type that no longer says it is one (`unknown`, an own interface, a
  * Pick that drops the query methods) is refused anywhere in production; a
- * narrowing to the client's four raw-query methods alone is raw SQL's to judge.
+ * narrowing to the client's four raw-query methods alone is raw SQL's to judge,
+ * and a grant one of whose calls reaches raw SQL is not judged stale (the
+ * tables, procedures and triggers that SQL reaches are not read here).
  *
  * Five rounds of review found defects here, every one the same defect: a
  * predicate that judged code by its spelling. A fixed 10-line radius stopped
@@ -78,13 +113,15 @@
  * this repo's module setting (TS1202). `import wb = rls.withBypassRls` is a
  * reference like any other (rounds 14 and 15).
  *
- *   - Check 2 (BYPASS_PURPOSE) is call-scoped and resolved through the
+ *   - Check 2 (BYPASS_GRANT) is call-scoped and resolved through the
  *     Program: each `withBypassRls` call passes a member of the real
- *     BYPASS_PURPOSE (a shadowing local object does not pass), or forwards a
- *     parameter whose TYPE is the purpose union, in which case every
- *     production caller of that forwarder is held to the same rule. A file in
- *     ALLOWED_PURPOSES may pass only the members listed there, directly or
- *     through a forwarder.
+ *     BYPASS_GRANT (a shadowing local object does not pass; a renamed import
+ *     resolves), or forwards a parameter whose TYPE is BypassGrant, in which
+ *     case every production caller of that forwarder names the grant and is
+ *     charged with what the forwarded call reaches. An inline defineGrant, a
+ *     conditional, a spread or a cast does not resolve and fails. A file in
+ *     ALLOWED_PURPOSES may name only grants whose purpose is listed there,
+ *     directly or through a forwarder.
  *   - A re-export or an `export *` barrel, renamed or not; a load whose
  *     specifier is not a literal; a quoted or computed destructuring key; and
  *     a helper-named member read off an object this file cannot prove to be
@@ -147,32 +184,29 @@ import {
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createFunctionResolver, createReachability, isBindingWrite, isProductionPath, literalKey, prismaModelNames, unwrap } from "./lib/function-resolver.mjs";
 import { flowsOf, functionFlowViolations, productionScope } from "./lib/soundness.mjs";
+import { nameOf, tokenizeSql, TOKEN } from "./lib/sql-scan.mjs";
+import {
+  FILTERING,
+  ORDERING,
+  SchemaReadError,
+  WRITING,
+  loadPrismaSchema,
+  objectLiterals,
+  walkCallArgs,
+} from "./lib/prisma-relation-reach.mjs";
 import { join, extname, dirname, relative, resolve, sep } from "node:path";
 
-// The models `countStrandedRows` counts — the keys of STRANDED_COUNTERS in
-// src/lib/tenant/stranded-rows.ts. A realignment reaches every one of them
-// (read-only counts) under its caller's bypass. Kept in step by this gate
-// itself: a counter added there is reported as a model not on the allowlist,
-// one removed as a permission never reached.
-const STRANDED_ROW_MODELS = [
-  "account", "apiKey", "attachment", "delegationSession", "emergencyAccessGrant",
-  "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken",
-  "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification",
-  "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey",
-  "teamPasswordFavorite", "vaultKey", "webAuthnCredential",
-];
-
-// Per-file allowlist: file path → allowed Prisma model names.
-// "*" means any model is allowed (use sparingly, only for definitions or
-// complex transactional code that touches many models by design).
-const ALLOWED_USAGE = new Map([
-  ["src/lib/tenant-rls.ts", ["*"]], // definition
+// The files that may call withBypassRls (Check 1). Which models a call may
+// reach is no longer listed here: it is the call's own grant
+// (src/lib/tenant-rls-grants.ts), compared by Check 3.
+const ALLOWED_USAGE = new Set([
+  "src/lib/tenant-rls.ts", // definition
   // `user`: `resolveExistingUsersForTenant`, the ownership read SCIM POST and
   // directory sync consult before attaching an existing user. It must see users
   // filed under other tenants — to REFUSE them — and it lives here, beside
   // `resolveOwningTenantIdFromClient`, because it applies the same owning-tenant
   // rule. Read-only; returns ids and a classification, no identity.
-  ["src/lib/tenant-context.ts", ["tenantMember", "team", "user"]],
+  "src/lib/tenant-context.ts",
   // The standalone realignment for producers that activate a membership inside a
   // TENANT context (SCIM, directory sync): that context cannot write a users row
   // the owning column files under another tenant. Re-reads the membership it
@@ -180,190 +214,173 @@ const ALLOWED_USAGE = new Map([
   // through `realignOwningTenantColumn` and records both sides.
   // Realignment: the membership read, then realignToMembershipInTxWith's
   // owning-column move (user), stranded-row counts and the in-tx audit enqueue.
-  ["src/lib/tenant/tenant-realignment.ts", ["tenantMember", "user", "auditOutbox"]],
-  ["src/lib/auth/session/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember", "tenantClaim"]],
+  "src/lib/tenant/tenant-realignment.ts",
+  "src/lib/auth/session/auth-adapter.ts",
   // The Web-session cap (both sign-in creators route here): the tenant's
   // maxConcurrentSessions, then evict + create sessions under the per-user lock.
-  ["src/lib/auth/session/session-concurrency.ts", ["session", "tenant"]],
+  "src/lib/auth/session/session-concurrency.ts",
   // Session callbacks and the sign-in realignment: tenant, user and membership
   // reads, the account/vault wipe on a tenant move ($transaction), the claim
-  // registry (tenant-management). Stranded-row counts and the audit enqueue
-  // are granted via their modules (ALLOWED_VIA).
-  ["src/auth.ts", [
-    "account", "apiKey", "attachment", "emergencyAccessGrant", "emergencyAccessKeyPair", "extensionToken",
-    "folder", "notification", "passwordEntry", "passwordEntryHistory", "passwordShare", "session",
-    "shareAccessLog", "tag", "tenant", "tenantClaim", "tenantMember", "user", "vaultKey", "webAuthnCredential",
-  ]],
-  ["src/lib/audit/audit.ts", ["team", "user"]],
-  ["src/lib/audit/audit-outbox.ts", ["auditOutbox"]],
-  ["src/lib/audit/audit-user-lookup.ts", ["user"]],
-  ["src/lib/auth/tokens/scim-token.ts", ["scimToken"]],
-  ["src/lib/auth/tokens/extension-token.ts", ["extensionToken", "tenant", "tenantMember"]],
+  // registry (tenant-management), the stranded-row counts and the audit
+  // enqueue — each call's own grant.
+  "src/auth.ts",
+  "src/lib/audit/audit.ts",
+  "src/lib/audit/audit-outbox.ts",
+  "src/lib/audit/audit-user-lookup.ts",
+  "src/lib/auth/tokens/scim-token.ts",
+  "src/lib/auth/tokens/extension-token.ts",
   // C5: shared DPoP validate helper for IOS_APP + BROWSER_EXTENSION rows.
   // Updates lastUsedAt / lastUsedIp / lastUsedUserAgent on the resolved row.
-  ["src/lib/auth/dpop/validate-token-dpop.ts", ["extensionToken"]],
+  "src/lib/auth/dpop/validate-token-dpop.ts",
   // C12: user-initiated key reset revokes the calling user's cnfJkt-bound
   // ExtensionToken rows (after body-cnfJkt-must-match-proof check).
-  ["src/app/api/extension/key/reset/route.ts", ["extensionToken"]],
-  ["src/lib/auth/access/maintenance-auth.ts", ["tenantMember"]],
-  ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
-  ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
+  "src/app/api/extension/key/reset/route.ts",
+  "src/lib/auth/access/maintenance-auth.ts",
+  "src/app/api/extension/bridge-code/route.ts",
+  "src/app/api/extension/token/exchange/route.ts",
   // A04-4: execute is the only phase that revokes shares system-wide; the
   // master key is global, so old-version shares across ALL tenants must be
   // revoked regardless of which tenant approved the rotation (NF4).
   // The legacy single-actor endpoint at /api/admin/rotate-master-key/route.ts
   // returned 410 Gone post-A04-4 and no longer touches PasswordShare — its
   // prior allowlist entry has been removed.
-  ["src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts", ["passwordShare"]],
-  ["src/app/api/maintenance/purge-history/route.ts", ["tenant", "passwordEntryHistory"]],
-  ["src/app/api/teams/route.ts", ["teamMember", "tenantMember"]],
-  ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
+  "src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts",
+  "src/app/api/maintenance/purge-history/route.ts",
+  "src/app/api/teams/route.ts",
+  "src/app/api/teams/pending-key-distributions/route.ts",
   // Team key distribution: guest members require cross-tenant public-key lookup
-  ["src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts", ["user"]],
+  "src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts",
   // Team invitations: existing-user lookup must see guest users across tenants
-  ["src/app/api/teams/[teamId]/invitations/route.ts", ["user"]],
+  "src/app/api/teams/[teamId]/invitations/route.ts",
   // Team key rotation prep: guest members require cross-tenant public-key lookup
-  ["src/app/api/teams/[teamId]/rotate-key/data/route.ts", ["user"]],
-  ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
-  ["src/lib/auth/policy/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
-  ["src/lib/auth/policy/lockout-admin-notify.ts", ["user", "tenantMember"]],
-  ["src/lib/auth/policy/new-device-detection.ts", ["session", "user"]],
+  "src/app/api/teams/[teamId]/rotate-key/data/route.ts",
+  "src/app/api/teams/invitations/accept/route.ts",
+  "src/lib/auth/policy/account-lockout.ts",
+  "src/lib/auth/policy/lockout-admin-notify.ts",
+  "src/lib/auth/policy/new-device-detection.ts",
   // C8: shared fail-closed re-derivation of passkey-enforcement state for the
   // token-issuance gates (derivePasskeyState). Reads a user-global passkey
   // count + the tenant policy row under bypass — the cookieless token paths and
   // the session callback have no RLS context. Mirrors src/auth.ts's read.
-  ["src/lib/auth/policy/passkey-enforcement.ts", ["webAuthnCredential", "tenant"]],
+  "src/lib/auth/policy/passkey-enforcement.ts",
   // Shared step-up helper: reads Session.createdAt from the session-token cookie.
-  ["src/lib/auth/session/step-up.ts", ["session"]],
+  "src/lib/auth/session/step-up.ts",
   // Route-level chooser: selects passkey freshness vs generic recent-session by session provider.
   // C5 member 1: canRecoverSessionWithPasskey re-checks the bound credential row by id.
-  ["src/lib/auth/session/recent-current-auth-method.ts", ["session", "webAuthnCredential"]],
-  ["src/lib/notification.ts", ["user", "notification"]],
-  ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],
-  ["src/lib/auth/access/tenant-auth.ts", ["tenantMember"]],
+  "src/lib/auth/session/recent-current-auth-method.ts",
+  "src/lib/notification.ts",
+  "src/lib/webhook-dispatcher.ts",
+  "src/lib/auth/access/tenant-auth.ts",
   // Admin console: cross-tenant team membership query for scope selector
-  ["src/lib/auth/access/team-auth.ts", ["teamMember", "tenantMember"]],
+  "src/lib/auth/access/team-auth.ts",
   // Vault wipe: deletes across the vault's tables in one $transaction, the
-  // attachment blobs' rows, the emergency-access grants it ends. The audit
-  // enqueue is granted via its module (ALLOWED_VIA).
-  ["src/lib/vault/vault-reset.ts", [
-    "attachment", "emergencyAccessGrant", "folder", "passwordEntry", "passwordShare", "tag",
-    "teamMember", "teamMemberKey", "user", "vaultKey",
-  ]],
-  ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
-  ["src/lib/auth/tokens/api-key.ts", ["apiKey", "tenantMember"]],
-  ["src/lib/auth/webauthn/webauthn-authorize.ts", ["webAuthnCredential"]],
+  // attachment blobs' rows, the emergency-access grants it ends, the audit
+  // enqueue.
+  "src/lib/vault/vault-reset.ts",
+  "src/app/api/vault/admin-reset/route.ts",
+  "src/lib/auth/tokens/api-key.ts",
+  "src/lib/auth/webauthn/webauthn-authorize.ts",
   // `tenant` reads the policy row directly by id. These files used to reach the
   // same row by traversing `user.tenant`, which follows the stale `User.tenantId`
   // column; the adjudicator resolves the active membership first, so the tenant
   // is now loaded by that id. Same row, same bypass scope, named model.
-  ["src/app/api/auth/passkey/verify/route.ts", ["user", "tenant"]],
-  ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential", "tenant"]],
+  "src/app/api/auth/passkey/verify/route.ts",
+  "src/app/api/auth/passkey/options/email/route.ts",
   // The cross-tenant reactivation guard: resolves the SCIM id and reads the
   // user's ACTIVE membership set, both of which are invisible inside the tenant
   // context this route mutates in. Read-only, and the tenant it compares against
   // is the authenticated SCIM token's, not caller-supplied.
-  ["src/app/api/scim/v2/Users/[id]/route.ts", ["tenantMember", "scimExternalMapping"]],
+  "src/app/api/scim/v2/Users/[id]/route.ts",
   // The user LIST reads under a bypass: its filter runs through the users
   // relation, which a tenant context narrows to users whose owning column names
   // this tenant, silently dropping departed members from the page and the count.
   // Every query carries the token's tenantId, ANDed so no filter can widen it.
   // Read-only. (The CREATE verb's ownership read moved into tenant-context.ts's
   // `resolveExistingUsersForTenant`, so this file no longer reads `user`.)
-  ["src/app/api/scim/v2/Users/route.ts", ["tenantMember", "scimExternalMapping"]],
+  "src/app/api/scim/v2/Users/route.ts",
   // C3: also reads the session row to resolve the bound credential.
-  ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential", "session"]],
-  ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],
-  ["src/lib/auth/session/user-session-invalidation.ts", [
-    "session", "extensionToken", "apiKey",
-    "mcpAccessToken", "mcpRefreshToken", "delegationSession",
-    "operatorToken",
-  ]],
+  "src/app/api/auth/passkey/reauth/options/route.ts",
+  "src/app/api/auth/passkey/reauth/verify/route.ts",
+  "src/lib/auth/session/user-session-invalidation.ts",
   // C18 (OWASP A04-1): per-user / per-tenant resource quotas need to count
   // total usage that may span beyond the current request's tenant context.
   // RLS would clip the count to the calling tenant's view, producing
   // under-counts on shared resources. SYSTEM_MAINTENANCE bypass purpose.
-  ["src/lib/quota/resource-quotas.ts", [
-    "passwordEntry", "attachment", "passwordShare",
-    "tenantWebhook", "teamWebhook",
-  ]],
-  ["src/app/api/tenant/policy/route.ts", ["tenant", "teamPolicy"]],
+  "src/lib/quota/resource-quotas.ts",
+  "src/app/api/tenant/policy/route.ts",
   // Operator CLI (SSO tenant-claim registry, lockout recovery, owning-column
   // realignment). Runs out of band with MIGRATION_DATABASE_URL and must read and
   // repair rows across every tenant, which is the bypass itself. Its purpose is
   // pinned to SYSTEM_MAINTENANCE by ALLOWED_PURPOSES below.
-  ["scripts/tenant-domain.ts", [
-    "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember", "user",
-    "auditOutbox",
-  ]],
+  "scripts/tenant-domain.ts",
   // One-shot operator migrations, run with MIGRATION_DATABASE_URL. The account
   // token rewrite is raw SQL only (governed by check-raw-sql-usage); the webhook
   // secret rewrite reads and updates both webhook tables.
-  ["scripts/migrate-account-tokens-to-encrypted.ts", []],
-  ["scripts/migrate-webhook-secrets-v1-to-v2.ts", ["teamWebhook", "tenantWebhook"]],
-  ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],
-  ["src/lib/team/team-policy.ts", ["tenant"]],
+  "scripts/migrate-account-tokens-to-encrypted.ts",
+  "scripts/migrate-webhook-secrets-v1-to-v2.ts",
+  "src/lib/auth/policy/access-restriction.ts",
+  "src/lib/team/team-policy.ts",
   // Team member display: cross-tenant user + home-tenant name hydration for guest members
-  ["src/lib/team/team-member-display.ts", ["user", "tenantMember"]],
+  "src/lib/team/team-member-display.ts",
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
-  ["src/lib/auth/session/session-timeout.ts", ["user", "tenant"]],
+  "src/lib/auth/session/session-timeout.ts",
   // Extension token refresh: tenant policy read keyed by the validated token
   // row's tenantId; family presence MAX + replay lookup of the presented token
   // (by tokenHash) span revoked rows of the same family.
-  ["src/app/api/extension/token/refresh/route.ts", ["tenant", "extensionToken"]],
+  "src/app/api/extension/token/refresh/route.ts",
   // iOS auth: token row updates (lastUsedIp/UA, replay-detection family revoke)
   // happen across tenant boundary because the bearer token's tenantId is
   // resolved from the row, not the request session.
   // Tenant idle/absolute policy read keyed by the refresh row's tenantId.
-  ["src/lib/auth/tokens/mobile-token.ts", ["extensionToken", "tenant"]],
+  "src/lib/auth/tokens/mobile-token.ts",
   // iOS authorize: bridge-code creation atomically counts active bridge codes
   // per user across tenants (parity with extension/bridge-code/route.ts).
-  ["src/app/api/mobile/authorize/route.ts", ["mobileBridgeCode"]],
+  "src/app/api/mobile/authorize/route.ts",
   // iOS token exchange: bridge-code single-use consumption requires bypass
   // because the row predates the issued session (parity with extension exchange).
   // Tenant idle/absolute policy read keyed by the consumed bridge code's tenantId.
-  ["src/app/api/mobile/token/route.ts", ["mobileBridgeCode", "tenant"]],
+  "src/app/api/mobile/token/route.ts",
   // iOS token refresh: cross-tenant token row read for family-absolute check.
   // C13: deactivated-user rejection requires tenantMember lookup.
-  ["src/app/api/mobile/token/refresh/route.ts", ["extensionToken", "tenantMember"]],
+  "src/app/api/mobile/token/refresh/route.ts",
   // Team policy route: pre-write tenant cap check (cross-tenant read of tenant row)
-  ["src/app/api/teams/[teamId]/policy/route.ts", ["team"]],
-  ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenant", "auditLog"]],
-  ["src/app/api/maintenance/audit-outbox-metrics/route.ts", []],
+  "src/app/api/teams/[teamId]/policy/route.ts",
+  "src/app/api/maintenance/purge-audit-logs/route.ts",
+  "src/app/api/maintenance/audit-outbox-metrics/route.ts",
   // Health probe: whole-deployment outbox backlog depth. Raw SQL, no model
   // accessor. Runs outside any request tenant context, and the depth it reports
   // is deliberately not tenant-scoped.
-  ["src/lib/health.ts", []],
-  ["src/app/api/maintenance/audit-outbox-purge-failed/route.ts", []],
-  ["src/app/api/maintenance/audit-chain-verify/route.ts", []],
-  ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user", "tenant"]],
-  ["src/app/api/share-links/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_CREATE
-  ["src/app/api/share-links/[id]/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_REVOKE
-  ["src/app/api/share-links/verify-access/route.ts", ["passwordShare"]],
-  ["src/app/api/share-links/[id]/content/route.ts", ["passwordShare", "shareAccessLog"]],
-  ["src/app/s/[token]/page.tsx", ["passwordShare", "shareAccessLog"]],
-  ["src/app/s/[token]/download/route.ts", ["passwordShare", "shareAccessLog"]],
+  "src/lib/health.ts",
+  "src/app/api/maintenance/audit-outbox-purge-failed/route.ts",
+  "src/app/api/maintenance/audit-chain-verify/route.ts",
+  "src/app/api/user/passkey-status/route.ts",
+  "src/app/api/share-links/route.ts", // logAuditInTx for SHARE_CREATE
+  "src/app/api/share-links/[id]/route.ts", // logAuditInTx for SHARE_REVOKE
+  "src/app/api/share-links/verify-access/route.ts",
+  "src/app/api/share-links/[id]/content/route.ts",
+  "src/app/s/[token]/page.tsx",
+  "src/app/s/[token]/download/route.ts",
   // Emergency access: cross-tenant grantee look-ups require RLS bypass
-  ["src/app/api/emergency-access/route.ts", ["emergencyAccessGrant", "user"]],
-  ["src/app/api/emergency-access/accept/route.ts", ["emergencyAccessGrant", "emergencyAccessKeyPair", "user"]],
-  ["src/app/api/emergency-access/reject/route.ts", ["emergencyAccessGrant", "user"]],
-  ["src/app/api/emergency-access/[id]/accept/route.ts", ["emergencyAccessGrant", "emergencyAccessKeyPair", "user"]],
-  ["src/app/api/emergency-access/[id]/approve/route.ts", ["user"]],
-  ["src/app/api/emergency-access/[id]/decline/route.ts", ["emergencyAccessGrant", "user"]],
-  ["src/app/api/emergency-access/[id]/request/route.ts", ["emergencyAccessGrant", "user"]],
-  ["src/app/api/emergency-access/[id]/revoke/route.ts", ["user"]],
-  ["src/app/api/emergency-access/[id]/vault/route.ts", ["emergencyAccessGrant"]],
-  ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
+  "src/app/api/emergency-access/route.ts",
+  "src/app/api/emergency-access/accept/route.ts",
+  "src/app/api/emergency-access/reject/route.ts",
+  "src/app/api/emergency-access/[id]/accept/route.ts",
+  "src/app/api/emergency-access/[id]/approve/route.ts",
+  "src/app/api/emergency-access/[id]/decline/route.ts",
+  "src/app/api/emergency-access/[id]/request/route.ts",
+  "src/app/api/emergency-access/[id]/revoke/route.ts",
+  "src/app/api/emergency-access/[id]/vault/route.ts",
+  "src/app/api/emergency-access/[id]/vault/entries/route.ts",
   // Machine Identity: SA token validation + MCP Gateway operate cross-tenant by design
-  ["src/lib/auth/tokens/service-account-token.ts", ["serviceAccountToken"]],
+  "src/lib/auth/tokens/service-account-token.ts",
   // Operator-token validator: cross-tenant lookup is required because the
   // bearer-token caller has no tenant context until the token row resolves it
-  ["src/lib/auth/tokens/operator-token.ts", ["operatorToken"]],
-  ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken", "tenantMember"]],
-  ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
-  ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
-  ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],
-  ["src/app/[locale]/mcp/authorize/page.tsx", ["mcpClient", "user"]],
+  "src/lib/auth/tokens/operator-token.ts",
+  "src/lib/mcp/oauth-server.ts",
+  "src/app/api/mcp/authorize/route.ts",
+  "src/app/api/mcp/register/route.ts",
+  "src/app/api/mcp/authorize/consent/route.ts",
+  "src/app/[locale]/mcp/authorize/page.tsx",
   // Per-request `form-action` for the consent page, computed in the proxy
   // (`src/lib/proxy/page-route.ts`) — a layer that runs before any tenant
   // context is established, so no RLS session variable exists to satisfy. Same
@@ -371,37 +388,35 @@ const ALLOWED_USAGE = new Map([
   // `redirectUris` only: values the registrant supplied and which the consent
   // page already shows them. Read-only, no identity, and every failure path
   // returns no extra CSP sources.
-  ["src/lib/security/consent-form-action.ts", ["mcpClient"]],
+  "src/lib/security/consent-form-action.ts",
   // JIT access requests: SA self-service path uses bypass for SA lookup; approve reads tenant policy
-  ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
-  ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
+  "src/app/api/tenant/access-requests/route.ts",
+  "src/app/api/tenant/access-requests/[id]/approve/route.ts",
   // Delegated Decryption: cross-tenant session lookup + delegation CRUD
-  ["src/lib/auth/access/delegation.ts", ["delegationSession"]],
-  ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
-  ["src/app/api/vault/delegation/check/route.ts", ["delegationSession"]],
+  "src/lib/auth/access/delegation.ts",
+  "src/app/api/vault/delegation/route.ts",
+  "src/app/api/vault/delegation/check/route.ts",
   // Unlock presence: lastPresenceAt write on the presenting token's own row,
   // keyed by the id checkAuth resolved from the validated bearer.
-  ["src/app/api/vault/unlock/verify/route.ts", ["extensionToken"]],
+  "src/app/api/vault/unlock/verify/route.ts",
   // SSH agent per-signature authorize: cross-tenant SSH_KEY lookup scoped by userId in WHERE
-  ["src/app/api/vault/ssh/sign-authorize/route.ts", ["passwordEntry"]],
+  "src/app/api/vault/ssh/sign-authorize/route.ts",
   // MCP Connections: user's own token listing + revocation (userId + tenantId in WHERE)
   // The last three were always used by the bulk-revoke callback (refresh-token
   // families, delegation sessions, one summary audit row) but sat past the old
   // fixed 10-line scan window, so the entry only listed what the window could
   // see. The sibling [id]/route.ts entry below has carried the same four for as
   // long as it has existed; this is the same operation, one level up.
-  ["src/app/api/user/mcp-tokens/route.ts", [
-    "mcpAccessToken", "mcpClient", "mcpRefreshToken", "delegationSession", "auditLog",
-  ]],
-  ["src/app/api/user/mcp-tokens/[id]/route.ts", ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "auditLog"]],
+  "src/app/api/user/mcp-tokens/route.ts",
+  "src/app/api/user/mcp-tokens/[id]/route.ts",
   // Auth provider check: userId-scoped Account query for passkey sign-in capability
-  ["src/app/api/user/auth-provider/route.ts", ["account"]],
+  "src/app/api/user/auth-provider/route.ts",
   // Audit anchor publisher: cross-tenant manifest generation reads all tenants + chain state
-  ["src/workers/audit-anchor-publisher.ts", ["auditChainAnchor", "tenant", "systemSetting"]],
+  "src/workers/audit-anchor-publisher.ts",
 ]);
 
-// The RLS helpers. `withBypassRls` is the one the per-file model allowlist
-// governs; the others share the callback-shape discipline (C2 / F3) only.
+// The RLS helpers. `withBypassRls` is the one the file allowlist and the grants
+// govern; the others share the callback-shape discipline (C2 / F3) only.
 const HELPER_NAMES = new Set([
   "withBypassRls",
   "withTenantRls",
@@ -465,37 +480,35 @@ const INDIRECT_CALLBACK_ALLOWLIST = new Set([
   "src/app/api/vault/unlock/data/route.ts",
 ]);
 
-// Per-file restriction on WHICH purpose a bypass may declare. A file listed here
-// may pass only these BYPASS_PURPOSE members; a file not listed may pass any.
+// Per-file restriction on WHICH purpose a bypass may run under. A file listed
+// here may name only grants whose purpose (the defineGrant's BYPASS_PURPOSE
+// member, read off the grant's AST) is listed, directly or through a
+// forwarder; a file not listed may name any grant. The operator scripts run out
+// of band with MIGRATION_DATABASE_URL: a grant declared for a request path
+// (auth_flow, token_lifecycle, …) is not theirs to take, even when its models
+// would cover what they reach.
 const ALLOWED_PURPOSES = new Map([
   ["scripts/tenant-domain.ts", ["SYSTEM_MAINTENANCE"]],
   ["scripts/migrate-account-tokens-to-encrypted.ts", ["SYSTEM_MAINTENANCE"]],
   ["scripts/migrate-webhook-secrets-v1-to-v2.ts", ["SYSTEM_MAINTENANCE"]],
 ]);
 
-// Models a file may reach only THROUGH the named module, not in its own code:
-// the grant covers accesses whose site is in that module, of any operation
-// there, and none in the file itself or anywhere else. A realignment counts the
-// user's stranded rows under its caller's bypass (stranded-rows.ts holds only
-// counts today); that grant must not let the caller's own code write them.
-const ALLOWED_VIA = new Map([
-  ["src/lib/tenant/tenant-realignment.ts", [{ via: "src/lib/tenant/stranded-rows.ts", models: STRANDED_ROW_MODELS }]],
-  ["scripts/tenant-domain.ts", [{ via: "src/lib/tenant/stranded-rows.ts", models: STRANDED_ROW_MODELS }]],
-  // derivePasskeyState({ …, tx }) reads the credential count and the tenant's
-  // passkey policy under the code/refresh exchange's bypass.
-  ["src/lib/mcp/oauth-server.ts", [{ via: "src/lib/auth/policy/passkey-enforcement.ts", models: ["webAuthnCredential", "tenant"] }]],
-  // The auto-promotion transition writes its audit row in the same
-  // transaction: the owning-tenant lookup for the row, then the outbox enqueue.
-  ["src/app/api/emergency-access/[id]/vault/route.ts", [
-    { via: "src/lib/tenant-context.ts", models: ["user"] },
-    { via: "src/lib/audit/audit-outbox-in-tx.ts", models: ["auditOutbox"] },
-  ]],
-  ["src/auth.ts", [
-    { via: "src/lib/tenant/stranded-rows.ts", models: STRANDED_ROW_MODELS },
-    { via: "src/lib/audit/audit-outbox-in-tx.ts", models: ["auditOutbox"] },
-  ]],
-  ["src/lib/vault/vault-reset.ts", [{ via: "src/lib/audit/audit-outbox-in-tx.ts", models: ["auditOutbox"] }]],
-]);
+// The grant registry and the helpers around it. A grant is named by a
+// withBypassRls call (judged here, Check 3) or by a self-setting site — a call
+// that hands the grant to setBypassGucs, directly or through a module-private
+// wrapper such as the retention worker's inSweepTx — whose raw SQL this gate
+// does not follow (the database reports what such a site reaches outside its
+// grant).
+const GRANTS_FILE = "src/lib/tenant-rls-grants.ts";
+const HELPER_FILE = "src/lib/tenant-rls.ts";
+const PURPOSE_FILE = "src/lib/tenant-rls-purpose.ts";
+// The retention worker builds its per-entry grants from the registry's table
+// column (grantForEntry → grantForTables): resolved by construction, recorded
+// as self-setting sites, not judged here.
+const DYNAMIC_GRANT_DIR = "src/workers/retention-gc-worker/";
+const DYNAMIC_GRANT_BUILDERS = new Set(["grantForTables", "grantForEntry"]);
+// The two modules whose raw SQL may write session settings (the writer rule).
+const WRITER_EXEMPT_FILES = new Set([HELPER_FILE, GRANTS_FILE]);
 
 /**
  * Production TypeScript under src/ and scripts/ (isProductionPath: tests, the
@@ -826,8 +839,8 @@ function declaresUnusedTx(fn) {
 // literal member read, an `any` receiver with a non-literal key — the case is
 // REFUSED (reported), not followed.
 const HELPER_DECLARATIONS = [
-  { file: "src/lib/tenant-rls.ts", name: "withBypassRls" },
-  { file: "src/lib/tenant-rls.ts", name: "withTenantRls" },
+  { file: HELPER_FILE, name: "withBypassRls" },
+  { file: HELPER_FILE, name: "withTenantRls" },
   { file: "src/lib/tenant-context.ts", name: "withUserTenantRls" },
   { file: "src/lib/tenant-context.ts", name: "withTeamTenantRls" },
 ];
@@ -1505,12 +1518,70 @@ sourceFiles.length = 0;
 for (const abs of scope.files) sourceFiles.push(toRelPosix(abs));
 const helperDecls = resolveHelperDeclarations(program);
 const bypassDecl = program
-  .getSourceFile(join(process.cwd(), "src/lib/tenant-rls.ts"))
+  .getSourceFile(join(process.cwd(), HELPER_FILE))
   ?.getFunctions()
   .find((fn) => fn.getName() === "withBypassRls" && fn.getBody());
 // The Prisma client's model accessors, read off withBypassRls's own client
 // parameter type.
 const MODEL_NAMES = prismaModelNames(bypassDecl?.getParameters()[0]?.getType());
+// The schema's relations, for the models a query's argument reaches through
+// them (lib/prisma-relation-reach.mjs, shared with check-required-user-relation).
+const SCHEMA = (() => {
+  try {
+    return loadPrismaSchema(join(process.cwd(), "prisma/schema.prisma"));
+  } catch (error) {
+    if (error instanceof SchemaReadError) programBuildFailed(error.message);
+    throw error;
+  }
+})();
+const camelModel = (pascal) => pascal[0].toLowerCase() + pascal.slice(1);
+const relationBindings = new Map();
+
+/**
+ * `{ reached: [{ model, path }], unreadable }` for a delegate query node
+ * (`<delegate>.findMany` as a callee): every model its argument reaches through
+ * a relation — select/include/_count, where, orderBy, nested writes — and
+ * whether any part of the argument could not be read. A query method read off
+ * the delegate other than as a direct callee (destructured, bound) has its
+ * argument elsewhere, so it is unreadable.
+ */
+function relationReachOf(node, models) {
+  const out = { reached: [], unreadable: false };
+  const k = node.getKind();
+  const method =
+    k === SyntaxKind.PropertyAccessExpression ? node.getName() : k === SyntaxKind.ElementAccessExpression ? literalKey(node.getArgumentExpression()) : null;
+  if (!method || !(FILTERING.has(method) || WRITING.has(method) || ORDERING.has(method))) return out;
+  const call = node.getParent();
+  if (call?.getKind() !== SyntaxKind.CallExpression || call.getExpression() !== node) {
+    out.unreadable = true;
+    return out;
+  }
+  const arg = call.getArguments()[0];
+  if (!arg) return out;
+  const sf = node.getSourceFile();
+  if (!relationBindings.has(sf)) relationBindings.set(sf, bindingIndex(sf));
+  const ctx = { bindingsFor: () => relationBindings.get(sf) };
+  const literals = arg.getKind() === SyntaxKind.SpreadElement ? null : objectLiterals(arg, ctx);
+  if (!literals) {
+    out.unreadable = true;
+    return out;
+  }
+  const visitor = {
+    relation({ trail, field }) {
+      out.reached.push({ model: camelModel(field.type), path: trail.join(".") });
+      return true;
+    },
+    unreadable() {
+      out.unreadable = true;
+    },
+  };
+  for (const model of models) {
+    const pascal = SCHEMA.handles.get(model);
+    if (!pascal) continue;
+    for (const literal of literals) walkCallArgs(literal, pascal, method, { models: SCHEMA.models, visitor, ctx, full: true });
+  }
+  return out;
+}
 const resolver = createFunctionResolver({ program, scope });
 // The helpers' implementation nodes, as the resolver returns them: reach stops
 // at one of these: a nested context is check-rls-nesting's to reject.
@@ -1521,67 +1592,247 @@ for (const { file, name } of HELPER_DECLARATIONS) {
   }
 }
 
-// ─── Purpose resolution (Check 2) ───────────────────────────────────────────
+// ─── Purposes and grants (Check 2) ──────────────────────────────────────────
 const bypassPurposeDecl = program
-  .getSourceFile(join(process.cwd(), "src/lib/tenant-rls.ts"))
+  .getSourceFile(join(process.cwd(), PURPOSE_FILE))
   ?.getVariableDeclaration("BYPASS_PURPOSE");
-if (!bypassPurposeDecl) programBuildFailed("BYPASS_PURPOSE is not declared in src/lib/tenant-rls.ts");
-const PURPOSE_VALUES = new Set(
-  (unwrapExpression(bypassPurposeDecl.getInitializer())?.getProperties?.() ?? [])
-    .map((p) => (p.getKind() === SyntaxKind.PropertyAssignment ? literalMemberName(p.getInitializer()) : null))
-    .filter(Boolean),
-);
+if (!bypassPurposeDecl) programBuildFailed(`BYPASS_PURPOSE is not declared in ${PURPOSE_FILE}`);
 
-/** A type every value of which is a BYPASS_PURPOSE value: `BypassPurpose`, `(typeof BYPASS_PURPOSE)[keyof …]`. */
-function isPurposeType(type) {
-  const members = type.isUnion() ? type.getUnionTypes() : [type];
-  return members.length > 0 && members.every((m) => m.isStringLiteral() && PURPOSE_VALUES.has(m.getLiteralValue()));
+/**
+ * The declarations `expr` (a value read as `X.member`) names, alias-resolved:
+ * a renamed import binds the module's own declaration, and
+ * `const { BYPASS_GRANT } = await import(…)` binds the loaded value's member.
+ */
+function declarationsOfReceiver(expr) {
+  let symbol = expr?.getSymbol();
+  if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+  return (symbol?.getDeclarations() ?? []).flatMap((d) => {
+    if (d.getKind() !== SyntaxKind.BindingElement) return [d];
+    const holder = d.getParent()?.getParent();
+    const key = d.getPropertyNameNode()?.getText() ?? d.getName();
+    const source = holder?.getKind() === SyntaxKind.VariableDeclaration ? holder.getInitializer() : null;
+    return source?.getType().getProperty(key)?.getDeclarations() ?? [];
+  });
 }
 
-/** `{ member }` for `BYPASS_PURPOSE.X` off the real declaration, `{ forwardedParam }`, or null. */
-function purposeOfExpression(arg) {
-  const e = unwrapExpression(arg);
-  if (e?.getKind() === SyntaxKind.PropertyAccessExpression) {
-    let symbol = unwrapExpression(e.getExpression())?.getSymbol();
-    if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
-    const decls = (symbol?.getDeclarations() ?? []).flatMap((d) => {
-      // `const { BYPASS_PURPOSE } = await import("@/lib/tenant-rls")`: the
-      // binding's declaration is the module's, read off the loaded value's type.
-      if (d.getKind() !== SyntaxKind.BindingElement) return [d];
-      const holder = d.getParent()?.getParent();
-      const key = d.getPropertyNameNode()?.getText() ?? d.getName();
-      const source = holder?.getKind() === SyntaxKind.VariableDeclaration ? holder.getInitializer() : null;
-      return source?.getType().getProperty(key)?.getDeclarations() ?? [];
-    });
-    if (decls.includes(bypassPurposeDecl)) return { member: e.getName() };
-    return null;
+/** `X.member` or `X["member"]`, parentheses only around it: `{ receiver, member }`, or null. */
+function memberRead(arg) {
+  let e = arg;
+  while (e?.getKind() === SyntaxKind.ParenthesizedExpression) e = e.getExpression();
+  const receiverOf = (access) => {
+    let r = access.getExpression();
+    while (r?.getKind() === SyntaxKind.ParenthesizedExpression) r = r.getExpression();
+    return r;
+  };
+  if (e?.getKind() === SyntaxKind.PropertyAccessExpression) return { receiver: receiverOf(e), member: e.getName() };
+  if (e?.getKind() === SyntaxKind.ElementAccessExpression) {
+    const member = literalMemberName(e.getArgumentExpression());
+    if (member !== null) return { receiver: receiverOf(e), member };
   }
-  if (e?.getKind() === SyntaxKind.Identifier) {
+  return null;
+}
+
+/** `BYPASS_PURPOSE.X` off the real declaration: the member name, or null. */
+function purposeMemberOf(arg) {
+  const read = memberRead(arg);
+  return read && declarationsOfReceiver(read.receiver).includes(bypassPurposeDecl) ? read.member : null;
+}
+
+const grantsSf = program.getSourceFile(join(process.cwd(), GRANTS_FILE));
+if (!grantsSf) programBuildFailed(`grant registry not found in the Program: ${GRANTS_FILE}`);
+const bypassGrantDecl = grantsSf.getVariableDeclaration("BYPASS_GRANT");
+const defineGrantDecl = grantsSf.getFunction("defineGrant");
+const bypassGrantTypeDecl = grantsSf.getTypeAlias("BypassGrant");
+const setBypassGucsDecl = grantsSf.getFunction("setBypassGucs");
+for (const [name, decl] of [["BYPASS_GRANT", bypassGrantDecl], ["defineGrant", defineGrantDecl], ["BypassGrant", bypassGrantTypeDecl], ["setBypassGucs", setBypassGucsDecl]]) {
+  if (!decl) programBuildFailed(`${name} is not declared in ${GRANTS_FILE}`);
+}
+
+/**
+ * The registry, read off its AST: every BYPASS_GRANT member must be
+ * `NAME: defineGrant(BYPASS_PURPOSE.X, ["model", …])` with literal, known,
+ * distinct models — anything else is a grant this gate cannot read, refused
+ * rather than skipped.
+ */
+const GRANTS = new Map();
+const grantDefinitionViolations = [];
+{
+  let init = bypassGrantDecl.getInitializer();
+  for (;;) {
+    init = unwrapExpression(init);
+    const isFreeze =
+      init?.getKind() === SyntaxKind.CallExpression && init.getExpression().getText() === "Object.freeze" && init.getArguments().length === 1;
+    if (!isFreeze) break;
+    init = init.getArguments()[0];
+  }
+  if (init?.getKind() !== SyntaxKind.ObjectLiteralExpression) {
+    programBuildFailed(`BYPASS_GRANT in ${GRANTS_FILE} is not an object literal (optionally Object.freeze'd)`);
+  }
+  for (const prop of init.getProperties()) {
+    const line = prop.getStartLineNumber();
+    const bad = (detail) => grantDefinitionViolations.push({ file: GRANTS_FILE, line, detail });
+    if (prop.getKind() !== SyntaxKind.PropertyAssignment) {
+      bad(`${prop.getText().slice(0, 60)}: not a \`NAME: defineGrant(…)\` member`);
+      continue;
+    }
+    const nameNode = prop.getNameNode();
+    const name = nameNode.getKind() === SyntaxKind.Identifier ? nameNode.getText() : literalMemberName(nameNode);
+    if (name === null) {
+      bad(`${nameNode.getText()}: a computed member name`);
+      continue;
+    }
+    const call = prop.getInitializer();
+    const callee = call?.getKind() === SyntaxKind.CallExpression ? call.getExpression() : null;
+    const calleeDecls = callee?.getKind() === SyntaxKind.Identifier ? declarationsOfReceiver(callee) : [];
+    if (!calleeDecls.includes(defineGrantDecl)) {
+      bad(`${name}: not built by defineGrant(…)`);
+      continue;
+    }
+    const [purposeArg, modelsArg, ...rest] = call.getArguments();
+    const purpose = purposeArg ? purposeMemberOf(purposeArg) : null;
+    if (!purpose || rest.length > 0) {
+      bad(`${name}: the purpose is not a BYPASS_PURPOSE.* member`);
+      continue;
+    }
+    const list = modelsArg && unwrapExpression(modelsArg);
+    const models = list?.getKind() === SyntaxKind.ArrayLiteralExpression ? list.getElements().map(literalMemberName) : null;
+    if (!models || models.some((m) => m === null)) {
+      bad(`${name}: the models are not an array of string literals`);
+      continue;
+    }
+    const unknown = models.filter((m) => !MODEL_NAMES.has(m));
+    if (unknown.length > 0) bad(`${name}: unknown model(s) ${unknown.join(", ")}`);
+    const duplicated = models.filter((m, i) => models.indexOf(m) !== i);
+    if (duplicated.length > 0) bad(`${name}: model(s) listed twice: ${duplicated.join(", ")}`);
+    if (GRANTS.has(name)) bad(`${name}: declared twice`);
+    GRANTS.set(name, { purpose, models: new Set(models), line });
+  }
+}
+
+/** `BypassGrant` (or `BypassGrant | null`, …): the registry's grant type. */
+function isGrantType(type) {
+  // By type identity: the checker interns the alias's instantiation, so any
+  // spelling of the type (an aliased import, `BypassGrant | null`) is the same
+  // type once nullability is removed.
+  return type.getNonNullableType().compilerType === bypassGrantTypeDecl.getType().compilerType;
+}
+
+/** The function a call's callee names (alias-resolved), or null. */
+function calledFunction(call) {
+  const callee = unwrap(call.getExpression());
+  const node = callee?.getKind() === SyntaxKind.PropertyAccessExpression ? callee.getNameNode() : callee;
+  let symbol = node?.getSymbol?.();
+  if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+  const decl = symbol?.getDeclarations()?.[0];
+  if (!decl) return null;
+  if (FN_KINDS.has(decl.getKind()) || decl.getKind() === SyntaxKind.FunctionDeclaration || decl.getKind() === SyntaxKind.MethodDeclaration) return decl;
+  if (decl.getKind() === SyntaxKind.VariableDeclaration) {
+    const init = unwrap(decl.getInitializer());
+    return init && FN_KINDS.has(init.getKind()) ? init : null;
+  }
+  return null;
+}
+
+/**
+ * What a grant argument resolves to:
+ *   { grant }              `BYPASS_GRANT.NAME` off the real registry (a renamed
+ *                          import or a literal key resolves too);
+ *   { forwardedParam }     a parameter typed BypassGrant, charged at its callers;
+ *   { reassignedParam }    such a parameter, reassigned before it is passed on;
+ *   { dynamic }            grantForTables(…)/grantForEntry(…) in the retention worker;
+ *   null                   anything else — an inline defineGrant, a conditional,
+ *                          a cast, a variable — which no review can read off the call.
+ * No type-level wrapper is looked through: `x as BypassGrant` asserts a grant,
+ * it does not name one.
+ */
+function grantOfExpression(arg) {
+  let e = arg;
+  while (e?.getKind() === SyntaxKind.ParenthesizedExpression) e = e.getExpression();
+  if (!e) return null;
+  const read = memberRead(e);
+  if (read) {
+    if (!declarationsOfReceiver(read.receiver).includes(bypassGrantDecl)) return null;
+    return GRANTS.has(read.member) ? { grant: read.member } : null;
+  }
+  if (e.getKind() === SyntaxKind.Identifier) {
     const decl = e.getSymbol()?.getDeclarations()[0];
-    if (decl?.getKind() === SyntaxKind.Parameter && isPurposeType(decl.getType())) {
+    if (decl?.getKind() === SyntaxKind.Parameter && isGrantType(decl.getType())) {
       // Reassigned inside the forwarder, it no longer carries what its callers passed.
       const written = decl.getNameNode().findReferences().some((g) =>
         g.getReferences().some((r) => isBindingWrite(r) && r.getNode() !== decl.getNameNode()),
       );
       return written ? { reassignedParam: decl } : { forwardedParam: decl };
     }
+    return null;
+  }
+  if (e.getKind() === SyntaxKind.CallExpression && toRelPosix(e.getSourceFile().getFilePath()).startsWith(DYNAMIC_GRANT_DIR)) {
+    const fn = calledFunction(e);
+    const name = fn?.getName?.() ?? fn?.getParent()?.getName?.();
+    if (fn && DYNAMIC_GRANT_BUILDERS.has(name)) return { dynamic: true };
   }
   return null;
 }
 
-/** `member` against the pin of `file` and of every file a forwarder chain passed through. */
-function checkPurposeMember(file, line, member, chainPins = []) {
+/** `purpose` (a BYPASS_PURPOSE member name) against the pin of `file` and of every file a forwarder chain passed through. */
+function checkGrantPurpose(file, line, grantName, chainPins = []) {
+  const { purpose } = GRANTS.get(grantName);
   for (const pinned of new Set([file, ...chainPins])) {
     const allowed = ALLOWED_PURPOSES.get(pinned);
-    if (allowed && !allowed.includes(member)) {
+    if (allowed && !allowed.includes(purpose)) {
       const where = pinned === file ? "" : ` (forwarded into ${pinned})`;
-      purposeViolations.push({ file, line, detail: `BYPASS_PURPOSE.${member} is not in ALLOWED_PURPOSES (${allowed.join(", ")})${where}` });
+      grantViolations.push({ file, line, detail: `BYPASS_GRANT.${grantName} runs under BYPASS_PURPOSE.${purpose}, not in ALLOWED_PURPOSES (${allowed.join(", ")})${where}` });
     }
   }
 }
 
-/** Functions that pass their own purpose parameter on to withBypassRls, to be checked at their callers. */
+/** Functions that pass their own grant parameter on to withBypassRls, to be charged at their callers. */
 const forwarderQueue = [];
+/** grant name → models reached by the calls that name it. */
+const reachedByGrant = new Map();
+/** Grants named by a call this gate could not follow to the end: their "never reached" means "not seen". */
+const undecidableGrants = new Set();
+/**
+ * grant name → a raw-SQL statement one of its calls reaches. Raw SQL reaches
+ * tables this gate does not read (a SECURITY DEFINER procedure's audit_logs,
+ * an invoker trigger's), so a model such a grant lists and no Prisma access
+ * reaches may be reached there: not judged stale.
+ */
+const rawSqlGrants = new Map();
+/** grant name → a query one of its calls runs whose argument the relation walk cannot read. */
+const unreadableArgGrants = new Map();
+/** `file:line` of each withBypassRls call that runs such a query (printed on success: reach unknown both ways). */
+const unreadableArgCalls = [];
+/** Grants named by a withBypassRls call or a forwarder's caller. */
+const judgedGrants = new Set();
+const grantViolations = [];
+/** `file:line` of each call whose grant the retention worker builds per entry (grantForEntry/grantForTables). */
+const dynamicGrantSites = [];
+
+/**
+ * Charge `reached` (model → where it was reached) to `grantName`, as named at
+ * `file:line`: every model must be one the grant lists.
+ */
+function chargeGrant(grantName, reached, { file, line, undecidable, rawSqlAt = null, unreadableArgAt = null, through = null }) {
+  judgedGrants.add(grantName);
+  if (undecidable) undecidableGrants.add(grantName);
+  if (rawSqlAt) rawSqlGrants.set(grantName, rawSqlAt);
+  if (unreadableArgAt) unreadableArgGrants.set(grantName, unreadableArgAt);
+  if (!reachedByGrant.has(grantName)) reachedByGrant.set(grantName, new Set());
+  const { models } = GRANTS.get(grantName);
+  for (const [model, sites] of reached) {
+    reachedByGrant.get(grantName).add(model);
+    if (models.has(model)) continue;
+    // Charged at a forwarder's caller: the caller's line, and where the model
+    // was reached inside the forwarder.
+    for (const at of sites) {
+      modelViolations.push(
+        through
+          ? { file, line, model, grant: grantName, via: at.site, through, relation: at.relation }
+          : { file, line: at.line, model, grant: grantName, via: at.via, through, relation: at.relation },
+      );
+    }
+  }
+}
 
 // ─── Check 3: reach and types ───────────────────────────────────────────────
 const reachability = createReachability(resolver);
@@ -1594,9 +1845,9 @@ const CALLBACK_INDEX = new Map(
 );
 for (const [name, index] of CALLBACK_INDEX) if (index < 0) programBuildFailed(`${name} declares no callback parameter`);
 const BYPASS_CALLBACK_INDEX = CALLBACK_INDEX.get("withBypassRls");
-// withBypassRls's purpose position: the parameter typed as the purpose union.
-const PURPOSE_INDEX = bypassImpl.getParameters().findIndex((p) => isPurposeType(p.getType()));
-if (PURPOSE_INDEX < 0) programBuildFailed("withBypassRls declares no purpose parameter");
+// withBypassRls's grant position: the parameter typed BypassGrant.
+const GRANT_INDEX = bypassImpl.getParameters().findIndex((p) => isGrantType(p.getType()));
+if (GRANT_INDEX < 0) programBuildFailed("withBypassRls declares no BypassGrant parameter");
 
 
 const isPrismaClientMember = (decls) =>
@@ -1664,6 +1915,14 @@ function isRawQueryOnly(type) {
     const name = p.getName();
     return RAW_QUERY_METHODS.has(name) && isPrismaClientMember(CLIENT_TYPE?.getProperty(name)?.getDeclarations() ?? []);
   });
+}
+
+/** `client.$executeRaw…`/`$queryRaw…`, called or tagged, on a Prisma client by its member's declaration. */
+function isRawQueryCall(node) {
+  const k = node.getKind();
+  const callee = k === SyntaxKind.CallExpression ? unwrap(node.getExpression()) : k === SyntaxKind.TaggedTemplateExpression ? unwrap(node.getTag()) : null;
+  if (callee?.getKind() !== SyntaxKind.PropertyAccessExpression || !RAW_QUERY_METHODS.has(callee.getName())) return false;
+  return isPrismaClientMember(callee.getNameNode().getSymbol()?.getDeclarations() ?? []);
 }
 
 /** Whether a type is, or each part of it is, a delegate the charge can name by its members' declarations. */
@@ -1862,21 +2121,6 @@ const bypassReachHooks = {
 let bypassCallbacks = 0;
 let reachedUnits = 0;
 
-/** Record one model reached by a bypass in `file`: directly (at null) or through another unit `at`. */
-function judgeModel(file, line, model, at, allowedSet) {
-  if (at !== null) {
-    for (const v of ALLOWED_VIA.get(file) ?? []) if (at.startsWith(`${v.via}:`)) touchedVia.add(`${file}|${v.via}`);
-    const via = (ALLOWED_VIA.get(file) ?? []).find((v) => at.startsWith(`${v.via}:`) && v.models.includes(model));
-    if (via) {
-      usedVia.add(`${file}|${via.via}|${model}`);
-      return;
-    }
-  }
-  if (!usedModels.has(file)) usedModels.set(file, new Set());
-  usedModels.get(file).add(model);
-  if (!allowedSet.has(model)) modelViolations.push({ file, line, model, ...(at ? { via: at } : {}) });
-}
-
 const helperDeclKeys = buildHelperDeclKeySet(helperDecls);
 const checker = program.getTypeChecker();
 const aliasPrefix = resolveAliasPrefix(program.getCompilerOptions(), process.cwd());
@@ -1919,17 +2163,6 @@ const astProject = createAstProject();
 const unparseableFiles = [];
 const fileViolations = [];
 const modelViolations = [];
-/**
- * file -> models actually reached under a bypass, and whether anything in
- * that file defeated the analysis. The second half is what keeps the
- * over-breadth check below from reading an undecidable file as an unused
- * permission.
- */
-const usedModels = new Map();
-/** "file|via|model" for every ALLOWED_VIA permission actually used. */
-const usedVia = new Set();
-/** "file|via" for every file whose followed reach entered the via module at all. */
-const touchedVia = new Set();
 const undecidableFiles = new Set();
 /**
  * Files that make at least one real `withBypassRls` call, or hold a helper reference
@@ -1937,7 +2170,6 @@ const undecidableFiles = new Set();
  * file already fails, and telling its reviewer to delete the entry would be wrong.
  */
 const bypassCallFiles = new Set();
-const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
 const indirectHelperReferences = [];
@@ -2011,47 +2243,45 @@ for (const file of sourceFiles) {
     }
   }
 
-  const allowedModels = ALLOWED_USAGE.get(file);
+  const allowed = ALLOWED_USAGE.has(file);
 
   // Check 1: a file that really calls withBypassRls must be on the allowlist.
   // Keyed on a call in the tree, not on the text naming one, so prose and
   // string literals that mention the helper no longer read as usage.
-  if (bypassCalls.length > 0 && !allowedModels) {
+  if (bypassCalls.length > 0 && !allowed) {
     fileViolations.push(file);
   }
 
-  // Check 2: every withBypassRls call names its purpose with a member of the
-  // real BYPASS_PURPOSE (resolved through the Program, so a local object that
-  // shadows the name does not pass), or forwards its own parameter whose TYPE is
-  // the purpose union — whose production callers are then held to the same
-  // rule (see the forwarder pass after this loop). For a file in
-  // ALLOWED_PURPOSES the member must be one listed there. The definition file
-  // (tenant-rls.ts) is exempt — it defines, not consumes.
-  if (file !== "src/lib/tenant-rls.ts") {
+  // Check 2: every withBypassRls call names its grant with a member of the
+  // real BYPASS_GRANT (resolved through the Program, so a local object that
+  // shadows the name does not pass), or forwards its own parameter typed
+  // BypassGrant — whose production callers are then charged with what the
+  // forwarded call reaches (see the forwarder pass after this loop). The
+  // definition file (tenant-rls.ts) is exempt — it defines, not consumes.
+  /** call start → the call's resolved grant argument */
+  const grantOfCall = new Map();
+  if (file !== HELPER_FILE) {
     for (const { call } of bypassCalls) {
       const pcall = programCallOf(call);
       const line = call.getStartLineNumber();
-      // At the declared position only: a BYPASS_PURPOSE.X anywhere else is not
+      // At the declared position only: a BYPASS_GRANT.X anywhere else is not
       // what the helper receives.
       const args = pcall?.getArguments() ?? [];
-      const spread = args.slice(0, PURPOSE_INDEX + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement);
-      const purpose = !spread && args[PURPOSE_INDEX] ? purposeOfExpression(args[PURPOSE_INDEX]) : null;
-      if (purpose?.reassignedParam) {
-        purposeViolations.push({ file, line, detail: `purpose parameter ${purpose.reassignedParam.getName()} is reassigned before it reaches withBypassRls` });
-      } else if (purpose?.forwardedParam) {
-        // The forwarding file's own pin travels with the parameter: a caller
-        // elsewhere must not run this file's bypass under another purpose.
-        forwarderQueue.push({ param: purpose.forwardedParam, pins: [file] });
-      } else if (!purpose) {
-        purposeViolations.push({ file, line, detail: "no BYPASS_PURPOSE.* argument" });
-      } else {
-        checkPurposeMember(file, line, purpose.member);
+      const spread = args.slice(0, GRANT_INDEX + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement);
+      const grant = !spread && args[GRANT_INDEX] ? grantOfExpression(args[GRANT_INDEX]) : null;
+      grantOfCall.set(call.getStart(), grant);
+      if (grant?.reassignedParam) {
+        grantViolations.push({ file, line, detail: `grant parameter ${grant.reassignedParam.getName()} is reassigned before it reaches withBypassRls` });
+      } else if (grant?.dynamic) {
+        dynamicGrantSites.push(`${file}:${line}`);
+      } else if (!grant) {
+        const text = spread ? "a spread argument" : (args[GRANT_INDEX]?.getText() ?? "missing").replace(/\s+/g, " ").slice(0, 60);
+        grantViolations.push({ file, line, detail: `the grant is not a BYPASS_GRANT.* member: ${text}` });
+      } else if (grant.grant) {
+        checkGrantPurpose(file, line, grant.grant);
       }
     }
   }
-
-  const allowedSet =
-    !allowedModels || allowedModels.includes("*") ? null : new Set(allowedModels);
 
   // Built on first use, not per file: only a call that passes its callback by
   // NAME needs it, which is 3 of the 238 parsed files. Building it eagerly cost
@@ -2091,25 +2321,36 @@ for (const file of sourceFiles) {
       }
     }
 
-    // Check 3: model allowlist, for withBypassRls in a non-wildcard file —
+    // Check 3: per-call grant, for withBypassRls in an allowlisted consumer —
     // judged on REACH and TYPES, not on names. Everything that can run inside
     // the callback is reached through the shared resolver; in each reached
     // function, every access whose receiver is a Prisma client (by type) is a
-    // model reached under this bypass, however the client got there.
-    if (helper !== "withBypassRls" || !allowedSet) continue;
+    // model reached under this bypass, however the client got there, and it
+    // must be one the call's grant lists.
+    if (helper !== "withBypassRls" || !allowed || file === HELPER_FILE) continue;
+    const grant = grantOfCall.get(call.getStart());
     const pcall = programCallOf(call);
     const located = pcall ? bypassRootsOf(pcall) : { roots: [], problem: "call not found in the Program" };
+    let undecidable = false;
+    /** The first raw-SQL statement reached: what it reaches is not read here. */
+    let rawSqlAt = null;
+    /** The first query whose argument the relation walk cannot read. */
+    let unreadableArgAt = null;
     if (located.problem) {
       unfollowedHandOffs.push({ file, at: `${file}:${line}`, reason: located.problem });
       undecidableFiles.add(file);
+      undecidable = true;
     }
     const seen = new Set();
+    /** model → every { line, via, site } it is reached at under this call */
+    const reached = new Map();
     for (const root of located.roots) {
       bypassCallbacks += 1;
       const { info, unresolved } = reachability.reach(root, bypassReachHooks);
       for (const u of unresolved) {
         unfollowedHandOffs.push({ file, at: siteOf(u.node), reason: u.reason });
         undecidableFiles.add(file);
+        undecidable = true;
       }
       for (const unit of info.keys()) {
         if (helperImplementations.has(unit)) continue;
@@ -2120,43 +2361,61 @@ for (const file of sourceFiles) {
           if (handOff) {
             unfollowedHandOffs.push({ file, at: siteOf(node), reason: handOff });
             undecidableFiles.add(file);
+            undecidable = true;
+          }
+          // The RLS modules' own raw SQL (advisoryXactLock, readBypassState,
+          // setLockTimeout) sets or reads settings and locks, never a table.
+          if (!rawSqlAt && isRawQueryCall(node) && !WRITER_EXEMPT_FILES.has(toRelPosix(node.getSourceFile().getFilePath()))) {
+            rawSqlAt = siteOf(node);
           }
           const at = siteOf(node);
-          for (const access of [modelAccessOf(node), delegateOperationOf(node)]) {
+          const operation = delegateOperationOf(node);
+          for (const access of [modelAccessOf(node), operation]) {
             if (!access) continue;
             if (access.dynamic) {
               unresolvedModels.push({ file, line: node.getStartLineNumber(), text: `${access.text}  (in ${at})` });
               undecidableFiles.add(file);
+              undecidable = true;
               continue;
             }
             for (const model of access.models ?? [access.model]) {
               const key = `${model}@${at}`;
               if (seen.has(key)) continue;
               seen.add(key);
-              judgeModel(file, direct ? node.getStartLineNumber() : line, model, direct ? null : at, allowedSet);
+              if (!reached.has(model)) reached.set(model, []);
+              reached.get(model).push(direct ? { line: node.getStartLineNumber(), site: at } : { line, via: at, site: at });
+            }
+          }
+          // The models the query's argument reaches through relations.
+          if (operation?.models) {
+            const rel = relationReachOf(node, operation.models);
+            if (rel.unreadable && !unreadableArgAt) unreadableArgAt = at;
+            for (const { model, path } of rel.reached) {
+              const key = `${model}@${at}@${path}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              if (!reached.has(model)) reached.set(model, []);
+              reached.get(model).push(
+                direct ? { line: node.getStartLineNumber(), site: at, relation: path } : { line, via: at, site: at, relation: path },
+              );
             }
           }
         }
       }
     }
+    if (unreadableArgAt) unreadableArgCalls.push(`${file}:${line}`);
+    if (grant?.grant) chargeGrant(grant.grant, reached, { file, line, undecidable, rawSqlAt, unreadableArgAt });
+    else if (grant?.forwardedParam) forwarderQueue.push({ param: grant.forwardedParam, pins: [file], reached, undecidable, rawSqlAt, unreadableArgAt });
   }
 }
 
-/**
- * The reverse direction: a model this file is permitted to reach under a
- * bypass and never does. The permission outlives its reason, and the next
- * reader takes the entry for the file's documented scope — `notification.ts`
- * carried `user` for a read it had already moved into the adjudicator.
- *
- * Skipped for a file whose analysis was defeated anywhere (an unresolved
- * client or model access): there, "never reached" means "not seen".
- */
-// A forwarder's production callers name the purpose (or forward their own).
+// A forwarder's production callers name the grant (or forward their own), and
+// are charged with everything the forwarded call reaches.
 {
   const seenParams = new Set();
   while (forwarderQueue.length > 0) {
-    const { param, pins } = forwarderQueue.shift();
-    const seenKey = `${param.getStart()}:${param.getSourceFile().getFilePath()}|${[...pins].sort().join(",")}`;
+    const { param, pins, reached, undecidable, rawSqlAt, unreadableArgAt } = forwarderQueue.shift();
+    const seenKey = `${param.getStart()}:${param.getSourceFile().getFilePath()}|${[...pins].sort().join(",")}|${[...reached.keys()].sort().join(",")}`;
     if (seenParams.has(seenKey)) continue;
     seenParams.add(seenKey);
     const fn = param.getParent();
@@ -2164,9 +2423,10 @@ for (const file of sourceFiles) {
     const nameNode = fn.getNameNode?.() ?? fn.getParent()?.getNameNode?.();
     const fnFile = toRelPosix(fn.getSourceFile().getFilePath());
     if (!nameNode) {
-      purposeViolations.push({ file: fnFile, line: fn.getStartLineNumber(), detail: "an anonymous function forwards a bypass purpose; its callers cannot be found" });
+      grantViolations.push({ file: fnFile, line: fn.getStartLineNumber(), detail: "an anonymous function forwards a bypass grant; its callers cannot be found" });
       continue;
     }
+    const fnName = nameNode.getText();
     for (const ref of nameNode.findReferencesAsNodes()) {
       const refFile = toRelPosix(ref.getSourceFile().getFilePath());
       if (ref === nameNode || !isInScopeFile(refFile)) continue;
@@ -2179,74 +2439,604 @@ for (const file of sourceFiles) {
       const call = callee.getParent();
       const line = ref.getStartLineNumber();
       if (call?.getKind() !== SyntaxKind.CallExpression || call.getExpression() !== callee) {
-        purposeViolations.push({ file: refFile, line, detail: `${nameNode.getText()} forwards a bypass purpose and is used other than by a direct call` });
+        grantViolations.push({ file: refFile, line, detail: `${fnName} forwards a bypass grant and is used other than by a direct call` });
         continue;
       }
       const args = call.getArguments();
       if (args.slice(0, index + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement)) {
-        purposeViolations.push({ file: refFile, line, detail: `spread argument where ${nameNode.getText()} takes its purpose` });
+        grantViolations.push({ file: refFile, line, detail: `spread argument where ${fnName} takes its grant` });
         continue;
       }
-      const purpose = args[index] ? purposeOfExpression(args[index]) : null;
-      if (purpose?.reassignedParam) {
-        purposeViolations.push({ file: refFile, line, detail: `purpose parameter ${purpose.reassignedParam.getName()} is reassigned before it reaches ${nameNode.getText()}` });
-      } else if (purpose?.forwardedParam) forwarderQueue.push({ param: purpose.forwardedParam, pins: [...new Set([...pins, refFile])] });
-      else if (!purpose) purposeViolations.push({ file: refFile, line, detail: `${nameNode.getText()} called without a BYPASS_PURPOSE.* argument` });
-      else checkPurposeMember(refFile, line, purpose.member, pins);
+      const grant = args[index] ? grantOfExpression(args[index]) : null;
+      if (grant?.reassignedParam) {
+        grantViolations.push({ file: refFile, line, detail: `grant parameter ${grant.reassignedParam.getName()} is reassigned before it reaches ${fnName}` });
+      } else if (grant?.forwardedParam) {
+        forwarderQueue.push({ param: grant.forwardedParam, pins: [...new Set([...pins, refFile])], reached, undecidable, rawSqlAt, unreadableArgAt });
+      } else if (grant?.grant) {
+        checkGrantPurpose(refFile, line, grant.grant, pins);
+        chargeGrant(grant.grant, reached, { file: refFile, line, undecidable, rawSqlAt, unreadableArgAt, through: `${fnName} (${fnFile})` });
+      } else {
+        grantViolations.push({ file: refFile, line, detail: `${fnName} called without a BYPASS_GRANT.* argument` });
+      }
     }
-  }
-}
-
-const staleAllowances = [];
-// The via form of the same question. Judged per model once the file's reach
-// enters the via module; a via entry the file's reach never enters is stale
-// whole — unless the via module is absent from the tree (fixtures).
-for (const [file, entries] of ALLOWED_VIA) {
-  if (undecidableFiles.has(file) || !bypassCallFiles.has(file)) continue;
-  for (const { via, models } of entries) {
-    if (!touchedVia.has(`${file}|${via}`)) {
-      if (existsSync(via)) staleAllowances.push({ file, model: `* (via ${via}: never reached)` });
-      continue;
-    }
-    for (const model of models) {
-      if (!usedVia.has(`${file}|${via}|${model}`)) staleAllowances.push({ file, model: `${model} (via ${via})` });
-    }
-  }
-}
-for (const [file, models] of ALLOWED_USAGE) {
-  if (models.includes("*") || undecidableFiles.has(file)) continue;
-  const reached = usedModels.get(file);
-  if (!reached) continue; // reached no model: a file with no bypass call is judged whole, below
-  for (const model of models) {
-    if (!reached.has(model)) staleAllowances.push({ file, model });
   }
 }
 
 /**
- * The whole-entry form of the same question: an ALLOWED_USAGE entry whose file
- * makes no `withBypassRls` call at all. The per-model check above skips such a
- * file — it reached no model because it opened no bypass — and its comment used
- * to call that "Check 1's business". It is not: Check 1 fires only in the other
+ * Self-setting sites: a call that hands a grant to setBypassGucs, directly or
+ * through an own function whose BypassGrant parameter reaches setBypassGucs's
+ * grant position (the retention worker's inSweepTx). Derived from the Program
+ * to a fixpoint — the helpers' own implementations excluded, since
+ * withBypassRls's grant reaching setBypassGucs is the call Check 3 judges. Each
+ * site's grant must resolve like a withBypassRls call's; what its raw SQL
+ * reaches is not followed here (the database reports it).
+ */
+/** function declaration node → the index of its parameter that reaches setBypassGucs */
+const selfSetters = new Map([[setBypassGucsDecl, setBypassGucsDecl.getParameters().findIndex((p) => isGrantType(p.getType()))]]);
+const selfSettingSites = [];
+/** Grants named where their reach is not judged: a self-setting site, or a manual test's withBypassRls call. */
+const unjudgedGrants = new Set();
+{
+  const setterFiles = [...scope.files].concat(
+    // A hand-run manual test sets the bypass for its own fixture rows; its
+    // grant is named there and nowhere else.
+    program.getSourceFiles().map((f) => f.getFilePath()).filter((f) => toRelPosix(f).startsWith("scripts/manual-tests/")),
+  );
+  const callsByFile = new Map();
+  for (const path of setterFiles) {
+    const sf = program.getSourceFile(path);
+    if (sf) callsByFile.set(path, sf.getDescendantsOfKind(SyntaxKind.CallExpression));
+  }
+  // Fixpoint: a function whose grant parameter is handed to a self-setter is one.
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const calls of callsByFile.values()) {
+      for (const call of calls) {
+        const target = calledFunction(call);
+        const index = target ? selfSetters.get(target) : undefined;
+        if (index === undefined || index < 0) continue;
+        const grant = call.getArguments()[index] ? grantOfExpression(call.getArguments()[index]) : null;
+        const owner = grant?.forwardedParam?.getParent();
+        if (!owner || selfSetters.has(owner) || helperImplementations.has(owner)) continue;
+        selfSetters.set(owner, owner.getParameters().indexOf(grant.forwardedParam));
+        changed = true;
+      }
+    }
+  }
+  for (const calls of callsByFile.values()) {
+    for (const call of calls) {
+      const target = calledFunction(call);
+      // A hand-run manual test's withBypassRls call is outside the production
+      // scope Check 3 judges; the grant it names is used, not judged.
+      if (target === bypassImpl && toRelPosix(call.getSourceFile().getFilePath()).startsWith("scripts/manual-tests/")) {
+        const grant = call.getArguments()[GRANT_INDEX] ? grantOfExpression(call.getArguments()[GRANT_INDEX]) : null;
+        if (grant?.grant) unjudgedGrants.add(grant.grant);
+        continue;
+      }
+      const index = target ? selfSetters.get(target) : undefined;
+      if (index === undefined || index < 0) continue;
+      const file = toRelPosix(call.getSourceFile().getFilePath());
+      const line = call.getStartLineNumber();
+      const arg = call.getArguments()[index];
+      const grant = arg && !call.getArguments().slice(0, index + 1).some((a) => a.getKind() === SyntaxKind.SpreadElement) ? grantOfExpression(arg) : null;
+      if (grant?.grant) {
+        selfSettingSites.push({ file, line, grant: grant.grant });
+        unjudgedGrants.add(grant.grant);
+      } else if (grant?.dynamic) {
+        dynamicGrantSites.push(`${file}:${line}`);
+      } else if (grant?.forwardedParam && (selfSetters.has(grant.forwardedParam.getParent()) || helperImplementations.has(grant.forwardedParam.getParent()))) {
+        // A self-setter (or withBypassRls itself) passing its own parameter on: judged at its callers.
+      } else {
+        grantViolations.push({ file, line, detail: `${target.getName?.() ?? "a self-setting function"} is handed a grant that is not a BYPASS_GRANT.* member: ${(arg?.getText() ?? "missing").replace(/\s+/g, " ").slice(0, 60)}` });
+      }
+    }
+  }
+}
+
+/**
+ * The reverse direction: a grant no call names, or a model a grant lists that
+ * no call naming it reaches. The permission outlives its reason, and the next
+ * reader takes the grant for its call sites' documented scope. Grants are
+ * shared, so a model is stale only when NO call naming the grant reaches it.
+ *
+ * Not judged for staleness of models, each for a stated reason:
+ *   - a grant a self-setting site names: its raw SQL is not followed here;
+ *   - a grant named by a call whose analysis was defeated anywhere (an
+ *     unresolved client or model access): "never reached" means "not seen";
+ *   - a grant one of whose calls runs a query whose argument the relation walk
+ *     cannot read (unreadableArgGrants): what it reaches through relations is
+ *     not known;
+ *   - a grant one of whose calls reaches raw SQL (rawSqlGrants), or whose calls
+ *     reach no model at all: raw SQL names tables, procedures and triggers this
+ *     gate does not read (check-raw-sql-usage governs it).
+ */
+const unnamedGrants = [...GRANTS.keys()].filter((name) => !judgedGrants.has(name) && !unjudgedGrants.has(name));
+const staleAllowances = [];
+for (const name of judgedGrants) {
+  if (unjudgedGrants.has(name) || undecidableGrants.has(name) || rawSqlGrants.has(name) || unreadableArgGrants.has(name)) continue;
+  const reached = reachedByGrant.get(name) ?? new Set();
+  if (reached.size === 0) continue;
+  for (const model of GRANTS.get(name).models) {
+    if (!reached.has(model)) staleAllowances.push({ grant: name, model });
+  }
+}
+
+/**
+ * The whole-entry form of the file allowlist: an ALLOWED_USAGE entry whose
+ * file makes no `withBypassRls` call at all. Check 1 fires only in the other
  * direction, a call with no entry, so this direction was checked by nothing.
  *
  * NOT judged here, each for a stated reason:
- *   - `["*"]` entries, the helpers' own definition;
+ *   - the helpers' own definition;
  *   - a file this run could not parse, which is reported on its own above;
- *   - a file that sets `app.bypass_rls` through raw SQL. That is a real bypass
- *     this gate cannot see; `check-raw-sql-usage` requires such a file to be
- *     allowlisted with a stated purpose, so the entry here documents a scope
- *     nothing in this gate enforces, rather than one that has gone stale;
+ *   - a file that turns the bypass on through setBypassGucs (a self-setting
+ *     site, read from the Program above): a real bypass this gate does not
+ *     follow, so the entry documents a scope rather than one gone stale;
  *   - a file absent from the tree being scanned. The self-test runs this gate on
  *     one-file fixture trees, so absence is asserted by a real-repo cell there.
  */
-const RAW_BYPASS_GUC_RE = /set_config\(\s*'app\.bypass_rls'\s*,\s*'on'/;
+const selfSettingFiles = new Set(selfSettingSites.map(({ file }) => file));
 const unparseableFileSet = new Set(unparseableFiles.map(({ file }) => file));
 const staleEntries = [];
-for (const [file, models] of ALLOWED_USAGE) {
-  if (models.includes("*") || bypassCallFiles.has(file) || unparseableFileSet.has(file)) continue;
+for (const file of ALLOWED_USAGE) {
+  if (file === HELPER_FILE || bypassCallFiles.has(file) || unparseableFileSet.has(file)) continue;
   if (!existsSync(file)) continue;
-  if (RAW_BYPASS_GUC_RE.test(readFileSync(file, "utf8"))) continue;
+  if (selfSettingFiles.has(file)) continue;
   staleEntries.push(file);
+}
+
+// ─── Writer, pool and function rules ────────────────────────────────────────
+//
+// Check 3 judges what a bypass reaches; these three judge who can turn one on.
+// The database adjudicates a bypassed statement against `app.bypass_tables`,
+// so a path that writes the bypass GUCs itself, a pool that skips the factory's
+// notice listener, or a function created outside the migrations would each
+// step around that report. Each rule is a writer check against honest code:
+// SQL built at run time from values this gate cannot fold is outside its reach.
+
+/** Prisma raw-query members, Prisma.sql/raw, and a pg `query` call. */
+const RAW_SQL_TAGS = new Set(["$executeRaw", "$queryRaw"]);
+const RAW_SQL_CALLS = new Set(["$executeRaw", "$queryRaw", "$executeRawUnsafe", "$queryRawUnsafe", "query"]);
+const PRISMA_SQL_BUILDERS = new Set(["sql", "raw"]);
+
+/** The member a callee or tag names: `x.name`, `x["name"]`, or a bare `name`; with the receiver. */
+function calleeMember(expr) {
+  let e = expr;
+  while (e?.getKind() === SyntaxKind.ParenthesizedExpression || e?.getKind() === SyntaxKind.NonNullExpression) e = e.getExpression();
+  if (e?.getKind() === SyntaxKind.PropertyAccessExpression) return { name: e.getName(), receiver: e.getExpression() };
+  if (e?.getKind() === SyntaxKind.ElementAccessExpression) {
+    const name = literalMemberName(e.getArgumentExpression());
+    return name === null ? null : { name, receiver: e.getExpression() };
+  }
+  if (e?.getKind() === SyntaxKind.Identifier) return { name: e.getText(), receiver: null };
+  return null;
+}
+
+const isPrismaReceiver = (receiver) => receiver?.getKind() === SyntaxKind.Identifier && receiver.getText() === "Prisma";
+
+/**
+ * Constant-fold `expr` into SQL text segments: literals, `+` concatenation,
+ * untagged templates, parentheses and type wrappers, and an identifier bound
+ * to a `const` whose initializer folds (through imports, when the Program
+ * resolves them). A Prisma.sql/Prisma.raw fragment folds to its own text. What
+ * does not fold is one opaque segment — the lexer's substitution token.
+ */
+function foldSql(expr, seen = new Set()) {
+  const e = unwrap(expr);
+  if (!e) return [{ opaque: "" }];
+  switch (e.getKind()) {
+    case SyntaxKind.StringLiteral:
+    case SyntaxKind.NoSubstitutionTemplateLiteral:
+      return [{ text: e.getLiteralText() }];
+    case SyntaxKind.TemplateExpression: {
+      const out = [{ text: e.getHead().getLiteralText() }];
+      for (const span of e.getTemplateSpans()) {
+        out.push(...foldSql(span.getExpression(), seen), { text: span.getLiteral().getLiteralText() });
+      }
+      return out;
+    }
+    case SyntaxKind.BinaryExpression:
+      if (e.getOperatorToken().getKind() === SyntaxKind.PlusToken) {
+        return [...foldSql(e.getLeft(), seen), ...foldSql(e.getRight(), seen)];
+      }
+      break;
+    case SyntaxKind.TaggedTemplateExpression: {
+      const m = calleeMember(e.getTag());
+      if (m?.name === "sql" && isPrismaReceiver(m.receiver)) return taggedSqlSegments(e.getTemplate(), seen);
+      break;
+    }
+    case SyntaxKind.CallExpression: {
+      const m = calleeMember(e.getExpression());
+      if (m && PRISMA_SQL_BUILDERS.has(m.name) && isPrismaReceiver(m.receiver) && e.getArguments()[0]) {
+        return foldSql(e.getArguments()[0], seen);
+      }
+      break;
+    }
+    case SyntaxKind.Identifier: {
+      let symbol = e.getSymbol();
+      if (symbol?.isAlias()) symbol = symbol.getAliasedSymbol();
+      const decls = symbol?.getDeclarations() ?? [];
+      const decl = decls.length === 1 ? decls[0] : null;
+      if (
+        decl?.getKind() === SyntaxKind.VariableDeclaration &&
+        decl.getVariableStatement?.()?.getDeclarationKind() === "const" &&
+        decl.getInitializer() &&
+        !seen.has(decl)
+      ) {
+        return foldSql(decl.getInitializer(), new Set([...seen, decl]));
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  return [{ opaque: e.getText().slice(0, 40) }];
+}
+
+/**
+ * A tagged raw-query template: its substitutions are bind parameters (opaque),
+ * except a Prisma.sql/Prisma.raw fragment, which is SQL text.
+ */
+function taggedSqlSegments(template, seen) {
+  if (template.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral) return [{ text: template.getLiteralText() }];
+  const out = [{ text: template.getHead().getLiteralText() }];
+  for (const span of template.getTemplateSpans()) {
+    const sub = unwrap(span.getExpression());
+    const m = sub?.getKind() === SyntaxKind.CallExpression ? calleeMember(sub.getExpression()) : sub?.getKind() === SyntaxKind.TaggedTemplateExpression ? calleeMember(sub.getTag()) : null;
+    const isFragment = m && PRISMA_SQL_BUILDERS.has(m.name) && isPrismaReceiver(m.receiver);
+    out.push(...(isFragment ? foldSql(sub, seen) : [{ opaque: sub?.getText().slice(0, 40) ?? "" }]));
+    out.push({ text: span.getLiteral().getLiteralText() });
+  }
+  return out;
+}
+
+/** Segments → the lexer's `{ parts, substitutions }` input. */
+function sqlInputOf(segments) {
+  const parts = [""];
+  const substitutions = [];
+  for (const seg of segments) {
+    if (seg.opaque !== undefined) {
+      substitutions.push(seg.opaque);
+      parts.push("");
+    } else parts[parts.length - 1] += seg.text;
+  }
+  return { parts, substitutions };
+}
+
+/** Every raw-SQL argument in `sf`: `{ node, segments }`. */
+function rawSqlArgumentsIn(sf) {
+  const out = [];
+  for (const tagged of sf.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression)) {
+    const m = calleeMember(tagged.getTag());
+    if (!m) continue;
+    if (RAW_SQL_TAGS.has(m.name) || (m.name === "sql" && isPrismaReceiver(m.receiver))) {
+      out.push({ node: tagged, segments: taggedSqlSegments(tagged.getTemplate(), new Set()) });
+    }
+  }
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const m = calleeMember(call.getExpression());
+    if (!m) continue;
+    const isRaw = RAW_SQL_CALLS.has(m.name) && (m.name !== "query" || m.receiver !== null);
+    const isBuilder = PRISMA_SQL_BUILDERS.has(m.name) && isPrismaReceiver(m.receiver);
+    if (!isRaw && !isBuilder) continue;
+    let arg = call.getArguments()[0];
+    if (!arg) continue;
+    // pg's `query({ text, values })` form.
+    const obj = unwrap(arg);
+    if (obj?.getKind() === SyntaxKind.ObjectLiteralExpression) {
+      const text = obj.getProperty("text");
+      if (text?.getKind() !== SyntaxKind.PropertyAssignment) continue;
+      arg = text.getInitializer();
+    }
+    out.push({ node: call, segments: foldSql(arg) });
+  }
+  return out;
+}
+
+/** `U&"…"` with its `\XXXX` / `\+XXXXXX` escapes (or a UESCAPE character) decoded. */
+function decodeUnicodeIdent(value, escape = "\\") {
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] !== escape) {
+      out += value[i];
+      continue;
+    }
+    if (value[i + 1] === escape) {
+      out += escape;
+      i += 1;
+    } else if (value[i + 1] === "+" && /^[0-9A-Fa-f]{6}$/.test(value.slice(i + 2, i + 8))) {
+      out += String.fromCodePoint(parseInt(value.slice(i + 2, i + 8), 16));
+      i += 7;
+    } else if (/^[0-9A-Fa-f]{4}$/.test(value.slice(i + 1, i + 5))) {
+      out += String.fromCodePoint(parseInt(value.slice(i + 1, i + 5), 16));
+      i += 4;
+    } else out += value[i];
+  }
+  return out;
+}
+
+/**
+ * The writer findings for one SQL text: a statement-leading SET or RESET, an
+ * ALTER … SET/RESET, a DO block, EXECUTE (outside a GRANT/REVOKE privilege
+ * list), and any `set_config` identifier — plain, quoted, schema-qualified,
+ * or U&-escaped, whatever follows it.
+ */
+function writerFindingsOf(input) {
+  const tokens = tokenizeSql(input);
+  const findings = [];
+  const statements = [[]];
+  for (const t of tokens) {
+    if (t.type === TOKEN.SEMI && t.depth === 0) statements.push([]);
+    else statements[statements.length - 1].push(t);
+  }
+  for (const stmt of statements) {
+    const lead = stmt[0];
+    const leadWord = lead?.type === TOKEN.WORD ? lead.upper : null;
+    if (leadWord === "SET" || leadWord === "RESET") findings.push(`statement-leading ${leadWord}`);
+    if (leadWord === "DO") findings.push("DO block");
+    if (leadWord === "ALTER" && stmt.some((t) => t.type === TOKEN.WORD && (t.upper === "SET" || t.upper === "RESET"))) {
+      findings.push("ALTER … SET/RESET");
+    }
+    if (leadWord !== "GRANT" && leadWord !== "REVOKE" && stmt.some((t) => t.type === TOKEN.WORD && t.upper === "EXECUTE")) {
+      findings.push("EXECUTE");
+    }
+    for (let i = 0; i < stmt.length; i++) {
+      const t = stmt[i];
+      let name = null;
+      if (t.type === TOKEN.WORD) name = t.text;
+      else if (t.type === TOKEN.QIDENT) {
+        name = t.value;
+        const amp = stmt[i - 1];
+        const u = stmt[i - 2];
+        if (amp?.type === TOKEN.OP && amp.text === "&" && u?.type === TOKEN.WORD && u.upper === "U") {
+          const esc = stmt[i + 1]?.type === TOKEN.WORD && stmt[i + 1].upper === "UESCAPE" && stmt[i + 2]?.type === TOKEN.STRING
+            ? stmt[i + 2].text.slice(1, -1)
+            : "\\";
+          name = decodeUnicodeIdent(t.value, esc);
+        }
+      }
+      if (name !== null && name.toLowerCase() === "set_config") findings.push("set_config");
+    }
+  }
+  return [...new Set(findings)];
+}
+
+const writerViolations = [];
+for (const path of scope.files) {
+  const file = toRelPosix(path);
+  if (WRITER_EXEMPT_FILES.has(file)) continue;
+  const psf = program.getSourceFile(path);
+  if (!psf) continue;
+  for (const { node, segments } of rawSqlArgumentsIn(psf)) {
+    const findings = writerFindingsOf(sqlInputOf(segments));
+    if (findings.length > 0) writerViolations.push({ file, line: node.getStartLineNumber(), detail: findings.join(", ") });
+  }
+}
+
+// Every own code file under these roots, tests included: a pool a test builds
+// is a pool the factory's listener does not see.
+const CODE_ROOTS = ["src", "scripts"];
+const CODE_EXT = /\.([cm]?[jt]sx?)$/;
+// Files the function rule reads as text (SQL, shell, workflow YAML).
+const FUNCTION_TEXT_ROOTS = ["src", "scripts", ".github"];
+
+function walkFiles(root) {
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => join(e.parentPath ?? e.path, e.name).split(sep).join("/"));
+}
+
+const POOL_FACTORY = "src/lib/db/pool-factory.ts";
+// Constructions outside the factory, each a superuser or no-bypass site with no
+// bypass to report (R5-M2). An entry that matches no construction fails the run.
+const POOL_RULE_ALLOWLIST = new Map([
+  ["scripts/bootstrap-rds-roles.mjs", "operator DB-role tooling: connects as the superuser to create roles, runs no application code"],
+  ["scripts/audit-db-grants.mjs", "operator DB-role tooling: reads the catalog as the superuser, runs no application code"],
+  ["src/__tests__/db-integration/setup.ts", "the suite's preflight probe: reads pg_stat_activity and role privileges before any pool exists"],
+  ["src/__tests__/db-integration/bootstrap-rds-roles.integration.test.ts", "superuser clients that drive the role bootstrap under test"],
+  ["src/__tests__/db-integration/audit-db-grants.integration.test.ts", "the superuser client that drives the grant audit under test"],
+  ["src/__tests__/db-integration/rls-bypass-grants.integration.test.ts", "the old-code cell: a pool deliberately WITHOUT the factory's listener, proving report mode admits old code (E2)"],
+]);
+// A regex, as check-raw-sql-usage matches it: a string literal naming a Prisma
+// package outside an import is that gate's SPECIFIER_LITERAL.
+const PG_MODULE_RE = /^(?:pg|@prisma\/adapter-pg)$/;
+const PG_CONSTRUCTORS = new Set(["Pool", "Client", "PrismaPg"]);
+
+/**
+ * The pool rule's subjects in one file: `new` of a pg Pool/Client or a
+ * PrismaPg adapter, by spelling (`new Pool`, `new X.Pool`, `new X.Client`,
+ * `new PrismaPg`) or by binding (any name imported or required from "pg" /
+ * "@prisma/adapter-pg"), plus any value use of such a constructor that is not
+ * a `new` (an alias, a subclass) — where it is constructed is then not here.
+ * Read with the compiler's own parser and walker: this pass covers every own
+ * code file, tests included, and ts-morph's node wrappers cost more than the
+ * Program-backed checks above.
+ */
+function poolConstructionsIn(sf) {
+  const moduleBindings = new Set(); // `pg` (default/namespace/require'd module object)
+  const ctorBindings = new Set(); // named imports / destructured requires
+  const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  const specOf = (node) => (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : null);
+  const found = [];
+  const bindings = (node) => {
+    if (ts.isImportDeclaration(node) && PG_MODULE_RE.test(specOf(node.moduleSpecifier) ?? "") && !node.importClause?.isTypeOnly) {
+      const clause = node.importClause;
+      if (clause?.name) moduleBindings.add(clause.name.text);
+      const nb = clause?.namedBindings;
+      if (nb && ts.isNamespaceImport(nb)) moduleBindings.add(nb.name.text);
+      if (nb && ts.isNamedImports(nb)) for (const el of nb.elements) if (!el.isTypeOnly) ctorBindings.add(el.name.text);
+    }
+    if (ts.isCallExpression(node) && PG_MODULE_RE.test(specOf(node.arguments[0]) ?? "")) {
+      const isLoad = node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require");
+      let holder = node.parent;
+      while (holder && (ts.isAwaitExpression(holder) || ts.isParenthesizedExpression(holder))) holder = holder.parent;
+      if (isLoad && holder && ts.isVariableDeclaration(holder)) {
+        if (ts.isIdentifier(holder.name)) moduleBindings.add(holder.name.text);
+        else if (ts.isObjectBindingPattern(holder.name)) {
+          for (const el of holder.name.elements) if (ts.isIdentifier(el.name)) ctorBindings.add(el.name.text);
+        }
+      }
+    }
+    ts.forEachChild(node, bindings);
+  };
+  bindings(sf);
+  const isNewCallee = (node) => {
+    let n = node;
+    while (n.parent && ts.isParenthesizedExpression(n.parent)) n = n.parent;
+    return !!n.parent && ts.isNewExpression(n.parent) && n.parent.expression === n;
+  };
+  const visit = (node) => {
+    if (ts.isNewExpression(node)) {
+      let callee = node.expression;
+      while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+      const hit =
+        (ts.isIdentifier(callee) && (PG_CONSTRUCTORS.has(callee.text) || ctorBindings.has(callee.text))) ||
+        (ts.isPropertyAccessExpression(callee) &&
+          (PG_CONSTRUCTORS.has(callee.name.text) ||
+            (ts.isIdentifier(callee.expression) && moduleBindings.has(callee.expression.text))));
+      if (hit) found.push({ line: lineOf(node), text: `new ${callee.getText(sf)}` });
+    } else if (
+      ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && moduleBindings.has(node.expression.text) &&
+      PG_CONSTRUCTORS.has(node.name.text) && !isNewCallee(node)
+    ) {
+      found.push({ line: lineOf(node), text: `${node.getText(sf)} used other than by \`new\`` });
+    } else if (ts.isIdentifier(node) && ctorBindings.has(node.text) && !isNewCallee(node)) {
+      const p = node.parent;
+      const isDeclarationOrType =
+        ts.isImportSpecifier(p) || ts.isBindingElement(p) || ts.isTypeReferenceNode(p) || ts.isQualifiedName(p) ||
+        ts.isTypeQueryNode(p) || (ts.isPropertyAccessExpression(p) && p.name === node) ||
+        (ts.isExpressionWithTypeArguments(p) && ts.isHeritageClause(p.parent) && p.parent.token === ts.SyntaxKind.ImplementsKeyword);
+      if (!isDeclarationOrType) found.push({ line: lineOf(node), text: `${node.text} used other than by \`new\`` });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+/** A compiler-API literal or `+` concatenation, constant-folded like foldSql (no symbol resolution). */
+function foldTsSql(node, sf) {
+  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression?.(node)) {
+    return foldTsSql(node.expression, sf);
+  }
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return [{ text: node.text ?? node.rawText ?? "" }];
+  if (ts.isTemplateExpression(node)) {
+    const out = [{ text: node.head.text ?? node.head.rawText ?? "" }];
+    for (const span of node.templateSpans) {
+      out.push(...foldTsSql(span.expression, sf), { text: span.literal.text ?? span.literal.rawText ?? "" });
+    }
+    return out;
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    return [...foldTsSql(node.left, sf), ...foldTsSql(node.right, sf)];
+  }
+  return [{ opaque: node.getText(sf).slice(0, 40) }];
+}
+
+/** Every top-level literal or `+` concatenation in a code file, folded: `{ line, input }`. */
+function sqlTextsIn(sf) {
+  const out = [];
+  const isPlus = (n) => ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken;
+  const visit = (node) => {
+    const stringish = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node) || isPlus(node);
+    let p = node.parent;
+    while (p && (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isNonNullExpression(p))) p = p.parent;
+    const nested = p && (isPlus(p) || ts.isTemplateSpan(p));
+    if (stringish && !nested) {
+      out.push({ line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1, input: sqlInputOf(foldTsSql(node, sf)) });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+const CREATE_ROUTINE = "CREATE [OR REPLACE] FUNCTION|PROCEDURE";
+/** The routine names a CREATE [OR REPLACE] FUNCTION|PROCEDURE token sequence creates in `input`. */
+function createdRoutinesOf(input) {
+  const tokens = tokenizeSql(input);
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].type !== TOKEN.WORD || tokens[i].upper !== "CREATE") continue;
+    let j = i + 1;
+    if (tokens[j]?.upper === "OR" && tokens[j + 1]?.upper === "REPLACE") j += 2;
+    if (tokens[j]?.type === TOKEN.WORD && (tokens[j].upper === "FUNCTION" || tokens[j].upper === "PROCEDURE")) {
+      const name = tokens[j + 1];
+      out.push(name ? nameOf(name) ?? name.text : "?");
+    }
+  }
+  return out;
+}
+
+/**
+ * A text file read as SQL by words alone: the lexer's quoting rules (`$$`,
+ * `'`, `--`) do not hold in shell or YAML, where they would hide the very
+ * text this looks for. Separators are whitespace and SQL comments; a quote or
+ * backslash before the next word is skipped.
+ */
+// One separator run. A block comment ends at its first `*/`
+// (`(?:[^*]|\*(?!\/))*`), so no input has two ways through it: the lazy
+// `[\s\S]*?` it replaces backtracked exponentially on repeated `*//*`.
+const SQL_WORD_SEP = String.raw`(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/|--[^\n]*\n)+`;
+const CREATE_ROUTINE_TEXT_RE = new RegExp(
+  String.raw`\bCREATE${SQL_WORD_SEP}(?:OR${SQL_WORD_SEP}REPLACE${SQL_WORD_SEP})?(?:FUNCTION|PROCEDURE)\b(?:\s|["'` + "`" + String.raw`\\])*([A-Za-z_][\w.$]*)?`,
+  "gi",
+);
+
+// Routines created outside prisma/migrations (R5-M2). A file entry names the
+// routine it may create; an entry that matches nothing fails the run.
+const FUNCTION_RULE_ALLOWLIST = [
+  { file: "scripts/rls-cross-tenant-negative-test.sh", routine: "rls_negative_secdef_probe", why: "Case 9: a SECURITY DEFINER probe on a throwaway database, dropped by the case itself" },
+  { prefix: "scripts/__tests__/", why: "gate fixture strings: inputs for the gates that refuse these statements" },
+];
+const functionAllowed = (file, routine) =>
+  FUNCTION_RULE_ALLOWLIST.find((e) => (e.prefix ? file.startsWith(e.prefix) : e.file === file && e.routine === routine?.toLowerCase()));
+
+const poolViolations = [];
+const functionViolations = [];
+const usedPoolAllowances = new Set();
+const usedFunctionAllowances = new Set();
+{
+  const codeFiles = new Set(CODE_ROOTS.flatMap(walkFiles).filter((f) => CODE_EXT.test(f) && !/\.d\.[cm]?ts$/.test(f)));
+  const noteRoutine = (file, line, routine) => {
+    const entry = functionAllowed(file, routine);
+    if (entry) usedFunctionAllowances.add(entry);
+    else functionViolations.push({ file, line, detail: `creates ${routine ?? "a routine"} (${CREATE_ROUTINE})` });
+  };
+  for (const file of codeFiles) {
+    const kind = /\.tsx$/.test(file) ? ts.ScriptKind.TSX : /\.[cm]?jsx?$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+    const sf = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, kind);
+    if (file !== POOL_FACTORY) {
+      for (const c of poolConstructionsIn(sf)) {
+        if (POOL_RULE_ALLOWLIST.has(file)) usedPoolAllowances.add(file);
+        else poolViolations.push({ file, ...c });
+      }
+    }
+    // Function rule, code files: every literal or folded concatenation, not
+    // only raw-SQL arguments — a routine body handed to a query by variable
+    // is still created by this file.
+    for (const { line, input } of sqlTextsIn(sf)) {
+      for (const routine of createdRoutinesOf(input)) noteRoutine(file, line, routine);
+    }
+  }
+  for (const file of new Set(FUNCTION_TEXT_ROOTS.flatMap(walkFiles))) {
+    if (CODE_EXT.test(file)) continue;
+    const buf = readFileSync(file);
+    if (buf.includes(0)) continue; // binary
+    const text = buf.toString("utf8");
+    for (const m of text.matchAll(CREATE_ROUTINE_TEXT_RE)) {
+      noteRoutine(file, text.slice(0, m.index).split("\n").length, m[1]?.split(".").pop());
+    }
+  }
+}
+for (const [file] of POOL_RULE_ALLOWLIST) {
+  if (existsSync(file) && !usedPoolAllowances.has(file)) poolViolations.push({ file, line: 0, detail: "POOL_RULE_ALLOWLIST entry matches no construction: remove it" });
+}
+for (const entry of FUNCTION_RULE_ALLOWLIST) {
+  if (entry.file && existsSync(entry.file) && !usedFunctionAllowances.has(entry)) {
+    functionViolations.push({ file: entry.file, line: 0, detail: `FUNCTION_RULE_ALLOWLIST entry (${entry.routine}) matches nothing: remove it` });
+  }
 }
 
 let failed = false;
@@ -2287,66 +3077,103 @@ if (fileViolations.length > 0) {
 if (modelViolations.length > 0) {
   failed = true;
   if (fileViolations.length > 0) console.error("");
+  console.error("withBypassRls reaches Prisma models its grant does not list.");
   console.error(
-    "withBypassRls accesses Prisma models not on the per-file allowlist.",
-  );
-  console.error(
-    "Add the model to the file's entry in ALLOWED_USAGE after security review.",
+    "Name a grant in src/lib/tenant-rls-grants.ts that lists exactly what the call reaches (add one after security review).",
   );
   console.error("");
-  for (const { file, line, model, via } of modelViolations) {
-    console.error(`  ${file}:${line}  prisma.${model}${via ? `  (reached in ${via})` : ""}`);
+  for (const { file, line, model, grant, via, through, relation } of modelViolations) {
+    console.error(
+      `  ${file}:${line}  prisma.${model}${via ? `  (reached in ${via})` : ""}${relation ? `  (relation ${relation})` : ""}  not in BYPASS_GRANT.${grant}${through ? `  (through ${through})` : ""}`,
+    );
   }
 }
 
 if (staleEntries.length > 0) {
   failed = true;
   if (modelViolations.length > 0) console.error("");
-  console.error("ALLOWED_USAGE has an entry for a file that makes no withBypassRls call.");
+  console.error("ALLOWED_USAGE has an entry for a file that makes no withBypassRls call and sets no bypass.");
   console.error("Remove it: the entry reads as a bypass this file performs, and it performs none.");
   console.error("");
   for (const file of staleEntries) console.error(`  ${file}`);
 }
 
+if (unnamedGrants.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("stale grant: a BYPASS_GRANT member no withBypassRls call or self-setting site names.");
+  console.error("Remove it: a grant nothing uses reads to the next reviewer as a scope some path has.");
+  console.error("");
+  for (const name of unnamedGrants) console.error(`  ${GRANTS_FILE}:${GRANTS.get(name).line}  BYPASS_GRANT.${name}`);
+}
+
 if (staleAllowances.length > 0) {
   failed = true;
-  if (modelViolations.length > 0) console.error("");
+  console.error("");
+  console.error("stale grant: a BYPASS_GRANT member lists a model no call naming it reaches.");
   console.error(
-    "ALLOWED_USAGE permits a model the file never reaches under a bypass.",
+    "Remove the model: a permission that outlives its reason reads to the next",
   );
   console.error(
-    "Remove it: a permission that outlives its reason reads to the next",
-  );
-  console.error(
-    "reviewer as the scope this file is meant to have.",
+    "reviewer as the scope its call sites are meant to have.",
   );
   console.error("");
-  for (const { file, model } of staleAllowances) {
-    console.error(`  ${file}  prisma.${model}`);
+  for (const { grant, model } of staleAllowances) {
+    console.error(`  ${GRANTS_FILE}:${GRANTS.get(grant).line}  BYPASS_GRANT.${grant}  prisma.${model}`);
   }
 }
 
-if (purposeViolations.length > 0) {
+if (grantDefinitionViolations.length > 0 || grantViolations.length > 0) {
   failed = true;
-  if (fileViolations.length > 0 || modelViolations.length > 0) console.error("");
-  console.error(
-    "withBypassRls call sites with a missing or disallowed BYPASS_PURPOSE.",
-  );
-  console.error(
-    "Pass BYPASS_PURPOSE.* from @/lib/tenant-rls (not a string literal or a variable),",
-  );
-  console.error(
-    "and for a file in ALLOWED_PURPOSES, one of the members listed there.",
-  );
   console.error("");
-  for (const { file, line, detail } of purposeViolations) {
+  console.error("withBypassRls (or a self-setting site) is handed a grant this gate cannot read.");
+  console.error(
+    "Pass BYPASS_GRANT.* from @/lib/tenant-rls-grants (not an inline defineGrant, a",
+  );
+  console.error(
+    "conditional, a cast or a variable), and for a file in ALLOWED_PURPOSES, a grant whose",
+  );
+  console.error("purpose is listed there. Each BYPASS_GRANT member is `NAME: defineGrant(BYPASS_PURPOSE.X, [models])`.");
+  console.error("");
+  for (const { file, line, detail } of [...grantDefinitionViolations, ...grantViolations]) {
     console.error(`  ${file}:${line}  ${detail}`);
   }
 }
 
+if (writerViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error("raw SQL writes a session setting, or could, outside src/lib/tenant-rls.ts and");
+  console.error(`${GRANTS_FILE}. Turn the bypass on with setBypassGucs(tx, BYPASS_GRANT.X), a lock`);
+  console.error("timeout with setLockTimeout, and read the bypass state with readBypassState:");
+  console.error("");
+  for (const { file, line, detail } of writerViolations) console.error(`  ${file}:${line}  ${detail}`);
+}
+
+if (poolViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(`a pg Pool/Client or PrismaPg adapter is built outside ${POOL_FACTORY}, so the`);
+  console.error("factory's notice listener never sees what its bypasses reach. Use createPool /");
+  console.error("createClient / createPrismaClient, or add a superuser or no-bypass site to");
+  console.error("POOL_RULE_ALLOWLIST with its reason:");
+  console.error("");
+  for (const { file, line, text, detail } of poolViolations) console.error(`  ${file}:${line}  ${text ?? detail}`);
+}
+
+if (functionViolations.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(`a routine is created outside prisma/migrations (${CREATE_ROUTINE}). A function`);
+  console.error("body or a function-level SET clause can write the bypass settings where the writer");
+  console.error("rule cannot see; create routines in a migration:");
+  console.error("");
+  for (const { file, line, detail } of functionViolations) console.error(`  ${file}:${line}  ${detail}`);
+}
+
 if (txLessViolations.length > 0) {
   failed = true;
-  if (fileViolations.length > 0 || modelViolations.length > 0 || purposeViolations.length > 0) {
+  if (fileViolations.length > 0 || modelViolations.length > 0 || grantViolations.length > 0) {
     console.error("");
   }
   console.error(
@@ -2613,5 +3440,9 @@ const scannableCount = sourceFiles.filter(
 ).length;
 console.log(
   `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files; ` +
-    `${bypassCallbacks} bypass callback(s) followed through ${reachedUnits} reached function(s))`,
+    `${bypassCallbacks} bypass callback(s) followed through ${reachedUnits} reached function(s); ` +
+    `${unreadableArgCalls.length} call(s) run a query whose argument the relation walk cannot read: ` +
+    `their relation reach is unknown in both directions — a missing relation-reached model is not ` +
+    `reported, and their grants are not judged stale)`,
 );
+for (const site of [...unreadableArgCalls].sort()) console.log(`  unreadable relation argument: ${site}`);

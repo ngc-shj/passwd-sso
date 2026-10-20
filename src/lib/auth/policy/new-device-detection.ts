@@ -1,7 +1,8 @@
 import Bowser from "bowser";
 import { prisma } from "@/lib/prisma";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { sendEmail } from "@/lib/email";
 import { newDeviceLoginEmail } from "@/lib/email/templates/new-device-login";
 import { createNotification } from "@/lib/notification";
@@ -57,7 +58,7 @@ export async function checkNewDeviceAndNotify(
         select: { userAgent: true },
         orderBy: { createdAt: "desc" },
       }),
-    BYPASS_PURPOSE.AUTH_FLOW);
+    BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
 
     // Skip notification for first-ever login (no previous sessions)
     if (recentSessions.length === 0) return;
@@ -82,7 +83,7 @@ export async function checkNewDeviceAndNotify(
         where: { id: userId },
         select: { email: true, locale: true },
       }),
-    BYPASS_PURPOSE.AUTH_FLOW);
+    BYPASS_GRANT.AUTH_USER_LOOKUP);
     if (!user?.email) return;
 
     const locale = resolveUserLocale(user.locale, meta.acceptLanguage);

@@ -19,7 +19,8 @@ import {
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   resolveOwningTenantIdFromClient,
   resolveUserTenantId,
@@ -620,7 +621,7 @@ async function claimedTenantMembership(
     }
 
     return { ok: true };
-  }, BYPASS_PURPOSE.AUTH_FLOW);
+  }, BYPASS_GRANT.AUTH_TENANT_CLAIM_MEMBERSHIP);
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -701,7 +702,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               })
             : null;
           return { id: found.id, tenant };
-        }, BYPASS_PURPOSE.AUTH_FLOW);
+        }, BYPASS_GRANT.AUTH_SIGNIN_TENANT_LOOKUP);
         // An existing user whose tenant does not resolve, or whose resolved
         // tenant row is absent, leaves this gate's question — is this an SSO
         // tenant? — unanswered. The arm below reads "no answer" as "not SSO" and
@@ -743,7 +744,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             where: { email: lookupEmail },
             select: { id: true },
           }),
-        BYPASS_PURPOSE.AUTH_FLOW);
+        BYPASS_GRANT.AUTH_USER_LOOKUP);
         userId = existing?.id ?? null;
       }
 
@@ -918,7 +919,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             throw new Error(`session passkey policy: tenant for user ${user.id} not found`);
           }
           return { credCount, tenant, fetchFavicons: userRow.fetchFavicons };
-        }, BYPASS_PURPOSE.AUTH_FLOW);
+        }, BYPASS_GRANT.AUTH_SESSION_PASSKEY_STATUS);
 
         hasPasskey = passkeyData.credCount > 0;
         requirePasskey = passkeyData.tenant.requirePasskey;

@@ -22,7 +22,7 @@ import {
   type TestContext,
   inRetentionSweepTx,
 } from "./helpers";
-import { sweepPerTenantAge } from "@/workers/retention-gc-worker/sweep";
+import { sweepPerTenantAge, grantForEntry } from "@/workers/retention-gc-worker/sweep";
 import { RETENTION_REGISTRY } from "@/workers/retention-gc-worker/registry";
 
 const historyEntry = RETENTION_REGISTRY.find(
@@ -132,12 +132,12 @@ describe("retention-gc history auto-trim (SC3)", () => {
 
     await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepPerTenantAge(tx, historyEntry, 100);
-    });
+    }, grantForEntry(historyEntry));
     expect(await historyExists(old)).toBe(false);
 
     await expect(
       ctx.retentionWorker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
           tenantId,

@@ -24,7 +24,8 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
@@ -82,7 +83,7 @@ async function handlePOST(req: NextRequest) {
       where: { id: auth.tenantId },
       select: { historyRetentionDays: true },
     }),
-  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP);
   // Bound tenant record not found — no-op (purge nothing) rather than falling
   // through to an unfloored delete with the raw request retentionDays. Mirrors
   // purge-audit-logs's "tenant no longer exists" early return; keeps the two
@@ -114,7 +115,7 @@ async function handlePOST(req: NextRequest) {
   if (dryRun) {
     const matched = await withBypassRls(prisma, async (tx) =>
       tx.passwordEntryHistory.count({ where: whereClause }),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+    BYPASS_GRANT.PASSWORD_HISTORY_PURGE);
     await logAuditAsync({
       ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
       actorType: ACTOR_TYPE.HUMAN,
@@ -135,7 +136,7 @@ async function handlePOST(req: NextRequest) {
 
   const deleted = await withBypassRls(prisma, async (tx) =>
     tx.passwordEntryHistory.deleteMany({ where: whereClause }),
-  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  BYPASS_GRANT.PASSWORD_HISTORY_PURGE);
 
   await logAuditAsync({
     ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),

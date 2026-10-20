@@ -7,7 +7,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import {
@@ -288,7 +289,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
           events: { has: event.type },
         },
       }),
-    BYPASS_PURPOSE.WEBHOOK_DISPATCH);
+    BYPASS_GRANT.TEAM_WEBHOOK_DISPATCH);
 
     if (rows.length === 0) return;
 
@@ -326,7 +327,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
               lastError: null,
             },
           }),
-        BYPASS_PURPOSE.WEBHOOK_DISPATCH);
+        BYPASS_GRANT.TEAM_WEBHOOK_DISPATCH);
       },
       async (id, newFailCount, url) => {
         await withBypassRls(prisma, async (tx) => {
@@ -339,7 +340,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
               isActive: newFailCount >= WEBHOOK_AUTO_DISABLE_THRESHOLD ? false : undefined,
             },
           });
-        }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
+        }, BYPASS_GRANT.TEAM_WEBHOOK_DISPATCH);
 
         // Lazy import to break circular dependency: webhook-dispatcher.ts ↔ audit.ts
         const { logAuditAsync } = await import("@/lib/audit/audit");
@@ -382,7 +383,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
           events: { has: event.type },
         },
       }),
-    BYPASS_PURPOSE.WEBHOOK_DISPATCH);
+    BYPASS_GRANT.TENANT_WEBHOOK_DISPATCH);
 
     if (rows.length === 0) return;
 
@@ -419,7 +420,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
               lastError: null,
             },
           }),
-        BYPASS_PURPOSE.WEBHOOK_DISPATCH);
+        BYPASS_GRANT.TENANT_WEBHOOK_DISPATCH);
       },
       async (id, newFailCount, url) => {
         await withBypassRls(prisma, async (tx) => {
@@ -432,7 +433,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
               isActive: newFailCount >= WEBHOOK_AUTO_DISABLE_THRESHOLD ? false : undefined,
             },
           });
-        }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
+        }, BYPASS_GRANT.TENANT_WEBHOOK_DISPATCH);
 
         const { logAuditAsync } = await import("@/lib/audit/audit");
         await logAuditAsync({

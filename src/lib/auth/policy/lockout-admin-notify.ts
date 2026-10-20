@@ -6,7 +6,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { sendEmail } from "@/lib/email";
 import { vaultLockoutEmail } from "@/lib/email/templates/vault-lockout";
 import { createNotification } from "@/lib/notification";
@@ -69,7 +70,7 @@ export async function notifyAdminsOfLockout(
         tenantId: params.tenantId,
         admins,
       };
-    }, BYPASS_PURPOSE.AUTH_FLOW);
+    }, BYPASS_GRANT.LOCKOUT_ADMIN_NOTIFY);
 
     if (!data) return;
 

@@ -61,7 +61,7 @@
 #   entry below). See bypass-rls-tx-callback-form plan.
 
 scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
-scripts/lib/assert-bypass-rls-active.ts # reads current_setting('app.bypass_rls') on the caller's transaction so a migration cannot proceed with RLS silently emptying its reads; static SQL, no interpolation, no parameters
+scripts/lib/assert-bypass-rls-active.ts # narrows the probe's client to $queryRaw for readBypassState, so a migration cannot proceed with RLS silently emptying its reads; issues no raw SQL itself
 scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table
 scripts/tenant-domain.ts # operator CLI: unmapped-claim report unions audit_logs + audit_outbox by static SQL + $N params, no interpolation
 src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verify endpoint; static SQL + $N params reading audit_logs/audit_chain_anchors
@@ -76,8 +76,8 @@ src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob s
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry recheck on file download (TOCTOU close)
 src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry recheck on share view (TOCTOU close)
 src/auth.ts # SECURITY DEFINER call to migrate audit_logs rows during tenant merge
-src/lib/audit/audit-outbox-in-tx.ts # enqueueAuditInTx's GUC and tenant-existence probes on the caller's transaction, moved here so the offline operator CLI can enqueue without the app Prisma singleton
-src/lib/audit/audit-outbox.ts # bypass_rls GUC set/verify + tenant-existence check before enqueueing audit outbox rows
+src/lib/audit/audit-outbox-in-tx.ts # enqueueAuditInTx's tenant-existence probe on the caller's transaction (the GUC read is readBypassState), moved here so the offline operator CLI can enqueue without the app Prisma singleton
+src/lib/audit/audit-outbox.ts # tenant-existence check before enqueueing audit outbox rows (the bypass is set through setBypassGucs)
 src/lib/auth/policy/account-lockout.ts # row lock (FOR UPDATE) + lock_timeout for atomic failed-login counter update
 src/lib/auth/webauthn/webauthn-authorize.ts # CAS counter update on WebAuthn credential to prevent replay/clone
 src/lib/auth/webauthn/webauthn-server.ts # CAS counter update on WebAuthn credential within caller's tx
@@ -85,12 +85,13 @@ src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding
 src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/age metrics
 src/lib/prisma/raw-sql.ts # names $queryRawUnsafe/$executeRawUnsafe in its header comment describing the values Unsafe call sites elsewhere must use; mints/renders SqlIdentifier/SqlFragment but issues no raw-SQL call itself
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
-src/lib/tenant-rls.ts # defines the RLS GUC helpers (set_config for app.tenant_id / app.bypass_rls / app.bypass_purpose)
+src/lib/tenant-rls-grants.ts # the single writer and reader of the bypass GUCs (set_config for app.bypass_rls / app.bypass_purpose / app.tenant_id / app.bypass_tables) and setLockTimeout
+src/lib/tenant-rls.ts # defines the RLS context helpers: set_config for app.tenant_id, and the shared pg_advisory_xact_lock helper
 src/lib/tenant/tenant-claim-event.ts # append-only routing-history INSERT with no RETURNING (passwd_app holds INSERT but not SELECT)
 src/lib/tenant/tenant-management.ts # SAVEPOINT-protected slug-collision retry when creating a tenant + claim row
 src/lib/vault/key-version-guard.ts # row lock (FOR SHARE) reading users.key_version for the personal-vault stale-write guard
 src/lib/vault/rotate-key-server.ts # row lock (FOR UPDATE) on users for the pre-write rotation tuple-CAS (key_version/vault_setup_at/account_salt)
 src/lib/vault/vault-reset.ts # row lock (FOR UPDATE) on users, acquired first for lock-order consistency with rotation before entry deletes
-src/workers/audit-anchor-publisher.ts # bypass_rls GUC set + anchor row lock/read for chain anchor publishing
+src/workers/audit-anchor-publisher.ts # anchor row lock/read for chain anchor publishing (the bypass is set through setBypassGucs)
 src/workers/audit-outbox-worker.ts # outbox claim/deliver/reap/purge queries; static SQL + $N params, one code-controlled table-name ident (webhook health atomic increment)
 src/workers/retention-gc-worker/sweep.ts # batch-bounded DELETE/SELECT sweeps over registry-declared tables/columns

@@ -54,7 +54,7 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { GET } from "./route";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const USER_ID = "user-1";
 const now = new Date("2025-06-01T00:00:00Z");
@@ -236,7 +236,7 @@ describe("GET /api/share-links/mine", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 

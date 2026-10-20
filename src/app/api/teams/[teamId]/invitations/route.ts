@@ -9,7 +9,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -45,7 +46,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   );
   const inviters = await fetchUserDisplayMap(
     invitations.map((inv) => inv.invitedById),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
 
   return NextResponse.json(
@@ -99,7 +100,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   // private-key-encryption material across tenants if the row leaks via logs.
   const existingUserPromise = withBypassRls(prisma, (tx) =>
     tx.user.findUnique({ where: { email }, select: { id: true } }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
 
   const [[existingInv, team], existingUser] = await Promise.all([
     teamContextPromise,

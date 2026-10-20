@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { getLogger } from "@/lib/logger";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
@@ -81,7 +82,7 @@ export async function validateScimToken(
         lastUsedAt: true,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.SCIM_TOKEN_VALIDATE);
 
   if (!token) {
     return { ok: false, error: "SCIM_TOKEN_INVALID" };
@@ -105,7 +106,7 @@ export async function validateScimToken(
         where: { id: token.id },
         data: { lastUsedAt: new Date(now) },
       });
-    }, BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch((err) => {
+    }, BYPASS_GRANT.SCIM_TOKEN_VALIDATE).catch((err) => {
       getLogger().warn({ err }, "scim.token.lastUsedAt.update_failed");
     });
   }

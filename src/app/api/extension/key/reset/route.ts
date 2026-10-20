@@ -19,7 +19,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { unauthorized, errorResponse } from "@/lib/http/api-response";
@@ -115,7 +116,7 @@ async function handlePOST(req: NextRequest) {
         },
         data: { revokedAt: new Date() },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE,
   );
 
   const cnfJktFingerprint = createHash("sha256")

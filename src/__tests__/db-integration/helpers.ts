@@ -12,10 +12,13 @@
  * shared dev database.
  */
 
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import pg from "pg";
+import type pg from "pg";
+import { createPool, createPrismaClient, type BypassNotice } from "@/lib/db/pool-factory";
+import { bypassNoticeBuffer } from "./bypass-notice-sink";
+import { defineGrant, MODEL_TABLE, setBypassGucs, type BypassGrant, type BypassModel } from "@/lib/tenant-rls-grants";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 import { randomUUID, randomBytes } from "node:crypto";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
@@ -117,41 +120,52 @@ export function createPrismaForRole(
   role: TestRole,
   opts?: { max?: number },
 ): PrismaWithPool {
-  const pool = new pg.Pool({
+  const pool = createPool({
     connectionString: getConnectionString(role),
     max: opts?.max ?? 3,
     idleTimeoutMillis: 10_000,
     statement_timeout: 30_000,
   });
-  const adapter = new PrismaPg(pool);
-  const prisma = new PrismaClient({ adapter });
+  const prisma = createPrismaClient(pool);
   return { prisma, pool };
 }
 
 // ─── Bypass RLS GUC helper ──────────────────────────────────────
 
-const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function setBypassRlsGucs(client: any): Promise<void> {
-  await client.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-  await client.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
-  await client.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
+/**
+ * A grant naming every table, for test SETUP that bypasses RLS to seed or
+ * inspect rows. It reports nothing, so the notice sink stays quiet. A cell
+ * that proves a production path's grant passes that production grant instead.
+ */
+export const TEST_SETUP_GRANT: BypassGrant = defineGrant(
+  BYPASS_PURPOSE.AUDIT_WRITE,
+  Object.keys(MODEL_TABLE) as BypassModel[],
+);
+
+export async function setBypassRlsGucs(
+  client: Pick<Prisma.TransactionClient, "$executeRaw">,
+  grant: BypassGrant = TEST_SETUP_GRANT,
+): Promise<void> {
+  await setBypassGucs(client, grant);
 }
 
 /**
- * Run `fn` in a transaction whose first statement sets the tx-local RLS
- * bypass, as retention-gc's module-private inSweepTx does for a globalDelete
- * or per-tenant entry (#874). The sweeps only assert the bypass, so a test
- * calling one directly must set it the way the dispatcher does; inSweepTx
- * itself stays unexported.
+ * Run `fn` in a transaction that sets the tx-local RLS bypass for `grant`
+ * first, as retention-gc's module-private inSweepTx does (#874); a null grant
+ * runs without it. The sweeps only assert the bypass, so a test calling one
+ * directly must set it the way the dispatcher does; inSweepTx itself stays
+ * unexported. `grant` is required and should be the production one —
+ * `grantForEntry(entry)` or the named BYPASS_GRANT the dispatcher passes — so
+ * the database reports a table the production grant is missing.
  */
 export async function inRetentionSweepTx<T>(
   client: PrismaClient,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  grant: BypassGrant | null,
 ): Promise<T> {
   return client.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+    if (grant) await setBypassGucs(tx, grant);
     return fn(tx);
   });
 }
@@ -845,4 +859,18 @@ export async function raceTwoClients<A, B>(
     clientB.$executeRawUnsafe(`SELECT 1`),
   ]);
   return Promise.all([opA(clientA), opB(clientB)]) as Promise<[A, B]>;
+}
+
+// ─── RLS bypass reports (report mode, #911) ─────────────────────
+
+/**
+ * Run `fn` and return the bypass reports it caused, removing them from the
+ * per-test buffer so setup.ts's afterEach does not fail the cell for them. For
+ * a cell whose subject IS a report; every other report fails its test.
+ */
+export async function expectBypassNotices(fn: () => Promise<unknown>): Promise<BypassNotice[]> {
+  const buffer = bypassNoticeBuffer();
+  const before = buffer.length;
+  await fn();
+  return buffer.splice(before);
 }

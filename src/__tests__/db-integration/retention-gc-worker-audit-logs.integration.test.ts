@@ -125,7 +125,7 @@ describe("retention-gc sweepAuditLogs: per-tenant retention (C3/T6)", () => {
 
     // Run sweepAuditLogs in a bypass_rls tx as superuser
     const deleted = await ctx.su.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       return sweepAuditLogs(tx, auditLogsEntry);
     });
 
@@ -169,7 +169,7 @@ describe("retention-gc sweepAuditLogs: per-tenant retention (C3/T6)", () => {
 
     // Run full sweepOnce — emitHeartbeatAudit=false to skip the heartbeat tx
     const counts = await ctx.su.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       // sweepAuditLogs only — direct call for count attribution
       return sweepAuditLogs(tx, auditLogsEntry);
     });
@@ -214,7 +214,7 @@ describe("retention-gc sweepAuditLogs: per-tenant retention (C3/T6)", () => {
     const oldId = await insertAuditLog(tenantAId, "now() - interval '40 days'");
 
     const deleted = await ctx.su.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       return sweepAuditLogs(tx, auditLogsEntry);
     });
 

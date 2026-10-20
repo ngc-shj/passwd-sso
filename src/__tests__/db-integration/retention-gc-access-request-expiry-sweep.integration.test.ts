@@ -30,6 +30,7 @@ import {
   type AuditProvenanceEntry,
 } from "@/workers/retention-gc-worker/registry";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const accessRequestProvenanceEntry = RETENTION_REGISTRY.find(
   (e): e is AuditProvenanceEntry =>
@@ -112,8 +113,10 @@ describe("retention-gc sweepExpiredAccessRequests: PENDING -> EXPIRED (C7)", () 
   }
 
   async function runSweep(): Promise<number> {
-    return inRetentionSweepTx(ctx.retentionWorker.prisma, (tx) =>
-      sweepExpiredAccessRequests(tx, 100),
+    return inRetentionSweepTx(
+      ctx.retentionWorker.prisma,
+      (tx) => sweepExpiredAccessRequests(tx, 100),
+      BYPASS_GRANT.RETENTION_ACCESS_REQUEST_EXPIRY,
     );
   }
 

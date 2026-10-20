@@ -1,0 +1,153 @@
+import { describe, it, expect, vi } from "vitest";
+import { Prisma } from "@prisma/client";
+import { NIL_UUID } from "@/lib/constants/app";
+import {
+  MODEL_TABLE,
+  defineGrant,
+  grantForTables,
+  readBypassState,
+  setBypassGucs,
+  setLockTimeout,
+  setTenantGucs,
+} from "@/lib/tenant-rls-grants";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
+
+/** Render a Prisma tagged-template call back to its SQL text and values. */
+function captureRaw() {
+  const calls: { sql: string; values: unknown[] }[] = [];
+  const record = (strings: TemplateStringsArray, ...values: unknown[]) => {
+    calls.push({ sql: strings.join("$"), values });
+    return Promise.resolve(0);
+  };
+  return { calls, tx: { $executeRaw: vi.fn(record) } as unknown as Prisma.TransactionClient };
+}
+
+/**
+ * The GUC each set_config in a captured statement writes, paired with the
+ * value it writes (a bound value for `$`, else the literal) — so a test
+ * asserts which name gets which value, not names and values separately.
+ */
+function writtenGucs(call: { sql: string; values: unknown[] }): Record<string, unknown> {
+  const values = [...call.values];
+  const out: Record<string, unknown> = {};
+  for (const m of call.sql.matchAll(/set_config\('([^']+)', (\$|'[^']*'), true\)/g)) {
+    out[m[1]] = m[2] === "$" ? values.shift() : m[2].slice(1, -1);
+  }
+  return out;
+}
+
+describe("MODEL_TABLE", () => {
+  it("maps every Prisma model to its @@map table, as the dmmf does", () => {
+    const fromDmmf = Object.fromEntries(
+      Prisma.dmmf.datamodel.models.map((m) => [m.name[0].toLowerCase() + m.name.slice(1), m.dbName ?? m.name]),
+    );
+    expect(MODEL_TABLE).toEqual(fromDmmf);
+  });
+});
+
+describe("defineGrant", () => {
+  it("joins the grant's tables sorted, deduplicated and without spaces", () => {
+    const grant = defineGrant(BYPASS_PURPOSE.AUTH_FLOW, ["user", "session", "user"]);
+    expect(grant.tables).toBe("sessions,users");
+    expect(grant.purpose).toBe("auth_flow");
+    expect(Object.isFrozen(grant)).toBe(true);
+  });
+
+  it("refuses a grant with no model", () => {
+    expect(() => defineGrant(BYPASS_PURPOSE.AUTH_FLOW, [])).toThrow("at least one model");
+  });
+});
+
+describe("grantForTables", () => {
+  it("maps tables back to models", () => {
+    expect(grantForTables(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["sessions", "users"]).tables).toBe("sessions,users");
+  });
+
+  it("refuses a table no model maps to", () => {
+    expect(() => grantForTables(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["sessions", "no_such_table"])).toThrow(
+      'no model maps to table "no_such_table"',
+    );
+  });
+});
+
+describe("setBypassGucs", () => {
+  it("sets the four bypass GUCs transaction-locally in one statement", async () => {
+    const { calls, tx } = captureRaw();
+    await setBypassGucs(tx, defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session", "apiKey"]));
+    expect(calls).toHaveLength(1);
+    expect(writtenGucs(calls[0])).toEqual({
+      "app.bypass_rls": "on",
+      "app.bypass_purpose": "token_lifecycle",
+      "app.tenant_id": NIL_UUID,
+      "app.bypass_tables": "api_keys,sessions",
+    });
+  });
+
+  it("uses the given tenant id instead of NIL", async () => {
+    const { calls, tx } = captureRaw();
+    await setBypassGucs(tx, defineGrant(BYPASS_PURPOSE.AUDIT_ANCHOR_PUBLISH, ["systemSetting"]), {
+      tenantId: "00000000-0000-4000-8000-000000000002",
+    });
+    expect(calls[0].values[1]).toBe("00000000-0000-4000-8000-000000000002");
+  });
+});
+
+describe("setTenantGucs", () => {
+  it("sets the tenant, turns the bypass off and clears the grant in one statement", async () => {
+    const { calls, tx } = captureRaw();
+    await setTenantGucs(tx, "00000000-0000-4000-8000-000000000003");
+    expect(calls).toHaveLength(1);
+    expect(writtenGucs(calls[0])).toEqual({
+      "app.tenant_id": "00000000-0000-4000-8000-000000000003",
+      "app.bypass_rls": "off",
+      "app.bypass_tables": "",
+    });
+  });
+});
+
+describe("setLockTimeout", () => {
+  it("sets lock_timeout in milliseconds, transaction-locally", async () => {
+    const { calls, tx } = captureRaw();
+    await setLockTimeout(tx, 200);
+    expect(calls[0].sql).toContain("set_config('lock_timeout', $, true)");
+    expect(calls[0].values).toEqual(["200ms"]);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])("refuses %s", async (ms) => {
+    const { tx } = captureRaw();
+    await expect(setLockTimeout(tx, ms)).rejects.toThrow("positive integer");
+  });
+});
+
+describe("readBypassState", () => {
+  it("reads each GUC into its own column", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    await readBypassState({ $queryRaw: queryRaw } as unknown as Prisma.TransactionClient);
+    const sql = (queryRaw.mock.calls[0][0] as TemplateStringsArray).join("$").replace(/\s+/g, " ");
+    for (const [guc, column] of [
+      ["app.bypass_rls", "bypass_rls"],
+      ["app.bypass_purpose", "purpose"],
+      ["app.tenant_id", "tenant_id"],
+      ["app.bypass_tables", "tables"],
+    ]) {
+      expect(sql).toContain(`current_setting('${guc}', true) AS ${column}`);
+    }
+  });
+
+  it("returns the four GUCs as read", async () => {
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ bypass_rls: "on", purpose: "auth_flow", tenant_id: NIL_UUID, tables: "users" }]),
+    } as unknown as Prisma.TransactionClient;
+    await expect(readBypassState(tx)).resolves.toEqual({
+      bypassRls: "on",
+      purpose: "auth_flow",
+      tenantId: NIL_UUID,
+      tables: "users",
+    });
+  });
+
+  it("returns null when no row comes back, so a caller's check denies", async () => {
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]) } as unknown as Prisma.TransactionClient;
+    await expect(readBypassState(tx)).resolves.toBeNull();
+  });
+});

@@ -10,7 +10,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, advisoryXactLock, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -33,6 +33,7 @@ import {
   OPERATOR_TOKEN_NAME_MAX_LENGTH,
   OPERATOR_TOKEN_SCOPE,
 } from "@/lib/constants/auth/operator-token";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 export const runtime = "nodejs";
 
@@ -121,7 +122,7 @@ async function handleGET(req: NextRequest) {
 
   const users = await fetchUserDisplayMap(
     rows.flatMap((r) => [r.subjectUserId, r.createdByUserId]),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
   const tokens = rows.map((r) => ({
     ...r,

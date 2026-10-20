@@ -34,7 +34,6 @@ const EXPECTED_MEMBERS = [
   "sweepTrashTenant",
 ];
 const ENTRY_GATED = new Set(["sweepExpiryEntry", "sweepGuardedExpiryEntry", "sweepAuditProvenanceEntry"]);
-const BYPASS_SET_CONFIG = /set_config\s*\(\s*'app\.bypass_rls'/;
 const TX_TYPE_RE = /\b(TransactionClient|TxClient|RawExecutor)\b/;
 
 function parse(file: string): SourceFile {
@@ -52,19 +51,11 @@ function members(): FunctionDeclaration[] {
     .filter((fn) => !EXEMPT.has(fn.getName() ?? ""));
 }
 
-/** Every string/template literal node in the file whose text sets app.bypass_rls. */
-function bypassSetConfigLiterals(sf: SourceFile): Node[] {
+/** Every `setBypassGucs(...)` call expression in the file — the single writer of the bypass GUCs. */
+function setBypassGucsCalls(sf: SourceFile): Node[] {
   return sf
-    .getDescendants()
-    .filter(
-      (n) =>
-        Node.isStringLiteral(n) ||
-        Node.isNoSubstitutionTemplateLiteral(n) ||
-        Node.isTemplateHead(n) ||
-        Node.isTemplateMiddle(n) ||
-        Node.isTemplateTail(n),
-    )
-    .filter((n) => BYPASS_SET_CONFIG.test(n.getText()));
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .filter((n) => n.getExpression().getText() === "setBypassGucs");
 }
 
 describe("retention-gc sweep.ts bypass invariants (C2)", () => {
@@ -100,15 +91,15 @@ describe("retention-gc sweep.ts bypass invariants (C2)", () => {
     },
   );
 
-  it("sets app.bypass_rls in exactly one place, inside inSweepTx", () => {
-    const literals = bypassSetConfigLiterals(sweep);
-    expect(literals).toHaveLength(1);
-    const owner = literals[0].getFirstAncestorByKind(SyntaxKind.FunctionDeclaration);
+  it("calls setBypassGucs in exactly one place, inside inSweepTx", () => {
+    const calls = setBypassGucsCalls(sweep);
+    expect(calls).toHaveLength(1);
+    const owner = calls[0].getFirstAncestorByKind(SyntaxKind.FunctionDeclaration);
     expect(owner?.getName()).toBe("inSweepTx");
   });
 
-  it("index.ts never sets app.bypass_rls", () => {
-    expect(bypassSetConfigLiterals(parse("index.ts"))).toEqual([]);
+  it("index.ts never calls setBypassGucs", () => {
+    expect(setBypassGucsCalls(parse("index.ts"))).toEqual([]);
   });
 
   it.each(["inSweepTx", "assertSweepBypass"])("%s is module-private", (name) => {
@@ -123,14 +114,14 @@ describe("retention-gc sweep.ts bypass invariants (C2)", () => {
     ).toBe(false);
   });
 
-  it("the integration helper sets the bypass with the same statement as inSweepTx", () => {
+  it("the integration helper sets the bypass with the same call as inSweepTx", () => {
     const helpers = parseRouteSource(
       readFileSync(path.join(REPO_ROOT, "src/__tests__/db-integration/helpers.ts"), "utf8"),
       "db-integration/helpers.ts",
     );
-    const inHelper = bypassSetConfigLiterals(helpers).filter(
+    const inHelper = setBypassGucsCalls(helpers).filter(
       (n) => n.getFirstAncestorByKind(SyntaxKind.FunctionDeclaration)?.getName() === "inRetentionSweepTx",
     );
-    expect(inHelper.map((n) => n.getText())).toEqual(bypassSetConfigLiterals(sweep).map((n) => n.getText()));
+    expect(inHelper.map((n) => n.getText())).toEqual(setBypassGucsCalls(sweep).map((n) => n.getText()));
   });
 });

@@ -24,7 +24,8 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
@@ -64,7 +65,7 @@ async function purgeForTenant(
       where: { id: tenantId },
       select: { auditLogRetentionDays: true },
     }),
-  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP);
   if (!tenant) {
     return { ok: true, purged: 0 };
   }
@@ -87,7 +88,7 @@ async function purgeForTenant(
       tx.auditLog.count({
         where: { tenantId, createdAt: { lt: tenantCutoff } },
       }),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+    BYPASS_GRANT.AUDIT_LOG_MAINTENANCE_ACCESS);
     return { ok: true, purged: matched };
   }
   // C13: audit_logs DELETE is revoked from passwd_app; route through the
@@ -97,7 +98,7 @@ async function purgeForTenant(
     tx.$queryRaw<Array<{ rows_deleted: number }>>`
       SELECT audit_log_purge(${tenantId}::uuid, ${tenantCutoff}::timestamptz) AS rows_deleted
     `,
-  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  BYPASS_GRANT.AUDIT_LOG_MAINTENANCE_ACCESS);
   return { ok: true, purged: rows[0]?.rows_deleted ?? 0 };
 }
 

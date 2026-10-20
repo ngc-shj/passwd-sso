@@ -6,8 +6,8 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -50,7 +50,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   );
   const changers = await fetchUserDisplayMap(
     histories.map((h) => h.changedById),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
   );
 
   return NextResponse.json(

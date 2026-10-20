@@ -116,7 +116,8 @@ export async function GET(request: NextRequest) {
 
   // Find active delegation session via MCP client's public clientId
   const { prisma } = await import("@/lib/prisma");
-  const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
+  const { withBypassRls } = await import("@/lib/tenant-rls");
+  const { BYPASS_GRANT } = await import("@/lib/tenant-rls-grants");
 
   // When auth is an MCP token, bind the lookup to the calling token's row —
   // defense-in-depth on top of the clientId equality check above.
@@ -145,7 +146,7 @@ export async function GET(request: NextRequest) {
       select: { id: true, expiresAt: true, entryIds: true },
       orderBy: { createdAt: "desc" },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 
   if (!session) {
     return NextResponse.json({ authorized: false, reason: "no_session" }, { status: 403 });

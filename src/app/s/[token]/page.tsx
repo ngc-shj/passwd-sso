@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { hashToken, decryptShareData } from "@/lib/crypto/crypto-server";
 import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareE2EEntryView } from "@/components/share/share-e2e-entry-view";
@@ -217,5 +218,5 @@ export default async function SharePage({ params }: Props) {
         maxViews={share.maxViews}
       />
     );
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.SHARE_LINK_PUBLIC_ACCESS);
 }

@@ -1,6 +1,6 @@
-import { PrismaClient, type Prisma } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import pg from "pg";
+import type { PrismaClient, Prisma } from "@prisma/client";
+import type pg from "pg";
+import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
 import { getLogger } from "@/lib/logger";
 import { getTenantRlsContext } from "@/lib/tenant-rls";
 import {
@@ -68,13 +68,13 @@ export function envInt(
 
 // ─── Pool creation ───────────────────────────────────────────
 
-function createPool(): pg.Pool {
+function createAppPool(): pg.Pool {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL environment variable is not set");
   }
 
-  const pool = new pg.Pool({
+  const pool = createPool({
     connectionString,
     max: envInt("DB_POOL_MAX", 20, { min: 1, max: 200 }),
     connectionTimeoutMillis: envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5 * MS_PER_SECOND, {
@@ -139,13 +139,11 @@ function registerShutdown(pool: pg.Pool): void {
 
 // ─── PrismaClient factory ────────────────────────────────────
 
-function createPrismaClient(): { client: PrismaClient; pool: pg.Pool } {
-  const pool = createPool();
+function createAppPrismaClient(): { client: PrismaClient; pool: pg.Pool } {
+  const pool = createAppPool();
   registerShutdown(pool);
 
-  const adapter = new PrismaPg(pool);
-  const client = new PrismaClient({
-    adapter,
+  const client = createPrismaClient(pool, {
     log:
       process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
@@ -157,7 +155,7 @@ function createPrismaClient(): { client: PrismaClient; pool: pg.Pool } {
 
 const result = globalForPrisma.prisma
   ? { client: globalForPrisma.prisma, pool: globalForPrisma.pool! }
-  : createPrismaClient();
+  : createAppPrismaClient();
 
 const baseClient = result.client;
 export const prismaBase = baseClient;

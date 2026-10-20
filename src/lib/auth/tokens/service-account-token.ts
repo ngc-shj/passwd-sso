@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   SA_TOKEN_PREFIX,
   SA_TOKEN_SCOPE,
@@ -96,7 +97,7 @@ export async function validateServiceAccountToken(
         },
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.SERVICE_ACCOUNT_TOKEN_VALIDATE);
 
   if (!token) {
     return { ok: false, error: "SA_TOKEN_INVALID" };
@@ -129,7 +130,7 @@ export async function validateServiceAccountToken(
         where: { id: token.id },
         data: { lastUsedAt: new Date() },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch(() => {});
+    BYPASS_GRANT.SERVICE_ACCOUNT_TOKEN_VALIDATE).catch(() => {});
   }
 
   return {

@@ -139,7 +139,7 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
 
     // Worker should be able to SELECT
     const rows = await ctx.worker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
       return tx.$queryRawUnsafe<{ id: string }[]>(
@@ -154,7 +154,7 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
   it("worker cannot INSERT into audit_delivery_targets", async () => {
     await expect(
       ctx.worker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         await tx.$executeRawUnsafe(
@@ -194,7 +194,7 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
     // Worker should be able to INSERT into audit_deliveries
     const deliveryId = randomUUID();
     await ctx.worker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
       await tx.$executeRawUnsafe(
@@ -250,7 +250,7 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
 
     // Worker should be able to UPDATE
     await ctx.worker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
       await tx.$executeRawUnsafe(
@@ -301,7 +301,7 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
 
     // Worker should be able to DELETE
     await ctx.worker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
       await tx.$executeRawUnsafe(
@@ -323,7 +323,7 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
   it("worker cannot access password_entries table", async () => {
     await expect(
       ctx.worker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         return tx.$queryRawUnsafe(`SELECT id FROM password_entries LIMIT 1`);
@@ -334,7 +334,7 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
   it("worker cannot INSERT into users table (SELECT-only grant)", async () => {
     await expect(
       ctx.worker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         await tx.$executeRawUnsafe(

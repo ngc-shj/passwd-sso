@@ -35,7 +35,7 @@ import {
   realignmentBySignIn,
   realignToMembershipInTx,
 } from "./tenant-realignment";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const USER_ID = "user-1";
@@ -163,7 +163,7 @@ describe("realignAfterActivation", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.TENANT_REALIGN_AFTER_ACTIVATION,
     );
     expect(mockRealignOwningTenantColumn).toHaveBeenCalledWith(expect.anything(), USER_ID, JOINED);
     expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({

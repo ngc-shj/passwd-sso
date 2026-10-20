@@ -10,7 +10,7 @@ import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
 } from "@/lib/auth/access/tenant-auth";
-import { withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
@@ -18,6 +18,7 @@ import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { fetchUserContact } from "@/lib/audit/audit-user-lookup";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 export const runtime = "nodejs";
 
@@ -137,7 +138,7 @@ async function handlePOST(
   // this read used to include came back null (Prisma does not throw); reading its
   // locale threw after the revoke had already committed.
   const targetUser = targetMember
-    ? await fetchUserContact(targetUserId, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
+    ? await fetchUserContact(targetUserId, BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP)
     : null;
 
   if (targetUser) {

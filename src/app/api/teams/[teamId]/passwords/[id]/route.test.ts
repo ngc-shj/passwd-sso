@@ -79,7 +79,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { NextResponse } from "next/server";
 import { GET, PUT, DELETE } from "./route";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 
@@ -199,7 +199,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 

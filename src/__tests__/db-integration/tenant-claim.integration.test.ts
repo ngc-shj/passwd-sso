@@ -13,9 +13,9 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
-import { Prisma, PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import pg from "pg";
+import { Prisma, type PrismaClient } from "@prisma/client";
+import type pg from "pg";
+import { createClient, createPool, createPrismaClient } from "@/lib/db/pool-factory";
 import {
   createTestContext,
   setBypassRlsGucs,
@@ -32,7 +32,13 @@ import {
   normalizeTenantClaim,
   storableClaimSchema,
 } from "@/lib/tenant/tenant-claim-registry";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+
+// The narrowest production grant findOrCreateTenantForClaim runs under (the
+// auth adapter's user creation; sign-in's AUTH_TENANT_CLAIM_MEMBERSHIP is a
+// superset), so the database reports a table the production grant is missing.
+const CLAIM_RESOLUTION_GRANT = BYPASS_GRANT.AUTH_CREATE_USER;
 // The SAME loader the bootstrap and the audit use, so the probe role's grant
 // cannot drift from the declaration production converges to.
 import { loadDeniedPolicy } from "../../../scripts/lib/denied-privileges.mjs";
@@ -426,8 +432,8 @@ describe("tenant_claims (C1)", () => {
           const url = new URL(base);
           url.username = roleName;
           url.password = password;
-          pool = new pg.Pool({ connectionString: url.toString(), max: 2 });
-          probePrisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+          pool = createPool({ connectionString: url.toString(), max: 2 });
+          probePrisma = createPrismaClient(pool);
           // Through Prisma and `setBypassRlsGucs`, not raw pg with the GUCs
           // spelled again here: a second copy of the bypass-GUC set is how the
           // two drift, and this case is about attribution, not about RLS.
@@ -557,17 +563,19 @@ describe("tenant_claims (C1)", () => {
       try {
         // A FRESH connection, not one from the pool.
         //
-        // `tenant_claims` carries FORCE ROW LEVEL SECURITY, and its policy's OR
-        // is not short-circuited, so `current_setting('app.tenant_id', true)::uuid`
-        // is folded at planning time. On a pooled connection that GUC is the
-        // EMPTY STRING (some earlier test set it), and ''::uuid raises 22P02
-        // BEFORE the ACL check — the privilege denial never surfaces. `RESET`
+        // `tenant_claims` carries FORCE ROW LEVEL SECURITY. Before migration
+        // 20261019000000 its policy's `current_setting('app.tenant_id', true)::uuid`
+        // was folded at planning time; it now sits in a sub-SELECT evaluated at
+        // execution, after the ACL check. A fresh connection keeps this cell
+        // independent of that ordering: on a pooled connection that GUC is the
+        // EMPTY STRING (some earlier test set it), and wherever ''::uuid is
+        // evaluated first it raises 22P02 and the privilege denial never surfaces. `RESET`
         // does not help: it restores the session default, which for a custom GUC
         // already touched in that session is '' rather than unset. Only a
         // connection that has never had the GUC set leaves
         // `current_setting(…, true)` NULL, where NULL::uuid is harmless and the
         // 42501 we are asserting is what comes back. Measured at each step.
-        const client = new pg.Client({ connectionString: appConnectionString() });
+        const client = createClient({ connectionString: appConnectionString() });
         await client.connect();
         // The connected principal, asserted before the statement it is meant to
         // refuse. `process.env.DATABASE_URL` used to build this connection —
@@ -614,17 +622,19 @@ describe("tenant_claims (C1)", () => {
       try {
         // A FRESH connection, not one from the pool.
         //
-        // `tenant_claims` carries FORCE ROW LEVEL SECURITY, and its policy's OR
-        // is not short-circuited, so `current_setting('app.tenant_id', true)::uuid`
-        // is folded at planning time. On a pooled connection that GUC is the
-        // EMPTY STRING (some earlier test set it), and ''::uuid raises 22P02
-        // BEFORE the ACL check — the privilege denial never surfaces. `RESET`
+        // `tenant_claims` carries FORCE ROW LEVEL SECURITY. Before migration
+        // 20261019000000 its policy's `current_setting('app.tenant_id', true)::uuid`
+        // was folded at planning time; it now sits in a sub-SELECT evaluated at
+        // execution, after the ACL check. A fresh connection keeps this cell
+        // independent of that ordering: on a pooled connection that GUC is the
+        // EMPTY STRING (some earlier test set it), and wherever ''::uuid is
+        // evaluated first it raises 22P02 and the privilege denial never surfaces. `RESET`
         // does not help: it restores the session default, which for a custom GUC
         // already touched in that session is '' rather than unset. Only a
         // connection that has never had the GUC set leaves
         // `current_setting(…, true)` NULL, where NULL::uuid is harmless and the
         // 42501 we are asserting is what comes back. Measured at each step.
-        const client = new pg.Client({ connectionString: appConnectionString() });
+        const client = createClient({ connectionString: appConnectionString() });
         await client.connect();
         // The connected principal, asserted before the statement it is meant to
         // refuse. `process.env.DATABASE_URL` used to build this connection —
@@ -749,13 +759,13 @@ describe("findOrCreateTenantForClaim (C4)", () => {
               withBypassRls(
                 c,
                 (tx) => findOrCreateTenantForClaim(claim, tx),
-                BYPASS_PURPOSE.AUTH_FLOW,
+                CLAIM_RESOLUTION_GRANT,
               ),
             (c) =>
               withBypassRls(
                 c,
                 (tx) => findOrCreateTenantForClaim(claim, tx),
-                BYPASS_PURPOSE.AUTH_FLOW,
+                CLAIM_RESOLUTION_GRANT,
               ),
           );
 
@@ -908,7 +918,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         const result = await withBypassRls(
           ctx.su.prisma,
           (tx) => findOrCreateTenantForClaim(claim, tx),
-          BYPASS_PURPOSE.AUTH_FLOW,
+          CLAIM_RESOLUTION_GRANT,
         );
         if (result.kind !== "tenant") throw new Error(`unexpected ${result.kind}`);
         ctx.trackTenant(result.id);
@@ -949,7 +959,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         const resultA = await withBypassRls(
           ctx.su.prisma,
           (tx) => findOrCreateTenantForClaim(claimA, tx),
-          BYPASS_PURPOSE.AUTH_FLOW,
+          CLAIM_RESOLUTION_GRANT,
         );
         if (resultA.kind !== "tenant") throw new Error(`claimA returned ${resultA.kind}`);
         ctx.trackTenant(resultA.id);
@@ -957,7 +967,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         const resultB = await withBypassRls(
           ctx.su.prisma,
           (tx) => findOrCreateTenantForClaim(claimB, tx),
-          BYPASS_PURPOSE.AUTH_FLOW,
+          CLAIM_RESOLUTION_GRANT,
         );
         if (resultB.kind !== "tenant") throw new Error(`claimB returned ${resultB.kind}`);
         ctx.trackTenant(resultB.id);
@@ -999,7 +1009,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         const result = await withBypassRls(
           ctx.su.prisma,
           (tx) => findOrCreateTenantForClaim(claim, tx),
-          BYPASS_PURPOSE.AUTH_FLOW,
+          CLAIM_RESOLUTION_GRANT,
         );
         expect(result).toEqual({ kind: "tenant", id: tenantId });
 
@@ -1051,7 +1061,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         const result = await withBypassRls(
           ctx.su.prisma,
           (tx) => findOrCreateTenantForClaim(committedClaim, tx),
-          BYPASS_PURPOSE.AUTH_FLOW,
+          CLAIM_RESOLUTION_GRANT,
         );
         if (result.kind !== "tenant") throw new Error(`unexpected ${result.kind}`);
         ctx.trackTenant(result.id);
@@ -1124,17 +1134,21 @@ describe("findOrCreateTenantForClaim (C4)", () => {
             await ctx.su.prisma.$executeRawUnsafe(
               `GRANT SELECT, INSERT, UPDATE, DELETE ON tenants, tenant_claims TO "${roleName}"`,
             );
+            // Every RLS policy calls these; passwd_app holds EXECUTE on both.
+            await ctx.su.prisma.$executeRawUnsafe(
+              `GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text), public.rls_bypass_enforced() TO "${roleName}"`,
+            );
 
             const url = new URL(base);
             url.username = roleName;
             url.password = password;
-            pool = new pg.Pool({
+            pool = createPool({
               connectionString: url.toString(),
               max: 2,
               idleTimeoutMillis: 10_000,
               statement_timeout: 30_000,
             });
-            probePrisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+            probePrisma = createPrismaClient(pool);
 
             const token = runToken();
 
@@ -1166,7 +1180,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
             const allowResult = await withBypassRls(
               probePrisma,
               (tx) => findOrCreateTenantForClaim(allowClaim, tx),
-              BYPASS_PURPOSE.AUTH_FLOW,
+              CLAIM_RESOLUTION_GRANT,
             );
             if (allowResult.kind !== "tenant") {
               throw new Error(`allow arm: unexpected ${allowResult.kind}`);
@@ -1189,7 +1203,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
               await withBypassRls(
                 probePrisma,
                 (tx) => findOrCreateTenantForClaim(denyClaim, tx),
-                BYPASS_PURPOSE.AUTH_FLOW,
+                CLAIM_RESOLUTION_GRANT,
               );
             } catch (e) {
               caught = e;

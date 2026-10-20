@@ -30,7 +30,8 @@ import {
   type TestContext,
 } from "./helpers";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { prisma } from "@/lib/prisma";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { issueIosToken, issueAutofillToken } from "@/lib/auth/tokens/mobile-token";
@@ -54,7 +55,7 @@ async function familyIdForToken(token: string): Promise<string> {
       where: { tokenHash: hashToken(token) },
       select: { familyId: true },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
   if (!row) throw new Error("familyIdForToken: token row not found");
   return row.familyId;
 }

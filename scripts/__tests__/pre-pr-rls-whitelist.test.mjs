@@ -81,9 +81,25 @@ function runWith(output, code, blockSource = block) {
 }
 
 describe("pre-pr rls-cross-tenant whitelist", () => {
+  // A run that completed emits every RLS-MARKER region rls-verify-run.sh checks.
+  const CLEAN_RUN = [
+    "DO",
+    "NOTICE:  RLS-MARKER:block=4-start",
+    "NOTICE:  RLS-MARKER:block=4-end",
+    "NOTICE:  RLS-MARKER:block=report table=users",
+    "WARNING:  rls_bypass_not_granted table=users purpose=system_maintenance",
+    "NOTICE:  RLS-MARKER:block=report-end",
+    "DO",
+  ].join("\n");
+
   it("passes a clean run", () => {
-    const r = runWith("DO\nDO\nDO", 0);
+    const r = runWith(CLEAN_RUN, 0);
     expect(r.status).toBe(0);
+  });
+
+  it("fails a run that exits 0 without emitting the marker regions", () => {
+    const r = runWith("DO\nDO\nDO", 0);
+    expect(r.status).not.toBe(0);
   });
 
   // ALLOW side: the seed-dependent row-count blocks cannot pass against a
@@ -104,6 +120,16 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
   );
 
   // DENY side: Block 1 needs no seed, so these are real control regressions.
+  //
+  // BYPASS-TABLE is also Block 1 (pure pg_catalog inspection) — a policy
+  // whose bypass branch reverted to the pre-#911 app.bypass_rls form, named
+  // the wrong table, or dropped the sub-SELECT wrapper. REPORT and INITPLAN
+  // (Block 4b) are seed-dependent in the other direction from COUNT-A/
+  // COUNT-B/BYPASS: ON_ERROR_STOP=1 means Block 4b is reachable at all only
+  // once Block 2/3/4 (which themselves need the cross-tenant seed) already
+  // passed, so seeing either code here means the DB was effectively fully
+  // seeded and Block 4b still failed — a real regression, never the
+  // unseeded-dev-DB shape this whitelist exists to tolerate.
   it.each([
     "FORCE",
     "SECDEF",
@@ -114,6 +140,9 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
     "DISCOVER",
     "MANIFEST-EXTRA",
     "MANIFEST-MISSING",
+    "BYPASS-TABLE",
+    "REPORT",
+    "INITPLAN",
   ])("stays fatal on the seed-independent code [E-RLS-%s]", (code) => {
     const r = runWith(`ERROR:  [E-RLS-${code}] regression detected`, 3);
     expect(r.status).not.toBe(0);

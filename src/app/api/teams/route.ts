@@ -9,7 +9,8 @@ import { errorResponse, forbidden, handleAuthError, unauthorized } from "@/lib/h
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { getLogger } from "@/lib/logger";
@@ -45,7 +46,7 @@ async function handleGET(req: NextRequest) {
       orderBy: { team: { name: "asc" } },
     });
     return { userTenantId: uid, memberships: data };
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.TEAM_ADMIN_MEMBERSHIP_LOOKUP);
 
   const teams = memberships.map((m) => ({
     id: m.team.id,

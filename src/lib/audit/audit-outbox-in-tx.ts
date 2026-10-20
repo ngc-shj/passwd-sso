@@ -11,6 +11,7 @@
  * every application caller and test reaches it.
  */
 import type { Prisma, AuditScope, AuditAction, ActorType } from "@prisma/client";
+import { readBypassState } from "@/lib/tenant-rls-grants";
 
 export interface AuditOutboxPayload {
   scope: AuditScope;
@@ -31,13 +32,11 @@ export async function enqueueAuditInTx(
   tenantId: string,
   payload: AuditOutboxPayload,
 ): Promise<void> {
-  const [ctx] = await tx.$queryRaw<{ bypass_rls: string; tenant_id: string }[]>`
-    SELECT current_setting('app.bypass_rls', true) AS bypass_rls,
-           current_setting('app.tenant_id', true)  AS tenant_id`;
-  if (ctx.bypass_rls !== "on" && ctx.tenant_id !== tenantId) {
+  const ctx = await readBypassState(tx);
+  if (!ctx || (ctx.bypassRls !== "on" && ctx.tenantId !== tenantId)) {
     throw new Error(
       `enqueueAuditInTx called outside withBypassRls/withTenantRls scope; ` +
-      `bypass_rls=${ctx.bypass_rls}, tenant_id=${ctx.tenant_id}, expected=${tenantId}`,
+      `bypass_rls=${ctx?.bypassRls}, tenant_id=${ctx?.tenantId}, expected=${tenantId}`,
     );
   }
   const [tenantExists] = await tx.$queryRaw<{ ok: boolean }[]>`

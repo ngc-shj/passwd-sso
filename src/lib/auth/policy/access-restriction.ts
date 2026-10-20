@@ -7,7 +7,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { isIpAllowed, isTailscaleIp, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { verifyTailscalePeer } from "@/lib/services/tailscale-client";
 import { logAuditAsync } from "@/lib/audit/audit";
@@ -74,7 +75,7 @@ async function getTenantAccessPolicy(
         tailscaleTailnet: true,
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TENANT_POLICY_LOOKUP);
 
   // FAIL-CLOSED: tenantId always comes from a server-trusted source (session /
   // token row) backed by an FK RESTRICT to Tenant, so a null here on a

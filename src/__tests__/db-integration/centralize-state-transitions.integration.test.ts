@@ -38,9 +38,15 @@ import { transition, bulkTransition } from "@/lib/emergency-access/emergency-acc
 import { markGrantsStaleForOwner } from "@/lib/emergency-access/emergency-access-server";
 import { autoPromoteIfElapsed } from "@/lib/emergency-access/vault-auto-promote";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { AUDIT_ACTION, EA_STATUS, EA_ACTOR } from "@/lib/constants";
 import { AUDIT_SCOPE } from "@/lib/constants/audit/audit";
+
+// The grant the vault route runs autoPromoteIfElapsed under. The database
+// reports any table a bypass reaches outside its grant, so a hand-written copy
+// here would drift from what production passes.
+const TEST_GRANT = BYPASS_GRANT.EMERGENCY_ACCESS_VAULT_READ;
 
 // ─── Skip guard ──────────────────────────────────────────────────────────────
 // Gracefully skip the entire suite if DATABASE_URL is not configured.
@@ -229,7 +235,7 @@ describe("centralize-state-transitions — integration", () => {
           clientA.prisma,
           clientB.prisma,
           async (db: PrismaClient) => {
-            await db.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+            await setBypassRlsGucs(db);
             await db.$executeRaw`SELECT set_config('app.bypass_purpose', 'cross_tenant_lookup', true)`;
             await db.$executeRaw`SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true)`;
             return transition({
@@ -242,7 +248,7 @@ describe("centralize-state-transitions — integration", () => {
             });
           },
           async (db: PrismaClient) => {
-            await db.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+            await setBypassRlsGucs(db);
             await db.$executeRaw`SELECT set_config('app.bypass_purpose', 'cross_tenant_lookup', true)`;
             await db.$executeRaw`SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true)`;
             return transition({
@@ -333,7 +339,7 @@ describe("centralize-state-transitions — integration", () => {
             to: EA_STATUS.REVOKED,
             actor: EA_ACTOR.OWNER,
           }),
-        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+        TEST_GRANT,
       ),
     ).rejects.toThrow("transition: under withBypassRls, where must include one of");
   });
@@ -382,7 +388,7 @@ describe("centralize-state-transitions — integration", () => {
           ownerId,
         );
       },
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      TEST_GRANT,
     );
 
     const outboxBefore = await countVaultResetOutbox(tenantId);
@@ -445,12 +451,12 @@ describe("centralize-state-transitions — integration", () => {
       withBypassRls(
         ctx.app.prisma,
         async (tx) => autoPromoteIfElapsed({ db: tx, granteeId, grantId, now, auditBase }),
-        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+        TEST_GRANT,
       ),
       withBypassRls(
         ctx.app.prisma,
         async (tx) => autoPromoteIfElapsed({ db: tx, granteeId, grantId, now, auditBase }),
-        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+        TEST_GRANT,
       ),
     ]);
 
@@ -534,7 +540,7 @@ describe("centralize-state-transitions — integration", () => {
         await autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() });
         // The CAS and the audit row are both committed-or-not with THIS throw.
         throw boom;
-      }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+      }, TEST_GRANT),
     ).rejects.toBe(boom);
 
     // Positive first: the promotion did not survive.
@@ -566,7 +572,7 @@ describe("centralize-state-transitions — integration", () => {
     await expect(
       withBypassRls(ctx.app.prisma, async (tx) =>
         autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+      TEST_GRANT),
     ).rejects.toThrow(/outbox down/);
 
     const afterFailure = await fetchGrant(grantId);
@@ -579,7 +585,7 @@ describe("centralize-state-transitions — integration", () => {
     // which is what keeps T17 and the cells above on the real path.
     const retry = await withBypassRls(ctx.app.prisma, async (tx) =>
       autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    TEST_GRANT);
 
     expect(retry.ok).toBe(true);
     expect((await fetchGrant(grantId))?.status).toBe("ACTIVATED");
@@ -609,7 +615,7 @@ describe("centralize-state-transitions — integration", () => {
 
       const result = await withBypassRls(ctx.app.prisma, async (tx) =>
         autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+      TEST_GRANT);
 
       expect(result.ok, label).toBe(false);
       if (!result.ok) expect(result.reason, label).toBe(label);
@@ -665,7 +671,7 @@ describe("centralize-state-transitions — integration", () => {
         await seedEligible(grantId);
         const result = await withBypassRls(ctx.app.prisma, async (tx) =>
           autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() }),
-        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+        TEST_GRANT);
 
         // Positive first: the release actually happened, so a missing row under
         // the old tenant is misfiling rather than nothing to file.

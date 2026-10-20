@@ -602,9 +602,7 @@ export function functionFlowViolations(program, scope, usedShapes = new Set()) {
           const origin = originModules(source);
           if (!origin || ![...origin].every((m) => m === pkg)) {
             const from = origin ? [...origin].join(", ") : "nothing traceable";
-            out.push(pkg
-              ? `${siteOf(source)}  G7: ${shape} is supplied by ${pkg}, but this value comes from ${from}`
-              : `${siteOf(source)}  G7: ${shape} has no supplier; only a typed client may take it, and this value comes from ${from}`);
+            out.push(`${siteOf(source)}  G7: ${shape} is supplied by ${pkg}, but this value comes from ${from}`);
           }
           continue;
         }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { decryptShareData } from "@/lib/crypto/crypto-server";
 import { verifyShareAccessToken } from "@/lib/auth/tokens/share-access-token";
 import { USER_AGENT_MAX_LENGTH, SHARE_ACCESS_IP_MAX_LENGTH } from "@/lib/validations/common.server";
@@ -210,7 +211,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       viewCount: share.viewCount + viewCountDelta,
       maxViews: share.maxViews,
     });
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.SHARE_LINK_PUBLIC_ACCESS);
 }
 
 export const GET = withRequestLog(handleGET);

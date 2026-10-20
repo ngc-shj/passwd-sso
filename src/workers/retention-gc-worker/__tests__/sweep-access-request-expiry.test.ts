@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { sweepExpiredAccessRequests } from "../sweep";
 import { MATRIX, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
-import { isAssertRead, makeQueryRaw, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
+import { isBypassStateRead, makeQueryRaw, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 function makeTx(updatedCount: number) {
   const executeRaw = vi.fn().mockResolvedValue(undefined); // any set_config
@@ -34,7 +34,7 @@ describe("sweepExpiredAccessRequests (C7)", () => {
     // Ordering, not just call count (T2): the bypass state is checked BEFORE
     // the UPDATE runs.
     expect(queryRaw).toHaveBeenCalledOnce();
-    expect(isAssertRead(sqlText(queryRaw.mock.calls[0][0]))).toBe(true);
+    expect(isBypassStateRead(sqlText(queryRaw.mock.calls[0][0]))).toBe(true);
     expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       executeRawUnsafe.mock.invocationCallOrder[0],
     );

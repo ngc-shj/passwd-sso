@@ -87,7 +87,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { GET, POST } from "./route";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // Module-scope snapshot: route.ts's module-level `createRateLimiter(...)`
 // call runs at import time above. Must be captured before any
@@ -171,7 +171,7 @@ describe("GET /api/tenant/operator-tokens", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 

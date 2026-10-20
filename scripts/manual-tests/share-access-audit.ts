@@ -23,7 +23,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { hashToken, hashAccessPassword, encryptShareData } from "@/lib/crypto/crypto-server";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { randomBytes } from "node:crypto";
@@ -34,7 +35,7 @@ async function main() {
       select: { id: true, userId: true, tenantId: true },
       where: { deletedAt: null },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.VAULT_ENTRY_CROSS_TENANT_READ);
   if (!entry) {
     console.error("No password entry found. Create one via UI first.");
     process.exit(1);
@@ -64,7 +65,7 @@ async function main() {
         viewCount: 0,
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.SHARE_LINK_VERIFY_ACCESS);
   console.log(`Created test share id=${share.id} (tenant=${entry.tenantId})`);
 
   // Local dev uses a self-signed cert. Set NODE_TLS_REJECT_UNAUTHORIZED=0 in
@@ -113,7 +114,7 @@ async function main() {
       ORDER BY created_at DESC
       LIMIT 5
     `,
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.AUDIT_LOG_CROSS_TENANT_READ);
   console.log(`\n[AUDIT LOGS]`);
   console.table(logs);
 
@@ -132,13 +133,13 @@ async function main() {
       ORDER BY created_at DESC
       LIMIT 5
     `,
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.AUDIT_OUTBOX_CROSS_TENANT_READ);
   console.log(`\n[OUTBOX (should have SENT rows — routed through outbox)]`);
   console.table(outbox);
 
   await withBypassRls(prisma, () =>
     prisma.passwordShare.delete({ where: { id: share.id } }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.SHARE_LINK_VERIFY_ACCESS);
   console.log(`\nCleaned up test share ${share.id}`);
 
   const failedRow = logs.find((r) => r.action === "SHARE_ACCESS_VERIFY_FAILED");

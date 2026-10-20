@@ -18,6 +18,7 @@ import {
   sweepAuditLogs,
   sweepPerTenantAge,
   sweepExpiredAccessRequests,
+  grantForEntry,
 } from "../sweep";
 import {
   RETENTION_REGISTRY,
@@ -27,8 +28,9 @@ import {
   type AuditProvenanceEntry,
   type PerTenantFnEntry,
   type PerTenantAgeEntry,
+  type PerTenantTrashEntry,
 } from "../registry";
-import { isAssertRead, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
+import { isBypassStateRead, sqlText } from "@/__tests__/workers/retention-gc-tx-fakes";
 
 const C2_ERROR = "retention-gc sweep requires the RLS bypass state its entry declares";
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
@@ -45,7 +47,7 @@ function makeRecordingTx(read: ReadAnswer) {
   const calls: RecordedCall[] = [];
 
   const answer = (name: string, args: unknown[]): unknown => {
-    if (name === "$queryRaw" && isAssertRead(sqlText(args[0]))) {
+    if (name === "$queryRaw" && isBypassStateRead(sqlText(args[0]))) {
       if ("error" in read) throw read.error;
       return read.rows;
     }
@@ -111,6 +113,10 @@ const API_KEYS = registryEntry<"EXPIRY_AUDIT_PROVENANCE", AuditProvenanceEntry>(
   "api_keys",
 );
 const AUDIT_LOGS = registryEntry<"PER_TENANT_FN", PerTenantFnEntry>("PER_TENANT_FN", "audit_logs");
+const PASSWORD_ENTRIES = registryEntry<"PER_TENANT_TRASH", PerTenantTrashEntry>(
+  "PER_TENANT_TRASH",
+  "password_entries",
+);
 const HISTORIES: PerTenantAgeEntry = {
   kind: "PER_TENANT_AGE",
   table: "password_entry_histories",
@@ -118,6 +124,28 @@ const HISTORIES: PerTenantAgeEntry = {
   tenantRetentionColumn: "historyRetentionDays",
   auditAction: "HISTORY_RETENTION_PURGED",
 };
+
+describe("grantForEntry derives each entry's bypass tables (C2)", () => {
+  it("names attachments for a PER_TENANT_TRASH entry", () => {
+    expect(grantForEntry(PASSWORD_ENTRIES)?.tables).toBe(
+      "attachments,audit_outbox,password_entries,tenants",
+    );
+  });
+
+  it("names the MCP_TOKEN_FAMILY_DEAD guard's tables for mcp_access_tokens", () => {
+    expect(grantForEntry(MCP_ACCESS_TOKENS)?.tables).toBe(
+      "audit_outbox,delegation_sessions,mcp_access_tokens,mcp_refresh_tokens,tenants",
+    );
+  });
+
+  it("names audit_logs for the PER_TENANT_FN entry", () => {
+    expect(grantForEntry(AUDIT_LOGS)?.tables).toBe("audit_logs,audit_outbox,tenants");
+  });
+
+  it("returns null for an entry without globalDelete", () => {
+    expect(grantForEntry(VERIFICATION_TOKENS)).toBeNull();
+  });
+});
 
 interface MemberCase {
   name: string;
@@ -189,6 +217,7 @@ const DENY_WHEN_EXPECTED: ReadonlyArray<readonly [string, unknown[]]> = [
 // Reads that deny when the entry does not declare it (expected = false).
 const DENY_WHEN_NOT_EXPECTED: ReadonlyArray<readonly [string, unknown[]]> = [
   ["'on' (a caller's bypass)", [{ bypass_rls: "on" }]],
+  // A missing row is a failed read (readBypassState returns null), not "off".
   ["no row", []],
 ];
 
@@ -200,12 +229,12 @@ const ALLOW_WHEN_NOT_EXPECTED: ReadonlyArray<readonly [string, unknown[]]> = [
 
 function expectOnlyTheRead(calls: RecordedCall[]) {
   expect(calls.map((c) => c.name)).toEqual(["$queryRaw"]);
-  expect(isAssertRead(sqlText(calls[0].args[0]))).toBe(true);
+  expect(isBypassStateRead(sqlText(calls[0].args[0]))).toBe(true);
 }
 
 function expectReachedWrite(calls: RecordedCall[], write: string) {
   expect(calls[0].name).toBe("$queryRaw");
-  expect(isAssertRead(sqlText(calls[0].args[0]))).toBe(true);
+  expect(isBypassStateRead(sqlText(calls[0].args[0]))).toBe(true);
   expect(calls.slice(1).map((c) => c.name)).toContain(write);
 }
 

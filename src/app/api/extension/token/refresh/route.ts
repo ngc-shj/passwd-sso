@@ -10,7 +10,8 @@ import { computeClientTokenExpiry, getFamilyPresenceAt } from "@/lib/auth/tokens
 import { REFRESH_REPLAY_GRACE_MS } from "@/lib/auth/tokens/mobile-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { TokenIssueResponseSchema } from "@/lib/validations/extension-token";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -61,7 +62,7 @@ async function detectRefreshReplay(req: NextRequest): Promise<void> {
       where: { tokenHash },
       select: { revokedAt: true, familyId: true, userId: true, tenantId: true },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
   if (!row?.revokedAt) return; // Not found, or a benign race — nothing to detect.
 
@@ -124,7 +125,7 @@ async function handlePOST(req: NextRequest) {
         extensionTokenAbsoluteTimeoutMinutes: true,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.TOKEN_TENANT_LOOKUP);
   // FAIL-CLOSED: tenantId is FK-backed, so a null tenant row is data
   // corruption, NOT "no policy". These columns are non-nullable with schema
   // defaults, so `?? DEFAULT` only fires on a vanished tenant — where defaulting
@@ -168,7 +169,7 @@ async function handlePOST(req: NextRequest) {
   // must still die `idle` after the last real unlock.
   const presenceAt = await withBypassRls(prisma, async (tx) =>
     getFamilyPresenceAt(tx, familyId, familyCreatedAt),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
   if (presenceAt.getTime() + idleMinutes * MS_PER_MINUTE <= now.getTime()) {
     await revokeExtensionTokenFamily({
       familyId,

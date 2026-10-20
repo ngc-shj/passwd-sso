@@ -17,7 +17,7 @@
       "dbRole": "passwd_outbox_worker",
       "tenantScoped": {
         "value": true,
-        "reason": "Every claim/deliver/reap/purge transaction sets bypass_rls + app.tenant_id=NIL_UUID via setBypassRlsGucs (audit-outbox-worker.ts) and then operates per-row using the row's own tenant_id column (e.g. deliverRow, deliverRowWithChain) -- it is a system-wide sweep by role privilege, but every write is attributed to the row's own tenant."
+        "reason": "Every claim/deliver/reap/purge transaction sets bypass_rls + app.tenant_id=NIL_UUID + its grant's tables via setBypassGucs (audit-outbox-worker.ts) and then operates per-row using the row's own tenant_id column (e.g. deliverRow, deliverRowWithChain) -- it is a system-wide sweep by role privilege, but every write is attributed to the row's own tenant."
       },
       "usesSecurityDefiner": false,
       "rawSql": true,

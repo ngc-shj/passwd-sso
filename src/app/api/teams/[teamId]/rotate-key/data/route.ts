@@ -5,7 +5,8 @@ import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
@@ -92,7 +93,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
           where: { id: { in: memberKeys.map((mk) => mk.userId) } },
           select: { id: true, ecdhPublicKey: true },
         }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP)
     : [];
 
   const publicKeyByUserId = new Map(publicKeys.map((user) => [user.id, user.ecdhPublicKey]));

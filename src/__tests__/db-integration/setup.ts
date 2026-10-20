@@ -107,6 +107,44 @@ try {
       ].join("\n"),
     );
   }
+  // The RLS policies call these for every reading role; without EXECUTE every
+  // statement on an RLS table fails with "permission denied for function"
+  // (a role created after the migration misses its grant).
+  // Checked for every role the suite connects as (the app role, and the
+  // worker roles where they exist), not only this connection's.
+  const { rows: exec } = await probe.query<{ role: string }>(
+    `SELECT r.rolname AS role
+       FROM pg_roles r
+      WHERE (r.rolname = current_user OR r.rolname IN ('passwd_app', 'passwd_outbox_worker', 'passwd_retention_gc_worker'))
+        AND NOT (has_function_privilege(r.rolname, 'public.rls_bypass_admits(text)', 'EXECUTE')
+             AND has_function_privilege(r.rolname, 'public.rls_bypass_enforced()', 'EXECUTE'))`,
+  );
+  if (exec.length > 0) {
+    throw new Error(
+      `role(s) lacking EXECUTE on public.rls_bypass_admits / rls_bypass_enforced: ${exec.map((r) => r.role).join(", ")}`,
+    );
+  }
 } finally {
   await probe.end().catch(() => {});
 }
+
+// Every RLS bypass report goes to this suite's buffer, never to the logger;
+// a test that caused one fails unless it took it with expectBypassNotices.
+const { registerBypassNoticeSink } = await import("@/lib/db/pool-factory");
+const { bypassNoticeBuffer, recordBypassNotice } = await import("./bypass-notice-sink");
+registerBypassNoticeSink(recordBypassNotice);
+
+const { afterEach, afterAll } = await import("vitest");
+function failOnReports(when: string): void {
+  const reports = bypassNoticeBuffer().splice(0);
+  if (reports.length > 0) {
+    throw new Error(
+      `RLS bypass reached tables outside its grant ${when}: ` +
+        reports.map((r) => `${r.table} (purpose ${r.purpose})`).join(", ") +
+        ". Add the table to the grant the code passes, or take the report with expectBypassNotices.",
+    );
+  }
+}
+afterEach(() => failOnReports("in this test"));
+// Detached work can report after its test ended.
+afterAll(() => failOnReports("after this file's last test"));

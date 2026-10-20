@@ -32,7 +32,7 @@ import {
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
-import { sweepExpiryEntry, sweepOnce, sweepPerTenantAge } from "@/workers/retention-gc-worker/sweep";
+import { sweepExpiryEntry, sweepOnce, sweepPerTenantAge, grantForEntry } from "@/workers/retention-gc-worker/sweep";
 import {
   RETENTION_REGISTRY,
   type ExpiryEntry,
@@ -192,7 +192,7 @@ describe("retention-gc dispatcher bypass, shared fixture", () => {
       expect(await sessionExists(sessionId)).toBe(true);
 
       // Positive control on the same fixture.
-      const deleted = await inRetentionSweepTx(ctx.su.prisma, (tx) => sweepExpiryEntry(tx, entry, 100));
+      const deleted = await inRetentionSweepTx(ctx.su.prisma, (tx) => sweepExpiryEntry(tx, entry, 100), grantForEntry(entry));
       expect(deleted).toBeGreaterThanOrEqual(1);
       expect(await sessionExists(sessionId)).toBe(false);
     });
@@ -238,7 +238,7 @@ describe("retention-gc dispatcher bypass, shared fixture", () => {
       });
       expect(await historyExists()).toBe(true);
 
-      await inRetentionSweepTx(ctx.su.prisma, (tx) => sweepPerTenantAge(tx, entry, 100));
+      await inRetentionSweepTx(ctx.su.prisma, (tx) => sweepPerTenantAge(tx, entry, 100), grantForEntry(entry));
       expect(await historyExists()).toBe(false);
     });
   });

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const { mockAuth, mockPrismaTenantMember, mockPrismaAdminVaultReset, mockRequireTenantPermission, mockWithTenantRls, mockFetchUserDisplayMap, TenantAuthError } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -209,7 +210,7 @@ describe("GET /api/tenant/members", () => {
 
     expect(mockFetchUserDisplayMap).toHaveBeenCalledWith(
       ["user-1", "user-2", "user-3"],
-      expect.any(String),
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 

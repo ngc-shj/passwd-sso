@@ -159,7 +159,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST, GET } from "./route";
 import { MS_PER_DAY } from "@/lib/constants/time";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // Module-scope snapshot: route.ts:40 `adminResetLimiter = createRateLimiter(...)`
 // then :46 `targetResetLimiter = createRateLimiter(...)` run at import time above,
@@ -848,7 +848,7 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 });

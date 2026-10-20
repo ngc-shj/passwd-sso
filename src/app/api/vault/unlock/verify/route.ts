@@ -35,7 +35,8 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { hexHash } from "@/lib/validations/common";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { compareVaultAuthHash } from "@/lib/vault/verify-auth-hash";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
@@ -143,7 +144,7 @@ async function handlePOST(request: NextRequest) {
       where: { id: tokenId },
       data: { lastPresenceAt: new Date() },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
   getLogger().info({ userId, clientKind }, "vault.unlock.verify.success");
 

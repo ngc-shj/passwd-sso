@@ -1,6 +1,4 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { getLogger } from "@/lib/logger";
 import { deadLetterLogger } from "@/lib/audit/audit-logger";
@@ -18,7 +16,9 @@ import {
   validateWebhookDeliveryLease,
 } from "@/lib/constants/audit/webhook-delivery-lease.server";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
+import { BYPASS_GRANT, readBypassState, setBypassGucs, setLockTimeout } from "@/lib/tenant-rls-grants";
+import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
+import { SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
 import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
@@ -71,29 +71,19 @@ interface WorkerConfig {
   pollIntervalMs?: number;
 }
 
-/** Structural minimum shared by PrismaClient and TransactionClient. */
-type RawExecutor = { $executeRaw: PrismaClient["$executeRaw"] };
 
-async function setBypassRlsGucs(client: RawExecutor): Promise<void> {
-  await client.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-  await client.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
-  await client.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
-}
 
 /**
  * Refuse to run an exported `*InTx` seam unless the caller's transaction
  * already carries the audit-write bypass. The seams never set the GUCs
- * themselves — each production wrapper calls setBypassRlsGucs first — so
+ * themselves — each production wrapper calls setBypassGucs first — so
  * importing a seam cannot carry an RLS bypass into a caller's transaction.
  * A read plus a JS throw, not a failing statement: a caller that catches the
  * error still holds a usable (non-aborted) transaction.
  */
 async function assertAuditWriteBypass(tx: Prisma.TransactionClient): Promise<void> {
-  const rows = await tx.$queryRaw<{ bypass_rls: string | null; bypass_purpose: string | null }[]>`
-    SELECT current_setting('app.bypass_rls', true) AS bypass_rls,
-           current_setting('app.bypass_purpose', true) AS bypass_purpose`;
-  const gucs = rows[0];
-  if (gucs?.bypass_rls !== "on" || gucs.bypass_purpose !== BYPASS_PURPOSE.AUDIT_WRITE) {
+  const gucs = await readBypassState(tx);
+  if (gucs?.bypassRls !== "on" || gucs.purpose !== BYPASS_PURPOSE.AUDIT_WRITE) {
     throw new Error("audit-outbox seam requires the audit_write RLS bypass on its transaction");
   }
 }
@@ -136,7 +126,7 @@ async function claimBatch(
   batchSize: number,
 ): Promise<AuditOutboxRow[]> {
   return prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_DRAIN);
     return claimOutboxBatchInTx(tx, batchSize);
   });
 }
@@ -171,7 +161,7 @@ export async function claimOutboxBatchInTx(
 
 /**
  * Enqueue exactly one webhook delivery work item for this outbox row, inside
- * the caller's winning audit tx (the tx MUST have already run setBypassRlsGucs).
+ * the caller's winning audit tx (the tx MUST have already run setBypassGucs).
  * Called only by the ON CONFLICT winner of the audit_logs INSERT, so the row is
  * enqueued atomically with the audit event: a crash before commit rolls back
  * both; a crash after commit leaves a durable PENDING row the delivery loop
@@ -248,7 +238,7 @@ export async function deliverRow(
   payload: AuditOutboxPayload,
 ): Promise<{ inserted: boolean }> {
   return prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_DRAIN);
 
     const metadataJson =
       payload.metadata !== null ? JSON.stringify(payload.metadata) : null;
@@ -320,7 +310,7 @@ export async function checkChainEnabled(
   tenantId: string,
 ): Promise<boolean> {
   const result = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_DRAIN);
     const rows = await tx.$queryRawUnsafe<{ audit_chain_enabled: boolean }[]>(
       `SELECT audit_chain_enabled FROM tenants WHERE id = $1::uuid`,
       tenantId,
@@ -344,10 +334,10 @@ export async function deliverRowWithChain(
   payload: AuditOutboxPayload,
 ): Promise<{ delivered: boolean; inserted: boolean }> {
   const result = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_DRAIN);
 
     // P4-S2 fix: prevent indefinite lock wait
-    await tx.$executeRaw`SET LOCAL lock_timeout = '5000ms'`;
+    await setLockTimeout(tx, 5000);
 
     // P4-F4 fix: ensure anchor row exists (idempotent upsert)
     await tx.$executeRawUnsafe(
@@ -510,7 +500,7 @@ export async function deliverRowWithChain(
 
 /**
  * Create audit_deliveries rows for each active non-DB delivery target, inside
- * the caller's winning audit tx (the tx MUST have already run setBypassRlsGucs).
+ * the caller's winning audit tx (the tx MUST have already run setBypassGucs).
  * Called only by the ON CONFLICT winner of the audit_logs INSERT, so the
  * delivery rows are enqueued atomically with the audit event: a crash before
  * commit rolls back both; a crash after commit leaves durable PENDING rows the
@@ -546,7 +536,7 @@ async function enqueueAuditDeliveriesInTx(
 
 /**
  * Insert a SYSTEM-actor audit event into audit_logs using the caller's
- * transaction. The caller's tx MUST have already run setBypassRlsGucs. This
+ * transaction. The caller's tx MUST have already run setBypassGucs. This
  * does NOT open a tx and does NOT swallow errors — a failure rolls back the
  * caller's tx, which is required when the audit row must commit atomically
  * with a sibling mutation (e.g. the retention-purge DELETE).
@@ -606,7 +596,7 @@ async function writeDirectAuditLogBestEffort(
 ): Promise<void> {
   try {
     await prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_ERROR_RECORD);
       await writeDirectAuditLogInTx(tx, tenantId, action, metadata, opts);
     });
   } catch (err) {
@@ -634,7 +624,7 @@ async function recordError(
 
   try {
     await prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_ERROR_RECORD);
 
       if (isDead) {
         await tx.$executeRawUnsafe(
@@ -702,7 +692,7 @@ function parsePayloadAction(raw: unknown): string {
 export async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Promise<number> {
   // Claim + fetch in a single transaction to avoid an extra roundtrip
   const deliveries = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_AUDIT_DELIVERY);
     const claimedIds = await claimDeliveriesInTx(tx, batchSize);
     if (claimedIds.length === 0) return [];
     return tx.auditDelivery.findMany({
@@ -723,7 +713,7 @@ export async function processDeliveryBatch(prisma: PrismaClient, batchSize: numb
   // audit_outbox RLS policy would cast ''::uuid (22P02). Only reachable when
   // an audit_deliveries row is PENDING, which is why it has not surfaced.
   const outboxRows = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_AUDIT_DELIVERY);
     return tx.auditOutbox.findMany({
       where: { id: { in: outboxIds } },
       select: { id: true, createdAt: true, payload: true, tenantId: true },
@@ -863,7 +853,7 @@ async function processOneDelivery(
 
     // Mark as SENT
     await workerPrisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_AUDIT_DELIVERY);
       await tx.auditDelivery.update({
         where: { id: delivery.id },
         data: { status: "SENT", lastError: null },
@@ -902,7 +892,7 @@ async function recordDeliveryError(
 
   if (isDead) {
     await workerPrisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_AUDIT_DELIVERY);
       await tx.auditDelivery.update({
         where: { id: delivery.id },
         data: {
@@ -941,7 +931,7 @@ async function recordDeliveryError(
     const nextRetry = new Date(Date.now() + withFullJitter(backoffMs));
 
     await workerPrisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_AUDIT_DELIVERY);
       await tx.auditDelivery.update({
         where: { id: delivery.id },
         data: {
@@ -991,7 +981,7 @@ export async function processWebhookDeliveryBatch(
   batchSize: number,
 ): Promise<number> {
   const claimed = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
     return claimWebhookDeliveriesInTx(tx, batchSize);
   });
 
@@ -1052,7 +1042,7 @@ async function processOneWebhookDelivery(
     // left to deliver, and the outbox-purge guard only allows this once no
     // PENDING/PROCESSING webhook delivery references the row.
     const outbox = await workerPrisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
       const rows = await tx.$queryRawUnsafe<
         { created_at: Date; payload: unknown }[]
       >(
@@ -1139,7 +1129,7 @@ async function resolveWebhookSubscribers(
   item: WebhookDeliveryRow,
 ): Promise<WebhookRecord[]> {
   return workerPrisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
     if (item.scope === "TEAM" && item.team_id) {
       const rows = await tx.teamWebhook.findMany({
         // Scope by tenantId too (defense-in-depth): delivery runs under bypass
@@ -1191,7 +1181,7 @@ async function markWebhookDeliverySent(
   deliveryId: string,
 ): Promise<void> {
   await workerPrisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
     await tx.$executeRawUnsafe(
       `UPDATE webhook_deliveries
        SET status = 'SENT', last_error = NULL, processing_started_at = NULL
@@ -1207,7 +1197,7 @@ async function onWebhookDeliverySuccess(
   webhookId: string,
 ): Promise<void> {
   await workerPrisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
     if (scope === "TEAM") {
       await tx.teamWebhook.update({
         where: { id: webhookId },
@@ -1248,7 +1238,7 @@ export async function onWebhookDeliveryFailure(
   // best-effort AFTER (warn-on-fail). This is the ONLY sweep site where the state
   // change outranks audit atomicity — terminal/dead-letter events stay co-committed.
   const updated = await workerPrisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
     const rows = await tx.$queryRawUnsafe<{ fail_count: number }[]>(
       renderSql(trustedSql`UPDATE "${sqlIdentifier(table)}"
        SET fail_count = fail_count + 1,
@@ -1306,7 +1296,7 @@ async function recordWebhookDeliveryError(
 
   try {
     await workerPrisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_WEBHOOK_DELIVERY);
       if (isDead) {
         await tx.$executeRawUnsafe(
           `UPDATE webhook_deliveries
@@ -1395,7 +1385,7 @@ export async function reapStuckRows(
   // its audit record. If any audit insert throws, the whole batch rolls back and
   // is retried on the next reaper tick.
   return prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_REAPER);
     return reapStuckRowsInTx(tx, limit);
   });
 }
@@ -1496,7 +1486,7 @@ export async function reapStuckDeliveries(
   // tx (parity with reapStuckRows), so a reaper-driven delivery dead-letter can
   // never be silent in the audit trail.
   return prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_REAPER);
     return reapStuckDeliveriesInTx(tx, limit);
   });
 }
@@ -1570,7 +1560,7 @@ export async function reapStuckWebhookDeliveries(
   limit: number = AUDIT_OUTBOX.REAP_BATCH_SIZE,
 ): Promise<number> {
   const count = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_REAPER);
     return reapStuckWebhookDeliveriesInTx(tx, limit);
   });
 
@@ -1673,11 +1663,11 @@ export async function purgeRetention(
   // a matching audit record: if the FAILED-branch tx later throws, the
   // SENT-branch delete + its audit event have already committed together.
   const sentPurged = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_RETENTION_PURGE);
     return purgeSentAgedInTx(tx, limit);
   });
   const failedPurged = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_RETENTION_PURGE);
     return purgeFailedAgedInTx(tx, limit);
   });
 
@@ -1688,7 +1678,7 @@ export async function purgeRetention(
 
   // Purge terminal delivery rows
   const deliveryPurged = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_RETENTION_PURGE);
     return purgeDeliveryRetentionInTx(tx, sentCutoff, failedCutoff, limit);
   });
   if (deliveryPurged > 0) {
@@ -1697,7 +1687,7 @@ export async function purgeRetention(
 
   // Purge terminal webhook delivery rows (bounded).
   const webhookDeliveryPurged = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_RETENTION_PURGE);
     return purgeWebhookDeliveryRetentionInTx(tx, sentCutoff, failedCutoff, limit);
   });
   if (webhookDeliveryPurged > 0) {
@@ -1931,13 +1921,14 @@ async function runReaper(prisma: PrismaClient): Promise<void> {
  * `$transaction` cannot represent.
  *
  * MUST run inside a bypass transaction. Reading audit_outbox on a bare pool
- * connection fails: the `tenant_id = current_setting('app.tenant_id', true)::uuid`
+ * connection fails: the `tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)`
  * branch of the RLS policy casts an EMPTY STRING and raises 22P02. A custom GUC
  * set with `SET LOCAL` does not revert to unset when the transaction ends — it
  * reverts to the session default, which is '' once the GUC has been touched at
  * all. So after the first bypass tx on a pooled connection, current_setting(...)
- * returns '' rather than NULL for the rest of that connection's life, and
- * `''::uuid` errors before the OR-bypass clause can short-circuit. Same trap
+ * returns '' rather than NULL for the rest of that connection's life. With the
+ * bypass off, the bypass branch is false and the tenant branch's sub-SELECT
+ * evaluates `''::uuid`, which errors. Same trap
  * documented in scripts/rls-cross-tenant-verify.sql (Block 4's nil-sentinel
  * comment).
  */
@@ -1946,7 +1937,7 @@ export async function readOutboxDepth(
 ): Promise<{ pending: number; oldestAgeSecs: number }> {
   const rows = await prisma.$transaction(
     async (tx) => {
-      await setBypassRlsGucs(tx);
+      await setBypassGucs(tx, BYPASS_GRANT.OUTBOX_DEPTH_READ);
       return tx.$queryRawUnsafe<
         Array<{ pending: bigint; oldest_age_secs: number | null }>
       >(`
@@ -1979,7 +1970,7 @@ export function createWorker(config: WorkerConfig) {
   const batchSize = config.batchSize ?? AUDIT_OUTBOX.BATCH_SIZE;
   const pollIntervalMs = config.pollIntervalMs ?? AUDIT_OUTBOX.POLL_INTERVAL_MS;
 
-  const pool = new pg.Pool({
+  const pool = createPool({
     connectionString: databaseUrl,
     max: 5,
     idleTimeoutMillis: WORKER_POOL_IDLE_TIMEOUT_MS,
@@ -2003,8 +1994,7 @@ export function createWorker(config: WorkerConfig) {
     );
   });
 
-  const adapter = new PrismaPg(pool);
-  const workerPrisma = new PrismaClient({ adapter });
+  const workerPrisma = createPrismaClient(pool);
 
   let running = false;
   let shutdownResolve: (() => void) | null = null;

@@ -89,27 +89,39 @@ control for those tables is enforced entirely at the application layer.
 
 ## Bypass surface
 
-`scripts/checks/check-bypass-rls.mjs` is the single source of truth for every `withBypassRls(...)`
-call site in production code. It enforces three invariants:
+Every bypass names a **grant**: a member of `BYPASS_GRANT` in `src/lib/tenant-rls-grants.ts`,
+built with `defineGrant(purpose, models)`. `withBypassRls(prisma, fn, grant)` and
+`setBypassGucs(tx, grant)` write the grant's tables into the transaction-local
+`app.bypass_tables` GUC, and every RLS policy admits a bypassed row only through
+`public.rls_bypass_admits('<its own table>')`.
 
-1. **File allowlist** (`ALLOWED_USAGE`, a `Map<file, allowedModels[]>`) — a file may call
-   `withBypassRls` only if it appears in the map; `"*"` means any Prisma model is permitted
-   (reserved for the definition file and a few `$transaction`-heavy call sites that touch many
-   models by design, e.g. vault reset).
-2. **Per-file model allowlist** — for files with an explicit model list, every model reached from a
-   bypass callback (followed through the functions it calls, by type) must be in that file's list.
-   This is a partial, development-time preventive control, not a tenant boundary: nothing at runtime
-   checks a bypass's purpose or the models it touches, so code the analysis does not follow can reach
-   an ungranted model unchecked. See the gate's header and #911 for the known shapes.
-3. **`BYPASS_PURPOSE` constant usage** — every call site (except the definition file) must reference
-   a `BYPASS_PURPOSE.*` constant rather than a string literal, and the tx-less callback shape
-   (`() => prisma.x` instead of `(tx) => tx.x`) is banned for both `withBypassRls` and `withTenantRls`.
+- **Runtime (database), report mode:** a bypassed statement that examines a row of a table outside
+  its grant is admitted, and the database raises
+  `WARNING rls_bypass_not_granted table=<t> purpose=<p>`. The pool listener in
+  `src/lib/db/pool-factory.ts` logs it as `_logType: "rls.bypass_not_granted"`, and CloudWatch
+  counts it (`RlsBypassNotGranted`). Refusing such a statement (enforce mode) is a separate,
+  later step (#911). Until then the grant is observed, not enforced. A statement that examines no
+  row raises nothing. FK cascades, and `SECURITY DEFINER` bodies owned by an RLS-exempt role, are
+  outside this control.
+- **Static (CI), `scripts/checks/check-bypass-rls.mjs`:** a limited, development-time aid.
+  1. **File allowlist** (`ALLOWED_USAGE`): a file may call `withBypassRls` only if it is listed.
+  2. **Grant resolution:** each call's grant must resolve to a `BYPASS_GRANT` member, or to a
+     `BypassGrant` parameter, whose production callers are then charged.
+  3. **Per-call reach:** every model a call reaches (followed through the functions it calls, by
+     type) must be in its grant. Unnamed grants and unreached models fail as stale.
+  4. **Writer, pool and function rules:** only `tenant-rls.ts` / `tenant-rls-grants.ts` may write the
+     bypass GUCs; only `src/lib/db/pool-factory.ts` may construct a pg pool, client or Prisma
+     adapter (so every connection carries the report listener); no code may create a database
+     function.
 
-As of this writing, `ALLOWED_USAGE` has **101 entries** (the `ALLOWED_USAGE` map in `scripts/checks/check-bypass-rls.mjs`; the file holds other maps, so a whole-file line count overstates it).
-This document does not copy the list — `scripts/checks/check-bypass-rls.mjs` is the SSoT and is
-CI-enforced on every push; consult it directly for the current file × model grant.
+  The tx-less callback shape (`() => prisma.x` instead of `(tx) => tx.x`) is banned for both
+  `withBypassRls` and `withTenantRls`. Code the analysis does not follow is left to the
+  database report.
 
-Purpose classes (`BYPASS_PURPOSE` in `src/lib/tenant-rls.ts:5-13`), each covering a distinct reason a
+This document does not copy the allowlist or the grants. `scripts/checks/check-bypass-rls.mjs` and
+`src/lib/tenant-rls-grants.ts` are the SSoT, CI-enforced on every push.
+
+Purpose classes (`BYPASS_PURPOSE` in `src/lib/tenant-rls-purpose.ts`), each covering a distinct reason a
 call site legitimately needs to see across tenant boundaries:
 
 | Purpose | Typical call sites |
@@ -231,17 +243,19 @@ designed to stay within.
 
 ## Tenant-context GUC mechanism
 
-Three Postgres GUCs (`current_setting` / `set_config`, transaction-scoped via the `true` third
+Four Postgres GUCs (`current_setting` / `set_config`, transaction-scoped via the `true` third
 argument) drive every RLS policy in this schema:
 
 | GUC | Set by | Read by |
 | --- | --- | --- |
-| `app.tenant_id` | `withTenantRls` (the caller's tenant); `withBypassRls` (set to `NIL_UUID` to keep both OR-branches of the RLS policy castable) | Every RLS policy's `tenant_id = current_setting('app.tenant_id')::uuid` clause |
-| `app.bypass_rls` | `withBypassRls` (`'on'`) | Every RLS policy's `OR COALESCE(current_setting('app.bypass_rls', true), '') = 'on'` clause |
-| `app.bypass_purpose` | `withBypassRls` (the `BypassPurpose` string) | Not read by any RLS policy today — observability-only (see below) |
+| `app.tenant_id` | `withTenantRls` (the caller's tenant); `setBypassGucs` (`NIL_UUID` unless a tenant is given, keeping both OR-branches of the RLS policy castable) | Every RLS policy's `tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)` clause (a sub-SELECT, so it is evaluated only when the bypass branch is false) |
+| `app.bypass_rls` | `setBypassGucs` (`'on'`); `withTenantRls` pins it `'off'` | `public.rls_bypass_admits(table)`, called by every RLS policy's `OR (SELECT public.rls_bypass_admits('<table>'))` branch |
+| `app.bypass_tables` | `setBypassGucs` (the grant's tables, `,`-joined); `withTenantRls` pins it `''` | `public.rls_bypass_admits(table)`: exact membership of the policy's own table |
+| `app.bypass_purpose` | `setBypassGucs` (the grant's purpose) | `public.rls_bypass_admits(table)`: named, sanitised, in the report |
 
-`src/lib/tenant-rls.ts` (`withTenantRls`, `withBypassRls`) is the sole production entry point for
-setting these GUCs; both wrap `prisma.$transaction` and run the GUC-setting `$executeRaw` calls
+`src/lib/tenant-rls.ts` (`withTenantRls`, `withBypassRls`) and `src/lib/tenant-rls-grants.ts`
+(`setBypassGucs`, for the workers that open their own transactions) are the only production writers
+of these GUCs (the gate's writer rule). The helpers wrap `prisma.$transaction` and run the GUC-setting `$executeRaw` calls
 inside that transaction, so the GUCs are transaction-scoped and cannot leak across requests.
 
 **Nesting rule (symmetric, enforced at runtime)**: `AsyncLocalStorage` (the in-process context that
@@ -261,13 +275,11 @@ directions are therefore rejected at runtime:
 proxy injection at runtime; it silently breaks under dependency injection or a raw `PrismaClient` in
 tests, so the checker treats it as a violation independent of the model/purpose checks.
 
-**`app.bypass_purpose` is observability-only today**: `src/workers/retention-gc-worker/sweep.ts`'s
-raw `$executeRaw` GUC calls (the worker does not go through `withBypassRls` — it is not a
-"per-request" caller with a `PrismaClient` handle in the same shape) set only `app.bypass_rls`, not
-`app.bypass_purpose` or `app.tenant_id`. No RLS policy currently branches on `bypass_purpose`; it
-exists so that structured logs / future policies could distinguish bypass reasons, but as of this
-writing it is written by `withBypassRls` call sites and left unset by the retention-gc worker's
-direct GUC calls. This is a documented inconsistency (C4-S5/A3), not a security gap — the worker's
-correctness does not depend on `bypass_purpose` being set. Full consolidation of the three-GUC
-`set_config` triple behind a single shared helper (an `setBypassRlsGucsOnTx`-shaped function) is
-tracked as `TODO(route-policy-sql-security): extract setBypassRlsGucsOnTx shared helper`.
+**A refused nesting fails the outer transaction**: the refusal marks the outer context, and the outer
+helper throws `INVALID_RLS_NESTING: a nested RLS context was refused inside this <helper>` when its
+callback returns, rolling the outer transaction back even if the caller caught the inner error.
+Two limits remain, both still logged (`rls.nesting_refused`): nested work detached from the callback
+and refused after the outer transaction committed, and a caller that catches the outer error.
+This covers nested contexts only. `logAuditAsync` called inside a context never reaches an opener:
+`src/lib/audit/audit.ts` refuses the emit and logs `audit-refused`, and the outer transaction commits
+without that audit row. Code that must audit inside a context uses `logAuditInTx`.

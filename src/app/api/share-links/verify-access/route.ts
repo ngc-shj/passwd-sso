@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { verifyShareAccessSchema } from "@/lib/validations";
 import { hashToken, verifyAccessPassword } from "@/lib/crypto/crypto-server";
 import { createShareAccessToken } from "@/lib/auth/tokens/share-access-token";
@@ -79,7 +80,7 @@ async function handlePOST(req: NextRequest) {
         viewCount: true,
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.SHARE_LINK_VERIFY_ACCESS);
 
   if (!share) {
     return notFound();

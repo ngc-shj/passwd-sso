@@ -15,7 +15,7 @@
  * That role retains SELECT on audit_logs after the C13 REVOKE, but SELECT
  * PRIVILEGE IS NOT RLS VISIBILITY: passwd_app is NOBYPASSRLS, and both
  * audit_logs and audit_chain_anchors are FORCE ROW LEVEL SECURITY with
- * `bypass_rls='on' OR tenant_id = current_setting('app.tenant_id',true)::uuid`.
+ * `rls_bypass_admits('<table>') OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)`.
  * With the GUC unset the predicate is NULL and every read returns zero rows
  * WITH NO ERROR — so the walk finds nothing wrong and reports every tenant
  * healthy. Reads therefore run inside withTenantRls, which sets app.tenant_id
@@ -35,9 +35,7 @@
  * manufactured assurance one layer up.
  */
 
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
+import type { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import {
@@ -48,6 +46,7 @@ import {
 } from "@/lib/audit/audit-chain-verify";
 import { MS_PER_HOUR, MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 
 config({ path: resolve(process.cwd(), ".env.local") });
 config({ path: resolve(process.cwd(), ".env") });
@@ -363,9 +362,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
-  const adapter = new PrismaPg(pool);
-  const prisma = new PrismaClient({ adapter });
+  registerBypassNoticeSink(stderrBypassNoticeSink);
+  const pool = createPool({ connectionString: databaseUrl });
+  const prisma = createPrismaClient(pool);
 
   const states = new Map<string, TenantState>();
   const stop = { value: false };

@@ -22,8 +22,8 @@
  * The script seeds a temporary MCP client + tokens, exercises rotate + replay,
  * verifies the audit row shape, then deletes the test fixture (try/finally).
  */
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
+import { BYPASS_GRANT, setBypassGucs } from "@/lib/tenant-rls-grants";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { config } from "dotenv";
 
@@ -33,8 +33,8 @@ config({ path: ".env.local" });
 // seed/cleanup. The actual audit row under verification is still written by the
 // API process running as passwd_app — only the test fixture rows need elevated
 // access.
-const adapter = new PrismaPg({ connectionString: process.env.MIGRATION_DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
+registerBypassNoticeSink(stderrBypassNoticeSink);
+const prisma = createPrismaClient(createPool({ connectionString: process.env.MIGRATION_DATABASE_URL }), {}, { ownsPool: true });
 
 const BASE = process.env.BASE_URL ?? "https://localhost:3001/passwd-sso";
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
@@ -46,9 +46,7 @@ function hashToken(t: string): string {
 
 async function withTenantRls<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-    await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'TOKEN_LIFECYCLE', true)`;
-    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
+    await setBypassGucs(tx, BYPASS_GRANT.MANUAL_MCP_REPLAY_VERIFICATION, { tenantId });
     return fn();
   });
 }

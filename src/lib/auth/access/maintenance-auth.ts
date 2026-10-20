@@ -8,7 +8,8 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponseWithMessage } from "@/lib/http/api-response";
@@ -52,7 +53,7 @@ export async function requireMaintenanceOperator(
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: { tenantId: true, role: true },
       }),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    BYPASS_GRANT.MAINTENANCE_OPERATOR_CHECK,
   );
   if (!membership) {
     return {

@@ -50,6 +50,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 
 import { POST } from "./route";
 import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 // Module-scope snapshot (route.ts:16 `const acceptLimiter = createRateLimiter(...)`
 // runs at import time, above). See fail-closed.ts module doc.
@@ -289,7 +290,11 @@ describe("POST /api/teams/invitations/accept", () => {
     }));
 
     // Invitation lookup: bypass RLS (invitee not yet in team's tenant)
-    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), expect.any(String));
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_GRANT.TEAM_INVITATION_ACCEPT,
+    );
     // Team data operations: team tenant RLS
     expect(mockWithTeamTenantRls).toHaveBeenCalledWith("team-1", expect.any(Function));
     // User data: user tenant RLS

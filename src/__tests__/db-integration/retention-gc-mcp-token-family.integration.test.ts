@@ -213,7 +213,7 @@ describe("retention-gc mcp_access_tokens family-aware GC (SC5/C5)", () => {
     const deadRt = await insertRefreshToken(at, "now() - interval '1 hour'", false);
 
     await ctx.retentionWorker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `DELETE FROM mcp_access_tokens WHERE (id) IN (
            SELECT id FROM mcp_access_tokens
@@ -242,7 +242,7 @@ describe("retention-gc mcp_access_tokens family-aware GC (SC5/C5)", () => {
 
     await expect(
       ctx.retentionWorker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `DELETE FROM mcp_refresh_tokens WHERE id = $1::uuid`,
           rt,

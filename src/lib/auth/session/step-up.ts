@@ -4,7 +4,8 @@ import { getSessionTokenDigest } from "@/app/api/sessions/helpers";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 export const STEP_UP_WINDOW_MS = 15 * MS_PER_MINUTE;
 
@@ -37,7 +38,7 @@ export async function requireRecentSession(
         where: { sessionToken: sessionTokenDigest },
         select: { createdAt: true },
       }),
-    BYPASS_PURPOSE.AUTH_FLOW,
+    BYPASS_GRANT.AUTH_SESSION_LIFECYCLE,
   );
 
   if (!sessionRow) {

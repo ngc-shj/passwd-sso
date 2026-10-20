@@ -29,7 +29,9 @@ import { randomUUID } from "node:crypto";
 import { createTestContext, type TestContext } from "./helpers";
 import { enqueueAudit, enqueueAuditBulk, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 import { prisma } from "@/lib/prisma";
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 
 type GucSnapshot = { bypass_rls: string | null; tenant_id: string | null; bypass_purpose: string | null };
 
@@ -154,7 +156,7 @@ describe("outbox openers run on the un-proxied client (C1)", () => {
       before = await readGucs(tx);
       await enqueueAudit(tenantId, payload());
       after = await readGucs(tx);
-    }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    }, BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
 
     expect(before.bypass_purpose).toBe(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     expect(after.bypass_purpose).toBe(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);

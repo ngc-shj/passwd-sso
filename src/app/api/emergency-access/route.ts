@@ -12,7 +12,8 @@ import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-respons
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -88,7 +89,7 @@ async function handlePOST(req: NextRequest) {
       where: { email: { in: [granteeEmail], mode: "insensitive" } },
       select: { locale: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
   const locale = resolveUserLocale(granteeUser?.locale);
   const ownerName = session.user.name ?? session.user.email ?? "";
   const { subject, html, text } = emergencyInviteEmail(locale, ownerName);
@@ -136,7 +137,7 @@ async function handleGET() {
       },
       orderBy: { createdAt: "desc" },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.EMERGENCY_ACCESS_GRANT_LOOKUP);
 
   const result = grants.map((g) => ({
     id: g.id,

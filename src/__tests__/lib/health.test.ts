@@ -14,10 +14,10 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 // Runs the callback against a tx whose $queryRaw is the same mock, so the
-// outbox query keeps flowing through mockQueryRaw. The purpose argument is
+// outbox query keeps flowing through mockQueryRaw. The grant argument is
 // recorded, which is what pins the bypass context in place: dropping
 // withBypassRls leaves this uncalled.
-// BYPASS_PURPOSE comes from the REAL module. Re-typing its value here would
+// BYPASS_GRANT comes from the REAL module. Re-typing its value here would
 // let the mock and the assertion agree with each other while production
 // recorded a different purpose in app.bypass_purpose — the double and the
 // expectation would share an author.
@@ -36,7 +36,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { runHealthChecks, CHECK_TIMEOUT_MS } from "@/lib/health";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 describe("health checks", () => {
   // Fake timers are installed inside three test bodies. `useRealTimers` sits
@@ -179,7 +179,7 @@ describe("health checks", () => {
       expect(mockWithBypassRls).toHaveBeenCalledWith(
         expect.anything(),
         expect.any(Function),
-        BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+        BYPASS_GRANT.AUDIT_OUTBOX_OPERATOR_ACCESS,
         expect.objectContaining({
           timeout: expect.any(Number),
           maxWait: expect.any(Number),

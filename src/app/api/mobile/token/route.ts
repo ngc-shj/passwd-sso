@@ -42,7 +42,8 @@ import {
 } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
@@ -140,7 +141,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
           expiresAt: true,
         },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.MOBILE_BRIDGE_CODE_LIFECYCLE,
   );
   // In-memory freshness check (informational — CAS at step 7 is authoritative).
   // We still verify subsequent bindings even when stored looks "stale" because
@@ -225,7 +226,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
         where: { codeHash, usedAt: null, expiresAt: { gt: now } },
         data: { usedAt: now },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.MOBILE_BRIDGE_CODE_LIFECYCLE,
   );
   if (cas.count === 0) {
     getLogger().warn(
@@ -254,7 +255,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
           extensionTokenAbsoluteTimeoutMinutes: true,
         },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.TOKEN_TENANT_LOOKUP,
   );
   if (!tenant) {
     throw new Error(`mobile token issuance: tenant ${stored.tenantId} not found`);

@@ -493,8 +493,8 @@ if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -
     # sed (not awk) — bash -c "..." double-escapes positional vars and breaks awk $1 references.
     EXPECTED_TABLES=$(sed -E "/^#/d; /^[[:space:]]*$/d; s/^[[:space:]]+//; s/[[:space:]]+$//" \
       scripts/rls-cross-tenant-tables.manifest | paste -sd,)
-    out=$(cat scripts/rls-cross-tenant-verify.sql | docker exec -i passwd-sso-db-1 \
-      psql -U passwd_app -d passwd_sso -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" 2>&1) && ec=0 || ec=$?
+    out=$(cat scripts/rls-cross-tenant-verify.sql | scripts/rls-verify-run.sh -- docker exec -i passwd-sso-db-1 \
+      psql -U passwd_app -d passwd_sso -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES") && ec=0 || ec=$?
     if (( ec == 0 )); then
       exit 0
     fi

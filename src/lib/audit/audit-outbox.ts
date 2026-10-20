@@ -8,8 +8,7 @@ import type { Prisma } from "@prisma/client";
 // its remainder. Opening on the un-proxied client makes that structurally
 // impossible rather than conventionally avoided.
 import { prismaBase } from "@/lib/prisma";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { NIL_UUID } from "@/lib/constants/app";
+import { BYPASS_GRANT, readBypassState, setBypassGucs } from "@/lib/tenant-rls-grants";
 
 import { enqueueAuditInTx as enqueueAuditRowInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox-in-tx";
 
@@ -34,9 +33,7 @@ export async function enqueueAudit(
   payload: AuditOutboxPayload,
 ): Promise<void> {
   await prismaBase.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-    await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
-    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
+    await setBypassGucs(tx, BYPASS_GRANT.AUDIT_OUTBOX_ENQUEUE);
     await enqueueAuditInTx(tx, tenantId, payload);
   });
 }
@@ -52,12 +49,8 @@ export async function enqueueAuditBulk(
 ): Promise<void> {
   if (payloads.length === 0) return;
   await prismaBase.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-    await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
-    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
-    const [ctx] = await tx.$queryRaw<{ bypass_rls: string }[]>`
-      SELECT current_setting('app.bypass_rls', true) AS bypass_rls`;
-    if (ctx.bypass_rls !== "on") {
+    await setBypassGucs(tx, BYPASS_GRANT.AUDIT_OUTBOX_ENQUEUE);
+    if ((await readBypassState(tx))?.bypassRls !== "on") {
       throw new Error("enqueueAuditBulk: bypass_rls context not active");
     }
     const [tenantExists] = await tx.$queryRaw<{ ok: boolean }[]>`

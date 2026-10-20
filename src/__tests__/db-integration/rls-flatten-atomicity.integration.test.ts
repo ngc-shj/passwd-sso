@@ -27,7 +27,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { prisma } from "@/lib/prisma";
-import { withTenantRls, BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
+import { defineGrant } from "@/lib/tenant-rls-grants";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
+
+const SEED_GRANT = defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["emergencyAccessGrant"]);
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { logAuditInTx } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, EA_STATUS } from "@/lib/constants";
@@ -201,7 +205,7 @@ describe("ambient statements share the opener's transaction", () => {
         `grantee-${grantId.slice(0, 6)}@example.com`,
         randomUUID().replace(/-/g, ""),
       );
-    }, BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+    }, SEED_GRANT);
   }
 
   async function grantStatus(grantId: string): Promise<string> {

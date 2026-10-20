@@ -112,11 +112,11 @@ describe("check-rls-read-context", () => {
     const r = runGate(`
       export async function f(prisma: any) {
         return prisma.$transaction(async (tx: any) => {
-          await setBypassRlsGucs(tx);
+          await setBypassGucs(tx);
           return tx.auditOutbox.findMany({});
         });
       }
-      declare function setBypassRlsGucs(tx: any): Promise<void>;
+      declare function setBypassGucs(tx: any, grant?: unknown): Promise<void>;
     `);
     expect(r.status).toBe(0);
   });
@@ -250,11 +250,11 @@ describe("check-rls-read-context", () => {
       import type { Prisma } from "@prisma/client";
       export async function f(prisma: any) {
         return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          await setBypassRlsGucs(tx);
+          await setBypassGucs(tx);
           return tx.auditOutbox.findMany({});
         });
       }
-      declare function setBypassRlsGucs(tx: any): Promise<void>;
+      declare function setBypassGucs(tx: any, grant?: unknown): Promise<void>;
     `);
     expect(r.status).toBe(0);
   });
@@ -536,16 +536,16 @@ describe("check-rls-read-context", () => {
 
   describe("$transaction GUC establishment", () => {
     const read = "return tx.auditOutbox.findMany({});";
-    const decl = "declare function setBypassRlsGucs(x: any): Promise<void>;";
+    const decl = "declare function setBypassGucs(x: any, grant?: unknown): Promise<void>;";
 
     // Every one of these re-admits the checkDepthAlert defect. They are the
     // shapes a text predicate over the callback source accepts, which is why
     // the check is an AST walk rather than a regex.
     it.each([
-      ["a comment naming the helper", `/* setBypassRlsGucs(tx) in caller */ ${read}`],
+      ["a comment naming the helper", `/* setBypassGucs(tx) in caller */ ${read}`],
       ["a comment naming set_config", `/* set_config("app.tenant_id", t, true) */ ${read}`],
-      ["a string literal naming the helper", `const m = "wrap in setBypassRlsGucs(tx)"; void m; ${read}`],
-      ["the setter on a DIFFERENT binding", `await setBypassRlsGucs(other); ${read}`],
+      ["a string literal naming the helper", `const m = "wrap in setBypassGucs(tx)"; void m; ${read}`],
+      ["the setter on a DIFFERENT binding", `await setBypassGucs(other); ${read}`],
       ["set_config to the EMPTY string", `await tx.$executeRawUnsafe("SELECT set_config('app.tenant_id', '', true)"); ${read}`],
     ])("FAILS a bare $transaction with only %s", (_label, body) => {
       const r = runGate(`
@@ -562,7 +562,7 @@ describe("check-rls-read-context", () => {
         export async function f(prisma: any) {
           return prisma.$transaction(async (tx: any) => {
             const rows = await tx.auditOutbox.findMany({});
-            await setBypassRlsGucs(tx);
+            await setBypassGucs(tx);
             return rows;
           });
         }
@@ -571,11 +571,11 @@ describe("check-rls-read-context", () => {
       expect(r.status).not.toBe(0);
     });
 
-    it("PASSES a real setBypassRlsGucs on the binding, before the read", () => {
+    it("PASSES a real setBypassGucs on the binding, before the read", () => {
       const r = runGate(`
         export async function f(prisma: any) {
           return prisma.$transaction(async (tx: any) => {
-            await setBypassRlsGucs(tx);
+            await setBypassGucs(tx);
             ${read}
           });
         }
@@ -584,7 +584,9 @@ describe("check-rls-read-context", () => {
       expect(r.status).toBe(0);
     });
 
-    it("PASSES raw set_config on the binding, before the read", () => {
+    // A raw set_config is not the writer: check-bypass-rls's writer rule
+    // refuses it outside src/lib/tenant-rls*.ts, so it establishes nothing here.
+    it("FAILS raw set_config on the binding, before the read", () => {
       const r = runGate(`
         export async function f(prisma: any, t: string) {
           return prisma.$transaction(async (tx: any) => {
@@ -593,7 +595,7 @@ describe("check-rls-read-context", () => {
           });
         }
       `);
-      expect(r.status).toBe(0);
+      expect(r.status).not.toBe(0);
     });
 
     it("REPORTS rather than accepts when the binding is passed to an unknown helper", () => {
@@ -628,11 +630,11 @@ describe("check-rls-read-context", () => {
     const r = runGate(
       `export async function f(prisma: any) {
          return prisma.$transaction(async (tx: any) => {
-           await setBypassRlsGucs(tx);
+           await setBypassGucs(tx);
            return tx.auditOutbox.findMany({});
          });
        }
-       declare function setBypassRlsGucs(tx: any): Promise<void>;`,
+       declare function setBypassGucs(tx: any, grant?: unknown): Promise<void>;`,
       { dirs: "src/workers,src/lib/health_MOVED.ts" },
     );
     expect(r.status).not.toBe(0);

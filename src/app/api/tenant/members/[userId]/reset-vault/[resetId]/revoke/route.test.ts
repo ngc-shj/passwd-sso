@@ -91,7 +91,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const TENANT_ID = "tenant-1";
 const TARGET_USER_ID = "user-target";
@@ -332,7 +332,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke", () =>
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 

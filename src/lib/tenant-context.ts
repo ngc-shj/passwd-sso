@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { owningTenantOf } from "@/lib/tenant/owning-tenant-rule";
 
 export async function resolveUserTenantIdFromClient(
@@ -23,7 +24,7 @@ export async function resolveUserTenantIdFromClient(
 export async function resolveUserTenantId(userId: string): Promise<string | null> {
   return withBypassRls(prisma, async (tx) =>
     resolveUserTenantIdFromClient(tx, userId),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TENANT_MEMBERSHIP_LOOKUP);
 }
 
 /**
@@ -104,7 +105,7 @@ export async function resolveTeamTenantId(teamId: string): Promise<string | null
       select: { tenantId: true },
     });
     return team?.tenantId ?? null;
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.TEAM_TENANT_LOOKUP);
 }
 
 export async function withUserTenantRls<T>(
@@ -191,7 +192,7 @@ export async function usersActiveInAnotherTenant(
       ids: new Set(rows.map((r) => r.userId)),
       emails: new Set(rows.map((r) => r.user.email?.toLowerCase()).filter((e): e is string => !!e)),
     };
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.TENANT_MEMBERSHIP_LOOKUP);
 }
 
 /** How an existing user stands toward the tenant that wants to attach them. */
@@ -271,7 +272,7 @@ export async function resolveExistingUsersForTenant(
       );
     }
     return resolved;
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
 }
 
 /**
@@ -312,5 +313,5 @@ export async function usersOwnedByAnotherTenant(
     return new Set(
       users.filter((u) => owningTenantOf(u.tenantId, u.tenantMemberships) !== tenantId).map((u) => u.id),
     );
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
 }

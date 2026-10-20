@@ -30,7 +30,8 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized, forbidden } from "@/lib/http/api-response";
@@ -155,7 +156,7 @@ async function handleGET(req: NextRequest) {
         `SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1`,
         tenantId,
       ),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    BYPASS_GRANT.AUDIT_CHAIN_VERIFY_ANCHOR_READ,
   );
 
   if (!anchors.length) {
@@ -173,7 +174,7 @@ async function handleGET(req: NextRequest) {
              AND chain_seq IS NOT NULL`,
           tenantId,
         ),
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.AUDIT_LOG_MAINTENANCE_ACCESS,
     );
     if (Number(chainedRows[0]?.count ?? 0) > 0) {
       await logAuditAsync({
@@ -221,7 +222,7 @@ async function handleGET(req: NextRequest) {
           tenantId,
           from,
         ),
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.AUDIT_LOG_MAINTENANCE_ACCESS,
     );
     const minSeq = fromRows[0]?.chain_seq;
     if (minSeq != null) {
@@ -244,7 +245,7 @@ async function handleGET(req: NextRequest) {
           tenantId,
           to,
         ),
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.AUDIT_LOG_MAINTENANCE_ACCESS,
     );
     const maxSeq = toRows[0]?.chain_seq;
     if (maxSeq != null) {
@@ -266,7 +267,7 @@ async function handleGET(req: NextRequest) {
           tenantId,
           BigInt(fromSeq - 1),
         ),
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      BYPASS_GRANT.AUDIT_LOG_MAINTENANCE_ACCESS,
     );
     if (!seedRows[0]?.event_hash) {
       return errorResponse(API_ERROR.AUDIT_CHAIN_SEED_NOT_FOUND);
@@ -292,7 +293,7 @@ async function handleGET(req: NextRequest) {
         BigInt(toSeq),
         MAX_ROWS_PER_REQUEST,
       ).then((rawRows) => rawRows.map(toChainRow)),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    BYPASS_GRANT.AUDIT_LOG_MAINTENANCE_ACCESS,
   );
 
   // The walk lives in @/lib/audit/audit-chain-verify so the periodic worker

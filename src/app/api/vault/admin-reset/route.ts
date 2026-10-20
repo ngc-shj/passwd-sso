@@ -12,7 +12,8 @@ import {
   findVaultRowsOutsideTenant,
   VaultResetOutsideTenantError,
 } from "@/lib/vault/vault-reset";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
@@ -80,7 +81,7 @@ async function handlePOST(req: NextRequest) {
     tx.adminVaultReset.findUnique({
       where: { tokenHash },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.ADMIN_VAULT_RESET_LOOKUP);
 
   if (!resetRecord) {
     return notFound();
@@ -133,7 +134,7 @@ async function handlePOST(req: NextRequest) {
       },
       data: { executedAt: new Date(), encryptedToken: null },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.ADMIN_VAULT_RESET_LOOKUP);
 
   if (atomicResult.count === 0) {
     return errorResponse(API_ERROR.VAULT_RESET_TOKEN_USED);

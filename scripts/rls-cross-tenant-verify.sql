@@ -36,14 +36,23 @@ SET app.expected_tables TO :'expected_tables';
 --                                 vs non-NULL polwithcheck would otherwise
 --                                 fire [E-RLS-SYM] first and mask the defect)
 --   4. [E-RLS-SYM]                USING ↔ WITH CHECK symmetry
---   5. [E-RLS-COLPARITY]          column count vs discovery count parity
---   6. [E-RLS-MANIFEST-EXTRA]     manifest \ discovery
---   7. [E-RLS-MANIFEST-MISSING]   discovery \ manifest
---   8. [E-RLS-FORCE]              FORCE ROW LEVEL SECURITY enabled on every
+--   5. [E-RLS-BYPASS-TABLE]       every policy in public (not only
+--                                 tenant_isolation-named ones) calls
+--                                 rls_bypass_admits('<own table>') in a
+--                                 sub-SELECT bypass branch and carries no
+--                                 leftover app.bypass_rls admit-everything
+--                                 branch (#911 report mode, migration
+--                                 20261019000000)
+--   5b. [E-RLS-TENANT-INITPLAN]   no policy casts app.tenant_id outside a
+--                                 sub-SELECT (migration 20261019000000)
+--   6. [E-RLS-COLPARITY]          column count vs discovery count parity
+--   7. [E-RLS-MANIFEST-EXTRA]     manifest \ discovery
+--   8. [E-RLS-MANIFEST-MISSING]   discovery \ manifest
+--   9. [E-RLS-FORCE]              FORCE ROW LEVEL SECURITY enabled on every
 --                                 tenant_isolation table — table-owner roles
 --                                 (e.g., passwd_user used by migrations) bypass
 --                                 RLS unless the table has FORCE set
---   9. [E-RLS-SECDEF]             no SECURITY DEFINER functions in public —
+--   10. [E-RLS-SECDEF]            no SECURITY DEFINER functions in public —
 --                                 a passwd_user-owned secdef function callable
 --                                 by passwd_app is an RLS-bypass surface
 -- =====================================================================
@@ -109,7 +118,70 @@ BEGIN
   ),
     '[E-RLS-SYM] A tenant_isolation policy has asymmetric USING vs WITH CHECK — add INSERT/UPDATE/DELETE assertions OR normalise the policy.';
 
-  -- 5. Column parity: every discovered policy table has a tenant_id column,
+  -- 5. [E-RLS-BYPASS-TABLE] #911 report-mode bypass branch, every policy in
+  --    public (migration 20261019000000 rewrote all of them, including
+  --    system_settings_bypass which has no tenant_id and so is invisible to
+  --    every tenant_isolation-scoped check above). Mirrors the migration's
+  --    own post-rewrite invariant check so a later CREATE/ALTER POLICY
+  --    cannot silently regress to the admit-everything app.bypass_rls branch
+  --    or a wrong/bare/non-sub-SELECT call.
+  ASSERT NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policy p
+    JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND (
+        pg_get_expr(p.polqual, p.polrelid) NOT LIKE '%( SELECT rls_bypass_admits(''' || c.relname || '''::text)%'
+        OR pg_get_expr(p.polwithcheck, p.polrelid) NOT LIKE '%( SELECT rls_bypass_admits(''' || c.relname || '''::text)%'
+        OR pg_get_expr(p.polqual, p.polrelid) LIKE '%app.bypass_rls%'
+        OR pg_get_expr(p.polwithcheck, p.polrelid) LIKE '%app.bypass_rls%'
+      )
+  ),
+    format('[E-RLS-BYPASS-TABLE] policies not calling rls_bypass_admits(<own table>) in a sub-SELECT, or still referencing app.bypass_rls: %s', (
+      SELECT string_agg(c.relname || '.' || p.polname, ', ')
+      FROM pg_catalog.pg_policy p
+      JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND (
+          pg_get_expr(p.polqual, p.polrelid) NOT LIKE '%( SELECT rls_bypass_admits(''' || c.relname || '''::text)%'
+          OR pg_get_expr(p.polwithcheck, p.polrelid) NOT LIKE '%( SELECT rls_bypass_admits(''' || c.relname || '''::text)%'
+          OR pg_get_expr(p.polqual, p.polrelid) LIKE '%app.bypass_rls%'
+          OR pg_get_expr(p.polwithcheck, p.polrelid) LIKE '%app.bypass_rls%'
+        )
+    ));
+
+  -- 5b. [E-RLS-TENANT-INITPLAN] The tenant branch's cast sits in a sub-SELECT
+  --    (migration 20261019000000). The bypass branch is an InitPlan the
+  --    planner cannot fold, so a bare `current_setting('app.tenant_id')::uuid`
+  --    is evaluated while planning a bypassed statement, and on a connection
+  --    whose app.tenant_id reverted to '' it raises 22P02 for the bypass.
+  --    A regex, not a LIKE: the bare cast is any occurrence not inside the
+  --    sub-SELECT, on either side of `=` (a LIKE on `::uuid)` misses
+  --    `current_setting(...)::uuid = tenant_id`).
+  ASSERT NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policy p
+    JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND (
+        pg_get_expr(p.polqual, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
+        OR pg_get_expr(p.polwithcheck, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
+      )
+  ),
+    format('[E-RLS-TENANT-INITPLAN] policies casting app.tenant_id outside a sub-SELECT: %s', (
+      SELECT string_agg(c.relname || '.' || p.polname, ', ')
+      FROM pg_catalog.pg_policy p
+      JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND (
+          pg_get_expr(p.polqual, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
+          OR pg_get_expr(p.polwithcheck, p.polrelid) ~ '(?<!SELECT )\(current_setting\(''app\.tenant_id''::text, true\)\)::uuid'
+        )
+    ));
+
+  -- 6. Column parity: every discovered policy table has a tenant_id column,
   --    and every public.tenant_id column (other than `tenants`) has a policy.
   SELECT count(*) INTO discovered_count
   FROM pg_catalog.pg_policy p
@@ -133,7 +205,7 @@ BEGIN
     format('[E-RLS-COLPARITY] tenant_id column count (%s) does not equal discovered tenant_isolation policy count (%s) — a column was added without a policy, or a policy without its column.',
       column_count, discovered_count);
 
-  -- 6. Manifest \ discovery (extra in manifest, missing from DB).
+  -- 7. Manifest \ discovery (extra in manifest, missing from DB).
   ASSERT NOT EXISTS (
     SELECT m.t FROM unnest(string_to_array(current_setting('app.expected_tables', true), ',')) AS m(t)
     EXCEPT
@@ -167,7 +239,7 @@ BEGIN
       )
     ));
 
-  -- 7. Discovery \ manifest (extra in DB, missing from manifest).
+  -- 8. Discovery \ manifest (extra in DB, missing from manifest).
   ASSERT NOT EXISTS (
     SELECT c.relname
     FROM pg_catalog.pg_policy p
@@ -200,7 +272,7 @@ BEGIN
         )
     ));
 
-  -- 8. FORCE ROW LEVEL SECURITY guard.
+  -- 9. FORCE ROW LEVEL SECURITY guard.
   --    Without FORCE, the table-owner role (passwd_user, used by migrations and
   --    Prisma's `migrate dev`) bypasses RLS even when policies exist. A migration
   --    that drops FORCE on a single table is a silent cross-tenant regression
@@ -225,7 +297,7 @@ BEGIN
         AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity)
     ));
 
-  -- 9. SECURITY DEFINER function audit.
+  -- 10. SECURITY DEFINER function audit.
   --    A SECURITY DEFINER function in `public` runs with the function-owner's
   --    privileges. If the owner is passwd_user (SUPERUSER) and EXECUTE is granted
   --    to passwd_app (or PUBLIC), the function becomes an RLS-bypass primitive:
@@ -413,19 +485,45 @@ DECLARE
   tenant_b constant uuid := '00000000-0000-0000-0000-0000000000B0';
   -- Cannot use `RESET app.tenant_id`: Postgres custom-GUC quirk — once SET in
   -- a session, current_setting returns '' rather than NULL even after RESET,
-  -- and `''::uuid` errors before the OR-bypass clause can short-circuit. The
-  -- nil sentinel parses cleanly and matches no real tenant_id.
+  -- and the tenant branch's `''::uuid` errors whenever it is evaluated (since
+  -- 20261019000000 only when the bypass branch is false). The nil sentinel
+  -- parses cleanly and matches no real tenant_id.
   nil_sentinel constant uuid := '00000000-0000-0000-0000-000000000000';
+  bypass_table_list text;
 BEGIN
   SET LOCAL client_min_messages = 'NOTICE';
 
+  -- #911: every policy's bypass branch now checks app.bypass_tables
+  -- membership before admitting (report mode: ungranted still admits, but
+  -- warns). Grant every discovered table up front so this block's "both
+  -- seeded rows visible" assertions test the OR-bypass clause itself, not
+  -- the report-mode fallback — and so it raises no rls_bypass_not_granted
+  -- WARNING (the report block right after this one covers the ungranted
+  -- case deliberately).
+  SELECT string_agg(c.relname, ',' ORDER BY c.relname) INTO bypass_table_list
+  FROM pg_catalog.pg_policy p
+  JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+  JOIN information_schema.columns col
+    ON col.table_schema = n.nspname
+   AND col.table_name = c.relname
+   AND col.column_name = 'tenant_id'
+  WHERE n.nspname = 'public'
+    AND c.relname <> 'tenants'
+    AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\');
+
   SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000000';
   SET LOCAL app.bypass_rls = 'on';
+  PERFORM set_config('app.bypass_tables', bypass_table_list, true);
 
   ASSERT current_setting('app.tenant_id', true) = '00000000-0000-0000-0000-000000000000',
     'pre-Block-4: SET LOCAL app.tenant_id (nil sentinel) failed';
   ASSERT current_setting('app.bypass_rls', true) = 'on',
     'pre-Block-4: SET LOCAL app.bypass_rls failed';
+
+  -- Marker for scripts/rls-verify-run.sh: no rls_bypass_not_granted WARNING
+  -- is expected between this and the block-4-end marker below.
+  RAISE NOTICE 'RLS-MARKER:block=4-start';
 
   FOR t IN
     SELECT c.relname
@@ -477,9 +575,97 @@ BEGIN
     failures := failures + 1;
   END IF;
 
+  -- Marker for scripts/rls-verify-run.sh: closes the "no WARNING expected"
+  -- region opened by the block=4-start marker above.
+  RAISE NOTICE 'RLS-MARKER:block=4-end';
+
   IF failures > 0 THEN
     RAISE EXCEPTION '[E-RLS-BYPASS] Block 4 (bypass): % failures — see NOTICE lines above', failures;
   END IF;
+END $$;
+
+-- =====================================================================
+-- Block 4b: #911 report-mode grant boundary. With app.bypass_rls=on and a
+-- grant naming every OTHER discovered table, a bypassed read of the table
+-- LEFT OUT must still be admitted (report mode does not enforce) and must
+-- raise the `rls_bypass_not_granted` WARNING naming that table. The
+-- RLS-MARKER lines let scripts/rls-verify-run.sh (reading psql's combined
+-- stderr) attribute the WARNING lines that follow each marker to the table
+-- whose grant was withheld for that iteration — this block cannot read its
+-- own RAISE WARNING text back, so attribution happens at the psql-output
+-- layer, not in SQL.
+--
+-- system_settings has no tenant_id (bypass-only policy, not named
+-- `tenant_isolation`) so it is unioned in explicitly rather than discovered
+-- through the naming convention the other blocks use.
+-- =====================================================================
+DO $$
+DECLARE
+  all_tables text[];
+  t text;
+  n bigint;
+  plan_json text;
+  nil_sentinel constant uuid := '00000000-0000-0000-0000-000000000000';
+BEGIN
+  SET LOCAL client_min_messages = 'NOTICE';
+
+  SELECT array_agg(DISTINCT c.relname ORDER BY c.relname) INTO all_tables
+  FROM pg_catalog.pg_policy p
+  JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND c.relname <> 'tenants'
+    AND (
+      p.polname = 'tenant_isolation'
+      OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\'
+      OR c.relname = 'system_settings'
+    );
+
+  PERFORM set_config('app.tenant_id', nil_sentinel::text, true);
+  SET LOCAL app.bypass_rls = 'on';
+  PERFORM set_config('app.bypass_tables', array_to_string(all_tables, ','), true);
+
+  -- T3-11: must be seeded (scripts/rls-cross-tenant-seed.sql), or "still
+  -- admitted without a grant" below would hold vacuously — a table with zero
+  -- rows can never fail the n = 0 check either way.
+  ASSERT (SELECT count(*) FROM system_settings) > 0,
+    '[E-RLS-REPORT] system_settings has no seeded rows — scripts/rls-cross-tenant-seed.sql must insert at least one row';
+
+  FOREACH t IN ARRAY all_tables LOOP
+    ASSERT t ~ '^[a-z_][a-z0-9_]*$',
+      format('table name failed regex: %L', t);
+
+    -- Grant every OTHER table; withhold this one.
+    PERFORM set_config('app.bypass_tables', array_to_string(array_remove(all_tables, t), ','), true);
+
+    RAISE NOTICE 'RLS-MARKER:block=report table=%', t;
+
+    EXECUTE format('SELECT count(*) FROM %I', t) INTO n;
+
+    IF n = 0 THEN
+      RAISE EXCEPTION '[E-RLS-REPORT] table=% not admitted under report-mode bypass without its own grant (enforcement regressed?)', t;
+    END IF;
+
+    -- Restore the full grant before the next iteration's marker, so only the
+    -- table named in that iteration's marker is ever ungranted.
+    PERFORM set_config('app.bypass_tables', array_to_string(all_tables, ','), true);
+  END LOOP;
+
+  RAISE NOTICE 'RLS-MARKER:block=report-end';
+
+  -- #911 (RP3-6): the bypass check is a scalar sub-SELECT so the planner
+  -- materializes it once per statement (an InitPlan), not once per row (a
+  -- SubPlan). A per-row re-evaluation would defeat the function's
+  -- STABLE/PARALLEL SAFE cost assumptions and silently regress every
+  -- bypassed read's performance.
+  SET LOCAL app.bypass_tables = 'sessions';
+
+  EXECUTE 'EXPLAIN (FORMAT JSON) SELECT count(*) FROM sessions' INTO plan_json;
+
+  ASSERT plan_json ~ '"Parent Relationship"\s*:\s*"InitPlan"',
+    format('[E-RLS-INITPLAN] expected an InitPlan for the bypass check, found none. Plan: %s', plan_json);
+  ASSERT plan_json !~ '"Parent Relationship"\s*:\s*"SubPlan"',
+    format('[E-RLS-INITPLAN] expected no per-row SubPlan for the bypass check, found one. Plan: %s', plan_json);
 END $$;
 
 -- =====================================================================
@@ -492,4 +678,5 @@ DO $$
 BEGIN
   RESET app.bypass_rls;
   RESET app.tenant_id;
+  RESET app.bypass_tables;
 END $$;

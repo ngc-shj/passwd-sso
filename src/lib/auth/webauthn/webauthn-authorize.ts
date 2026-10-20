@@ -10,7 +10,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   verifyAuthentication,
   getRpOrigin,
@@ -126,7 +127,7 @@ export async function authorizeWebAuthn(
         user: { select: { id: true, email: true, name: true } },
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.WEBAUTHN_AUTHORIZE_CREDENTIAL);
 
   // 4. Build WebAuthnCredential (dummy if not found for timing equalization).
   // v11 renamed AuthenticatorDevice → WebAuthnCredential, with `id: string`
@@ -182,7 +183,7 @@ export async function authorizeWebAuthn(
       WHERE id = ${storedCredential.id}
         AND counter = ${storedCredential.counter}
     `,
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.WEBAUTHN_AUTHORIZE_CREDENTIAL);
 
   if (updatedRows === 0) return null;
 

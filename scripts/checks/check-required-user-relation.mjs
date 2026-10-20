@@ -80,8 +80,9 @@ import { SyntaxKind } from "ts-morph";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
-import { bindingIndex, resolveLocalObjectLiteral, unwrapExpression, visibleBinding } from "./lib/scope-bindings.mjs";
+import { bindingIndex } from "./lib/scope-bindings.mjs";
 import { RLS_CONTEXT, rlsContextOf } from "./lib/rls-context.mjs";
+import { FILTERING, SchemaReadError, loadPrismaSchema, walkCallArgs } from "./lib/prisma-relation-reach.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const ROOT = process.env.REQUIRED_USER_RELATION_CHECK_ROOT ?? REPO_ROOT;
@@ -89,52 +90,27 @@ const SCAN_ROOT = "src";
 const SCHEMA_PATH = "prisma/schema.prisma";
 const MANIFEST_PATH = "scripts/checks/required-user-relation-manifest.json";
 
-/** Calls that return rows, and so carry `select` / `include`. */
-const RETURNING = new Set([
-  "findUnique", "findUniqueOrThrow", "findFirst", "findFirstOrThrow", "findMany",
-  "create", "update", "upsert", "delete", "createManyAndReturn", "updateManyAndReturn",
-]);
-/** Calls whose `where` decides which rows are touched or counted. */
-const FILTERING = new Set([...RETURNING, "count", "aggregate", "groupBy", "updateMany", "deleteMany"]);
-
 const DISPOSITIONS = new Set(["active-membership", "actor", "caller-bypass", "dynamic-where"]);
 
-const LOGICAL = new Set(["AND", "OR", "NOT"]);
-const RELATION_FILTERS = new Set(["is", "isNot", "some", "every", "none"]);
 /** Marks a path through a filter this gate could not read; the manifest check keys on it. */
 const UNREADABLE_WHERE = "<unreadable-where>";
 
 /**
  * `model -> (field -> { type, list, optional })` from the schema itself, plus the
- * client handle each model answers to. Fail-loud on a schema it cannot read: a
- * walk that resolved every field to "not a relation" would pass every call.
+ * client handle each model answers to (lib/prisma-relation-reach.mjs). Fail-loud
+ * on a schema it cannot read: a walk that resolved every field to "not a
+ * relation" would pass every call.
  */
 function loadSchema() {
-  const abs = join(ROOT, SCHEMA_PATH);
-  if (!existsSync(abs)) fail(`prisma schema not found at ${abs}.`);
-  const models = new Map();
-  let current = null;
-  for (const line of readFileSync(abs, "utf8").split("\n")) {
-    const open = /^model\s+(\w+)\s*\{/.exec(line);
-    if (open) {
-      current = new Map();
-      models.set(open[1], current);
-      continue;
-    }
-    if (/^\}/.test(line)) {
-      current = null;
-      continue;
-    }
-    if (!current) continue;
-    const trimmed = line.trim();
-    if (trimmed.startsWith("@@") || trimmed.startsWith("//")) continue;
-    const field = /^[ \t]+(\w+)[ \t]+([A-Za-z_]\w*)(\[\])?(\?)?/.exec(line);
-    if (field) current.set(field[1], { type: field[2], list: !!field[3], optional: !!field[4] });
+  let schema;
+  try {
+    schema = loadPrismaSchema(join(ROOT, SCHEMA_PATH));
+  } catch (e) {
+    if (e instanceof SchemaReadError) fail(e.message);
+    throw e;
   }
-  if (models.size === 0) fail(`parsed zero models from ${abs}.`);
-  if (!models.has("User")) fail(`${abs} declares no User model, so no call can be classified.`);
-  const handles = new Map([...models.keys()].map((m) => [m[0].toLowerCase() + m.slice(1), m]));
-  return { models, handles };
+  if (!schema.models.has("User")) fail(`${join(ROOT, SCHEMA_PATH)} declares no User model, so no call can be classified.`);
+  return schema;
 }
 
 function loadManifest() {
@@ -160,191 +136,52 @@ const MANIFEST = loadManifest();
 const isRequiredUser = (field) => field.type === "User" && !field.list && !field.optional;
 const hasRequiredUser = (model) => [...(MODELS.get(model)?.values() ?? [])].some(isRequiredUser);
 const asObject = (node) => (node && node.getKind() === SyntaxKind.ObjectLiteralExpression ? node : null);
-const initializerOf = (prop) => prop?.getInitializer?.() ?? null;
-
-const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
-
-/** Does anything in the file assign into, delete from, or Object.assign onto this binding? */
-function assignedInto(name, declaration, ctx) {
-  const sf = declaration.getSourceFile();
-  const rootOf = (expr) => {
-    let node = unwrapExpression(expr);
-    while (
-      node &&
-      (node.getKind() === SyntaxKind.PropertyAccessExpression || node.getKind() === SyntaxKind.ElementAccessExpression)
-    ) {
-      node = unwrapExpression(node.getExpression());
-    }
-    return node;
-  };
-  const refersHere = (node) =>
-    node?.getKind() === SyntaxKind.Identifier &&
-    node.getText() === name &&
-    sameNode(visibleBinding(name, node, ctx.bindingsFor), declaration);
-  for (const bin of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
-    const op = bin.getOperatorToken().getKind();
-    if (op < SyntaxKind.FirstAssignment || op > SyntaxKind.LastAssignment) continue;
-    const left = unwrapExpression(bin.getLeft());
-    if (left?.getKind() === SyntaxKind.Identifier) continue; // a const cannot be rebound
-    if (refersHere(rootOf(left))) return true;
-  }
-  for (const del of sf.getDescendantsOfKind(SyntaxKind.DeleteExpression)) {
-    if (refersHere(rootOf(del.getExpression()))) return true;
-  }
-  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    if (call.getExpression().getText() !== "Object.assign") continue;
-    if (refersHere(unwrapExpression(call.getArguments()[0]))) return true;
-  }
-  return false;
-}
 
 /**
- * The object literals a `where` (or a filter inside one) can be: the literal
- * itself, the `const` a bare name is bound to where the name is written provided
- * nothing assigns into it, or both branches of a conditional. Null when this file
- * cannot say.
+ * The paths through one call's argument that reach a required User relation,
+ * read by the shared relation walk: a projection or filter that names the
+ * relation (it is not descended), and — when the model the unreadable part is
+ * about declares one — a filter this gate cannot read.
  */
-function filterLiterals(node, ctx) {
-  const value = unwrapExpression(node);
-  if (!value) return null;
-  if (value.getKind() === SyntaxKind.ObjectLiteralExpression) return [value];
-  if (value.getKind() === SyntaxKind.ConditionalExpression) {
-    const whenTrue = filterLiterals(value.getWhenTrue(), ctx);
-    const whenFalse = filterLiterals(value.getWhenFalse(), ctx);
-    return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
-  }
-  if (value.getKind() !== SyntaxKind.Identifier) return null;
-  // Resolved at the name itself. A name inside a literal followed from the call —
-  // an OR branch of a module-level `where` — means the binding visible THERE, and
-  // resolving it at the call let a same-named local of the calling function answer
-  // for it (round 6, R46).
-  const literal = resolveLocalObjectLiteral(value.getText(), value, ctx.bindingsFor);
-  if (!literal) return null;
-  return assignedInto(value.getText(), literal.getParent(), ctx) ? null : [literal];
-}
-
-/** The value node of a named property, including a shorthand `{ where }`. */
-function propertyValue(objectLiteral, name) {
-  const prop = objectLiteral.getProperty(name);
-  if (!prop) return null;
-  if (prop.getKind() === SyntaxKind.ShorthandPropertyAssignment) return prop.getNameNode();
-  return initializerOf(prop);
-}
-
-/** Scan the `where` held by `node` (a projection argument or a call's args), or report it unreadable. */
-function scanWhereOf(node, model, trail, hits, ctx) {
-  const value = propertyValue(node, "where");
-  if (!value) return;
-  const wheres = filterLiterals(value, ctx);
-  if (wheres) for (const where of wheres) scanWhere(where, model, [...trail, "where"], hits, ctx);
-  else if (hasRequiredUser(model)) hits.push([...trail, `where${UNREADABLE_WHERE}`].join("."));
-}
-
-/** `_count: { select: { relation: { where } } }` filters its counts through relations. */
-function scanCount(value, model, trail, hits, ctx) {
-  const count = asObject(unwrapExpression(value));
-  if (!count) return;
-  const select = asObject(initializerOf(count.getProperty("select")));
-  if (!select) return;
-  for (const prop of select.getProperties()) {
-    if (prop.getKind() !== SyntaxKind.PropertyAssignment) continue;
-    const field = MODELS.get(model)?.get(prop.getName());
-    if (!field || !MODELS.has(field.type)) continue;
-    const nested = asObject(initializerOf(prop));
-    if (nested) scanWhereOf(nested, field.type, [...trail, prop.getName()], hits, ctx);
-  }
-}
-
-/** Every path through a projection of `model` that reaches a required User relation. */
-function scanProjection(projection, model, trail, hits, ctx) {
-  for (const prop of projection.getProperties()) {
-    if (prop.getKind() !== SyntaxKind.PropertyAssignment) {
-      hits.push([...trail, "<spread>"].join("."));
-      continue;
-    }
-    if (prop.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) continue;
-    const key = prop.getName();
-    if (key === "_count") {
-      scanCount(initializerOf(prop), model, [...trail, "_count"], hits, ctx);
-      continue;
-    }
-    const field = MODELS.get(model)?.get(key);
-    const here = [...trail, key];
-    if (!field) {
-      hits.push([...here, "<unresolved-field>"].join("."));
-      continue;
-    }
-    if (!MODELS.has(field.type)) continue;
-    if (isRequiredUser(field)) {
-      hits.push(here.join("."));
-      continue;
-    }
-    const nested = asObject(initializerOf(prop));
-    if (!nested) continue;
-    scanWhereOf(nested, field.type, here, hits, ctx);
-    for (const root of ["select", "include"]) {
-      const sub = initializerOf(nested.getProperty(root));
-      if (!sub) continue;
-      if (!asObject(sub)) {
-        hits.push([...here, `${root}:<unreadable>`].join("."));
-        continue;
+function requiredUserHits(args, model, method, ctx) {
+  const hits = [];
+  const visitor = {
+    relation({ trail, field, position }) {
+      if (position === "count" || !isRequiredUser(field)) return true;
+      hits.push(position === "where" ? `${trail.join(".")}<filter>` : trail.join("."));
+      return false;
+    },
+    unreadable({ trail, model: at, kind, key, field, root }) {
+      switch (kind) {
+        case "projection":
+          hits.push([...trail, `${root}:<unreadable>`].join("."));
+          break;
+        case "spread":
+          hits.push([...trail, "<spread>"].join("."));
+          break;
+        case "unresolved-field":
+          hits.push([...trail, "<unresolved-field>"].join("."));
+          break;
+        case "shorthand-filter":
+          if (isRequiredUser(field)) hits.push(`${trail.join(".")}<filter>`);
+          break;
+        case "where":
+          if (hasRequiredUser(at)) hits.push([...trail, `where${UNREADABLE_WHERE}`].join("."));
+          break;
+        case "logical":
+          if (hasRequiredUser(at)) hits.push([...trail, `${key}${UNREADABLE_WHERE}`].join("."));
+          break;
+        case "filter":
+        case "relation-op":
+          if (hasRequiredUser(field.type)) hits.push(`${trail.join(".")}${UNREADABLE_WHERE}`);
+          break;
+        default:
+          break;
       }
-      scanProjection(asObject(sub), field.type, here, hits, ctx);
-    }
-  }
-}
-
-/** Every path through a `where` of `model` that filters through a required User relation. */
-function scanWhere(where, model, trail, hits, ctx) {
-  for (const prop of where.getProperties()) {
-    if (prop.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
-      // `{ user }` names a filter held by a variable; treat it like `user: user`.
-      const field = MODELS.get(model)?.get(prop.getName());
-      if (field && isRequiredUser(field)) hits.push(`${[...trail, prop.getName()].join(".")}<filter>`);
-      continue;
-    }
-    if (prop.getKind() !== SyntaxKind.PropertyAssignment) continue;
-    if (prop.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) continue;
-    const key = prop.getName();
-    const value = unwrapExpression(initializerOf(prop));
-    if (LOGICAL.has(key)) {
-      const branches = value?.getKind() === SyntaxKind.ArrayLiteralExpression ? value.getElements() : [value];
-      for (const branch of branches) {
-        const objs = filterLiterals(branch, ctx);
-        if (objs) for (const obj of objs) scanWhere(obj, model, [...trail, key], hits, ctx);
-        else if (branch && hasRequiredUser(model)) hits.push([...trail, `${key}${UNREADABLE_WHERE}`].join("."));
-      }
-      continue;
-    }
-    const field = MODELS.get(model)?.get(key);
-    if (!field || !MODELS.has(field.type)) continue;
-    const here = [...trail, key];
-    if (isRequiredUser(field)) {
-      hits.push(`${here.join(".")}<filter>`);
-      continue;
-    }
-    const nestedFilters = filterLiterals(value, ctx);
-    if (!nestedFilters) {
-      if (value && hasRequiredUser(field.type)) hits.push(`${here.join(".")}${UNREADABLE_WHERE}`);
-      continue;
-    }
-    for (const nested of nestedFilters) {
-      const wrapped = nested.getProperties().some(
-        (p) => p.getKind() === SyntaxKind.PropertyAssignment && RELATION_FILTERS.has(p.getName()),
-      );
-      if (!wrapped) {
-        scanWhere(nested, field.type, here, hits, ctx);
-        continue;
-      }
-      for (const op of RELATION_FILTERS) {
-        const opValue = propertyValue(nested, op);
-        if (!opValue) continue;
-        const subs = filterLiterals(opValue, ctx);
-        if (subs) for (const sub of subs) scanWhere(sub, field.type, [...here, op], hits, ctx);
-        else if (hasRequiredUser(field.type)) hits.push(`${[...here, op].join(".")}${UNREADABLE_WHERE}`);
-      }
-    }
-  }
+    },
+  };
+  walkCallArgs(args, model, method, { models: MODELS, visitor, ctx });
+  return hits;
 }
 
 function walk(dir, out = []) {
@@ -383,17 +220,7 @@ for (const { rel, sf } of sourceFilesFrom(createAstProject(), files, ROOT)) {
     const args = asObject(call.getArguments()[0]);
     if (!args) continue;
 
-    const ctx = { bindingsFor };
-    const hits = [];
-    if (RETURNING.has(method)) {
-      for (const root of ["select", "include"]) {
-        const node = initializerOf(args.getProperty(root));
-        if (!node) continue;
-        if (!asObject(node)) hits.push(`${model}.${root}:<unreadable>`);
-        else scanProjection(asObject(node), model, [model], hits, ctx);
-      }
-    }
-    scanWhereOf(args, model, [model], hits, ctx);
+    const hits = requiredUserHits(args, model, method, { bindingsFor });
     if (hits.length === 0 || rlsContextOf(call, sf, bindingsFor) === RLS_CONTEXT.BYPASS) continue;
 
     if (!found.has(rel)) found.set(rel, []);

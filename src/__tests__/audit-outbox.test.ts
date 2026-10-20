@@ -89,6 +89,12 @@ const TX_CLIENT = {
 
 // ─── enqueueAuditInTx ────────────────────────────────────────────────────────
 
+/** A full row of readBypassState's four-column read; unset columns are null. */
+type BypassStateRow = { bypass_rls: string | null; purpose: string | null; tenant_id: string | null; tables: string | null };
+function bypassStateRow(row: Partial<BypassStateRow>): BypassStateRow {
+  return { bypass_rls: null, purpose: null, tenant_id: null, tables: null, ...row };
+}
+
 describe("enqueueAuditInTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -97,7 +103,7 @@ describe("enqueueAuditInTx", () => {
   it("creates an AuditOutbox row with correct tenantId and payload", async () => {
     // bypass_rls = 'on' → skip tenant_id check
     mockQueryRaw
-      .mockResolvedValueOnce([{ bypass_rls: "on", tenant_id: "" }]) // ctx check
+      .mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]) // ctx check
       .mockResolvedValueOnce([{ ok: true }]); // tenant exists
 
     await enqueueAuditInTx(TX_CLIENT as never, "tenant-1", SAMPLE_PAYLOAD);
@@ -138,7 +144,7 @@ describe("enqueueAuditInTx", () => {
 
   it("throws when tenantId does not exist in tenants table", async () => {
     mockQueryRaw
-      .mockResolvedValueOnce([{ bypass_rls: "on", tenant_id: "" }]) // ctx check passes
+      .mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]) // ctx check passes
       .mockResolvedValueOnce([{ ok: false }]); // tenant NOT found
 
     await expect(
@@ -162,7 +168,7 @@ describe("enqueueAuditInTx", () => {
     };
 
     mockQueryRaw
-      .mockResolvedValueOnce([{ bypass_rls: "on", tenant_id: "" }])
+      .mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })])
       .mockResolvedValueOnce([{ ok: true }]);
 
     await enqueueAuditInTx(TX_CLIENT as never, "tenant-1", richPayload);
@@ -195,7 +201,7 @@ describe("enqueueAudit", () => {
     vi.clearAllMocks();
     // Defaults: bypass_rls on + tenant exists
     mockQueryRaw
-      .mockResolvedValueOnce([{ bypass_rls: "on", tenant_id: "" }])
+      .mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })])
       .mockResolvedValueOnce([{ ok: true }]);
   });
 

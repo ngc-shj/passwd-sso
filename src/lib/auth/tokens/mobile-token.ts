@@ -3,7 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -433,7 +434,7 @@ export async function validateIosTokenDpop(
         lastUsedUserAgent: userAgent,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch(() => {});
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE).catch(() => {});
 
   return {
     ok: true,
@@ -585,7 +586,7 @@ export async function refreshIosToken(
         extensionTokenAbsoluteTimeoutMinutes: true,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.TOKEN_TENANT_LOOKUP);
   if (!tenant) {
     throw new Error(`refreshIosToken: tenant ${oldRow.tenantId} not found`);
   }
@@ -612,7 +613,7 @@ export async function refreshIosToken(
   // after the last real unlock (mirrors the extension's own refresh route).
   const presenceAt = await withBypassRls(prisma, async (tx) =>
     getFamilyPresenceAt(tx, oldRow.familyId, oldRow.familyCreatedAt),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
   if (presenceAt.getTime() + idleMinutes * MS_PER_MINUTE <= now) {
     await revokeExtensionTokenFamily({
       familyId: oldRow.familyId,

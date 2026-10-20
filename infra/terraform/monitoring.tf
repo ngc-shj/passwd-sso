@@ -61,6 +61,33 @@ resource "aws_cloudwatch_log_metric_filter" "high_latency" {
   }
 }
 
+# RLS bypass reports (#911, report mode): a bypassed statement reached a table
+# outside its grant. One filter per log group that carries a pool built by
+# src/lib/db/pool-factory.ts; the line is emitted with this _logType there.
+# The enforce flip waits for these to read zero over a window, after a canary
+# has shown each one counting.
+locals {
+  rls_bypass_report_log_groups = {
+    app                 = aws_cloudwatch_log_group.app.name
+    audit_outbox_worker = aws_cloudwatch_log_group.audit_outbox_worker.name
+    retention_gc_worker = aws_cloudwatch_log_group.retention_gc_worker.name
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "rls_bypass_not_granted" {
+  for_each       = var.enable_monitoring ? local.rls_bypass_report_log_groups : {}
+  name           = "${local.name_prefix}-rls-bypass-not-granted-${each.key}"
+  log_group_name = each.value
+  pattern        = "{ $._logType = \"rls.bypass_not_granted\" }"
+
+  metric_transformation {
+    name          = "RlsBypassNotGranted"
+    namespace     = "${local.name_prefix}/App"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
 ################################################################################
 # CloudWatch Alarms
 ################################################################################
@@ -83,6 +110,46 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
     LoadBalancer = aws_lb.main.arn_suffix
     TargetGroup  = aws_lb_target_group.app.arn_suffix
   }
+
+  alarm_actions = [aws_sns_topic.alarms[0].arn]
+  ok_actions    = [aws_sns_topic.alarms[0].arn]
+  tags          = local.tags
+}
+
+# A WARNING from rls_bypass_admits whose text the listener could not parse
+# (function and listener disagree on the format). Counted on the same metric so
+# a format drift raises the alarm below instead of reading as zero reports.
+resource "aws_cloudwatch_log_metric_filter" "rls_bypass_notice_unparsed" {
+  for_each       = var.enable_monitoring ? local.rls_bypass_report_log_groups : {}
+  name           = "${local.name_prefix}-rls-bypass-notice-unparsed-${each.key}"
+  log_group_name = each.value
+  pattern        = "{ $._logType = \"rls.bypass_notice_unparsed\" }"
+
+  metric_transformation {
+    name          = "RlsBypassNotGranted"
+    namespace     = "${local.name_prefix}/App"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+# Any RLS bypass report. Report mode admits the statement, so without this
+# alarm an ungranted reach is visible only to someone reading the metric. Both
+# filter resources (reports and unparsed reports, one filter per log group
+# each) publish to the same metric, so one alarm covers them; a report line
+# names the table and purpose.
+resource "aws_cloudwatch_metric_alarm" "rls_bypass_not_granted" {
+  count               = var.enable_monitoring ? 1 : 0
+  alarm_name          = "${local.name_prefix}-rls-bypass-not-granted"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "RlsBypassNotGranted"
+  namespace           = "${local.name_prefix}/App"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  alarm_description   = "An RLS bypass reached a table outside its grant (rls.bypass_not_granted), or a report could not be parsed (rls.bypass_notice_unparsed); see docs/operations/alerts.md"
+  treat_missing_data  = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alarms[0].arn]
   ok_actions    = [aws_sns_topic.alarms[0].arn]

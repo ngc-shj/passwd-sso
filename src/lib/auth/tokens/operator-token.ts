@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   OPERATOR_TOKEN_PREFIX,
   OPERATOR_TOKEN_SCOPE,
@@ -100,7 +101,7 @@ export async function validateOperatorToken(
           lastUsedAt: true,
         },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.OPERATOR_TOKEN_VALIDATE,
   );
 
   if (!token) {
@@ -125,7 +126,7 @@ export async function validateOperatorToken(
           where: { id: token.id },
           data: { lastUsedAt: new Date() },
         }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+      BYPASS_GRANT.OPERATOR_TOKEN_VALIDATE,
     ).catch(() => {});
   }
 

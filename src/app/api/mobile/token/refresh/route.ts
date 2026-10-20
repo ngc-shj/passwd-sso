@@ -40,7 +40,8 @@ import {
   unauthorized,
 } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { readBytesWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
@@ -142,7 +143,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
           clientKind: true,
         },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE,
   );
   if (!oldRow || oldRow.clientKind !== "IOS_APP") {
     return unauthorized();
@@ -157,7 +158,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
         where: { tenantId_userId: { tenantId: oldRow.tenantId, userId: oldRow.userId } },
         select: { deactivatedAt: true },
       }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    BYPASS_GRANT.TOKEN_TENANT_MEMBERSHIP_CHECK,
   );
   if (!member || member.deactivatedAt !== null) {
     return unauthorized();

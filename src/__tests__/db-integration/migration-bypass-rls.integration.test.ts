@@ -7,10 +7,12 @@
  * unspecified, so `rolsuper`/`rolbypassrls` are both false there. Every table
  * these migrations rewrite is FORCE ROW LEVEL SECURITY, whose policy admits on
  *
- *   COALESCE(current_setting('app.bypass_rls', true), '') = 'on'
- *     OR tenant_id = current_setting('app.tenant_id', true)::uuid
+ *   (SELECT public.rls_bypass_admits('<table>'))
+ *     OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)
  *
- * so what decides visibility is the GUC, which any role may set. That is why
+ * and `rls_bypass_admits` reads `app.bypass_rls` (in report mode it admits any
+ * table once the bypass is on), so what decides visibility is the GUC, which
+ * any role may set. That is why
  * the migrations run inside `withBypassRls` rather than gating on a role
  * attribute — `scripts/tenant-domain.ts` documents the identical hazard for
  * `tenant_claims`.

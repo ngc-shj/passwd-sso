@@ -26,7 +26,7 @@ import {
   type PrismaWithPool,
   inRetentionSweepTx,
 } from "./helpers";
-import { sweepAuditProvenanceEntry } from "@/workers/retention-gc-worker/sweep";
+import { sweepAuditProvenanceEntry, grantForEntry } from "@/workers/retention-gc-worker/sweep";
 import {
   RETENTION_REGISTRY,
   type AuditProvenanceEntry,
@@ -219,12 +219,12 @@ describe("retention-gc security-record GC (SC6)", () => {
 
     await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepAuditProvenanceEntry(tx, inviteEntry, 100);
-    });
+    }, grantForEntry(inviteEntry));
     expect(await rowExists("team_invitations", inviteId)).toBe(false);
 
     await expect(
       ctx.retentionWorker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
           tenantId,
@@ -271,7 +271,7 @@ describe("retention-gc security-record GC (SC6)", () => {
 
     await inRetentionSweepTx(ctx.retentionWorker.prisma, async (tx) => {
       await sweepAuditProvenanceEntry(tx, shareEntry, 100);
-    });
+    }, grantForEntry(shareEntry));
     expect(await rowExists("password_shares", shareId)).toBe(false);
   });
 

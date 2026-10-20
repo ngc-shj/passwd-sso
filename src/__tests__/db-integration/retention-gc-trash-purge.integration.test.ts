@@ -219,7 +219,7 @@ describe("retention-gc sweepTrashEntry: personal trash purge (SC2/C3/C7)", () =>
     // Direct DELETE FROM attachments is denied for the worker role.
     await expect(
       ctx.retentionWorker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `DELETE FROM attachments WHERE id = $1::uuid`,
           attachmentId,
@@ -232,7 +232,7 @@ describe("retention-gc sweepTrashEntry: personal trash purge (SC2/C3/C7)", () =>
 
     // But deleting the parent entry via the worker role cascades the attachment.
     await ctx.retentionWorker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `DELETE FROM password_entries WHERE id = $1::uuid`,
         entryId,

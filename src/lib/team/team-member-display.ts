@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 /**
  * Input shape consumed by `buildTeamMemberDisplayItems`.
@@ -66,7 +67,7 @@ export async function buildTeamMemberDisplayItems(
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       }),
     ]),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TEAM_MEMBER_DISPLAY_LOOKUP);
 
   const userById = new Map(users.map((u) => [u.id, u]));
   const tenantByUserId = new Map(userTenants.map((t) => [t.userId, t.tenant.name]));

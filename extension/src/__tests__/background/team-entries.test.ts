@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
 import { holdDecrypt, holdFetch, holdNextCall } from "../helpers/deferred";
 import { DEBOUNCE_MS } from "../../background/context-menu";
@@ -349,6 +349,15 @@ describe("team entries in background", () => {
     await loadBackground();
   });
 
+  afterEach(async () => {
+    // Tear down this test's context-menu instance: cancel its pending debounce
+    // and supersede any in-flight rebuild. vi.resetModules() leaves the old
+    // instance alive, and its real-timer rebuild would otherwise fire during a
+    // later test and call that test's chrome mock (found under parallel load).
+    const { disableContextMenu } = await import("../../background/context-menu");
+    await disableContextMenu();
+  });
+
   async function unlockVault() {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -617,52 +626,69 @@ describe("team entries in background", () => {
     // in background.test.ts (no team harness there) — this is the one case
     // that needs this file's team fetch chain.
     it("rebuilds the context menu when the same entry's teamId changes", async () => {
-      // Clear first, then wait for the UNLOCK rebuild's last item: a gate that
-      // the earlier calls already satisfy would wait for nothing.
-      chromeMock!.contextMenus.create.mockClear();
-      await unlockVault();
-      await vi.waitFor(() => {
-        const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
-        expect(ids).toContain("psso-open-popup");
-      });
-      await sendMessage({ type: "FETCH_PASSWORDS" });
-      chromeMock!.contextMenus.removeAll.mockClear();
+      // Every rebuild runs behind the menu's DEBOUNCE_MS timer. Fake the timers
+      // for the whole cell, so no real debounce from an earlier step can fire
+      // inside the window this cell observes, and every wait is the debounce
+      // itself rather than a wall-clock budget a loaded machine can overrun.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        // Clear first, then wait for the UNLOCK rebuild's last item: a gate that
+        // the earlier calls already satisfy would wait for nothing.
+        chromeMock!.contextMenus.create.mockClear();
+        await unlockVault();
+        // waitFor advances the fake clock as it polls.
+        await vi.waitFor(() => {
+          const ids = chromeMock!.contextMenus.create.mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
+          expect(ids).toContain("psso-open-popup");
+        });
+        await sendMessage({ type: "FETCH_PASSWORDS" });
+        // Run out this cell's own debounces scheduled so far (earlier tests'
+        // instances are torn down in afterEach).
+        await vi.runAllTimersAsync();
+        chromeMock!.contextMenus.removeAll.mockClear();
 
-      // Same team-pw-1 entry, same team passwords list, but the teams list
-      // now reports it under a different team id — id/title/username/urlHost
-      // unchanged, teamId alone differs.
-      fetchMock.mockImplementation(async (url: string) => {
-        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
-          return {
-            ok: true,
-            json: async () => ({
-              token: "refreshed-tok",
-              expiresAt: new Date(Date.now() + 900_000).toISOString(),
-              scope: ["passwords:read", "vault:unlock-data"],
-            }),
-          };
-        }
-        if (url.includes("/member-key")) {
-          return { ok: true, json: async () => MEMBER_KEY_RESPONSE };
-        }
-        if (url.match(/\/teams\/[^/]+\/passwords$/)) {
-          return { ok: true, json: async () => [makeTeamEntry("team-pw-1", EXT_ENTRY_TYPE.LOGIN)] };
-        }
-        if (url.endsWith(EXT_API_PATH.TEAMS)) {
-          return { ok: true, json: async () => [{ id: "team-2", name: "Engineering" }] };
-        }
-        if (url.includes(EXT_API_PATH.PASSWORDS)) {
-          return { ok: true, json: async () => [PERSONAL_ENTRY] };
-        }
-        return { ok: false, json: async () => ({}) };
-      });
+        // Same team-pw-1 entry, same team passwords list, but the teams list
+        // now reports it under a different team id — id/title/username/urlHost
+        // unchanged, teamId alone differs.
+        fetchMock.mockImplementation(async (url: string) => {
+          if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+            return {
+              ok: true,
+              json: async () => ({
+                token: "refreshed-tok",
+                expiresAt: new Date(Date.now() + 900_000).toISOString(),
+                scope: ["passwords:read", "vault:unlock-data"],
+              }),
+            };
+          }
+          if (url.includes("/member-key")) {
+            return { ok: true, json: async () => MEMBER_KEY_RESPONSE };
+          }
+          if (url.match(/\/teams\/[^/]+\/passwords$/)) {
+            return { ok: true, json: async () => [makeTeamEntry("team-pw-1", EXT_ENTRY_TYPE.LOGIN)] };
+          }
+          if (url.endsWith(EXT_API_PATH.TEAMS)) {
+            return { ok: true, json: async () => [{ id: "team-2", name: "Engineering" }] };
+          }
+          if (url.includes(EXT_API_PATH.PASSWORDS)) {
+            return { ok: true, json: async () => [PERSONAL_ENTRY] };
+          }
+          return { ok: false, json: async () => ({}) };
+        });
 
-      const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as {
-        entries: Array<{ id: string; teamId?: string }>;
-      };
-      expect(res.entries.find((e) => e.id === "team-pw-1")?.teamId).toBe("team-2");
+        const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as {
+          entries: Array<{ id: string; teamId?: string }>;
+        };
+        expect(res.entries.find((e) => e.id === "team-pw-1")?.teamId).toBe("team-2");
 
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+        // The rebuild waits out the debounce: not one millisecond early, then due.
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS - 1);
+        expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

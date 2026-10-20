@@ -11,8 +11,8 @@
  * reverts at transaction end to the SESSION DEFAULT — which is '' once the GUC
  * has been touched at all — not to unset. So after the first bypass transaction
  * on a pooled connection, `current_setting('app.tenant_id', true)` returns ''
- * for the rest of that connection's life, and the tenant_isolation policy's
- * `''::uuid` raises 22P02 before the OR-bypass clause can short-circuit.
+ * for the rest of that connection's life. Outside a bypass the policy's bypass
+ * branch is false, so its tenant branch evaluates `''::uuid` and raises 22P02.
  *
  * Run as `passwd_app`, not as the worker role: that is the role the health
  * probe actually connects as, and it is NOBYPASSRLS, so the policy really is

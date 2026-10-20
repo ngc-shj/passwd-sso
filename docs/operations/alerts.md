@@ -379,9 +379,9 @@ and only one of them is a bug:
 
 The same trap applies to any read of an RLS-forced table by a
 `NOBYPASSRLS` role on a pooled connection. Inside
-`src/workers/audit-outbox-worker.ts` the local helper is
-`setBypassRlsGucs`; elsewhere use `withBypassRls` from
-`src/lib/tenant-rls.ts`. `scripts/checks/check-rls-read-context.mjs`
+`src/workers/audit-outbox-worker.ts` each transaction calls
+`setBypassGucs` from `src/lib/tenant-rls-grants.ts` with its grant;
+elsewhere use `withBypassRls` from `src/lib/tenant-rls.ts`. `scripts/checks/check-rls-read-context.mjs`
 enforces this for `src/workers` and `scripts` — but it is a bounded
 verification gate, not a boundary: `src/app` and `src/lib` are out of
 its scope (their context is ambient, via the AsyncLocalStorage Proxy
@@ -472,6 +472,45 @@ sink.
 **Recovery**: do NOT immediately purge or rewrite anything.
 Snapshot the affected tenant's `audit_logs` and `audit_chain_anchors`,
 notify security team, investigate.
+
+## `rls.bypass_not_granted`
+
+Emitted by the pool listener in `src/lib/db/pool-factory.ts`. The database
+raised it when a bypassed statement examined a row of a table that is not
+in the bypass's grant (`app.bypass_tables`). The line names `table` and
+`purpose`. It is rate-limited to one line per (table, purpose) per process
+per minute.
+
+In report mode the statement was **admitted**. The line records a grant that
+is missing a table. Once enforce mode ships (#911), the same reach is
+refused.
+
+**Severity**: medium
+**Trigger**: any occurrence. The normal count is 0.
+**Recovery**: find the code path that serves `purpose` and reaches
+`table`. Then either add the table's model to that grant in
+`BYPASS_GRANT`, or stop the path from reaching the table. Do this before
+enforce mode is turned on.
+
+CloudWatch: the `RlsBypassNotGranted` metric. There is one filter each on
+the app, audit-outbox-worker and retention-gc-worker log groups, and the
+`rls-bypass-not-granted` alarm fires on `Sum >= 1` in 5 minutes
+(`infra/terraform/monitoring.tf`). Operator scripts write the same record
+to stderr.
+
+**Not covered:** the audit-anchor-publisher has no Terraform-managed log
+group, so its reports reach no metric. Wherever it runs, collect its stdout
+and match the same `_logType`. A log group, a filter and a positive canary
+for it are preconditions of enforce mode.
+
+Datadog: `{ _logType="rls.bypass_not_granted" OR _logType="rls.bypass_notice_unparsed" }`
+
+A line `rls.bypass_notice_unparsed` means a WARNING came from
+`rls_bypass_admits` but did not match the expected text. The listener
+logs it with no content, at most once per process per minute. The likely
+cause is that the function and the listener disagree on the message
+format. It is counted on the same `RlsBypassNotGranted` metric and fires
+the same alarm, so a format drift is not read as zero reports.
 
 ## `csp.violation`
 

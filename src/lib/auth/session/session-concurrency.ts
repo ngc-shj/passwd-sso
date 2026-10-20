@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
@@ -208,7 +209,7 @@ export async function createCappedSession(
   const { session, eviction } = await withBypassRls(
     prisma,
     async (tx) => createSessionUnderConcurrencyCap(tx, input),
-    BYPASS_PURPOSE.AUTH_FLOW,
+    BYPASS_GRANT.AUTH_SESSION_CAPPING,
   );
 
   // Fire-and-forget: check for new device and notify user

@@ -9,11 +9,12 @@ import { parseBody } from "@/lib/http/parse-body";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { displayIdentityOf, fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { serviceAccountUpdateSchema } from "@/lib/validations/service-account";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -78,7 +79,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
  */
 async function withCreatorIdentity<T extends { createdById: string }>(account: T) {
   const { createdById, ...rest } = account;
-  const users = await fetchUserDisplayMap([createdById], BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  const users = await fetchUserDisplayMap([createdById], BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP);
   return { ...rest, createdBy: displayIdentityOf(users, createdById) };
 }
 

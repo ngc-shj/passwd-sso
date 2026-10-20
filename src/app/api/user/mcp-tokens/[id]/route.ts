@@ -4,7 +4,8 @@ import { unauthorized, notFound, rateLimited, errorResponse } from "@/lib/http/a
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
@@ -133,7 +134,7 @@ async function handleDELETE(
     });
 
     return { token, revokedDelegationSessionIds };
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.MCP_TOKEN_REVOKE_WITH_AUDIT);
 
   if (!result) {
     return notFound();

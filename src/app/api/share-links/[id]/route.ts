@@ -6,7 +6,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, SHARE_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 
 type Params = { params: Promise<{ id: string }> };
@@ -65,7 +66,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
       targetId: share.id,
     });
-  }, BYPASS_PURPOSE.AUDIT_WRITE);
+  }, BYPASS_GRANT.AUDIT_WRITE_DIRECT_OUTBOX);
 
   return NextResponse.json({ ok: true });
 }

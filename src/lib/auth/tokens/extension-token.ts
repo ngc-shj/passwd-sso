@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
 import {
@@ -89,7 +90,7 @@ export async function validateExtensionToken(
         cnfJkt: true,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
   if (!token) {
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
@@ -108,7 +109,7 @@ export async function validateExtensionToken(
       where: { tenantId_userId: { tenantId: token.tenantId, userId: token.userId } },
       select: { deactivatedAt: true },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.TOKEN_TENANT_MEMBERSHIP_CHECK);
   if (!member || member.deactivatedAt !== null) {
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
   }
@@ -373,7 +374,7 @@ export async function issueExtensionToken(params: {
         extensionTokenAbsoluteTimeoutMinutes: true,
       },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.TOKEN_TENANT_LOOKUP);
   if (!tenant) {
     throw new Error(`issueExtensionToken: tenant ${tenantId} not found`);
   }
@@ -470,7 +471,7 @@ export async function revokeExtensionTokenFamily(params: {
       where: { familyId, revokedAt: null },
       data: { revokedAt: now },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
   if (result.count > 0) {
     await emitRevokedFamilyAudits([{ familyId, reason, rowsRevoked: result.count }], {
@@ -501,7 +502,7 @@ export async function revokeAllExtensionTokensForUser(params: {
       select: { familyId: true },
       distinct: ["familyId"],
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
   let totalRows = 0;
   for (const row of activeFamilies) {

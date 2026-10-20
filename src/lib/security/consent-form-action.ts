@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
   MCP_CLIENT_ID_MAX_LENGTH,
   isAcceptableRedirectUri,
@@ -54,7 +55,7 @@ export async function consentFormActionSources(
           where: { clientId, isActive: true },
           select: { redirectUris: true },
         }),
-      BYPASS_PURPOSE.AUTH_FLOW,
+      BYPASS_GRANT.MCP_CLIENT_LOOKUP,
     );
     if (!client) return [];
     redirectUris = client.redirectUris;

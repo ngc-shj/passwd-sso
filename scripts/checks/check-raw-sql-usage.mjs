@@ -406,6 +406,9 @@ const ADAPTER_PG_ALLOWED_FILES = new Set([
   "scripts/migrate-account-tokens-to-encrypted.ts",
   "scripts/migrate-webhook-secrets-v1-to-v2.ts",
   "scripts/tenant-domain.ts",
+  // The pool factory: every pool and Prisma client is built here
+  // (check-bypass-rls's pool rule).
+  "src/lib/db/pool-factory.ts",
   "src/lib/prisma.ts",
   "src/workers/audit-anchor-publisher.ts",
   "src/workers/audit-outbox-worker.ts",

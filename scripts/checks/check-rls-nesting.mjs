@@ -4,11 +4,12 @@
  *
  * `assertNoActiveRlsContext` (src/lib/tenant-rls.ts) refuses a nested
  * withTenantRls / withBypassRls at run time with INVALID_RLS_NESTING, and logs
- * the refusal. That runtime guard is the enforcement boundary. It is
- * fail-closed only for a caller that propagates the error: one that swallows it
- * — `invalidateUserSessions(...).catch(() => null)`, the best-effort
- * notification and lockout-audit paths — skips a security side effect, and no
- * test notices unless it drives that exact nesting. This gate is a limited
+ * the refusal. That runtime guard is the enforcement boundary. A refusal also
+ * marks the outer context, which then fails its transaction (runContext), so a
+ * caller that swallows the inner error — `invalidateUserSessions(...).catch(() =>
+ * null)`, the best-effort notification and lockout-audit paths — fails the
+ * whole request instead of committing without the side effect; only work
+ * detached past the outer commit stays detection-only. This gate is a limited
  * development aid that reports the nesting it can see before it ships; it is
  * not a proof that none exists. What it misses is the runtime guard's.
  *
@@ -516,7 +517,7 @@ const dedupe = (rows, key) => [...new Map(rows.map((r) => [key(r), r])).values()
 if (violations.length > 0) {
   failed = true;
   console.error("An RLS context is opened from inside another one. At run time this throws");
-  console.error("INVALID_RLS_NESTING, and a caller that swallows it silently skips the work.");
+  console.error("INVALID_RLS_NESTING and fails the outer transaction, so the request fails.");
   console.error("Move the call outside the outer callback, or pass the outer `tx` down.");
   console.error("");
   for (const v of dedupe(violations, (v) => `${v.site}|${v.what}`)) {

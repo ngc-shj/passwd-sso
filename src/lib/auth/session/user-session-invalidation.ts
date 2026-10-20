@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { invalidateCachedSessionsBulkByDigest, hashSessionToken } from "@/lib/auth/session/session-cache";
 import { getLogger } from "@/lib/logger";
@@ -218,7 +219,7 @@ export async function invalidateUserSessions(
       operatorTokens: operatorTokensResult.count,
       cacheTombstoneFailures,
     };
-  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  }, BYPASS_GRANT.USER_SESSION_INVALIDATION);
 }
 
 /**
@@ -247,7 +248,7 @@ export async function invalidateTenantSessionsCache(
       where: { tenantId, expires: { gt: new Date() } },
       select: { sessionToken: true },
     }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  BYPASS_GRANT.TENANT_SESSION_CACHE_INVALIDATION);
 
   if (targetSessions.length === 0) {
     return { totalSessions: 0, cacheTombstoneFailures: 0 };

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getRedis } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -120,7 +121,7 @@ async function handlePOST(req: NextRequest) {
     });
     if (!tenant) return null;
     return { id: found.id, tenant };
-  }, BYPASS_PURPOSE.AUTH_FLOW);
+  }, BYPASS_GRANT.AUTH_SIGNIN_TENANT_LOOKUP);
 
   // SSO tenant users are rejected by the verify route's tenant guard,
   // so treat them the same as "not found" to avoid leaking info.
@@ -135,7 +136,7 @@ async function handlePOST(req: NextRequest) {
         where: { userId: user.id },
         select: { credentialId: true, transports: true, prfSalt: true },
       }),
-    BYPASS_PURPOSE.AUTH_FLOW);
+    BYPASS_GRANT.PASSKEY_EMAIL_OPTIONS);
     if (credentials.length > 0) {
       allowCredentials = credentials.map((c) => ({
         credentialId: c.credentialId,
@@ -158,7 +159,7 @@ async function handlePOST(req: NextRequest) {
         select: { credentialId: true, transports: true },
         take: PASSKEY_DUMMY_CREDENTIALS_MAX,
       }),
-    BYPASS_PURPOSE.AUTH_FLOW);
+    BYPASS_GRANT.PASSKEY_EMAIL_OPTIONS);
     allowCredentials = generateDummyCredentials();
   }
 

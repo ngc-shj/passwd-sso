@@ -82,7 +82,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { GET, PUT, PATCH, DELETE } from "./route";
-import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 /**
  * Who owns `user-1` as the ownership read sees it: filed here and active nowhere
@@ -173,7 +173,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.CROSS_TENANT_USER_LOOKUP,
     );
   });
 

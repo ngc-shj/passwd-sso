@@ -67,7 +67,7 @@ describe("audit-outbox BEFORE DELETE trigger (TM1 defense)", () => {
     // Attempt to delete as worker role — should be blocked by the trigger
     await expect(
       ctx.worker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
         await tx.$executeRaw`SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true)`;
         await tx.$executeRawUnsafe(
@@ -84,7 +84,7 @@ describe("audit-outbox BEFORE DELETE trigger (TM1 defense)", () => {
 
     await expect(
       ctx.worker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await setBypassRlsGucs(tx);
         await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
         await tx.$executeRaw`SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true)`;
         await tx.$executeRawUnsafe(
@@ -101,7 +101,7 @@ describe("audit-outbox BEFORE DELETE trigger (TM1 defense)", () => {
 
     // Should succeed — trigger allows SENT deletions
     await ctx.worker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
       await tx.$executeRaw`SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true)`;
       await tx.$executeRawUnsafe(
@@ -127,7 +127,7 @@ describe("audit-outbox BEFORE DELETE trigger (TM1 defense)", () => {
 
     // Should succeed — trigger allows FAILED deletions
     await ctx.worker.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      await setBypassRlsGucs(tx);
       await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
       await tx.$executeRaw`SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true)`;
       await tx.$executeRawUnsafe(

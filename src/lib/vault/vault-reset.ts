@@ -11,7 +11,8 @@ import {
   collectAttachmentRefsByCreator,
   deleteAttachmentBlobs,
 } from "@/lib/blob-store/cleanup";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
 import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
@@ -111,7 +112,7 @@ export async function findVaultRowsOutsideTenant(
   return withBypassRls(
     prisma,
     (tx) => countVaultRowsOutsideTenant(tx, userId, tenantId),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.VAULT_RESET_SCOPE_CHECK,
   );
 }
 
@@ -163,7 +164,7 @@ export async function executeVaultReset(
         tx.passwordEntry.count({ where: { userId: targetUserId } }),
         tx.attachment.count({ where: { createdById: targetUserId } }),
       ]),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    BYPASS_GRANT.VAULT_RESET_COUNT,
   );
 
   // Single transaction: delete all vault data (callback form required for bulkTransition — S4).
@@ -268,7 +269,7 @@ export async function executeVaultReset(
     }
 
     return refs;
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.VAULT_RESET_EXECUTE);
 
   // Purge external blob objects only after the DB transaction commits
   // (best-effort; no-op on the DB backend).

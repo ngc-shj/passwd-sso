@@ -18,7 +18,8 @@ import {
 import { scimUserSchema } from "@/lib/scim/validations";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveExistingUsersForTenant } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -132,7 +133,7 @@ async function handleGET(req: NextRequest) {
     });
 
     return scimListResponse(resources, totalResults, startIndex);
-  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }, BYPASS_GRANT.SCIM_USER_MAPPING_LOOKUP);
 }
 
 // POST /api/scim/v2/Users — Create tenant user

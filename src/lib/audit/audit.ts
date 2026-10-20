@@ -65,7 +65,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { auditLogger, deadLetterLogger, refusedEmitLogger } from "@/lib/audit/audit-logger";
-import { withBypassRls, getTenantRlsContext, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, getTenantRlsContext } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
@@ -187,7 +188,7 @@ async function resolveTenantId(params: AuditLogParams): Promise<string> {
     // sentinel actor" — sentinels ARE UUIDs by construction
     // (constants/app.ts), which is what the guard above relies on.
     return SYSTEM_TENANT_ID;
-  }, BYPASS_PURPOSE.AUDIT_WRITE);
+  }, BYPASS_GRANT.AUDIT_TENANT_RESOLVE);
 }
 
 /**

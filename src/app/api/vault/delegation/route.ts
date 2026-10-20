@@ -9,7 +9,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
@@ -120,7 +121,7 @@ async function handlePOST(request: NextRequest) {
       },
       select: { id: true, scope: true, clientId: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_MCP_TOKEN_CHECK);
 
   if (!mcpToken) {
     return errorResponse(API_ERROR.MCP_TOKEN_NOT_FOUND);
@@ -142,7 +143,7 @@ async function handlePOST(request: NextRequest) {
         delegationMaxTtlSec: true,
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.TENANT_POLICY_LOOKUP);
 
   const maxTtl = tenant?.delegationMaxTtlSec ?? DELEGATION_MAX_TTL_SEC;
   const defaultTtl = tenant?.delegationDefaultTtlSec ?? DELEGATION_DEFAULT_TTL_SEC;
@@ -160,7 +161,7 @@ async function handlePOST(request: NextRequest) {
       },
       select: { id: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.VAULT_ENTRY_CROSS_TENANT_READ);
 
   const ownedIds = new Set(ownedEntries.map((e) => e.id));
   const missingIds = entryIds.filter((id) => !ownedIds.has(id));
@@ -182,7 +183,7 @@ async function handlePOST(request: NextRequest) {
       },
       select: { id: true },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 
   // Step 1: Create new delegation session in DB.
   const expiresAt = new Date(Date.now() + effectiveTtl * MS_PER_SECOND);
@@ -197,7 +198,7 @@ async function handlePOST(request: NextRequest) {
         expiresAt,
       },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 
   // Step 2: Store metadata entries in Redis. On failure, roll back via
   // deleteMany (idempotent — avoids P2025 if a concurrent vault-lock fired).
@@ -218,7 +219,7 @@ async function handlePOST(request: NextRequest) {
       tx.delegationSession.deleteMany({
         where: { id: delegationSession.id, revokedAt: null },
       }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP).catch(() => {});
+    BYPASS_GRANT.DELEGATION_SESSION_LOOKUP).catch(() => {});
     return errorResponse(API_ERROR.DELEGATION_STORE_FAILED);
   }
 
@@ -254,7 +255,7 @@ async function handlePOST(request: NextRequest) {
           where: { id: existingSession.id, revokedAt: null },
           data: { revokedAt: new Date() },
         }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+      BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
     } catch (err) {
       getLogger().warn(
         { error: errorLogFields(err), oldSessionId: existingSession.id, userId },
@@ -307,7 +308,7 @@ async function handleGET(_request: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_SESSION_LOOKUP);
 
   // Also return available MCP tokens with delegation-relevant scopes
   const availableTokens = await withBypassRls(prisma, (tx) =>
@@ -328,7 +329,7 @@ async function handleGET(_request: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  BYPASS_GRANT.DELEGATION_MCP_TOKEN_CHECK);
 
   return NextResponse.json({
     sessions: sessions.map((s) => ({

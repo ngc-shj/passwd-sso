@@ -11,9 +11,7 @@
  * worker in pg_stat_activity from the app and audit-outbox workers.
  */
 
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import pg from "pg";
+import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
 import { setTimeout as setTimeoutPromise } from "node:timers/promises";
 import { getLogger } from "@/lib/logger";
 import {
@@ -140,7 +138,7 @@ export function createWorker(config: WorkerConfig) {
   // Throws immediately on misconfigured identifier or missing globalDelete flag (INV-C2b).
   validateRegistry();
 
-  const pool = new pg.Pool({
+  const pool = createPool({
     connectionString: databaseUrl,
     max: 3,
     idleTimeoutMillis: WORKER_POOL_IDLE_TIMEOUT_MS,
@@ -158,8 +156,7 @@ export function createWorker(config: WorkerConfig) {
     );
   });
 
-  const adapter = new PrismaPg(pool);
-  const workerPrisma = new PrismaClient({ adapter });
+  const workerPrisma = createPrismaClient(pool);
 
   const controller = new AbortController();
   const { signal } = controller;

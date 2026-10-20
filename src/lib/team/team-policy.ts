@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { withTeamTenantRls, resolveTeamTenantId } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { isIpAllowed, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -151,7 +152,7 @@ export async function checkTeamAccessRestriction(teamId: string, clientIp: strin
           where: { id: tenantId },
           select: { allowedCidrs: true },
         }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      BYPASS_GRANT.TENANT_POLICY_LOOKUP,
     );
     if (!tenant) {
       throw new PolicyViolationError(

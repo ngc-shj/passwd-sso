@@ -34,7 +34,8 @@ import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { computeAth } from "@/lib/auth/dpop/verify";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { getFamilyPresenceAt } from "@/lib/auth/tokens/client-token-expiry";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { prisma } from "@/lib/prisma";
 import { generateKeypair, makeProof, type TestKeypair } from "@/__tests__/helpers/dpop-test-keypair";
 
@@ -215,7 +216,7 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
             cnfJkt: "A".repeat(43),
           },
         }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
       // (2) Rotate A → B: revoke A, create B carrying the family forward.
       const p0 = new Date(Date.now() - 30_000);
@@ -237,7 +238,7 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
             cnfJkt: "A".repeat(43),
           },
         });
-      }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      }, BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
       // (3) Write a NEWER presence directly onto the now-revoked row A —
       // simulating a presence write landing on a row that was concurrently
@@ -248,7 +249,7 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
           where: { tokenHash: tokenAHash },
           data: { lastPresenceAt: p1 },
         }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
       // (4) getFamilyPresenceAt must return p1 (the true max), not p0 — which
       // requires the query to NOT filter revokedAt: null. A revokedAt filter
@@ -256,7 +257,7 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
       // revoked row A.
       const presence = await withBypassRls(prisma, async (tx) =>
         getFamilyPresenceAt(tx, familyId, familyCreatedAt),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
       expect(presence.getTime()).toBe(p1.getTime());
       expect(presence.getTime()).toBeGreaterThan(p0.getTime());
     });
@@ -277,11 +278,11 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
             cnfJkt: "A".repeat(43),
           },
         }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
       const presence = await withBypassRls(prisma, async (tx) =>
         getFamilyPresenceAt(tx, familyId, familyCreatedAt),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
       expect(presence.getTime()).toBe(familyCreatedAt.getTime());
     });
   });
@@ -335,11 +336,11 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
           where: { tokenHash },
           data: { lastPresenceAt: issuancePresence },
         }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
       const before = await withBypassRls(prisma, async (tx) =>
         tx.extensionToken.findUnique({ where: { tokenHash } }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
       expect(before?.lastPresenceAt?.getTime()).toBe(issuancePresence.getTime());
 
       const req = await signedRequest({
@@ -356,7 +357,7 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
 
       const after = await withBypassRls(prisma, async (tx) =>
         tx.extensionToken.findUnique({ where: { tokenHash } }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
       expect(after!.lastPresenceAt!.getTime()).toBeGreaterThan(issuancePresence.getTime());
       expect(after!.expiresAt.getTime()).toBe(before!.expiresAt.getTime());
     });
@@ -368,7 +369,7 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
 
       const before = await withBypassRls(prisma, async (tx) =>
         tx.extensionToken.findUnique({ where: { tokenHash } }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
 
       const req = await signedRequest({
         kp,
@@ -384,7 +385,7 @@ describe("long-lived-client-login B1a — real-DB integration", () => {
 
       const after = await withBypassRls(prisma, async (tx) =>
         tx.extensionToken.findUnique({ where: { tokenHash } }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+      BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE);
       expect(after!.lastPresenceAt!.getTime()).toBe(before!.lastPresenceAt!.getTime());
     });
   });
