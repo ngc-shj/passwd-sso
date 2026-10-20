@@ -657,12 +657,22 @@ describe("team entries in background", () => {
         return { ok: false, json: async () => ({}) };
       });
 
-      const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as {
-        entries: Array<{ id: string; teamId?: string }>;
-      };
-      expect(res.entries.find((e) => e.id === "team-pw-1")?.teamId).toBe("team-2");
+      // The rebuild runs behind the menu's real DEBOUNCE_MS timer. Fake only the
+      // timers, so the wait is the debounce itself rather than a wall-clock
+      // budget that a loaded machine can overrun.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as {
+          entries: Array<{ id: string; teamId?: string }>;
+        };
+        expect(res.entries.find((e) => e.id === "team-pw-1")?.teamId).toBe("team-2");
+        expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
 
-      await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+        await vi.waitFor(() => expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled());
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
