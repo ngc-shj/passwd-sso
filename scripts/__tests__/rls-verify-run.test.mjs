@@ -7,9 +7,11 @@
  * The wrapped command is a fake that prints canned psql output and exits with
  * a chosen code, so each case pins one branch without a database.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { resolve, dirname } from "node:path";
+import { writeFileSync, mkdtempSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -29,11 +31,23 @@ function completeRun({ block4Warnings = [], reports = { users: ["users"], sessio
   ].join("\n");
 }
 
-function run(output, code = 0) {
+// The wrapped command: a stub standing in for psql. Its canned output and exit
+// code come from the environment, so no command string is assembled here.
+let fakePsql;
+
+beforeAll(() => {
+  const dir = mkdtempSync(join(tmpdir(), "rls-verify-run-"));
+  fakePsql = join(dir, "fake-psql");
   // psql writes NOTICE/WARNING to stderr and results to stdout; the wrapper must
-  // merge both, so the fake puts the canned output on stderr.
-  const r = spawnSync("bash", [WRAPPER, "--", "bash", "-c", 'printf "DO\\n"; printf "%s\\n" "$1" >&2; exit "$2"', "fake", output, String(code)], {
+  // merge both, so the stub puts the canned output on stderr.
+  writeFileSync(fakePsql, '#!/usr/bin/env bash\nprintf "DO\\n"\nprintf "%s\\n" "$FAKE_PSQL_STDERR" >&2\nexit "$FAKE_PSQL_CODE"\n');
+  chmodSync(fakePsql, 0o755);
+});
+
+function run(output, code = 0) {
+  const r = spawnSync("bash", [WRAPPER, "--", fakePsql], {
     encoding: "utf8",
+    env: { ...process.env, FAKE_PSQL_STDERR: output, FAKE_PSQL_CODE: String(code) },
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
