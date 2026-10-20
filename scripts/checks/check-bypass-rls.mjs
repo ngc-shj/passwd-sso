@@ -1534,6 +1534,7 @@ const SCHEMA = (() => {
     throw error;
   }
 })();
+const relationChecker = program.getTypeChecker().compilerObject;
 const camelModel = (pascal) => pascal[0].toLowerCase() + pascal.slice(1);
 const relationBindings = new Map();
 
@@ -1560,7 +1561,9 @@ function relationReachOf(node, models) {
   if (!arg) return out;
   const sf = node.getSourceFile();
   if (!relationBindings.has(sf)) relationBindings.set(sf, bindingIndex(sf));
-  const ctx = { bindingsFor: () => relationBindings.get(sf) };
+  // The node is the Program's own, so the Program's checker types it: a spread
+  // or a non-literal where/data the walk reads by its type (issue #926).
+  const ctx = { bindingsFor: () => relationBindings.get(sf), checker: relationChecker };
   const literals = arg.getKind() === SyntaxKind.SpreadElement ? null : objectLiterals(arg, ctx);
   if (!literals) {
     out.unreadable = true;

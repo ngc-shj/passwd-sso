@@ -21,8 +21,24 @@
  * where it is written, provided nothing in the file assigns into, deletes
  * from, or `Object.assign`s onto it; both branches of a conditional are
  * followed. Anything else is reported to the visitor as unreadable.
+ *
+ * With `full` (check-bypass-rls) two more shapes are read, in a `where`, a
+ * `data`, a projection and the call's argument itself:
+ *   - a conditional spread `...(c ? A : B)`, or a spread of a name bound to an
+ *     unmutated `const` whose initializer is one, each branch an object
+ *     literal, such a name, or `{}`/`undefined`/`null`: each non-empty branch
+ *     is walked as if written inline, so a relation in either branch counts;
+ *   - any other spread, and a whole `where`/`data` value that is not a literal,
+ *     by its type (`ctx.checker`, the gate's Program type checker): readable,
+ *     reaching nothing, only when every union member is an object type with a
+ *     finite property set — no index signature, no type variable, at least one
+ *     property — none of which the position could read a relation through (a
+ *     relation field of the model; in a `where` also AND/OR/NOT and the
+ *     relation-filter keys). Anything else stays unreadable. A type bounds the
+ *     keys a value is declared with, not every key it carries at run time
+ *     (structural width): this reads the declared contract, not a proof.
  */
-import { SyntaxKind } from "ts-morph";
+import { SyntaxKind, ts } from "ts-morph";
 import { existsSync, readFileSync } from "node:fs";
 import { resolveLocalObjectLiteral, unwrapExpression, visibleBinding } from "./scope-bindings.mjs";
 
@@ -90,6 +106,16 @@ export function loadPrismaSchema(abs) {
   if (models.size === 0) throw new SchemaReadError(`parsed zero models from ${abs}.`);
   const handles = new Map([...models.keys()].map((m) => [m[0].toLowerCase() + m.slice(1), m]));
   return { models, handles };
+}
+
+/**
+ * unwrapExpression plus the angle-bracket assertion `<T>x`, which (like `as`)
+ * states a type the value need not have. Kept apart from the shared helper so
+ * the gates that use that one read exactly what they did.
+ */
+function unwrapAssertions(expr) {
+  const value = unwrapExpression(expr);
+  return value?.getKind() === SyntaxKind.TypeAssertionExpression ? unwrapAssertions(value.getExpression()) : value;
 }
 
 const asObject = (node) => (node && node.getKind() === SyntaxKind.ObjectLiteralExpression ? node : null);
@@ -182,32 +208,71 @@ const isBooleanLiteral = (node) => {
  *     "shorthand-filter" (`{ relation }` in a where, `field`), "orderBy",
  *     "data".
  * `full: true` also walks `orderBy` (the call's and each nested relation's) and
- * nested writes, and reports a spread or computed key in a `where` as
- * unreadable. Without it (check-required-user-relation) neither is read and a
- * `where` spread or computed key is skipped, as that gate always has.
+ * nested writes, reads spreads and non-literal `where`/`data` values as the
+ * module header describes (`ctx.checker` for the typed reading; without one
+ * those stay unreadable), and reports a computed key in a `where` as
+ * unreadable. Without it (check-required-user-relation) none of this is read
+ * and a `where` spread or computed key is skipped, as that gate always has.
  */
 export function walkCallArgs(args, model, method, { models, visitor, ctx, full = false }) {
-  const walker = createWalker(models, visitor, ctx, full);
-  const trail = [model];
-  if (RETURNING.has(method)) {
-    for (const root of ["select", "include"]) {
-      const node = initializerOf(args.getProperty(root));
-      if (!node) continue;
-      if (!asObject(node)) visitor.unreadable({ trail, model, kind: "projection", root });
-      else walker.projection(asObject(node), model, trail);
+  createWalker(models, visitor, ctx, full).callArgs(args, model, method, [model]);
+}
+
+/** Argument keys the walk reads a relation through; a typed argument spread holding one is unreadable. */
+const ARG_KEYS = new Set(["select", "include", "where", "cursor", "orderBy", "data", "create", "update"]);
+const F = ts.TypeFlags;
+/** Types whose property set depends on a type argument not known here. */
+const GENERIC = F.TypeParameter | F.IndexedAccess | F.Index | F.Conditional | F.Substitution;
+
+/** Does this type, or a type argument it was instantiated with, hold a type variable? */
+function isGeneric(type, checker, depth = 0) {
+  if (depth > 8) return true;
+  if (type.flags & GENERIC) return true;
+  if (type.flags & (F.Union | F.Intersection)) return type.types.some((t) => isGeneric(t, checker, depth + 1));
+  const args = [...(type.aliasTypeArguments ?? [])];
+  if (type.flags & F.Object && type.objectFlags & ts.ObjectFlags.Reference) args.push(...checker.getTypeArguments(type));
+  return args.some((t) => isGeneric(t, checker, depth + 1));
+}
+
+/** The property names of an object type whose property set is finite and known, or null. */
+function objectKeys(type, checker) {
+  if (type.flags & F.Intersection) {
+    if (!type.types.every((part) => objectKeys(part, checker))) return null;
+  } else if (!(type.flags & F.Object)) return null;
+  if (isGeneric(type, checker)) return null;
+  if (checker.getIndexInfosOfType(type).length > 0) return null;
+  // No property at all is `{}`/`object`, which any value is assignable to.
+  const props = checker.getPropertiesOfType(type);
+  if (type.flags & F.Object && type.objectFlags & ts.ObjectFlags.Mapped) {
+    // A mapped type written inline (`{ [K in keyof T]: T[K] }`) carries no alias
+    // whose arguments isGeneric could check, and its key set is whatever T is
+    // instantiated with. Only an alias's instantiation is read; its constraint
+    // and modifiers types, once the property read above has resolved them,
+    // must not hold a type variable either.
+    if (!type.aliasSymbol) return null;
+    for (const part of [type.constraintType, type.modifiersType]) {
+      if (part && isGeneric(part, checker)) return null;
     }
   }
-  if (FILTERING.has(method)) walker.whereOf(args, model, trail);
-  if (full && ORDERING.has(method)) {
-    const order = propertyValue(args, "orderBy");
-    if (order) walker.orderBy(order, model, [...trail, "orderBy"]);
+  return props.length > 0 ? props.map((p) => p.getName()) : null;
+}
+
+/**
+ * Every key a value of this type can be declared with, or null when that set
+ * is not finite and known. `undefined`/`null` contribute nothing (nor, spread,
+ * does a boolean: `...(c && { k })`). `any`, `unknown` and `never` are not
+ * object types, so objectKeys refuses them.
+ */
+function finiteKeys(type, checker, spread) {
+  const keys = new Set();
+  for (const member of type.flags & F.Union ? type.types : [type]) {
+    if (member.flags & (F.Undefined | F.Null | F.Void)) continue;
+    if (spread && member.flags & F.BooleanLiteral) continue;
+    const own = objectKeys(member, checker);
+    if (!own) return null;
+    for (const k of own) keys.add(k);
   }
-  if (full && WRITING.has(method)) {
-    for (const key of WRITING.get(method)) {
-      const value = propertyValue(args, key);
-      if (value) walker.data(value, model, [...trail, key]);
-    }
-  }
+  return keys;
 }
 
 function createWalker(models, visitor, ctx, full) {
@@ -215,12 +280,226 @@ function createWalker(models, visitor, ctx, full) {
     const field = models.get(model)?.get(key);
     return field && models.has(field.type) ? field : null;
   };
+  const whereKey = (model) => (k) => !!relationField(model, k) || LOGICAL.has(k) || RELATION_FILTERS.has(k);
+  const dataKey = (model) => (k) => !!relationField(model, k);
+  const projectionKey = (model) => (k) => k === "_count" || !models.get(model)?.has(k) || !!relationField(model, k);
+  const argKey = (k) => ARG_KEYS.has(k);
+
+  /**
+   * (`full` only.) The object literals a value can be, `[]` when it is readable
+   * and holds none to walk, null when it is unreadable. `opensKey(k)` says
+   * whether a key could carry a relation in this position; a value read by its
+   * type is readable only if no key it can hold does.
+   */
+  function readValue(node, opensKey, spread = false, seen = new Set()) {
+    const value = unwrapAssertions(node);
+    if (!value) return null;
+    switch (value.getKind()) {
+      case SyntaxKind.ObjectLiteralExpression:
+        return [value];
+      case SyntaxKind.NullKeyword:
+        return [];
+      case SyntaxKind.ConditionalExpression: {
+        const whenTrue = readValue(value.getWhenTrue(), opensKey, spread, seen);
+        const whenFalse = readValue(value.getWhenFalse(), opensKey, spread, seen);
+        return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
+      }
+      case SyntaxKind.Identifier: {
+        const name = value.getText();
+        const binding = visibleBinding(name, value, ctx.bindingsFor);
+        if (!binding) {
+          if (name === "undefined") return [];
+          break;
+        }
+        // Something assigns into it: neither its initializer nor its declared type says what it holds.
+        if (assignedInto(name, binding, ctx)) return null;
+        // Nor for a name rebound after its declaration: `w = other` is checked
+        // only for assignability, and a wider object is assignable.
+        if (binding.getKind() === SyntaxKind.VariableDeclaration && binding.getParent()?.getDeclarationKind?.() !== "const") return null;
+        if (rebound(name, binding)) return null;
+        // A destructured name (`const { w } = …`) is indexed under its whole
+        // declaration, whose initializer is not what the name holds.
+        if (
+          binding.getKind() === SyntaxKind.VariableDeclaration &&
+          binding.getNameNode().getKind() === SyntaxKind.Identifier &&
+          binding.getVariableStatement?.()?.getDeclarationKind() === "const" &&
+          binding.getInitializer() &&
+          !seen.has(binding)
+        ) {
+          return readValue(binding.getInitializer(), opensKey, spread, new Set([...seen, binding]));
+        }
+        break;
+      }
+    }
+    const checker = ctx.checker;
+    if (!checker) return null;
+    const types = declaredTypes(value, checker);
+    if (!types) return null;
+    const keys = new Set();
+    for (const type of types) {
+      const own = finiteKeys(type, checker, spread);
+      if (!own) return null;
+      for (const k of own) keys.add(k);
+    }
+    return ![...keys].some(opensKey) ? [] : null;
+  }
+
+  /**
+   * The types a value is declared with — never the flow-narrowed type at the
+   * use site, which a user-defined type guard can narrow to anything — or null.
+   *   - A name, or a chain of plain property reads off one: the root's declared
+   *     type, each property looked up on every non-nullish member of the type
+   *     before it (any member lacking it: null). The root must be a binding in
+   *     this file that nothing assigns into, rebinds, or (for `let`/`var`)
+   *     could rebind, since a member's type says nothing about a value
+   *     written through a cast.
+   *   - A call through such a chain: the return type of every call signature
+   *     of the callee's declared types, each of which must be non-generic and
+   *     carry an explicit return-type annotation (an inferred one is whatever
+   *     the body returned, narrowing included).
+   * Anything else (`await w`, `w ?? x`, an element access, …) is null.
+   */
+  function declaredTypes(value, checker) {
+    if (value.getKind() === SyntaxKind.CallExpression) {
+      const callees = declaredTypes(unwrapAssertions(value.getExpression()), checker);
+      if (!callees) return null;
+      const out = [];
+      for (const callee of callees) {
+        const signatures = checker.getSignaturesOfType(callee, ts.SignatureKind.Call);
+        if (signatures.length === 0) return null;
+        for (const signature of signatures) {
+          const decl = signature.getDeclaration();
+          if (!decl?.type || decl.typeParameters?.length || signature.getTypeParameters()?.length) return null;
+          out.push(checker.getReturnTypeOfSignature(signature));
+        }
+      }
+      return out;
+    }
+    const names = [];
+    let root = value;
+    while (root.getKind() === SyntaxKind.PropertyAccessExpression) {
+      names.unshift(root.getName());
+      root = root.getExpression();
+    }
+    if (root.getKind() !== SyntaxKind.Identifier) return null;
+    const binding = visibleBinding(root.getText(), root, ctx.bindingsFor);
+    if (!binding) return null;
+    if (assignedInto(root.getText(), binding, ctx) || rebound(root.getText(), binding)) return null;
+    if (binding.getKind() === SyntaxKind.VariableDeclaration && binding.getParent()?.getDeclarationKind?.() !== "const") return null;
+    let symbol = checker.getSymbolAtLocation(root.compilerNode);
+    if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (!symbol) return null;
+    const nullish = F.Undefined | F.Null | F.Void;
+    let types = [checker.getTypeOfSymbol(symbol)];
+    for (const name of names) {
+      const next = [];
+      for (const type of types) {
+        for (const member of type.flags & F.Union ? type.types : [type]) {
+          if (member.flags & nullish) continue;
+          const prop = checker.getPropertyOfType(member, name);
+          if (!prop) return null;
+          next.push(checker.getTypeOfSymbol(prop));
+        }
+      }
+      types = next;
+    }
+    return types;
+  }
+
+  /** Is `name` (bound at `binding`) the target of a plain or destructuring assignment, or a for-in/of head? */
+  function rebound(name, binding) {
+    const refersHere = (node) =>
+      node?.getKind() === SyntaxKind.Identifier &&
+      node.getText() === name &&
+      sameNode(visibleBinding(name, node, ctx.bindingsFor), binding);
+    const targets = (left) => {
+      const l = unwrapAssertions(left);
+      if (refersHere(l)) return true;
+      const k = l?.getKind();
+      if (k !== SyntaxKind.ObjectLiteralExpression && k !== SyntaxKind.ArrayLiteralExpression) return false;
+      return l.getDescendantsOfKind(SyntaxKind.Identifier).some(refersHere);
+    };
+    const sf = binding.getSourceFile();
+    for (const bin of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+      const op = bin.getOperatorToken().getKind();
+      if (op >= SyntaxKind.FirstAssignment && op <= SyntaxKind.LastAssignment && targets(bin.getLeft())) return true;
+    }
+    for (const kind of [SyntaxKind.ForOfStatement, SyntaxKind.ForInStatement]) {
+      for (const loop of sf.getDescendantsOfKind(kind)) {
+        if (targets(loop.getInitializer())) return true;
+      }
+    }
+    return false;
+  }
+
+  /** (`full` only.) The elements an array literal holds, spreads of array literals (or conditionals of them) flattened; null otherwise. */
+  function arrayElements(node) {
+    const value = unwrapExpression(node);
+    if (value?.getKind() === SyntaxKind.ConditionalExpression) {
+      const whenTrue = arrayElements(value.getWhenTrue());
+      const whenFalse = arrayElements(value.getWhenFalse());
+      return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
+    }
+    if (value?.getKind() !== SyntaxKind.ArrayLiteralExpression) return null;
+    const out = [];
+    for (const el of value.getElements()) {
+      if (el.getKind() !== SyntaxKind.SpreadElement) {
+        out.push(el);
+        continue;
+      }
+      const inner = arrayElements(el.getExpression());
+      if (!inner) return null;
+      out.push(...inner);
+    }
+    return out;
+  }
+
+  /** The call's argument object: select/include, where, orderBy and nested writes. */
+  function callArgs(args, model, method, trail) {
+    if (full) {
+      for (const prop of args.getProperties()) {
+        if (prop.getKind() !== SyntaxKind.SpreadAssignment) continue;
+        const spread = readValue(prop.getExpression(), argKey, true);
+        if (!spread) visitor.unreadable({ trail, model, kind: "args" });
+        else for (const literal of spread) callArgs(literal, model, method, trail);
+      }
+    }
+    if (RETURNING.has(method)) {
+      for (const root of ["select", "include"]) {
+        const node = initializerOf(args.getProperty(root));
+        if (!node) continue;
+        if (!asObject(node)) visitor.unreadable({ trail, model, kind: "projection", root });
+        else projection(asObject(node), model, trail);
+      }
+    }
+    if (FILTERING.has(method)) whereOf(args, model, trail);
+    if (full && FILTERING.has(method)) cursorOf(args, model, trail);
+    if (full && ORDERING.has(method)) {
+      const order = propertyValue(args, "orderBy");
+      if (order) orderBy(order, model, [...trail, "orderBy"]);
+    }
+    if (full && WRITING.has(method)) {
+      for (const key of WRITING.get(method)) {
+        const value = propertyValue(args, key);
+        if (value) data(value, model, [...trail, key]);
+      }
+    }
+  }
+
+  /** (`full` only.) A `cursor` is a unique filter, which can name relations like a `where`. */
+  function cursorOf(node, model, trail) {
+    const value = propertyValue(node, "cursor");
+    if (!value) return;
+    const cursors = readValue(value, whereKey(model));
+    if (cursors) for (const c of cursors) where(c, model, [...trail, "cursor"]);
+    else visitor.unreadable({ trail, model, kind: "where" });
+  }
 
   /** Scan the `where` held by `node` (a projection argument or a call's args), or report it unreadable. */
   function whereOf(node, model, trail) {
     const value = propertyValue(node, "where");
     if (!value) return;
-    const wheres = objectLiterals(value, ctx);
+    const wheres = full ? readValue(value, whereKey(model)) : objectLiterals(value, ctx);
     if (wheres) for (const w of wheres) where(w, model, [...trail, "where"]);
     else visitor.unreadable({ trail, model, kind: "where" });
   }
@@ -252,6 +531,12 @@ function createWalker(models, visitor, ctx, full) {
   /** Every relation a projection of `model` reaches. */
   function projection(node, model, trail) {
     for (const prop of node.getProperties()) {
+      if (full && prop.getKind() === SyntaxKind.SpreadAssignment) {
+        const spread = readValue(prop.getExpression(), projectionKey(model), true);
+        if (!spread) visitor.unreadable({ trail, model, kind: "spread" });
+        else for (const literal of spread) projection(literal, model, trail);
+        continue;
+      }
       if (prop.getKind() !== SyntaxKind.PropertyAssignment) {
         visitor.unreadable({ trail, model, kind: "spread" });
         continue;
@@ -273,6 +558,7 @@ function createWalker(models, visitor, ctx, full) {
       const nested = asObject(initializerOf(prop));
       if (!nested) continue;
       whereOf(nested, declared.type, here);
+      if (full) cursorOf(nested, declared.type, here);
       for (const root of ["select", "include"]) {
         const sub = initializerOf(nested.getProperty(root));
         if (!sub) continue;
@@ -297,6 +583,15 @@ function createWalker(models, visitor, ctx, full) {
         if (field) visitor.unreadable({ trail: [...trail, prop.getName()], model, kind: "shorthand-filter", key: prop.getName(), field });
         continue;
       }
+      if (full && prop.getKind() === SyntaxKind.SpreadAssignment) {
+        const spread = readValue(prop.getExpression(), whereKey(model), true);
+        // A branch naming is/some/… would make the enclosing relation filter a
+        // wrapped one, which the walk decided from the literal's own keys.
+        const wraps = (literal) => literal.getProperties().some((p) => p.getName?.() && RELATION_FILTERS.has(p.getName()));
+        if (!spread || spread.some(wraps)) visitor.unreadable({ trail, model, kind: "where" });
+        else for (const literal of spread) where(literal, model, trail);
+        continue;
+      }
       if (prop.getKind() !== SyntaxKind.PropertyAssignment || prop.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) {
         if (full) visitor.unreadable({ trail, model, kind: "where" });
         continue;
@@ -304,9 +599,13 @@ function createWalker(models, visitor, ctx, full) {
       const key = prop.getName();
       const value = unwrapExpression(initializerOf(prop));
       if (LOGICAL.has(key)) {
-        const branches = value?.getKind() === SyntaxKind.ArrayLiteralExpression ? value.getElements() : [value];
+        let branches = value?.getKind() === SyntaxKind.ArrayLiteralExpression ? value.getElements() : [value];
+        if (full && value?.getKind() === SyntaxKind.ArrayLiteralExpression) {
+          const flat = arrayElements(value);
+          if (flat) branches = flat;
+        }
         for (const branch of branches) {
-          const objs = objectLiterals(branch, ctx);
+          const objs = full && branch?.getKind() !== SyntaxKind.SpreadElement ? readValue(branch, whereKey(model)) : objectLiterals(branch, ctx);
           if (objs) for (const obj of objs) where(obj, model, [...trail, key]);
           else if (branch) visitor.unreadable({ trail, model, kind: "logical", key });
         }
@@ -328,6 +627,10 @@ function createWalker(models, visitor, ctx, full) {
         if (!wrapped) {
           where(nested, field.type, here);
           continue;
+        }
+        // Beside is/some/…, a spread could hold another of them.
+        if (full && nested.getProperties().some((p) => p.getKind() !== SyntaxKind.PropertyAssignment)) {
+          visitor.unreadable({ trail: here, model, kind: "filter", key, field });
         }
         for (const op of RELATION_FILTERS) {
           const opValue = propertyValue(nested, op);
@@ -378,33 +681,42 @@ function createWalker(models, visitor, ctx, full) {
     const v = unwrapExpression(value);
     const items = v?.getKind() === SyntaxKind.ArrayLiteralExpression ? v.getElements() : [v];
     for (const item of items) {
-      const objs = objectLiterals(item, ctx);
+      const objs = item?.getKind() === SyntaxKind.SpreadElement ? null : readValue(item, dataKey(model));
       if (!objs) {
         visitor.unreadable({ trail, model, kind: "data" });
         continue;
       }
-      for (const obj of objs) {
-        for (const prop of obj.getProperties()) {
-          if (prop.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
-            const field = relationField(model, prop.getName());
-            if (field) {
-              visitor.relation({ trail: [...trail, prop.getName()], model, key: prop.getName(), field, position: "data" });
-              visitor.unreadable({ trail: [...trail, prop.getName()], model, kind: "data" });
-            }
-            continue;
-          }
-          if (prop.getKind() !== SyntaxKind.PropertyAssignment || prop.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) {
-            visitor.unreadable({ trail, model, kind: "data" });
-            continue;
-          }
-          const key = prop.getName();
-          const field = relationField(model, key);
-          if (!field) continue;
-          const here = [...trail, key];
-          if (visitor.relation({ trail: here, model, key, field, position: "data" }) === false) continue;
-          nestedWrite(initializerOf(prop), field.type, here);
-        }
+      for (const obj of objs) dataObject(obj, model, trail);
+    }
+  }
+
+  /** Every relation one `data` object literal of `model` writes through. */
+  function dataObject(obj, model, trail) {
+    for (const prop of obj.getProperties()) {
+      if (prop.getKind() === SyntaxKind.SpreadAssignment) {
+        const spread = readValue(prop.getExpression(), dataKey(model), true);
+        if (!spread) visitor.unreadable({ trail, model, kind: "data" });
+        else for (const literal of spread) dataObject(literal, model, trail);
+        continue;
       }
+      if (prop.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
+        const field = relationField(model, prop.getName());
+        if (field) {
+          visitor.relation({ trail: [...trail, prop.getName()], model, key: prop.getName(), field, position: "data" });
+          visitor.unreadable({ trail: [...trail, prop.getName()], model, kind: "data" });
+        }
+        continue;
+      }
+      if (prop.getKind() !== SyntaxKind.PropertyAssignment || prop.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) {
+        visitor.unreadable({ trail, model, kind: "data" });
+        continue;
+      }
+      const key = prop.getName();
+      const field = relationField(model, key);
+      if (!field) continue;
+      const here = [...trail, key];
+      if (visitor.relation({ trail: here, model, key, field, position: "data" }) === false) continue;
+      nestedWrite(initializerOf(prop), field.type, here);
     }
   }
 
@@ -485,5 +797,5 @@ function createWalker(models, visitor, ctx, full) {
     }
   }
 
-  return { projection, whereOf, orderBy, data };
+  return { callArgs };
 }

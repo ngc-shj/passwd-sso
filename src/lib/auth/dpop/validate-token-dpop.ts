@@ -83,13 +83,16 @@ export async function validateExtensionTokenDpop(args: {
 
   // Best-effort lastUsedAt update — always, for both clientKinds.
   // lastUsedIp / lastUsedUserAgent only for IOS_APP (preserves existing behavior).
-  const updateData: Record<string, unknown> = { lastUsedAt: new Date() };
-  if (row.clientKind === "IOS_APP") {
-    updateData.lastUsedIp =
-      extractClientIp(req)?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null;
-    updateData.lastUsedUserAgent =
-      req.headers.get("user-agent")?.slice(0, 512) ?? null;
-  }
+  // One literal (not a mutated record) so check-bypass-rls can read it (`#926`).
+  const updateData = {
+    lastUsedAt: new Date(),
+    ...(row.clientKind === "IOS_APP"
+      ? {
+          lastUsedIp: extractClientIp(req)?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
+          lastUsedUserAgent: req.headers.get("user-agent")?.slice(0, 512) ?? null,
+        }
+      : {}),
+  };
 
   void withBypassRls(
     prisma,
