@@ -8,7 +8,7 @@ import {
   readBypassState,
   setBypassGucs,
   setLockTimeout,
-  pinBypassOff,
+  setTenantGucs,
 } from "@/lib/tenant-rls-grants";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls-purpose";
 
@@ -20,6 +20,20 @@ function captureRaw() {
     return Promise.resolve(0);
   };
   return { calls, tx: { $executeRaw: vi.fn(record) } as unknown as Prisma.TransactionClient };
+}
+
+/**
+ * The GUC each set_config in a captured statement writes, paired with the
+ * value it writes (a bound value for `$`, else the literal) — so a test
+ * asserts which name gets which value, not names and values separately.
+ */
+function writtenGucs(call: { sql: string; values: unknown[] }): Record<string, unknown> {
+  const values = [...call.values];
+  const out: Record<string, unknown> = {};
+  for (const m of call.sql.matchAll(/set_config\('([^']+)', (\$|'[^']*'), true\)/g)) {
+    out[m[1]] = m[2] === "$" ? values.shift() : m[2].slice(1, -1);
+  }
+  return out;
 }
 
 describe("MODEL_TABLE", () => {
@@ -61,11 +75,12 @@ describe("setBypassGucs", () => {
     const { calls, tx } = captureRaw();
     await setBypassGucs(tx, defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session", "apiKey"]));
     expect(calls).toHaveLength(1);
-    expect(calls[0].sql).toContain("set_config('app.bypass_rls', 'on', true)");
-    expect(calls[0].sql).toContain("set_config('app.bypass_tables', $, true)");
-    expect(calls[0].sql).toContain("set_config('app.bypass_purpose', $, true)");
-    expect(calls[0].sql).toContain("set_config('app.tenant_id', $, true)");
-    expect(calls[0].values).toEqual(["token_lifecycle", NIL_UUID, "api_keys,sessions"]);
+    expect(writtenGucs(calls[0])).toEqual({
+      "app.bypass_rls": "on",
+      "app.bypass_purpose": "token_lifecycle",
+      "app.tenant_id": NIL_UUID,
+      "app.bypass_tables": "api_keys,sessions",
+    });
   });
 
   it("uses the given tenant id instead of NIL", async () => {
@@ -77,12 +92,16 @@ describe("setBypassGucs", () => {
   });
 });
 
-describe("pinBypassOff", () => {
-  it("turns the bypass off and clears the grant", async () => {
+describe("setTenantGucs", () => {
+  it("sets the tenant, turns the bypass off and clears the grant in one statement", async () => {
     const { calls, tx } = captureRaw();
-    await pinBypassOff(tx);
-    expect(calls[0].sql).toContain("set_config('app.bypass_rls', 'off', true)");
-    expect(calls[0].sql).toContain("set_config('app.bypass_tables', '', true)");
+    await setTenantGucs(tx, "00000000-0000-4000-8000-000000000003");
+    expect(calls).toHaveLength(1);
+    expect(writtenGucs(calls[0])).toEqual({
+      "app.tenant_id": "00000000-0000-4000-8000-000000000003",
+      "app.bypass_rls": "off",
+      "app.bypass_tables": "",
+    });
   });
 });
 
@@ -101,6 +120,20 @@ describe("setLockTimeout", () => {
 });
 
 describe("readBypassState", () => {
+  it("reads each GUC into its own column", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    await readBypassState({ $queryRaw: queryRaw } as unknown as Prisma.TransactionClient);
+    const sql = (queryRaw.mock.calls[0][0] as TemplateStringsArray).join("$").replace(/\s+/g, " ");
+    for (const [guc, column] of [
+      ["app.bypass_rls", "bypass_rls"],
+      ["app.bypass_purpose", "purpose"],
+      ["app.tenant_id", "tenant_id"],
+      ["app.bypass_tables", "tables"],
+    ]) {
+      expect(sql).toContain(`current_setting('${guc}', true) AS ${column}`);
+    }
+  });
+
   it("returns the four GUCs as read", async () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([{ bypass_rls: "on", purpose: "auth_flow", tenant_id: NIL_UUID, tables: "users" }]),

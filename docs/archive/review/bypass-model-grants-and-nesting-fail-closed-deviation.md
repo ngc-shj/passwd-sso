@@ -34,12 +34,12 @@ Departures from the plan (revision 4.1) made during implementation, and why.
 - **Implemented:** the reach was taken from a scratch copy of `check-bypass-rls.mjs` that dumped per-call reach. The dump showed 221 calls: 67 with a set of reached models, and 15 empty (raw SQL only, so their tables were added by reading the SQL). The scratch gate is not part of the change.
 - **Pending:** the "WARNINGs observed in tests" source needs the integration run against the migrated dev database. Any table it reports is added to the grant that reached it.
 
-## D5. Second migration: the tenant branch moves into a sub-SELECT
+## D5. The tenant branch moves into a sub-SELECT too
 
 - **Plan:** C1 rewrites only the bypass branch.
 - **Found by the integration run:** the old bypass branch, `COALESCE(current_setting('app.bypass_rls'), '') = 'on'`, let the planner fold the whole `OR` to true when estimating a bypassed statement, so the tenant branch was never evaluated. The new branch is an InitPlan, which the planner cannot fold. So planning now evaluates `current_setting('app.tenant_id', true)::uuid`. On a pooled connection where an earlier transaction set `app.tenant_id`, the GUC has reverted to `''`, and `''::uuid` raises 22P02.
 - **Who is affected:** a bypass that sets `app.bypass_rls` without `app.tenant_id`. New code always sets `NIL_UUID` through `setBypassGucs`. The pre-change retention sweep does not, so a code-only rollback would have broken retention GC, and the plan's claim that report mode admits on every rollback path would have been false.
-- **Fix:** `20261019000001_rls_tenant_branch_initplan` rewrites the tenant branch of all 56 policies to `tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)`. An InitPlan is evaluated lazily, so the cast runs only when the bypass branch is false. All four cases keep their previous outcomes:
+- **Fix:** the same migration, `20261019000000_rls_bypass_admits_report_mode`, in the same transaction, also rewrites the tenant branch of all 56 policies to `tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)`. An InitPlan is evaluated lazily, so the cast runs only when the bypass branch is false. All four cases keep their previous outcomes:
 
   | Bypass | `app.tenant_id` | Outcome |
   |---|---|---|
@@ -50,8 +50,9 @@ Departures from the plan (revision 4.1) made during implementation, and why.
 
   Plans are unchanged: the old shape was also a filter, not an index condition. `current_setting` is now evaluated once per statement instead of once per row.
 - **Rejected alternative:** `NULLIF(current_setting(...), '')::uuid`. It turns the loud missing-context error into a silent empty result, which existing code and tests rely on not happening.
+- **One transaction:** this was first a second migration. Phase 3 review merged it into the first, because a deploy that stopped between the two would have committed exactly the state that breaks pre-change code.
 - **Guards:**
-  - `rls-cross-tenant-verify.sql` Block 1 `[E-RLS-TENANT-INITPLAN]`, with negative case 13;
+  - `rls-cross-tenant-verify.sql` Block 1 `[E-RLS-TENANT-INITPLAN]`, with negative cases 13 and 14;
   - the integration cell "admits a bypass without app.tenant_id on a connection where an earlier transaction set it";
   - the 7 retention-GC least-privilege cells, which failed with 22P02 before the fix.
 
@@ -79,3 +80,7 @@ Departures from the plan (revision 4.1) made during implementation, and why.
   - Why accepted: both helpers run their callback through one `runContext`, so the transaction-rollback mechanism is the same code for all four combinations, and the one database cell exercises it.
 - **RT11, notice sink attribution:** the buffer carries no test id. A report from detached work that lands after its test's `afterEach` fails the next test, or the file's `afterAll`, under that test's name.
   - Why accepted: reports are attributed by table and purpose, which name the grant to fix, so the wrong test name does not hide the defect. Per-test ids would need the ALS context at notice time, and a `pg` notice event does not carry it.
+- **C6, the "side-effect rows at caught sites" cell:** not written as a per-site cell.
+  - Why: no production code catches `INVALID_RLS_NESTING` (`git grep` outside `tenant-rls.ts` and tests finds no handler). A "caught site" exists only as a caller that swallows every error.
+  - Covered by: the integration cell "rolls back the outer transaction's write when a nested context was refused and caught". It catches the inner refusal exactly as such a caller would, and asserts that the outer write is absent.
+  - The member set of state-tightening sites, with its evidence, is listed in the code review (C5 per-site list).

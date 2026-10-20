@@ -2,7 +2,11 @@ import pg from "pg";
 import ConnectionParameters from "pg/lib/connection-parameters";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { getLogger } from "@/lib/logger";
+// The base logger, not getLogger(): a notice is emitted from the pooled
+// socket's callback, which runs in the async context of whichever request first
+// opened that connection, so a request-scoped logger would stamp the report
+// with that earlier request's id and path.
+import logger from "@/lib/logger";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 /**
@@ -27,17 +31,22 @@ const RATE_WINDOW_MS = MS_PER_MINUTE;
 const RATE_MAP_MAX = 1_000;
 const lastLogged = new Map<string, number>();
 
-export const productionBypassNoticeSink: BypassNoticeSink = ({ table, purpose }) => {
-  const key = `${table}\u0000${purpose}`;
+/** True when a line for `key` may be logged now; bounded, per process. */
+function withinRateLimit(key: string): boolean {
   const now = Date.now();
   const last = lastLogged.get(key);
-  if (last !== undefined && now - last < RATE_WINDOW_MS) return;
+  if (last !== undefined && now - last < RATE_WINDOW_MS) return false;
   if (!lastLogged.has(key) && lastLogged.size >= RATE_MAP_MAX) {
     const oldest = lastLogged.keys().next().value;
     if (oldest !== undefined) lastLogged.delete(oldest);
   }
   lastLogged.set(key, now);
-  getLogger().warn({ _logType: "rls.bypass_not_granted", table, purpose }, "rls.bypass_not_granted");
+  return true;
+}
+
+export const productionBypassNoticeSink: BypassNoticeSink = ({ table, purpose }) => {
+  if (!withinRateLimit(`${table}\u0000${purpose}`)) return;
+  logger.warn({ _logType: "rls.bypass_not_granted", table, purpose }, "rls.bypass_not_granted");
 };
 
 export const stderrBypassNoticeSink: BypassNoticeSink = ({ table, purpose }) => {
@@ -78,7 +87,10 @@ export function handleServerNotice(notice: { code?: string; message?: string; wh
   if (notice.code !== WARNING_SQLSTATE || !notice.where?.includes(REPORT_SOURCE)) return;
   const match = REPORT_RE.exec(notice.message ?? "");
   if (!match) {
-    getLogger().warn({ _logType: "rls.bypass_notice_unparsed" }, "rls.bypass_notice_unparsed");
+    // No content to key on, so one shared rate-limit slot.
+    if (withinRateLimit("\u0000unparsed")) {
+      logger.warn({ _logType: "rls.bypass_notice_unparsed" }, "rls.bypass_notice_unparsed");
+    }
     return;
   }
   (registeredSink ?? productionBypassNoticeSink)({ table: match[1], purpose: match[2] });
@@ -91,6 +103,13 @@ function attachNoticeListener(client: pg.Client | pg.PoolClient): void {
 // PostgreSQL's option parser folds `-` into `_`, so `client-min-messages`
 // sets the same parameter.
 const CLIENT_MIN_MESSAGES_RE = /client[-_]min[-_]messages/i;
+
+// The server splits startup `options` in pg_split_opts, where a backslash
+// escapes the next character and is dropped: `client\_min\_messages` arrives
+// as `client_min_messages`. Undo the escapes before matching, as it does.
+function unescapeStartupOptions(options: string): string {
+  return options.replace(/\\(.)/gs, "$1");
+}
 
 /**
  * Refuse a configuration that would raise `client_min_messages` above WARNING
@@ -108,7 +127,7 @@ function assertReportsNotSuppressed(config: pg.ClientConfig): void {
     new ConnectionParameters().options,
   ];
   for (const source of sources) {
-    if (source && CLIENT_MIN_MESSAGES_RE.test(source)) {
+    if (source && CLIENT_MIN_MESSAGES_RE.test(unescapeStartupOptions(source))) {
       throw new Error("database connection options must not set client_min_messages: it would silence RLS bypass reports");
     }
   }
@@ -128,9 +147,17 @@ export function createClient(config: pg.ClientConfig): pg.Client {
   return client;
 }
 
+/**
+ * `ownsPool`: end `pool` when the client disconnects. The adapter leaves an
+ * external pool open by default, and pg's idle timer then holds the process
+ * for idleTimeoutMillis — right for the app and the workers, which end their
+ * pools themselves on shutdown (ending twice throws), wrong for a script that
+ * only calls `$disconnect()`.
+ */
 export function createPrismaClient(
   pool: pg.Pool,
   options: Omit<Prisma.PrismaClientOptions, "adapter" | "accelerateUrl"> = {},
+  { ownsPool = false }: { ownsPool?: boolean } = {},
 ): PrismaClient {
-  return new PrismaClient({ ...options, adapter: new PrismaPg(pool) });
+  return new PrismaClient({ ...options, adapter: new PrismaPg(pool, { disposeExternalPool: ownsPool }) });
 }

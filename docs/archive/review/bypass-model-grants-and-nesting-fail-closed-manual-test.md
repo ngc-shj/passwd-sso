@@ -1,7 +1,7 @@
 # Manual test: bypass-model-grants-and-nesting-fail-closed
 
 Covers the deployment-facing parts of this change:
-- the migrations `20261019000000_rls_bypass_admits_report_mode` and `20261019000001_rls_tenant_branch_initplan`;
+- the migration `20261019000000_rls_bypass_admits_report_mode` (both policy branches, in one transaction);
 - the `rls_bypass_not_granted` metric filters in `infra/terraform/monitoring.tf`;
 - the EXECUTE grants added to `bootstrap-rds-roles.mjs` and `ci-integration.yml`.
 

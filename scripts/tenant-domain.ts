@@ -193,7 +193,7 @@ export const migrationClientFactory = {
       connectionTimeoutMillis: envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5 * MS_PER_SECOND, { min: 1, max: MS_PER_MINUTE }),
       query_timeout: confirmationTransaction.options().timeout,
     });
-    return createPrismaClient(pool);
+    return createPrismaClient(pool, {}, { ownsPool: true });
   },
 };
 

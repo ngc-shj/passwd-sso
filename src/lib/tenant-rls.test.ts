@@ -80,9 +80,11 @@ describe("withTenantRls", () => {
       seenBeforeCallback = [...sql];
       return undefined;
     });
-    const pin = seenBeforeCallback.find((q) => q.includes("set_config('app.bypass_rls', 'off', true)"));
-    expect(pin).toBeDefined();
-    expect(pin).toContain("set_config('app.bypass_tables', '', true)");
+    // One statement opens the context: tenant id, bypass off, grant cleared.
+    expect(seenBeforeCallback).toHaveLength(1);
+    expect(seenBeforeCallback[0]).toContain("set_config('app.tenant_id', $, true)");
+    expect(seenBeforeCallback[0]).toContain("set_config('app.bypass_rls', 'off', true)");
+    expect(seenBeforeCallback[0]).toContain("set_config('app.bypass_tables', '', true)");
   });
 
   it("context is cleared after the call completes (no leak)", async () => {
@@ -310,7 +312,7 @@ describe("RLS nesting guards (C1)", () => {
 
     // The inner set_config('app.bypass_rls', 'on', ...) must NOT have fired.
     // Quoted 'on' specifically — a bare /on/ also matches "set_config" on the
-    // pinBypassOff call withTenantRls's own open already made (off, not on).
+    // setTenantGucs call withTenantRls's own open already made (off, not on).
     for (const call of mockTx.$executeRaw.mock.calls) {
       const flatArgs = JSON.stringify(call);
       expect(flatArgs).not.toMatch(/bypass_rls[^]*?'on'/);

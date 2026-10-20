@@ -1921,13 +1921,14 @@ async function runReaper(prisma: PrismaClient): Promise<void> {
  * `$transaction` cannot represent.
  *
  * MUST run inside a bypass transaction. Reading audit_outbox on a bare pool
- * connection fails: the `tenant_id = current_setting('app.tenant_id', true)::uuid`
+ * connection fails: the `tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)`
  * branch of the RLS policy casts an EMPTY STRING and raises 22P02. A custom GUC
  * set with `SET LOCAL` does not revert to unset when the transaction ends — it
  * reverts to the session default, which is '' once the GUC has been touched at
  * all. So after the first bypass tx on a pooled connection, current_setting(...)
- * returns '' rather than NULL for the rest of that connection's life, and
- * `''::uuid` errors before the OR-bypass clause can short-circuit. Same trap
+ * returns '' rather than NULL for the rest of that connection's life. With the
+ * bypass off, the bypass branch is false and the tenant branch's sub-SELECT
+ * evaluates `''::uuid`, which errors. Same trap
  * documented in scripts/rls-cross-tenant-verify.sql (Block 4's nil-sentinel
  * comment).
  */

@@ -34,7 +34,7 @@ config({ path: ".env.local" });
 // API process running as passwd_app — only the test fixture rows need elevated
 // access.
 registerBypassNoticeSink(stderrBypassNoticeSink);
-const prisma = createPrismaClient(createPool({ connectionString: process.env.MIGRATION_DATABASE_URL }));
+const prisma = createPrismaClient(createPool({ connectionString: process.env.MIGRATION_DATABASE_URL }), {}, { ownsPool: true });
 
 const BASE = process.env.BASE_URL ?? "https://localhost:3001/passwd-sso";
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";

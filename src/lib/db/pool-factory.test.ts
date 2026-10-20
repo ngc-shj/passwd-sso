@@ -3,9 +3,10 @@ import { EventEmitter } from "node:events";
 import type pg from "pg";
 
 const { mockWarn } = vi.hoisted(() => ({ mockWarn: vi.fn() }));
-vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ warn: mockWarn, error: vi.fn(), info: vi.fn(), debug: vi.fn() }),
-}));
+vi.mock("@/lib/logger", () => {
+  const logger = { warn: mockWarn, error: vi.fn(), info: vi.fn(), debug: vi.fn() };
+  return { default: logger, getLogger: () => logger };
+});
 
 import {
   createClient,
@@ -95,6 +96,16 @@ describe("handleServerNotice", () => {
   });
 });
 
+describe("unparsed reports", () => {
+  it("logs one constant line per window, however many arrive", () => {
+    const unparsed = report("rls_bypass_not_granted tbl=users");
+    handleServerNotice(unparsed);
+    handleServerNotice(unparsed);
+    expect(mockWarn).toHaveBeenCalledTimes(1);
+    expect(mockWarn).toHaveBeenCalledWith({ _logType: "rls.bypass_notice_unparsed" }, "rls.bypass_notice_unparsed");
+  });
+});
+
 describe("productionBypassNoticeSink", () => {
   it("logs one line per (table, purpose) per window", () => {
     productionBypassNoticeSink({ table: "sessions", purpose: "auth_flow" });
@@ -171,6 +182,9 @@ describe("createPool / createClient refuse to silence the reports", () => {
     // PostgreSQL folds `-` into `_` in option names.
     ["the config's options, dashed", { options: "-c client-min-messages=error" }],
     ["the connection string's options, dashed", { connectionString: "postgresql://u:p@localhost:5432/db?options=-c%20client-min-messages%3Derror" }],
+    // The server drops a backslash and keeps the next character (pg_split_opts).
+    ["the config's options, backslash-escaped", { options: "-c client\\_min\\_messages=error" }],
+    ["the config's options, an escaped letter", { options: "-c clien\\t_min_messages=error" }],
     // `new URL` rejects a host-less URL; pg parses it and applies its options.
     ["a host-less connection string's options", { connectionString: "postgres://u:p@/db?options=-c%20client_min_messages%3Derror" }],
   ])("rejects client_min_messages in %s", (_label, config) => {
@@ -186,6 +200,11 @@ describe("createPool / createClient refuse to silence the reports", () => {
   it("rejects a dashed client-min-messages in PGOPTIONS", () => {
     vi.stubEnv("PGOPTIONS", "-c client-min-messages=error");
     expect(() => createPool({ connectionString: "postgresql://u:p@localhost:5432/db" })).toThrow("must not set client_min_messages");
+  });
+
+  it("accepts other options carrying backslash escapes", async () => {
+    const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db", options: "-c application_name=a\\ b" });
+    await pool.end();
   });
 
   it("accepts other options", async () => {

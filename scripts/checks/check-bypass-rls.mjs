@@ -1800,7 +1800,7 @@ const undecidableGrants = new Set();
 const rawSqlGrants = new Map();
 /** grant name → a query one of its calls runs whose argument the relation walk cannot read. */
 const unreadableArgGrants = new Map();
-/** `file:line` of each withBypassRls call that runs such a query (printed: undecidable for staleness). */
+/** `file:line` of each withBypassRls call that runs such a query (printed on success: reach unknown both ways). */
 const unreadableArgCalls = [];
 /** Grants named by a withBypassRls call or a forwarder's caller. */
 const judgedGrants = new Set();
@@ -3434,6 +3434,8 @@ const scannableCount = sourceFiles.filter(
 console.log(
   `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files; ` +
     `${bypassCallbacks} bypass callback(s) followed through ${reachedUnits} reached function(s); ` +
-    `${unreadableArgCalls.length} call(s) run a query whose argument the relation walk cannot read, ` +
-    `so their grants are not judged stale)`,
+    `${unreadableArgCalls.length} call(s) run a query whose argument the relation walk cannot read: ` +
+    `their relation reach is unknown in both directions — a missing relation-reached model is not ` +
+    `reported, and their grants are not judged stale)`,
 );
+for (const site of [...unreadableArgCalls].sort()) console.log(`  unreadable relation argument: ${site}`);

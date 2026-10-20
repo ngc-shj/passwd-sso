@@ -116,6 +116,23 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   tags          = local.tags
 }
 
+# A WARNING from rls_bypass_admits whose text the listener could not parse
+# (function and listener disagree on the format). Counted on the same metric so
+# a format drift raises the alarm below instead of reading as zero reports.
+resource "aws_cloudwatch_log_metric_filter" "rls_bypass_notice_unparsed" {
+  for_each       = var.enable_monitoring ? local.rls_bypass_report_log_groups : {}
+  name           = "${local.name_prefix}-rls-bypass-notice-unparsed-${each.key}"
+  log_group_name = each.value
+  pattern        = "{ $._logType = \"rls.bypass_notice_unparsed\" }"
+
+  metric_transformation {
+    name          = "RlsBypassNotGranted"
+    namespace     = "${local.name_prefix}/App"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
 # Any RLS bypass report. Report mode admits the statement, so without this
 # alarm an ungranted reach is visible only to someone reading the metric. All
 # three filters publish to the same metric, so one alarm covers them; the log

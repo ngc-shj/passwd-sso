@@ -115,7 +115,7 @@ try {
   const { rows: exec } = await probe.query<{ role: string }>(
     `SELECT r.rolname AS role
        FROM pg_roles r
-      WHERE (r.rolname = current_user OR r.rolname IN ('passwd_outbox_worker', 'passwd_retention_gc_worker'))
+      WHERE (r.rolname = current_user OR r.rolname IN ('passwd_app', 'passwd_outbox_worker', 'passwd_retention_gc_worker'))
         AND NOT (has_function_privilege(r.rolname, 'public.rls_bypass_admits(text)', 'EXECUTE')
              AND has_function_privilege(r.rolname, 'public.rls_bypass_enforced()', 'EXECUTE'))`,
   );

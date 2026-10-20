@@ -2212,7 +2212,7 @@ export async function drain(tx: TX) {
     const r = spawnSync("node", [CHECKER], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     expect(r.stderr).not.toContain("stale grant: a BYPASS_GRANT member no withBypassRls call or self-setting site names.");
     // The rule ran: the whole run reached its verdict over the real registry.
-    expect(r.status).toBe(0);
+    expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain("check-bypass-rls: OK");
   });
 });
@@ -4161,6 +4161,8 @@ describe("relation reach: models a query's argument reaches are charged to the g
     const { code, stdout, stderr } = run(SESSION_CAP, `${HEAD_RLS}export const f = (w: { email?: string }) => withBypassRls(prisma, async (tx) => tx.user.findMany({ where: w }), BYPASS_GRANT.AUTH_USER_LOOKUP);`);
     expect(code, stderr).toBe(0);
     expect(stdout).toMatch(/; [1-9]\d* call\(s\) run a query whose argument the relation walk cannot read/);
+    // Each such call is named, so a reviewer can check its reach by hand.
+    expect(stdout).toContain(`  unreadable relation argument: ${SESSION_CAP}:2`);
   });
 
   it("still charges what it can read beside an unreadable part", () => {

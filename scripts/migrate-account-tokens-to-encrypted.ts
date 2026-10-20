@@ -107,7 +107,7 @@ async function main(): Promise<void> {
 
   registerBypassNoticeSink(stderrBypassNoticeSink);
   const pool = createPool({ connectionString: url });
-  const prisma = createPrismaClient(pool);
+  const prisma = createPrismaClient(pool, {}, { ownsPool: true });
 
   let cursorId: string | null = null;
   let scanned = 0;

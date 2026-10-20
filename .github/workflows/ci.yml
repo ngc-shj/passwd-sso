@@ -73,6 +73,10 @@ jobs:
               # these two entries a docs-only PR skips those assertions, which is
               # exactly the change they exist to catch.
               - "docs/operations/**"
+              # Read by src/lib/db/pool-factory.metric-filter.test.ts, which
+              # pins the RLS bypass report filters and their log groups: an
+              # infra-only PR changing them must still run that test.
+              - "infra/terraform/monitoring.tf"
               - "CLAUDE.md"
             extension:
               - "extension/**"

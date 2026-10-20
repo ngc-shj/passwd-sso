@@ -15,7 +15,7 @@ import { readBypassState } from "@/lib/tenant-rls-grants";
  * policies are
  *
  *   (SELECT public.rls_bypass_admits('<table>'))
- *     OR tenant_id = current_setting('app.tenant_id', true)::uuid
+ *     OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)
  *
  * and `rls_bypass_admits` is decided by `app.bypass_rls` (and the grant's
  * `app.bypass_tables`), so what actually decides visibility is the GUC, which any role may set —

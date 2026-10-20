@@ -121,7 +121,7 @@ built with `defineGrant(purpose, models)`. `withBypassRls(prisma, fn, grant)` an
 This document does not copy the allowlist or the grants. `scripts/checks/check-bypass-rls.mjs` and
 `src/lib/tenant-rls-grants.ts` are the SSoT, CI-enforced on every push.
 
-Purpose classes (`BYPASS_PURPOSE` in `src/lib/tenant-rls.ts:5-13`), each covering a distinct reason a
+Purpose classes (`BYPASS_PURPOSE` in `src/lib/tenant-rls-purpose.ts`), each covering a distinct reason a
 call site legitimately needs to see across tenant boundaries:
 
 | Purpose | Typical call sites |
@@ -280,3 +280,6 @@ helper throws `INVALID_RLS_NESTING: a nested RLS context was refused inside this
 callback returns, rolling the outer transaction back even if the caller caught the inner error.
 Two limits remain, both still logged (`rls.nesting_refused`): nested work detached from the callback
 and refused after the outer transaction committed, and a caller that catches the outer error.
+This covers nested contexts only. `logAuditAsync` called inside a context never reaches an opener:
+`src/lib/audit/audit.ts` refuses the emit and logs `audit-refused`, and the outer transaction commits
+without that audit row. Code that must audit inside a context uses `logAuditInTx`.

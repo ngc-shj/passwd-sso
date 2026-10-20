@@ -21,6 +21,9 @@ import {
   type TestContext,
 } from "./helpers";
 import { defineGrant, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
+import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
+import { prisma as appPrisma } from "@/lib/prisma";
+import { NIL_UUID } from "@/lib/constants/app";
 import { BYPASS_PURPOSE, type BypassPurpose } from "@/lib/tenant-rls-purpose";
 import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
 
@@ -59,6 +62,43 @@ describe("RLS bypass grants (report mode)", () => {
     });
     expect(found).toEqual({ id: userId });
     expect(notices).toContainEqual({ table: "users", purpose: "auth_flow" });
+  });
+
+  // The report's other attach points: the app singleton (the client the
+  // production code these suites drive uses) and a pool built with createPool.
+  it("reports through the @/lib/prisma singleton's connections", async () => {
+    await assertRlsApplies(appPrisma);
+    const denied = await expectBypassNotices(async () => {
+      await withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), SESSIONS_ONLY);
+    });
+    expect(denied).toContainEqual({ table: "users", purpose: "auth_flow" });
+    const allowed = await expectBypassNotices(async () => {
+      await withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), USERS_ONLY);
+    });
+    expect(allowed).toEqual([]);
+  });
+
+  it("reports through a pool built with createPool", async () => {
+    const pool = createPool({ connectionString: appConnectionString(), max: 1 });
+    try {
+      const notices = await expectBypassNotices(async () => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(
+            "SELECT set_config('app.bypass_rls', 'on', true), set_config('app.bypass_purpose', 'auth_flow', true), set_config('app.tenant_id', $1, true), set_config('app.bypass_tables', 'sessions', true)",
+            [NIL_UUID],
+          );
+          await client.query("SELECT id FROM users WHERE id = $1", [userId]);
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
+        }
+      });
+      expect(notices).toContainEqual({ table: "users", purpose: "auth_flow" });
+    } finally {
+      await pool.end();
+    }
   });
 
   it("reports nothing for a read inside the grant", async () => {
@@ -141,7 +181,7 @@ describe("RLS bypass grants (report mode)", () => {
   it("admits a bypass without app.tenant_id on a connection where an earlier transaction set it", async () => {
     // A transaction-local custom GUC reverts to '' (not NULL) on its
     // connection. Planning must not evaluate the tenant branch's ''::uuid
-    // while the bypass branch admits the row (migration 20261019000001).
+    // while the bypass branch admits the row (migration 20261019000000).
     // pool-factory-exempt: stands in for code that predates the factory, so it
     // deliberately has no notice listener.
     const pool = new pg.Pool({ connectionString: appConnectionString(), max: 1 });
@@ -161,6 +201,21 @@ describe("RLS bypass grants (report mode)", () => {
       }
     } finally {
       await pool.end();
+    }
+  });
+
+  it.each([
+    [true, true],
+    [false, false],
+  ])("a client created with ownsPool=%s ends its pool on $disconnect: %s", async (ownsPool, ended) => {
+    const pool = createPool({ connectionString: appConnectionString(), max: 1 });
+    const client = createPrismaClient(pool, {}, { ownsPool });
+    try {
+      await client.$queryRawUnsafe("SELECT 1");
+      await client.$disconnect();
+      expect(pool.ended).toBe(ended);
+    } finally {
+      if (!pool.ended) await pool.end();
     }
   });
 

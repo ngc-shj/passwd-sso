@@ -44,7 +44,7 @@ SET app.expected_tables TO :'expected_tables';
 --                                 branch (#911 report mode, migration
 --                                 20261019000000)
 --   5b. [E-RLS-TENANT-INITPLAN]   no policy casts app.tenant_id outside a
---                                 sub-SELECT (migration 20261019000001)
+--                                 sub-SELECT (migration 20261019000000)
 --   6. [E-RLS-COLPARITY]          column count vs discovery count parity
 --   7. [E-RLS-MANIFEST-EXTRA]     manifest \ discovery
 --   8. [E-RLS-MANIFEST-MISSING]   discovery \ manifest
@@ -152,7 +152,7 @@ BEGIN
     ));
 
   -- 5b. [E-RLS-TENANT-INITPLAN] The tenant branch's cast sits in a sub-SELECT
-  --    (migration 20261019000001). The bypass branch is an InitPlan the
+  --    (migration 20261019000000). The bypass branch is an InitPlan the
   --    planner cannot fold, so a bare `current_setting('app.tenant_id')::uuid`
   --    is evaluated while planning a bypassed statement, and on a connection
   --    whose app.tenant_id reverted to '' it raises 22P02 for the bypass.
@@ -485,8 +485,9 @@ DECLARE
   tenant_b constant uuid := '00000000-0000-0000-0000-0000000000B0';
   -- Cannot use `RESET app.tenant_id`: Postgres custom-GUC quirk — once SET in
   -- a session, current_setting returns '' rather than NULL even after RESET,
-  -- and `''::uuid` errors before the OR-bypass clause can short-circuit. The
-  -- nil sentinel parses cleanly and matches no real tenant_id.
+  -- and the tenant branch's `''::uuid` errors whenever it is evaluated (since
+  -- 20261019000000 only when the bypass branch is false). The nil sentinel
+  -- parses cleanly and matches no real tenant_id.
   nil_sentinel constant uuid := '00000000-0000-0000-0000-000000000000';
   bypass_table_list text;
 BEGIN

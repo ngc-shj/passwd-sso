@@ -111,6 +111,14 @@ describe("prisma pool configuration", () => {
     );
   });
 
+  it("attaches the RLS bypass report listener to each new connection", async () => {
+    // Built through createPool (src/lib/db/pool-factory.ts); without this the
+    // app's reports would never reach a log line.
+    await import("@/lib/prisma");
+
+    expect(mockOn).toHaveBeenCalledWith("connect", expect.any(Function));
+  });
+
   it("registers error handler on pool", async () => {
     await import("@/lib/prisma");
 

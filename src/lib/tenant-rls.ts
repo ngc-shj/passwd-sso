@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { SYSTEM_TENANT_ID, UUID_RE } from "@/lib/constants/app";
 import { getLogger } from "@/lib/logger";
-import { pinBypassOff, setBypassGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
+import { setBypassGucs, setTenantGucs, type BypassGrant } from "@/lib/tenant-rls-grants";
 
 export { BYPASS_PURPOSE, type BypassPurpose } from "@/lib/tenant-rls-purpose";
 
@@ -141,7 +141,10 @@ function assertOpenableTenantContext(tenantId: string): void {
  * transaction when its callback returns (runContext), so the request fails
  * instead. Two cases stay detection-only, through the error log below: work
  * detached from the callback that opens a context after the outer one
- * committed, and an outer call that is itself caught. The log names only the
+ * committed, and an outer call that is itself caught. An audit emit inside a
+ * context (logAuditAsync) is a separate path: audit.ts refuses it before any
+ * opener runs, logs `audit-refused`, and the outer transaction commits — use
+ * logAuditInTx there. The log names only the
  * two helpers: no tenant id, SQL or caller argument reaches it. This guard is
  * the boundary; check-rls-nesting is a limited development aid that reports
  * the nesting it can see, with the coverage its header lists.
@@ -204,10 +207,7 @@ export async function withTenantRls<T>(
   // happened to carry.
   assertOpenableTenantContext(tenantId);
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-    // A bypass GUC left on the connection by anything else must not turn this
-    // tenant transaction into a bypass.
-    await pinBypassOff(tx);
+    await setTenantGucs(tx, tenantId);
     return runContext({ tx, tenantId, bypass: false, refusedNesting: false }, fn);
   }, options);
 }

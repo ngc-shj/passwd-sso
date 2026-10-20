@@ -15,7 +15,7 @@
  * That role retains SELECT on audit_logs after the C13 REVOKE, but SELECT
  * PRIVILEGE IS NOT RLS VISIBILITY: passwd_app is NOBYPASSRLS, and both
  * audit_logs and audit_chain_anchors are FORCE ROW LEVEL SECURITY with
- * `bypass_rls='on' OR tenant_id = current_setting('app.tenant_id',true)::uuid`.
+ * `rls_bypass_admits('<table>') OR tenant_id = (SELECT current_setting('app.tenant_id', true)::uuid)`.
  * With the GUC unset the predicate is NULL and every read returns zero rows
  * WITH NO ERROR — so the walk finds nothing wrong and reports every tenant
  * healthy. Reads therefore run inside withTenantRls, which sets app.tenant_id

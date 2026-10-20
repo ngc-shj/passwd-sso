@@ -21,16 +21,16 @@ vi.mock("@/lib/logger", async (importOriginal) => {
     },
   });
   const logger = pino({ ...actual.loggerOptions, level: "info" }, sink);
-  return { ...actual, getLogger: () => logger };
+  return { ...actual, default: logger, getLogger: () => actual.requestContext.getStore() ?? logger };
 });
 
 import { handleServerNotice, registerBypassNoticeSink, resetBypassNoticeRateLimit } from "@/lib/db/pool-factory";
 
 const TF = readFileSync(resolve(__dirname, "../../../infra/terraform/monitoring.tf"), "utf8");
 
-/** The `rls_bypass_not_granted` metric filter resource block. */
-function filterBlock(): string {
-  const start = TF.indexOf('resource "aws_cloudwatch_log_metric_filter" "rls_bypass_not_granted"');
+/** A metric filter resource block, by resource name. */
+function filterBlock(name = "rls_bypass_not_granted"): string {
+  const start = TF.indexOf(`resource "aws_cloudwatch_log_metric_filter" "${name}"`);
   expect(start).toBeGreaterThanOrEqual(0);
   const end = TF.indexOf("\n}\n", start);
   return TF.slice(start, end);
@@ -60,6 +60,41 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
     expect(pattern).not.toBeNull();
     const [, key, value] = pattern as RegExpExecArray;
     expect(JSON.parse(line)[key]).toBe(value);
+  });
+
+  it("does not stamp the report with the request context the notice arrives in", async () => {
+    // A pooled socket's notice runs in the context of the request that opened
+    // the connection, not the one whose statement was reported.
+    const { requestContext, default: base } = await import("@/lib/logger");
+    chunks.length = 0;
+    resetBypassNoticeRateLimit();
+    requestContext.run(base.child({ requestId: "earlier-request" }), () =>
+      handleServerNotice({
+        code: "01000",
+        message: "rls_bypass_not_granted table=users purpose=auth_flow",
+        where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+      }),
+    );
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).not.toContain("earlier-request");
+  });
+
+  it("counts an unparsed report on the same metric, so a format drift is not read as zero", () => {
+    chunks.length = 0;
+    resetBypassNoticeRateLimit();
+    handleServerNotice({
+      code: "01000",
+      message: "rls_bypass_not_granted tbl=users",
+      where: "PL/pgSQL function rls_bypass_admits(text) line 17 at RAISE",
+    });
+    expect(chunks).toHaveLength(1);
+    const block = filterBlock("rls_bypass_notice_unparsed");
+    const pattern = /pattern\s*=\s*"\{ \$\.(\w+) = \\"([^"\\]+)\\" \}"/.exec(block);
+    expect(pattern).not.toBeNull();
+    const [, key, value] = pattern as RegExpExecArray;
+    expect(JSON.parse(chunks[0])[key]).toBe(value);
+    expect(block).toMatch(/name\s*=\s*"RlsBypassNotGranted"/);
+    expect(block).toMatch(/for_each\s*=\s*var\.enable_monitoring \? local\.rls_bypass_report_log_groups : \{\}/);
   });
 
   it("binds one filter to each service log group that can emit the line", () => {

@@ -63,7 +63,7 @@ const {
     return {
       ...tx,
       $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => {
-        // setBypassGucs (and pinBypassOff) write every GUC in ONE statement —
+        // setBypassGucs (and setTenantGucs) write every GUC in ONE statement —
         // `SELECT set_config('<name>', <literal|$>, true), set_config(...), ...`
         // — so every set_config in the text is captured, mapping each `$`
         // placeholder to the next positional value in order.

@@ -30,7 +30,9 @@ function completeRun({ block4Warnings = [], reports = { users: ["users"], sessio
 }
 
 function run(output, code = 0) {
-  const r = spawnSync("bash", [WRAPPER, "--", "bash", "-c", 'printf "%s\\n" "$1"; exit "$2"', "fake", output, String(code)], {
+  // psql writes NOTICE/WARNING to stderr and results to stdout; the wrapper must
+  // merge both, so the fake puts the canned output on stderr.
+  const r = spawnSync("bash", [WRAPPER, "--", "bash", "-c", 'printf "DO\\n"; printf "%s\\n" "$1" >&2; exit "$2"', "fake", output, String(code)], {
     encoding: "utf8",
   });
   return { status: r.status, stderr: r.stderr };

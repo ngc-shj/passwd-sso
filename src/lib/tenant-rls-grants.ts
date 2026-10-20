@@ -242,9 +242,15 @@ export async function setBypassGucs(
                               set_config('app.bypass_tables', ${grant.tables}, true)`;
 }
 
-/** Pin the bypass off for a tenant-scoped transaction (withTenantRls). */
-export async function pinBypassOff(tx: Pick<Prisma.TransactionClient, "$executeRaw">): Promise<void> {
-  await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'off', true),
+/**
+ * Open a tenant-scoped transaction's context (withTenantRls): the tenant id,
+ * with the bypass pinned off and the grant cleared, in one statement — so a
+ * bypass GUC left on the connection by anything else cannot turn the tenant
+ * transaction into a bypass.
+ */
+export async function setTenantGucs(tx: Pick<Prisma.TransactionClient, "$executeRaw">, tenantId: string): Promise<void> {
+  await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true),
+                              set_config('app.bypass_rls', 'off', true),
                               set_config('app.bypass_tables', '', true)`;
 }
 
