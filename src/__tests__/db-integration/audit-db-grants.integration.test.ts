@@ -252,6 +252,32 @@ describe("audit-db-grants (real DB)", () => {
     }
   });
 
+  it("T8d: refuses a denied session default live, and refuses to record it", async () => {
+    // app.* defaults are denied whatever the value: a role default of
+    // app.bypass_rls = on would bypass RLS on every connection. 'off' is used
+    // here so integration files running alongside are unaffected.
+    try {
+      await su.query("ALTER ROLE passwd_outbox_worker SET app.bypass_rls = 'off'");
+
+      const r = runAudit(manifestPath);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("DENIED_SETTING_HELD: ROLESETTING:passwd_outbox_worker * app.bypass_rls=off");
+
+      const scratch = join(tmpDir, "refused.json");
+      const w = spawnSync(process.execPath, [AUDIT, "--write"], {
+        env: auditEnv(scratch),
+        encoding: "utf8",
+        timeout: 60_000,
+        cwd: REPO_ROOT,
+      });
+      expect(w.status).toBe(1);
+      expect(w.stderr).toContain("REFUSING to regenerate the manifest");
+      expect(existsSync(scratch)).toBe(false);
+    } finally {
+      await su.query("ALTER ROLE passwd_outbox_worker RESET app.bypass_rls");
+    }
+  });
+
   it("T8c: detects a session default set on this database for every role", async () => {
     const { rows } = await su.query<{ db: string }>("SELECT current_database() AS db");
     const db = rows[0].db;

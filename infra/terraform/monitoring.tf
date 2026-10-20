@@ -23,7 +23,8 @@ resource "aws_cloudwatch_log_metric_filter" "app_5xx" {
   count          = var.enable_monitoring ? 1 : 0
   name           = "${local.name_prefix}-5xx-errors"
   log_group_name = aws_cloudwatch_log_group.app.name
-  pattern        = "{ $._stream = \"app\" && $.msg = \"request.end\" && $.status >= 500 }"
+  # request.error is an unhandled throw: it carries no status, and Next answers 500.
+  pattern = "{ $._stream = \"app\" && (($.msg = \"request.end\" && $.status >= 500) || $.msg = \"request.error\") }"
 
   metric_transformation {
     name          = "App5xxErrors"

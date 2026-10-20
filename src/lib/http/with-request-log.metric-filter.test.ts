@@ -51,24 +51,56 @@ function patternOf(resource: string): string {
 }
 
 /**
- * Whether a JSON log line matches a CloudWatch filter pattern of the form
- * `{ $.a = "x" && $.b >= 500 }`, the only form these filters use. A term this
- * evaluator cannot read throws, so an unsupported pattern fails loudly rather
- * than reading as "no match".
+ * Whether a JSON log line matches a CloudWatch filter pattern built from
+ * `$.key <op> value` terms joined by `&&` / `||` and grouped by parentheses —
+ * the only forms these filters use. Anything else throws, so an unsupported
+ * pattern fails loudly rather than reading as "no match".
  */
 function matches(pattern: string, line: Record<string, unknown>): boolean {
   const body = /^\{\s*(.*?)\s*\}$/.exec(pattern)?.[1];
   if (body === undefined) throw new Error(`unsupported pattern: ${pattern}`);
-  return body.split("&&").every((term) => {
-    const m = /^\s*\$\.(\w+)\s*(=|>=|<=|>|<|!=)\s*(?:"([^"]*)"|(-?\d+(?:\.\d+)?))\s*$/.exec(term);
-    if (!m) throw new Error(`unsupported term: ${term}`);
+  const tokens = body.match(/\(|\)|&&|\|\||\$\.\w+\s*(?:=|!=|>=|<=|>|<)\s*(?:"[^"]*"|-?\d+(?:\.\d+)?)/g) ?? [];
+  if (tokens.join("").replace(/\s/g, "") !== body.replace(/\s/g, "")) throw new Error(`unsupported pattern: ${pattern}`);
+  let i = 0;
+  const term = (t: string): boolean => {
+    const m = /^\$\.(\w+)\s*(=|!=|>=|<=|>|<)\s*(?:"([^"]*)"|(-?\d+(?:\.\d+)?))$/.exec(t);
+    if (!m) throw new Error(`unsupported term: ${t}`);
     const [, key, op, str, num] = m;
     const actual = line[key];
     if (str !== undefined) return op === "=" ? actual === str : op === "!=" ? actual !== str : false;
     if (typeof actual !== "number") return false;
     const n = Number(num);
     return { "=": actual === n, "!=": actual !== n, ">=": actual >= n, "<=": actual <= n, ">": actual > n, "<": actual < n }[op] as boolean;
-  });
+  };
+  const primary = (): boolean => {
+    const t = tokens[i++];
+    if (t === "(") {
+      const v = or();
+      if (tokens[i++] !== ")") throw new Error(`unbalanced pattern: ${pattern}`);
+      return v;
+    }
+    if (t === undefined) throw new Error(`truncated pattern: ${pattern}`);
+    return term(t);
+  };
+  const and = (): boolean => {
+    let v = primary();
+    while (tokens[i] === "&&") {
+      i++;
+      v = primary() && v;
+    }
+    return v;
+  };
+  function or(): boolean {
+    let v = and();
+    while (tokens[i] === "||") {
+      i++;
+      v = and() || v;
+    }
+    return v;
+  }
+  const result = or();
+  if (i !== tokens.length) throw new Error(`trailing tokens in pattern: ${pattern}`);
+  return result;
 }
 
 /** The request.end line withRequestLog writes for one request. */
@@ -87,6 +119,18 @@ async function requestEndLine(path: string, status: number, durationMs = 1): Pro
   return end as Record<string, unknown>;
 }
 
+/** The request.error line withRequestLog writes when the handler throws. */
+async function requestErrorLine(path: string): Promise<Record<string, unknown>> {
+  chunks.length = 0;
+  const handler = withRequestLog(async (_req: NextRequest): Promise<Response> => {
+    throw new Error("boom");
+  });
+  await expect(handler(new NextRequest(`https://app.example${path}`))).rejects.toThrow("boom");
+  const line = chunks.map((c) => JSON.parse(c) as Record<string, unknown>).find((l) => l.msg === "request.error");
+  expect(line).toBeDefined();
+  return line as Record<string, unknown>;
+}
+
 describe("request metric filters vs the request log line", () => {
   beforeEach(() => {
     chunks.length = 0;
@@ -96,6 +140,12 @@ describe("request metric filters vs the request log line", () => {
     const p = patternOf("app_5xx");
     expect(matches(p, await requestEndLine("/api/passwords", 500))).toBe(true);
     expect(matches(p, await requestEndLine("/api/passwords", 200))).toBe(false);
+  });
+
+  it("counts an unhandled throw, which Next answers with 500", async () => {
+    // request.error carries no status; without its own arm the filter missed
+    // exactly the unexpected-bug 5xx.
+    expect(matches(patternOf("app_5xx"), await requestErrorLine("/api/passwords"))).toBe(true);
   });
 
   it("counts a 503 from the readiness probe and not from another path", async () => {

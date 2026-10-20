@@ -28,6 +28,9 @@
  *   MISSING_GRANT:    <manifest key>  — manifest entry with no live privilege
  *                                       (migrations not applied, or a grant was
  *                                       revoked)
+ *   DENIED_SETTING_HELD / _IN_MANIFEST  — a role or database session default no
+ *                                       one may carry (app.*, client_min_messages,
+ *                                       log_min_messages, row_security)
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { Client } from "pg";
@@ -342,6 +345,19 @@ async function readLiveGrants(client) {
  *   - a `sequence` entry matches `SEQUENCE:` keys. Sequences carry their own
  *     ACL, so nothing about a table entry constrains them.
  */
+/**
+ * Session defaults no role or database may carry, whatever their value: the
+ * application's own context GUCs (`app.*`, so a role default cannot turn the
+ * RLS bypass on for every connection), and the settings that silence or
+ * redirect the RLS bypass reports or disable RLS. Refused live AND in the
+ * manifest, and `--write` refuses to record one, as for a denied privilege.
+ */
+const DENIED_SETTING_RE = /^ROLESETTING:[^\t]+\t[^\t]+\t(?:app\.[^=]*|client_min_messages|log_min_messages|row_security)=/i;
+
+function deniedSettings(keys) {
+  return keys.filter((k) => DENIED_SETTING_RE.test(k));
+}
+
 function violatesDenied(keys, denied) {
   const out = [];
   for (const d of denied) {
@@ -546,10 +562,14 @@ async function main() {
     // have been erased is one where the fail-closed event writer cannot write,
     // and recording that as the expectation makes the outage the baseline.
     const erased = missingDeclaredColumnGrants(live, denied, existingSubjects);
-    if (laundered.length > 0 || erased.length > 0) {
+    const settings = deniedSettings(live);
+    if (laundered.length > 0 || erased.length > 0 || settings.length > 0) {
       console.error("REFUSING to regenerate the manifest:\n");
       for (const k of laundered) {
         console.error(`  DENIED_PRIVILEGE_HELD: ${k.replace(/\t/g, " ")}`);
+      }
+      for (const k of settings) {
+        console.error(`  DENIED_SETTING_HELD: ${k.replace(/\t/g, " ")}`);
       }
       for (const k of erased) {
         console.error(`  DECLARED_COLUMN_GRANT_MISSING: ${k.replace(/\t/g, " ")}`);
@@ -581,6 +601,12 @@ async function main() {
   // is the state this whole file exists to make impossible.
   for (const key of violatesDenied(live, denied)) {
     findings.push(`DENIED_PRIVILEGE_HELD: ${key.replace(/\t/g, " ")}`);
+  }
+  for (const key of deniedSettings(live)) {
+    findings.push(`DENIED_SETTING_HELD: ${key.replace(/\t/g, " ")}`);
+  }
+  for (const key of deniedSettings([...expected])) {
+    findings.push(`DENIED_SETTING_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
   }
   for (const key of violatesDenied([...expected], denied)) {
     findings.push(`DENIED_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
