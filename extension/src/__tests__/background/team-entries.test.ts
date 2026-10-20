@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
 import { holdDecrypt, holdFetch, holdNextCall } from "../helpers/deferred";
 import { DEBOUNCE_MS } from "../../background/context-menu";
@@ -349,6 +349,15 @@ describe("team entries in background", () => {
     await loadBackground();
   });
 
+  afterEach(async () => {
+    // Tear down this test's context-menu instance: cancel its pending debounce
+    // and supersede any in-flight rebuild. vi.resetModules() leaves the old
+    // instance alive, and its real-timer rebuild would otherwise fire during a
+    // later test and call that test's chrome mock (found under parallel load).
+    const { disableContextMenu } = await import("../../background/context-menu");
+    await disableContextMenu();
+  });
+
   async function unlockVault() {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -633,8 +642,8 @@ describe("team entries in background", () => {
           expect(ids).toContain("psso-open-popup");
         });
         await sendMessage({ type: "FETCH_PASSWORDS" });
-        // Run out every debounce scheduled so far, so nothing earlier can fire
-        // inside the window observed below.
+        // Run out this cell's own debounces scheduled so far (earlier tests'
+        // instances are torn down in afterEach).
         await vi.runAllTimersAsync();
         chromeMock!.contextMenus.removeAll.mockClear();
 
@@ -671,9 +680,11 @@ describe("team entries in background", () => {
           entries: Array<{ id: string; teamId?: string }>;
         };
         expect(res.entries.find((e) => e.id === "team-pw-1")?.teamId).toBe("team-2");
-        expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
 
-        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+        // The rebuild waits out the debounce: not one millisecond early, then due.
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS - 1);
+        expect(chromeMock!.contextMenus.removeAll).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
         expect(chromeMock!.contextMenus.removeAll).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();

@@ -245,7 +245,6 @@ describe("createPool / createClient refuse to silence the reports", () => {
     ["a NUL as the last character", { connectionString: "postgresql://u:p@localhost:5432/db", application_name: "app\0" }],
     ["options", { connectionString: "postgresql://u:p@localhost:5432/db", options: "-c statement_timeout=5\0client_min_messages\0error" }],
     ["fallback_application_name", { connectionString: "postgresql://u:p@localhost:5432/db", fallback_application_name: "x\0client_min_messages\0error" }],
-
   ])("rejects a NUL byte in %s, which injects a startup setting", (_label, config) => {
     expect(() => createPool(config)).toThrow("must not contain a NUL byte");
     expect(() => createClient(config)).toThrow("must not contain a NUL byte");
@@ -262,6 +261,18 @@ describe("createPool / createClient refuse to silence the reports", () => {
     const config = { connectionString: "postgresql://u:p@localhost:5432/db", ...extra } as unknown as pg.PoolConfig;
     expect(() => createPool(config)).toThrow(message);
     expect(() => createClient(config as pg.ClientConfig)).toThrow(message);
+  });
+
+  it("checks the value pg.Client is given, reading a getter once", () => {
+    let reads = 0;
+    const config = { connectionString: "postgresql://u:p@localhost:5432/db" } as pg.ClientConfig;
+    Object.defineProperty(config, "application_name", {
+      enumerable: true,
+      get: () => (++reads === 1 ? "clean" : "x\0client_min_messages\0error"),
+    });
+    const client = createClient(config);
+    expect(reads).toBe(1);
+    expect((client as unknown as { connectionParameters: { application_name?: string } }).connectionParameters.application_name).toBe("clean");
   });
 
   it("checks the value pg is given, reading a getter once", async () => {
@@ -288,8 +299,8 @@ describe("createPool / createClient refuse to silence the reports", () => {
     ["an ordinary fallback_application_name", { fallback_application_name: "passwd-sso" }],
     ["an empty application_name", { application_name: "" }],
   ])("accepts %s", async (_label, extra) => {
-    // The NUL check coerces as pg does; it must not refuse a non-string or an
-    // empty value that carries no NUL.
+    // The checks must not over-block: a boolean replication, an empty string
+    // and an ordinary value carry no NUL.
     const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db", ...extra });
     await pool.end();
   });

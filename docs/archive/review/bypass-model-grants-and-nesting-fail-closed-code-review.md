@@ -322,3 +322,36 @@ State-tightening writes inside RLS-context files: token, credential and lockout 
   - 5/5 runs alone;
   - two full extension suites and the web `src/lib` suite in parallel, all exit 0;
   - red-proven by dropping `teamId` from `sameMenuView`, and by advancing `DEBOUNCE_MS - 1`. Both fail at the final assertion.
+
+---
+
+# Round 5 (fixes since b84870577: 1e0b44118, 996205f9d)
+
+## Changes from Previous Round
+- **Functionality:** no findings. The snapshot drops nothing pg-pool's own `Object.assign({}, options)` keeps, and there are no false refusals.
+- **Security:** no findings. The class is closed by construction: getters and Proxies yield a clean startup configuration on both entry points. Every spelling of `client_min_messages` is refused. Prototype pollution is out of scope, because the serializer uses `Object.keys` and pollution already compromises far more.
+- **Testing:** three Majors and one Minor, all test-side.
+
+## Findings
+- **T5-1 [Major]** The extension cell was still flaky. `vi.resetModules()` leaves earlier tests' background instances alive, and their real-timer context-menu rebuilds fired inside this cell's window and called the current chrome mock. Fake timers inside the cell cannot reach them.
+- **T5-2 [Major]** The `not.toHaveBeenCalled()` control passed even with the debounce removed: the rebuild is only a few microtasks behind `sendMessage`.
+- **T5-3 [Major]** The getter read-once cell covered `createPool` only. `createClient` passing the original config to pg survived.
+- **T5-4 [Minor]** A stale test comment still said the check "coerces as pg does".
+
+## Resolution Status
+### T5-1
+- **Action:** the file's `afterEach` calls that test's own `disableContextMenu()`, which cancels its pending debounce and supersedes any in-flight rebuild. This fixes the isolation leak at its source. A real-time wait at the start of the cell, which was also suggested, was rejected: it is a sleep that widens a race rather than removing it.
+- **Verified:** 32 parallel runs at seed 1792477866443. Without the teardown, 5 of 32 failed, all in this cell. With the teardown, 0 of 32 failed, and 16 of 16 in a second batch.
+
+### T5-2
+- **Action:** the control advances `DEBOUNCE_MS - 1` and asserts no rebuild, then advances 1 ms and asserts the rebuild.
+- **Red-proven:** with the debounce removed, the control fails; with `teamId` dropped from `sameMenuView`, the final assertion fails.
+
+### T5-3
+- **Action:** the same getter cell for `createClient` asserts `reads === 1` and that `connectionParameters.application_name` is `"clean"`.
+- **Red-proven:** a client-only mutation that passes the original config.
+
+### T5-4
+- **Action:** the comment describes the over-blocking guard.
+
+**Verified:** web unit 17427, extension 2699, extension `tsc`, lint, build. Production code is unchanged in this round, so the integration suite was not rerun.
