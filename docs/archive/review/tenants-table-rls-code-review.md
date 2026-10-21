@@ -76,3 +76,12 @@ Security: No findings. Functionality: No findings. Testing: one Minor.
 
 Recurring Issue Check (round 3): Security — all OK or N/A. Functionality — all OK or N/A.
 Testing — R2, R38, R40, R41, R47 N4; others OK or N/A.
+
+## Round 4
+
+Testing only (the round-3 fix was test-only; Security and Functionality returned No findings in
+round 3 on unchanged production code): No findings. Review complete after 4 rounds.
+
+Environment Verification Report (final): V1 `blocked-deferred` (plan V1/SC3); V2 `verified-local`
+(full integration suite, workers stopped); negative-test Cases 15/16 `verified-CI` pending the first
+CI run of this branch.
