@@ -73,3 +73,36 @@
   share one snapshot/restore function; Case 16 widens the policy to `bypass OR true` (symmetric, so
   Block 1 passes) and expects `[E-RLS-TENANTS]`. Checked against the dev DB in a rolled-back
   transaction: under the widened policy a no-context `passwd_app` read sees every tenant.
+
+## D9 — Phase 3 round 1 side-fixes
+
+- `checkChainEnabled` (`src/workers/audit-outbox-worker.ts`) read a missing `tenants` row as
+  "chain disabled", which delivers the outbox row unchained and marks it SENT. With RLS a missing row
+  means a lost scope or grant, so it now throws `CHAIN_FLAG_UNREADABLE` (the caller's `recordError`
+  keeps the row retryable). `audit-outbox-worker.test.ts`'s mocks answer the flag query explicitly.
+- `runTick`: the enumeration is in try/catch (`TENANT_ENUMERATION_FAILED`), a list without
+  `__system__` is `TENANT_ENUMERATION_INCOMPLETE` (only a full bypass read sees the sentinel), and a
+  sentinel with `audit_chain_enabled` true is `SENTINEL_CHAIN_UNVERIFIABLE`; each adds to
+  `erroredTenantCount` and the heartbeat is always emitted. This supersedes D2's Anti-Deferral for
+  the enabled-sentinel case: it is now reported rather than silent.
+- Negative-test Cases 15/16 reset the throwaway table's policy first (Case 14 left an
+  INITPLAN-violating one that would have stopped Block 1), calibrate with one passing run, snapshot
+  the tenants policy once, refuse a non-canonical snapshot, restore after each case and re-run the
+  verify to exit 0, and run only under `CI=true`. Still executed only in CI.
+
+## D10 — mutation-table and C7 acceptance executions (T10)
+
+Recorded as executed; DB mutations ran as `passwd_app` inside rolled-back transactions on the dev DB.
+
+| Contract | Mutation | Observed |
+|---|---|---|
+| C1 | WITH CHECK widened to `true`, fresh-id INSERT under scope A | INSERT succeeds → the (c2) cell's 42501 pin goes red |
+| C1 | policy widened to `bypass OR true` | no-context read sees every tenant → Block 1b raises |
+| C3 | empty / incomplete / failed enumeration, enabled sentinel | heartbeat cells (b)(c)(d) red against the previous `runTick` (scratch copy) |
+| C4 | probe restored under AUDIT_WRITE_DIRECT_OUTBOX | `WARNING rls_bypass_not_granted table=tenants` → the no-report cell goes red |
+| C5 | `tenants` RLS disabled, users INSERT with no context | error names `users`, not `tenants` → the C5 cell goes red |
+| C6 | drift gate on the previous code (no tenants branch / wrong policy name) | gate exits 0 → new self-test cells red (scratch copy) |
+| C6 | verify (c2) on a plain privilege denial (REVOKE INSERT in a rolled-back tx) | previous SQL passes; new SQL raises `[E-RLS-TENANTS-SEED]` |
+| C7 | each of the four `alerts.md` blocks run as `passwd_app` | all return the sentinel's rows; `\copy` writes its file |
+
+Not executed locally: `rls-cross-tenant-negative-test.sh` (CI-only by design).

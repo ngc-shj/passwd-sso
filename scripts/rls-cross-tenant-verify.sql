@@ -363,9 +363,10 @@ DECLARE
   tenant_a constant uuid := '00000000-0000-0000-0000-0000000000A0';
   tenant_b constant uuid := '00000000-0000-0000-0000-0000000000B0';
 BEGIN
-  ASSERT current_setting('app.tenant_id', true) IS NULL
-      OR current_setting('app.tenant_id', true) = '',
-    'pre-Block-1b: app.tenant_id must be unset entering this block';
+  -- NULL only: '' (a value set and reverted earlier in the session) would make
+  -- the (a1) read below raise 22P02 instead of this block's coded error.
+  ASSERT current_setting('app.tenant_id', true) IS NULL,
+    'pre-Block-1b: app.tenant_id must never have been set in this session';
 
   -- (a1) No scope, no bypass: a bare read sees neither seeded row, nor any
   -- other — the tenant branch has nothing to compare against, so the
@@ -454,6 +455,13 @@ BEGIN
     RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: INSERT of a non-A0 id succeeded (WITH CHECK should refuse id <> app.tenant_id)';
   EXCEPTION
     WHEN insufficient_privilege THEN
+      -- insufficient_privilege is also raised by a plain GRANT/column
+      -- privilege denial, which is not what this block exists to detect.
+      -- Pin the message to the RLS refusal text itself so a different
+      -- 42501 cause does not pass as "WITH CHECK worked".
+      IF SQLERRM NOT LIKE '%row-level security policy for table "tenants"%' THEN
+        RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: INSERT raised insufficient_privilege, but not an RLS refusal on tenants: %', SQLERRM;
+      END IF;
       NULL; -- expected: WITH CHECK refused the row, nothing committed.
   END;
 
@@ -462,6 +470,9 @@ BEGIN
     RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: UPDATE of its own row to a non-A0 id succeeded (visible under USING, should be refused by WITH CHECK)';
   EXCEPTION
     WHEN insufficient_privilege THEN
+      IF SQLERRM NOT LIKE '%row-level security policy for table "tenants"%' THEN
+        RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: UPDATE raised insufficient_privilege, but not an RLS refusal on tenants: %', SQLERRM;
+      END IF;
       NULL; -- expected.
   END;
 END $$;

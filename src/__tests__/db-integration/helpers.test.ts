@@ -45,8 +45,15 @@ function adapterError(sqlstate: string): Error {
   return err;
 }
 
-/** The `cause.code` shape: what the adapter's `default:` branch carries (beside
- * `originalCode`) for a SQLSTATE `mapDriverError` does not name, such as 23514. */
+/**
+ * A SYNTHETIC shape, not one `@prisma/adapter-pg` actually produces: the real
+ * `default:` branch adds `code` BESIDE `originalCode`, never in its place (see
+ * pgErrorCode's header; src/lib/prisma/prisma-error.test.ts pins that real
+ * shape with both fields present). This fixture omits `originalCode`
+ * entirely so it drives pgErrorCode's `cause.code` fallback specifically —
+ * the arm reached only when `originalCode` is absent — as a defensive
+ * regression check, not as a shape the adapter is measured to emit.
+ */
 function legacyAdapterError(sqlstate: string): Error {
   const err = new Error("\nInvalid `prisma.$executeRaw()` invocation:\n\nRaw query failed.");
   Object.assign(err, {

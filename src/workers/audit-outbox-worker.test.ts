@@ -31,7 +31,20 @@ const {
   mockAuditLogsInsert,
 } = vi.hoisted(() => {
   const mockExecuteRaw = vi.fn().mockResolvedValue(undefined);
-  const mockQueryRawUnsafe = vi.fn().mockResolvedValue([]);
+  // checkChainEnabled's tenant chain-flag read (`SELECT audit_chain_enabled
+  // FROM tenants ...`) now throws CHAIN_FLAG_UNREADABLE on no row rather than
+  // defaulting to false (#923-adjacent fix — a missing row reads as a lost
+  // RLS scope, not "chain disabled"). Every test below that reaches
+  // deliverRow/deliverRowWithChain depends on this query resolving with a
+  // row, or the whole delivery reads as a failure instead of exercising what
+  // the test is actually about; `mockResolvedValueOnce` layers for claimBatch
+  // (consumed first, in order) still take priority over this default.
+  const mockQueryRawUnsafe = vi.fn().mockImplementation((sql) => {
+    if (typeof sql === "string" && sql.includes("audit_chain_enabled")) {
+      return Promise.resolve([{ audit_chain_enabled: false }]);
+    }
+    return Promise.resolve([]);
+  });
   const mockExecuteRawUnsafe = vi.fn().mockResolvedValue(undefined);
   const mockDisconnect = vi.fn().mockResolvedValue(undefined);
 
@@ -347,6 +360,13 @@ function makeOneShotTxImpl(
         mockAuditLogsInsert(...args);
         return auditLogsInsertResult;
       }
+      // checkChainEnabled's tenant chain-flag read, inside its own
+      // withBypassRls transaction — same reasoning as the shared
+      // mockQueryRawUnsafe default above: no row now throws
+      // CHAIN_FLAG_UNREADABLE instead of defaulting to false.
+      if (sql.includes("audit_chain_enabled")) {
+        return [{ audit_chain_enabled: false }];
+      }
       // Delivery claims, reaper, purge, or other queries — return empty/default
       if (sql.includes("DELETE FROM audit_outbox")) {
         // purgeRetention CTE — return 0 purged
@@ -372,7 +392,15 @@ function makeOneShotTxImpl(
 function resetMocks() {
   vi.clearAllMocks();
   mockExecuteRaw.mockResolvedValue(undefined);
-  mockQueryRawUnsafe.mockResolvedValue([]);
+  // Same default as the hoisted definition above — vi.clearAllMocks() does not
+  // reset a mock's implementation, but this explicit re-set after it would
+  // otherwise overwrite the audit_chain_enabled branch with a bare `[]`.
+  mockQueryRawUnsafe.mockImplementation((sql) => {
+    if (typeof sql === "string" && sql.includes("audit_chain_enabled")) {
+      return Promise.resolve([{ audit_chain_enabled: false }]);
+    }
+    return Promise.resolve([]);
+  });
   mockExecuteRawUnsafe.mockResolvedValue(undefined);
   mockDisconnect.mockResolvedValue(undefined);
   mockPoolEnd.mockResolvedValue(undefined);

@@ -471,20 +471,34 @@ its `audit_chain_enabled` is false, so there is no chain to verify. A
 deployment with no tenants besides `__system__` therefore reports
 `tenantCount = 0` with `erroredTenantCount = 0`.
 
-**Empty enumeration (#923).** `tenants` now carries the same RLS policy
-as every other table, so the worker's tenant-list read runs under a
-named bypass grant like any other tenant read. The `__system__` tenant
-always exists, so a read that returns no tenants at all (not even
-`__system__`) lost its scope; it does not mean the deployment has no tenants. The tick reports this as
-`erroredTenantCount >= 1` — set directly by the empty check, not
-incremented per-tenant like the construction above — plus a
-`tick incomplete` line with reason `TENANT_ENUMERATION_EMPTY`. It does
-not throw: a throw would skip the heartbeat and leave only the
-absence alarm, which cannot distinguish "inert" from "dead".
-**Recovery**: treat `TENANT_ENUMERATION_EMPTY` the same as
-`RLS_CONTEXT_MISSING` below — "the verifier is inert" — and check the
-`SYSTEM_MAINTENANCE_TENANT_LOOKUP` bypass grant and
-`check-bypass-rls.mjs`'s ALLOWED_USAGE entry for this worker.
+**Enumeration failures (#923).** `tenants` now carries the same RLS
+policy as every other table, so the worker's tenant-list read runs under
+a named bypass grant like any other tenant read. `__system__` always
+exists and only a full bypass read sees it, so a list without it means
+the read lost its scope; it does not mean the deployment has no tenants.
+Each case adds 1 to `erroredTenantCount` directly (not per tenant like
+the construction above) and logs a `tick incomplete` line with its
+reason:
+
+- `TENANT_ENUMERATION_FAILED` — the read threw (the line carries the
+  error code), e.g. 42501 when a role lacks EXECUTE on
+  `public.rls_bypass_admits` or, once enforce mode ships (#921), when
+  the grant does not name `tenants`.
+- `TENANT_ENUMERATION_EMPTY` — the read returned no tenants at all.
+- `TENANT_ENUMERATION_INCOMPLETE` — it returned tenants but not
+  `__system__`, i.e. a tenant-scoped rather than a bypass read. The
+  tenants it did return are still verified.
+- `SENTINEL_CHAIN_UNVERIFIABLE` — `__system__`'s `audit_chain_enabled`
+  is true, which no migration sets and which this worker cannot verify.
+
+None of these throws: a throw would skip the heartbeat and leave only
+the absence alarm, which cannot distinguish "inert" from "dead".
+**Recovery**: for the three enumeration reasons, treat the verifier as
+inert, as for `RLS_CONTEXT_MISSING` below: check that the worker's role
+holds EXECUTE on `public.rls_bypass_admits` and SELECT on `tenants`, and
+that `SYSTEM_MAINTENANCE_TENANT_LOOKUP` still names `tenant`. For
+`SENTINEL_CHAIN_UNVERIFIABLE`, find who enabled the sentinel's chain and
+set it back to false.
 
 **Recovery (per-tenant failures)**: the accompanying `tick incomplete`
 stderr line names the failing tenant ids. `RLS_CONTEXT_MISSING` there

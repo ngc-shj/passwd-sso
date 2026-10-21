@@ -162,7 +162,24 @@ describe("check-rls-read-context", () => {
       }
     `);
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("tenants");
+    // Pinned to the gate's exact violation-line shape (accessor.method -> table),
+    // not a bare substring: "tenants" alone would also match this file's own
+    // narration text in the trailing remediation paragraph.
+    expect(r.stderr).toContain("prisma.tenant.findMany  ->  tenants");
+  });
+
+  it("PASSES withBypassRls(prisma, (tx) => tx.tenant.findMany({}), G)", () => {
+    // Allow side for the tenancy-root cell above: a correctly-scoped read on
+    // `tenants` itself must not be flagged just because the table is
+    // special-cased via TENANCY_ROOT_TABLE rather than the manifest.
+    const r = runGate(`
+      export async function f(prisma: any) {
+        return withBypassRls(prisma, (tx: any) => tx.tenant.findMany({}), G);
+      }
+      declare function withBypassRls(prisma: any, fn: (tx: any) => unknown, grant: unknown): Promise<unknown>;
+      declare const G: unknown;
+    `);
+    expect(r.status).toBe(0);
   });
 
   it("FAILS a bare tagged-template raw read", () => {

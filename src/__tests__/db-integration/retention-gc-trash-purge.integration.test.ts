@@ -207,7 +207,11 @@ describe("retention-gc sweepTrashEntry: personal trash purge (SC2/C3/C7)", () =>
 
     const deleted = await sweepTrashEntry(ctx.retentionWorker.prisma, PERSONAL_ENTRY, 100);
 
-    expect(deleted).toBe(1);
+    // Not toBe(1): the sweep is not scoped to this test's tenant — it spans
+    // every tenant in a shared dev DB, so another tenant's own past-grace
+    // row sharing the sweep window would also count. The seeded row IS the
+    // thing this cell pins down.
+    expect(deleted).toBeGreaterThanOrEqual(1);
     expect(await entryExists(pastId)).toBe(false);
   });
 

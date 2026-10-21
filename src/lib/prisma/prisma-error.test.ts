@@ -134,6 +134,23 @@ describe("pgErrorCode", () => {
     expect(pgErrorCode(new Error("connection refused"))).toBeNull();
   });
 
+  it("reads an unmapped SQLSTATE from the adapter's real default: branch shape (originalCode AND a sibling code, both present)", () => {
+    // 23514 (check_violation) has no named branch in mapDriverError, so the
+    // adapter's default: case runs and adds `code` beside `originalCode`
+    // rather than in place of it — unlike src/__tests__/db-integration/
+    // helpers.test.ts's legacyAdapterError, which is a synthetic `code`-only
+    // shape built to drive the fallback arm, not this one.
+    const err = Object.assign(new Error("Raw query failed"), {
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          cause: { originalCode: "23514", code: "23514", kind: "postgres" },
+        },
+      },
+    });
+    expect(pgErrorCode(err)).toBe("23514");
+  });
+
   it.each([null, undefined, "string error", 42])(
     "returns null for the non-object input %s",
     (input) => {

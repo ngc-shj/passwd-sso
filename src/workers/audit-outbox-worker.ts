@@ -315,7 +315,14 @@ export async function checkChainEnabled(
       `SELECT audit_chain_enabled FROM tenants WHERE id = $1::uuid`,
       tenantId,
     );
-    return rows[0]?.audit_chain_enabled ?? false;
+    // The outbox row's FK guarantees the tenant exists, so no row means this
+    // read lost its RLS scope or grant. Reading that as "chain disabled" would
+    // deliver the row unchained and mark it SENT; throwing leaves it to the
+    // caller's recordError, retryable.
+    if (rows.length === 0) {
+      throw new Error(`CHAIN_FLAG_UNREADABLE: no tenants row visible for ${tenantId}`);
+    }
+    return rows[0].audit_chain_enabled;
   });
   return result;
 }

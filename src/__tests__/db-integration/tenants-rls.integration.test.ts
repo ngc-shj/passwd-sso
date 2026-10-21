@@ -22,7 +22,6 @@ import {
   assertRlsApplies,
   appConnectionString,
   expectBypassNotices,
-  setBypassRlsGucs,
   sqlStateOf,
   type TestContext,
 } from "./helpers";
@@ -32,6 +31,7 @@ import { createClient, createPool } from "@/lib/db/pool-factory";
 import { NIL_UUID } from "@/lib/constants/app";
 import { enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox-in-tx";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import { checkChainEnabled } from "@/workers/audit-outbox-worker";
 
 const SAMPLE_PAYLOAD: AuditOutboxPayload = {
   scope: AUDIT_SCOPE.PERSONAL,
@@ -177,8 +177,13 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
       caught = e;
     }
     // Pinned exactly: a widened WITH CHECK (e.g. `true`) lets this succeed
-    // and the cell goes red, rather than merely "some error happened".
+    // and the cell goes red, rather than merely "some error happened". The
+    // message pin catches a 42501 raised by a DIFFERENT policy or table (the
+    // SQLSTATE alone cannot tell them apart).
     expect(sqlStateOf(caught)).toBe("42501");
+    expect((caught as Error | undefined)?.message).toMatch(
+      /new row violates row-level security policy for table "tenants"/,
+    );
 
     const rows = await ctx.su.prisma.tenant.findMany({ where: { id: freshId } });
     expect(rows).toEqual([]);
@@ -207,6 +212,9 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
       caught = e;
     }
     expect(sqlStateOf(caught)).toBe("42501");
+    expect((caught as Error | undefined)?.message).toMatch(
+      /new row violates row-level security policy for table "tenants"/,
+    );
 
     const stillThere = await ctx.su.prisma.tenant.findUnique({ where: { id: tenantC } });
     expect(stillThere).not.toBeNull();
@@ -278,6 +286,9 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
       // INSERT now that the probe is gone (C4).
       expect(sqlStateOf(caught)).toBe("23503");
 
+      // Defence only: the transaction above already aborted on the FK
+      // violation, so no row could have landed regardless — this re-confirms
+      // it rather than being the thing that prevents it.
       const rows = await ctx.su.prisma.auditOutbox.findMany({ where: { tenantId: unknownTenantId } });
       expect(rows).toEqual([]);
     });
@@ -285,11 +296,6 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
 
   describe("C5: the bootstrap trigger's own INSERT INTO tenants is refused first", () => {
     it("INSERT INTO users with NULL tenant_id and no context fails naming `tenants`, not `users`; no tenants row leaks", async () => {
-      const [{ count: before }] = await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<Array<{ count: bigint }>>(`SELECT COUNT(*) AS count FROM tenants`);
-      });
-
       const client = createClient({ connectionString: appConnectionString() });
       await client.connect();
       let caught: { code?: string; message?: string } | undefined;
@@ -314,13 +320,32 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
       }
 
       expect(caught?.code, "the bootstrap trigger's own INSERT INTO tenants is what now fails").toBe("42501");
-      expect(caught?.message).toMatch(/tenants/);
+      // Pinned to the exact RLS refusal text, not merely "mentions tenants"
+      // — a 42501 naming `users` instead would also satisfy a bare /tenants/.
+      expect(caught?.message).toMatch(
+        /new row violates row-level security policy for table "tenants"/,
+      );
+      // No separate before/after tenants count: the whole statement runs
+      // inside BEGIN...ROLLBACK (committed nowhere on either path above), so
+      // "no leak" is guaranteed by never reaching COMMIT, not by a count
+      // comparison — which, over the whole table in a shared dev DB, can
+      // only change through unrelated activity and would be a flake source
+      // for no added proof.
+    });
+  });
 
-      const [{ count: after }] = await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<Array<{ count: bigint }>>(`SELECT COUNT(*) AS count FROM tenants`);
-      });
-      expect(Number(after)).toBe(Number(before));
+  describe("the outbox worker's chain-flag read", () => {
+    it("reads the flag of an existing tenant as the outbox worker role", async () => {
+      // Allow side: the drain grant names tenants, so the row is visible.
+      expect(await checkChainEnabled(ctx.worker.prisma, tenantA)).toBe(false);
+    });
+
+    it("refuses to read a missing row as chain-disabled", async () => {
+      // No row is what a lost RLS scope or grant looks like; "disabled" would
+      // deliver the outbox row unchained and mark it SENT.
+      await expect(checkChainEnabled(ctx.worker.prisma, randomUUID())).rejects.toThrow(
+        "CHAIN_FLAG_UNREADABLE",
+      );
     });
   });
 });
