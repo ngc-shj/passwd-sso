@@ -250,6 +250,14 @@ interface TenantState {
   inFailedState: boolean;
 }
 
+/** Why a tick's tenant list cannot be trusted, keyed by the logged reason. */
+const ENUMERATION_FAILURE = {
+  TENANT_ENUMERATION_FAILED: "the tenant-list read threw",
+  TENANT_ENUMERATION_EMPTY: "the tenant-list read returned no tenants, not even the system tenant",
+  TENANT_ENUMERATION_INCOMPLETE:
+    "the tenant list did not include the system tenant, which only a full bypass read sees",
+} as const;
+
 export async function runTick(
   prisma: PrismaClient,
   states: Map<string, TenantState>,
@@ -294,7 +302,7 @@ export async function runTick(
   // run otherwise); if that ever changes, the tick reports it as unverifiable.
   const sentinel = tenants.find((t) => t.id === SYSTEM_TENANT_ID);
   const verifiable = tenants.map((t) => t.id).filter((id) => id !== SYSTEM_TENANT_ID);
-  const enumerationReason =
+  const enumerationReason: keyof typeof ENUMERATION_FAILURE | null =
     enumerationError !== null
       ? "TENANT_ENUMERATION_FAILED"
       : tenants.length === 0
@@ -305,8 +313,9 @@ export async function runTick(
   if (enumerationReason !== null) {
     errored++;
     logger.error(
-      "audit-chain-verify-worker: tick incomplete — reason=%s (the tenant list did not include the system tenant, which only a full bypass read sees) error=%j",
+      "audit-chain-verify-worker: tick incomplete — reason=%s (%s) error=%j",
       enumerationReason,
+      ENUMERATION_FAILURE[enumerationReason],
       enumerationError !== null ? errorLogFields(enumerationError) : null,
     );
   }

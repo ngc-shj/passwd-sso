@@ -1,6 +1,6 @@
 # Code Review: tenants-table-rls
 Date: 2026-10-21
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 
@@ -45,3 +45,23 @@ R50 T1, T8, T10; R55 T6; RT1 T9; RT7 T1, T2, T10; RT10 T6, T7; all others OK or 
   NOBYPASSRLS role locally (`verified-local`, D10).
 - V2 (integration tests vs workers): `verified-local` — full integration suite with workers stopped.
 - Negative-test Cases 15/16: `verified-CI` pending (CI-only harness).
+
+## Round 2
+
+Changes from previous round: all round-1 findings resolved (87fc3780b). Round 2 raised Minor only.
+
+| ID | Expert | Sev | Finding | Resolution |
+|----|--------|-----|---------|-----------|
+| N1(sec) | Sec | Minor | `CHAIN_FLAG_UNREADABLE` invisible in logs (`code: unknown`); no requeue path before the 90-day purge | Fixed: error carries `code`; alerts.md documents cause, recovery and a requeue block (executed as `passwd_app` and `passwd_outbox_worker`, rolled back) |
+| N2(sec) | Sec | Minor | Real-policy cases gated only on `CI=true`; a CI job without it SKIPs green | Fixed: explicit `RLS_NEGATIVE_MUTATE_REAL_POLICY=1` set only by the CI rls job; FAIL under GitHub Actions without it |
+| N1(func) | Func | Minor | alerts.md counter invariant and sentinel text stale after D9 | Fixed |
+| N2(func) | Func | Minor | One explanation logged for every enumeration reason | Fixed: per-reason text; cell asserts the FAILED line does not blame a missing sentinel |
+| N3(func) | Func | Minor | Sentinel recovery contradicted the retention migration's explicit-decision rationale; no RDS-safe write | Fixed: explicit decision, write block executed (rolled back) |
+| N1(test) | Test | Minor | No test drives the batch loop when the chain-flag read throws | Fixed: three unit cells (error path, no caching of the throw, allow side), red-proved |
+| N2(test) | Test | Minor | C5 comment rationale inaccurate | Fixed |
+| N3(test) | Test | Minor | `>= 1` where the count is exactly 1 | Fixed: `toBe(1)` |
+
+Side effect: the sentinel parity gate's `alerts.md` count is now 10 (the recovery UPDATE spells it twice).
+
+Recurring Issue Check (round 2): Security — R16, R31 N2; R38 N1; R50 N2; others OK or N/A; RS OK/N/A.
+Functionality — R29 N1, N3; others OK or N/A. Testing — R29 N2; R38 N1; RT7 N3; RT8 N1; others OK or N/A.

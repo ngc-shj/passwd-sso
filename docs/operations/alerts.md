@@ -113,6 +113,29 @@ audit pipeline is degraded — events are being lost.
 **Recovery**: investigate audit-outbox-worker logs; check DB write
 permissions on the `audit_logs` and `audit_outbox` tables.
 
+**`code: "CHAIN_FLAG_UNREADABLE"` (#923).** The worker reads each tenant's
+`audit_chain_enabled` before delivering, and refuses to treat a missing
+`tenants` row as "chain disabled": that would write the row unchained and mark
+it SENT. The outbox row's foreign key guarantees the tenant exists, so a missing
+row means the read lost its RLS scope or grant. Every tenant is affected, so
+events retry and then dead-letter. Restore the cause (the `OUTBOX_DRAIN` grant
+still naming `tenant`; the worker role's EXECUTE on `public.rls_bypass_admits`
+and SELECT on `tenants`), then requeue the dead-lettered rows before
+`OUTBOX_FAILED_RETENTION_DAYS` (90) purges them. On RDS `audit_outbox` is under
+FORCE RLS for the owner too, so the requeue runs under a transaction-scoped
+bypass naming only that table:
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+SET LOCAL app.bypass_tables = 'audit_outbox';
+SET LOCAL app.bypass_purpose = 'system_maintenance';
+UPDATE audit_outbox
+SET status = 'PENDING', attempt_count = 0, next_retry_at = now(), last_error = NULL
+WHERE status = 'FAILED' AND last_error LIKE 'CHAIN_FLAG_UNREADABLE%';
+COMMIT;
+```
+
 Datadog/Loki: `{ _logType="audit-dead-letter" }`
 Splunk: `_logType="audit-dead-letter"`
 Sentry: auto-captured at error level.
@@ -457,19 +480,22 @@ at all. Conflating them would hide a tamper behind a coverage page.
 
 (Not `verifiedTenantCount < tenantCount`: neither LogQL nor Datadog can
 compare two extracted fields — a label-filter expression needs a literal
-on the right. `erroredTenantCount` is equivalent by construction
-**when the tick enumerated at least one tenant**, because every
-verified-or-errored tenant increments exactly one of the two counters. An
-empty enumeration is the one case that invariant does not cover by
-iteration — see below.)
+on the right. `erroredTenantCount` is per-tenant failures plus one for
+each tick-level reason under "Enumeration failures" below, so it is
+strictly stronger than `verifiedTenantCount < tenantCount`:
+`verifiedTenantCount + erroredTenantCount` can exceed `tenantCount`, and a
+tick that verified every listed tenant can still report
+`erroredTenantCount = 1`.)
 
 `tenantCount` counts the tenants the worker verifies, which is every tenant
 except `__system__`. The worker cannot open a tenant context on the
 sentinel (it is the FK target of every unattributable audit row), so it
-leaves it out of all three counts rather than reporting it as verified;
-its `audit_chain_enabled` is false, so there is no chain to verify. A
-deployment with no tenants besides `__system__` therefore reports
-`tenantCount = 0` with `erroredTenantCount = 0`.
+leaves it out of all three counts rather than reporting it as verified.
+Its `audit_chain_enabled` is false by default, so there is no chain to
+verify; if someone enables it, the tick reports
+`SENTINEL_CHAIN_UNVERIFIABLE` (below). A deployment with no tenants besides
+`__system__` therefore reports `tenantCount = 0` with
+`erroredTenantCount = 0`.
 
 **Enumeration failures (#923).** `tenants` now carries the same RLS
 policy as every other table, so the worker's tenant-list read runs under
@@ -497,8 +523,22 @@ the absence alarm, which cannot distinguish "inert" from "dead".
 inert, as for `RLS_CONTEXT_MISSING` below: check that the worker's role
 holds EXECUTE on `public.rls_bypass_admits` and SELECT on `tenants`, and
 that `SYSTEM_MAINTENANCE_TENANT_LOOKUP` still names `tenant`. For
-`SENTINEL_CHAIN_UNVERIFIABLE`, find who enabled the sentinel's chain and
-set it back to false.
+`SENTINEL_CHAIN_UNVERIFIABLE`, decide explicitly, as
+`20260902120000_set_system_tenant_audit_retention` does (it refuses to
+turn the chain off for you; see
+`docs/security/audit-chain-threat-model.md#retention-purge-interaction`):
+either disable the chain on `__system__`, accepting that its rows go
+unverified, or keep it and accept this alert until sentinel verification
+exists. Disabling it on RDS (owner under FORCE RLS) is a write, so it runs
+in a transaction-scoped tenant scope without `READ ONLY`:
+
+```sql
+BEGIN;
+SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
+UPDATE tenants SET audit_chain_enabled = false
+WHERE id = '00000000-0000-4000-8000-000000000002';
+COMMIT;
+```
 
 **Recovery (per-tenant failures)**: the accompanying `tick incomplete`
 stderr line names the failing tenant ids. `RLS_CONTEXT_MISSING` there

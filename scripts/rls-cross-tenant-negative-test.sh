@@ -5,7 +5,8 @@
 # 16 distinct failure shapes to verify the cross-tenant verify SQL correctly
 # detects each: cases 1-14 mutate an ephemeral throwaway table's own policy;
 # cases 15-16 ALTER the REAL tenants_tenant_isolation policy itself (there is
-# no throwaway stand-in for `tenants`) and are gated to CI=true — locally
+# no throwaway stand-in for `tenants`) and run only with
+# RLS_NEGATIVE_MUTATE_REAL_POLICY=1, which only the CI rls job sets — locally
 # they SKIP rather than mutate a shared/persistent dev DB's tenants policy.
 #   0. canonical policy + correct manifest (sanity: harness calibrated)
 #   1. permissive symmetric → [E-RLS-COUNT-A]
@@ -523,13 +524,22 @@ run_tenants_policy_case() {
   printf 'PASS case %s (matched %s)\n' "$n" "$expected"
 }
 
-# Cases 15/16 mutate the REAL tenants policy, so they are gated to CI=true —
-# a crashed run between an ALTER and its restore on a shared/persistent dev
-# DB would leave the live tenants table running a broken policy. The trap's
-# fallback restore (cleanup(), above) is a safety net, not a substitute for
-# only running this against CI's ephemeral Postgres.
-if [[ "${CI:-}" != "true" ]]; then
-  printf 'SKIP cases 15/16: tenants-policy mutation cases run only under CI=true\n'
+# Cases 15/16 mutate the REAL tenants policy (case 16 opens every tenant row to
+# a no-context session), so they need an explicit opt-in that only the CI rls
+# job sets: a crashed run between an ALTER and its restore on a shared or
+# persistent dev DB would leave the live tenants table running a broken
+# policy, and CI=true alone is commonly exported locally. The trap's fallback
+# restore (cleanup(), above) is a safety net, not a substitute for running this
+# only against CI's ephemeral Postgres. Under GitHub Actions without the
+# opt-in the run FAILS rather than skipping, so a CI job that loses the
+# variable cannot report "examined nothing" as green.
+if [[ "${RLS_NEGATIVE_MUTATE_REAL_POLICY:-}" != "1" ]]; then
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    printf 'FAIL cases 15/16: RLS_NEGATIVE_MUTATE_REAL_POLICY=1 is not set in CI\n'
+    total_failures=$((total_failures + 1))
+  else
+    printf 'SKIP cases 15/16: tenants-policy mutation cases need RLS_NEGATIVE_MUTATE_REAL_POLICY=1 (CI only)\n'
+  fi
 else
   # Snapshot the canonical tenants policy text ONCE, before either case.
   TENANTS_POLICY_QUAL_SNAPSHOT=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "

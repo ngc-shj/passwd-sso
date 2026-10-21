@@ -320,7 +320,11 @@ export async function checkChainEnabled(
     // deliver the row unchained and mark it SENT; throwing leaves it to the
     // caller's recordError, retryable.
     if (rows.length === 0) {
-      throw new Error(`CHAIN_FLAG_UNREADABLE: no tenants row visible for ${tenantId}`);
+      // The code is what errorLogFields puts on worker.deliver_failed and the
+      // dead-letter line; the message alone reaches only audit_outbox.last_error.
+      throw Object.assign(new Error(`CHAIN_FLAG_UNREADABLE: no tenants row visible for ${tenantId}`), {
+        code: "CHAIN_FLAG_UNREADABLE",
+      });
     }
     return rows[0].audit_chain_enabled;
   });

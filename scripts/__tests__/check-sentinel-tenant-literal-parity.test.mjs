@@ -40,7 +40,7 @@ const DOC_FILES = ["alerts.md", "sentinel-tenant-membership.md"];
  * "present the right number of times", which is the whole subject of the
  * partial-drift case below.
  */
-const DOC_OCCURRENCES = { "alerts.md": 8, "sentinel-tenant-membership.md": 4 };
+const DOC_OCCURRENCES = { "alerts.md": 10, "sentinel-tenant-membership.md": 4 };
 
 let root;
 const roots = [];

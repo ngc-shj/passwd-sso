@@ -338,10 +338,19 @@ type TxFn = (tx: MockTxClient) => Promise<unknown>;
  */
 function makeOneShotTxImpl(
   stopFn: () => void,
-  opts: { auditLogsInsertResult?: { id: string }[] } = {},
+  opts: {
+    auditLogsInsertResult?: { id: string }[];
+    // Override checkChainEnabled's `SELECT audit_chain_enabled FROM tenants`
+    // read. Default (one row, flag false) keeps deliverRow/deliverRowWithChain
+    // reachable for the existing delivery tests; pass `[]` to reproduce the
+    // no-row RLS-scope-loss case, which makes checkChainEnabled throw
+    // CHAIN_FLAG_UNREADABLE instead of returning a boolean.
+    chainEnabledResult?: { audit_chain_enabled: boolean }[];
+  } = {},
 ): (fn: TxFn) => Promise<unknown> {
   let outboxClaimCount = 0;
   const auditLogsInsertResult = opts.auditLogsInsertResult ?? [{ id: "11111111-1111-4111-8111-111111111111" }];
+  const chainEnabledResult = opts.chainEnabledResult ?? [{ audit_chain_enabled: false }];
   return async function (fn: TxFn) {
     const txQueryRaw = vi.fn(async (...args: unknown[]) => {
       const sql = typeof args[0] === "string" ? args[0] : "";
@@ -365,7 +374,7 @@ function makeOneShotTxImpl(
       // mockQueryRawUnsafe default above: no row now throws
       // CHAIN_FLAG_UNREADABLE instead of defaulting to false.
       if (sql.includes("audit_chain_enabled")) {
-        return [{ audit_chain_enabled: false }];
+        return chainEnabledResult;
       }
       // Delivery claims, reaper, purge, or other queries — return empty/default
       if (sql.includes("DELETE FROM audit_outbox")) {
@@ -436,7 +445,10 @@ const TEST_DB_URL = "postgresql://test:test@localhost:5432/test";
  */
 async function runWorkerOnce(
   worker: ReturnType<typeof createWorker>,
-  opts: { auditLogsInsertResult?: { id: string }[] } = {},
+  opts: {
+    auditLogsInsertResult?: { id: string }[];
+    chainEnabledResult?: { audit_chain_enabled: boolean }[];
+  } = {},
 ): Promise<void> {
   mockTransaction.mockImplementation(makeOneShotTxImpl(() => worker.stop(), opts));
   await worker.start();
@@ -1067,6 +1079,118 @@ describe("error paths", () => {
       expect.objectContaining({ outboxId: ROW_ID }),
       "worker.invalid_userid_skipped",
     );
+  }, 15000);
+});
+
+// ─── checkChainEnabled throws (CHAIN_FLAG_UNREADABLE) ─────────────────────────
+//
+// checkChainEnabled throws when the tenants row is invisible to the read (lost
+// RLS scope/grant) instead of defaulting to "chain disabled" — delivering the
+// row unchained and marking it SENT would hide the loss. The batch loop's
+// per-row try/catch (around getChainEnabled) must route the throw to
+// recordError instead of deliverRow/deliverRowWithChain.
+
+describe("checkChainEnabled throws (CHAIN_FLAG_UNREADABLE)", () => {
+  beforeEach(resetMocks);
+
+  it("routes the row to recordError instead of delivering it", async () => {
+    const row = makeRow({ attempt_count: 2, max_attempts: 8 });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    // No tenants row visible to checkChainEnabled's read.
+    await runWorkerOnce(worker, { chainEnabledResult: [] });
+
+    // Not delivered: deliverRow/deliverRowWithChain never run, so no
+    // audit_logs INSERT is attempted.
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeUndefined();
+    // Not marked SENT either.
+    const sentUpdate = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("UPDATE audit_outbox") &&
+        call[0].includes("status = 'SENT'"),
+    );
+    expect(sentUpdate).toBeUndefined();
+
+    // recordError ran: PENDING retry with attempt_count incremented (2 -> 3)
+    // and last_error carrying the CHAIN_FLAG_UNREADABLE code — distinguishes
+    // this from a generic deliver failure.
+    const updateCall = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("UPDATE audit_outbox") &&
+        call[0].includes("status = 'PENDING'") &&
+        call[4] === ROW_ID,
+    );
+    expect(updateCall).toBeDefined();
+    expect(updateCall![1]).toBe(3);
+    expect(updateCall![3]).toContain("CHAIN_FLAG_UNREADABLE");
+  }, 15000);
+
+  it("re-checks a second claimed row of the same tenant instead of caching the throw as false", async () => {
+    const rowA = makeRow({ id: ROW_ID, attempt_count: 0, max_attempts: 8 });
+    const otherRowId = "00000000-0000-4000-8000-000000000099";
+    const rowB = makeRow({ id: otherRowId, tenant_id: TENANT_ID, attempt_count: 0, max_attempts: 8 });
+
+    // Both rows claimed in the SAME batch, same tenant_id — the per-batch
+    // chainEnabledCache keys on tenantId, so this is the case that would read
+    // back a cached `false` for rowB if the throw on rowA were ever cached.
+    mockQueryRawUnsafe.mockResolvedValueOnce([rowA, rowB]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker, { chainEnabledResult: [] });
+
+    // Neither row was delivered.
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeUndefined();
+
+    // Both rows independently hit recordError with the CHAIN_FLAG_UNREADABLE
+    // error — if the throw had been cached as `false`, rowB would have been
+    // delivered via deliverRow instead and carry no such UPDATE.
+    for (const id of [ROW_ID, otherRowId]) {
+      const updateCall = mockExecuteRawUnsafe.mock.calls.find(
+        (call) =>
+          typeof call[0] === "string" &&
+          call[0].includes("UPDATE audit_outbox") &&
+          call[0].includes("status = 'PENDING'") &&
+          call[4] === id,
+      );
+      expect(updateCall).toBeDefined();
+      expect(updateCall![1]).toBe(1);
+      expect(updateCall![3]).toContain("CHAIN_FLAG_UNREADABLE");
+    }
+  }, 15000);
+
+  it("allow side: a readable tenants row still delivers and marks the row SENT", async () => {
+    // Pairs with the throw cases above: the mock's default chainEnabledResult
+    // (one row, flag false) must still reach deliverRow and mark SENT —
+    // otherwise the throw cases above would be vacuously true for any batch.
+    const row = makeRow();
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeDefined();
+    const sentUpdate = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("UPDATE audit_outbox") &&
+        call[0].includes("status = 'SENT'") &&
+        call[1] === ROW_ID,
+    );
+    expect(sentUpdate).toBeDefined();
   }, 15000);
 });
 

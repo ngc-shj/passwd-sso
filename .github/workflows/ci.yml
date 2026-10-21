@@ -745,6 +745,9 @@ jobs:
       - name: Cross-tenant verify negative test (gate self-check)
         run: bash scripts/rls-cross-tenant-negative-test.sh
         env:
+          # Cases 15/16 ALTER the real tenants policy; this ephemeral job DB is
+          # the only place they may run.
+          RLS_NEGATIVE_MUTATE_REAL_POLICY: "1"
           MIGRATION_DATABASE_URL: "postgresql://passwd_user:${{ env.PASSWD_SUPERUSER_PASSWORD }}@localhost:5432/passwd_sso"
           APP_DATABASE_URL: "postgresql://passwd_app:${{ env.PASSWD_APP_PASSWORD }}@localhost:5432/passwd_sso"
   # ─── Container Scan (Trivy) ─────────────────────────────────

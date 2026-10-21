@@ -265,7 +265,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
     expect(beat.tenantCount).toBe(0);
     expect(beat.verifiedTenantCount).toBe(0);
-    expect(beat.erroredTenantCount).toBeGreaterThan(0);
+    expect(beat.erroredTenantCount).toBe(1);
     expect(errLineIncludes(errLines, "TENANT_ENUMERATION_EMPTY")).toBe(true);
   });
 
@@ -317,7 +317,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     await runTick(prisma, new Map());
 
     const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
-    expect(beat.erroredTenantCount).toBeGreaterThanOrEqual(1);
+    expect(beat.erroredTenantCount).toBe(1);
     expect(beat.verifiedTenantCount).toBe(1);
     expect(errLineIncludes(errLines, "TENANT_ENUMERATION_INCOMPLETE")).toBe(
       true,
@@ -335,8 +335,11 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
     expect(beat.tenantCount).toBe(0);
     expect(beat.verifiedTenantCount).toBe(0);
-    expect(beat.erroredTenantCount).toBeGreaterThanOrEqual(1);
+    expect(beat.erroredTenantCount).toBe(1);
     expect(errLineIncludes(errLines, "TENANT_ENUMERATION_FAILED")).toBe(true);
+    // No list came back, so the line must not blame a missing system tenant.
+    expect(errLineIncludes(errLines, "did not include")).toBe(false);
+    expect(errLineIncludes(errLines, "read threw")).toBe(true);
   });
 
   it("flags the sentinel's chain as unverifiable when audit_chain_enabled is true (SENTINEL_CHAIN_UNVERIFIABLE)", async () => {
@@ -352,7 +355,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     await runTick(prisma, new Map());
 
     const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
-    expect(beat.erroredTenantCount).toBeGreaterThanOrEqual(1);
+    expect(beat.erroredTenantCount).toBe(1);
     expect(beat.verifiedTenantCount).toBe(1);
     expect(
       errLines.some(([fmt]) =>

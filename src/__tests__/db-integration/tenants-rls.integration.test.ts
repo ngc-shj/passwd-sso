@@ -320,8 +320,9 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
       }
 
       expect(caught?.code, "the bootstrap trigger's own INSERT INTO tenants is what now fails").toBe("42501");
-      // Pinned to the exact RLS refusal text, not merely "mentions tenants"
-      // — a 42501 naming `users` instead would also satisfy a bare /tenants/.
+      // Pinned to the exact RLS refusal text, not merely "mentions tenants":
+      // a privilege denial ("permission denied for table tenants") is also
+      // 42501 and would satisfy a bare /tenants/.
       expect(caught?.message).toMatch(
         /new row violates row-level security policy for table "tenants"/,
       );
@@ -343,9 +344,10 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
     it("refuses to read a missing row as chain-disabled", async () => {
       // No row is what a lost RLS scope or grant looks like; "disabled" would
       // deliver the outbox row unchained and mark it SENT.
-      await expect(checkChainEnabled(ctx.worker.prisma, randomUUID())).rejects.toThrow(
-        "CHAIN_FLAG_UNREADABLE",
-      );
+      // The code, not just the message: it is what the worker's log lines carry.
+      await expect(checkChainEnabled(ctx.worker.prisma, randomUUID())).rejects.toMatchObject({
+        code: "CHAIN_FLAG_UNREADABLE",
+      });
     });
   });
 });
