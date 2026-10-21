@@ -133,13 +133,15 @@ const SQL_SITES = [
 const DOC_SITES = [
   {
     path: "docs/operations/alerts.md",
-    // Four: the unattributable-event diagnostic, the read of the tenant's own
+    // Eight: the unattributable-event diagnostic, the read of the tenant's own
     // retention value, the pre-sweep query that computes what will drop, and the
-    // \copy that exports it. All four are pasted mid-incident, which is what
-    // puts them in scope — and the export is the one where a stale UUID would
-    // write the wrong tenant's rows to a file.
-    occurrences: 4,
-    what: "the unattributable-event diagnostic, retention read, pre-sweep and export queries",
+    // \copy that exports it — each once in its WHERE clause and once in the
+    // `SET LOCAL app.tenant_id` that scopes it (tenants and audit_logs are both
+    // FORCE-RLS, which binds the RDS owner, #923). All are pasted mid-incident,
+    // which is what puts them in scope — and the export is the one where a
+    // stale UUID would write the wrong tenant's rows to a file.
+    occurrences: 8,
+    what: "the unattributable-event diagnostic, retention read, pre-sweep and export queries, and their tenant scopes",
   },
   {
     path: "docs/operations/sentinel-tenant-membership.md",
