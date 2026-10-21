@@ -1129,7 +1129,30 @@ describe("checkChainEnabled throws (CHAIN_FLAG_UNREADABLE)", () => {
     );
     expect(updateCall).toBeDefined();
     expect(updateCall![1]).toBe(3);
-    expect(updateCall![3]).toContain("CHAIN_FLAG_UNREADABLE");
+    // Anchored: the runbook requeues by `last_error LIKE 'CHAIN_FLAG_UNREADABLE%'`.
+    expect(updateCall![3]).toMatch(/^CHAIN_FLAG_UNREADABLE: /);
+  }, 15000);
+
+  it("dead-letters the row on its last attempt with last_error the runbook's requeue selects", async () => {
+    // attempt_count + 1 == max_attempts takes recordError's FAILED path, the
+    // state docs/operations/alerts.md requeues by a prefix match on last_error.
+    const row = makeRow({ attempt_count: 7, max_attempts: 8 });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker, { chainEnabledResult: [] });
+
+    const failedUpdate = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("UPDATE audit_outbox") &&
+        call[0].includes("status = 'FAILED'") &&
+        call[3] === ROW_ID,
+    );
+    expect(failedUpdate).toBeDefined();
+    expect(failedUpdate![1]).toBe(8);
+    expect(failedUpdate![2]).toMatch(/^CHAIN_FLAG_UNREADABLE: /);
   }, 15000);
 
   it("re-checks a second claimed row of the same tenant instead of caching the throw as false", async () => {
@@ -1164,7 +1187,7 @@ describe("checkChainEnabled throws (CHAIN_FLAG_UNREADABLE)", () => {
       );
       expect(updateCall).toBeDefined();
       expect(updateCall![1]).toBe(1);
-      expect(updateCall![3]).toContain("CHAIN_FLAG_UNREADABLE");
+      expect(updateCall![3]).toMatch(/^CHAIN_FLAG_UNREADABLE: /);
     }
   }, 15000);
 

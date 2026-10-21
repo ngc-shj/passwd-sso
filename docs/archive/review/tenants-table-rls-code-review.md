@@ -65,3 +65,14 @@ Side effect: the sentinel parity gate's `alerts.md` count is now 10 (the recover
 
 Recurring Issue Check (round 2): Security — R16, R31 N2; R38 N1; R50 N2; others OK or N/A; RS OK/N/A.
 Functionality — R29 N1, N3; others OK or N/A. Testing — R29 N2; R38 N1; RT7 N3; RT8 N1; others OK or N/A.
+
+## Round 3
+
+Security: No findings. Functionality: No findings. Testing: one Minor.
+
+| ID | Expert | Sev | Finding | Resolution |
+|----|--------|-----|---------|-----------|
+| N4(test) | Test | Minor | Runbook requeue selects by a `last_error` prefix the tests did not pin; the FAILED path had no cell | Fixed: anchored `/^CHAIN_FLAG_UNREADABLE: /` in both cells; new FAILED-path cell (`attempt_count` 7 of 8). Red-proved: prefixing the thrown message fails all three deny cells, the allow cell passes |
+
+Recurring Issue Check (round 3): Security — all OK or N/A. Functionality — all OK or N/A.
+Testing — R2, R38, R40, R41, R47 N4; others OK or N/A.
