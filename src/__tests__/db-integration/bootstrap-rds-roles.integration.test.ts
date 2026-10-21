@@ -27,6 +27,7 @@ import {
   convergeRole,
   applyDeniedPrivileges,
   loadDeniedPolicy,
+  grantRoutineExecute,
 } from "../../../scripts/bootstrap-rds-roles.mjs";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -801,6 +802,63 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       const r = runDeniedOnly();
       expect(r.status).not.toBe(0);
       expect(`${r.stdout}${r.stderr}`).toContain("DENIED_POLICY_MISSING");
+    });
+  });
+
+  /**
+   * T9 — EXECUTE on routines for a role created after the migrations. The
+   * migrations grant only to roles that exist when they run; a role created
+   * later (CI's bootstrap, a re-created role) was left unable to call the
+   * SECURITY DEFINER audit routines (#922 surfaced it).
+   */
+  describe("T9: grantRoutineExecute", () => {
+    const PURGE = "public.audit_log_purge(uuid, timestamptz)";
+    const MIGRATE = "public.audit_log_tenant_migrate(uuid, uuid, uuid)";
+    const canExecute = async (signature: string) => {
+      const { rows } = await su.query("SELECT has_function_privilege($1, $2, 'EXECUTE') AS ok", [PROBE, signature]);
+      return rows[0].ok as boolean;
+    };
+
+    it("grants EXECUTE on a function and a procedure to a role created after them", async () => {
+      await convergeRole(su, PROBE, "probe-pw-exec");
+      expect(await canExecute(PURGE)).toBe(false);
+      expect(await canExecute(MIGRATE)).toBe(false);
+
+      await grantRoutineExecute(su, [
+        { kind: "FUNCTION", signature: PURGE, roles: [PROBE] },
+        { kind: "PROCEDURE", signature: MIGRATE, roles: [PROBE] },
+      ]);
+
+      expect(await canExecute(PURGE)).toBe(true);
+      expect(await canExecute(MIGRATE)).toBe(true);
+    });
+
+    it("skips a routine that does not exist yet", async () => {
+      await convergeRole(su, PROBE, "probe-pw-exec");
+      await expect(
+        grantRoutineExecute(su, [{ kind: "FUNCTION", signature: "public.bootstrap_probe_missing_fn()", roles: [PROBE] }]),
+      ).resolves.toBeUndefined();
+    });
+
+    it("names the definer audit routines for the roles that call them", async () => {
+      // The default set is what main() applies; the roles here are the ones
+      // db-grants-manifest.json records as holding EXECUTE.
+      const granted: string[] = [];
+      const recorder = {
+        query: async (text: string, params?: unknown[]) => {
+          if (text.startsWith("GRANT")) granted.push(text);
+          return text.startsWith("SELECT") ? su.query(text, params) : { rows: [] };
+        },
+      };
+      await grantRoutineExecute(recorder);
+      expect(granted).toEqual(expect.arrayContaining([
+        `GRANT EXECUTE ON FUNCTION ${PURGE} TO passwd_app`,
+        `GRANT EXECUTE ON FUNCTION ${PURGE} TO passwd_retention_gc_worker`,
+        `GRANT EXECUTE ON PROCEDURE ${MIGRATE} TO passwd_app`,
+      ]));
+      expect(granted.filter((g) => g.includes("audit_log_tenant_migrate"))).toEqual([
+        `GRANT EXECUTE ON PROCEDURE ${MIGRATE} TO passwd_app`,
+      ]);
     });
   });
 });

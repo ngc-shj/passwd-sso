@@ -241,6 +241,34 @@ export async function convergeRole(client, name, password) {
   }
 }
 
+// EXECUTE grants on routines. Each migration that creates one of these grants
+// EXECUTE to the roles that exist when it runs, so a role created afterwards
+// would be left without it; this grants it to those roles. The RLS policies call
+// the rls_bypass_* functions for every role that reads an RLS table; the
+// SECURITY DEFINER audit routines are callable only by the roles named here
+// (scripts/checks/db-grants-manifest.json records the same set).
+const ROUTINE_EXECUTE = [
+  { kind: "FUNCTION", signature: "public.rls_bypass_enforced()", roles: ROLES.map((r) => r.name) },
+  { kind: "FUNCTION", signature: "public.rls_bypass_admits(text)", roles: ROLES.map((r) => r.name) },
+  { kind: "FUNCTION", signature: "public.audit_log_purge(uuid, timestamptz)", roles: ["passwd_app", "passwd_retention_gc_worker"] },
+  { kind: "PROCEDURE", signature: "public.audit_log_tenant_migrate(uuid, uuid, uuid)", roles: ["passwd_app"] },
+];
+
+/**
+ * Grant ROUTINE_EXECUTE. Guarded per routine, so a run before the migration
+ * that creates it converges on the next run. Exported so the integration test
+ * drives it against a probe role.
+ */
+export async function grantRoutineExecute(client, grants = ROUTINE_EXECUTE) {
+  for (const { kind, signature, roles } of grants) {
+    const { rows } = await client.query("SELECT to_regprocedure($1) IS NOT NULL AS present", [signature]);
+    if (!rows[0]?.present) continue;
+    for (const role of roles) {
+      await client.query(`GRANT EXECUTE ON ${kind} ${signature} TO ${role}`);
+    }
+  }
+}
+
 async function main() {
   const connectionString = process.env.MIGRATION_DATABASE_URL;
   if (!connectionString) {
@@ -398,17 +426,7 @@ async function main() {
       );
     }
 
-    // The RLS policies call these functions for every role that reads an RLS
-    // table; the migration that creates them grants EXECUTE to the roles that
-    // exist then, and this grants it to roles created afterwards. Guarded per
-    // function so a run before that migration converges on the next run.
-    for (const fn of ["public.rls_bypass_enforced()", "public.rls_bypass_admits(text)"]) {
-      const { rows } = await client.query("SELECT to_regprocedure($1) IS NOT NULL AS present", [fn]);
-      if (!rows[0]?.present) continue;
-      for (const { name } of ROLES) {
-        await client.query(`GRANT EXECUTE ON FUNCTION ${fn} TO ${name}`);
-      }
-    }
+    await grantRoutineExecute(client);
 
     await client.query("COMMIT");
     console.log("bootstrap-rds-roles: done");
