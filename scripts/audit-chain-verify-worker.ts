@@ -45,7 +45,10 @@ import {
   type ChainVerifyReason,
 } from "@/lib/audit/audit-chain-verify";
 import { MS_PER_HOUR, MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { errorLogFields } from "@/lib/logger/error-fields";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 
 config({ path: resolve(process.cwd(), ".env.local") });
@@ -247,14 +250,37 @@ interface TenantState {
   inFailedState: boolean;
 }
 
+/** Why a tick's tenant list cannot be trusted, keyed by the logged reason. */
+const ENUMERATION_FAILURE = {
+  TENANT_ENUMERATION_FAILED: "the tenant-list read threw",
+  TENANT_ENUMERATION_EMPTY: "the tenant-list read returned no tenants, not even the system tenant",
+  TENANT_ENUMERATION_INCOMPLETE:
+    "the tenant list did not include the system tenant, which only a full bypass read sees",
+} as const;
+
 export async function runTick(
   prisma: PrismaClient,
   states: Map<string, TenantState>,
 ): Promise<void> {
-  // `tenants` carries no tenant_isolation policy (it is the tenancy root), so
-  // this read needs no RLS context — unlike everything verifyTenantChain reads.
-  const tenants = await prisma.tenant.findMany({ select: { id: true } });
   const logger = console;
+  // `tenants` carries the same tenant_isolation policy as every other table:
+  // a bare read sees no rows on a fresh connection and raises 22P02 on one
+  // whose app.tenant_id was set and reverted. The enumeration runs under the
+  // SYSTEM_MAINTENANCE_TENANT_LOOKUP grant, in its own bypass transaction. A
+  // failure here is reported like any other incomplete tick rather than
+  // thrown: a throw would skip the heartbeat and leave only the absence alarm,
+  // which cannot tell "inert" from "dead".
+  let tenants: Array<{ id: string; auditChainEnabled: boolean }> = [];
+  let enumerationError: unknown = null;
+  try {
+    tenants = await withBypassRls(
+      prisma,
+      (tx) => tx.tenant.findMany({ select: { id: true, auditChainEnabled: true } }),
+      BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP,
+    );
+  } catch (err) {
+    enumerationError = err;
+  }
   let verified = 0;
   let errored = 0;
   // Tampered/gap tenants. Distinct from `errored`: verification RAN and found a
@@ -262,7 +288,44 @@ export async function runTick(
   let failed = 0;
   const erroredTenantIds: string[] = [];
 
-  for (const { id: tenantId } of tenants) {
+  // The `__system__` tenant always exists and is visible only to a full
+  // bypass read, so an enumeration without it lost its scope: empty, or scoped
+  // to one tenant. That is an error (erroredTenantCount, the field the
+  // deployed alert keys on), not a healthy tick; the tenants it did return are
+  // still verified.
+  //
+  // The sentinel itself is not verified here: withTenantRls refuses to open a
+  // context on it — it is the FK target of every unattributable audit row, so
+  // a context scoped to it would expose all of them. It is left out of the
+  // counts rather than counted as verified, since nothing about its chain is
+  // read. Its audit_chain_enabled is false (a retention migration refuses to
+  // run otherwise); if that ever changes, the tick reports it as unverifiable.
+  const sentinel = tenants.find((t) => t.id === SYSTEM_TENANT_ID);
+  const verifiable = tenants.map((t) => t.id).filter((id) => id !== SYSTEM_TENANT_ID);
+  const enumerationReason: keyof typeof ENUMERATION_FAILURE | null =
+    enumerationError !== null
+      ? "TENANT_ENUMERATION_FAILED"
+      : tenants.length === 0
+        ? "TENANT_ENUMERATION_EMPTY"
+        : sentinel === undefined
+          ? "TENANT_ENUMERATION_INCOMPLETE"
+          : null;
+  if (enumerationReason !== null) {
+    errored++;
+    logger.error(
+      "audit-chain-verify-worker: tick incomplete — reason=%s (%s) error=%j",
+      enumerationReason,
+      ENUMERATION_FAILURE[enumerationReason],
+      enumerationError !== null ? errorLogFields(enumerationError) : null,
+    );
+  }
+  if (sentinel?.auditChainEnabled) {
+    errored++;
+    logger.error(
+      "audit-chain-verify-worker: tick incomplete — reason=SENTINEL_CHAIN_UNVERIFIABLE (the system tenant's audit chain is enabled, but no tenant context can be opened on it)",
+    );
+  }
+  for (const tenantId of verifiable) {
     try {
       const result = await verifyTenantChain(tenantId, { prisma, logger });
       const state = states.get(tenantId) ?? {
@@ -324,11 +387,13 @@ export async function runTick(
   // COVERAGE rides on the same line as counts. A partial tick must never read
   // as fully verified, so alert on `verifiedTenantCount < tenantCount` rather
   // than on the heartbeat's absence.
-  if (errored > 0) {
+  // Per-tenant failures only; the enumeration and sentinel reasons above have
+  // their own lines.
+  if (erroredTenantIds.length > 0) {
     logger.error(
       "audit-chain-verify-worker: tick incomplete — %d/%d tenants failed to verify: %s",
-      errored,
-      tenants.length,
+      erroredTenantIds.length,
+      verifiable.length,
       // Name them, but bounded: the dominant failure (RLS context lost) fails
       // EVERY tenant, so an unbounded join is a ~10KB line at 283 tenants —
       // past the point a log driver keeps it in one record.
@@ -342,7 +407,7 @@ export async function runTick(
     JSON.stringify({
       level: "info",
       _logType: "audit-chain-verify-heartbeat",
-      tenantCount: tenants.length,
+      tenantCount: verifiable.length,
       verifiedTenantCount: verified,
       erroredTenantCount: errored,
       // Carried here so tamper detection has a structured signal. The only

@@ -57,24 +57,35 @@ describe("mapPrismaError", () => {
 
 describe("pgErrorCode", () => {
   /**
-   * The shape the pg driver adapter actually produces, measured against a real
-   * database in src/__tests__/db-integration/ and pinned by fixture in
-   * helpers.test.ts. It is first here because it is the one the original
-   * implementation could not read: the SQLSTATE sits under
-   * meta.driverAdapterError.cause.code, so a parser that stopped at meta.code
-   * returned null and the caller reclassified a known error as unknown.
+   * The two shapes the pg driver adapter produces under
+   * meta.driverAdapterError.cause (see pgErrorCode's header): `code` beside
+   * `originalCode` for a SQLSTATE its mapDriverError does not name, and
+   * `originalCode` alone for one it does (23503, 40001, …). A parser that
+   * stopped at meta.code returned null for both; one that read only `code`
+   * returned null for the second.
    */
   function adapterError(sqlstate: string): Error {
     return Object.assign(
       new Error("\nInvalid `prisma.$executeRaw()` invocation:\n\nRaw query failed."),
-      { code: "P2010", meta: { driverAdapterError: { cause: { code: sqlstate } } } },
+      { code: "P2010", meta: { driverAdapterError: { cause: { originalCode: sqlstate, code: sqlstate } } } },
     );
+  }
+
+  function namedKindAdapterError(sqlstate: string): Error {
+    return Object.assign(new Error("\nInvalid `prisma.auditOutbox.create()` invocation:"), {
+      code: "P2003",
+      meta: { driverAdapterError: { cause: { originalCode: sqlstate, kind: "ForeignKeyConstraintViolation" } } },
+    });
   }
 
   it.each([
     [
       "the pg adapter's nested shape",
       (s: string) => adapterError(s),
+    ],
+    [
+      "the pg adapter's named-kind shape (originalCode only)",
+      (s: string) => namedKindAdapterError(s),
     ],
     [
       "P2010 with a flat meta.code",
@@ -121,6 +132,23 @@ describe("pgErrorCode", () => {
 
   it("returns null when no SQLSTATE is present anywhere", () => {
     expect(pgErrorCode(new Error("connection refused"))).toBeNull();
+  });
+
+  it("reads an unmapped SQLSTATE from the adapter's real default: branch shape (originalCode AND a sibling code, both present)", () => {
+    // 23514 (check_violation) has no named branch in mapDriverError, so the
+    // adapter's default: case runs and adds `code` beside `originalCode`
+    // rather than in place of it — unlike src/__tests__/db-integration/
+    // helpers.test.ts's legacyAdapterError, which is a synthetic `code`-only
+    // shape built to drive the fallback arm, not this one.
+    const err = Object.assign(new Error("Raw query failed"), {
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          cause: { originalCode: "23514", code: "23514", kind: "postgres" },
+        },
+      },
+    });
+    expect(pgErrorCode(err)).toBe("23514");
   });
 
   it.each([null, undefined, "string error", 42])(

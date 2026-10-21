@@ -25,44 +25,46 @@ describe("sweepOnce per-entry error isolation (C4/INV-C4b/RT7)", () => {
       (e) => e.kind === "EXPIRY",
     )!.table;
 
-    // PER_TENANT_TRASH entries dispatch through sweepTrashEntry (not an outer
-    // $transaction), which first calls workerPrisma.tenant.findMany. Returning
-    // [] makes those entries report 0 with no inner tx — keeping the $transaction
-    // call sequence aligned 1:1 with the non-trash entries.
-    const txEntryOrder = RETENTION_REGISTRY.filter(
-      (e) => e.kind !== "PER_TENANT_TRASH",
-    ).map((e) => e.table);
-    const trashTables = RETENTION_REGISTRY.filter(
-      (e) => e.kind === "PER_TENANT_TRASH",
-    ).map((e) => e.table);
+    // Every registry entry triggers exactly one $transaction call, in
+    // registry order: a PER_TENANT_TRASH entry's tenant enumeration now runs
+    // in its own bypass transaction too (C2), not a bare client call — so
+    // trash entries are no longer special-cased out of the sequence.
     const entryOrder = RETENTION_REGISTRY.map((e) => e.table);
+    const trashTables = new Set<string>(
+      RETENTION_REGISTRY.filter((e) => e.kind === "PER_TENANT_TRASH").map((e) => e.table),
+    );
 
     // sweepOnce (C7) fires ONE extra $transaction BEFORE the registry loop for
     // sweepExpiredAccessRequests. Account for it as call 0 (returns 0 — no
     // access_requests rows expired in this fixture) so the registry-entry
     // mapping below stays aligned.
     let callIndex = -1;
-    // Each non-trash registry entry triggers one $transaction call, in registry
-    // order. sweepOnce ALSO fires one EXTRA $transaction for the heartbeat after
-    // the entries (because a sibling deleted >0 → anyDeleted). That extra call
-    // has callIndex === txEntryOrder.length; we return 0 for it (txEntryOrder[i]
-    // is undefined there) and the mock ignores the callback, so the heartbeat
+    // Each registry entry triggers one $transaction call, in registry order.
+    // sweepOnce ALSO fires one EXTRA $transaction for the heartbeat after the
+    // entries (because a sibling deleted >0 → anyDeleted). That extra call has
+    // callIndex === entryOrder.length; we return 0 for it (entryOrder[i] is
+    // undefined there) and the mock ignores the callback, so the heartbeat
     // emit never runs and its result is discarded by sweepOnce — invisible to
     // the assertions below. Guard it explicitly so a future mock that DOES
     // invoke the callback can't silently misalign the per-entry mapping.
     const mockPrisma = {
-      tenant: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async () => {
         if (callIndex === -1) {
           callIndex += 1;
           return 0; // C7 pre-step tx (sweepExpiredAccessRequests) — no rows expired
         }
-        if (callIndex >= txEntryOrder.length) {
+        if (callIndex >= entryOrder.length) {
           callIndex += 1;
           return 0; // heartbeat tx — result discarded by sweepOnce
         }
-        const table = txEntryOrder[callIndex];
+        const table = entryOrder[callIndex];
         callIndex += 1;
+        if (trashTables.has(table)) {
+          // The trash entry's own tenant-enumeration transaction (C2): no
+          // tenants with trashRetentionDays set, so sweepTrashEntry's
+          // per-tenant loop never runs and the entry reports 0.
+          return [];
+        }
         if (table === failingTable) {
           throw Object.assign(new Error("boom"), { code: "XX000" });
         }
@@ -79,8 +81,8 @@ describe("sweepOnce per-entry error isolation (C4/INV-C4b/RT7)", () => {
     expect(counts[failingTable]).toBe(-1);
 
     // Every non-trash sibling still ran and reported its count (3) — isolation.
-    for (const table of txEntryOrder) {
-      if (table === failingTable) continue;
+    for (const table of entryOrder) {
+      if (table === failingTable || trashTables.has(table)) continue;
       expect(counts[table]).toBe(3);
     }
     // Trash entries (no tenants enumerated) report 0 and don't abort the sweep.

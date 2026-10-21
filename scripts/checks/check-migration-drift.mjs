@@ -17,8 +17,10 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-// Tables that are structurally exempt from the RLS coverage check.
-const RLS_EXEMPT_TABLES = new Set(["tenants"]);
+// The tenancy root. It has no tenant_id column, so it never falls into the
+// hasTenantId loop below, but it carries its own tenants_tenant_isolation
+// policy (#923) and is checked explicitly, independent of hasTenantId.
+const TENANCY_ROOT_TABLE = "tenants";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -326,10 +328,7 @@ const { tableAliases, enumAliases, columnAliases, enumValueAliases } =
 
 const rlsIssues = [];
 
-for (const [tableName, info] of tables) {
-  if (!info.hasTenantId) continue;
-  if (RLS_EXEMPT_TABLES.has(tableName)) continue;
-
+function checkTableRlsCoverage(tableName, { exactPolicyName } = {}) {
   // Collect all historical names for this table (including current).
   const allNames = tableAliases.get(tableName) ?? new Set([tableName]);
   // Build pattern alternatives for both quoted ("name") and unquoted (name) forms.
@@ -363,9 +362,17 @@ for (const [tableName, info] of tables) {
     rlsIssues.push(`Table "${tableName}": missing FORCE ROW LEVEL SECURITY`);
   }
 
-  // CREATE POLICY <name> ON <table> — must not be a comment line
+  // CREATE POLICY <name> ON <table> — must not be a comment line.
+  // `exactPolicyName` pins the policy to one literal name (the tenancy root
+  // caller below passes "tenants_tenant_isolation"): `\S*tenant_isolation`
+  // accepts ANY prefix, so without this a policy named e.g.
+  // "tenants_tenant_isolation_v2" or a copy-pasted "other_tenant_isolation"
+  // on `tenants` would pass just as silently as the real one.
+  const policyNamePattern = exactPolicyName
+    ? escapeRe(exactPolicyName)
+    : `\\S*tenant_isolation`;
   const policyPattern = new RegExp(
-    `create\\s+policy\\s+"?\\S*tenant_isolation"?\\s+on\\s+${tablePattern}(?:\\s|$)`,
+    `create\\s+policy\\s+"?${policyNamePattern}"?\\s+on\\s+${tablePattern}(?:\\s|$)`,
     "i",
   );
   const policyLines = allSql.split("\n").filter((ln) => {
@@ -374,9 +381,31 @@ for (const [tableName, info] of tables) {
   });
   if (policyLines.length === 0) {
     rlsIssues.push(
-      `Table "${tableName}": missing CREATE POLICY <table>_tenant_isolation`,
+      exactPolicyName
+        ? `Table "${tableName}": missing CREATE POLICY ${exactPolicyName}`
+        : `Table "${tableName}": missing CREATE POLICY <table>_tenant_isolation`,
     );
   }
+}
+
+for (const [tableName, info] of tables) {
+  if (tableName === TENANCY_ROOT_TABLE) continue; // checked explicitly below
+  if (!info.hasTenantId) continue;
+  checkTableRlsCoverage(tableName);
+}
+
+// The tenancy root carries the policy on its own `id`, not a tenant_id
+// column, so it falls outside the hasTenantId loop above by construction —
+// checked here unconditionally instead. Its absence from schema.prisma is a
+// defect in this gate's own parse (the Tenant model maps to "tenants" and
+// always exists), not a healthy "nothing to check" — a silent skip here
+// would let the whole tenants RLS check go dark the day the parse breaks.
+if (tables.has(TENANCY_ROOT_TABLE)) {
+  checkTableRlsCoverage(TENANCY_ROOT_TABLE, { exactPolicyName: "tenants_tenant_isolation" });
+} else {
+  rlsIssues.push(
+    `Table "${TENANCY_ROOT_TABLE}": not found among tables parsed from prisma/schema.prisma — the tenancy-root RLS check did not run`,
+  );
 }
 
 // ---------------------------------------------------------------------------

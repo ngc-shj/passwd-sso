@@ -191,6 +191,30 @@ describe("retention-gc sweepTrashEntry: personal trash purge (SC2/C3/C7)", () =>
     expect(await entryExists(liveId)).toBe(true);
   });
 
+  it("C2: purges the tenant's past-grace trashed entry as the real passwd_retention_gc_worker role", async () => {
+    // Every other cell in this file drives sweepTrashEntry as the superuser
+    // (ctx.su.prisma), which bypasses RLS outright regardless of whether the
+    // tenant-enumeration transaction (C2) names `tenants` in its grant. This
+    // cell runs it as the actual NOBYPASSRLS worker role, so a regression
+    // back to a bare `workerPrisma.tenant.findMany` (which sees zero tenants
+    // under this role once `tenants` carries RLS — C1) reddens it.
+    await setTrashRetention(tenantId, 30);
+    const pastId = await insertEntry({
+      ownerTenantId: tenantId,
+      ownerUserId: userId,
+      deletedAt: "now() - interval '31 days'",
+    });
+
+    const deleted = await sweepTrashEntry(ctx.retentionWorker.prisma, PERSONAL_ENTRY, 100);
+
+    // Not toBe(1): the sweep is not scoped to this test's tenant — it spans
+    // every tenant in a shared dev DB, so another tenant's own past-grace
+    // row sharing the sweep window would also count. The seeded row IS the
+    // thing this cell pins down.
+    expect(deleted).toBeGreaterThanOrEqual(1);
+    expect(await entryExists(pastId)).toBe(false);
+  });
+
   it("does not touch a NULL-retention tenant's past-grace trashed entry", async () => {
     // tenantId keeps its default NULL trash_retention_days.
     const pastId = await insertEntry({

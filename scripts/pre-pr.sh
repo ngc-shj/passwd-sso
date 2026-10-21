@@ -505,6 +505,12 @@ if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -
     # (no teardown) and blindly re-GRANTs every table to passwd_app, so it is
     # only ever run against the ephemeral CI database. Against a long-lived dev
     # DB those three can never pass, and that is not a local defect.
+    # TENANTS-SEED is the same shape for the tenants block (#923, Block 1c):
+    # (b)/(c1)/(c2) need the seeded A0/B0 tenant rows themselves, so it fails
+    # on an unseeded dev DB the same way COUNT-A/B do. The fatal, seed-
+    # independent TENANTS code (Block 1b: no-context read + FORCE/ENABLE
+    # flags) is deliberately NOT here — it must hold on any tenants table
+    # state, seeded or not.
     #
     # Every OTHER code stays fatal here. Block 1 of rls-cross-tenant-verify.sql
     # (ROLE, DISCOVER, NULL, SYM, COLPARITY, MANIFEST-EXTRA, MANIFEST-MISSING,
@@ -519,7 +525,7 @@ if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -
     # above. Drop pipefail and that pipeline reports paste-s status — 0 with no
     # match — which would whitelist ANY failure, including a genuine parse
     # error. Testing the captured string instead holds either way.
-    matched=$(grep -oE "\[E-RLS-(COUNT-A|COUNT-B|BYPASS)\]" <<<"$out" | sort -u | paste -sd" ") || true
+    matched=$(grep -oE "\[E-RLS-(COUNT-A|COUNT-B|BYPASS|TENANTS-SEED)\]" <<<"$out" | sort -u | paste -sd" ") || true
     if [ -n "$matched" ]; then
       # Deliberately NOT "parse OK": ON_ERROR_STOP=1 aborts psql at the first
       # failing block, so every statement after it went unparsed. Claiming the

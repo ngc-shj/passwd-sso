@@ -30,8 +30,31 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** The `meta.driverAdapterError.cause.code` nesting the pg adapter produces. */
+/**
+ * The `meta.driverAdapterError.cause` nesting `@prisma/adapter-pg` produces for
+ * a SQLSTATE its `mapDriverError` names (23503, 40001, 40P01, …): `originalCode`
+ * only, no sibling `code` (measured against a real FK violation — see
+ * src/lib/prisma/prisma-error.ts's `pgErrorCode` header).
+ */
 function adapterError(sqlstate: string): Error {
+  const err = new Error("\nInvalid `prisma.$executeRaw()` invocation:\n\nRaw query failed.");
+  Object.assign(err, {
+    code: "P2010",
+    meta: { driverAdapterError: { cause: { originalCode: sqlstate } } },
+  });
+  return err;
+}
+
+/**
+ * A SYNTHETIC shape, not one `@prisma/adapter-pg` actually produces: the real
+ * `default:` branch adds `code` BESIDE `originalCode`, never in its place (see
+ * pgErrorCode's header; src/lib/prisma/prisma-error.test.ts pins that real
+ * shape with both fields present). This fixture omits `originalCode`
+ * entirely so it drives pgErrorCode's `cause.code` fallback specifically —
+ * the arm reached only when `originalCode` is absent — as a defensive
+ * regression check, not as a shape the adapter is measured to emit.
+ */
+function legacyAdapterError(sqlstate: string): Error {
   const err = new Error("\nInvalid `prisma.$executeRaw()` invocation:\n\nRaw query failed.");
   Object.assign(err, {
     code: "P2010",
@@ -78,6 +101,13 @@ describe("isRetryableCleanupConflict", () => {
   it.each(RETRYABLE_CLEANUP_SQLSTATES)("recognises %s carried in the message", (sqlstate) => {
     expect(isRetryableCleanupConflict(messageError(sqlstate))).toBe(true);
   });
+
+  it.each(RETRYABLE_CLEANUP_SQLSTATES)(
+    "recognises %s carried in the legacy cause.code shape too (defensive fallback)",
+    (sqlstate) => {
+      expect(isRetryableCleanupConflict(legacyAdapterError(sqlstate))).toBe(true);
+    },
+  );
 
   it("names exactly the three transient conflicts, and no others", () => {
     // 23505 (unique_violation) and 42P01 (undefined_table) are permanent: a

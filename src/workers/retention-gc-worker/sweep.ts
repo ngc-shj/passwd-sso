@@ -130,8 +130,10 @@ export interface SweepOpts {
  * Inline audit enqueue — mirrors enqueueAuditInTx from @/lib/audit/audit-outbox
  * but inlined here to avoid the transitive import of @/lib/prisma (the app
  * singleton), which would throw at module load time when DATABASE_URL is unset.
- * Behaviour is identical: verifies bypass_rls GUC, checks tenant existence,
- * then writes to audit_outbox within the caller's transaction.
+ * Unlike enqueueAuditInTx (C4), this keeps its tenant-existence probe on
+ * purpose: every caller's grant is fixed in this same module and already
+ * names `tenants` (grantForEntry, RETENTION_HEARTBEAT), so the probe never
+ * runs outside a transaction that can see the row it checks.
  *
  * Exported so integration tests can stub it via the _emitFn override.
  */
@@ -556,8 +558,32 @@ export async function sweepPerTenantAge(
 }
 
 /**
+ * The tenants with explicit trash retention configured (NULL skipped).
+ * Asserts the bypass first, like every sweep that takes a tx. Declared and
+ * exported rather than passed as an inline arrow so sweepTrashEntry can hand
+ * inSweepTx a named function (the read-context gate's declared-function
+ * form) and so sweep-bypass-assert.test.ts can run it through the same
+ * per-member deny/allow pattern as the other tx-taking sweeps.
+ */
+export async function listTrashRetentionTenants(
+  tx: Prisma.TransactionClient,
+): Promise<Array<{ id: string; trashRetentionDays: number | null }>> {
+  await assertSweepBypass(tx, true);
+  return tx.tenant.findMany({
+    where: { trashRetentionDays: { not: null } },
+    select: { id: true, trashRetentionDays: true },
+  });
+}
+
+/**
  * Auto-purge soft-deleted (trashed) vault entries past each tenant's configured
  * grace period (SC2). One PER_TENANT_TRASH entry per entry table.
+ *
+ * First, the tenant enumeration itself runs in its own bypass transaction
+ * naming only `tenants` (listTrashRetentionTenants, via inSweepTx). `tenants`
+ * carries the tenant_isolation policy like every other table, so a bare read
+ * here would see no rows on a fresh connection and raise 22P02 on one whose
+ * app.tenant_id was set and reverted.
  *
  * Per tenant, in its own transaction:
  *   1. inSweepTx sets bypass_rls FIRST (entry tables AND attachments are RLS-enabled).
@@ -588,11 +614,18 @@ export async function sweepTrashEntry(
 ): Promise<number> {
   sqlIdentifier(entry.table);
 
-  // Enumerate only tenants with explicit trash retention configured (NULL → skip).
-  const tenants = await workerPrisma.tenant.findMany({
-    where: { trashRetentionDays: { not: null } },
-    select: { id: true, trashRetentionDays: true },
-  });
+  // Enumerate only tenants with explicit trash retention configured (NULL →
+  // skip). `tenants` carries the same tenant_isolation policy as every other
+  // table, so this read runs in its own bypass transaction naming only
+  // `tenants` — unlike sweepAuditLogs/sweepPerTenantAge, which already
+  // enumerate tenants on a tx inSweepTx opened with the entry's own grant
+  // (which lists `tenants` too), sweepTrashEntry has no such tx yet at this
+  // point: the per-tenant purge below opens one per tenant, after this.
+  const tenants = await inSweepTx(
+    workerPrisma,
+    grantForTables(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenants"]),
+    listTrashRetentionTenants,
+  );
 
   let total = 0;
   for (const tenant of tenants) {

@@ -235,7 +235,7 @@ designed to stay within.
 | Table | Grant | Reason |
 | --- | --- | --- |
 | `audit_chain_anchors` | `SELECT`; `UPDATE (publish_paused_until, last_published_at)` | read chain-seq snapshot; column-scoped update — cannot touch `chain_seq`, `prev_hash`, or any other column |
-| `tenants` | `SELECT` | FK existence check inside `enqueueAuditInTx` |
+| `tenants` | `SELECT` | chain-enabled tenant enumeration (`audit-anchor-publisher.ts`, under the `AUDIT_ANCHOR_PUBLISH` grant) |
 | `audit_outbox` | `INSERT` | enqueue SYSTEM-attributed publish-event audit rows |
 | `system_settings` | `SELECT, INSERT, UPDATE` | publish-state key-value storage (deployment-ID guard, pause bookkeeping) |
 

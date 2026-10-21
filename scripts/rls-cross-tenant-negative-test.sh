@@ -2,8 +2,12 @@
 # rls-cross-tenant-negative-test.sh — gate self-check
 #
 # Runs a Case 0 pre-flight calibration (canonical policy → exit 0) plus
-# 14 distinct failure shapes against an ephemeral throwaway table to verify
-# the cross-tenant verify SQL correctly detects each:
+# 16 distinct failure shapes to verify the cross-tenant verify SQL correctly
+# detects each: cases 1-14 mutate an ephemeral throwaway table's own policy;
+# cases 15-16 ALTER the REAL tenants_tenant_isolation policy itself (there is
+# no throwaway stand-in for `tenants`) and run only with
+# RLS_NEGATIVE_MUTATE_REAL_POLICY=1, which only the CI rls job sets — locally
+# they SKIP rather than mutate a shared/persistent dev DB's tenants policy.
 #   0. canonical policy + correct manifest (sanity: harness calibrated)
 #   1. permissive symmetric → [E-RLS-COUNT-A]
 #   2. asymmetric USING/WITH CHECK → [E-RLS-SYM]
@@ -19,11 +23,20 @@
 #   12. bare call, no scalar sub-SELECT wrapper → [E-RLS-BYPASS-TABLE]
 #   13. tenant branch casts app.tenant_id outside a sub-SELECT → [E-RLS-TENANT-INITPLAN]
 #   14. the same cast commuted to the left of `=` → [E-RLS-TENANT-INITPLAN]
+#   15. tenants_tenant_isolation's tenant branch dropped (#923) → [E-RLS-TENANTS-SEED]
+#   16. tenants_tenant_isolation admits every row (#923) → [E-RLS-TENANTS]
 #
 # Codes NOT exercised here (acceptable coverage gaps):
 #   - [E-RLS-COUNT-B]: structurally identical to [E-RLS-COUNT-A] (Block 3 mirrors Block 2).
 #   - [E-RLS-DISCOVER]: requires REVOKE on system catalog which is fragile and rarely portable.
 #   - [E-RLS-ROLE]: requires running the verify as a different role; covered by R21 verification not by this self-check.
+#   - A WITH-CHECK-only widening of the tenants policy (USING left canonical,
+#     WITH CHECK loosened) is not exercised: an asymmetric USING/WITH CHECK
+#     trips [E-RLS-SYM] in Block 1 before the tenants-specific blocks ever
+#     run, AND Block 1c's (c2) UPDATE re-points seeded A0 — whose cascading
+#     children (FK-dependent rows seeded against A0) would then fail with an
+#     uncoded, uninformative error under such a mutation rather than a
+#     tenants-specific [E-RLS-*] code.
 #
 # Each case matches a stable error code (e.g., [E-RLS-NULL]), not freeform
 # prose, so future EXCEPTION message wording changes do not silently break
@@ -79,6 +92,20 @@ cleanup() {
     psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q \
       -c "DROP TABLE IF EXISTS rls_negative_test CASCADE; DROP TABLE IF EXISTS rls_colparity_probe CASCADE; DROP FUNCTION IF EXISTS rls_negative_secdef_probe();" >/dev/null 2>&1 || true
   fi
+  # Cases 15/16 fallback: unlike every other case, these ALTER the REAL
+  # tenants_tenant_isolation policy (there is no throwaway table for
+  # `tenants`). If the script exited between that ALTER and its own restore
+  # (SIGINT, a failed assertion before the restore runs), reapply the
+  # pre-ALTER snapshot here so a crashed run never leaves the real tenants
+  # table running with a mutated policy. No-op (same text back) if the case
+  # already restored successfully.
+  if [[ -n "${MIG_URL:-}" && -n "${TENANTS_POLICY_QUAL_SNAPSHOT:-}" && -n "${TENANTS_POLICY_CHECK_SNAPSHOT:-}" ]]; then
+    psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q -c "
+      ALTER POLICY tenants_tenant_isolation ON tenants
+        USING ($TENANTS_POLICY_QUAL_SNAPSHOT)
+        WITH CHECK ($TENANTS_POLICY_CHECK_SNAPSHOT);
+    " >/dev/null 2>&1 || true
+  fi
   # Last: the DROP above authenticates through the passfile.
   psql_safe_cleanup
 }
@@ -115,6 +142,22 @@ CANONICAL_POLICY_SQL="CREATE POLICY rls_negative_test_tenant_isolation ON rls_ne
 # Build the manifest entries (whitespace-trimmed, comments stripped).
 manifest_entries=$(awk 'NF && $1 !~ /^#/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); print}' \
   "$MANIFEST_FILE" | paste -sd,)
+
+# assert_only_expected_code <verify_output> <expected_code> <case_id>
+#   Refuses a case whose output names any [E-RLS-*] code besides the one it
+#   targets — an earlier block's defect masking the target block would
+#   otherwise pass unnoticed as long as ITS code happened to also appear.
+assert_only_expected_code() {
+  local output="$1" expected="$2" case_id="$3"
+  local other
+  other=$(grep -oE '\[E-RLS-[A-Z0-9-]+\]' <<<"$output" | sort -u | grep -vxF -- "$expected" || true)
+  if [[ -n "$other" ]]; then
+    printf 'FAIL case %s: verify output names code(s) other than the expected %s: %s\n' \
+      "$case_id" "$expected" "$(tr '\n' ' ' <<<"$other")"
+    return 1
+  fi
+  return 0
+}
 
 # run_negative_case <case_id> <create_policy_sql> <expected_code> <omit_throwaway_from_manifest>
 #   case_id                 : human label for log lines
@@ -394,6 +437,174 @@ run_negative_case 14 \
   "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((SELECT public.rls_bypass_admits('rls_negative_test')) OR current_setting('app.tenant_id', true)::uuid = tenant_id) WITH CHECK ((SELECT public.rls_bypass_admits('rls_negative_test')) OR current_setting('app.tenant_id', true)::uuid = tenant_id)" \
   "[E-RLS-TENANT-INITPLAN]" \
   "no" || total_failures=$((total_failures + 1))
+
+# Cases 15 and 16 ALTER the REAL tenants_tenant_isolation policy (#923) — there
+# is no throwaway stand-in for `tenants`. Each keeps USING and WITH CHECK
+# identical and keeps the bypass sub-SELECT, so Block 1's [E-RLS-SYM] /
+# [E-RLS-BYPASS-TABLE] pass and the mutation reaches the tenants blocks.
+#
+# The policy text is snapshotted via pg_get_expr ONCE, before case 15 (not
+# per case) — case 16 must restore to the SAME known-good baseline case 15
+# started from, never to whatever a prior case's restore left behind — and
+# restored from that one snapshot immediately after each case, with the
+# restored text asserted equal to it (same immediate-restore shape as
+# run_case_8_force_rls for FORCE).
+#
+#   $1  case number
+#   $2  expression used for both USING and WITH CHECK
+#   $3  expected error code
+#
+# Sets TENANTS_RESTORE_OK=0 when either restore assertion (text equality, or
+# the post-restore re-verify) fails, so the caller can refuse to run a
+# further mutation against a tenants policy that may not have round-tripped.
+run_tenants_policy_case() {
+  local n="$1" expr="$2" expected="$3"
+
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "
+    ALTER POLICY tenants_tenant_isolation ON tenants
+      USING ($expr)
+      WITH CHECK ($expr);
+  "
+
+  local expected_tables="${manifest_entries},rls_negative_test"
+  local out ec
+  out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
+    -v expected_tables="$expected_tables" \
+    -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+
+  # Restore IMMEDIATELY — before any assertion below can return early and
+  # leave the real tenants table running with the mutated policy.
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "
+    ALTER POLICY tenants_tenant_isolation ON tenants
+      USING ($TENANTS_POLICY_QUAL_SNAPSHOT)
+      WITH CHECK ($TENANTS_POLICY_CHECK_SNAPSHOT);
+  "
+
+  local restored_qual restored_check
+  restored_qual=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+    SELECT pg_get_expr(polqual, polrelid) FROM pg_catalog.pg_policy
+    WHERE polname = 'tenants_tenant_isolation';
+  ")
+  restored_check=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+    SELECT pg_get_expr(polwithcheck, polrelid) FROM pg_catalog.pg_policy
+    WHERE polname = 'tenants_tenant_isolation';
+  ")
+  if [[ "$restored_qual" != "$TENANTS_POLICY_QUAL_SNAPSHOT" || "$restored_check" != "$TENANTS_POLICY_CHECK_SNAPSHOT" ]]; then
+    printf 'FAIL case %s: restored tenants_tenant_isolation text does not match the pre-ALTER snapshot\n' "$n"
+    TENANTS_RESTORE_OK=0
+    return 1
+  fi
+
+  # Text equality proves the ALTER round-tripped; it does not prove the
+  # restored policy still PASSES verify. Re-run it once more against the
+  # now-unmodified policy and require exit 0.
+  local restore_verify_out restore_verify_ec
+  restore_verify_out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
+    -v expected_tables="$expected_tables" \
+    -f "$VERIFY_SQL" 2>&1) && restore_verify_ec=0 || restore_verify_ec=$?
+  if (( restore_verify_ec != 0 )); then
+    printf 'FAIL case %s: verify did NOT pass after restoring the tenants policy. Output:\n%s\n' \
+      "$n" "$restore_verify_out"
+    TENANTS_RESTORE_OK=0
+    return 1
+  fi
+
+  if (( ec == 0 )); then
+    printf 'FAIL case %s: verify exited 0 with the tenants policy mutated — gate is broken\n' "$n"
+    return 1
+  fi
+  if ! grep -qF -- "$expected" <<<"$out"; then
+    printf 'FAIL case %s: verify failed but expected code %s not found in output:\n%s\n' "$n" "$expected" "$out"
+    return 1
+  fi
+  # An earlier block's defect could mask whichever block this case targets —
+  # refuse if any code OTHER than the expected one also appears.
+  assert_only_expected_code "$out" "$expected" "$n" || return 1
+
+  printf 'PASS case %s (matched %s)\n' "$n" "$expected"
+}
+
+# Cases 15/16 mutate the REAL tenants policy (case 16 opens every tenant row to
+# a no-context session), so they need an explicit opt-in that only the CI rls
+# job sets: a crashed run between an ALTER and its restore on a shared or
+# persistent dev DB would leave the live tenants table running a broken
+# policy, and CI=true alone is commonly exported locally. The trap's fallback
+# restore (cleanup(), above) is a safety net, not a substitute for running this
+# only against CI's ephemeral Postgres. Under GitHub Actions without the
+# opt-in the run FAILS rather than skipping, so a CI job that loses the
+# variable cannot report "examined nothing" as green.
+if [[ "${RLS_NEGATIVE_MUTATE_REAL_POLICY:-}" != "1" ]]; then
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    printf 'FAIL cases 15/16: RLS_NEGATIVE_MUTATE_REAL_POLICY=1 is not set in CI\n'
+    total_failures=$((total_failures + 1))
+  else
+    printf 'SKIP cases 15/16: tenants-policy mutation cases need RLS_NEGATIVE_MUTATE_REAL_POLICY=1 (CI only)\n'
+  fi
+else
+  # Snapshot the canonical tenants policy text ONCE, before either case.
+  TENANTS_POLICY_QUAL_SNAPSHOT=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+    SELECT pg_get_expr(polqual, polrelid) FROM pg_catalog.pg_policy
+    WHERE polname = 'tenants_tenant_isolation';
+  ")
+  TENANTS_POLICY_CHECK_SNAPSHOT=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+    SELECT pg_get_expr(polwithcheck, polrelid) FROM pg_catalog.pg_policy
+    WHERE polname = 'tenants_tenant_isolation';
+  ")
+  if [[ -z "$TENANTS_POLICY_QUAL_SNAPSHOT" || -z "$TENANTS_POLICY_CHECK_SNAPSHOT" ]]; then
+    printf 'FAIL tenants-policy cases: could not snapshot tenants_tenant_isolation (policy missing?)\n'
+    total_failures=$((total_failures + 1))
+  elif [[ "$TENANTS_POLICY_QUAL_SNAPSHOT" != "$TENANTS_POLICY_CHECK_SNAPSHOT" ]]; then
+    printf 'FAIL tenants-policy cases: canonical USING and WITH CHECK text differ — not the symmetric shape #923 expects:\nUSING: %s\nWITH CHECK: %s\n' \
+      "$TENANTS_POLICY_QUAL_SNAPSHOT" "$TENANTS_POLICY_CHECK_SNAPSHOT"
+    total_failures=$((total_failures + 1))
+  elif [[ "$TENANTS_POLICY_QUAL_SNAPSHOT" != *"rls_bypass_admits('tenants'::text)"* ]] \
+    || [[ "$TENANTS_POLICY_QUAL_SNAPSHOT" != *"SELECT (current_setting('app.tenant_id'::text, true))"* ]]; then
+    printf 'FAIL tenants-policy cases: canonical text is not the migration shape (bypass call / tenant-id cast missing a sub-SELECT):\n%s\n' \
+      "$TENANTS_POLICY_QUAL_SNAPSHOT"
+    total_failures=$((total_failures + 1))
+  else
+    # Tenants-policy calibration (T1): case 14 leaves rls_negative_test's OWN
+    # policy INITPLAN-violating — reset it to canonical (the exact DROP+CREATE
+    # run_negative_case uses) so Block 1 cannot fail on rls_negative_test
+    # before the tenants-targeted mutations below ever run. Then verify once
+    # against the UNMODIFIED tenants policy and require exit 0: this proves
+    # the harness reaches the end cleanly BEFORE any tenants mutation, so a
+    # fatal failure in case 15/16 is attributable to that case's own ALTER,
+    # not to leftover state from an earlier case.
+    psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q \
+      -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;"
+
+    calibration_tables="${manifest_entries},rls_negative_test"
+    calibration_out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
+      -v expected_tables="$calibration_tables" \
+      -f "$VERIFY_SQL" 2>&1) && calibration_ec=0 || calibration_ec=$?
+    if (( calibration_ec != 0 )); then
+      printf 'FAIL tenants-policy calibration: verify did NOT pass with the canonical tenants policy still in place. Output:\n%s\n' \
+        "$calibration_out"
+      total_failures=$((total_failures + 1))
+    else
+      printf 'PASS tenants-policy calibration (verify exits 0 before any tenants mutation)\n'
+
+      # Case 15: tenant branch dropped. A no-context read still sees nothing,
+      # so the fatal Block 1b passes and the seed-dependent Block 1c fails:
+      # scope A0 no longer sees its own row (CI seeds A0/B0).
+      TENANTS_RESTORE_OK=1
+      run_tenants_policy_case 15 \
+        "(SELECT public.rls_bypass_admits('tenants'))" \
+        "[E-RLS-TENANTS-SEED]" || total_failures=$((total_failures + 1))
+
+      if [[ "$TENANTS_RESTORE_OK" == "1" ]]; then
+        # Case 16: policy admits every row. A no-context read now sees
+        # tenants, so the fatal Block 1b fails before Block 1c runs.
+        run_tenants_policy_case 16 \
+          "(SELECT public.rls_bypass_admits('tenants')) OR true" \
+          "[E-RLS-TENANTS]" || total_failures=$((total_failures + 1))
+      else
+        printf 'SKIP case 16: case 15 left the tenants policy restore unverified — refusing a further mutation on top of it\n'
+      fi
+    fi
+  fi
+fi
 
 if (( total_failures > 0 )); then
   printf '\n%d negative-test cases failed.\n' "$total_failures"

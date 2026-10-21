@@ -42,16 +42,28 @@ function asSqlState(value: unknown): string | null {
  * real database (fixtures at helpers.test.ts), and that helper now delegates
  * here so the two cannot drift into deciding one predicate differently:
  *
- *   1. meta.driverAdapterError.cause.code   the pg driver adapter's nesting
- *   2. meta.code                            P2010's flatter rendering
- *   3. err.code                             a direct pg error
- *   4. err.cause.code                       a Prisma-wrapped driver error
- *   5. "Code: `42P01`" in the message       paths that render it into the text
+ *   1. meta.driverAdapterError.cause.originalCode   the pg driver adapter's nesting
+ *   2. meta.code                                    P2010's flatter rendering
+ *   3. err.code                                      a direct pg error
+ *   4. err.cause.code                                a Prisma-wrapped driver error
+ *   5. "Code: `42P01`" in the message                paths that render it into the text
  *
  * Reading the wrapper before the nested value is what makes this order
  * load-bearing rather than arbitrary: a P2010 carries `code` AND the driver's
  * SQLSTATE underneath, so returning `code` first hands back "P2010" for every
  * raw-query failure. That is why steps 3 and 4 go through `asSqlState`.
+ *
+ * Step 1 reads `originalCode` before `code`: `@prisma/adapter-pg`'s
+ * `convertDriverError` spreads `{ originalCode: error.code, originalMessage:
+ * error.message, ...mapDriverError(error) }`. `mapDriverError`'s `default:`
+ * branch (kind "postgres") adds a sibling `code`, but its named branches —
+ * 22001, 22003, 22P02, 23505, 23502, 23503, 23001, 3D000, 28000, 28P01, 40001,
+ * 40P01, 42P01, 42703, 42P04, 53300 — do not. Reading `code` alone therefore
+ * returned null for those SQLSTATEs on the ORM path (e.g. a model-API FK
+ * violation's cause is `{ originalCode: '23503', originalMessage, kind:
+ * 'ForeignKeyConstraintViolation', constraint }`), and only raw-query errors
+ * recovered them, through step 5's rendered text. Unmapped SQLSTATEs (23514,
+ * 55P03, 42501, …) carry both fields, so `code` stays as the live fallback.
  *
  * This is the repo's single reading of "what SQLSTATE does this error carry".
  * Add callers here rather than re-deriving: `isLockTimeoutError` in
@@ -68,7 +80,8 @@ export function pgErrorCode(err: unknown): string | null {
     if (adapter && typeof adapter === "object") {
       const cause = (adapter as { cause?: unknown }).cause;
       if (cause && typeof cause === "object") {
-        const nested = (cause as { code?: unknown }).code;
+        const nested =
+          (cause as { originalCode?: unknown }).originalCode ?? (cause as { code?: unknown }).code;
         if (typeof nested === "string") return nested;
       }
     }

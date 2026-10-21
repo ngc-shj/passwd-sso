@@ -67,10 +67,31 @@ describe("check-migration-drift.mjs", () => {
   });
 
   it("passes when every schema column is present in migrations", () => {
+    // Also needs a Tenant model + its RLS migration now that the tenancy-root
+    // branch fails loudly rather than skipping when "tenants" is absent from
+    // the schema (T8) — this fixture is meant to be fully clean (exit 0).
+    writeFileSync(
+      join(root, "prisma/schema.prisma"),
+      SCHEMA + '\nmodel Tenant {\n  id   String @id\n  name String\n  @@map("tenants")\n}\n',
+      "utf8",
+    );
     writeMigration(
       root,
       "20260101000000_create_widget",
       'CREATE TABLE "widget" (\n  "id" TEXT NOT NULL,\n  "name" TEXT NOT NULL,\n  "color" TEXT NOT NULL\n);\n',
+    );
+    writeMigration(
+      root,
+      "20260101000001_create_tenants",
+      [
+        'CREATE TABLE "tenants" (',
+        '  "id" TEXT NOT NULL,',
+        '  "name" TEXT NOT NULL',
+        ");",
+        'ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;',
+        'ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;',
+        'CREATE POLICY tenants_tenant_isolation ON "tenants" USING (true) WITH CHECK (true);',
+      ].join("\n"),
     );
     const { exitCode, stdout } = runGuard();
     expect(exitCode).toBe(0);
@@ -82,6 +103,134 @@ describe("check-migration-drift.mjs", () => {
     it("passes against the actual schema + migrations tree", () => {
       const r = spawnSync("node", [GUARD], { encoding: "utf8" });
       expect(r.status, r.stdout + r.stderr).toBe(0);
+    });
+  });
+
+  describe("tenants RLS coverage, independent of hasTenantId", () => {
+    // tenants has no tenant_id column (the policy keys on its own `id`), so
+    // Check A's hasTenantId loop never reaches it — it is checked through an
+    // explicit branch instead (#923). These cells pin that branch the same
+    // way the column-completeness cells above pin Check C, each varying one
+    // of the three RLS statements while the other two stay present.
+    const TENANT_SCHEMA = [
+      "model Tenant {",
+      "  id   String @id",
+      "  name String",
+      "  @@map(\"tenants\")",
+      "}",
+      "",
+    ].join("\n");
+
+    function writeTenantsMigration(root, sql) {
+      writeMigration(
+        root,
+        "20260101000000_create_tenants",
+        [
+          'CREATE TABLE "tenants" (',
+          '  "id" TEXT NOT NULL,',
+          '  "name" TEXT NOT NULL',
+          ");",
+          sql,
+        ].join("\n"),
+      );
+    }
+
+    beforeEach(() => {
+      writeFileSync(join(root, "prisma/schema.prisma"), TENANT_SCHEMA, "utf8");
+    });
+
+    it('FAILS with "missing ENABLE ROW LEVEL SECURITY" when ENABLE is absent', () => {
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;',
+          'CREATE POLICY tenants_tenant_isolation ON "tenants" USING (true) WITH CHECK (true);',
+        ].join("\n"),
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Table "tenants": missing ENABLE ROW LEVEL SECURITY');
+    });
+
+    it('FAILS with "missing FORCE ROW LEVEL SECURITY" when FORCE is absent', () => {
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;',
+          'CREATE POLICY tenants_tenant_isolation ON "tenants" USING (true) WITH CHECK (true);',
+        ].join("\n"),
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Table "tenants": missing FORCE ROW LEVEL SECURITY');
+    });
+
+    it('FAILS with "missing CREATE POLICY" when the policy is absent', () => {
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;',
+          'ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;',
+        ].join("\n"),
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        'Table "tenants": missing CREATE POLICY tenants_tenant_isolation',
+      );
+    });
+
+    it('FAILS with "missing CREATE POLICY tenants_tenant_isolation" when the policy is named differently but still matches the generic `\\S*tenant_isolation` shape', () => {
+      // The defect this cell exists to catch: a copy-pasted policy from
+      // another table's migration (e.g. widget_tenant_isolation), wrongly
+      // attached to `tenants`. The GENERIC pattern `\S*tenant_isolation`
+      // would accept this name on any other table — the tenancy root must
+      // pin the name EXACTLY instead, so this must still read as missing.
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;',
+          'ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;',
+          'CREATE POLICY widget_tenant_isolation ON "tenants" USING (true) WITH CHECK (true);',
+        ].join("\n"),
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        'Table "tenants": missing CREATE POLICY tenants_tenant_isolation',
+      );
+    });
+
+    it("passes when ENABLE, FORCE and the policy are all present", () => {
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;',
+          'ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;',
+          'CREATE POLICY tenants_tenant_isolation ON "tenants" USING (true) WITH CHECK (true);',
+        ].join("\n"),
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("all consistent");
+    });
+
+    it('FAILS rather than silently skipping when "tenants" is absent from schema.prisma', () => {
+      // A schema with no model mapping to "tenants" at all — not merely a
+      // missing ENABLE/FORCE/POLICY statement, but the table itself gone from
+      // the parse. The tenancy-root branch must not read that as "nothing to
+      // check" the way `if (tables.has(...))` with no else used to.
+      writeFileSync(join(root, "prisma/schema.prisma"), SCHEMA, "utf8");
+      writeMigration(
+        root,
+        "20260101000000_create_widget",
+        'CREATE TABLE "widget" (\n  "id" TEXT NOT NULL,\n  "name" TEXT NOT NULL,\n  "color" TEXT NOT NULL\n);\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        'Table "tenants": not found among tables parsed from prisma/schema.prisma',
+      );
     });
   });
 });

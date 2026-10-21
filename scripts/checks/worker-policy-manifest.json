@@ -134,7 +134,7 @@
       "dbRole": "passwd_app",
       "tenantScoped": {
         "value": true,
-        "reason": "runTick enumerates ALL tenants (prisma.tenant.findMany) and calls verifyTenantChain once per tenantId, and the underlying query filters WHERE tenant_id = $1 (audit-chain-verify-worker.ts:72-82,134-137) -- a system-wide read loop, but each verification pass is scoped to a single tenant's chain."
+        "reason": "runTick enumerates ALL tenants under the named SYSTEM_MAINTENANCE_TENANT_LOOKUP bypass grant (tenants carries the same RLS policy as every other table since migration 20261022000000_tenants_rls) and calls verifyTenantChain once per tenantId, and the underlying query filters WHERE tenant_id = $1 (audit-chain-verify-worker.ts runTick, verifyTenantChain) -- a system-wide read loop, but each verification pass is scoped to a single tenant's chain via its own withTenantRls context."
       },
       "usesSecurityDefiner": false,
       "rawSql": true,

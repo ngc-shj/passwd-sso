@@ -61,7 +61,9 @@ describe("RLS bypass grants (report mode)", () => {
       found = await underBypass(SESSIONS_ONLY, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }));
     });
     expect(found).toEqual({ id: userId });
-    expect(notices).toContainEqual({ table: "users", purpose: "auth_flow" });
+    // Exact: a report naming another table (e.g. `tenants`, under RLS since
+    // C1) would be absorbed by toContainEqual but fails this.
+    expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
   });
 
   // The report's other attach points: the app singleton (the client the
@@ -71,7 +73,7 @@ describe("RLS bypass grants (report mode)", () => {
     const denied = await expectBypassNotices(async () => {
       await withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), SESSIONS_ONLY);
     });
-    expect(denied).toContainEqual({ table: "users", purpose: "auth_flow" });
+    expect(denied).toEqual([{ table: "users", purpose: "auth_flow" }]);
     const allowed = await expectBypassNotices(async () => {
       await withBypassRls(appPrisma, (tx) => tx.user.findUnique({ where: { id: userId }, select: { id: true } }), USERS_ONLY);
     });
@@ -95,7 +97,7 @@ describe("RLS bypass grants (report mode)", () => {
           client.release();
         }
       });
-      expect(notices).toContainEqual({ table: "users", purpose: "auth_flow" });
+      expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
     } finally {
       await pool.end();
     }
@@ -131,7 +133,7 @@ describe("RLS bypass grants (report mode)", () => {
       });
       expect(rows).toEqual([]);
     });
-    expect(notices).toContainEqual({ table: "users", purpose: "auth_flow" });
+    expect(notices).toEqual([{ table: "users", purpose: "auth_flow" }]);
   });
 
   it.each([

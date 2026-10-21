@@ -75,6 +75,12 @@ function buildMockPrisma(opts: {
   const teamDeleteMany = vi.fn(async () => ({ count: 0 }));
   const personalDeleteMany = vi.fn(async () => ({ count: 0 }));
   const auditCreate = vi.fn(async () => ({}));
+  // The tenant enumeration (C2) now runs on the same kind of inSweepTx
+  // transaction as everything else, so it reads through `tx.tenant.findMany`
+  // rather than a bare `workerPrisma.tenant.findMany`.
+  const tenantFindMany = vi.fn(async () =>
+    opts.tenants.filter((t) => t.trashRetentionDays !== null),
+  );
 
   const queryRaw = vi.fn(async (strings: TemplateStringsArray) => {
     const text = strings.join("");
@@ -95,14 +101,10 @@ function buildMockPrisma(opts: {
     passwordEntry: { deleteMany: personalDeleteMany },
     attachment: { findMany: opts.attachmentFindMany },
     auditOutbox: { create: auditCreate },
+    tenant: { findMany: tenantFindMany },
   };
 
   const workerPrisma = {
-    tenant: {
-      findMany: vi.fn(async () =>
-        opts.tenants.filter((t) => t.trashRetentionDays !== null),
-      ),
-    },
     $transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) =>
       cb(tx),
     ),
@@ -161,7 +163,7 @@ describe("sweepTrashEntry — tenant enumeration (C3)", () => {
     const attachmentFindMany: AttachmentFindManyMock = vi.fn(
       async () => [],
     );
-    const { workerPrisma } = buildMockPrisma({
+    const { workerPrisma, tx } = buildMockPrisma({
       tenants: [
         { id: "11111111-1111-4111-8111-111111111111", trashRetentionDays: 30 },
         { id: "22222222-2222-4222-8222-222222222222", trashRetentionDays: null },
@@ -176,12 +178,13 @@ describe("sweepTrashEntry — tenant enumeration (C3)", () => {
       100,
     );
 
-    expect(workerPrisma.tenant.findMany).toHaveBeenCalledWith({
+    expect(tx.tenant.findMany).toHaveBeenCalledWith({
       where: { trashRetentionDays: { not: null } },
       select: { id: true, trashRetentionDays: true },
     });
-    // The NULL-retention tenant is filtered out → only one tenant tx opened.
-    expect(workerPrisma.$transaction).toHaveBeenCalledTimes(1);
+    // One transaction for the enumeration itself (C2), plus one per surviving
+    // (non-NULL-retention) tenant — the NULL-retention tenant is filtered out.
+    expect(workerPrisma.$transaction).toHaveBeenCalledTimes(2);
   });
 });
 

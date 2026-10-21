@@ -16,23 +16,58 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runTick } from "../audit-chain-verify-worker.ts";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 const HEARTBEAT = "audit-chain-verify-heartbeat";
+
+// console.error applies printf formatting, so a reason passed as a %s/%j
+// argument never appears in the format string itself — only in a later
+// element of the captured args array. Match across the whole call, not fmt.
+function errLineIncludes(errLines, text) {
+  return errLines.some((args) => args.some((a) => String(a).includes(text)));
+}
 
 /**
  * @param tenantIds tenants the tick should walk
  * @param failFor   tenant ids whose verify should throw
+ * @param opts.chainEnabledIds ids whose auditChainEnabled is true (default: none — false)
+ * @param opts.enumerationRejects when true, the enumeration read itself rejects,
+ *   simulating withBypassRls throwing (lost scope, dropped connection, ...)
  */
-function makeStubPrisma(tenantIds, failFor = []) {
+function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
+  const { chainEnabledIds = [], enumerationRejects = false } = opts;
+  // The tenant enumeration itself now runs under withBypassRls (C3), so it is
+  // the FIRST $transaction call runTick makes — before any per-tenant
+  // withTenantRls call verifyTenantChain opens. Serve that call with a tx
+  // carrying `$executeRaw` (setBypassGucs writes through it) and
+  // `tenant.findMany`; every later call is a per-tenant read.
+  let transactionCallCount = 0;
   return {
-    tenant: {
-      findMany: async () => tenantIds.map((id) => ({ id })),
-    },
     // verifyTenantChain wraps its reads in withTenantRls, which opens a
     // transaction — so failing here is exactly how a broken RLS context
     // reaches runTick.
-    $transaction: async (fn, opts) => {
-      txOptions = opts;
+    $transaction: async (fn, txOpts) => {
+      transactionCallCount += 1;
+      if (transactionCallCount === 1) {
+        return fn({
+          $executeRaw: async () => 0,
+          tenant: {
+            findMany: async () => {
+              // Thrown here, not returned as a rejection value: this is what
+              // withBypassRls's $transaction call itself failing looks like
+              // from runTick's perspective (its try/catch around the call).
+              if (enumerationRejects) {
+                throw new Error("ENUMERATION_REJECTED: bypass transaction aborted");
+              }
+              return tenantIds.map((id) => ({
+                id,
+                auditChainEnabled: chainEnabledIds.includes(id),
+              }));
+            },
+          },
+        });
+      }
+      txOptions = txOpts;
       const tx = {
         $executeRaw: async () => 0,
         $queryRawUnsafe: async (sql) => {
@@ -76,10 +111,15 @@ let anchorRows;
 /** Advance `currentTenantId` in walk order as each transaction opens. */
 function trackTenantOrder(prisma, order) {
   let i = 0;
+  let callCount = 0;
   const orig = prisma.$transaction;
   // Forward opts: dropping it here would make the tx-budget assertion vacuous
   // even with the stub capturing it.
   prisma.$transaction = async (fn, opts) => {
+    callCount += 1;
+    // The enumeration transaction (withBypassRls) is always the first call —
+    // it carries no per-tenant id, and must not consume the per-tenant order.
+    if (callCount === 1) return orig(fn, opts);
     currentTenantId = order[i++];
     return orig(fn, opts);
   };
@@ -113,7 +153,10 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
 
   it("emits the heartbeat with full coverage when every tenant verified", async () => {
     const tenants = ["11111111-1111-4111-8111-111111111111"];
-    const prisma = makeStubPrisma(tenants);
+    // The sentinel is always in the real enumeration; omitting it here would
+    // incidentally trip TENANT_ENUMERATION_INCOMPLETE and corrupt this test's
+    // own count, which is not what it is pinning down.
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, ...tenants]);
     trackTenantOrder(prisma, tenants);
 
     await runTick(prisma, new Map());
@@ -130,7 +173,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     // detected by.
     const ok = "33333333-3333-4333-8333-333333333333";
     const bad = "44444444-4444-4444-8444-444444444444";
-    const prisma = makeStubPrisma([ok, bad], [bad]);
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, ok, bad], [bad]);
     trackTenantOrder(prisma, [ok, bad]);
 
     await runTick(prisma, new Map());
@@ -145,7 +188,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
 
   it("names the failing tenants so the coverage alarm is actionable", async () => {
     const bad = "22222222-2222-4222-8222-222222222222";
-    const prisma = makeStubPrisma([bad], [bad]);
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, bad], [bad]);
     trackTenantOrder(prisma, [bad]);
 
     await runTick(prisma, new Map());
@@ -163,7 +206,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     // context that reports the wrong tenant, not a deleted wrapper.
     const t = "55555555-5555-4555-8555-555555555555";
     gucOverride = null;
-    const prisma = makeStubPrisma([t]);
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
     trackTenantOrder(prisma, [t]);
 
     await runTick(prisma, new Map());
@@ -196,7 +239,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     const t = "88888888-8888-4888-8888-888888888888";
     // An anchor claiming chain_seq 1 with no chained rows -> ok:false.
     anchorRows = [{ chain_seq: "1", prev_hash: Buffer.from([0]) }];
-    const prisma = makeStubPrisma([t]);
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
     trackTenantOrder(prisma, [t]);
 
     await runTick(prisma, new Map());
@@ -211,10 +254,120 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     ).toBe(true);
   });
 
+  it("emits TENANT_ENUMERATION_EMPTY and a non-zero erroredTenantCount when enumeration returns no tenants (C3)", async () => {
+    // The `__system__` tenant always exists, so an empty enumeration means the
+    // bypass read lost its scope, not "this deployment has no tenants" — the
+    // tick must still emit its heartbeat (liveness), but as a coverage failure.
+    const prisma = makeStubPrisma([]);
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.tenantCount).toBe(0);
+    expect(beat.verifiedTenantCount).toBe(0);
+    expect(beat.erroredTenantCount).toBe(1);
+    expect(errLineIncludes(errLines, "TENANT_ENUMERATION_EMPTY")).toBe(true);
+  });
+
+  it("leaves the sentinel tenant out of the counts without opening a per-tenant context", async () => {
+    // withTenantRls's assertOpenableTenantContext unconditionally refuses the
+    // sentinel (src/lib/tenant-rls.ts) — verifyTenantChain would throw on it
+    // EVERY tick if runTick tried. Enumeration always includes it, so runTick
+    // must skip it, never opening the per-tenant transaction stubbed below, and
+    // must not claim it was verified.
+    const other = "99999999-9999-4999-8999-999999999999";
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, other]);
+    // Only the non-sentinel tenant opens a per-tenant (withTenantRls) tx.
+    trackTenantOrder(prisma, [other]);
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.tenantCount).toBe(1);
+    expect(beat.verifiedTenantCount).toBe(1);
+    expect(beat.erroredTenantCount).toBe(0);
+  });
+
+  it("treats [SYSTEM_TENANT_ID] alone as a complete, healthy tick (allow side)", async () => {
+    // A single-tenant deployment with no other tenants yet is the minimum
+    // healthy state: the sentinel is present (enumeration is complete) and
+    // there is nothing left to verify. No per-tenant tx opens.
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID]);
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.tenantCount).toBe(0);
+    expect(beat.verifiedTenantCount).toBe(0);
+    expect(beat.erroredTenantCount).toBe(0);
+    expect(
+      errLines.some(([fmt]) => String(fmt).includes("tick incomplete")),
+    ).toBe(false);
+  });
+
+  it("still verifies a returned tenant when the sentinel is missing from enumeration (TENANT_ENUMERATION_INCOMPLETE)", async () => {
+    // A non-empty enumeration without the sentinel lost its scope just as
+    // surely as an empty one — but the tenant it did return is real and gets
+    // verified anyway; coverage failure and per-tenant verification are
+    // independent facts.
+    const other = "99999999-9999-4999-8999-999999999999";
+    const prisma = makeStubPrisma([other]);
+    trackTenantOrder(prisma, [other]);
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.erroredTenantCount).toBe(1);
+    expect(beat.verifiedTenantCount).toBe(1);
+    expect(errLineIncludes(errLines, "TENANT_ENUMERATION_INCOMPLETE")).toBe(
+      true,
+    );
+  });
+
+  it("still emits the heartbeat when the enumeration read itself throws (TENANT_ENUMERATION_FAILED)", async () => {
+    // Simulates withBypassRls's $transaction call rejecting outright (a
+    // dropped connection, a nesting-guard throw, ...) — distinct from a
+    // successful read that came back empty or incomplete.
+    const prisma = makeStubPrisma([], [], { enumerationRejects: true });
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.tenantCount).toBe(0);
+    expect(beat.verifiedTenantCount).toBe(0);
+    expect(beat.erroredTenantCount).toBe(1);
+    expect(errLineIncludes(errLines, "TENANT_ENUMERATION_FAILED")).toBe(true);
+    // No list came back, so the line must not blame a missing system tenant.
+    expect(errLineIncludes(errLines, "did not include")).toBe(false);
+    expect(errLineIncludes(errLines, "read threw")).toBe(true);
+  });
+
+  it("flags the sentinel's chain as unverifiable when audit_chain_enabled is true (SENTINEL_CHAIN_UNVERIFIABLE)", async () => {
+    // The sentinel is never walked (withTenantRls refuses it), so a sentinel
+    // whose chain is enabled is a gap the tick must surface rather than
+    // silently skip.
+    const other = "99999999-9999-4999-8999-999999999999";
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, other], [], {
+      chainEnabledIds: [SYSTEM_TENANT_ID],
+    });
+    trackTenantOrder(prisma, [other]);
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.erroredTenantCount).toBe(1);
+    expect(beat.verifiedTenantCount).toBe(1);
+    expect(
+      errLines.some(([fmt]) =>
+        String(fmt).includes("SENTINEL_CHAIN_UNVERIFIABLE"),
+      ),
+    ).toBe(true);
+  });
+
   it("does NOT throw when the GUC matches the tenant under verification", async () => {
     // Allow side: an assertion that always fired would be caught here.
     const t = "66666666-6666-4666-8666-666666666666";
-    const prisma = makeStubPrisma([t]);
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
     trackTenantOrder(prisma, [t]);
 
     await runTick(prisma, new Map());

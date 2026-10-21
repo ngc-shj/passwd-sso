@@ -44,6 +44,10 @@ model Tenant {
   id String @id
   @@map("tenants")
 }
+model VerificationToken {
+  id String @id
+  @@map("verification_tokens")
+}
 `;
 
 let root;
@@ -134,12 +138,46 @@ describe("check-rls-read-context", () => {
   });
 
   it("PASSES a table with no tenant_isolation policy", () => {
-    // tenants is the tenancy root and carries no policy; flagging it would be
-    // a false positive that trains readers to ignore the gate.
+    // verificationToken maps to a real table outside the manifest and
+    // outside the tenancy-root constant (#923 member-set audit: the models
+    // with no Tenant relation and no manifest entry are VerificationToken,
+    // Tenant, TenantClaimEvent, SystemSetting). Flagging it would be a false
+    // positive that trains readers to ignore the gate.
+    const r = runGate(`
+      export async function f(prisma: any) {
+        return prisma.verificationToken.findMany({});
+      }
+    `);
+    expect(r.status).toBe(0);
+  });
+
+  it("FAILS a bare model read on tenants, the tenancy root", () => {
+    // tenants carries its own tenants_tenant_isolation policy (#923) and is
+    // added to the RLS table set via a named constant, not the manifest
+    // (which stays tenant_id-keyed — tenants has no tenant_id column). A bare
+    // read must be caught the same way as any other RLS table.
     const r = runGate(`
       export async function f(prisma: any) {
         return prisma.tenant.findMany({});
       }
+    `);
+    expect(r.status).not.toBe(0);
+    // Pinned to the gate's exact violation-line shape (accessor.method -> table),
+    // not a bare substring: "tenants" alone would also match this file's own
+    // narration text in the trailing remediation paragraph.
+    expect(r.stderr).toContain("prisma.tenant.findMany  ->  tenants");
+  });
+
+  it("PASSES withBypassRls(prisma, (tx) => tx.tenant.findMany({}), G)", () => {
+    // Allow side for the tenancy-root cell above: a correctly-scoped read on
+    // `tenants` itself must not be flagged just because the table is
+    // special-cased via TENANCY_ROOT_TABLE rather than the manifest.
+    const r = runGate(`
+      export async function f(prisma: any) {
+        return withBypassRls(prisma, (tx: any) => tx.tenant.findMany({}), G);
+      }
+      declare function withBypassRls(prisma: any, fn: (tx: any) => unknown, grant: unknown): Promise<unknown>;
+      declare const G: unknown;
     `);
     expect(r.status).toBe(0);
   });

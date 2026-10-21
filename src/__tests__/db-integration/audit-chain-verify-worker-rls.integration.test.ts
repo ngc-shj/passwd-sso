@@ -18,10 +18,12 @@
  * bypasses RLS outright and passes against the unfixed code.
  */
 
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import {
   describe,
   it,
   expect,
+  vi,
   beforeAll,
   afterAll,
   beforeEach,
@@ -38,7 +40,7 @@ import {
   computeCanonicalBytes,
   computeEventHash,
 } from "@/lib/audit/audit-chain";
-import { verifyTenantChain } from "@/../scripts/audit-chain-verify-worker";
+import { runTick, verifyTenantChain } from "@/../scripts/audit-chain-verify-worker";
 
 const CHAIN_LENGTH = 3;
 
@@ -216,5 +218,41 @@ describe("audit-chain verify worker RLS context", () => {
     // asserted here — the walk bails at the first tampered row, so the anchor
     // head-hash comparison never runs.
     expect(result.walkedThrough).toBeGreaterThan(0);
+  });
+
+  it("C3: runTick enumerates tenants under bypass as passwd_app, matching the superuser count with no coverage shortfall", async () => {
+    // `tenants` now carries RLS too (C1): a bare `prisma.tenant.findMany` as
+    // passwd_app would see zero rows and every tenant would walk an empty
+    // chain — the same silent failure this file's other cells exist to catch,
+    // one layer up. runTick must instead enumerate under the named
+    // SYSTEM_MAINTENANCE_TENANT_LOOKUP bypass grant.
+    const logLines: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      logLines.push(String(line));
+    });
+    try {
+      await runTick(ctx.app.prisma, new Map());
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const heartbeatLine = logLines.find((line) =>
+      line.includes("audit-chain-verify-heartbeat"),
+    );
+    expect(heartbeatLine).toBeDefined();
+    const heartbeat = JSON.parse(heartbeatLine!);
+
+    const [{ count: superuserTenantCount }] = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<Array<{ count: bigint }>>(
+        // The sentinel is enumerated but not verified (withTenantRls refuses
+        // it), so it is outside tenantCount.
+        `SELECT COUNT(*) AS count FROM tenants WHERE id <> $1::uuid`,
+        SYSTEM_TENANT_ID,
+      );
+    });
+    expect(heartbeat.tenantCount).toBe(Number(superuserTenantCount));
+    expect(heartbeat.verifiedTenantCount + heartbeat.erroredTenantCount).toBe(heartbeat.tenantCount);
+    expect(heartbeat.erroredTenantCount).toBe(0);
   });
 });

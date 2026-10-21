@@ -113,6 +113,29 @@ audit pipeline is degraded — events are being lost.
 **Recovery**: investigate audit-outbox-worker logs; check DB write
 permissions on the `audit_logs` and `audit_outbox` tables.
 
+**`code: "CHAIN_FLAG_UNREADABLE"` (#923).** The worker reads each tenant's
+`audit_chain_enabled` before delivering, and refuses to treat a missing
+`tenants` row as "chain disabled": that would write the row unchained and mark
+it SENT. The outbox row's foreign key guarantees the tenant exists, so a missing
+row means the read lost its RLS scope or grant. Every tenant is affected, so
+events retry and then dead-letter. Restore the cause (the `OUTBOX_DRAIN` grant
+still naming `tenant`; the worker role's EXECUTE on `public.rls_bypass_admits`
+and SELECT on `tenants`), then requeue the dead-lettered rows before
+`OUTBOX_FAILED_RETENTION_DAYS` (90) purges them. On RDS `audit_outbox` is under
+FORCE RLS for the owner too, so the requeue runs under a transaction-scoped
+bypass naming only that table:
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+SET LOCAL app.bypass_tables = 'audit_outbox';
+SET LOCAL app.bypass_purpose = 'system_maintenance';
+UPDATE audit_outbox
+SET status = 'PENDING', attempt_count = 0, next_retry_at = now(), last_error = NULL
+WHERE status = 'FAILED' AND last_error LIKE 'CHAIN_FLAG_UNREADABLE%';
+COMMIT;
+```
+
 Datadog/Loki: `{ _logType="audit-dead-letter" }`
 Splunk: `_logType="audit-dead-letter"`
 Sentry: auto-captured at error level.
@@ -128,12 +151,25 @@ the event reaches `audit_outbox` and then `audit_logs` like any other.
 tenant:
 
 ```sql
+BEGIN READ ONLY;
+SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
 SELECT action, actor_type, COUNT(*) AS n, MAX(created_at) AS latest
 FROM audit_logs
 WHERE tenant_id = '00000000-0000-4000-8000-000000000002'   -- the sentinel tenant (name/slug: __system__)
 GROUP BY action, actor_type
 ORDER BY n DESC;
+ROLLBACK;
 ```
+
+Every `tenants` / `audit_logs` query in this runbook runs inside a block
+shaped like this one, never as a bare `SELECT`: on RDS the
+migration/owner role is the master user, and FORCE RLS applies to it
+there same as to any application role, so a psql session authenticated
+as the owner needs its own scope too. `SET LOCAL` + `ROLLBACK` leave
+nothing on the session afterward — never `ALTER ROLE … SET app.*` or
+`ALTER DATABASE … SET app.*` instead, which would leak the scope to
+every later session on that role/database (`audit-db-grants.mjs`
+already flags either as a drift finding).
 
 **Group by `action`; do not filter on `actor_type`.** Both populations under this
 tenant emit `SYSTEM` — the anchor publisher, the retention GC, and also
@@ -250,9 +286,16 @@ emit "past the transaction" does not clear it.
 > `__system__` keeps it. Read the actual number before acting on anything below:
 >
 > ```sql
+> BEGIN READ ONLY;
+> SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
 > SELECT audit_log_retention_days, audit_chain_enabled
 > FROM tenants WHERE id = '00000000-0000-4000-8000-000000000002';
+> ROLLBACK;
 > ```
+>
+> (See the audit-dead-letter section above for why every `tenants` /
+> `audit_logs` query here runs inside this scope rather than as a bare
+> `SELECT`.)
 >
 > **On the first sweep after that migration, sentinel rows older than that window
 > are deleted.** On a deployment that has been running long enough to have them,
@@ -260,12 +303,15 @@ emit "past the transaction" does not clear it.
 > value, not from an assumed 365:
 >
 > ```sql
+> BEGIN READ ONLY;
+> SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
 > SELECT count(*), min(a.created_at), max(a.created_at)
 > FROM audit_logs a
 > JOIN tenants t ON t.id = a.tenant_id
 > WHERE a.tenant_id = '00000000-0000-4000-8000-000000000002'
 >   AND a.created_at < now()
 >       - make_interval(days => GREATEST(t.audit_log_retention_days, 30));
+> ROLLBACK;
 > ```
 >
 > `GREATEST(…, 30)` because the sweep does: `sweepAuditLogs` clamps with
@@ -278,8 +324,14 @@ emit "past the transaction" does not clear it.
 > session is not a copy. From `psql`, with the predicate spelled out:
 >
 > ```
+> BEGIN READ ONLY;
+> SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
 > \copy (SELECT * FROM audit_logs a JOIN tenants t ON t.id = a.tenant_id WHERE a.tenant_id = '00000000-0000-4000-8000-000000000002' AND a.created_at < now() - make_interval(days => GREATEST(t.audit_log_retention_days, 30))) TO 'sentinel-audit-export.csv' CSV HEADER
+> ROLLBACK;
 > ```
+>
+> No `;` after `\copy` — psql takes the rest of that line as its own
+> arguments, and a trailing `;` would be read as part of the output path.
 >
 > Not `pg_dump`: it has no row predicate, so `--table=audit_logs` would write
 > **every tenant's** audit rows to that file.
@@ -428,14 +480,73 @@ at all. Conflating them would hide a tamper behind a coverage page.
 
 (Not `verifiedTenantCount < tenantCount`: neither LogQL nor Datadog can
 compare two extracted fields — a label-filter expression needs a literal
-on the right. `erroredTenantCount` is equivalent by construction,
-because every tenant increments exactly one of the two counters.)
-**Recovery**: the accompanying `tick incomplete` stderr line names the
-failing tenant ids. `RLS_CONTEXT_MISSING` there means the worker lost
-its RLS context and its reads would have returned zero rows — treat as
-"the verifier is inert", not as a per-tenant blip. `P2028` means the
-read outgrew `AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` (default 60s); raise it
-or lower `AUDIT_CHAIN_VERIFY_MAX_ROWS`.
+on the right. `erroredTenantCount` is per-tenant failures plus one for
+each tick-level reason under "Enumeration failures" below, so it is
+strictly stronger than `verifiedTenantCount < tenantCount`:
+`verifiedTenantCount + erroredTenantCount` can exceed `tenantCount`, and a
+tick that verified every listed tenant can still report
+`erroredTenantCount = 1`.)
+
+`tenantCount` counts the tenants the worker verifies, which is every tenant
+except `__system__`. The worker cannot open a tenant context on the
+sentinel (it is the FK target of every unattributable audit row), so it
+leaves it out of all three counts rather than reporting it as verified.
+Its `audit_chain_enabled` is false by default, so there is no chain to
+verify; if someone enables it, the tick reports
+`SENTINEL_CHAIN_UNVERIFIABLE` (below). A deployment with no tenants besides
+`__system__` therefore reports `tenantCount = 0` with
+`erroredTenantCount = 0`.
+
+**Enumeration failures (#923).** `tenants` now carries the same RLS
+policy as every other table, so the worker's tenant-list read runs under
+a named bypass grant like any other tenant read. `__system__` always
+exists and only a full bypass read sees it, so a list without it means
+the read lost its scope; it does not mean the deployment has no tenants.
+Each case adds 1 to `erroredTenantCount` directly (not per tenant like
+the construction above) and logs a `tick incomplete` line with its
+reason:
+
+- `TENANT_ENUMERATION_FAILED` — the read threw (the line carries the
+  error code), e.g. 42501 when a role lacks EXECUTE on
+  `public.rls_bypass_admits` or, once enforce mode ships (#921), when
+  the grant does not name `tenants`.
+- `TENANT_ENUMERATION_EMPTY` — the read returned no tenants at all.
+- `TENANT_ENUMERATION_INCOMPLETE` — it returned tenants but not
+  `__system__`, i.e. a tenant-scoped rather than a bypass read. The
+  tenants it did return are still verified.
+- `SENTINEL_CHAIN_UNVERIFIABLE` — `__system__`'s `audit_chain_enabled`
+  is true, which no migration sets and which this worker cannot verify.
+
+None of these throws: a throw would skip the heartbeat and leave only
+the absence alarm, which cannot distinguish "inert" from "dead".
+**Recovery**: for the three enumeration reasons, treat the verifier as
+inert, as for `RLS_CONTEXT_MISSING` below: check that the worker's role
+holds EXECUTE on `public.rls_bypass_admits` and SELECT on `tenants`, and
+that `SYSTEM_MAINTENANCE_TENANT_LOOKUP` still names `tenant`. For
+`SENTINEL_CHAIN_UNVERIFIABLE`, decide explicitly, as
+`20260902120000_set_system_tenant_audit_retention` does (it refuses to
+turn the chain off for you; see
+`docs/security/audit-chain-threat-model.md#retention-purge-interaction`):
+either disable the chain on `__system__`, accepting that its rows go
+unverified, or keep it and accept this alert until sentinel verification
+exists. Disabling it on RDS (owner under FORCE RLS) is a write, so it runs
+in a transaction-scoped tenant scope without `READ ONLY`:
+
+```sql
+BEGIN;
+SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
+UPDATE tenants SET audit_chain_enabled = false
+WHERE id = '00000000-0000-4000-8000-000000000002';
+COMMIT;
+```
+
+**Recovery (per-tenant failures)**: the accompanying `tick incomplete`
+stderr line names the failing tenant ids. `RLS_CONTEXT_MISSING` there
+means the worker lost its RLS context and its reads would have
+returned zero rows — treat as "the verifier is inert", not as a
+per-tenant blip. `P2028` means the read outgrew
+`AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` (default 60s); raise it or lower
+`AUDIT_CHAIN_VERIFY_MAX_ROWS`.
 
 Datadog: `@_logType:audit-chain-verify-heartbeat @erroredTenantCount:>0`
 Loki: `{_logType="audit-chain-verify-heartbeat"} | json | erroredTenantCount > 0`

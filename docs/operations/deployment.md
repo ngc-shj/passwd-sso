@@ -369,6 +369,15 @@ The application uses four database roles with separated privileges:
 > `scripts/tenant-domain.ts`) must open a `withBypassRls` transaction rather
 > than rely on a role attribute. Skipping it does not error: the read returns
 > zero rows and the job reports a clean, empty success.
+>
+> **`tenants` itself is under this same FORCE RLS** (#923) — it is the
+> tenancy root, not an exception. A data migration or ad-hoc SQL run as the
+> owner that reads or writes `tenants` on RDS must set a scope
+> (`SET LOCAL app.tenant_id = …`) or the bypass GUCs (`SET LOCAL
+> app.bypass_rls = 'on'` + `app.bypass_tables`), transaction-locally, exactly
+> like a read of any other RLS table — never session-wide (`ALTER ROLE …
+> SET app.*` / `ALTER DATABASE … SET app.*`, which `audit-db-grants.mjs`
+> already flags as drift).
 
 On AWS RDS these roles are NOT auto-created (the `infra/postgres/initdb/*.sql`
 scripts run only on the Docker Postgres image) — create them during bootstrap,
