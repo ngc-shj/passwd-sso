@@ -19,6 +19,7 @@
 #   12. bare call, no scalar sub-SELECT wrapper → [E-RLS-BYPASS-TABLE]
 #   13. tenant branch casts app.tenant_id outside a sub-SELECT → [E-RLS-TENANT-INITPLAN]
 #   14. the same cast commuted to the left of `=` → [E-RLS-TENANT-INITPLAN]
+#   15. tenants_tenant_isolation's tenant branch dropped (#923) → [E-RLS-TENANTS-SEED]
 #
 # Codes NOT exercised here (acceptable coverage gaps):
 #   - [E-RLS-COUNT-B]: structurally identical to [E-RLS-COUNT-A] (Block 3 mirrors Block 2).
@@ -78,6 +79,20 @@ cleanup() {
   if [[ -n "${MIG_URL:-}" ]]; then
     psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q \
       -c "DROP TABLE IF EXISTS rls_negative_test CASCADE; DROP TABLE IF EXISTS rls_colparity_probe CASCADE; DROP FUNCTION IF EXISTS rls_negative_secdef_probe();" >/dev/null 2>&1 || true
+  fi
+  # Case 15 fallback: unlike every other case, Case 15 ALTERs the REAL
+  # tenants_tenant_isolation policy (there is no throwaway table for
+  # `tenants`). If the script exited between that ALTER and its own restore
+  # (SIGINT, a failed assertion before the restore runs), reapply the
+  # pre-ALTER snapshot here so a crashed run never leaves the real tenants
+  # table running with its tenant branch dropped. No-op (same text back) if
+  # Case 15 already restored successfully.
+  if [[ -n "${MIG_URL:-}" && -n "${TENANTS_POLICY_QUAL_SNAPSHOT:-}" && -n "${TENANTS_POLICY_CHECK_SNAPSHOT:-}" ]]; then
+    psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q -c "
+      ALTER POLICY tenants_tenant_isolation ON tenants
+        USING ($TENANTS_POLICY_QUAL_SNAPSHOT)
+        WITH CHECK ($TENANTS_POLICY_CHECK_SNAPSHOT);
+    " >/dev/null 2>&1 || true
   fi
   # Last: the DROP above authenticates through the passfile.
   psql_safe_cleanup
@@ -394,6 +409,76 @@ run_negative_case 14 \
   "CREATE POLICY rls_negative_test_tenant_isolation ON rls_negative_test FOR ALL USING ((SELECT public.rls_bypass_admits('rls_negative_test')) OR current_setting('app.tenant_id', true)::uuid = tenant_id) WITH CHECK ((SELECT public.rls_bypass_admits('rls_negative_test')) OR current_setting('app.tenant_id', true)::uuid = tenant_id)" \
   "[E-RLS-TENANT-INITPLAN]" \
   "no" || total_failures=$((total_failures + 1))
+
+# Case 15: tenants_tenant_isolation's tenant branch dropped (#923), bypass
+# branch kept symmetric (USING and WITH CHECK both become just the bypass
+# sub-SELECT) so Block 1's [E-RLS-SYM]/[E-RLS-BYPASS-TABLE] pass and the
+# mutation reaches rls-cross-tenant-verify.sql's tenants block (1c) →
+# [E-RLS-TENANTS-SEED] (CI seeds A0/B0, so (b)/(c1)/(c2) have rows to act
+# on). Unlike every other case this ALTERs the REAL tenants table's policy —
+# there is no throwaway stand-in for `tenants` — so the policy text is
+# snapshotted via pg_get_expr BEFORE the ALTER and restored from that exact
+# snapshot immediately after, with the restored text asserted equal to it
+# (same immediate-restore shape as run_case_8_force_rls for FORCE).
+run_case_15_tenants_branch_dropped() {
+  TENANTS_POLICY_QUAL_SNAPSHOT=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+    SELECT pg_get_expr(polqual, polrelid) FROM pg_catalog.pg_policy
+    WHERE polname = 'tenants_tenant_isolation';
+  ")
+  TENANTS_POLICY_CHECK_SNAPSHOT=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+    SELECT pg_get_expr(polwithcheck, polrelid) FROM pg_catalog.pg_policy
+    WHERE polname = 'tenants_tenant_isolation';
+  ")
+  if [[ -z "$TENANTS_POLICY_QUAL_SNAPSHOT" || -z "$TENANTS_POLICY_CHECK_SNAPSHOT" ]]; then
+    printf 'FAIL case 15: could not snapshot tenants_tenant_isolation (policy missing?)\n'
+    return 1
+  fi
+
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "
+    ALTER POLICY tenants_tenant_isolation ON tenants
+      USING ((SELECT public.rls_bypass_admits('tenants')))
+      WITH CHECK ((SELECT public.rls_bypass_admits('tenants')));
+  "
+
+  local expected_tables="${manifest_entries},rls_negative_test"
+  local out ec
+  out=$(psql_safe "$APP_URL" -v ON_ERROR_STOP=1 \
+    -v expected_tables="$expected_tables" \
+    -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+
+  # Restore IMMEDIATELY — before any assertion below can return early and
+  # leave the real tenants table running with no tenant scope.
+  psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "
+    ALTER POLICY tenants_tenant_isolation ON tenants
+      USING ($TENANTS_POLICY_QUAL_SNAPSHOT)
+      WITH CHECK ($TENANTS_POLICY_CHECK_SNAPSHOT);
+  "
+
+  local restored_qual restored_check
+  restored_qual=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+    SELECT pg_get_expr(polqual, polrelid) FROM pg_catalog.pg_policy
+    WHERE polname = 'tenants_tenant_isolation';
+  ")
+  restored_check=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
+    SELECT pg_get_expr(polwithcheck, polrelid) FROM pg_catalog.pg_policy
+    WHERE polname = 'tenants_tenant_isolation';
+  ")
+  if [[ "$restored_qual" != "$TENANTS_POLICY_QUAL_SNAPSHOT" || "$restored_check" != "$TENANTS_POLICY_CHECK_SNAPSHOT" ]]; then
+    printf 'FAIL case 15: restored tenants_tenant_isolation text does not match the pre-ALTER snapshot\n'
+    return 1
+  fi
+
+  if (( ec == 0 )); then
+    printf 'FAIL case 15: verify exited 0 with the tenants policy tenant branch dropped — gate is broken\n'
+    return 1
+  fi
+  if ! grep -qF -- "[E-RLS-TENANTS-SEED]" <<<"$out"; then
+    printf 'FAIL case 15: verify failed but expected code [E-RLS-TENANTS-SEED] not found in output:\n%s\n' "$out"
+    return 1
+  fi
+  printf 'PASS case 15 (matched [E-RLS-TENANTS-SEED])\n'
+}
+run_case_15_tenants_branch_dropped || total_failures=$((total_failures + 1))
 
 if (( total_failures > 0 )); then
   printf '\n%d negative-test cases failed.\n' "$total_failures"

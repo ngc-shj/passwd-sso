@@ -428,6 +428,11 @@ describe("tenant_claims (C1)", () => {
           await ctx.su.prisma.$executeRawUnsafe(
             `GRANT SELECT, DELETE ON tenants TO "${roleName}"`,
           );
+          // `tenants` has a policy (#923), and every policy calls this; every
+          // real role holds EXECUTE on it (bootstrap-rds-roles.mjs).
+          await ctx.su.prisma.$executeRawUnsafe(
+            `GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text) TO "${roleName}"`,
+          );
 
           const url = new URL(base);
           url.username = roleName;

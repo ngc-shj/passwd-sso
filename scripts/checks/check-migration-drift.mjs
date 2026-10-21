@@ -17,8 +17,10 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-// Tables that are structurally exempt from the RLS coverage check.
-const RLS_EXEMPT_TABLES = new Set(["tenants"]);
+// The tenancy root. It has no tenant_id column, so it never falls into the
+// hasTenantId loop below, but it carries its own tenants_tenant_isolation
+// policy (#923) and is checked explicitly, independent of hasTenantId.
+const TENANCY_ROOT_TABLE = "tenants";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -326,10 +328,7 @@ const { tableAliases, enumAliases, columnAliases, enumValueAliases } =
 
 const rlsIssues = [];
 
-for (const [tableName, info] of tables) {
-  if (!info.hasTenantId) continue;
-  if (RLS_EXEMPT_TABLES.has(tableName)) continue;
-
+function checkTableRlsCoverage(tableName) {
   // Collect all historical names for this table (including current).
   const allNames = tableAliases.get(tableName) ?? new Set([tableName]);
   // Build pattern alternatives for both quoted ("name") and unquoted (name) forms.
@@ -377,6 +376,19 @@ for (const [tableName, info] of tables) {
       `Table "${tableName}": missing CREATE POLICY <table>_tenant_isolation`,
     );
   }
+}
+
+for (const [tableName, info] of tables) {
+  if (tableName === TENANCY_ROOT_TABLE) continue; // checked explicitly below
+  if (!info.hasTenantId) continue;
+  checkTableRlsCoverage(tableName);
+}
+
+// The tenancy root carries the policy on its own `id`, not a tenant_id
+// column, so it falls outside the hasTenantId loop above by construction —
+// checked here unconditionally instead.
+if (tables.has(TENANCY_ROOT_TABLE)) {
+  checkTableRlsCoverage(TENANCY_ROOT_TABLE);
 }
 
 // ---------------------------------------------------------------------------

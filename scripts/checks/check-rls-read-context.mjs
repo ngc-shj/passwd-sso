@@ -188,7 +188,14 @@ function fail(msg) {
   process.exit(1);
 }
 
-/** Manifest tables — the authoritative RLS table set. */
+// The tenancy root: carries its own tenants_tenant_isolation policy (#923)
+// but, having no tenant_id column, is not a member of the manifest — the
+// manifest stays tenant_id-keyed for [E-MANIFEST-*] and COLPARITY. Added
+// here instead so a bare `prisma.tenant.findMany` in SEARCH_DIRS is caught
+// the same way a bare read of any other RLS table is.
+const TENANCY_ROOT_TABLE = "tenants";
+
+/** Manifest tables plus the tenancy root — the authoritative RLS table set. */
 function loadRlsTables() {
   const p = join(REPO_ROOT, "scripts/rls-cross-tenant-tables.manifest");
   let raw;
@@ -203,7 +210,9 @@ function loadRlsTables() {
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith("#"));
   if (tables.length === 0) fail(`manifest ${p} yielded 0 tables`);
-  return new Set(tables);
+  const rlsTables = new Set(tables);
+  rlsTables.add(TENANCY_ROOT_TABLE);
+  return rlsTables;
 }
 
 /** table -> prisma client accessor, from schema @@map. */

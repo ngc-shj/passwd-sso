@@ -16,6 +16,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runTick } from "../audit-chain-verify-worker.ts";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 const HEARTBEAT = "audit-chain-verify-heartbeat";
 
@@ -24,14 +25,24 @@ const HEARTBEAT = "audit-chain-verify-heartbeat";
  * @param failFor   tenant ids whose verify should throw
  */
 function makeStubPrisma(tenantIds, failFor = []) {
+  // The tenant enumeration itself now runs under withBypassRls (C3), so it is
+  // the FIRST $transaction call runTick makes — before any per-tenant
+  // withTenantRls call verifyTenantChain opens. Serve that call with a tx
+  // carrying `$executeRaw` (setBypassGucs writes through it) and
+  // `tenant.findMany`; every later call is a per-tenant read.
+  let transactionCallCount = 0;
   return {
-    tenant: {
-      findMany: async () => tenantIds.map((id) => ({ id })),
-    },
     // verifyTenantChain wraps its reads in withTenantRls, which opens a
     // transaction — so failing here is exactly how a broken RLS context
     // reaches runTick.
     $transaction: async (fn, opts) => {
+      transactionCallCount += 1;
+      if (transactionCallCount === 1) {
+        return fn({
+          $executeRaw: async () => 0,
+          tenant: { findMany: async () => tenantIds.map((id) => ({ id })) },
+        });
+      }
       txOptions = opts;
       const tx = {
         $executeRaw: async () => 0,
@@ -76,10 +87,15 @@ let anchorRows;
 /** Advance `currentTenantId` in walk order as each transaction opens. */
 function trackTenantOrder(prisma, order) {
   let i = 0;
+  let callCount = 0;
   const orig = prisma.$transaction;
   // Forward opts: dropping it here would make the tx-budget assertion vacuous
   // even with the stub capturing it.
   prisma.$transaction = async (fn, opts) => {
+    callCount += 1;
+    // The enumeration transaction (withBypassRls) is always the first call —
+    // it carries no per-tenant id, and must not consume the per-tenant order.
+    if (callCount === 1) return orig(fn, opts);
     currentTenantId = order[i++];
     return orig(fn, opts);
   };
@@ -209,6 +225,42 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     expect(
       errLines.some(([fmt]) => String(fmt).includes("CHAIN_VERIFY_FAILED")),
     ).toBe(true);
+  });
+
+  it("emits TENANT_ENUMERATION_EMPTY and a non-zero erroredTenantCount when enumeration returns no tenants (C3)", async () => {
+    // The `__system__` tenant always exists, so an empty enumeration means the
+    // bypass read lost its scope, not "this deployment has no tenants" — the
+    // tick must still emit its heartbeat (liveness), but as a coverage failure.
+    const prisma = makeStubPrisma([]);
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.tenantCount).toBe(0);
+    expect(beat.verifiedTenantCount).toBe(0);
+    expect(beat.erroredTenantCount).toBeGreaterThan(0);
+    expect(
+      errLines.some(([fmt]) => String(fmt).includes("TENANT_ENUMERATION_EMPTY")),
+    ).toBe(true);
+  });
+
+  it("leaves the sentinel tenant out of the counts without opening a per-tenant context", async () => {
+    // withTenantRls's assertOpenableTenantContext unconditionally refuses the
+    // sentinel (src/lib/tenant-rls.ts) — verifyTenantChain would throw on it
+    // EVERY tick if runTick tried. Enumeration always includes it, so runTick
+    // must skip it, never opening the per-tenant transaction stubbed below, and
+    // must not claim it was verified.
+    const other = "99999999-9999-4999-8999-999999999999";
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, other]);
+    // Only the non-sentinel tenant opens a per-tenant (withTenantRls) tx.
+    trackTenantOrder(prisma, [other]);
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.tenantCount).toBe(1);
+    expect(beat.verifiedTenantCount).toBe(1);
+    expect(beat.erroredTenantCount).toBe(0);
   });
 
   it("does NOT throw when the GUC matches the tenant under verification", async () => {

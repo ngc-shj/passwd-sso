@@ -413,6 +413,11 @@ const ALLOWED_USAGE = new Set([
   "src/app/api/user/auth-provider/route.ts",
   // Audit anchor publisher: cross-tenant manifest generation reads all tenants + chain state
   "src/workers/audit-anchor-publisher.ts",
+  // Audit-chain verify worker (C3): the tenant enumeration (now that `tenants`
+  // carries the same RLS policy as every other table) runs under the named
+  // SYSTEM_MAINTENANCE_TENANT_LOOKUP grant, once per tick, before the
+  // per-tenant withTenantRls walk.
+  "scripts/audit-chain-verify-worker.ts",
 ]);
 
 // The RLS helpers. `withBypassRls` is the one the file allowlist and the grants

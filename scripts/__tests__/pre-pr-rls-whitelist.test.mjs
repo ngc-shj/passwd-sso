@@ -104,7 +104,8 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
 
   // ALLOW side: the seed-dependent row-count blocks cannot pass against a
   // long-lived dev DB, and must not block the developer.
-  it.each(["COUNT-A", "COUNT-B", "BYPASS"])(
+  // TENANTS-SEED is the tenants block's seed-dependent half (#923).
+  it.each(["COUNT-A", "COUNT-B", "BYPASS", "TENANTS-SEED"])(
     "accepts the seed-dependent code [E-RLS-%s]",
     (code) => {
       const r = runWith(
@@ -143,6 +144,9 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
     "BYPASS-TABLE",
     "REPORT",
     "INITPLAN",
+    // The tenants block's seed-independent half (#923): no-context read and
+    // the ENABLE/FORCE flags. Not a prefix of TENANTS-SEED's match.
+    "TENANTS",
   ])("stays fatal on the seed-independent code [E-RLS-%s]", (code) => {
     const r = runWith(`ERROR:  [E-RLS-${code}] regression detected`, 3);
     expect(r.status).not.toBe(0);
@@ -174,8 +178,8 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
   describe("mutation proofs", () => {
     it("goes green on [E-RLS-FORCE] once FORCE is added to the alternation", () => {
       const widened = block.replace(
-        "(COUNT-A|COUNT-B|BYPASS)",
-        "(COUNT-A|COUNT-B|BYPASS|FORCE)",
+        "(COUNT-A|COUNT-B|BYPASS|TENANTS-SEED)",
+        "(COUNT-A|COUNT-B|BYPASS|TENANTS-SEED|FORCE)",
       );
       expect(widened).not.toBe(block);
       const r = runWith("ERROR:  [E-RLS-FORCE] regression", 3, widened);
@@ -184,8 +188,8 @@ describe("pre-pr rls-cross-tenant whitelist", () => {
 
     it("goes fatal on [E-RLS-COUNT-A] once COUNT-A is removed from the alternation", () => {
       const narrowed = block.replace(
-        "(COUNT-A|COUNT-B|BYPASS)",
-        "(COUNT-B|BYPASS)",
+        "(COUNT-A|COUNT-B|BYPASS|TENANTS-SEED)",
+        "(COUNT-B|BYPASS|TENANTS-SEED)",
       );
       expect(narrowed).not.toBe(block);
       const r = runWith("ERROR:  [E-RLS-COUNT-A] 25 tables failed", 3, narrowed);

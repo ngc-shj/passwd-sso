@@ -101,10 +101,9 @@ describe("enqueueAuditInTx", () => {
   });
 
   it("creates an AuditOutbox row with correct tenantId and payload", async () => {
-    // bypass_rls = 'on' → skip tenant_id check
-    mockQueryRaw
-      .mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]) // ctx check
-      .mockResolvedValueOnce([{ ok: true }]); // tenant exists
+    // bypass_rls = 'on' → skip tenant_id check. No tenant-existence probe
+    // (C4): the FK is what rejects an unknown tenantId now, at the create() call.
+    mockQueryRaw.mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]); // ctx check
 
     await enqueueAuditInTx(TX_CLIENT as never, "tenant-1", SAMPLE_PAYLOAD);
 
@@ -132,9 +131,7 @@ describe("enqueueAuditInTx", () => {
   });
 
   it("proceeds when bypass_rls is not 'on' but tenant_id matches", async () => {
-    mockQueryRaw
-      .mockResolvedValueOnce([{ bypass_rls: "off", tenant_id: "tenant-1" }]) // tenant_id matches
-      .mockResolvedValueOnce([{ ok: true }]); // tenant exists
+    mockQueryRaw.mockResolvedValueOnce([{ bypass_rls: "off", tenant_id: "tenant-1" }]); // tenant_id matches
 
     await expect(
       enqueueAuditInTx(TX_CLIENT as never, "tenant-1", SAMPLE_PAYLOAD),
@@ -142,14 +139,18 @@ describe("enqueueAuditInTx", () => {
     expect(mockAuditOutboxCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("throws when tenantId does not exist in tenants table", async () => {
-    mockQueryRaw
-      .mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]) // ctx check passes
-      .mockResolvedValueOnce([{ ok: false }]); // tenant NOT found
+  it("propagates the audit_outbox FK violation when tenantId does not exist (C4 — no more probe)", async () => {
+    mockQueryRaw.mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]); // ctx check passes
+    const fkViolation = Object.assign(new Error("Foreign key constraint violated: audit_outbox_tenant_id_fkey"), {
+      code: "P2003",
+    });
+    mockAuditOutboxCreate.mockRejectedValueOnce(fkViolation);
 
     await expect(
       enqueueAuditInTx(TX_CLIENT as never, "nonexistent-tenant", SAMPLE_PAYLOAD),
-    ).rejects.toThrow(/does not exist/);
+    ).rejects.toBe(fkViolation);
+    // Only the ctx-check read — no tenant-existence SELECT EXISTS probe.
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
   });
 
   it("passes full payload fields through to auditOutbox.create", async () => {
@@ -167,9 +168,7 @@ describe("enqueueAuditInTx", () => {
       userAgent: "TestAgent/1.0",
     };
 
-    mockQueryRaw
-      .mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })])
-      .mockResolvedValueOnce([{ ok: true }]);
+    mockQueryRaw.mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]);
 
     await enqueueAuditInTx(TX_CLIENT as never, "tenant-1", richPayload);
 
@@ -199,10 +198,14 @@ describe("enqueueAuditInTx", () => {
 describe("enqueueAudit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Defaults: bypass_rls on + tenant exists
-    mockQueryRaw
-      .mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })])
-      .mockResolvedValueOnce([{ ok: true }]);
+    // Default: bypass_rls on. enqueueAudit's path (enqueueAuditInTx) no
+    // longer probes tenant existence (C4), so this is the only queued read
+    // most tests here need; enqueueAuditBulk still probes on its own (that
+    // function's grant is fixed and names `tenants`), so its one test below
+    // queues its own second value rather than relying on a leftover here —
+    // an unconsumed once-value otherwise carries into the NEXT test's queue
+    // and misaligns it.
+    mockQueryRaw.mockResolvedValueOnce([bypassStateRow({ bypass_rls: "on", tenant_id: "" })]);
   });
 
   it("opens its transaction on the un-proxied client, never the Proxy", async () => {
@@ -220,6 +223,9 @@ describe("enqueueAudit", () => {
     // I1.1 is quantified over BOTH openers. Reverting only this one left the
     // whole unit suite green until this case existed — the singular pin says
     // nothing about it, and no static gate can tell the two clients apart.
+    // enqueueAuditBulk keeps its own tenant-existence probe (unlike
+    // enqueueAuditInTx, C4), so it needs this second queued read.
+    mockQueryRaw.mockResolvedValueOnce([{ ok: true }]);
     await enqueueAuditBulk("tenant-1", [SAMPLE_PAYLOAD, SAMPLE_PAYLOAD]);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
     expect(mockProxiedTransaction).not.toHaveBeenCalled();

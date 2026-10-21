@@ -14,7 +14,11 @@
 --
 -- Uses the SAME discovery query as scripts/rls-cross-tenant-verify.sql
 -- (consistent across files; no role-filter pitfall here because we run
--- as SUPERUSER but the query doesn't depend on it).
+-- as SUPERUSER but the query doesn't depend on it). `tenants` is excluded
+-- from this tenant_id-keyed discovery query the same way — it carries its
+-- own tenants_tenant_isolation policy (#923), verified separately by
+-- rls-cross-tenant-verify.sql's Block 1b/1c, and this file's seed rows for
+-- it (tenant A0/B0 themselves) are asserted there, not here.
 --
 -- Use %I (identifier quoting) for table names in dynamic SQL — never %s.
 -- Identifiers come from system catalog data (trusted).

@@ -192,14 +192,14 @@ BEGIN
    AND col.table_name = c.relname
    AND col.column_name = 'tenant_id'
   WHERE n.nspname = 'public'
-    AND c.relname <> 'tenants'
+    AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
     AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\');
 
   SELECT count(*) INTO column_count
   FROM information_schema.columns
   WHERE table_schema = 'public'
     AND column_name = 'tenant_id'
-    AND table_name <> 'tenants';
+    AND table_name <> 'tenants'; -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
 
   ASSERT discovered_count = column_count,
     format('[E-RLS-COLPARITY] tenant_id column count (%s) does not equal discovered tenant_isolation policy count (%s) — a column was added without a policy, or a policy without its column.',
@@ -218,7 +218,7 @@ BEGIN
      AND col.table_name = c.relname
      AND col.column_name = 'tenant_id'
     WHERE n.nspname = 'public'
-      AND c.relname <> 'tenants'
+      AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
       AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
   ),
     format('[E-RLS-MANIFEST-EXTRA] Manifest has tables not in discovery: %s', (
@@ -234,7 +234,7 @@ BEGIN
          AND col.table_name = c.relname
          AND col.column_name = 'tenant_id'
         WHERE n.nspname = 'public'
-          AND c.relname <> 'tenants'
+          AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
           AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
       )
     ));
@@ -250,7 +250,7 @@ BEGIN
      AND col.table_name = c.relname
      AND col.column_name = 'tenant_id'
     WHERE n.nspname = 'public'
-      AND c.relname <> 'tenants'
+      AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
       AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
     EXCEPT
     SELECT m.t FROM unnest(string_to_array(current_setting('app.expected_tables', true), ',')) AS m(t)
@@ -265,7 +265,7 @@ BEGIN
        AND col.table_name = c.relname
        AND col.column_name = 'tenant_id'
       WHERE n.nspname = 'public'
-        AND c.relname <> 'tenants'
+        AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
         AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
         AND c.relname NOT IN (
           SELECT m.t FROM unnest(string_to_array(current_setting('app.expected_tables', true), ',')) AS m(t)
@@ -349,6 +349,124 @@ BEGIN
 END $$;
 
 -- =====================================================================
+-- Block 1b: `tenants` — fatal, seed-independent checks (#923). Placed
+-- before Block 2's first SET LOCAL app.tenant_id so (a1) genuinely
+-- observes a session that has never set the GUC (Block 1 above only reads
+-- pg_catalog). FORCE/ENABLE and the no-context read hold on ANY `tenants`
+-- table state, seeded or not, so scripts/pre-pr.sh runs this against the
+-- long-lived dev DB unconditionally — unlike Block 1c below.
+--   [E-RLS-TENANTS]
+-- =====================================================================
+DO $$
+DECLARE
+  n bigint;
+  tenant_a constant uuid := '00000000-0000-0000-0000-0000000000A0';
+  tenant_b constant uuid := '00000000-0000-0000-0000-0000000000B0';
+BEGIN
+  ASSERT current_setting('app.tenant_id', true) IS NULL
+      OR current_setting('app.tenant_id', true) = '',
+    'pre-Block-1b: app.tenant_id must be unset entering this block';
+
+  -- (a1) No scope, no bypass: a bare read sees neither seeded row, nor any
+  -- other — the tenant branch has nothing to compare against, so the
+  -- policy admits nothing.
+  SELECT count(*) INTO n FROM tenants WHERE id IN (tenant_a, tenant_b);
+  IF n <> 0 THEN
+    RAISE EXCEPTION '[E-RLS-TENANTS] no-context read of tenants saw % of the seeded A0/B0 rows (expected 0)', n;
+  END IF;
+
+  SELECT count(*) INTO n FROM tenants;
+  IF n <> 0 THEN
+    RAISE EXCEPTION '[E-RLS-TENANTS] no-context read of tenants saw % row(s) total (expected 0)', n;
+  END IF;
+
+  -- FORCE + ENABLE, asserted from pg_class: a non-owner cannot observe
+  -- FORCE any other way, and this needs no seed data.
+  IF NOT (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid = 'public.tenants'::regclass) THEN
+    RAISE EXCEPTION '[E-RLS-TENANTS] tenants does not have ENABLE and FORCE row level security';
+  END IF;
+END $$;
+
+-- =====================================================================
+-- Block 1c: `tenants` — seed-dependent checks (#923). Requires the A0/B0
+-- rows scripts/rls-cross-tenant-seed.sql inserts; fails by design on the
+-- unseeded long-lived dev DB, where scripts/pre-pr.sh allow-lists
+-- [E-RLS-TENANTS-SEED] the same way it already allow-lists
+-- COUNT-A/COUNT-B/BYPASS.
+--   (b)  scope A0 sees exactly its own row.
+--   (c1) scope A0 cannot touch B0's row (0 rows affected, B0 still intact
+--        under its own scope).
+--   (c2) scope A0 cannot INSERT a non-A0 row, or re-point its own row to a
+--        non-A0 id — both refused by WITH CHECK (the UPDATE's target row
+--        is visible under USING, so this is WITH CHECK doing the work).
+--        Fresh, never-reused ids so a widened WITH CHECK cannot pass by
+--        colliding with an existing row.
+--   [E-RLS-TENANTS-SEED]
+-- =====================================================================
+DO $$
+DECLARE
+  n bigint;
+  rc bigint;
+  tenant_a constant uuid := '00000000-0000-0000-0000-0000000000A0';
+  tenant_b constant uuid := '00000000-0000-0000-0000-0000000000B0';
+  fresh_insert_id constant uuid := gen_random_uuid();
+  fresh_update_id constant uuid := gen_random_uuid();
+BEGIN
+  SET LOCAL client_min_messages = 'NOTICE';
+
+  SET LOCAL app.tenant_id = '00000000-0000-0000-0000-0000000000A0';
+  ASSERT current_setting('app.tenant_id', true) = '00000000-0000-0000-0000-0000000000A0',
+    'pre-Block-1c: SET LOCAL app.tenant_id failed';
+
+  -- (b)
+  SELECT count(*) INTO n FROM tenants WHERE id = tenant_a;
+  IF n <> 1 THEN
+    RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: expected exactly 1 row with id=A0, got %', n;
+  END IF;
+
+  SELECT count(*) INTO n FROM tenants;
+  IF n <> 1 THEN
+    RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: expected exactly 1 visible row total, got %', n;
+  END IF;
+
+  -- (c1)
+  UPDATE tenants SET name = name WHERE id = tenant_b;
+  GET DIAGNOSTICS rc = ROW_COUNT;
+  IF rc <> 0 THEN
+    RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: UPDATE WHERE id=B0 affected % row(s) (expected 0)', rc;
+  END IF;
+
+  SET LOCAL app.tenant_id = '00000000-0000-0000-0000-0000000000B0';
+  SELECT count(*) INTO n FROM tenants WHERE id = tenant_b;
+  IF n <> 1 THEN
+    RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope B0: B0 row not visible after the blocked cross-tenant UPDATE attempt (got % row(s))', n;
+  END IF;
+
+  -- (c2). Each sub-block catches insufficient_privilege ONLY — any other
+  -- SQLSTATE propagates, including the RAISE EXCEPTION issued here when a
+  -- write unexpectedly succeeds (the regression a widened WITH CHECK would
+  -- cause).
+  SET LOCAL app.tenant_id = '00000000-0000-0000-0000-0000000000A0';
+
+  BEGIN
+    INSERT INTO tenants (id, name, slug, created_at, updated_at)
+      VALUES (fresh_insert_id, fresh_insert_id::text, fresh_insert_id::text, NOW(), NOW());
+    RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: INSERT of a non-A0 id succeeded (WITH CHECK should refuse id <> app.tenant_id)';
+  EXCEPTION
+    WHEN insufficient_privilege THEN
+      NULL; -- expected: WITH CHECK refused the row, nothing committed.
+  END;
+
+  BEGIN
+    UPDATE tenants SET id = fresh_update_id WHERE id = tenant_a;
+    RAISE EXCEPTION '[E-RLS-TENANTS-SEED] scope A0: UPDATE of its own row to a non-A0 id succeeded (visible under USING, should be refused by WITH CHECK)';
+  EXCEPTION
+    WHEN insufficient_privilege THEN
+      NULL; -- expected.
+  END;
+END $$;
+
+-- =====================================================================
 -- Block 2: Tenant A → exactly 1 row visible per discovered table.
 -- Accumulator pattern (RAISE NOTICE per failing table, RAISE EXCEPTION at end)
 -- so a multi-table predicate regression surfaces ALL offending tables in one
@@ -387,7 +505,7 @@ BEGIN
      AND col.table_name = c.relname
      AND col.column_name = 'tenant_id'
     WHERE n.nspname = 'public'
-      AND c.relname <> 'tenants'
+      AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
       AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
     ORDER BY c.relname
   LOOP
@@ -444,7 +562,7 @@ BEGIN
      AND col.table_name = c.relname
      AND col.column_name = 'tenant_id'
     WHERE n.nspname = 'public'
-      AND c.relname <> 'tenants'
+      AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
       AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
     ORDER BY c.relname
   LOOP
@@ -509,7 +627,7 @@ BEGIN
    AND col.table_name = c.relname
    AND col.column_name = 'tenant_id'
   WHERE n.nspname = 'public'
-    AND c.relname <> 'tenants'
+    AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
     AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\');
 
   SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000000';
@@ -535,7 +653,7 @@ BEGIN
      AND col.table_name = c.relname
      AND col.column_name = 'tenant_id'
     WHERE n.nspname = 'public'
-      AND c.relname <> 'tenants'
+      AND c.relname <> 'tenants' -- tenant_id-keyed; tenants has its own policy, verified in Block 1b/1c
       AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
     ORDER BY c.relname
   LOOP
@@ -598,6 +716,12 @@ END $$;
 -- system_settings has no tenant_id (bypass-only policy, not named
 -- `tenant_isolation`) so it is unioned in explicitly rather than discovered
 -- through the naming convention the other blocks use.
+--
+-- tenants is NOT excluded here, unlike the tenant_id-keyed discovery queries
+-- elsewhere in this file: tenants_tenant_isolation matches the
+-- `%_tenant_isolation` naming convention directly, and this block's per-table
+-- loop only does a bare row count (no tenant_id column needed), so tenants
+-- falls into the same report-mode coverage as every other discovered table.
 -- =====================================================================
 DO $$
 DECLARE
@@ -614,7 +738,6 @@ BEGIN
   JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
   JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public'
-    AND c.relname <> 'tenants'
     AND (
       p.polname = 'tenant_isolation'
       OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\'

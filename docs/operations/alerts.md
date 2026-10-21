@@ -128,12 +128,25 @@ the event reaches `audit_outbox` and then `audit_logs` like any other.
 tenant:
 
 ```sql
+BEGIN READ ONLY;
+SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
 SELECT action, actor_type, COUNT(*) AS n, MAX(created_at) AS latest
 FROM audit_logs
 WHERE tenant_id = '00000000-0000-4000-8000-000000000002'   -- the sentinel tenant (name/slug: __system__)
 GROUP BY action, actor_type
 ORDER BY n DESC;
+ROLLBACK;
 ```
+
+Every `tenants` / `audit_logs` query in this runbook runs inside a block
+shaped like this one, never as a bare `SELECT`: on RDS the
+migration/owner role is the master user, and FORCE RLS applies to it
+there same as to any application role, so a psql session authenticated
+as the owner needs its own scope too. `SET LOCAL` + `ROLLBACK` leave
+nothing on the session afterward — never `ALTER ROLE … SET app.*` or
+`ALTER DATABASE … SET app.*` instead, which would leak the scope to
+every later session on that role/database (`audit-db-grants.mjs`
+already flags either as a drift finding).
 
 **Group by `action`; do not filter on `actor_type`.** Both populations under this
 tenant emit `SYSTEM` — the anchor publisher, the retention GC, and also
@@ -250,9 +263,16 @@ emit "past the transaction" does not clear it.
 > `__system__` keeps it. Read the actual number before acting on anything below:
 >
 > ```sql
+> BEGIN READ ONLY;
+> SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
 > SELECT audit_log_retention_days, audit_chain_enabled
 > FROM tenants WHERE id = '00000000-0000-4000-8000-000000000002';
+> ROLLBACK;
 > ```
+>
+> (See the audit-dead-letter section above for why every `tenants` /
+> `audit_logs` query here runs inside this scope rather than as a bare
+> `SELECT`.)
 >
 > **On the first sweep after that migration, sentinel rows older than that window
 > are deleted.** On a deployment that has been running long enough to have them,
@@ -260,12 +280,15 @@ emit "past the transaction" does not clear it.
 > value, not from an assumed 365:
 >
 > ```sql
+> BEGIN READ ONLY;
+> SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
 > SELECT count(*), min(a.created_at), max(a.created_at)
 > FROM audit_logs a
 > JOIN tenants t ON t.id = a.tenant_id
 > WHERE a.tenant_id = '00000000-0000-4000-8000-000000000002'
 >   AND a.created_at < now()
 >       - make_interval(days => GREATEST(t.audit_log_retention_days, 30));
+> ROLLBACK;
 > ```
 >
 > `GREATEST(…, 30)` because the sweep does: `sweepAuditLogs` clamps with
@@ -278,8 +301,14 @@ emit "past the transaction" does not clear it.
 > session is not a copy. From `psql`, with the predicate spelled out:
 >
 > ```
+> BEGIN READ ONLY;
+> SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
 > \copy (SELECT * FROM audit_logs a JOIN tenants t ON t.id = a.tenant_id WHERE a.tenant_id = '00000000-0000-4000-8000-000000000002' AND a.created_at < now() - make_interval(days => GREATEST(t.audit_log_retention_days, 30))) TO 'sentinel-audit-export.csv' CSV HEADER
+> ROLLBACK;
 > ```
+>
+> No `;` after `\copy` — psql takes the rest of that line as its own
+> arguments, and a trailing `;` would be read as part of the output path.
 >
 > Not `pg_dump`: it has no row predicate, so `--table=audit_logs` would write
 > **every tenant's** audit rows to that file.
@@ -428,14 +457,42 @@ at all. Conflating them would hide a tamper behind a coverage page.
 
 (Not `verifiedTenantCount < tenantCount`: neither LogQL nor Datadog can
 compare two extracted fields — a label-filter expression needs a literal
-on the right. `erroredTenantCount` is equivalent by construction,
-because every tenant increments exactly one of the two counters.)
-**Recovery**: the accompanying `tick incomplete` stderr line names the
-failing tenant ids. `RLS_CONTEXT_MISSING` there means the worker lost
-its RLS context and its reads would have returned zero rows — treat as
-"the verifier is inert", not as a per-tenant blip. `P2028` means the
-read outgrew `AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` (default 60s); raise it
-or lower `AUDIT_CHAIN_VERIFY_MAX_ROWS`.
+on the right. `erroredTenantCount` is equivalent by construction
+**when the tick enumerated at least one tenant**, because every
+verified-or-errored tenant increments exactly one of the two counters. An
+empty enumeration is the one case that invariant does not cover by
+iteration — see below.)
+
+`tenantCount` counts the tenants the worker verifies, which is every tenant
+except `__system__`. The worker cannot open a tenant context on the
+sentinel (it is the FK target of every unattributable audit row), so it
+leaves it out of all three counts rather than reporting it as verified;
+its `audit_chain_enabled` is false, so there is no chain to verify. A
+deployment with no tenants besides `__system__` therefore reports
+`tenantCount = 0` with `erroredTenantCount = 0`.
+
+**Empty enumeration (#923).** `tenants` now carries the same RLS policy
+as every other table, so the worker's tenant-list read runs under a
+named bypass grant like any other tenant read. The `__system__` tenant
+always exists, so a read that returns no tenants at all (not even
+`__system__`) lost its scope; it does not mean the deployment has no tenants. The tick reports this as
+`erroredTenantCount >= 1` — set directly by the empty check, not
+incremented per-tenant like the construction above — plus a
+`tick incomplete` line with reason `TENANT_ENUMERATION_EMPTY`. It does
+not throw: a throw would skip the heartbeat and leave only the
+absence alarm, which cannot distinguish "inert" from "dead".
+**Recovery**: treat `TENANT_ENUMERATION_EMPTY` the same as
+`RLS_CONTEXT_MISSING` below — "the verifier is inert" — and check the
+`SYSTEM_MAINTENANCE_TENANT_LOOKUP` bypass grant and
+`check-bypass-rls.mjs`'s ALLOWED_USAGE entry for this worker.
+
+**Recovery (per-tenant failures)**: the accompanying `tick incomplete`
+stderr line names the failing tenant ids. `RLS_CONTEXT_MISSING` there
+means the worker lost its RLS context and its reads would have
+returned zero rows — treat as "the verifier is inert", not as a
+per-tenant blip. `P2028` means the read outgrew
+`AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` (default 60s); raise it or lower
+`AUDIT_CHAIN_VERIFY_MAX_ROWS`.
 
 Datadog: `@_logType:audit-chain-verify-heartbeat @erroredTenantCount:>0`
 Loki: `{_logType="audit-chain-verify-heartbeat"} | json | erroredTenantCount > 0`

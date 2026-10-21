@@ -84,4 +84,93 @@ describe("check-migration-drift.mjs", () => {
       expect(r.status, r.stdout + r.stderr).toBe(0);
     });
   });
+
+  describe("tenants RLS coverage, independent of hasTenantId", () => {
+    // tenants has no tenant_id column (the policy keys on its own `id`), so
+    // Check A's hasTenantId loop never reaches it — it is checked through an
+    // explicit branch instead (#923). These cells pin that branch the same
+    // way the column-completeness cells above pin Check C, each varying one
+    // of the three RLS statements while the other two stay present.
+    const TENANT_SCHEMA = [
+      "model Tenant {",
+      "  id   String @id",
+      "  name String",
+      "  @@map(\"tenants\")",
+      "}",
+      "",
+    ].join("\n");
+
+    function writeTenantsMigration(root, sql) {
+      writeMigration(
+        root,
+        "20260101000000_create_tenants",
+        [
+          'CREATE TABLE "tenants" (',
+          '  "id" TEXT NOT NULL,',
+          '  "name" TEXT NOT NULL',
+          ");",
+          sql,
+        ].join("\n"),
+      );
+    }
+
+    beforeEach(() => {
+      writeFileSync(join(root, "prisma/schema.prisma"), TENANT_SCHEMA, "utf8");
+    });
+
+    it('FAILS with "missing ENABLE ROW LEVEL SECURITY" when ENABLE is absent', () => {
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;',
+          'CREATE POLICY tenants_tenant_isolation ON "tenants" USING (true) WITH CHECK (true);',
+        ].join("\n"),
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Table "tenants": missing ENABLE ROW LEVEL SECURITY');
+    });
+
+    it('FAILS with "missing FORCE ROW LEVEL SECURITY" when FORCE is absent', () => {
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;',
+          'CREATE POLICY tenants_tenant_isolation ON "tenants" USING (true) WITH CHECK (true);',
+        ].join("\n"),
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Table "tenants": missing FORCE ROW LEVEL SECURITY');
+    });
+
+    it('FAILS with "missing CREATE POLICY" when the policy is absent', () => {
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;',
+          'ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;',
+        ].join("\n"),
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        'Table "tenants": missing CREATE POLICY <table>_tenant_isolation',
+      );
+    });
+
+    it("passes when ENABLE, FORCE and the policy are all present", () => {
+      writeTenantsMigration(
+        root,
+        [
+          'ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;',
+          'ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;',
+          'CREATE POLICY tenants_tenant_isolation ON "tenants" USING (true) WITH CHECK (true);',
+        ].join("\n"),
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("all consistent");
+    });
+  });
 });

@@ -18,6 +18,7 @@ import {
   sweepAuditLogs,
   sweepPerTenantAge,
   sweepExpiredAccessRequests,
+  listTrashRetentionTenants,
   grantForEntry,
 } from "../sweep";
 import {
@@ -286,3 +287,31 @@ describe.each(MEMBERS.filter((m) => m.gated))(
     });
   },
 );
+
+describe("listTrashRetentionTenants asserts the bypass before reading tenants (C2)", () => {
+  // Ungated — sweepTrashEntry's enumeration always declares the bypass
+  // (there is no "entry without globalDelete" variant of a tenant read),
+  // so only the "declares the bypass" deny/allow pair applies, matching
+  // sweepAuditLogs / sweepPerTenantAge / sweepExpiredAccessRequests above.
+  it.each(DENY_WHEN_EXPECTED)("denies a %s read before touching a row", async (_label, rows) => {
+    const { tx, calls } = makeRecordingTx({ rows });
+    await expect(listTrashRetentionTenants(tx)).rejects.toThrow(C2_ERROR);
+    expectOnlyTheRead(calls);
+  });
+
+  it("propagates a failed read before touching a row", async () => {
+    const readError = new Error("read failed");
+    const { tx, calls } = makeRecordingTx({ error: readError });
+    await expect(listTrashRetentionTenants(tx)).rejects.toBe(readError);
+    expectOnlyTheRead(calls);
+  });
+
+  it("allows an 'on' read and reaches tenant.findMany", async () => {
+    const { tx, calls } = makeRecordingTx({ rows: [{ bypass_rls: "on" }] });
+    // The fixture's tenant.findMany answer is shared with the other
+    // per-tenant members above; this cell's subject is reaching the write,
+    // not the field shape (that is sweep-trash.test.ts's job).
+    await expect(listTrashRetentionTenants(tx)).resolves.toHaveLength(1);
+    expectReachedWrite(calls, "tenant.findMany");
+  });
+});

@@ -69,17 +69,19 @@ function makeDispatchPrisma(opts: { failDeleteOn?: string; inheritedBypass?: str
         return ROWS_PER_WRITE;
       }),
       $queryRawUnsafe: record("$queryRawUnsafe", async (_sql: string, ..._params: unknown[]) => []),
-      tenant: { findMany: record("tenant.findMany", async (_arg: unknown) => []) },
+      // sweepTrashEntry's tenant enumeration (C2) now runs on its own fresh
+      // tx, same as every other sweep — one tenant gives each trash entry an
+      // enumeration transaction plus one per-tenant transaction.
+      tenant: {
+        findMany: record("tenant.findMany", async (_arg: unknown) => [
+          { id: TRASH_TENANT_ID, trashRetentionDays: 30 },
+        ]),
+      },
       auditOutbox: { create: record("auditOutbox.create", async (_arg: unknown) => ({})) },
     };
   }
 
   const workerPrisma = {
-    // sweepTrashEntry enumerates on the client itself; one tenant gives each
-    // trash entry one transaction.
-    tenant: {
-      findMany: vi.fn(async () => [{ id: TRASH_TENANT_ID, trashRetentionDays: 30 }]),
-    },
     $transaction: vi.fn(async (fn: (tx: ReturnType<typeof makeTx>) => Promise<unknown>) =>
       fn(makeTx()),
     ),
@@ -127,9 +129,11 @@ describe("sweepOnce dispatch sets the bypass each entry declares (C1)", () => {
     const { workerPrisma, txs } = makeDispatchPrisma();
     await sweepOnce(workerPrisma, 100, { intervalMs: 1, emitHeartbeatAudit: true });
 
-    // access-request status sweep + one per non-trash entry + one per trash
-    // entry (one tenant) + the heartbeat.
-    expect(txs).toHaveLength(RETENTION_REGISTRY.length + 2);
+    // access-request status sweep + one per non-trash entry + TWO per trash
+    // entry (its own enumeration transaction (C2), plus one per tenant) +
+    // the heartbeat.
+    const TRASH_ENTRY_COUNT = RETENTION_REGISTRY.filter((e) => e.kind === "PER_TENANT_TRASH").length;
+    expect(txs).toHaveLength(RETENTION_REGISTRY.length + 2 + TRASH_ENTRY_COUNT);
     const bypassTxs = txs.filter((t) => !NON_GLOBAL_DELETE.some((table) => deletesFrom(t, table)));
     expect(bypassTxs).toHaveLength(txs.length - NON_GLOBAL_DELETE.length);
     for (const state of bypassTxs) {

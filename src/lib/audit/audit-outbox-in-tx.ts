@@ -39,13 +39,12 @@ export async function enqueueAuditInTx(
       `bypass_rls=${ctx?.bypassRls}, tenant_id=${ctx?.tenantId}, expected=${tenantId}`,
     );
   }
-  const [tenantExists] = await tx.$queryRaw<{ ok: boolean }[]>`
-    SELECT EXISTS (SELECT 1 FROM tenants WHERE id = ${tenantId}::uuid) AS ok`;
-  if (!tenantExists?.ok) {
-    throw new Error(
-      `enqueueAuditInTx: tenantId ${tenantId} does not exist`,
-    );
-  }
+  // No tenant-existence probe here (C4): `audit_outbox_tenant_id_fkey` is not
+  // DEFERRABLE, so it is checked at this INSERT, in the same transaction, and
+  // referential-integrity checks bypass row security (PostgreSQL docs, "Row
+  // Security Policies") — an unknown tenantId rejects on the FK regardless of
+  // which grant this call runs under, including one that does not name
+  // `tenants`.
   await tx.auditOutbox.create({
     data: {
       tenantId,

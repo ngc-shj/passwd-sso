@@ -45,7 +45,9 @@ import {
   type ChainVerifyReason,
 } from "@/lib/audit/audit-chain-verify";
 import { MS_PER_HOUR, MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 
 config({ path: resolve(process.cwd(), ".env.local") });
@@ -251,9 +253,16 @@ export async function runTick(
   prisma: PrismaClient,
   states: Map<string, TenantState>,
 ): Promise<void> {
-  // `tenants` carries no tenant_isolation policy (it is the tenancy root), so
-  // this read needs no RLS context — unlike everything verifyTenantChain reads.
-  const tenants = await prisma.tenant.findMany({ select: { id: true } });
+  // `tenants` now carries the same tenant_isolation policy as every other
+  // table (C1): a bare read sees nothing once any GUC has touched the
+  // connection. The enumeration runs under the named SYSTEM_MAINTENANCE_
+  // TENANT_LOOKUP grant (purpose SYSTEM_MAINTENANCE, models ["tenant"] —
+  // registry rule D2), in its own bypass transaction.
+  const tenants = await withBypassRls(
+    prisma,
+    (tx) => tx.tenant.findMany({ select: { id: true } }),
+    BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP,
+  );
   const logger = console;
   let verified = 0;
   let errored = 0;
@@ -262,87 +271,109 @@ export async function runTick(
   let failed = 0;
   const erroredTenantIds: string[] = [];
 
-  for (const { id: tenantId } of tenants) {
-    try {
-      const result = await verifyTenantChain(tenantId, { prisma, logger });
-      const state = states.get(tenantId) ?? {
-        lastAlertAt: null,
-        inFailedState: false,
-      };
+  // The `__system__` tenant always exists, so an empty enumeration means this
+  // read lost its bypass scope (not "the deployment has no tenants") — an
+  // error, not a healthy empty tick. Still emit the heartbeat (liveness is
+  // unconditional) with a non-zero erroredTenantCount, the field the deployed
+  // alert keys on, rather than throwing (a throw would skip the heartbeat and
+  // leave only the absence alarm, which cannot tell "inert" from "dead").
+  // The sentinel is enumerated (it is what makes an empty enumeration
+  // diagnostic, below) but is not verified here: withTenantRls refuses to open
+  // a context on it — it is the FK target of every unattributable audit row, so
+  // a context scoped to it would expose all of them — and verifyTenantChain
+  // would throw on it every tick. It is left out of both counters and of
+  // tenantCount rather than counted as verified: nothing about its chain was
+  // read. Its audit_chain_enabled is false (a retention migration refuses to
+  // run otherwise), so there is no chain to verify today.
+  const verifiable = tenants.map((t) => t.id).filter((id) => id !== SYSTEM_TENANT_ID);
+  if (tenants.length === 0) {
+    errored = 1;
+    logger.error(
+      "audit-chain-verify-worker: tick incomplete — reason=TENANT_ENUMERATION_EMPTY (0 tenants enumerated under bypass; the system tenant always exists)",
+    );
+  } else {
+    for (const tenantId of verifiable) {
+      try {
+        const result = await verifyTenantChain(tenantId, { prisma, logger });
+        const state = states.get(tenantId) ?? {
+          lastAlertAt: null,
+          inFailedState: false,
+        };
 
-      if (!result.ok) {
-        const now = Date.now();
-        const shouldAlert =
-          !state.inFailedState ||
-          (state.lastAlertAt !== null &&
-            now - state.lastAlertAt >= HYSTERESIS_REALERT_MS);
-        if (shouldAlert) {
-          // reason carries the discriminator: with only firstTamperedSeq an
-          // ANCHOR_MISSING or RANGE_INCOMPLETE failure logs a null seq and
-          // reads like noise, which is the opposite of what a chain alert is
-          // for. anchorChecked says whether the head-hash comparison ran.
-          logger.error(
-            "audit-chain-verify-worker: CHAIN_VERIFY_FAILED tenant=%s reason=%s firstTamperedSeq=%s firstGapAfterSeq=%s firstBrokenLinkSeq=%s walkedThrough=%d anchorChecked=%s",
-            tenantId,
-            result.reason ?? "UNKNOWN",
-            result.firstTamperedSeq,
-            result.firstGapAfterSeq,
-            result.firstBrokenLinkSeq,
-            result.walkedThrough,
-            result.anchorChecked,
-          );
-          state.lastAlertAt = now;
+        if (!result.ok) {
+          const now = Date.now();
+          const shouldAlert =
+            !state.inFailedState ||
+            (state.lastAlertAt !== null &&
+              now - state.lastAlertAt >= HYSTERESIS_REALERT_MS);
+          if (shouldAlert) {
+            // reason carries the discriminator: with only firstTamperedSeq an
+            // ANCHOR_MISSING or RANGE_INCOMPLETE failure logs a null seq and
+            // reads like noise, which is the opposite of what a chain alert is
+            // for. anchorChecked says whether the head-hash comparison ran.
+            logger.error(
+              "audit-chain-verify-worker: CHAIN_VERIFY_FAILED tenant=%s reason=%s firstTamperedSeq=%s firstGapAfterSeq=%s firstBrokenLinkSeq=%s walkedThrough=%d anchorChecked=%s",
+              tenantId,
+              result.reason ?? "UNKNOWN",
+              result.firstTamperedSeq,
+              result.firstGapAfterSeq,
+              result.firstBrokenLinkSeq,
+              result.walkedThrough,
+              result.anchorChecked,
+            );
+            state.lastAlertAt = now;
+          }
+          state.inFailedState = true;
+        } else {
+          state.inFailedState = false;
+          state.lastAlertAt = null;
         }
-        state.inFailedState = true;
-      } else {
-        state.inFailedState = false;
-        state.lastAlertAt = null;
+        if (!result.ok) failed++;
+        states.set(tenantId, state);
+        verified++;
+      } catch (err) {
+        errored++;
+        erroredTenantIds.push(tenantId);
+        logger.error(
+          "audit-chain-verify-worker: tenant=%s verify threw: %O",
+          tenantId,
+          err,
+        );
       }
-      if (!result.ok) failed++;
-      states.set(tenantId, state);
-      verified++;
-    } catch (err) {
-      errored++;
-      erroredTenantIds.push(tenantId);
+    }
+
+    // Liveness and coverage are independent facts and get independent signals.
+    //
+    // The heartbeat is LIVENESS only, and is emitted unconditionally: its alarm
+    // is `absence(...) for 2h`, so withholding it on a tenant failure would make
+    // one permanently-failing tenant indistinguishable from a dead worker. That
+    // alarm would then fire forever with a recovery step that does nothing, get
+    // muted, and a real crash would go unseen — the manufactured-assurance
+    // failure this worker exists to avoid, reproduced at the operator.
+    //
+    // COVERAGE rides on the same line as counts. A partial tick must never read
+    // as fully verified, so alert on `verifiedTenantCount < tenantCount` rather
+    // than on the heartbeat's absence.
+    if (errored > 0) {
       logger.error(
-        "audit-chain-verify-worker: tenant=%s verify threw: %O",
-        tenantId,
-        err,
+        "audit-chain-verify-worker: tick incomplete — %d/%d tenants failed to verify: %s",
+        errored,
+        verifiable.length,
+        // Name them, but bounded: the dominant failure (RLS context lost) fails
+        // EVERY tenant, so an unbounded join is a ~10KB line at 283 tenants —
+        // past the point a log driver keeps it in one record.
+        erroredTenantIds.length > ERRORED_IDS_LOGGED
+          ? `${erroredTenantIds.slice(0, ERRORED_IDS_LOGGED).join(",")} (+${erroredTenantIds.length - ERRORED_IDS_LOGGED} more)`
+          : erroredTenantIds.join(","),
       );
     }
-  }
-
-  // Liveness and coverage are independent facts and get independent signals.
-  //
-  // The heartbeat is LIVENESS only, and is emitted unconditionally: its alarm
-  // is `absence(...) for 2h`, so withholding it on a tenant failure would make
-  // one permanently-failing tenant indistinguishable from a dead worker. That
-  // alarm would then fire forever with a recovery step that does nothing, get
-  // muted, and a real crash would go unseen — the manufactured-assurance
-  // failure this worker exists to avoid, reproduced at the operator.
-  //
-  // COVERAGE rides on the same line as counts. A partial tick must never read
-  // as fully verified, so alert on `verifiedTenantCount < tenantCount` rather
-  // than on the heartbeat's absence.
-  if (errored > 0) {
-    logger.error(
-      "audit-chain-verify-worker: tick incomplete — %d/%d tenants failed to verify: %s",
-      errored,
-      tenants.length,
-      // Name them, but bounded: the dominant failure (RLS context lost) fails
-      // EVERY tenant, so an unbounded join is a ~10KB line at 283 tenants —
-      // past the point a log driver keeps it in one record.
-      erroredTenantIds.length > ERRORED_IDS_LOGGED
-        ? `${erroredTenantIds.slice(0, ERRORED_IDS_LOGGED).join(",")} (+${erroredTenantIds.length - ERRORED_IDS_LOGGED} more)`
-        : erroredTenantIds.join(","),
-    );
   }
 
   console.log(
     JSON.stringify({
       level: "info",
       _logType: "audit-chain-verify-heartbeat",
-      tenantCount: tenants.length,
+      tenantCount: verifiable.length,
       verifiedTenantCount: verified,
       erroredTenantCount: errored,
       // Carried here so tamper detection has a structured signal. The only
