@@ -30,8 +30,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** The `meta.driverAdapterError.cause.code` nesting the pg adapter produces. */
+/**
+ * The `meta.driverAdapterError.cause.originalCode` nesting `@prisma/adapter-pg`
+ * actually produces (measured against a real FK violation through both the raw-
+ * query and the ORM path — src/lib/prisma/prisma-error.ts's `pgErrorCode` header).
+ * `convertDriverError` always spreads `originalCode`, never a sibling `code`.
+ */
 function adapterError(sqlstate: string): Error {
+  const err = new Error("\nInvalid `prisma.$executeRaw()` invocation:\n\nRaw query failed.");
+  Object.assign(err, {
+    code: "P2010",
+    meta: { driverAdapterError: { cause: { originalCode: sqlstate } } },
+  });
+  return err;
+}
+
+/** The STALE shape `pgErrorCode` was written against before the adapter moved
+ * the SQLSTATE from `cause.code` to `cause.originalCode` — kept as a
+ * defensive-fallback cell, not because any live adapter version produces it. */
+function legacyAdapterError(sqlstate: string): Error {
   const err = new Error("\nInvalid `prisma.$executeRaw()` invocation:\n\nRaw query failed.");
   Object.assign(err, {
     code: "P2010",
@@ -78,6 +95,13 @@ describe("isRetryableCleanupConflict", () => {
   it.each(RETRYABLE_CLEANUP_SQLSTATES)("recognises %s carried in the message", (sqlstate) => {
     expect(isRetryableCleanupConflict(messageError(sqlstate))).toBe(true);
   });
+
+  it.each(RETRYABLE_CLEANUP_SQLSTATES)(
+    "recognises %s carried in the legacy cause.code shape too (defensive fallback)",
+    (sqlstate) => {
+      expect(isRetryableCleanupConflict(legacyAdapterError(sqlstate))).toBe(true);
+    },
+  );
 
   it("names exactly the three transient conflicts, and no others", () => {
     // 23505 (unique_violation) and 42P01 (undefined_table) are permanent: a

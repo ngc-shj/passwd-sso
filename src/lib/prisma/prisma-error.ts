@@ -42,16 +42,33 @@ function asSqlState(value: unknown): string | null {
  * real database (fixtures at helpers.test.ts), and that helper now delegates
  * here so the two cannot drift into deciding one predicate differently:
  *
- *   1. meta.driverAdapterError.cause.code   the pg driver adapter's nesting
- *   2. meta.code                            P2010's flatter rendering
- *   3. err.code                             a direct pg error
- *   4. err.cause.code                       a Prisma-wrapped driver error
- *   5. "Code: `42P01`" in the message       paths that render it into the text
+ *   1. meta.driverAdapterError.cause.originalCode   the pg driver adapter's nesting
+ *   2. meta.code                                    P2010's flatter rendering
+ *   3. err.code                                      a direct pg error
+ *   4. err.cause.code                                a Prisma-wrapped driver error
+ *   5. "Code: `42P01`" in the message                paths that render it into the text
  *
  * Reading the wrapper before the nested value is what makes this order
  * load-bearing rather than arbitrary: a P2010 carries `code` AND the driver's
  * SQLSTATE underneath, so returning `code` first hands back "P2010" for every
  * raw-query failure. That is why steps 3 and 4 go through `asSqlState`.
+ *
+ * Step 1 reads `originalCode`, not `code`: `@prisma/adapter-pg`'s
+ * `convertDriverError` always spreads `{ originalCode: error.code, originalMessage:
+ * error.message, ...mapDriverError(error) }`, and `mapDriverError`'s per-SQLSTATE
+ * branches (UniqueConstraintViolation, ForeignKeyConstraintViolation, …) never add
+ * a sibling `code` field — so `cause.code` is ALWAYS undefined on the adapter
+ * version this repo pins (measured directly: a real `tx.auditOutbox.create()` FK
+ * violation's `meta.driverAdapterError.cause` is `{ originalCode: '23503',
+ * originalMessage, kind: 'ForeignKeyConstraintViolation', constraint }`, no `code`
+ * at all). Step 1 was therefore dead for every ORM-path error (no later step
+ * recognises one either: Prisma's own rendered `.message` for an ORM error never
+ * embeds "Code: `…`.", unlike a raw-query P2010's) — silently breaking
+ * `classifySentinelTenantConstraint` (CF13, an ORM `user.create`/`user.update`
+ * CHECK violation) for every real sign-in it exists to classify. A bare `.code`
+ * fallback stays after `originalCode` for defensiveness only — no live shape
+ * this repo has measured produces it, but a parser should not go blind if an
+ * adapter upgrade or a different error class ever restores that field.
  *
  * This is the repo's single reading of "what SQLSTATE does this error carry".
  * Add callers here rather than re-deriving: `isLockTimeoutError` in
@@ -68,7 +85,8 @@ export function pgErrorCode(err: unknown): string | null {
     if (adapter && typeof adapter === "object") {
       const cause = (adapter as { cause?: unknown }).cause;
       if (cause && typeof cause === "object") {
-        const nested = (cause as { code?: unknown }).code;
+        const nested =
+          (cause as { originalCode?: unknown }).originalCode ?? (cause as { code?: unknown }).code;
         if (typeof nested === "string") return nested;
       }
     }
