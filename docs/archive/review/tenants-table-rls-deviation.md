@@ -4,13 +4,18 @@
 
 - Found by: the C4 integration cell asserting SQLSTATE 23503 for an `audit_outbox` FK violation raised
   through the model API; `pgErrorCode` returned `null`.
-- Cause: `@prisma/adapter-pg` reports `{ originalCode, originalMessage, ...mapDriverError(error) }`;
-  the per-kind branches add no `code`. `pgErrorCode` read `cause.code` first, so every model-API
-  error resolved to `null`; raw-query errors resolved only through the rendered message text.
-  `classifySentinelTenantConstraint` (sign-in, `users_not_system_tenant`) was therefore dead.
-  The `helpers.test.ts` fixture carried the same stale shape.
-- Change: `src/lib/prisma/prisma-error.ts` reads `cause.originalCode` first, `cause.code` as a
-  fallback; `helpers.test.ts` fixture corrected, a legacy-shape cell kept.
+- Cause: `@prisma/adapter-pg` reports `{ originalCode, originalMessage, ...mapDriverError(error) }`.
+  `mapDriverError`'s `default:` branch adds a sibling `code`; its named branches (22001, 22003,
+  22P02, 23505, 23502, 23503, 23001, 3D000, 28000, 28P01, 40001, 40P01, 42P01, 42703, 42P04,
+  53300) do not. `pgErrorCode` read `cause.code` first, so for those SQLSTATEs a model-API error
+  resolved to `null`; raw-query errors recovered them only through the rendered message text.
+  Unmapped SQLSTATEs (23514 — `classifySentinelTenantConstraint` — 55P03, 42501) were never
+  affected. The first version of this entry (and the code comment) claimed `cause.code` was always
+  absent and CF13 dead; the Phase 2 self-check refuted that against the adapter source, and both
+  texts were corrected.
+- Change: `src/lib/prisma/prisma-error.ts` reads `cause.originalCode` first, `cause.code` as the
+  live fallback; `helpers.test.ts` fixture labels corrected; `prisma-error.test.ts` gains the
+  named-kind (`originalCode`-only) shape.
 - Red proof: on a scratch copy with the previous `prisma-error.ts`, `helpers.test.ts` fails 5 cells;
   with the fix it passes. Separate commit.
 
@@ -47,3 +52,24 @@
 
 - Placed between Block 1 and Block 2, as planned ("before Block 2's first `SET LOCAL`"), named 1b
   (fatal `[E-RLS-TENANTS]`) and 1c (seed-dependent `[E-RLS-TENANTS-SEED]`).
+
+## D6 — `scripts/manual-tests/mcp-replay-audit-verification.ts` unchanged
+
+- Its tenant read runs under `withTenantRls(NIL_UUID)`, which the policy would hide, but the script
+  connects through `MIGRATION_DATABASE_URL` as the superuser (stated in its header), which bypasses
+  RLS. Unaffected; the plan's member-set table omitted it for that reason without saying so.
+
+## D7 — migration header comment not amended
+
+- The header says a query that set neither scope "sees nothing"; precisely, it sees no rows on a
+  fresh connection and raises 22P02 on one whose `app.tenant_id` reverted to `''` (plan R3). The
+  migration is already applied to the dev database, and editing an applied migration makes Prisma
+  report it as modified, so the imprecision stays in the header; plan R3, `alerts.md` and the
+  worker comments state the two outcomes correctly.
+
+## D8 — negative test gains Case 16
+
+- Self-check finding: the fatal `[E-RLS-TENANTS]` had no case that drove it red. Cases 15/16 now
+  share one snapshot/restore function; Case 16 widens the policy to `bypass OR true` (symmetric, so
+  Block 1 passes) and expects `[E-RLS-TENANTS]`. Checked against the dev DB in a rolled-back
+  transaction: under the widened policy a no-context `passwd_app` read sees every tenant.

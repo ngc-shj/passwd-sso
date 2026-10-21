@@ -53,22 +53,17 @@ function asSqlState(value: unknown): string | null {
  * SQLSTATE underneath, so returning `code` first hands back "P2010" for every
  * raw-query failure. That is why steps 3 and 4 go through `asSqlState`.
  *
- * Step 1 reads `originalCode`, not `code`: `@prisma/adapter-pg`'s
- * `convertDriverError` always spreads `{ originalCode: error.code, originalMessage:
- * error.message, ...mapDriverError(error) }`, and `mapDriverError`'s per-SQLSTATE
- * branches (UniqueConstraintViolation, ForeignKeyConstraintViolation, …) never add
- * a sibling `code` field — so `cause.code` is ALWAYS undefined on the adapter
- * version this repo pins (measured directly: a real `tx.auditOutbox.create()` FK
- * violation's `meta.driverAdapterError.cause` is `{ originalCode: '23503',
- * originalMessage, kind: 'ForeignKeyConstraintViolation', constraint }`, no `code`
- * at all). Step 1 was therefore dead for every ORM-path error (no later step
- * recognises one either: Prisma's own rendered `.message` for an ORM error never
- * embeds "Code: `…`.", unlike a raw-query P2010's) — silently breaking
- * `classifySentinelTenantConstraint` (CF13, an ORM `user.create`/`user.update`
- * CHECK violation) for every real sign-in it exists to classify. A bare `.code`
- * fallback stays after `originalCode` for defensiveness only — no live shape
- * this repo has measured produces it, but a parser should not go blind if an
- * adapter upgrade or a different error class ever restores that field.
+ * Step 1 reads `originalCode` before `code`: `@prisma/adapter-pg`'s
+ * `convertDriverError` spreads `{ originalCode: error.code, originalMessage:
+ * error.message, ...mapDriverError(error) }`. `mapDriverError`'s `default:`
+ * branch (kind "postgres") adds a sibling `code`, but its named branches —
+ * 22001, 22003, 22P02, 23505, 23502, 23503, 23001, 3D000, 28000, 28P01, 40001,
+ * 40P01, 42P01, 42703, 42P04, 53300 — do not. Reading `code` alone therefore
+ * returned null for those SQLSTATEs on the ORM path (e.g. a model-API FK
+ * violation's cause is `{ originalCode: '23503', originalMessage, kind:
+ * 'ForeignKeyConstraintViolation', constraint }`), and only raw-query errors
+ * recovered them, through step 5's rendered text. Unmapped SQLSTATEs (23514,
+ * 55P03, 42501, …) carry both fields, so `code` stays as the live fallback.
  *
  * This is the repo's single reading of "what SQLSTATE does this error carry".
  * Add callers here rather than re-deriving: `isLockTimeoutError` in

@@ -31,10 +31,10 @@ afterEach(() => {
 });
 
 /**
- * The `meta.driverAdapterError.cause.originalCode` nesting `@prisma/adapter-pg`
- * actually produces (measured against a real FK violation through both the raw-
- * query and the ORM path — src/lib/prisma/prisma-error.ts's `pgErrorCode` header).
- * `convertDriverError` always spreads `originalCode`, never a sibling `code`.
+ * The `meta.driverAdapterError.cause` nesting `@prisma/adapter-pg` produces for
+ * a SQLSTATE its `mapDriverError` names (23503, 40001, 40P01, …): `originalCode`
+ * only, no sibling `code` (measured against a real FK violation — see
+ * src/lib/prisma/prisma-error.ts's `pgErrorCode` header).
  */
 function adapterError(sqlstate: string): Error {
   const err = new Error("\nInvalid `prisma.$executeRaw()` invocation:\n\nRaw query failed.");
@@ -45,9 +45,8 @@ function adapterError(sqlstate: string): Error {
   return err;
 }
 
-/** The STALE shape `pgErrorCode` was written against before the adapter moved
- * the SQLSTATE from `cause.code` to `cause.originalCode` — kept as a
- * defensive-fallback cell, not because any live adapter version produces it. */
+/** The `cause.code` shape: what the adapter's `default:` branch carries (beside
+ * `originalCode`) for a SQLSTATE `mapDriverError` does not name, such as 23514. */
 function legacyAdapterError(sqlstate: string): Error {
   const err = new Error("\nInvalid `prisma.$executeRaw()` invocation:\n\nRaw query failed.");
   Object.assign(err, {

@@ -558,13 +558,32 @@ export async function sweepPerTenantAge(
 }
 
 /**
+ * The tenants with explicit trash retention configured (NULL skipped).
+ * Asserts the bypass first, like every sweep that takes a tx. Declared and
+ * exported rather than passed as an inline arrow so sweepTrashEntry can hand
+ * inSweepTx a named function (the read-context gate's declared-function
+ * form) and so sweep-bypass-assert.test.ts can run it through the same
+ * per-member deny/allow pattern as the other tx-taking sweeps.
+ */
+export async function listTrashRetentionTenants(
+  tx: Prisma.TransactionClient,
+): Promise<Array<{ id: string; trashRetentionDays: number | null }>> {
+  await assertSweepBypass(tx, true);
+  return tx.tenant.findMany({
+    where: { trashRetentionDays: { not: null } },
+    select: { id: true, trashRetentionDays: true },
+  });
+}
+
+/**
  * Auto-purge soft-deleted (trashed) vault entries past each tenant's configured
  * grace period (SC2). One PER_TENANT_TRASH entry per entry table.
  *
  * First, the tenant enumeration itself runs in its own bypass transaction
- * naming only `tenants` (listTrashRetentionTenants, via inSweepTx) — `tenants`
- * carries the tenant_isolation policy like every other table (C1), so a bare
- * read here would see nothing.
+ * naming only `tenants` (listTrashRetentionTenants, via inSweepTx). `tenants`
+ * carries the tenant_isolation policy like every other table, so a bare read
+ * here would see no rows on a fresh connection and raise 22P02 on one whose
+ * app.tenant_id was set and reverted.
  *
  * Per tenant, in its own transaction:
  *   1. inSweepTx sets bypass_rls FIRST (entry tables AND attachments are RLS-enabled).
@@ -588,24 +607,6 @@ export async function sweepPerTenantAge(
  *
  * @returns Total entries deleted across all enumerated tenants.
  */
-/**
- * The tenants with explicit trash retention configured (NULL skipped).
- * Asserts the bypass first, like every sweep that takes a tx. Declared and
- * exported rather than passed as an inline arrow so sweepTrashEntry can hand
- * inSweepTx a named function (the read-context gate's declared-function
- * form) and so sweep-bypass-assert.test.ts can run it through the same
- * per-member deny/allow pattern as the other tx-taking sweeps.
- */
-export async function listTrashRetentionTenants(
-  tx: Prisma.TransactionClient,
-): Promise<Array<{ id: string; trashRetentionDays: number | null }>> {
-  await assertSweepBypass(tx, true);
-  return tx.tenant.findMany({
-    where: { trashRetentionDays: { not: null } },
-    select: { id: true, trashRetentionDays: true },
-  });
-}
-
 export async function sweepTrashEntry(
   workerPrisma: PrismaClient,
   entry: PerTenantTrashEntry,
@@ -614,9 +615,9 @@ export async function sweepTrashEntry(
   sqlIdentifier(entry.table);
 
   // Enumerate only tenants with explicit trash retention configured (NULL →
-  // skip). `tenants` now carries the same tenant_isolation policy as every
-  // other table (C1), so this read runs in its own bypass transaction naming
-  // only `tenants` — unlike sweepAuditLogs/sweepPerTenantAge, which already
+  // skip). `tenants` carries the same tenant_isolation policy as every other
+  // table, so this read runs in its own bypass transaction naming only
+  // `tenants` — unlike sweepAuditLogs/sweepPerTenantAge, which already
   // enumerate tenants on a tx inSweepTx opened with the entry's own grant
   // (which lists `tenants` too), sweepTrashEntry has no such tx yet at this
   // point: the per-tenant purge below opens one per tenant, after this.

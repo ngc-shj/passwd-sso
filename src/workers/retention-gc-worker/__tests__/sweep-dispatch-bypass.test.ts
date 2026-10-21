@@ -148,6 +148,18 @@ describe("sweepOnce dispatch sets the bypass each entry declares (C1)", () => {
     }
   });
 
+  it("each trash entry lists its tenants in a transaction whose grant names only tenants", async () => {
+    const { workerPrisma, txs } = makeDispatchPrisma();
+    await sweepOnce(workerPrisma, 100, { intervalMs: 1, emitHeartbeatAudit: false });
+
+    const TRASH_ENTRY_COUNT = RETENTION_REGISTRY.filter((e) => e.kind === "PER_TENANT_TRASH").length;
+    const enumerationTxs = txs.filter((t) => t.calls.some((c) => c.name === "tenant.findMany") && t.gucs.tables === "tenants");
+    expect(enumerationTxs).toHaveLength(TRASH_ENTRY_COUNT);
+    for (const state of enumerationTxs) {
+      expect(state.calls.some((c) => c.name === "$executeRawUnsafe")).toBe(false);
+    }
+  });
+
   it("an entry without globalDelete (verification_tokens) runs with no set_config", async () => {
     const { workerPrisma, txs } = makeDispatchPrisma();
     const counts = await sweepOnce(workerPrisma, 100, { intervalMs: 1, emitHeartbeatAudit: false });

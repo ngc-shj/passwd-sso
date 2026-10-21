@@ -253,9 +253,9 @@ export async function runTick(
   prisma: PrismaClient,
   states: Map<string, TenantState>,
 ): Promise<void> {
-  // `tenants` now carries the same tenant_isolation policy as every other
-  // table (C1): a bare read sees nothing once any GUC has touched the
-  // connection. The enumeration runs under the named SYSTEM_MAINTENANCE_
+  // `tenants` carries the same tenant_isolation policy as every other table:
+  // a bare read sees no rows on a fresh connection and raises 22P02 on one
+  // whose app.tenant_id was set and reverted. The enumeration runs under the named SYSTEM_MAINTENANCE_
   // TENANT_LOOKUP grant (purpose SYSTEM_MAINTENANCE, models ["tenant"] —
   // registry rule D2), in its own bypass transaction.
   const tenants = await withBypassRls(

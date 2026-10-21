@@ -159,6 +159,9 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
 
   it("(c2) a tenant-scoped INSERT of a fresh id is refused with 42501 exactly", async () => {
     const freshId = randomUUID();
+    // Tracked before the statement: under a widened WITH CHECK the INSERT
+    // commits, and cleanup must still remove the row.
+    ctx.trackTenant(freshId);
     let caught: unknown;
     try {
       await ctx.app.prisma.$transaction(async (tx) => {
@@ -187,6 +190,9 @@ describe("tenants RLS (C1 / C4 / C5)", () => {
     // app.tenant_id) — distinct from (c1), which denies via USING instead.
     const tenantC = await ctx.createTenant();
     const freshId = randomUUID();
+    // Under a widened WITH CHECK the row moves to freshId; track it so cleanup
+    // still finds it.
+    ctx.trackTenant(freshId);
     let caught: unknown;
     try {
       await ctx.app.prisma.$transaction(async (tx) => {

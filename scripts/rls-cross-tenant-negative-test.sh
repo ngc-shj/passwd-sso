@@ -20,6 +20,7 @@
 #   13. tenant branch casts app.tenant_id outside a sub-SELECT → [E-RLS-TENANT-INITPLAN]
 #   14. the same cast commuted to the left of `=` → [E-RLS-TENANT-INITPLAN]
 #   15. tenants_tenant_isolation's tenant branch dropped (#923) → [E-RLS-TENANTS-SEED]
+#   16. tenants_tenant_isolation admits every row (#923) → [E-RLS-TENANTS]
 #
 # Codes NOT exercised here (acceptable coverage gaps):
 #   - [E-RLS-COUNT-B]: structurally identical to [E-RLS-COUNT-A] (Block 3 mirrors Block 2).
@@ -80,13 +81,13 @@ cleanup() {
     psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q \
       -c "DROP TABLE IF EXISTS rls_negative_test CASCADE; DROP TABLE IF EXISTS rls_colparity_probe CASCADE; DROP FUNCTION IF EXISTS rls_negative_secdef_probe();" >/dev/null 2>&1 || true
   fi
-  # Case 15 fallback: unlike every other case, Case 15 ALTERs the REAL
+  # Cases 15/16 fallback: unlike every other case, these ALTER the REAL
   # tenants_tenant_isolation policy (there is no throwaway table for
   # `tenants`). If the script exited between that ALTER and its own restore
   # (SIGINT, a failed assertion before the restore runs), reapply the
   # pre-ALTER snapshot here so a crashed run never leaves the real tenants
-  # table running with its tenant branch dropped. No-op (same text back) if
-  # Case 15 already restored successfully.
+  # table running with a mutated policy. No-op (same text back) if the case
+  # already restored successfully.
   if [[ -n "${MIG_URL:-}" && -n "${TENANTS_POLICY_QUAL_SNAPSHOT:-}" && -n "${TENANTS_POLICY_CHECK_SNAPSHOT:-}" ]]; then
     psql_safe "$MIG_URL" -v ON_ERROR_STOP=0 -q -c "
       ALTER POLICY tenants_tenant_isolation ON tenants
@@ -410,17 +411,19 @@ run_negative_case 14 \
   "[E-RLS-TENANT-INITPLAN]" \
   "no" || total_failures=$((total_failures + 1))
 
-# Case 15: tenants_tenant_isolation's tenant branch dropped (#923), bypass
-# branch kept symmetric (USING and WITH CHECK both become just the bypass
-# sub-SELECT) so Block 1's [E-RLS-SYM]/[E-RLS-BYPASS-TABLE] pass and the
-# mutation reaches rls-cross-tenant-verify.sql's tenants block (1c) →
-# [E-RLS-TENANTS-SEED] (CI seeds A0/B0, so (b)/(c1)/(c2) have rows to act
-# on). Unlike every other case this ALTERs the REAL tenants table's policy —
-# there is no throwaway stand-in for `tenants` — so the policy text is
-# snapshotted via pg_get_expr BEFORE the ALTER and restored from that exact
-# snapshot immediately after, with the restored text asserted equal to it
-# (same immediate-restore shape as run_case_8_force_rls for FORCE).
-run_case_15_tenants_branch_dropped() {
+# Cases 15 and 16 ALTER the REAL tenants_tenant_isolation policy (#923) — there
+# is no throwaway stand-in for `tenants`. Each keeps USING and WITH CHECK
+# identical and keeps the bypass sub-SELECT, so Block 1's [E-RLS-SYM] /
+# [E-RLS-BYPASS-TABLE] pass and the mutation reaches the tenants blocks. The
+# policy text is snapshotted via pg_get_expr BEFORE the ALTER and restored from
+# that exact snapshot immediately after, with the restored text asserted equal
+# to it (same immediate-restore shape as run_case_8_force_rls for FORCE).
+#
+#   $1  case number
+#   $2  expression used for both USING and WITH CHECK
+#   $3  expected error code
+run_tenants_policy_case() {
+  local n="$1" expr="$2" expected="$3"
   TENANTS_POLICY_QUAL_SNAPSHOT=$(psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -t -A -c "
     SELECT pg_get_expr(polqual, polrelid) FROM pg_catalog.pg_policy
     WHERE polname = 'tenants_tenant_isolation';
@@ -430,14 +433,14 @@ run_case_15_tenants_branch_dropped() {
     WHERE polname = 'tenants_tenant_isolation';
   ")
   if [[ -z "$TENANTS_POLICY_QUAL_SNAPSHOT" || -z "$TENANTS_POLICY_CHECK_SNAPSHOT" ]]; then
-    printf 'FAIL case 15: could not snapshot tenants_tenant_isolation (policy missing?)\n'
+    printf 'FAIL case %s: could not snapshot tenants_tenant_isolation (policy missing?)\n' "$n"
     return 1
   fi
 
   psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "
     ALTER POLICY tenants_tenant_isolation ON tenants
-      USING ((SELECT public.rls_bypass_admits('tenants')))
-      WITH CHECK ((SELECT public.rls_bypass_admits('tenants')));
+      USING ($expr)
+      WITH CHECK ($expr);
   "
 
   local expected_tables="${manifest_entries},rls_negative_test"
@@ -447,7 +450,7 @@ run_case_15_tenants_branch_dropped() {
     -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
 
   # Restore IMMEDIATELY — before any assertion below can return early and
-  # leave the real tenants table running with no tenant scope.
+  # leave the real tenants table running with the mutated policy.
   psql_safe "$MIG_URL" -v ON_ERROR_STOP=1 -q -c "
     ALTER POLICY tenants_tenant_isolation ON tenants
       USING ($TENANTS_POLICY_QUAL_SNAPSHOT)
@@ -464,21 +467,33 @@ run_case_15_tenants_branch_dropped() {
     WHERE polname = 'tenants_tenant_isolation';
   ")
   if [[ "$restored_qual" != "$TENANTS_POLICY_QUAL_SNAPSHOT" || "$restored_check" != "$TENANTS_POLICY_CHECK_SNAPSHOT" ]]; then
-    printf 'FAIL case 15: restored tenants_tenant_isolation text does not match the pre-ALTER snapshot\n'
+    printf 'FAIL case %s: restored tenants_tenant_isolation text does not match the pre-ALTER snapshot\n' "$n"
     return 1
   fi
 
   if (( ec == 0 )); then
-    printf 'FAIL case 15: verify exited 0 with the tenants policy tenant branch dropped — gate is broken\n'
+    printf 'FAIL case %s: verify exited 0 with the tenants policy mutated — gate is broken\n' "$n"
     return 1
   fi
-  if ! grep -qF -- "[E-RLS-TENANTS-SEED]" <<<"$out"; then
-    printf 'FAIL case 15: verify failed but expected code [E-RLS-TENANTS-SEED] not found in output:\n%s\n' "$out"
+  if ! grep -qF -- "$expected" <<<"$out"; then
+    printf 'FAIL case %s: verify failed but expected code %s not found in output:\n%s\n' "$n" "$expected" "$out"
     return 1
   fi
-  printf 'PASS case 15 (matched [E-RLS-TENANTS-SEED])\n'
+  printf 'PASS case %s (matched %s)\n' "$n" "$expected"
 }
-run_case_15_tenants_branch_dropped || total_failures=$((total_failures + 1))
+
+# Case 15: tenant branch dropped. A no-context read still sees nothing, so the
+# fatal Block 1b passes and the seed-dependent Block 1c fails: scope A0 no
+# longer sees its own row (CI seeds A0/B0).
+run_tenants_policy_case 15 \
+  "(SELECT public.rls_bypass_admits('tenants'))" \
+  "[E-RLS-TENANTS-SEED]" || total_failures=$((total_failures + 1))
+
+# Case 16: policy admits every row. A no-context read now sees tenants, so the
+# fatal Block 1b fails before Block 1c runs.
+run_tenants_policy_case 16 \
+  "(SELECT public.rls_bypass_admits('tenants')) OR true" \
+  "[E-RLS-TENANTS]" || total_failures=$((total_failures + 1))
 
 if (( total_failures > 0 )); then
   printf '\n%d negative-test cases failed.\n' "$total_failures"
