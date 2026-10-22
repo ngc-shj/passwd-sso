@@ -194,6 +194,10 @@ either:
   export them for the bootstrap. The running old tasks hold the old passwords in
   their environment, so they cannot open NEW connections from step 3 until step
   4 replaces them — run step 3 immediately before step 4 and accept that window.
+  If the bootstrap fails, it changes no role (every role is checked before the
+  first password is sent, and all roles converge in one transaction), so the
+  database keeps the old passwords while the secret holds the new ones: restore
+  the secret's previous version (`AWSPREVIOUS`) before any task restarts.
 
 ## Deploy Flow (Local / Docker Compose)
 
@@ -492,7 +496,7 @@ Manifest keys:
 |-----|--------|
 | `TABLE:<role> <schema>.<table> <priv>` | table-level privileges |
 | `COLUMN:<role> <schema>.<table>.<col> <priv>` | column-scoped grants not implied by the table-level privilege (13 today, e.g. the webhook workers' `UPDATE (fail_count, last_error, …)`) |
-| `MEMBER:<role> <granted_role> admin=<t\|f>,inherit=<t\|f>,set=<t\|f>` | role membership — an inheritance path; the audited roles should have none. Also every membership IN a retired role. An ADMIN-only row (`inherit=f,set=f`) into a retired role is the grant PostgreSQL 16 gives the non-superuser role that created it and confers none of its privileges, so it is allowed; `roleStateViolations` decides, not the query |
+| `MEMBER:<role> <granted_role> admin=<t\|f>,inherit=<t\|f>,set=<t\|f>` | role membership — an inheritance path; the audited roles should have none. Also every membership IN a retired role. An ADMIN-only row (`inherit=f,set=f`) into a retired role held by a non-audited role is allowed and left out of the manifest comparison: PostgreSQL 16 gives one to the non-superuser role that created the role (on RDS, the master), a deliberately granted one cannot be told apart from it, and neither confers its privileges. `roleStateViolations` decides, not the query |
 | `PUBLIC:<schema>.<table> <priv>` | granted to `PUBLIC`, so inherited by every role |
 | `SCHEMA:<grantee> <schema> <priv>` | `USAGE`/`CREATE` (`CREATE` lets the role add its own objects) |
 | `SEQUENCE:<grantee> <schema>.<seq> <priv>` | `USAGE`/`SELECT`/`UPDATE` |

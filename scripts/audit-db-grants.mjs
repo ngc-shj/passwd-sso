@@ -508,9 +508,9 @@ function aclGrantee(acl) {
  *     confers nothing); a default ACL naming it; and any object privilege PUBLIC
  *     does not also hold (PUBLIC's own grants reach every role, retired or not).
  *
- * A MEMBER key that does not parse as exactly three tab-separated fields with
- * the expected flag shape is itself a violation: role names may contain a tab,
- * and an unparsed key must not fall through to "allowed".
+ * A MEMBER or DEFAULTACL key that does not parse into its fields (three, with
+ * the expected flag shape; four) is itself a violation: role names may contain
+ * a tab, and an unparsed key must not fall through to "allowed".
  */
 export function roleStateViolations(keys, { auditedRoles, retiredRoles }) {
   const audited = new Set(auditedRoles);
@@ -549,8 +549,10 @@ export function roleStateViolations(keys, { auditedRoles, retiredRoles }) {
       continue;
     }
     if (k.startsWith("DEFAULTACL:")) {
-      const acl = k.split("\t").at(-1);
-      if (retired.has(aclGrantee(acl))) out.push(k);
+      // owner, schema, objtype, aclitem. A tab in the owner's name shifts the
+      // fields, so a key of any other shape is refused rather than read.
+      const fields = k.slice("DEFAULTACL:".length).split("\t");
+      if (fields.length !== 4 || retired.has(aclGrantee(fields[3]))) out.push(k);
       continue;
     }
     for (const role of retired) {

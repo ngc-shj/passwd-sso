@@ -28,6 +28,7 @@ import { Client } from "pg";
 import { spawnSync } from "node:child_process";
 import {
   convergeRole,
+  convergeRoles,
   applyDeniedPrivileges,
   loadDeniedPolicy,
   grantRoutineExecute,
@@ -46,6 +47,8 @@ const PROBE = "bootstrap_probe_app";
 const GRANTOR = "bootstrap_probe_grantor";
 /** NOSUPERUSER CREATEROLE stand-in for the RDS master (T10). */
 const STANDIN = "bootstrap_probe_standin";
+/** A second converged role, for the all-or-nothing convergeRoles cases. */
+const PROBE_B = "bootstrap_probe_app_b";
 
 /** SUPERUSER connection — the same privilege level the migrate task uses. */
 function superuserUrl(): string {
@@ -154,7 +157,7 @@ async function grantConnect(su: Client): Promise<void> {
  * "cannot be dropped because some objects depend on it".
  */
 async function dropProbeRoles(su: Client): Promise<void> {
-  for (const role of [PROBE, GRANTOR, STANDIN]) {
+  for (const role of [PROBE, PROBE_B, GRANTOR, STANDIN]) {
     await su.query(
       `DO $$ BEGIN
          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${role}') THEN
@@ -477,6 +480,105 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       });
     });
 
+    it("creates an absent role with CREATE alone, then converges it with the narrowed ALTER", async () => {
+      // The fresh-RDS path: the master creates every role. An ALTER right
+      // after the CREATE (what convergeRole used to send) is refused here and
+      // would log the password.
+      await inRolledBackTransaction(async (c) => {
+        await createStandIn(c);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+        // Precondition: this really runs as a non-superuser, and the role is absent.
+        const { rows: me } = await c.query(
+          "SELECT rolsuper FROM pg_roles WHERE rolname = current_user",
+        );
+        expect(me).toEqual([{ rolsuper: false }]);
+        expect((await c.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [PROBE])).rowCount).toBe(0);
+
+        const first = recordingClient(c);
+        await convergeRole(first.client, PROBE, "pw1");
+        expect(first.statements.filter((s) => s.startsWith("CREATE ROLE"))).toHaveLength(1);
+        expect(first.statements.filter((s) => s.startsWith("ALTER ROLE"))).toEqual([]);
+
+        const second = recordingClient(c);
+        await convergeRole(second.client, PROBE, "pw2");
+        expect(second.statements.some((s) => ADMIN_PREFLIGHT_RE.test(s))).toBe(true);
+        const alters = second.statements.filter((s) => s.startsWith("ALTER ROLE"));
+        expect(alters).toHaveLength(1);
+        expect(alters[0]).toContain(`ALTER ROLE ${PROBE} WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD`);
+        expect(alters[0]).not.toMatch(/SUPERUSER|BYPASSRLS|REPLICATION/);
+
+        await c.query("RESET ROLE");
+        expect(await roleAttrs(c, PROBE)).toEqual({
+          rolsuper: false,
+          rolbypassrls: false,
+          rolcreatedb: false,
+          rolcreaterole: false,
+          rolreplication: false,
+          rolcanlogin: true,
+        });
+        // The membership strip touches only rows where the role is the MEMBER:
+        // the stand-in's ADMIN-only creator row in it survives both runs.
+        expect(await memberRows(c, STANDIN, PROBE)).toBe(1);
+      });
+    });
+
+    it("throws when a membership is still there after the revokes", async () => {
+      // A REVOKE that removes nothing — what PostgreSQL 16 does for another
+      // grantor's row when GRANTED BY is missing — must not pass silently.
+      await inRolledBackTransaction(async (c) => {
+        await createStandIn(c);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+        await c.query(`CREATE ROLE ${GRANTOR} WITH NOLOGIN`);
+        await c.query(`CREATE ROLE ${PROBE} WITH LOGIN`);
+        await c.query(`GRANT ${GRANTOR} TO ${PROBE}`);
+        const dropsRevokes = {
+          escapeLiteral: (value: string) => c.escapeLiteral(value),
+          query: (text: string, params?: unknown[]) =>
+            /^REVOKE /.test(text) ? Promise.resolve({ rows: [], rowCount: 0 }) : c.query(text, params),
+        } as unknown as Client;
+
+        await expect(convergeRole(dropsRevokes, PROBE, "pw")).rejects.toThrow(
+          `role ${PROBE} is still a member of: ${GRANTOR} (granted by ${STANDIN})`,
+        );
+      });
+    });
+
+    it.each([
+      ["CREATEDB", "CREATEROLE"],
+      ["CREATEROLE", "CREATEDB"],
+    ] as const)("refuses, without sending the password, a caller with %s but not %s", async (has) => {
+      await inRolledBackTransaction(async (c) => {
+        // The target exists and the caller holds ADMIN OPTION on it, so only
+        // the caller's own attribute is missing.
+        await c.query(`CREATE ROLE ${PROBE} WITH NOLOGIN`);
+        await c.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER ${has}`);
+        await c.query(`GRANT ${PROBE} TO ${STANDIN} WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+
+        const { client, statements } = recordingClient(c);
+        await expect(convergeRole(client, PROBE, "pw")).rejects.toThrow(
+          "the current role needs CREATEROLE and CREATEDB to converge roles",
+        );
+        expect(statements.some((s) => /rolcreaterole, rolcreatedb/.test(s))).toBe(true);
+        expect(statements.filter((s) => /PASSWORD/i.test(s))).toEqual([]);
+      });
+    });
+
+    it("refuses to CREATE as a caller without CREATEDB, without sending the password", async () => {
+      await inRolledBackTransaction(async (c) => {
+        await c.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE`);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+
+        const { client, statements } = recordingClient(c);
+        await expect(convergeRole(client, PROBE, "pw")).rejects.toThrow(
+          "the current role needs CREATEROLE and CREATEDB to converge roles",
+        );
+        expect(statements.filter((s) => /PASSWORD/i.test(s))).toEqual([]);
+        await c.query("RESET ROLE");
+        expect((await c.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [PROBE])).rowCount).toBe(0);
+      });
+    });
+
     it("revokes a membership it granted itself, in a role it created", async () => {
       await inRolledBackTransaction(async (c) => {
         await createStandIn(c);
@@ -490,6 +592,94 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
 
         expect(await memberRows(c, PROBE, GRANTOR)).toBe(0);
       });
+    });
+  });
+
+  /**
+   * convergeRoles runs every role in one transaction, so a refusal on a later
+   * role or a failed membership strip leaves no role with a new password or
+   * LOGIN. These cases COMMIT their fixtures (convergeRoles opens its own
+   * transaction); beforeEach/afterAll drop every probe role.
+   */
+  describe("convergeRoles: all or nothing", () => {
+    async function passwordHash(name: string): Promise<string | null> {
+      const { rows } = await su.query("SELECT rolpassword FROM pg_authid WHERE rolname = $1", [name]);
+      return rows[0]?.rolpassword ?? null;
+    }
+
+    async function asStandIn<T>(fn: (c: Client) => Promise<T>): Promise<T> {
+      const c = new Client({ connectionString: superuserUrl() });
+      await c.connect();
+      try {
+        await c.query(`SET ROLE ${STANDIN}`);
+        return await fn(c);
+      } finally {
+        await c.end();
+      }
+    }
+
+    beforeEach(async () => {
+      await su.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE CREATEDB`);
+      // PROBE: created by the stand-in, so it holds ADMIN OPTION on it.
+      await su.query(`SET ROLE ${STANDIN}`);
+      await su.query(`CREATE ROLE ${PROBE} WITH NOLOGIN PASSWORD 'old-a'`);
+      await su.query("RESET ROLE");
+    });
+
+    it("refuses before any password is sent when a later role cannot be converged", async () => {
+      // PROBE_B is the superuser's, so the stand-in lacks ADMIN OPTION on it.
+      await su.query(`CREATE ROLE ${PROBE_B} WITH NOLOGIN`);
+      const before = await passwordHash(PROBE);
+
+      const statements = await asStandIn(async (c) => {
+        const { client, statements } = recordingClient(c);
+        await expect(
+          convergeRoles(client, [
+            { name: PROBE, password: "new-a" },
+            { name: PROBE_B, password: "new-b" },
+          ]),
+        ).rejects.toThrow(`role ${PROBE_B}: the current role lacks ADMIN OPTION on it`);
+        return statements;
+      });
+
+      expect(statements.filter((s) => /PASSWORD/i.test(s))).toEqual([]);
+      expect(await passwordHash(PROBE)).toBe(before);
+      expect((await roleAttrs(su, PROBE)).rolcanlogin).toBe(false);
+    });
+
+    it("rolls a role's new LOGIN and password back when its membership cannot be stripped", async () => {
+      // Granted by the superuser into a role the stand-in has no ADMIN on.
+      await su.query(`CREATE ROLE ${GRANTOR} WITH NOLOGIN`);
+      await su.query(`GRANT ${GRANTOR} TO ${PROBE}`);
+      const before = await passwordHash(PROBE);
+
+      await asStandIn(async (c) => {
+        await expect(convergeRoles(c, [{ name: PROBE, password: "new-a" }])).rejects.toThrow(
+          `role ${PROBE}: could not revoke its membership in ${GRANTOR}`,
+        );
+      });
+
+      expect(await passwordHash(PROBE)).toBe(before);
+      expect((await roleAttrs(su, PROBE)).rolcanlogin).toBe(false);
+      expect(await memberRows(su, PROBE, GRANTOR)).toBe(1);
+    });
+
+    it("commits every role when all of them converge", async () => {
+      await su.query(`SET ROLE ${STANDIN}`);
+      await su.query(`CREATE ROLE ${PROBE_B} WITH NOLOGIN`);
+      await su.query("RESET ROLE");
+      const before = await passwordHash(PROBE);
+
+      await asStandIn((c) =>
+        convergeRoles(c, [
+          { name: PROBE, password: "new-a" },
+          { name: PROBE_B, password: "new-b" },
+        ]),
+      );
+
+      expect(await passwordHash(PROBE)).not.toBe(before);
+      expect((await roleAttrs(su, PROBE)).rolcanlogin).toBe(true);
+      expect((await roleAttrs(su, PROBE_B)).rolcanlogin).toBe(true);
     });
   });
 

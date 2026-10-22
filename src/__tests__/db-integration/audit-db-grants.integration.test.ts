@@ -474,9 +474,32 @@ describe("audit-db-grants (real DB)", () => {
         const r = runAudit(manifestPath);
 
         expect(r.status, r.stderr).toBe(0);
+
+        // --write leaves it out too, or a manifest regenerated on RDS would
+        // carry it and fail every dev/CI audit with MISSING_GRANT.
+        const written = join(tmpDir, "creator-write.json");
+        rmSync(written, { force: true });
+        const w = runAuditWrite(written);
+        expect(w.status, w.stderr).toBe(0);
+        const grants: string[] = JSON.parse(readFileSync(written, "utf8")).grants;
+        expect(grants.some((k) => k.startsWith(`MEMBER:${creator}\t`))).toBe(false);
+        expect(grants).toContain(`ROLEATTR:${RETIRED}\trolcanlogin\tfalse`);
       } finally {
         await su.query(`DROP ROLE IF EXISTS ${creator}`);
       }
+    });
+
+    it("ignores a creator grant on the manifest side, where this database has none", () => {
+      // The reverse direction: a manifest generated on RDS against a database
+      // where a superuser created the role.
+      const doctored = join(tmpDir, "creator-manifest.json");
+      const base = JSON.parse(readFileSync(manifestPath, "utf8"));
+      base.grants.push(`MEMBER:passwd_user\t${RETIRED}\tadmin=t,inherit=f,set=f`);
+      writeFileSync(doctored, JSON.stringify(base, null, 2), "utf8");
+
+      const r = runAudit(doctored);
+
+      expect(r.status, r.stderr).toBe(0);
     });
 
     it("reports ROLE_STATE_IN_MANIFEST for a manifest that records one", () => {

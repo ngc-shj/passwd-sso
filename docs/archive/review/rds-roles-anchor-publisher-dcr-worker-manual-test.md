@@ -34,8 +34,11 @@ database whose own migration run retires it (deviation D2).
 
 ## M3 — RDS-shaped convergence and creator grant (verifiable-local via stand-in, executed)
 
-Covered by integration tests that run convergeRole and the migration body as a NOSUPERUSER
-CREATEROLE stand-in for the RDS master, and the audit with the creator grant's row shape present.
+Covered by integration tests: convergeRole runs as a NOSUPERUSER CREATEROLE CREATEDB stand-in for
+the RDS master (both the absent and the present branch); the migration body runs as the superuser
+against a role the stand-in created, so the creator grant exists (running the body under the
+master's own identity is E1, see D9 and M4); and the audit runs with the creator grant's row shape
+present, in compare mode, in `--write`, and on the manifest side.
 Red-proven on a scratch copy: the old full-attribute ALTER fails all seven stand-in cases;
 `roleStateViolations` stubbed to `[]` fails the five deny cases; removing the creator-grant
 exclusion fails the RDS-shaped allow case.
@@ -52,8 +55,9 @@ Expected: step 1 stops at the audit with exactly the `rolcanlogin` pair for
 
 Rollback: the old services keep serving through steps 1–3 (`deploy.sh` exits before any
 `update-service`). The migration only narrows the unused DCR role's privileges and needs no
-rollback for the old image. If step 3's bootstrap fails, it runs in one transaction for the
-privilege sequence and its role convergence stops at the first refused role with nothing logged
-that carries a password (preflight).
+rollback for the old image. If step 3's bootstrap fails, nothing it did is committed: every role
+is preflighted before the first password-bearing statement, all roles converge in one transaction,
+and the privilege sequence is a second one — so no role is left with a new password or LOGIN,
+including in the rotation path.
 
 Not executable here: no RDS instance or AWS access in this environment.

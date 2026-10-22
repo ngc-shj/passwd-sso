@@ -79,8 +79,9 @@ export const ROLES = [
   { name: "passwd_anchor_publisher", pwEnv: "PASSWD_ANCHOR_PUBLISHER_PASSWORD" },
 ];
 
-// The attribute set every role above must END UP with, applied on both CREATE
-// and ALTER so a pre-existing (possibly privilege-escalated) role converges.
+// The attribute set every role above must END UP with: written in full on
+// CREATE, and on ALTER when run as a superuser. As a non-superuser (the RDS
+// master) ALTER writes LOGIN/CREATEDB/CREATEROLE and the rest is asserted.
 // NOREPLICATION matters as much as NOSUPERUSER: REPLICATION lets a role open a
 // replication connection and stream the entire database (and create/drop
 // replication slots) — a full data-exfiltration path that none of these roles
@@ -118,11 +119,34 @@ async function currentUserIsSuperuser(client) {
 }
 
 /**
- * Everything a non-superuser's `ALTER ROLE … PASSWORD` would be refused for,
- * checked BEFORE the statement is sent. A refused statement is logged in full
- * under the default `log_min_error_statement`, password included.
+ * The current role's own attributes a non-superuser needs to send the
+ * statements convergeRole sends: CREATEROLE for CREATE/ALTER ROLE … LOGIN …
+ * PASSWORD, and CREATEDB because PostgreSQL 16 refuses a NOCREATEDB clause from
+ * a role without it, even as a no-op. The RDS master holds both.
+ */
+async function assertCallerCanManageRoles(client) {
+  const { rows } = await client.query(
+    "SELECT rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = current_user",
+  );
+  const caller = rows[0];
+  if (caller?.rolcreaterole !== true || caller?.rolcreatedb !== true) {
+    throw new Error(
+      "the current role needs CREATEROLE and CREATEDB to converge roles " +
+        `(has CREATEROLE=${caller?.rolcreaterole}, CREATEDB=${caller?.rolcreatedb}); ` +
+        "connect as the RDS master or a superuser.",
+    );
+  }
+}
+
+/**
+ * The refusal causes a non-superuser's `ALTER ROLE … PASSWORD` can be checked
+ * for, checked BEFORE the statement is sent: a refused statement is logged in
+ * full under the default `log_min_error_statement`, password included. What no
+ * preflight can see — the role dropped in between, a password-check hook, a
+ * read-only or cancelled session — is the residual tracked separately (SC6).
  */
 async function assertConvergeableWithoutSuperuser(client, name) {
+  await assertCallerCanManageRoles(client);
   const { rows } = await client.query(
     `SELECT ${SUPERUSER_ONLY_ATTRS.join(", ")},
             pg_has_role(current_user, oid, 'MEMBER WITH ADMIN OPTION') AS has_admin
@@ -277,7 +301,7 @@ export async function applyDeniedPrivileges(
  * production convergence logic against throwaway probe roles instead of the
  * real passwd_* roles.
  *
- * @param {import("pg").Client} client SUPERUSER connection
+ * @param {import("pg").Client} client migration connection: a superuser, or the RDS master
  * @param {string} name role name (caller-controlled allowlist, not user input)
  * @param {string} password plaintext password to install
  */
@@ -285,10 +309,12 @@ export async function convergeRole(client, name, password) {
   const { rowCount } = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [name]);
   // escapeLiteral wraps + escapes for the server's string-literal syntax.
   const pw = client.escapeLiteral(password);
+  const superuser = await currentUserIsSuperuser(client);
   if (rowCount === 0) {
+    if (!superuser) await assertCallerCanManageRoles(client);
     await client.query(`CREATE ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
     console.log(`created role ${name}`);
-  } else if (await currentUserIsSuperuser(client)) {
+  } else if (superuser) {
     // ALWAYS converge an existing role. It may carry the WRONG password (the
     // operator supplied a new one) or have been altered to
     // SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE out of band — skipping this
@@ -353,6 +379,37 @@ export async function convergeRole(client, name, password) {
   }
 }
 
+/**
+ * Converge every role in one transaction (role DDL is transactional), so a
+ * refusal or a failed membership strip on one role leaves no role with a new
+ * password or LOGIN — not an earlier one in the list, and not that role
+ * itself. As a non-superuser, every existing role is preflighted before the
+ * first statement carrying a password is sent. Exported for the integration
+ * test.
+ *
+ * @param {import("pg").Client} client not already inside a transaction
+ * @param {{ name: string, password: string }[]} roles
+ */
+export async function convergeRoles(client, roles) {
+  await client.query("BEGIN");
+  try {
+    if (!(await currentUserIsSuperuser(client))) {
+      await assertCallerCanManageRoles(client);
+      for (const { name } of roles) {
+        const { rowCount } = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [name]);
+        if (rowCount > 0) await assertConvergeableWithoutSuperuser(client, name);
+      }
+    }
+    for (const { name, password } of roles) {
+      await convergeRole(client, name, password);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+}
+
 // EXECUTE grants on routines. Each migration that creates one of these grants
 // EXECUTE to the roles that exist when it runs, so a role created afterwards
 // would be left without it; this grants it to those roles. The RLS policies call
@@ -384,7 +441,7 @@ export async function grantRoutineExecute(client, grants = ROUTINE_EXECUTE) {
 async function main() {
   const connectionString = process.env.MIGRATION_DATABASE_URL;
   if (!connectionString) {
-    console.error("ERROR: MIGRATION_DATABASE_URL is required (SUPERUSER connection).");
+    console.error("ERROR: MIGRATION_DATABASE_URL is required (a superuser or the RDS master).");
     process.exit(1);
   }
 
@@ -438,9 +495,10 @@ async function main() {
   const client = new Client({ connectionString });
   await client.connect();
   try {
-    for (const r of ROLES) {
-      await convergeRole(client, r.name, process.env[r.pwEnv]);
-    }
+    await convergeRoles(
+      client,
+      ROLES.map((r) => ({ name: r.name, password: process.env[r.pwEnv] })),
+    );
 
     // ONE transaction for the whole privilege sequence.
     //

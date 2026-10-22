@@ -102,6 +102,31 @@ BEGIN
       END
     );
   END LOOP;
+
+  -- What the revokes above cannot reach: a grant whose grantor is not the
+  -- object's owner (a REVOKE removes the owner's grants only), and object kinds
+  -- the loops do not enumerate. Refuse rather than commit a role that still
+  -- holds one; the grant audit would fail on it anyway.
+  IF EXISTS (
+    SELECT 1 FROM pg_class c, aclexplode(c.relacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_attribute a, aclexplode(a.attacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_proc p, aclexplode(p.proacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_namespace n, aclexplode(n.nspacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_database db, aclexplode(db.datacl) x
+               WHERE db.datname = current_database() AND x.grantee = target
+    UNION ALL SELECT 1 FROM pg_default_acl da, aclexplode(da.defaclacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_type t, aclexplode(t.typacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_language l, aclexplode(l.lanacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_largeobject_metadata o, aclexplode(o.lomacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_foreign_data_wrapper w, aclexplode(w.fdwacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_foreign_server f, aclexplode(f.srvacl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_parameter_acl pa, aclexplode(pa.paracl) x WHERE x.grantee = target
+    UNION ALL SELECT 1 FROM pg_tablespace ts, aclexplode(ts.spcacl) x WHERE x.grantee = target
+    -- pg_user_mappings, not pg_user_mapping: the catalog is superuser-only.
+    UNION ALL SELECT 1 FROM pg_user_mappings um WHERE um.umuser = target
+  ) THEN
+    RAISE EXCEPTION 'passwd_dcr_cleanup_worker still holds a grant or user mapping the retirement could not revoke';
+  END IF;
 END
 $$;
 

@@ -85,7 +85,7 @@ bootstrap, documented where that runs (`infra/terraform/README.md`, `docs/setup/
 - Owner: none; revisit if a retired role ever keeps privileges, or if a second retired role is
   added.
 
-## D9 — Three fail-closed guards left unexercised (self R-check RT7, Minor)
+## D9 — Fail-closed guards left unexercised (self R-check RT7, Minor)
 
 - `migration.sql`: the RAISE when a membership survives the GRANTED BY revokes. PostgreSQL 16's
   `REVOKE … GRANTED BY` either removes the named grantor's row or raises (42501) — the guard is
@@ -97,10 +97,31 @@ bootstrap, documented where that runs (`infra/terraform/README.md`, `docs/setup/
   CREATEDB CREATEROLE stand-in: the REVOKE raised `permission denied for table accounts` first.
   Reproducing the master's ownership is out of proportion; the superuser path cannot reach it
   (`pg_has_role` is always true for a superuser). E1.
-- `convergeRole`: the throw when the post-revoke re-query still finds a membership — same
-  reasoning as the first.
+- ~~`convergeRole`: the throw when the post-revoke re-query still finds a membership.~~ Reachable
+  after all (Phase 3 T-3): convergeRole takes an injected client, so a client that drops `REVOKE`
+  statements leaves the row in place. Now tested ("throws when a membership is still there after
+  the revokes").
 
 All three stop the run rather than letting it pass. Also learned in the attempt: a role without
 CREATEDB may not issue `NOCREATEDB` even as a no-op, so convergeRole's narrowed ALTER and the
 migration's `ALTER ROLE` assume the RDS master has CREATEDB, which it does; the convergeRole
 stand-in tests give the stand-in CREATEDB for that reason.
+
+## D10 — Phase 3 round 1 changes beyond the locked contracts
+
+- **convergeRoles (C1).** `main` now calls an exported `convergeRoles(client, roles)` instead of
+  looping `convergeRole`: one transaction for every role, and as a non-superuser every existing
+  role is preflighted before the first password-bearing statement (code-review S2, F1). Before,
+  each role autocommitted, so a refusal on a later role — or a failed membership strip on the same
+  role — left earlier roles with new passwords and a role with LOGIN it should not have had.
+- **Caller attributes in the preflight (C1).** The preflight also requires the connection to hold
+  CREATEROLE and CREATEDB, on both the CREATE and the ALTER branch (code-review S1); D9 had
+  recorded the CREATEDB requirement as an assumption only.
+- **DEFAULTACL keys parse fail-closed (C3).** A key that does not split into four fields is a
+  violation, as MEMBER keys already were (code-review S3).
+- **Migration postcondition (C2).** The retirement migration now RAISEs if any ACL entry or user
+  mapping still names the role after the revokes — grants whose grantor is not the object's owner,
+  and object kinds the loops do not enumerate (code-review S4). The migration had already been
+  applied to the dev database; its `_prisma_migrations.checksum` was updated to the new file's
+  SHA-256 in place (no reset), after the new postcondition was dry-run against that database inside
+  `BEGIN … ROLLBACK`. `npx prisma migrate status` reports the schema up to date.

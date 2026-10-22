@@ -67,7 +67,7 @@ Store these in Secrets Manager:
 - `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
 - `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; use `scripts/set-outbox-worker-password.sh` to rotate)
 - `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (least-privilege role `passwd_anchor_publisher`; no ECS task consumes it yet)
-- `PASSWD_ANCHOR_PUBLISHER_PASSWORD` (sets the `passwd_anchor_publisher` DB role password via `scripts/bootstrap-rds-roles.mjs`; the same value as in `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`)
+- `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is not stored on its own: it is an input to `scripts/bootstrap-rds-roles.mjs` only, taken from the userinfo of `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (a second stored copy could drift from the URL)
 
 Optional:
 - `GOOGLE_WORKSPACE_DOMAINS`
@@ -127,12 +127,17 @@ true superuser fails with SQLSTATE 42501, including:
 - `ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS / NOREPLICATION` — even when the
   attribute already has that value. `CREATE ROLE ... NOSUPERUSER` is fine.
   `scripts/bootstrap-rds-roles.mjs` therefore re-converges an existing role
-  without those clauses when it is not connected as a superuser: it checks
-  `rolsuper` / `rolbypassrls` / `rolreplication` and its own ADMIN OPTION on the
-  role first, and stops — before sending any statement that carries the
-  password — if one of the three is set (only AWS support can clear it) or the
-  ADMIN OPTION is missing. The master holds ADMIN OPTION on every role it
-  created, which covers the roles the bootstrap and the migrations create.
+  without those clauses when it is not connected as a superuser. Before any
+  statement that carries a password it checks, for every role, that the
+  connection has CREATEROLE and CREATEDB (a role without CREATEDB may not send
+  even a no-op `NOCREATEDB`), that it holds ADMIN OPTION on each existing role,
+  and that none has `rolsuper` / `rolbypassrls` / `rolreplication` set (only AWS
+  support can clear those); any failure stops the run with nothing sent. All
+  roles converge in one transaction, so a later failure leaves no role changed.
+  The master has CREATEROLE and CREATEDB and holds ADMIN OPTION on every role it
+  created. What no check can see — a role dropped in between, a password-check
+  hook in a custom parameter group, a read-only or cancelled session — can
+  still refuse the statement and log it.
 - Attaching a placeholder GUC to a routine (`CREATE FUNCTION ... SET app.x`),
   and `GRANT SET ON PARAMETER` to work around it.
 

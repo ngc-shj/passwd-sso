@@ -250,9 +250,12 @@ Unused since the retention GC worker absorbed DCR cleanup. Migration
 default ACLs naming it — nothing beyond what `PUBLIC` holds. `scripts/audit-db-grants.mjs` lists it
 in `RETIRED_ROLES` and asserts that state prescriptively (`ROLE_STATE_VIOLATION` /
 `ROLE_STATE_IN_MANIFEST`, and `--write` refuses), so a re-enabled role cannot be recorded as the
-expected set. The one membership allowed into it is the `ADMIN`-only row (no `INHERIT`, no `SET`)
-PostgreSQL 16 gives the non-superuser role that created it — on RDS, the master — which confers none
-of its privileges.
+expected set. A membership into it is allowed only as an `ADMIN`-only row (no `INHERIT`, no `SET`)
+held by a non-audited role, and such rows are left out of the manifest comparison: PostgreSQL 16
+gives one to the non-superuser role that created it (on RDS, the master), and a deliberately granted
+one cannot be told apart from it. Either confers none of the role's privileges, and every use of
+one — granting the role on with `INHERIT`/`SET`, re-enabling `LOGIN`, granting it privileges — is a
+`ROLE_STATE_VIOLATION`.
 
 ---
 

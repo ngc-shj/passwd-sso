@@ -164,6 +164,9 @@ const ROWS = [
   ["default ACL granting the retired role", `DEFAULTACL:passwd_user\tpublic\tr\t${RETIRED}=r/passwd_user`, [], true],
   ["default ACL granting a live role", `DEFAULTACL:passwd_user\tpublic\tr\t${LIVE}=arwd/passwd_user`, [], false],
   ["default ACL granting PUBLIC", "DEFAULTACL:passwd_user\t-\tf\t=X/passwd_user", [], false],
+  // A tab in the owner's name shifts the fields: refused, not read.
+  ["default ACL whose owner name holds a tab", `DEFAULTACL:"x\ty"\tpublic\tr\t${RETIRED}=r/"x\ty"`, [], true],
+  ["default ACL key missing a field", `DEFAULTACL:passwd_user\tpublic\t${LIVE}=r/passwd_user`, [], true],
   [
     "default ACL granting a role whose name extends the retired one",
     `DEFAULTACL:passwd_user\tpublic\tr\t${RETIRED}_x=r/passwd_user`,

@@ -287,6 +287,32 @@ describe("migration 20261023010000 retires passwd_dcr_cleanup_worker (real DB)",
     });
   });
 
+  it("(b2) raises on a grant whose grantor is not the object's owner", async () => {
+    // A REVOKE, even a superuser's, removes the owner's grants only, so a grant
+    // made through a GRANT OPTION chain survives the loops.
+    await inRolledBackTransaction(async (c) => {
+      await c.query(`CREATE ROLE ${PROBE_HOLDER} NOLOGIN`);
+      await c.query(`GRANT SELECT ON mcp_clients TO ${PROBE_HOLDER} WITH GRANT OPTION`);
+      await c.query(`SET LOCAL ROLE ${PROBE_HOLDER}`);
+      await c.query(`GRANT SELECT ON mcp_clients TO ${ROLE}`);
+      await c.query("RESET ROLE");
+
+      await expect(c.query(body)).rejects.toThrow(
+        "passwd_dcr_cleanup_worker still holds a grant or user mapping the retirement could not revoke",
+      );
+    });
+  });
+
+  it("(b3) raises on a grant of an object kind the loops do not revoke", async () => {
+    await inRolledBackTransaction(async (c) => {
+      await c.query(`GRANT SET ON PARAMETER work_mem TO ${ROLE}`);
+
+      await expect(c.query(body)).rejects.toThrow(
+        "passwd_dcr_cleanup_worker still holds a grant or user mapping the retirement could not revoke",
+      );
+    });
+  });
+
   it("(c) leaves the ADMIN-only row of a NOSUPERUSER CREATEROLE creator, which the audit accepts", async () => {
     await inRolledBackTransaction(async (c) => {
       // Never DROP the real role: move it aside and let the stand-in create a
