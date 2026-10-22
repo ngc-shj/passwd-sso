@@ -233,11 +233,14 @@ makes obvious:
   ways, with the same role. `session_user` is unaffected by that security-context
   switch, so `session_db_user` still names the actual caller.
 
-  Why it matters here specifically: `passwd_app` holds `DELETE` on `tenants`.
-  A compromised application that deletes a tenant destroys its `tenant_claims`
-  rows, and the `deregister` row recording that reads `db_user = <migration
-  role>` — i.e. it looks like an operator action to anyone applying the general
-  rule above. On a `deregister` row, read `session_db_user`.
+  Why it matters here specifically: a role that deletes a tenant destroys its
+  `tenant_claims` rows, and the `deregister` row recording that reads
+  `db_user = <migration role>` — i.e. it looks like an operator action to anyone
+  applying the general rule above. `passwd_app` no longer holds `DELETE` on
+  `tenants` (migration `20261023000000`, declared in
+  `scripts/checks/app-role-denied-privileges.json`), so a cascade `deregister`
+  row whose `session_db_user` is `passwd_app` means that control was undone. On
+  a `deregister` row, read `session_db_user`.
 - **Rows naming a tenant that never existed are unreachable by the tenant-scoped
   purge routine.** `tenant_claim_events_purge_for_tenant(<tenant>)` is the
   sanctioned deletion path and it takes a real tenant id. Removing injected rows

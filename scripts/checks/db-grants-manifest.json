@@ -297,7 +297,6 @@
     "TABLE:passwd_app\tpublic.tenant_webhooks\tINSERT",
     "TABLE:passwd_app\tpublic.tenant_webhooks\tSELECT",
     "TABLE:passwd_app\tpublic.tenant_webhooks\tUPDATE",
-    "TABLE:passwd_app\tpublic.tenants\tDELETE",
     "TABLE:passwd_app\tpublic.tenants\tINSERT",
     "TABLE:passwd_app\tpublic.tenants\tSELECT",
     "TABLE:passwd_app\tpublic.tenants\tUPDATE",
