@@ -31,6 +31,8 @@
  *   DENIED_SETTING_HELD / _IN_MANIFEST  — a role or database session default no
  *                                       one may carry (app.*, client_min_messages,
  *                                       log_min_messages, row_security)
+ *   ROLE_STATE_VIOLATION / _IN_MANIFEST — a role state that is never legitimate
+ *                                       (see roleStateViolations)
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { Client } from "pg";
@@ -58,7 +60,17 @@ const AUDITED_ROLES = [
   "passwd_app",
   "passwd_outbox_worker",
   "passwd_retention_gc_worker",
+  "passwd_anchor_publisher",
+  "passwd_dcr_cleanup_worker",
 ];
+
+/**
+ * Audited roles that must stay retired: NOLOGIN, nothing beyond what PUBLIC
+ * holds, and no role able to act as them. Migration
+ * 20261023010000_retire_dcr_cleanup_worker_role is what puts them there; this
+ * list is what keeps them there (see roleStateViolations).
+ */
+const RETIRED_ROLES = ["passwd_dcr_cleanup_worker"];
 
 /** Table privileges that matter for these roles. */
 const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
@@ -87,8 +99,11 @@ const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "R
  *   TABLE:<role>\t<schema>.<table>\t<priv>        effective table privilege
  *   COLUMN:<role>\t<schema>.<table>.<col>\t<priv> effective column privilege NOT
  *                                                 implied by the table-level one
- *   MEMBER:<role>\t<granted_role>                 role membership (an inheritance
- *                                                 path; these roles should have none)
+ *   MEMBER:<role>\t<granted_role>\tadmin=<t|f>,inherit=<t|f>,set=<t|f>
+ *                                                 role membership (an inheritance
+ *                                                 path; these roles should have
+ *                                                 none), and every membership IN a
+ *                                                 retired role
  *   PUBLIC:<schema>.<table>\t<priv>               granted to PUBLIC, so inherited
  *                                                 by every role
  *   SCHEMA:<grantee>\t<schema>\t<priv>            USAGE/CREATE (CREATE lets the
@@ -164,14 +179,20 @@ async function readLiveGrants(client) {
 
   // 3. Role MEMBERSHIPS — an inheritance path into arbitrary privileges. None of
   //    these roles is supposed to be a member of anything (bootstrap-rds-roles
-  //    strips memberships), so any row here is a finding.
+  //    strips memberships), so any row here is a finding. Also every role that
+  //    is a member OF a retired role, audited or not: that is a way to act as
+  //    it. The option bits go into the key because PostgreSQL 16 gives a
+  //    creating CREATEROLE role an ADMIN-only membership in what it creates (on
+  //    RDS, the master's row in every role a migration created), which confers
+  //    none of the role's privileges — roleStateViolations decides on them.
   const { rows: memberRows } = await client.query(
-    `SELECT r.rolname AS role, g.rolname AS granted_role
+    `SELECT r.rolname AS role, g.rolname AS granted_role,
+            m.admin_option, m.inherit_option, m.set_option
        FROM pg_auth_members m
        JOIN pg_roles r ON r.oid = m.member
        JOIN pg_roles g ON g.oid = m.roleid
-      WHERE r.rolname = ANY($1)`,
-    [AUDITED_ROLES],
+      WHERE r.rolname = ANY($1) OR g.rolname = ANY($2)`,
+    [AUDITED_ROLES, RETIRED_ROLES],
   );
 
   // 4. Privileges granted to PUBLIC. Every role inherits these, so they are the
@@ -292,7 +313,11 @@ async function readLiveGrants(client) {
       (r) =>
         `COLUMN:${r.role}\t${r.schema_name}.${r.table_name}.${r.column_name}\t${r.privilege_type}`,
     ),
-    ...memberRows.map((r) => `MEMBER:${r.role}\t${r.granted_role}`),
+    ...memberRows.map(
+      (r) =>
+        `MEMBER:${r.role}\t${r.granted_role}\t` +
+        `admin=${tf(r.admin_option)},inherit=${tf(r.inherit_option)},set=${tf(r.set_option)}`,
+    ),
     ...publicRows.map((r) => `PUBLIC:${r.schema_name}.${r.table_name}\t${r.privilege_type}`),
     ...schemaRows.map((r) => `SCHEMA:${r.grantee}\t${r.schema_name}\t${r.privilege_type}`),
     ...sequenceRows.map(
@@ -435,6 +460,153 @@ function missingDeclaredColumnGrants(keys, denied, existingSubjects) {
   return out;
 }
 
+function tf(value) {
+  return value ? "t" : "f";
+}
+
+/** Attributes no audited role may ever hold; LOGIN is per role (see below). */
+const ELEVATED_ATTRS = ["rolsuper", "rolbypassrls", "rolreplication", "rolcreatedb", "rolcreaterole"];
+
+const MEMBER_FLAGS_RE = /^admin=[tf],inherit=[tf],set=[tf]$/;
+
+/** Object kinds whose PUBLIC counterpart is a `<KIND>:public\t…` key. */
+const PUBLIC_GRANTEE_KINDS = ["SCHEMA", "SEQUENCE", "FUNCTION", "DATABASE"];
+
+/**
+ * The grantee of one `aclitem` text (`grantee=privs/grantor`, `=privs/grantor`
+ * for PUBLIC). A name that needs quoting is double-quoted with `""` escapes.
+ */
+function aclGrantee(acl) {
+  if (acl.startsWith('"')) {
+    let name = "";
+    for (let i = 1; i < acl.length; i++) {
+      if (acl[i] === '"') {
+        if (acl[i + 1] === '"') {
+          name += '"';
+          i++;
+          continue;
+        }
+        return name;
+      }
+      name += acl[i];
+    }
+    return null;
+  }
+  const eq = acl.indexOf("=");
+  return eq === -1 ? null : acl.slice(0, eq);
+}
+
+/**
+ * Keys describing a role state that is never legitimate, so that `--write`
+ * cannot record it as expected. The manifest is DESCRIPTIVE: everything else it
+ * holds is whatever the database held when it was generated.
+ *
+ *   - every audited role: an elevated attribute, or any membership;
+ *   - any `PUBLIC:` table grant (it reaches every role, jackson_user included);
+ *   - a retired role: LOGIN; any membership IN it that can confer it
+ *     (inherit or set — an ADMIN-only row is PostgreSQL 16's creator grant and
+ *     confers nothing); a default ACL naming it; and any object privilege PUBLIC
+ *     does not also hold (PUBLIC's own grants reach every role, retired or not).
+ *
+ * A MEMBER or DEFAULTACL key that does not parse into its fields (three, with
+ * the expected flag shape; four) is itself a violation: role names may contain
+ * a tab, and an unparsed key must not fall through to "allowed".
+ */
+export function roleStateViolations(keys, { auditedRoles, retiredRoles }) {
+  const audited = new Set(auditedRoles);
+  const retired = new Set(retiredRoles);
+  const publicHeld = new Set();
+  for (const k of keys) {
+    if (k.startsWith("PUBLIC:")) publicHeld.add(`TABLE\t${k.slice("PUBLIC:".length)}`);
+    for (const kind of PUBLIC_GRANTEE_KINDS) {
+      const prefix = `${kind}:public\t`;
+      if (k.startsWith(prefix)) publicHeld.add(`${kind}\t${k.slice(prefix.length)}`);
+    }
+  }
+
+  const out = [];
+  for (const k of keys) {
+    if (k.startsWith("ROLEATTR:")) {
+      const [role, attr, value] = k.slice("ROLEATTR:".length).split("\t");
+      if (value !== "true") continue;
+      if (audited.has(role) && ELEVATED_ATTRS.includes(attr)) out.push(k);
+      else if (retired.has(role) && attr === "rolcanlogin") out.push(k);
+      continue;
+    }
+    if (k.startsWith("MEMBER:")) {
+      const fields = k.slice("MEMBER:".length).split("\t");
+      if (fields.length !== 3 || !MEMBER_FLAGS_RE.test(fields[2])) {
+        out.push(k);
+        continue;
+      }
+      const [member, granted, flags] = fields;
+      if (audited.has(member)) out.push(k);
+      else if (retired.has(granted) && !flags.endsWith(",inherit=f,set=f")) out.push(k);
+      continue;
+    }
+    if (k.startsWith("PUBLIC:")) {
+      out.push(k);
+      continue;
+    }
+    if (k.startsWith("DEFAULTACL:")) {
+      // owner, schema, objtype, aclitem. A tab in the owner's name shifts the
+      // fields, so a key of any other shape is refused rather than read.
+      const fields = k.slice("DEFAULTACL:".length).split("\t");
+      if (fields.length !== 4 || retired.has(aclGrantee(fields[3]))) out.push(k);
+      continue;
+    }
+    for (const role of retired) {
+      if (k.startsWith(`COLUMN:${role}\t`)) {
+        // No PUBLIC column counterpart is collected, so none is exempt.
+        out.push(k);
+        break;
+      }
+      const kind = ["TABLE", ...PUBLIC_GRANTEE_KINDS].find((c) => k.startsWith(`${c}:${role}\t`));
+      if (kind) {
+        const rest = k.slice(`${kind}:${role}\t`.length);
+        if (!publicHeld.has(`${kind}\t${rest}`)) out.push(k);
+        break;
+      }
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * The creator grants among `keys`: ADMIN-only memberships of a non-audited role
+ * in a retired role. PostgreSQL 16 gives one to a NOSUPERUSER CREATEROLE role
+ * for every role it creates, so it exists where the RDS master ran the
+ * migration that created the role and not where a superuser did (dev, CI). It
+ * is therefore not a property of the deployment the manifest can describe, and
+ * is left out of the manifest comparison and of `--write` — after
+ * roleStateViolations has judged it (it confers none of the role's privileges).
+ */
+export function creatorGrantKeys(keys, { auditedRoles, retiredRoles }) {
+  const audited = new Set(auditedRoles);
+  const retired = new Set(retiredRoles);
+  return keys.filter((k) => {
+    if (!k.startsWith("MEMBER:")) return false;
+    const fields = k.slice("MEMBER:".length).split("\t");
+    return (
+      fields.length === 3 &&
+      !audited.has(fields[0]) &&
+      retired.has(fields[1]) &&
+      fields[2] === "admin=t,inherit=f,set=f"
+    );
+  });
+}
+
+/** A retired role the audit does not read would be asserted by nothing. */
+export function assertRetiredSubset(auditedRoles, retiredRoles) {
+  const missing = retiredRoles.filter((r) => !auditedRoles.includes(r));
+  if (missing.length > 0) {
+    throw new Error(
+      `RETIRED_ROLE_UNAUDITED: ${missing.join(", ")} — add to AUDITED_ROLES in ` +
+        "scripts/audit-db-grants.mjs, or the retired state is checked by nothing.",
+    );
+  }
+}
+
 function readManifest() {
   if (!existsSync(MANIFEST_FILE)) {
     console.error(
@@ -460,8 +632,11 @@ function writeManifest(grants) {
       "excluded). " +
       "Key forms: 'TABLE:<role><TAB><schema>.<table><TAB><priv>', " +
       "'COLUMN:<role><TAB><schema>.<table>.<column><TAB><priv>' (only where not " +
-      "implied by the table-level privilege), 'MEMBER:<role><TAB><granted_role>' " +
-      "(role membership — an inheritance path; these roles should have none), " +
+      "implied by the table-level privilege), " +
+      "'MEMBER:<role><TAB><granted_role><TAB>admin=<t|f>,inherit=<t|f>,set=<t|f>' " +
+      "(role membership — an inheritance path; these roles should have none — and " +
+      "every membership in a retired role; an ADMIN-only row into a retired role " +
+      "is PostgreSQL 16's creator grant and confers none of its privileges), " +
       "'PUBLIC:<schema>.<table><TAB><priv>' (granted to PUBLIC, therefore " +
       "inherited by every role), 'SCHEMA:<grantee><TAB><schema><TAB><priv>' " +
       "(CREATE lets the role add its own objects), " +
@@ -503,6 +678,14 @@ async function main() {
   // Loaded and validated BEFORE the connection, so a malformed policy stops the
   // run rather than being reported alongside live findings.
   const denied = loadDeniedPolicy();
+  assertRetiredSubset(AUDITED_ROLES, RETIRED_ROLES);
+  const roleScope = { auditedRoles: AUDITED_ROLES, retiredRoles: RETIRED_ROLES };
+  // What the manifest describes: everything but the creator grants, which vary
+  // with who created the role (see creatorGrantKeys).
+  const comparable = (keys) => {
+    const skip = new Set(creatorGrantKeys(keys, roleScope));
+    return keys.filter((k) => !skip.has(k));
+  };
 
   const client = new Client({ connectionString });
   await client.connect();
@@ -563,10 +746,19 @@ async function main() {
     // and recording that as the expectation makes the outage the baseline.
     const erased = missingDeclaredColumnGrants(live, denied, existingSubjects);
     const settings = deniedSettings(live);
-    if (laundered.length > 0 || erased.length > 0 || settings.length > 0) {
+    const roleState = roleStateViolations(live, roleScope);
+    if (
+      laundered.length > 0 ||
+      erased.length > 0 ||
+      settings.length > 0 ||
+      roleState.length > 0
+    ) {
       console.error("REFUSING to regenerate the manifest:\n");
       for (const k of laundered) {
         console.error(`  DENIED_PRIVILEGE_HELD: ${k.replace(/\t/g, " ")}`);
+      }
+      for (const k of roleState) {
+        console.error(`  ROLE_STATE_VIOLATION: ${k.replace(/\t/g, " ")}`);
       }
       for (const k of settings) {
         console.error(`  DENIED_SETTING_HELD: ${k.replace(/\t/g, " ")}`);
@@ -583,16 +775,19 @@ async function main() {
           `\nmutation paths). A DECLARED_COLUMN_GRANT_MISSING means a column` +
           `\ngrant the declaration REQUIRES is absent — re-run` +
           `\nscripts/bootstrap-rds-roles.mjs, which re-grants them after its` +
-          `\nrevokes. Then regenerate.\n`,
+          `\nrevokes. A ROLE_STATE_VIOLATION is a role state that is never` +
+          `\nlegitimate (an elevated attribute, a membership, a PUBLIC table` +
+          `\ngrant, or a retired role able to act); repair it. Then regenerate.\n`,
       );
       process.exit(1);
     }
-    writeManifest(live);
+    writeManifest(comparable(live));
     return;
   }
 
-  const expected = new Set(readManifest());
-  const liveSet = new Set(live);
+  const expected = new Set(comparable(readManifest()));
+  const liveComparable = comparable(live);
+  const liveSet = new Set(liveComparable);
 
   const findings = [];
   // Checked FIRST and against both sides. A denied privilege that is merely
@@ -611,6 +806,12 @@ async function main() {
   for (const key of violatesDenied([...expected], denied)) {
     findings.push(`DENIED_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
   }
+  for (const key of roleStateViolations(live, roleScope)) {
+    findings.push(`ROLE_STATE_VIOLATION: ${key.replace(/\t/g, " ")}`);
+  }
+  for (const key of roleStateViolations([...expected], roleScope)) {
+    findings.push(`ROLE_STATE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
+  }
   // The REQUIRED direction, against both sides for the same reason the denied
   // direction is. Live-only would be nearly covered by MISSING_GRANT below —
   // but only while the manifest still lists the keys. A manifest that lost them
@@ -623,7 +824,7 @@ async function main() {
   for (const key of missingDeclaredColumnGrants([...expected], denied, existingSubjects)) {
     findings.push(`DECLARED_COLUMN_GRANT_MISSING_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
   }
-  for (const key of live) {
+  for (const key of liveComparable) {
     if (!expected.has(key)) {
       findings.push(`UNEXPECTED_GRANT: ${key.replace(/\t/g, " ")}`);
     }
@@ -647,7 +848,11 @@ async function main() {
         `\nre-applies these revokes, or issue the REVOKE directly.` +
         `\nA DENIED_PRIVILEGE_IN_MANIFEST means the manifest sanctions something` +
         `\n${deniedFile()} forbids — the manifest was regenerated against a broken` +
-        `\ndatabase. Repair the database, then regenerate.\n`,
+        `\ndatabase. Repair the database, then regenerate.` +
+        `\nA ROLE_STATE_VIOLATION is a role state that is never legitimate: an` +
+        `\nelevated attribute or a membership on an audited role, a PUBLIC table` +
+        `\ngrant, or a retired role that can log in, be acted as, or hold anything` +
+        `\nbeyond PUBLIC's privileges. _IN_MANIFEST means the manifest records one.\n`,
     );
     process.exit(1);
   }
@@ -662,4 +867,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 
-export { readLiveGrants, AUDITED_ROLES };
+export { readLiveGrants, AUDITED_ROLES, RETIRED_ROLES };

@@ -2844,6 +2844,7 @@ const POOL_RULE_ALLOWLIST = new Map([
   ["src/__tests__/db-integration/setup.ts", "the suite's preflight probe: reads pg_stat_activity and role privileges before any pool exists"],
   ["src/__tests__/db-integration/bootstrap-rds-roles.integration.test.ts", "superuser clients that drive the role bootstrap under test"],
   ["src/__tests__/db-integration/audit-db-grants.integration.test.ts", "the superuser client that drives the grant audit under test"],
+  ["src/__tests__/db-integration/retire-dcr-cleanup-worker.integration.test.ts", "superuser clients that run the role-retirement migration body under test and check its residue"],
   ["src/__tests__/db-integration/rls-bypass-grants.integration.test.ts", "the old-code cell: a pool deliberately WITHOUT the factory's listener, proving report mode admits old code (E2)"],
 ]);
 // A regex, as check-raw-sql-usage matches it: a string literal naming a Prisma

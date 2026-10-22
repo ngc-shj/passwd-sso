@@ -74,8 +74,8 @@ single `terraform apply` cannot satisfy on its own:
   their endpoints + the AWS-managed RDS master password are known.
 - **RDS does NOT run the `infra/postgres/initdb/*.sql` scripts** (those are for
   the Docker Postgres image only), so the least-privilege roles — `passwd_app`,
-  `passwd_outbox_worker`, `passwd_retention_gc_worker` — must be created manually
-  on RDS. `passwd_app` must exist BEFORE `prisma migrate deploy`, because some
+  `passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`
+  — must be created manually on RDS. `passwd_app` must exist BEFORE `prisma migrate deploy`, because some
   migrations conditionally GRANT/REVOKE privileges to it.
 - The app/worker services start their tasks as soon as they exist, so their
   secrets and roles must be ready first.
@@ -112,7 +112,8 @@ MASTER_PW=$(aws secretsmanager get-secret-value --secret-id "$MASTER_ARN" \
 # Push the image (step 3), then inject ALL secret values built from the above:
 #   app-secrets.json: DATABASE_URL (passwd_app@$DB_HOST), MIGRATION_DATABASE_URL
 #   (master@$DB_HOST), REDIS_URL ($REDIS_HOST), OUTBOX_WORKER_DATABASE_URL,
-#   RETENTION_GC_DATABASE_URL, plus the app secrets (AUTH_*, SHARE_MASTER_KEY,
+#   RETENTION_GC_DATABASE_URL, AUDIT_ANCHOR_PUBLISHER_DATABASE_URL (password from
+#   `openssl rand -hex 32`), plus the app secrets (AUTH_*, SHARE_MASTER_KEY,
 #   SESSION_TOKEN_HMAC_KEY, …).
 scripts/put-terraform-secrets.sh --name-prefix passwd-sso-prod \
   --app-file ./app-secrets.json --jackson-file ./jackson-secrets.json
@@ -170,6 +171,22 @@ actions ECS Exec needs (`iam.tf`; the app/worker tasks do NOT get this). The
 a Postgres syntax error). Table-specific worker grants are issued later by the
 Prisma migrations, exactly as with the Docker initdb path.
 
+The RDS master is NOT a superuser (docs/setup/aws/en.md "RDS master users are
+not SUPERUSER"), and the script adapts to that. Creating a role works as
+everywhere else. For a role that already exists it writes only `LOGIN
+NOCREATEDB NOCREATEROLE PASSWORD …`: it checks — not writes —
+`SUPERUSER` / `BYPASSRLS` / `REPLICATION`. Before any statement carrying a
+password it also checks that the connection has CREATEROLE and CREATEDB and
+holds ADMIN OPTION on every existing role (the master has both attributes and
+holds ADMIN OPTION on every role it created); a failure stops the run with
+nothing sent, because a refused statement is written to the RDS log in full,
+password included. Role convergence and the privilege sequence run in one
+transaction, so a run that does not print `bootstrap-rds-roles: done` changed
+nothing. Clearing an escalated attribute needs a real
+superuser, which on RDS means AWS support. A refusal no check can foresee (a
+role dropped in between, a password-check hook, a read-only or cancelled
+session) can still be logged.
+
 ```bash
 CLUSTER=$(terraform output -raw ecs_cluster_name)
 MIGRATE_TD=$(terraform output -raw migrate_task_definition_arn)
@@ -190,14 +207,16 @@ aws ecs execute-command --cluster "$CLUSTER" --task "$TASK" \
   --container migrate --interactive --command "/bin/sh" --region <region>
 ```
 
-Inside the shell, export the three role passwords (the SAME values used to build
-the `DATABASE_URL` / `*_WORKER_DATABASE_URL` secrets injected in Phase B) and run
-the bootstrap script:
+Inside the shell, export the four role passwords (the SAME values used to build
+the `DATABASE_URL`, `OUTBOX_WORKER_DATABASE_URL`, `RETENTION_GC_DATABASE_URL` and
+`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` secrets injected in Phase B) and run the
+bootstrap script. It exits before connecting if any of the four is unset:
 
 ```sh
 export PASSWD_APP_PASSWORD='…'
 export PASSWD_OUTBOX_WORKER_PASSWORD='…'
 export PASSWD_RETENTION_GC_WORKER_PASSWORD='…'
+export PASSWD_ANCHOR_PUBLISHER_PASSWORD='…'
 node scripts/bootstrap-rds-roles.mjs   # idempotent; MIGRATION_DATABASE_URL is already in env
 ```
 
@@ -340,6 +359,45 @@ An empty secret makes the ECS task fail to launch, so run the script before
 bringing services up. ECS task definitions reference secrets in
 `{secret_arn}:KEY::` format, resolving against whatever value the script wrote.
 
+### Adding a key to an existing app secret
+
+`put-secret-value` replaces the whole JSON object, so adding one key (here
+`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`) is read-merge-write. The merged file holds
+EVERY app secret in plaintext: create it under `umask 077` at a `mktemp` path
+outside the repository, remove it with `trap … EXIT`, and never open it in an
+editor or print it to a terminal that keeps scrollback or history. Run from
+`infra/terraform`:
+
+```bash
+(
+  set -euo pipefail
+  umask 077
+  MERGED=$(mktemp "${TMPDIR:-/tmp}/app-secrets.XXXXXX")
+  trap 'rm -f "$MERGED"' EXIT
+
+  ANCHOR_PW=$(openssl rand -hex 32)
+  DB_HOST=$(terraform output -raw db_endpoint)
+  # Passed to jq through the environment, not argv (visible in `ps`).
+  # passwd_sso is var.db_name's default; use your value if you changed it.
+  export ANCHOR_URL="postgresql://passwd_anchor_publisher:${ANCHOR_PW}@${DB_HOST}:5432/passwd_sso?sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem"
+
+  aws secretsmanager get-secret-value --region <region> \
+    --secret-id "$(terraform output -raw app_secrets_arn)" \
+    --query SecretString --output text \
+    | jq 'if has("DATABASE_URL") then . + {AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: env.ANCHOR_URL}
+          else error("app secret has no DATABASE_URL — refusing to replace it") end' > "$MERGED"
+
+  ../../scripts/put-terraform-secrets.sh --name-prefix passwd-sso-prod \
+    --region <region> --app-file "$MERGED"
+)
+```
+
+The subshell keeps `umask`, the trap and the password variables out of your
+login shell; `pipefail` and the `has("DATABASE_URL")` guard stop a failed or
+empty read from being written back as a one-key secret. The password
+`bootstrap-rds-roles.mjs` needs as `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is the
+userinfo of that URL — the secret is its only copy.
+
 ### Required Secrets (app)
 
 | Key | Description |
@@ -357,6 +415,7 @@ bringing services up. ECS task definitions reference secrets in
 | `REDIS_URL` | Redis connection string |
 | `OUTBOX_WORKER_DATABASE_URL` | Least-privilege DB URL for the audit-outbox-worker ECS service (`passwd_outbox_worker` role) |
 | `RETENTION_GC_DATABASE_URL` | Least-privilege DB URL for the retention-gc-worker ECS service (`passwd_retention_gc_worker` role) |
+| `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | Least-privilege DB URL for the audit-anchor publisher (`passwd_anchor_publisher` role). No ECS task consumes it yet — no task definition runs the publisher — but `bootstrap-rds-roles.mjs` gives the role `LOGIN` with this password, so the value is generated and held here. |
 
 Both background workers run as dedicated ECS services (`*-audit-outbox-worker`,
 `*-retention-gc-worker`) on the app image (`node dist/<worker>.js`),

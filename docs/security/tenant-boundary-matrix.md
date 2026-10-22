@@ -138,8 +138,9 @@ call site legitimately needs to see across tenant boundaries:
 
 ## Worker roles and grants
 
-Four non-application Postgres roles exist alongside the interactive `passwd_app` role, each scoped to
-the minimum privileges its worker needs. All are `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE` —
+Three non-application Postgres login roles exist alongside the interactive `passwd_app` role, each
+scoped to the minimum privileges its worker needs, plus one retired role that holds nothing (below).
+All are `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE` —
 RLS is enforced for every one of them; a worker that needs to see across tenants sets
 `app.bypass_rls = 'on'` explicitly inside its own transaction (an application-level GUC), which is
 independent from the role-level `NOBYPASSRLS` grant.
@@ -227,17 +228,34 @@ mechanism is added.
 ### `passwd_anchor_publisher` (audit anchor publish cadence)
 
 Migration: `prisma/migrations/20260502000000_audit_anchor_publisher_phase2/migration.sql`
-(+ `20260502000001_audit_anchor_grant_updated_at_fix`). Declared `NOLOGIN` — this role is not a
-direct connection role; the anchor-publisher process authenticates as another role and the
-`NOLOGIN` grant set documents the privilege ceiling that role's publish-cadence code path is
-designed to stay within.
+(+ `20260502000001_audit_anchor_grant_updated_at_fix`). A `LOGIN` role: the anchor-publisher
+process connects as it (`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`). The migration creates it `NOLOGIN`
+on clusters that lack it; the Docker initdb (`infra/postgres/initdb/02-create-app-role.sql`) and,
+on RDS, `scripts/bootstrap-rds-roles.mjs` give it `LOGIN` and its password, and the bootstrap
+converges its attributes and memberships like the other login roles. `scripts/audit-db-grants.mjs`
+audits it on every ECS deploy (`AUDITED_ROLES`, including `ROLEATTR … rolcanlogin true`).
 
 | Table | Grant | Reason |
 | --- | --- | --- |
-| `audit_chain_anchors` | `SELECT`; `UPDATE (publish_paused_until, last_published_at)` | read chain-seq snapshot; column-scoped update — cannot touch `chain_seq`, `prev_hash`, or any other column |
+| `audit_chain_anchors` | `SELECT`; `UPDATE (publish_paused_until, last_published_at, updated_at)` | read chain-seq snapshot; column-scoped update — cannot touch `chain_seq`, `prev_hash`, or any other column |
 | `tenants` | `SELECT` | chain-enabled tenant enumeration (`audit-anchor-publisher.ts`, under the `AUDIT_ANCHOR_PUBLISH` grant) |
 | `audit_outbox` | `INSERT` | enqueue SYSTEM-attributed publish-event audit rows |
 | `system_settings` | `SELECT, INSERT, UPDATE` | publish-state key-value storage (deployment-ID guard, pause bookkeeping) |
+
+### `passwd_dcr_cleanup_worker` (retired)
+
+Unused since the retention GC worker absorbed DCR cleanup. Migration
+`prisma/migrations/20261023010000_retire_dcr_cleanup_worker_role/migration.sql` retires it in place
+(the role is kept, not dropped): `NOLOGIN`, no password, no memberships either way, no grants or
+default ACLs naming it — nothing beyond what `PUBLIC` holds. `scripts/audit-db-grants.mjs` lists it
+in `RETIRED_ROLES` and asserts that state prescriptively (`ROLE_STATE_VIOLATION` /
+`ROLE_STATE_IN_MANIFEST`, and `--write` refuses), so a re-enabled role cannot be recorded as the
+expected set. A membership into it is allowed only as an `ADMIN`-only row (no `INHERIT`, no `SET`)
+held by a non-audited role, and such rows are left out of the manifest comparison: PostgreSQL 16
+gives one to the non-superuser role that created it (on RDS, the master), and a deliberately granted
+one cannot be told apart from it. Either confers none of the role's privileges, and every use of
+one — granting the role on with `INHERIT`/`SET`, re-enabling `LOGIN`, granting it privileges — is a
+`ROLE_STATE_VIOLATION`.
 
 ---
 

@@ -85,7 +85,7 @@ const SEQUENCE_CASES = DECLARATION.denied
   .filter(isSequenceEntry)
   .flatMap((d) => d.privileges.map((priv) => [d.role, d.sequence as string, priv] as const));
 
-// C2's fixed shape for this table: all three audited roles, and every privilege
+// C2's fixed shape for this table: every audited role, and every privilege
 // the grant audit reads — the set was widened from five by a derivation rather
 // than case by case (deny everything the role does not need on the two routing
 // tables), which is what put TRIGGER on it: a BEFORE INSERT trigger returning
@@ -104,8 +104,8 @@ const TENANT_CLAIM_EVENTS_DENIED_PRIVILEGES = [
   "TRIGGER",
 ];
 /**
- * The identity sequence behind `tenant_claim_events.seq`, denied to all three
- * roles (20260731190000). Named for the same reason the table above is.
+ * The identity sequence behind `tenant_claim_events.seq`, denied to every
+ * audited role (20260731190000). Named for the same reason the table above is.
  */
 const TENANT_CLAIM_EVENTS_SEQUENCE = "public.tenant_claim_events_seq_seq";
 const TENANT_CLAIM_EVENTS_SEQUENCE_DENIED_PRIVILEGES = ["USAGE", "SELECT", "UPDATE"];
@@ -148,6 +148,8 @@ describe("app-role denied privileges (live database)", () => {
     expect(AUDITED_ROLES).toContain("passwd_app");
     expect(AUDITED_ROLES).toContain("passwd_outbox_worker");
     expect(AUDITED_ROLES).toContain("passwd_retention_gc_worker");
+    expect(AUDITED_ROLES).toContain("passwd_anchor_publisher");
+    expect(AUDITED_ROLES).toContain("passwd_dcr_cleanup_worker");
     for (const role of AUDITED_ROLES) {
       for (const privilege of TENANT_CLAIM_EVENTS_DENIED_PRIVILEGES) {
         const isMember = CASES.some(

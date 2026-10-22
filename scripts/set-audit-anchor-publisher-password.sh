@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Set the passwd_anchor_publisher role password in an existing cluster.
 #
+# On RDS, scripts/bootstrap-rds-roles.mjs now converges this role and sets its
+# password from PASSWD_ANCHOR_PUBLISHER_PASSWORD; use that there. This script
+# changes the password only — it does not give a NOLOGIN role LOGIN.
+#
 # Usage:
 #   MIGRATION_DATABASE_URL=<superuser-url> \
 #   scripts/set-audit-anchor-publisher-password.sh <<< "$PASSWORD"
