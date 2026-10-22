@@ -1,6 +1,6 @@
 # Code Review: rds-roles-anchor-publisher-dcr-worker
 Date: 2026-10-23
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 
@@ -129,3 +129,65 @@ RT9 N/A; RT10 T-1; RT11 checked.
 - Action: manual-test M3 reworded; comments updated; aws/en.md bullet says the password is not
   stored separately; tenant-boundary-matrix and deployment.md MEMBER row state the actual
   exemption (any non-audited ADMIN-only row, D8).
+
+---
+
+# Round 2
+Date: 2026-10-23
+
+## Changes from Previous Round
+
+All round-1 findings confirmed resolved by their filing experts (S1–S4, F1–F4, T-1–T-4); the
+security expert's R43 comparison found no boundary widened by the round-1 fixes.
+
+## Findings
+
+- N1 [Major] (functionality; same root as security S5 [Minor]) — role convergence committed before
+  the privilege transaction, so the round-1 docs' "a failed bootstrap changes no role" and its
+  "restore AWSPREVIOUS" recovery step were wrong for a failure in the privilege phase. Status: new.
+- N2 [Minor] (functionality) — the migration postcondition's catalog reads were never executed as
+  a non-superuser. Status: new.
+- R2-1 [Minor] (testing) — session-level `SET ROLE` on the shared `su` connection had no
+  failure-path reset in the convergeRoles describe. Status: new.
+- R2-2 [Minor] (testing) — only 2 of the postcondition's branches were shown able to fire. Status:
+  new.
+
+## Recurring Issue Check (round-2 delta)
+
+### Functionality expert
+R5 N1; R16 N2 (non-superuser parity); R29 N1; R35 manual-test M4 (N1); R42 checked (postcondition
+catalog set complete for PG16); R49 N1; R50 N2; RT10 N1 (recovery path). Other rules unchanged.
+
+### Security expert
+R5 S2 resolved, S5 new (docs); R29/R49 S1 resolved, S5 new; R42 complete up to SC6; R43 no
+widening; R47/R48 S3 resolved. Other rules unchanged.
+
+### Testing expert
+R29 M3 accurate; R35 M3/M4 updated; RT1 OK (drop-REVOKE double at the injected-client boundary);
+RT5 OK; RT6 OK; RT7 R2-2; RT8 OK; RT10 OK; RT11 R2-1. Other rules unchanged.
+
+## Resolution Status (round 2)
+
+### N1 / S5 — one transaction for the whole bootstrap
+- Action: `runBootstrap` = `convergeRolesInTx` + `applyPrivilegeSequence` in one transaction
+  (D11). Docs (deployment.md rotation bullet, README, aws/en.md, manual-test M4) key the recovery
+  step on `bootstrap-rds-roles: done`, and name the lost-commit case as the one ambiguity.
+- Test: "runBootstrap rolls role convergence back when the privilege sequence fails" — failure
+  injected at the first privilege statement, positive control that the role had LOGIN inside the
+  transaction, password hash and NOLOGIN unchanged after. Red-proven by splitting it back into two
+  transactions.
+
+### N2 — postcondition readable by the RDS master
+- Action: test (f) extracts the postcondition from the migration file and runs it as a NOSUPERUSER
+  CREATEROLE CREATEDB role: false at rest, true after a superuser's parameter grant. Red-proven by
+  pointing the user-mapping branch at the superuser-only `pg_user_mapping`.
+
+### R2-1 — shared-connection role switch
+- Action: fixtures created through the stand-in's own connection; an `afterEach` resets `su` and
+  asserts it is a superuser again.
+
+### R2-2 — postcondition branches
+- Action: (b3) is table-driven over parameter, type, language, large object, FDW, foreign server,
+  user mapping, tablespace — each with a precondition that the catalog row names the role. A user
+  mapping is an OWNER dependency in `pg_shdepend`, so the ownership guard refuses it first; that row
+  expects the ownership message. Red-proven by breaking the type branch alone.

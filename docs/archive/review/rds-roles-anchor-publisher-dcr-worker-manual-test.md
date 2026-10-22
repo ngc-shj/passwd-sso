@@ -56,8 +56,8 @@ Expected: step 1 stops at the audit with exactly the `rolcanlogin` pair for
 Rollback: the old services keep serving through steps 1–3 (`deploy.sh` exits before any
 `update-service`). The migration only narrows the unused DCR role's privileges and needs no
 rollback for the old image. If step 3's bootstrap fails, nothing it did is committed: every role
-is preflighted before the first password-bearing statement, all roles converge in one transaction,
-and the privilege sequence is a second one — so no role is left with a new password or LOGIN,
-including in the rotation path.
+is preflighted before the first password-bearing statement, and role convergence and the privilege
+sequence run in one transaction (`runBootstrap`) — so no role is left with a new password or LOGIN,
+including in the rotation path, and `bootstrap-rds-roles: done` is printed only after the commit.
 
 Not executable here: no RDS instance or AWS access in this environment.

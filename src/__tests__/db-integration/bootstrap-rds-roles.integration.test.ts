@@ -29,6 +29,7 @@ import { spawnSync } from "node:child_process";
 import {
   convergeRole,
   convergeRoles,
+  runBootstrap,
   applyDeniedPrivileges,
   loadDeniedPolicy,
   grantRoutineExecute,
@@ -620,10 +621,16 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
 
     beforeEach(async () => {
       await su.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE CREATEDB`);
-      // PROBE: created by the stand-in, so it holds ADMIN OPTION on it.
-      await su.query(`SET ROLE ${STANDIN}`);
-      await su.query(`CREATE ROLE ${PROBE} WITH NOLOGIN PASSWORD 'old-a'`);
+      // PROBE: created by the stand-in, so it holds ADMIN OPTION on it. On the
+      // stand-in's own connection, so the shared `su` never leaves the superuser.
+      await asStandIn((c) => c.query(`CREATE ROLE ${PROBE} WITH NOLOGIN PASSWORD 'old-a'`));
+    });
+
+    afterEach(async () => {
+      // A local failure must not leave `su` as someone else for later tests.
       await su.query("RESET ROLE");
+      const { rows } = await su.query("SELECT rolsuper FROM pg_roles WHERE rolname = current_user");
+      expect(rows).toEqual([{ rolsuper: true }]);
     });
 
     it("refuses before any password is sent when a later role cannot be converged", async () => {
@@ -664,10 +671,38 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       expect(await memberRows(su, PROBE, GRANTOR)).toBe(1);
     });
 
+    it("runBootstrap rolls role convergence back when the privilege sequence fails", async () => {
+      // One transaction for both phases: a failure after convergence must not
+      // leave the roles with new passwords while the run reads as failed.
+      const before = await passwordHash(PROBE);
+      let loginInsideTx: boolean | undefined;
+
+      await asStandIn(async (c) => {
+        const failsAfterConvergence = {
+          escapeLiteral: (value: string) => c.escapeLiteral(value),
+          query: async (text: string, params?: unknown[]) => {
+            if (text === "REVOKE CREATE ON SCHEMA public FROM PUBLIC") {
+              // Positive control: convergence really ran inside the transaction.
+              const { rows } = await c.query("SELECT rolcanlogin FROM pg_roles WHERE rolname = $1", [PROBE]);
+              loginInsideTx = rows[0]?.rolcanlogin;
+              throw new Error("simulated privilege-sequence failure");
+            }
+            return c.query(text, params);
+          },
+        } as unknown as Client;
+
+        await expect(
+          runBootstrap(failsAfterConvergence, [{ name: PROBE, password: "new-a" }], loadDeniedPolicy()),
+        ).rejects.toThrow("simulated privilege-sequence failure");
+      });
+
+      expect(loginInsideTx).toBe(true);
+      expect(await passwordHash(PROBE)).toBe(before);
+      expect((await roleAttrs(su, PROBE)).rolcanlogin).toBe(false);
+    });
+
     it("commits every role when all of them converge", async () => {
-      await su.query(`SET ROLE ${STANDIN}`);
-      await su.query(`CREATE ROLE ${PROBE_B} WITH NOLOGIN`);
-      await su.query("RESET ROLE");
+      await asStandIn((c) => c.query(`CREATE ROLE ${PROBE_B} WITH NOLOGIN`));
       const before = await passwordHash(PROBE);
 
       await asStandIn((c) =>

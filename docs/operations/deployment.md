@@ -194,10 +194,15 @@ either:
   export them for the bootstrap. The running old tasks hold the old passwords in
   their environment, so they cannot open NEW connections from step 3 until step
   4 replaces them — run step 3 immediately before step 4 and accept that window.
-  If the bootstrap fails, it changes no role (every role is checked before the
-  first password is sent, and all roles converge in one transaction), so the
+  The bootstrap is one transaction — role convergence and the privilege
+  sequence commit together, and every role is checked before the first password
+  is sent — so it either prints `bootstrap-rds-roles: done` and has applied
+  everything, or has changed nothing. If it did not print that line, the
   database keeps the old passwords while the secret holds the new ones: restore
-  the secret's previous version (`AWSPREVIOUS`) before any task restarts.
+  the secret's previous version (`AWSPREVIOUS`) before any task restarts. If it
+  did, keep the new secret. A connection lost during the final commit is the one
+  ambiguous case: check which of the two passwords a role accepts before
+  choosing.
 
 ## Deploy Flow (Local / Docker Compose)
 

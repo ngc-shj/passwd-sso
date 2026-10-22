@@ -125,3 +125,14 @@ stand-in tests give the stand-in CREATEDB for that reason.
   applied to the dev database; its `_prisma_migrations.checksum` was updated to the new file's
   SHA-256 in place (no reset), after the new postcondition was dry-run against that database inside
   `BEGIN … ROLLBACK`. `npx prisma migrate status` reports the schema up to date.
+
+## D11 — Phase 3 round 2: the whole bootstrap is one transaction
+
+Round 1's `convergeRoles` committed role convergence before `main` opened a second transaction
+for the privilege sequence. A failure in the second left the roles with their new passwords while
+the docs (written in round 1) told the operator a failed run changed nothing and to restore the
+previous secret — which would have broken authentication (code-review round 2: functionality N1,
+security S5). `main` now calls `runBootstrap`: `convergeRolesInTx` and the extracted
+`applyPrivilegeSequence` in one transaction; `bootstrap-rds-roles: done` is printed only after the
+commit, and the docs key the recovery step on that line. `convergeRoles` (one transaction around
+convergence alone) remains for its tests.

@@ -303,13 +303,112 @@ describe("migration 20261023010000 retires passwd_dcr_cleanup_worker (real DB)",
     });
   });
 
-  it("(b3) raises on a grant of an object kind the loops do not revoke", async () => {
-    await inRolledBackTransaction(async (c) => {
-      await c.query(`GRANT SET ON PARAMETER work_mem TO ${ROLE}`);
+  /**
+   * (b3) Object kinds the revoke loops do not enumerate. Each row grants one to
+   * the role inside the rolled-back transaction, asserts the catalog row now
+   * names it (so a failed setup reads as a failure, not a pass), and expects
+   * the postcondition to refuse. The audit reads none of these kinds, so the
+   * postcondition is the only control on them.
+   */
+  const STILL_HOLDS =
+    "passwd_dcr_cleanup_worker still holds a grant or user mapping the retirement could not revoke";
+  // A user mapping is recorded as an OWNER dependency in pg_shdepend, so the
+  // ownership guard refuses it before the postcondition is reached.
+  const OWNS = "passwd_dcr_cleanup_worker owns objects; reassign them before retiring it";
+  const unrevokedKinds: [string, string[], string, string][] = [
+    [
+      "a parameter",
+      [`GRANT SET ON PARAMETER work_mem TO ${ROLE}`],
+      `SELECT 1 FROM pg_parameter_acl pa, aclexplode(pa.paracl) x WHERE x.grantee = '${ROLE}'::regrole`,
+      STILL_HOLDS,
+    ],
+    [
+      "a type",
+      ["CREATE TYPE retire_dcr_probe_t AS (a int)", `GRANT USAGE ON TYPE retire_dcr_probe_t TO ${ROLE}`],
+      `SELECT 1 FROM pg_type t, aclexplode(t.typacl) x WHERE x.grantee = '${ROLE}'::regrole`,
+      STILL_HOLDS,
+    ],
+    [
+      "a language",
+      [`GRANT USAGE ON LANGUAGE plpgsql TO ${ROLE}`],
+      `SELECT 1 FROM pg_language l, aclexplode(l.lanacl) x WHERE x.grantee = '${ROLE}'::regrole`,
+      STILL_HOLDS,
+    ],
+    [
+      "a large object",
+      [
+        `DO $$ BEGIN EXECUTE format('GRANT SELECT ON LARGE OBJECT %s TO ${ROLE}', lo_create(0)); END $$`,
+      ],
+      `SELECT 1 FROM pg_largeobject_metadata o, aclexplode(o.lomacl) x WHERE x.grantee = '${ROLE}'::regrole`,
+      STILL_HOLDS,
+    ],
+    [
+      "a foreign-data wrapper",
+      ["CREATE FOREIGN DATA WRAPPER retire_dcr_probe_fdw", `GRANT USAGE ON FOREIGN DATA WRAPPER retire_dcr_probe_fdw TO ${ROLE}`],
+      `SELECT 1 FROM pg_foreign_data_wrapper w, aclexplode(w.fdwacl) x WHERE x.grantee = '${ROLE}'::regrole`,
+      STILL_HOLDS,
+    ],
+    [
+      "a foreign server",
+      [
+        "CREATE FOREIGN DATA WRAPPER retire_dcr_probe_fdw",
+        "CREATE SERVER retire_dcr_probe_srv FOREIGN DATA WRAPPER retire_dcr_probe_fdw",
+        `GRANT USAGE ON FOREIGN SERVER retire_dcr_probe_srv TO ${ROLE}`,
+      ],
+      `SELECT 1 FROM pg_foreign_server f, aclexplode(f.srvacl) x WHERE x.grantee = '${ROLE}'::regrole`,
+      STILL_HOLDS,
+    ],
+    [
+      "a user mapping",
+      [
+        "CREATE FOREIGN DATA WRAPPER retire_dcr_probe_fdw",
+        "CREATE SERVER retire_dcr_probe_srv FOREIGN DATA WRAPPER retire_dcr_probe_fdw",
+        `CREATE USER MAPPING FOR ${ROLE} SERVER retire_dcr_probe_srv`,
+      ],
+      `SELECT 1 FROM pg_user_mappings um WHERE um.umuser = '${ROLE}'::regrole`,
+      OWNS,
+    ],
+    [
+      "a tablespace",
+      [`GRANT CREATE ON TABLESPACE pg_default TO ${ROLE}`],
+      `SELECT 1 FROM pg_tablespace ts, aclexplode(ts.spcacl) x WHERE x.grantee = '${ROLE}'::regrole`,
+      STILL_HOLDS,
+    ],
+  ];
 
-      await expect(c.query(body)).rejects.toThrow(
-        "passwd_dcr_cleanup_worker still holds a grant or user mapping the retirement could not revoke",
-      );
+  it.each(unrevokedKinds)("(b3) raises on %s, which the loops do not revoke", async (_kind, setup, named, expected) => {
+    await inRolledBackTransaction(async (c) => {
+      for (const statement of setup) await c.query(statement);
+      expect((await c.query(named)).rowCount).toBeGreaterThan(0);
+
+      await expect(c.query(body)).rejects.toThrow(expected);
+    });
+  });
+
+  it("(f) the postcondition's catalogs are readable by a NOSUPERUSER CREATEROLE CREATEDB role", async () => {
+    // On RDS the migration runs as the master, not a superuser; a catalog it
+    // cannot read would fail the migrate task. The postcondition is taken from
+    // the migration file itself, not restated here.
+    const sql = readFileSync(MIGRATION_SQL, "utf8");
+    // The IF EXISTS block immediately before its RAISE — the file has others.
+    const raiseAt = sql.indexOf("RAISE EXCEPTION 'passwd_dcr_cleanup_worker still holds");
+    const open = sql.lastIndexOf("  IF EXISTS (\n", raiseAt);
+    const close = sql.lastIndexOf("\n  ) THEN", raiseAt);
+    expect(raiseAt > 0 && open > 0 && open < close, "postcondition block found in the migration").toBe(true);
+    const block = sql.slice(open + "  IF EXISTS (\n".length, close);
+    expect(block).not.toContain("IF EXISTS");
+    const probe = `SELECT EXISTS (${block.replace(/\btarget\b/g, `'${ROLE}'::regrole`)}) AS held`;
+
+    await inRolledBackTransaction(async (c) => {
+      await c.query(`CREATE ROLE ${PROBE_STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE CREATEDB`);
+
+      await c.query(`SET LOCAL ROLE ${PROBE_STANDIN}`);
+      expect((await c.query(probe)).rows).toEqual([{ held: false }]);
+      await c.query("RESET ROLE");
+
+      await c.query(`GRANT SET ON PARAMETER work_mem TO ${ROLE}`);
+      await c.query(`SET LOCAL ROLE ${PROBE_STANDIN}`);
+      expect((await c.query(probe)).rows).toEqual([{ held: true }]);
     });
   });
 

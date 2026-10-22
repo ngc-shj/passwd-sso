@@ -380,34 +380,49 @@ export async function convergeRole(client, name, password) {
 }
 
 /**
- * Converge every role in one transaction (role DDL is transactional), so a
- * refusal or a failed membership strip on one role leaves no role with a new
- * password or LOGIN — not an earlier one in the list, and not that role
- * itself. As a non-superuser, every existing role is preflighted before the
- * first statement carrying a password is sent. Exported for the integration
- * test.
+ * Converge every role inside the caller's transaction. As a non-superuser,
+ * every existing role is preflighted before the first statement carrying a
+ * password is sent.
+ *
+ * @param {import("pg").Client} client inside a transaction the caller owns
+ * @param {{ name: string, password: string }[]} roles
+ */
+export async function convergeRolesInTx(client, roles) {
+  if (!(await currentUserIsSuperuser(client))) {
+    await assertCallerCanManageRoles(client);
+    for (const { name } of roles) {
+      const { rowCount } = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [name]);
+      if (rowCount > 0) await assertConvergeableWithoutSuperuser(client, name);
+    }
+  }
+  for (const { name, password } of roles) {
+    await convergeRole(client, name, password);
+  }
+}
+
+async function inTransaction(client, fn) {
+  await client.query("BEGIN");
+  try {
+    await fn();
+    await client.query("COMMIT");
+  } catch (e) {
+    // Nothing partial survives: role DDL, GRANT, REVOKE and ALTER DEFAULT
+    // PRIVILEGES are all transactional.
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+}
+
+/**
+ * Converge every role in one transaction, so a refusal or a failed membership
+ * strip on one role leaves no role with a new password or LOGIN. Exported for
+ * the integration test.
  *
  * @param {import("pg").Client} client not already inside a transaction
  * @param {{ name: string, password: string }[]} roles
  */
 export async function convergeRoles(client, roles) {
-  await client.query("BEGIN");
-  try {
-    if (!(await currentUserIsSuperuser(client))) {
-      await assertCallerCanManageRoles(client);
-      for (const { name } of roles) {
-        const { rowCount } = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [name]);
-        if (rowCount > 0) await assertConvergeableWithoutSuperuser(client, name);
-      }
-    }
-    for (const { name, password } of roles) {
-      await convergeRole(client, name, password);
-    }
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw e;
-  }
+  await inTransaction(client, () => convergeRolesInTx(client, roles));
 }
 
 // EXECUTE grants on routines. Each migration that creates one of these grants
@@ -436,6 +451,114 @@ export async function grantRoutineExecute(client, grants = ROUTINE_EXECUTE) {
       await client.query(`GRANT EXECUTE ON ${kind} ${signature} TO ${role}`);
     }
   }
+}
+
+/**
+ * The privilege sequence: passwd_app's schema/table ACLs, the denied policy,
+ * the workers' schema-level privileges and routine EXECUTE. Runs inside the
+ * caller's transaction (runBootstrap). Exported for the integration test.
+ *
+ * @param {import("pg").Client} client
+ * @param {object[]} denied the loaded must-never-be-granted policy
+ */
+export async function applyPrivilegeSequence(client, denied) {
+  // Runs inside runBootstrap's single transaction.
+  //
+  // The blanket `GRANT ... ON ALL TABLES` and the deny REVOKEs that narrow it
+  // back are two ends of a single intended state. Run as autocommit
+  // statements, a crash, a lost connection or a thrown error between them
+  // commits only the widening half — leaving the immutable audit tables
+  // writable until someone happens to re-run this script. "Convergent and
+  // re-runnable" is not sufficient for a security control: it describes the
+  // steady state, not the window.
+  //
+  // Every statement below is transactional DDL in PostgreSQL (GRANT, REVOKE,
+  // ALTER DEFAULT PRIVILEGES), so the rollback is real.
+
+  // Schema-level privileges — mirror 02-create-app-role.sql. Safe to re-run.
+  await client.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
+
+  // passwd_app: CONNECT + USAGE + full DML on current + future tables/sequences.
+  // Revoke FIRST so a role that was over-granted out of band (extra table
+  // privileges such as TRUNCATE/REFERENCES, or CREATE on the schema) converges
+  // down to exactly this set rather than keeping the surplus — same
+  // revoke-then-grant shape used for the worker roles below.
+  await client.query("REVOKE ALL ON SCHEMA public FROM passwd_app");
+  await client.query("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM passwd_app");
+  await client.query("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM passwd_app");
+  await client.query(
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM passwd_app",
+  );
+  await client.query(
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM passwd_app",
+  );
+  await client.query(
+    "DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_app', current_database()); END $$",
+  );
+  await client.query("GRANT USAGE ON SCHEMA public TO passwd_app");
+  await client.query(
+    "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app",
+  );
+  await client.query(
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app",
+  );
+  await client.query(
+    "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app",
+  );
+  await client.query(
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app",
+  );
+
+  // Re-apply the declared must-never-be-granted set, AFTER the blanket grant
+  // above and derived from a single prescriptive file rather than spelled
+  // here.
+  //
+  // The blanket `GRANT ... ON ALL TABLES` is table-blind, so on any run that
+  // happens AFTER the migrations it re-granted exactly what migration
+  // 20260522000200_audit_log_revoke_via_definer had revoked: UPDATE/DELETE on
+  // audit_logs and audit_chain_anchors. The comment on the worker block below
+  // shows the authors reasoned carefully about grants the migrations ADD; what
+  // was missed is that a migration can also install a NEGATIVE grant, and this
+  // script is documented as convergent and re-runnable — so every convergence
+  // run silently reopened an OWASP A04-2 control.
+  //
+  // Idempotent, and safe on a pre-migration run: REVOKE on a table that does
+  // not exist yet is skipped by the to_regclass guard.
+  await applyDeniedPrivileges(client, denied);
+
+  // Worker roles: SCHEMA-level and DEFAULT privileges only.
+  //
+  // Scope note (do not over-read this as convergence): unlike passwd_app
+  // above, existing-object ACLs are deliberately NOT revoked here. The
+  // workers' legitimate table grants are issued by the Prisma migrations that
+  // create those tables (13 migrations at present), and this script runs
+  // BEFORE the first migration — so at this point those grants do not exist
+  // yet, and a blanket `REVOKE ALL ON ALL TABLES` on a re-run would strip the
+  // legitimate ACLs the migrations installed. Consequence: a table privilege
+  // granted to a worker out of band is NOT removed by re-running this script.
+  // Detecting that surplus is the job of `scripts/audit-db-grants.mjs`, which
+  // diffs the live ACLs against the expected set after the migrations have
+  // run.
+  await grantWorkerSchemaPrivileges(client);
+
+  await grantRoutineExecute(client);
+}
+
+/**
+ * The full bootstrap in ONE transaction: role convergence and the privilege
+ * sequence commit together or not at all. Two transactions would let a failure
+ * in the second leave the roles with their new passwords while an operator
+ * reads the failed run as "nothing changed" and restores the previous secret.
+ *
+ * @param {import("pg").Client} client not already inside a transaction
+ * @param {{ name: string, password: string }[]} roles
+ * @param {object[]} denied
+ */
+export async function runBootstrap(client, roles, denied) {
+  await inTransaction(client, async () => {
+    await convergeRolesInTx(client, roles);
+    await applyPrivilegeSequence(client, denied);
+  });
 }
 
 async function main() {
@@ -495,99 +618,12 @@ async function main() {
   const client = new Client({ connectionString });
   await client.connect();
   try {
-    await convergeRoles(
+    await runBootstrap(
       client,
       ROLES.map((r) => ({ name: r.name, password: process.env[r.pwEnv] })),
+      denied,
     );
-
-    // ONE transaction for the whole privilege sequence.
-    //
-    // The blanket `GRANT ... ON ALL TABLES` and the deny REVOKEs that narrow it
-    // back are two ends of a single intended state. Run as autocommit
-    // statements, a crash, a lost connection or a thrown error between them
-    // commits only the widening half — leaving the immutable audit tables
-    // writable until someone happens to re-run this script. "Convergent and
-    // re-runnable" is not sufficient for a security control: it describes the
-    // steady state, not the window.
-    //
-    // Every statement below is transactional DDL in PostgreSQL (GRANT, REVOKE,
-    // ALTER DEFAULT PRIVILEGES), so the rollback is real.
-    await client.query("BEGIN");
-    // Schema-level privileges — mirror 02-create-app-role.sql. Safe to re-run.
-    await client.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
-
-    // passwd_app: CONNECT + USAGE + full DML on current + future tables/sequences.
-    // Revoke FIRST so a role that was over-granted out of band (extra table
-    // privileges such as TRUNCATE/REFERENCES, or CREATE on the schema) converges
-    // down to exactly this set rather than keeping the surplus — same
-    // revoke-then-grant shape used for the worker roles below.
-    await client.query("REVOKE ALL ON SCHEMA public FROM passwd_app");
-    await client.query("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM passwd_app");
-    await client.query("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM passwd_app");
-    await client.query(
-      "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM passwd_app",
-    );
-    await client.query(
-      "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM passwd_app",
-    );
-    await client.query(
-      "DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_app', current_database()); END $$",
-    );
-    await client.query("GRANT USAGE ON SCHEMA public TO passwd_app");
-    await client.query(
-      "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app",
-    );
-    await client.query(
-      "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app",
-    );
-    await client.query(
-      "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app",
-    );
-    await client.query(
-      "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app",
-    );
-
-    // Re-apply the declared must-never-be-granted set, AFTER the blanket grant
-    // above and derived from a single prescriptive file rather than spelled
-    // here.
-    //
-    // The blanket `GRANT ... ON ALL TABLES` is table-blind, so on any run that
-    // happens AFTER the migrations it re-granted exactly what migration
-    // 20260522000200_audit_log_revoke_via_definer had revoked: UPDATE/DELETE on
-    // audit_logs and audit_chain_anchors. The comment on the worker block below
-    // shows the authors reasoned carefully about grants the migrations ADD; what
-    // was missed is that a migration can also install a NEGATIVE grant, and this
-    // script is documented as convergent and re-runnable — so every convergence
-    // run silently reopened an OWASP A04-2 control.
-    //
-    // Idempotent, and safe on a pre-migration run: REVOKE on a table that does
-    // not exist yet is skipped by the to_regclass guard.
-    await applyDeniedPrivileges(client, denied);
-
-    // Worker roles: SCHEMA-level and DEFAULT privileges only.
-    //
-    // Scope note (do not over-read this as convergence): unlike passwd_app
-    // above, existing-object ACLs are deliberately NOT revoked here. The
-    // workers' legitimate table grants are issued by the Prisma migrations that
-    // create those tables (13 migrations at present), and this script runs
-    // BEFORE the first migration — so at this point those grants do not exist
-    // yet, and a blanket `REVOKE ALL ON ALL TABLES` on a re-run would strip the
-    // legitimate ACLs the migrations installed. Consequence: a table privilege
-    // granted to a worker out of band is NOT removed by re-running this script.
-    // Detecting that surplus is the job of `scripts/audit-db-grants.mjs`, which
-    // diffs the live ACLs against the expected set after the migrations have
-    // run.
-    await grantWorkerSchemaPrivileges(client);
-
-    await grantRoutineExecute(client);
-
-    await client.query("COMMIT");
     console.log("bootstrap-rds-roles: done");
-  } catch (e) {
-    // Nothing partial survives: without this, a failure after the blanket GRANT
-    // leaves the audit tables writable.
-    await client.query("ROLLBACK").catch(() => {});
-    throw e;
   } finally {
     await client.end();
   }

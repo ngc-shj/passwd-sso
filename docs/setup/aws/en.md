@@ -133,7 +133,8 @@ true superuser fails with SQLSTATE 42501, including:
   even a no-op `NOCREATEDB`), that it holds ADMIN OPTION on each existing role,
   and that none has `rolsuper` / `rolbypassrls` / `rolreplication` set (only AWS
   support can clear those); any failure stops the run with nothing sent. All
-  roles converge in one transaction, so a later failure leaves no role changed.
+  roles converge in the same transaction as the privilege sequence, so a run
+  that fails anywhere leaves no role changed.
   The master has CREATEROLE and CREATEDB and holds ADMIN OPTION on every role it
   created. What no check can see — a role dropped in between, a password-check
   hook in a custom parameter group, a read-only or cancelled session — can
