@@ -58,3 +58,29 @@ not of the deployment, so the manifest cannot describe it. Tests: unit rows for
   (`audit-db-grants-role-state.test.mjs`, `bootstrap-rds-roles.integration.test.ts`).
 - `check-deployment-artifact.sh` (R35 Tier-1): `rds-roles-anchor-publisher-dcr-worker-manual-test.md`
   added.
+
+## D7 — `PASSWD_ANCHOR_PUBLISHER_PASSWORD` not added to `.env.example` / `env-allowlist.ts` / compose
+
+C5 asked for this to be decided by matching `PASSWD_RETENTION_GC_WORKER_PASSWORD`. Decided against
+(self R-check R18): the sibling is forwarded to the compose `db` service as `:?required`, so
+adding this one the same way makes `docker compose up` fail for every existing `.env` that lacks
+it; forwarding it as optional passes an empty value when unset, which defeats initdb 02's
+`\getenv` fallback and leaves the role with no password. The variable is an input only to the RDS
+bootstrap, documented where that runs (`infra/terraform/README.md`, `docs/setup/aws/en.md`).
+`npm run check:env-docs` passes.
+
+## D8 — Residual of the creator-grant exclusion (Anti-Deferral)
+
+- Finding (self R-check R43, Minor; same class as plan-review R4-S1): since D5 an explicit
+  `GRANT passwd_dcr_cleanup_worker TO <non-audited> WITH ADMIN OPTION, INHERIT FALSE, SET FALSE` is
+  indistinguishable from PostgreSQL 16's creator grant and appears in no finding; before D5 it
+  would have surfaced as `UNEXPECTED_GRANT`.
+- Why not narrowed here: telling them apart needs the member's `rolcreaterole`/`rolsuper` carried
+  in the key (a new flag, a format and regex change across the audit, docs and tests) for a grant
+  that confers none of the role's privileges.
+- Cost: a dormant ADMIN grant on a NOLOGIN, privilege-less role goes unreported until used. Every
+  use is still a finding: granting the role on with INHERIT/SET (`MEMBER … inherit=t` or `set=t`),
+  re-enabling LOGIN (`rolcanlogin true`), or granting it privileges (an object key PUBLIC does not
+  hold).
+- Owner: none; revisit if a retired role ever keeps privileges, or if a second retired role is
+  added.
