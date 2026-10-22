@@ -42,7 +42,7 @@
  * manufactured assurance one layer up.
  */
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import {
@@ -123,14 +123,12 @@ type ChainRead =
   | { kind: "no-anchor"; chainedRows: number }
   | { kind: "walk"; anchorSeq: number; anchorPrevHash: Uint8Array; rows: ChainRowRaw[] };
 
-type ReadTx = Pick<PrismaClient, "$queryRawUnsafe">;
-
 /**
  * The reads both paths share. `checkScope` is the bypass path's: there the
  * policy admits every tenant's rows, so the rows that come back are checked
  * against the tenant being verified rather than trusted to the WHERE alone.
  */
-async function readChain(tx: ReadTx, tenantId: string, checkScope: boolean): Promise<ChainRead> {
+async function readChain(tx: Prisma.TransactionClient, tenantId: string, checkScope: boolean): Promise<ChainRead> {
   // The anchor is read first and for the same reason the endpoint reads it:
   // without it, a tenant whose rows were all deleted walks zero rows, finds
   // nothing wrong, and reports healthy — which is precisely the state periodic
@@ -141,8 +139,12 @@ async function readChain(tx: ReadTx, tenantId: string, checkScope: boolean): Pro
   );
   if (checkScope) {
     const foreign = anchors.find((a) => a.tenant_id !== tenantId);
-    if (anchors.length > 1 || foreign) {
-      throw scopeViolation(tenantId, foreign?.tenant_id ?? tenantId, "audit_chain_anchors");
+    if (foreign) throw scopeViolation(tenantId, foreign.tenant_id, "audit_chain_anchors");
+    if (anchors.length > 1) {
+      throw new Error(
+        `BYPASS_SCOPE_VIOLATION: audit_chain_anchors returned ${anchors.length} rows ` +
+          `while verifying ${JSON.stringify(tenantId)}, expected at most 1`,
+      );
     }
   }
 
@@ -301,7 +303,6 @@ export async function verifyChainUnderSentinelGrant(
   // PostgreSQL returns uuids in lowercase; the row checks compare against
   // this one spelling, as the routing predicate does.
   const tenantId = rawTenantId.toLowerCase();
-  const grant = BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ;
   const fetched = await withBypassRls(
     deps.prisma,
     async (tx) => {
@@ -310,11 +311,12 @@ export async function verifyChainUnderSentinelGrant(
       // with the grant constant, not a value handed in, so a call made with
       // some other grant fails here.
       const state = await readBypassState(tx);
+      const expected = BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ;
       if (
         state === null ||
         state.bypassRls !== "on" ||
-        state.purpose !== grant.purpose ||
-        state.tables !== grant.tables
+        state.purpose !== expected.purpose ||
+        state.tables !== expected.tables
       ) {
         throw new Error(
           `BYPASS_CONTEXT_MISSING: bypass_rls=${JSON.stringify(state?.bypassRls ?? null)} ` +
@@ -324,7 +326,7 @@ export async function verifyChainUnderSentinelGrant(
       }
       return readChain(tx, tenantId, true);
     },
-    grant,
+    BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ,
     TX_BUDGET,
   );
   return resultOf(tenantId, fetched);

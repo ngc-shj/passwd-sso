@@ -135,11 +135,13 @@ function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
           const tenantId = params[0];
           // A mislabelled transaction (a wrong trackTenantOrder list) would
           // otherwise serve one tenant's fixture to another and pass quietly.
-          if (tenantId !== label) {
+          // Case-insensitive, as PostgreSQL's uuid equality is: a spelling
+          // difference must reach the worker's own row checks, not stop here.
+          if (String(tenantId).toLowerCase() !== label) {
             throw new Error(`stub: transaction for ${label} queried ${tenantId}`);
           }
           record.queried.push(text);
-          const fixture = fixtures[tenantId] ?? {};
+          const fixture = fixtures[label] ?? {};
           if (text.includes("audit_chain_anchors")) return fixture.anchors ?? [];
           if (text.includes("COUNT(*)")) {
             return [{ count: BigInt(fixture.chainedRows ?? 0) }];
@@ -593,7 +595,8 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
         },
       });
       expect(scopeViolationMessage()).toContain(
-        `BYPASS_SCOPE_VIOLATION: audit_chain_anchors returned a row of tenant ${JSON.stringify(SYSTEM_TENANT_ID)}`,
+        `BYPASS_SCOPE_VIOLATION: audit_chain_anchors returned 2 rows ` +
+          `while verifying ${JSON.stringify(SYSTEM_TENANT_ID)}, expected at most 1`,
       );
     });
 

@@ -314,6 +314,12 @@ describe("audit-chain verify worker RLS context", () => {
       expect(result.totalVerified).toBe(
         Math.min(Number(truth.walkable), MAX_ROWS_PER_TENANT),
       );
+      if (Number(truth.walkable) <= MAX_ROWS_PER_TENANT) {
+        expect(result.ok).toBe(true);
+        expect(result.reason).toBeUndefined();
+      } else {
+        expect(result.reason).toBe("TRUNCATED");
+      }
     }
   });
 

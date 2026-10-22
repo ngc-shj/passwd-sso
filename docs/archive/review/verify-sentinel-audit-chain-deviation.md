@@ -41,3 +41,16 @@ has no chain.
 - The unit case "verifies the sentinel when its audit_chain_enabled is true" ran the same path as
   the flag-off case (the worker no longer reads the flag) and was replaced by the uppercase-id
   case; the stub's `chainEnabledIds` option was removed.
+
+## D5 — Phase 3 fixes
+
+- `check-bypass-rls` and `check-rls-read-context` failed on the committed code: the grant was
+  passed through a local `const grant`, which the gate cannot read, and `readChain`'s `tx` was typed
+  `Pick<PrismaClient, "$queryRawUnsafe">`, which the read-context gate does not recognise as a
+  transaction client. The call now names `BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ` directly
+  and `tx` is `Prisma.TransactionClient`; both gates pass.
+- The anchor row-count arm of `BYPASS_SCOPE_VIOLATION` has its own message (`returned N rows …
+  expected at most 1`); red-proven by reverting it, which turns the `[own, own]` case red.
+- The unit stub's `$1` check is case-insensitive and its fixtures are keyed by the transaction's
+  label, so removing the lowercase normalisation now goes red at the worker's own
+  `BYPASS_SCOPE_VIOLATION`, not at the stub's mislabel guard (re-proven).
