@@ -544,10 +544,9 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       });
     });
 
-    it.each([
-      ["CREATEDB", "CREATEROLE"],
-      ["CREATEROLE", "CREATEDB"],
-    ] as const)("refuses, without sending the password, a caller with %s but not %s", async (has) => {
+    it.each(["CREATEDB", "CREATEROLE"] as const)(
+      "refuses, without sending the password, a caller holding only %s of CREATEROLE/CREATEDB",
+      async (has) => {
       await inRolledBackTransaction(async (c) => {
         // The target exists and the caller holds ADMIN OPTION on it, so only
         // the caller's own attribute is missing.
@@ -563,7 +562,8 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         expect(statements.some((s) => /rolcreaterole, rolcreatedb/.test(s))).toBe(true);
         expect(statements.filter((s) => /PASSWORD/i.test(s))).toEqual([]);
       });
-    });
+      },
+    );
 
     it("refuses to CREATE as a caller without CREATEDB, without sending the password", async () => {
       await inRolledBackTransaction(async (c) => {
