@@ -22,6 +22,9 @@
  *       to PUBLIC by default; the routine runs with its owner's privileges)
  * T11 — a grant in a NON-public schema is detected (the audit used to pin every
  *       query to nspname = 'public')
+ * Retired role state — passwd_dcr_cleanup_worker re-enabled, granted, or
+ *       acted as is ROLE_STATE_VIOLATION live, ROLE_STATE_IN_MANIFEST in the
+ *       manifest, and refused by --write
  *
  * Each mutation is undone in a `finally`. They must be COMMITTED, not rolled
  * back: the audit runs in its own process and would not see an open
@@ -374,6 +377,151 @@ describe("audit-db-grants (real DB)", () => {
     expect(r.stderr).toContain(
       "MISSING_GRANT: TABLE:passwd_app public.a_table_that_does_not_exist SELECT",
     );
+  });
+
+  /**
+   * The retired role, asserted prescriptively. passwd_dcr_cleanup_worker is in
+   * RETIRED_ROLES, so a state that lets it log in, be acted as, or hold
+   * anything PUBLIC does not is a ROLE_STATE_VIOLATION live and refused by
+   * `--write` — the manifest snapshot cannot absorb it.
+   *
+   * These mutate the REAL role (the audit reads it by name) and must be
+   * committed to be visible to the audit's own connection; each is undone in a
+   * finally entered right after the mutation is acquired.
+   */
+  describe("retired role state", () => {
+    const RETIRED = "passwd_dcr_cleanup_worker";
+
+    it("reports ROLE_STATE_VIOLATION when LOGIN is re-enabled", async () => {
+      try {
+        await su.query(`ALTER ROLE ${RETIRED} LOGIN`);
+
+        const r = runAudit(manifestPath);
+
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain(`ROLE_STATE_VIOLATION: ROLEATTR:${RETIRED} rolcanlogin true`);
+      } finally {
+        await su.query(`ALTER ROLE ${RETIRED} NOLOGIN`);
+      }
+    });
+
+    it("reports ROLE_STATE_VIOLATION for EXECUTE on a function PUBLIC does not hold", async () => {
+      // Anti-vacuity: PUBLIC really lacks it, so the PUBLIC-counterpart
+      // exemption cannot be what decides.
+      const [{ held }] = (
+        await su.query(
+          "SELECT has_function_privilege('public', 'public.rls_bypass_enforced()', 'EXECUTE') AS held",
+        )
+      ).rows;
+      expect(held).toBe(false);
+      try {
+        await su.query(`GRANT EXECUTE ON FUNCTION public.rls_bypass_enforced() TO ${RETIRED}`);
+
+        const r = runAudit(manifestPath);
+
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain(
+          `ROLE_STATE_VIOLATION: FUNCTION:${RETIRED} public.rls_bypass_enforced() EXECUTE`,
+        );
+      } finally {
+        await su.query(`REVOKE EXECUTE ON FUNCTION public.rls_bypass_enforced() FROM ${RETIRED}`);
+      }
+    });
+
+    it("reports ROLE_STATE_VIOLATION for a role that can act as it", async () => {
+      // The adjacent allow — the ADMIN-only row a creating CREATEROLE role
+      // holds — is the creator case in retire-dcr-cleanup-worker.integration.test.ts.
+      const member = "acl_audit_probe_dcr_member";
+      await su.query(`DROP ROLE IF EXISTS ${member}`);
+      await su.query(`CREATE ROLE ${member} NOLOGIN`);
+      try {
+        // Default options: INHERIT and SET.
+        await su.query(`GRANT ${RETIRED} TO ${member}`);
+
+        const r = runAudit(manifestPath);
+
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain(
+          `ROLE_STATE_VIOLATION: MEMBER:${member} ${RETIRED} admin=f,inherit=t,set=t`,
+        );
+      } finally {
+        // Dropping the member removes its membership in the real role.
+        await su.query(`DROP ROLE IF EXISTS ${member}`);
+      }
+    });
+
+    it("passes with the creator grant the RDS master holds, absent from the manifest", async () => {
+      // On RDS the master created the role, so PostgreSQL 16 recorded an
+      // ADMIN-only membership of the master in it; a manifest generated where a
+      // superuser created the role has no such key. Same row shape, made by the
+      // superuser so the shared role is never re-created.
+      const creator = "acl_audit_probe_dcr_creator";
+      await su.query(`DROP ROLE IF EXISTS ${creator}`);
+      await su.query(`CREATE ROLE ${creator} NOLOGIN`);
+      try {
+        await su.query(
+          `GRANT ${RETIRED} TO ${creator} WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`,
+        );
+        const { rows } = await su.query(
+          `SELECT m.admin_option, m.inherit_option, m.set_option
+             FROM pg_auth_members m
+            WHERE m.member = $1::regrole AND m.roleid = $2::regrole`,
+          [creator, RETIRED],
+        );
+        // Precondition: the row the exemption is about actually exists.
+        expect(rows).toEqual([{ admin_option: true, inherit_option: false, set_option: false }]);
+
+        const r = runAudit(manifestPath);
+
+        expect(r.status, r.stderr).toBe(0);
+      } finally {
+        await su.query(`DROP ROLE IF EXISTS ${creator}`);
+      }
+    });
+
+    it("reports ROLE_STATE_IN_MANIFEST for a manifest that records one", () => {
+      const doctored = join(tmpDir, "role-state.json");
+      const base = JSON.parse(readFileSync(manifestPath, "utf8"));
+      base.grants.push(`ROLEATTR:${RETIRED}\trolcanlogin\ttrue`);
+      writeFileSync(doctored, JSON.stringify(base, null, 2), "utf8");
+
+      const r = runAudit(doctored);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(`ROLE_STATE_IN_MANIFEST: ROLEATTR:${RETIRED} rolcanlogin true`);
+      // The live role is at rest; only the manifest is wrong. Matched as a
+      // finding line: the closing help text names the label too.
+      expect(r.stderr).not.toContain("ROLE_STATE_VIOLATION: ");
+    });
+
+    it("refuses --write against a re-enabled role and leaves the manifest unchanged", async () => {
+      const target = join(tmpDir, "role-state-write.json");
+      writeFileSync(target, readFileSync(manifestPath, "utf8"), "utf8");
+      const before = readFileSync(target, "utf8");
+      try {
+        await su.query(`ALTER ROLE ${RETIRED} LOGIN`);
+
+        const r = runAuditWrite(target);
+
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain("REFUSING to regenerate the manifest");
+        expect(r.stderr).toContain(`ROLE_STATE_VIOLATION: ROLEATTR:${RETIRED} rolcanlogin true`);
+        expect(readFileSync(target, "utf8")).toBe(before);
+      } finally {
+        await su.query(`ALTER ROLE ${RETIRED} NOLOGIN`);
+      }
+    });
+
+    it("allows --write with the role at rest", () => {
+      const target = join(tmpDir, "role-state-rest.json");
+      rmSync(target, { force: true });
+
+      const r = runAuditWrite(target);
+
+      expect(r.status, r.stderr).toBe(0);
+      const written = JSON.parse(readFileSync(target, "utf8"));
+      expect(written.grants).toContain(`ROLEATTR:${RETIRED}\trolcanlogin\tfalse`);
+    });
   });
 
   /**

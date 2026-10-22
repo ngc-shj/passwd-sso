@@ -15,6 +15,9 @@
  * T4 — an inherited role membership is stripped on re-run.
  * T5 — a password containing quotes/backslashes/semicolons is installed
  *      verbatim (escapeLiteral, not string concatenation) and does not inject.
+ * T10 — convergeRole as a NOSUPERUSER CREATEROLE role, the RDS master's shape:
+ *       converges what it may, and refuses BEFORE sending the password what it
+ *       may not.
  *
  * Uses THROWAWAY probe roles — never the real passwd_* roles, which this DB's
  * app and workers depend on.
@@ -28,6 +31,8 @@ import {
   applyDeniedPrivileges,
   loadDeniedPolicy,
   grantRoutineExecute,
+  grantWorkerSchemaPrivileges,
+  ROLES,
 } from "../../../scripts/bootstrap-rds-roles.mjs";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,6 +44,8 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "
 
 const PROBE = "bootstrap_probe_app";
 const GRANTOR = "bootstrap_probe_grantor";
+/** NOSUPERUSER CREATEROLE stand-in for the RDS master (T10). */
+const STANDIN = "bootstrap_probe_standin";
 
 /** SUPERUSER connection — the same privilege level the migrate task uses. */
 function superuserUrl(): string {
@@ -147,7 +154,7 @@ async function grantConnect(su: Client): Promise<void> {
  * "cannot be dropped because some objects depend on it".
  */
 async function dropProbeRoles(su: Client): Promise<void> {
-  for (const role of [PROBE, GRANTOR]) {
+  for (const role of [PROBE, GRANTOR, STANDIN]) {
     await su.query(
       `DO $$ BEGIN
          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${role}') THEN
@@ -167,6 +174,57 @@ async function roleAttrs(su: Client, name: string) {
     [name],
   );
   return rows[0];
+}
+
+/**
+ * Run `fn` on a dedicated superuser connection inside a transaction that is
+ * always rolled back, so roles created and altered there (the stand-in, the
+ * target, an escalated attribute) never reach the shared database.
+ */
+async function inRolledBackTransaction(fn: (c: Client) => Promise<void>): Promise<void> {
+  const c = new Client({ connectionString: superuserUrl() });
+  await c.connect();
+  try {
+    await c.query("BEGIN");
+    try {
+      await fn(c);
+    } finally {
+      await c.query("ROLLBACK");
+    }
+  } finally {
+    await c.end();
+  }
+}
+
+/**
+ * A client that records every statement text and passes it through to `c`.
+ * convergeRole uses `query` and `escapeLiteral` only; its JSDoc types the
+ * parameter as pg.Client, hence the cast.
+ */
+function recordingClient(c: Client): { client: Client; statements: string[] } {
+  const statements: string[] = [];
+  const recorder = {
+    escapeLiteral: (value: string) => c.escapeLiteral(value),
+    query: (text: string, params?: unknown[]) => {
+      statements.push(text);
+      return c.query(text, params);
+    },
+  };
+  return { client: recorder as unknown as Client, statements };
+}
+
+/** The preflight's ADMIN OPTION check — the positive control for the recorder. */
+const ADMIN_PREFLIGHT_RE = /pg_has_role\(current_user, oid, 'MEMBER WITH ADMIN OPTION'\)/;
+
+async function memberRows(c: Client, member: string, granted: string): Promise<number> {
+  const { rowCount } = await c.query(
+    `SELECT 1 FROM pg_auth_members m
+       JOIN pg_roles r ON r.oid = m.member
+       JOIN pg_roles g ON g.oid = m.roleid
+      WHERE r.rolname = $1 AND g.rolname = $2`,
+    [member, granted],
+  );
+  return rowCount ?? 0;
 }
 
 describe("bootstrap-rds-roles convergeRole (real DB)", () => {
@@ -273,6 +331,208 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
     // and our own connection is still usable.
     const { rows } = await su.query("SELECT 1 AS ok");
     expect(rows[0].ok).toBe(1);
+  });
+
+  /**
+   * T10 — the RDS master is not a superuser. It may CREATE a role with every
+   * attribute, but `ALTER ROLE … NOSUPERUSER / NOBYPASSRLS / NOREPLICATION` is
+   * refused even as a no-op, and a refused statement carrying the password is
+   * written to the server log.
+   *
+   * Reproduced with a NOSUPERUSER CREATEROLE stand-in that creates the target
+   * itself (`SET LOCAL ROLE`), so it holds ADMIN OPTION on it exactly as the
+   * master does over the roles it created. Each case runs inside a rolled-back
+   * transaction on its own superuser connection; the real superuser sets
+   * whatever the stand-in could not.
+   */
+  describe("T10: convergeRole as a non-superuser CREATEROLE role", () => {
+    async function createStandIn(c: Client): Promise<void> {
+      await c.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE CREATEDB`);
+    }
+
+    it("converges an existing target it created, without a SUPERUSER-class clause", async () => {
+      await inRolledBackTransaction(async (c) => {
+        await createStandIn(c);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+        await c.query(`CREATE ROLE ${PROBE} WITH NOLOGIN CREATEDB PASSWORD 'old-pw'`);
+
+        // The environment reproduces RDS: the statement the previous
+        // convergeRole sent is refused here (without its PASSWORD clause, so
+        // no password reaches the server log).
+        await c.query("SAVEPOINT old_alter");
+        let refused: { code?: string; message?: string; detail?: string } | undefined;
+        try {
+          await c.query(
+            `ALTER ROLE ${PROBE} WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`,
+          );
+        } catch (e) {
+          refused = e as typeof refused;
+        }
+        await c.query("ROLLBACK TO SAVEPOINT old_alter");
+        expect(refused?.code).toBe("42501");
+        expect(`${refused?.message} ${refused?.detail}`).toContain(
+          "Only roles with the SUPERUSER attribute may change the SUPERUSER attribute",
+        );
+
+        const { client, statements } = recordingClient(c);
+        await convergeRole(client, PROBE, "new-pw");
+
+        const alters = statements.filter((s) => s.startsWith("ALTER ROLE"));
+        expect(alters).toHaveLength(1);
+        expect(alters[0]).toContain(`ALTER ROLE ${PROBE} WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD`);
+        expect(alters[0]).not.toMatch(/SUPERUSER|BYPASSRLS|REPLICATION/);
+
+        await c.query("RESET ROLE");
+        const a = await roleAttrs(c, PROBE);
+        expect(a).toEqual({
+          rolsuper: false,
+          rolbypassrls: false,
+          rolcreatedb: false,
+          rolcreaterole: false,
+          rolreplication: false,
+          rolcanlogin: true,
+        });
+      });
+    });
+
+    it.each(["rolsuper", "rolbypassrls", "rolreplication"] as const)(
+      "refuses a target with %s set, before sending the password",
+      async (attr) => {
+        const clause = { rolsuper: "SUPERUSER", rolbypassrls: "BYPASSRLS", rolreplication: "REPLICATION" }[attr];
+        await inRolledBackTransaction(async (c) => {
+          await createStandIn(c);
+          await c.query(`SET LOCAL ROLE ${STANDIN}`);
+          await c.query(`CREATE ROLE ${PROBE} WITH LOGIN`);
+          await c.query("RESET ROLE");
+          // Only a real superuser can set it — and only one can clear it.
+          await c.query(`ALTER ROLE ${PROBE} WITH ${clause}`);
+          await c.query(`SET LOCAL ROLE ${STANDIN}`);
+
+          const { client, statements } = recordingClient(c);
+          await expect(convergeRole(client, PROBE, "pw")).rejects.toThrow(
+            `role ${PROBE} has ${attr} set. Only a real superuser can clear it (on RDS, AWS support)`,
+          );
+
+          expect(statements.some((s) => ADMIN_PREFLIGHT_RE.test(s))).toBe(true);
+          expect(statements.filter((s) => /PASSWORD/i.test(s))).toEqual([]);
+
+          await c.query("RESET ROLE");
+          expect((await roleAttrs(c, PROBE))[attr]).toBe(true);
+        });
+      },
+    );
+
+    it("refuses a target it lacks ADMIN OPTION on, before sending the password", async () => {
+      await inRolledBackTransaction(async (c) => {
+        await createStandIn(c);
+        // Created by the real superuser, not the stand-in.
+        await c.query(`CREATE ROLE ${PROBE} WITH NOLOGIN`);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+
+        const { client, statements } = recordingClient(c);
+        await expect(convergeRole(client, PROBE, "pw")).rejects.toThrow(
+          `role ${PROBE}: the current role lacks ADMIN OPTION on it`,
+        );
+
+        // Positive control: the recorder saw the preflight, so the empty
+        // PASSWORD list below is about what was sent, not about a recorder
+        // that saw nothing.
+        expect(statements.some((s) => ADMIN_PREFLIGHT_RE.test(s))).toBe(true);
+        expect(statements.filter((s) => /PASSWORD/i.test(s))).toEqual([]);
+
+        await c.query("RESET ROLE");
+        expect((await roleAttrs(c, PROBE)).rolcanlogin).toBe(false);
+      });
+    });
+
+    it("throws naming a membership another grantor gave in a role it has no ADMIN on", async () => {
+      await inRolledBackTransaction(async (c) => {
+        await createStandIn(c);
+        await c.query(`CREATE ROLE ${GRANTOR} WITH NOLOGIN`);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+        await c.query(`CREATE ROLE ${PROBE} WITH LOGIN`);
+        await c.query("RESET ROLE");
+        await c.query(`GRANT ${GRANTOR} TO ${PROBE}`);
+        expect(await memberRows(c, PROBE, GRANTOR)).toBe(1);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+
+        // PostgreSQL 16 refuses the REVOKE (42501), which aborts the
+        // transaction; the savepoint lets the row be read back afterwards.
+        await c.query("SAVEPOINT converge");
+        let caught: (Error & { cause?: { code?: string } }) | undefined;
+        try {
+          await convergeRole(c, PROBE, "pw");
+        } catch (e) {
+          caught = e as typeof caught;
+        }
+        await c.query("ROLLBACK TO SAVEPOINT converge");
+
+        expect(caught?.message).toContain(
+          `role ${PROBE}: could not revoke its membership in ${GRANTOR} (granted by `,
+        );
+        expect(caught?.cause?.code).toBe("42501");
+
+        await c.query("RESET ROLE");
+        expect(await memberRows(c, PROBE, GRANTOR)).toBe(1);
+      });
+    });
+
+    it("revokes a membership it granted itself, in a role it created", async () => {
+      await inRolledBackTransaction(async (c) => {
+        await createStandIn(c);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+        await c.query(`CREATE ROLE ${GRANTOR} WITH NOLOGIN`);
+        await c.query(`CREATE ROLE ${PROBE} WITH LOGIN`);
+        await c.query(`GRANT ${GRANTOR} TO ${PROBE}`);
+        expect(await memberRows(c, PROBE, GRANTOR)).toBe(1);
+
+        await convergeRole(c, PROBE, "pw");
+
+        expect(await memberRows(c, PROBE, GRANTOR)).toBe(0);
+      });
+    });
+  });
+
+  it("grantWorkerSchemaPrivileges defaults to every converged role except passwd_app", async () => {
+    const statements: string[] = [];
+    const recorder = {
+      query: async (text: string) => {
+        statements.push(text);
+        return { rows: [] };
+      },
+    };
+    await grantWorkerSchemaPrivileges(recorder);
+
+    const usageGrantees = statements
+      .map((s) => /^GRANT USAGE ON SCHEMA public TO (\S+)$/.exec(s)?.[1])
+      .filter((g): g is string => g !== undefined)
+      .sort();
+    expect(usageGrantees).toEqual(
+      ROLES.map((r) => r.name).filter((n) => n !== "passwd_app").sort(),
+    );
+    // Named, so the derivation above cannot pass by ROLES losing the role.
+    expect(usageGrantees).toContain("passwd_anchor_publisher");
+    expect(statements.filter((s) => /\bpasswd_app\b/.test(s))).toEqual([]);
+  });
+
+  it("exits 1 before connecting when PASSWD_ANCHOR_PUBLISHER_PASSWORD is empty", () => {
+    const r = spawnSync(process.execPath, [resolve(REPO_ROOT, "scripts/bootstrap-rds-roles.mjs")], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        // Unreachable: reaching it would print a connection error instead.
+        MIGRATION_DATABASE_URL: "postgresql://nobody:nothing@127.0.0.1:1/nothing",
+        PASSWD_APP_PASSWORD: "a",
+        PASSWD_OUTBOX_WORKER_PASSWORD: "b",
+        PASSWD_RETENTION_GC_WORKER_PASSWORD: "c",
+        // Explicitly empty: CI sets it job-wide.
+        PASSWD_ANCHOR_PUBLISHER_PASSWORD: "",
+      },
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("PASSWD_ANCHOR_PUBLISHER_PASSWORD is required");
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/ECONNREFUSED|ETIMEDOUT|connect/i);
   });
 
   /**
@@ -859,6 +1119,30 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       expect(granted.filter((g) => g.includes("audit_log_tenant_migrate"))).toEqual([
         `GRANT EXECUTE ON PROCEDURE ${MIGRATE} TO passwd_app`,
       ]);
+    });
+
+    it("grants EXECUTE on the rls_bypass_* functions to every converged role, the anchor publisher included", async () => {
+      // The RLS policies call these for every role that reads an RLS table, so
+      // a converged role without them cannot read tenants at all.
+      const granted: string[] = [];
+      const recorder = {
+        query: async (text: string, params?: unknown[]) => {
+          if (text.startsWith("GRANT")) granted.push(text);
+          return text.startsWith("SELECT") ? su.query(text, params) : { rows: [] };
+        },
+      };
+      await grantRoutineExecute(recorder);
+      const bypassFunctions = ["public.rls_bypass_enforced()", "public.rls_bypass_admits(text)"];
+      for (const signature of bypassFunctions) {
+        for (const { name } of ROLES) {
+          expect(granted).toContain(`GRANT EXECUTE ON FUNCTION ${signature} TO ${name}`);
+        }
+        expect(granted).toContain(`GRANT EXECUTE ON FUNCTION ${signature} TO passwd_anchor_publisher`);
+      }
+      // The definer audit routines stay with the roles that call them.
+      expect(granted.filter((g) => g.endsWith(" TO passwd_anchor_publisher"))).toEqual(
+        bypassFunctions.map((s) => `GRANT EXECUTE ON FUNCTION ${s} TO passwd_anchor_publisher`),
+      );
     });
   });
 });

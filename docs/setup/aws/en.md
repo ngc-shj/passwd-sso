@@ -66,6 +66,8 @@ Store these in Secrets Manager:
 - `BLOB_BACKEND`
 - `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
 - `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; use `scripts/set-outbox-worker-password.sh` to rotate)
+- `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (least-privilege role `passwd_anchor_publisher`; no ECS task consumes it yet)
+- `PASSWD_ANCHOR_PUBLISHER_PASSWORD` (sets the `passwd_anchor_publisher` DB role password via `scripts/bootstrap-rds-roles.mjs`; the same value as in `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`)
 
 Optional:
 - `GOOGLE_WORKSPACE_DOMAINS`
@@ -95,7 +97,8 @@ postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=verify-full&sslrootcert=/app
 
 **Every** DB URL that points at RDS needs those two parameters — `DATABASE_URL`,
 `MIGRATION_DATABASE_URL`, `OUTBOX_WORKER_DATABASE_URL`,
-`RETENTION_GC_DATABASE_URL`, and Jackson's `DB_URL`. Two independent reasons:
+`RETENTION_GC_DATABASE_URL`, `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, and
+Jackson's `DB_URL`. Two independent reasons:
 
 - RDS PostgreSQL 15+ ships `rds.force_ssl = 1`, so a plaintext connection is
   rejected at authentication time: `no pg_hba.conf entry for host "...", no
@@ -122,8 +125,14 @@ not a real PostgreSQL superuser (`pg_user.usesuper` is false). Anything needing
 true superuser fails with SQLSTATE 42501, including:
 
 - `ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS / NOREPLICATION` — even when the
-  attribute already has that value. `CREATE ROLE ... NOSUPERUSER` is fine, so
-  role creation works and only re-convergence of an existing role fails.
+  attribute already has that value. `CREATE ROLE ... NOSUPERUSER` is fine.
+  `scripts/bootstrap-rds-roles.mjs` therefore re-converges an existing role
+  without those clauses when it is not connected as a superuser: it checks
+  `rolsuper` / `rolbypassrls` / `rolreplication` and its own ADMIN OPTION on the
+  role first, and stops — before sending any statement that carries the
+  password — if one of the three is set (only AWS support can clear it) or the
+  ADMIN OPTION is missing. The master holds ADMIN OPTION on every role it
+  created, which covers the roles the bootstrap and the migrations create.
 - Attaching a placeholder GUC to a routine (`CREATE FUNCTION ... SET app.x`),
   and `GRANT SET ON PARAMETER` to work around it.
 

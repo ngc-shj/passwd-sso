@@ -2,7 +2,9 @@
  * Verifies that the REVOKE CONNECT FROM PUBLIC migration (C3) took effect.
  *
  * T1: a freshly-created role with no explicit GRANT cannot connect (PUBLIC revoked).
- * T2: all four legitimate app/worker roles retain their explicit GRANT CONNECT.
+ * T2: the four login roles retain their explicit GRANT CONNECT.
+ * T3: the retired passwd_dcr_cleanup_worker holds no CONNECT and cannot log in
+ *     (migration 20261023010000).
  * RT4: both false (probe) and true (legit) branches are asserted, so a no-op
  *      migration or an over-broad REVOKE is caught.
  *
@@ -63,10 +65,19 @@ describe("REVOKE CONNECT FROM PUBLIC (C3 migration)", () => {
     expect(rows[0].can_connect).toBe(true);
   });
 
-  it("T2: passwd_dcr_cleanup_worker retains explicit GRANT CONNECT", async () => {
+  it("T2: passwd_retention_gc_worker retains explicit GRANT CONNECT", async () => {
     const rows = await ctx.su.prisma.$queryRaw<Array<{ can_connect: boolean }>>`
-      SELECT has_database_privilege('passwd_dcr_cleanup_worker', current_database(), 'CONNECT') AS can_connect
+      SELECT has_database_privilege('passwd_retention_gc_worker', current_database(), 'CONNECT') AS can_connect
     `;
     expect(rows[0].can_connect).toBe(true);
+  });
+
+  it("T3: retired passwd_dcr_cleanup_worker holds no CONNECT and cannot log in", async () => {
+    const rows = await ctx.su.prisma.$queryRaw<Array<{ can_connect: boolean; can_login: boolean }>>`
+      SELECT has_database_privilege(rolname, current_database(), 'CONNECT') AS can_connect,
+             rolcanlogin AS can_login
+        FROM pg_roles WHERE rolname = 'passwd_dcr_cleanup_worker'
+    `;
+    expect(rows).toEqual([{ can_connect: false, can_login: false }]);
   });
 });

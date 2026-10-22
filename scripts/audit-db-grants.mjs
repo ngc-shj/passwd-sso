@@ -570,6 +570,30 @@ export function roleStateViolations(keys, { auditedRoles, retiredRoles }) {
   return [...new Set(out)];
 }
 
+/**
+ * The creator grants among `keys`: ADMIN-only memberships of a non-audited role
+ * in a retired role. PostgreSQL 16 gives one to a NOSUPERUSER CREATEROLE role
+ * for every role it creates, so it exists where the RDS master ran the
+ * migration that created the role and not where a superuser did (dev, CI). It
+ * is therefore not a property of the deployment the manifest can describe, and
+ * is left out of the manifest comparison and of `--write` — after
+ * roleStateViolations has judged it (it confers none of the role's privileges).
+ */
+export function creatorGrantKeys(keys, { auditedRoles, retiredRoles }) {
+  const audited = new Set(auditedRoles);
+  const retired = new Set(retiredRoles);
+  return keys.filter((k) => {
+    if (!k.startsWith("MEMBER:")) return false;
+    const fields = k.slice("MEMBER:".length).split("\t");
+    return (
+      fields.length === 3 &&
+      !audited.has(fields[0]) &&
+      retired.has(fields[1]) &&
+      fields[2] === "admin=t,inherit=f,set=f"
+    );
+  });
+}
+
 /** A retired role the audit does not read would be asserted by nothing. */
 export function assertRetiredSubset(auditedRoles, retiredRoles) {
   const missing = retiredRoles.filter((r) => !auditedRoles.includes(r));
@@ -654,6 +678,12 @@ async function main() {
   const denied = loadDeniedPolicy();
   assertRetiredSubset(AUDITED_ROLES, RETIRED_ROLES);
   const roleScope = { auditedRoles: AUDITED_ROLES, retiredRoles: RETIRED_ROLES };
+  // What the manifest describes: everything but the creator grants, which vary
+  // with who created the role (see creatorGrantKeys).
+  const comparable = (keys) => {
+    const skip = new Set(creatorGrantKeys(keys, roleScope));
+    return keys.filter((k) => !skip.has(k));
+  };
 
   const client = new Client({ connectionString });
   await client.connect();
@@ -749,12 +779,13 @@ async function main() {
       );
       process.exit(1);
     }
-    writeManifest(live);
+    writeManifest(comparable(live));
     return;
   }
 
-  const expected = new Set(readManifest());
-  const liveSet = new Set(live);
+  const expected = new Set(comparable(readManifest()));
+  const liveComparable = comparable(live);
+  const liveSet = new Set(liveComparable);
 
   const findings = [];
   // Checked FIRST and against both sides. A denied privilege that is merely
@@ -791,7 +822,7 @@ async function main() {
   for (const key of missingDeclaredColumnGrants([...expected], denied, existingSubjects)) {
     findings.push(`DECLARED_COLUMN_GRANT_MISSING_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
   }
-  for (const key of live) {
+  for (const key of liveComparable) {
     if (!expected.has(key)) {
       findings.push(`UNEXPECTED_GRANT: ${key.replace(/\t/g, " ")}`);
     }

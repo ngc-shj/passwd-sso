@@ -263,13 +263,20 @@ BEGIN;
 REVOKE CONNECT ON DATABASE passwd_sso FROM PUBLIC;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;
-GRANT CONNECT ON DATABASE passwd_sso TO passwd_dcr_cleanup_worker;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_anchor_publisher;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_retention_gc_worker;
 COMMIT;
 SQL
 echo "exit=$?"   # must be 0; any non-zero means nothing was applied
 ```
+
+`passwd_dcr_cleanup_worker` is deliberately absent: it is retired (migration
+`20261023010000_retire_dcr_cleanup_worker_role`). initdb
+(`03-create-dcr-cleanup-worker-role.sql`) still creates it, `NOLOGIN` with no
+grants, so a dump taken before the retirement restores without a missing-grantee
+error. Such a dump does carry the role's old table grants; they stay until the
+post-restore `prisma migrate deploy` below applies the retirement migration,
+which revokes them. A dump taken after the retirement carries none.
 
 Verify against the source host rather than trusting the statements — the role
 set is deployment-specific and this list is a snapshot:
@@ -320,7 +327,7 @@ Then bring up the rest and reconcile the schema:
 
 ```bash
 docker compose up -d redis jackson mailpit audit-outbox-worker
-npx prisma migrate deploy   # no-op when the dump already carries _prisma_migrations
+npx prisma migrate deploy   # applies only migrations newer than the dump (e.g. the DCR-role retirement)
 ```
 
 Use `migrate deploy`, not `npm run db:migrate`. The latter is `prisma migrate

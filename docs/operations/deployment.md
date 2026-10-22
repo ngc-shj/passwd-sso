@@ -140,6 +140,61 @@ The migration task is idempotent (`prisma migrate deploy` is a no-op when there
 are no pending migrations), so a code-only release is the same `./scripts/deploy.sh`
 — it re-runs the (no-op) migration and advances the services.
 
+### One-time upgrade: anchor publisher converged, DCR role retired
+
+The release carrying migration `20261023010000_retire_dcr_cleanup_worker_role`
+also makes the grant audit expect `passwd_anchor_publisher` to be a `LOGIN` role.
+On RDS only `scripts/bootstrap-rds-roles.mjs` gives it `LOGIN` (the migration that
+created it made it `NOLOGIN`), and that bootstrap needs the new image. So the
+first `deploy.sh` of this release on an existing RDS deployment stops at the
+audit by design. Before starting, add `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` to the
+app secret (`infra/terraform/README.md` "Adding a key to an existing app
+secret").
+
+1. Run `./scripts/deploy.sh`. Its migrate task applies the retirement migration
+   and then fails the audit; `deploy.sh` exits at the migrate step, before the
+   rollback trap is armed or any `update-service` is issued, so the old services
+   keep serving. The migration is compatible with the old image — nothing uses
+   the DCR role.
+2. Read the migrate task's log (group `/ecs/<name_prefix>/app`, stream prefix
+   `migrate/`):
+
+   ```bash
+   aws logs tail /ecs/passwd-sso-prod/app --log-stream-name-prefix migrate/ \
+     --since 1h --region <region>
+   ```
+
+   Proceed only if the audit findings are exactly this pair:
+
+   ```
+   UNEXPECTED_GRANT: ROLEATTR:passwd_anchor_publisher rolcanlogin false
+   MISSING_GRANT: ROLEATTR:passwd_anchor_publisher rolcanlogin true
+   ```
+
+   Anything else — a `ROLE_STATE_VIOLATION`, a migration error, another key — is
+   a stop: diagnose it before going on.
+3. Run the new bootstrap through ECS Exec on the migrate task definition step 1
+   just registered (`terraform output -raw migrate_task_definition_arn` now names
+   it), exactly as in `infra/terraform/README.md` "Creating the DB roles on RDS",
+   with all four passwords exported.
+4. Re-run `./scripts/deploy.sh`. `prisma migrate deploy` is a no-op, the audit
+   passes, and the services roll.
+
+**Prior password exposure.** The previous `convergeRole` sent `ALTER ROLE …
+NOSUPERUSER … PASSWORD '<cleartext>'` for every role, which RDS refuses with
+42501 and — under the default `log_min_error_statement` — writes to the
+PostgreSQL log in full. For any RDS deployment where the bootstrap ever ran,
+either:
+
+- confirm the RDS PostgreSQL logs from those runs have expired and were never
+  downloaded or exported (this Terraform sets no
+  `enabled_cloudwatch_logs_exports`; check whether anyone added it), or
+- rotate those roles' passwords in step 3: generate new values, write them into
+  the `*_DATABASE_URL` app-secret keys first (the same read-merge-write), then
+  export them for the bootstrap. The running old tasks hold the old passwords in
+  their environment, so they cannot open NEW connections from step 3 until step
+  4 replaces them — run step 3 immediately before step 4 and accept that window.
+
 ## Deploy Flow (Local / Docker Compose)
 
 ### Run migration only
@@ -350,7 +405,7 @@ task-def ARNs are read from `terraform output`, not passed in):
 
 ## Database User Permissions
 
-The application uses four database roles with separated privileges:
+The application uses these database roles with separated privileges:
 
 | Role | Privileges | Purpose |
 |------|-----------|---------|
@@ -358,6 +413,8 @@ The application uses four database roles with separated privileges:
 | `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced |
 | `passwd_outbox_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` | Audit outbox drain worker (least privilege) |
 | `passwd_retention_gc_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; scoped DELETE/SELECT on the retention-swept tables | Retention GC worker (least privilege) |
+| `passwd_anchor_publisher` | NOSUPERUSER NOBYPASSRLS; SELECT + column-scoped UPDATE on `audit_chain_anchors`, INSERT on `audit_outbox`, SELECT/INSERT/UPDATE on `system_settings`, SELECT on `tenants` | Audit-anchor publisher (least privilege) |
+| `passwd_dcr_cleanup_worker` | **Retired** — NOLOGIN, no password, nothing beyond `PUBLIC` (migration `20261023010000`) | None. Kept only so older dumps that name it still restore; the grant audit asserts the retired state |
 
 > **`rds_superuser` is a role MEMBERSHIP, not a role ATTRIBUTE.** On RDS the
 > master user is a member of `rds_superuser` but has `rolsuper = false` and
@@ -381,8 +438,9 @@ The application uses four database roles with separated privileges:
 
 On AWS RDS these roles are NOT auto-created (the `infra/postgres/initdb/*.sql`
 scripts run only on the Docker Postgres image) — create them during bootstrap,
-before the first migration, with `scripts/bootstrap-rds-roles.mjs`. See
-`infra/terraform/README.md` "First-time bootstrap".
+before the first migration, with `scripts/bootstrap-rds-roles.mjs`, which
+converges the four login roles above (not `passwd_user`, not the retired DCR
+role). See `infra/terraform/README.md` "First-time bootstrap".
 
 ### Ownership of role attributes vs table ACLs
 
@@ -390,9 +448,10 @@ These are owned by different things, which matters when auditing:
 
 | Aspect | Owner | Converged by a re-run? |
 |--------|-------|------------------------|
-| Role attributes (`NOSUPERUSER`, `NOBYPASSRLS`, `NOREPLICATION`, …), password, role memberships | `scripts/bootstrap-rds-roles.mjs` | Yes — always re-applied and asserted |
+| Role attributes (`NOSUPERUSER`, `NOBYPASSRLS`, `NOREPLICATION`, …), password, role memberships | `scripts/bootstrap-rds-roles.mjs` | Yes — always re-applied and asserted. As a non-superuser (the RDS master) it cannot write `SUPERUSER` / `BYPASSRLS` / `REPLICATION`: those are checked, and the run stops before sending the password if one is set |
 | `passwd_app` schema + table ACLs | `scripts/bootstrap-rds-roles.mjs` | Yes — revoke-then-grant |
-| Worker table ACLs (`passwd_outbox_worker`, `passwd_retention_gc_worker`) | The Prisma migrations that create each table | **No** |
+| Worker table ACLs (`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`) | The Prisma migrations that create each table | **No** |
+| The retired `passwd_dcr_cleanup_worker` | Migration `20261023010000_retire_dcr_cleanup_worker_role` | n/a — asserted by the audit (`RETIRED_ROLES`) |
 
 The worker table ACLs cannot be converged by the bootstrap: it runs *before* the
 first migration, so those grants do not exist yet, and a blanket
@@ -413,7 +472,9 @@ To run it manually against a deployed database:
 MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs
 ```
 
-It diffs the live ACLs of all three roles against
+It diffs the live ACLs of every audited role (`AUDITED_ROLES`: `passwd_app`,
+`passwd_outbox_worker`, `passwd_retention_gc_worker`, `passwd_anchor_publisher`
+and the retired `passwd_dcr_cleanup_worker`) against
 `scripts/checks/db-grants-manifest.json` and exits non-zero on any
 `UNEXPECTED_GRANT` (over-privilege) or `MISSING_GRANT` (migrations not applied).
 
@@ -431,7 +492,7 @@ Manifest keys:
 |-----|--------|
 | `TABLE:<role> <schema>.<table> <priv>` | table-level privileges |
 | `COLUMN:<role> <schema>.<table>.<col> <priv>` | column-scoped grants not implied by the table-level privilege (13 today, e.g. the webhook workers' `UPDATE (fail_count, last_error, …)`) |
-| `MEMBER:<role> <granted_role>` | role membership — an inheritance path; these roles should have none |
+| `MEMBER:<role> <granted_role> admin=<t\|f>,inherit=<t\|f>,set=<t\|f>` | role membership — an inheritance path; the audited roles should have none. Also every membership IN a retired role. An ADMIN-only row (`inherit=f,set=f`) into a retired role is the grant PostgreSQL 16 gives the non-superuser role that created it and confers none of its privileges, so it is allowed; `roleStateViolations` decides, not the query |
 | `PUBLIC:<schema>.<table> <priv>` | granted to `PUBLIC`, so inherited by every role |
 | `SCHEMA:<grantee> <schema> <priv>` | `USAGE`/`CREATE` (`CREATE` lets the role add its own objects) |
 | `SEQUENCE:<grantee> <schema>.<seq> <priv>` | `USAGE`/`SELECT`/`UPDATE` |
@@ -440,6 +501,16 @@ Manifest keys:
 | `DEFAULTACL:<owner> <schema> <type> <acl>` | pre-authorises objects that do not exist yet |
 | `ROLEATTR:<role> <attr> <value>` | `SUPERUSER`/`BYPASSRLS`/`REPLICATION`/`CREATEDB`/`CREATEROLE`/`LOGIN` |
 | `ROLESETTING:<role\|*> <db\|*> <name>=<value>` | a session default from `ALTER ROLE/DATABASE … SET` (`*` = every role / every database). It applies to every connection, invisibly to the connection's own options. Settings named `app.*`, `client_min_messages`, `log_min_messages` or `row_security` are refused outright (`DENIED_SETTING_*`), live and in the manifest |
+
+The manifest is descriptive, so two findings make some states unrecordable
+regardless of what it says. `ROLE_STATE_VIOLATION` (live) and
+`ROLE_STATE_IN_MANIFEST` (the manifest records one) cover: an elevated attribute
+(`SUPERUSER`/`BYPASSRLS`/`REPLICATION`/`CREATEDB`/`CREATEROLE`) or any membership
+on an audited role; any `PUBLIC:` table grant; and a retired role that can log
+in, that another role can act as (an `inherit` or `set` membership in it), that
+a default ACL names, or that holds any privilege `PUBLIC` does not also hold.
+A `MEMBER` key that does not parse as exactly that three-field form is itself a
+violation. `--write` refuses while a live violation exists.
 
 Columns are keyed individually on purpose: a table that legitimately carries
 `UPDATE (fail_count)` must still fail the audit if `UPDATE (secret_encrypted)` is
@@ -480,8 +551,36 @@ GRANT EXECUTE ON PROCEDURE public.audit_log_tenant_migrate(uuid, uuid, uuid) TO 
 - `DATABASE_URL` — app runtime connection (`NOSUPERUSER NOBYPASSRLS` role, e.g. `passwd_app`)
 - `MIGRATION_DATABASE_URL` — Prisma CLI connection (SUPERUSER role, e.g. `passwd_user`)
 - `OUTBOX_WORKER_DATABASE_URL` — audit outbox worker connection (least-privilege role, e.g. `passwd_outbox_worker`). Set the worker role password with `scripts/set-outbox-worker-password.sh`.
+- `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` — audit-anchor publisher connection (`passwd_anchor_publisher`). On RDS the role's password is set by `scripts/bootstrap-rds-roles.mjs` from `PASSWD_ANCHOR_PUBLISHER_PASSWORD`.
 
 The Docker Compose dev setup enforces the same role separation: the `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) while the `migrate` service connects as `passwd_user` (SUPERUSER). RLS is enforced in all environments.
+
+**Existing dev volumes.** `npm run db:migrate` retires `passwd_dcr_cleanup_worker`
+on its own. `passwd_anchor_publisher`, though, is `NOLOGIN` on a volume created
+before `infra/postgres/initdb/02-create-app-role.sql` gained it (the migration
+that created it there makes it `NOLOGIN`), and the grant audit now expects
+`LOGIN`. Check with
+`docker compose exec -T db psql -U passwd_user -d passwd_sso -Atc "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'passwd_anchor_publisher'"`;
+if it prints `f`, converge it. Use the password your
+`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` carries — `passwd_anchor_publisher_pass` is
+the initdb fallback a fresh volume gets, since compose does not forward
+`PASSWD_ANCHOR_PUBLISHER_PASSWORD` to the `db` service:
+
+```bash
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso \
+  -v pw="${PASSWD_ANCHOR_PUBLISHER_PASSWORD:-passwd_anchor_publisher_pass}" <<'SQL'
+SET log_statement TO 'none';
+ALTER ROLE passwd_anchor_publisher WITH LOGIN PASSWORD :'pw';
+SQL
+```
+
+`:'pw'` is interpolated by psql as a quoted literal, which works only in script
+input (stdin), not in `-c`. `SET log_statement` keeps the DDL — password included
+— out of the `db` container log, as in the Jackson repair below. The `-v` value
+is visible in the process list while the command runs; this is a dev-only
+procedure, so do not reuse it with a production password.
+`scripts/set-audit-anchor-publisher-password.sh` sets the password only, not
+`LOGIN`, so it does not fix this.
 
 > **⚠️ Breaking change for existing dev environments**: After upgrading, run `docker compose down -v && docker compose up` to recreate the database with the new `passwd_app` role. The initdb scripts only run on first initialization (empty volume).
 
