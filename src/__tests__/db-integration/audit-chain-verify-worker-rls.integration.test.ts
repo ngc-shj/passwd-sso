@@ -49,16 +49,13 @@ import {
   computeEventHash,
 } from "@/lib/audit/audit-chain";
 import {
+  MAX_ROWS_PER_TENANT,
   runTick,
   verifyChainUnderSentinelGrant,
   verifyTenantChain,
 } from "@/../scripts/audit-chain-verify-worker";
 
 const CHAIN_LENGTH = 3;
-// The worker's own default; the sentinel's walk is capped at it.
-const MAX_ROWS_PER_TENANT = Number(
-  process.env.AUDIT_CHAIN_VERIFY_MAX_ROWS ?? 100_000,
-);
 
 describe("audit-chain verify worker RLS context", () => {
   let ctx: TestContext;

@@ -17,7 +17,7 @@
  * the GUCs the wrappers wrote and answers `current_setting` reads from them.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runTick } from "../audit-chain-verify-worker.ts";
+import { runTick, verifyChainUnderSentinelGrant } from "../audit-chain-verify-worker.ts";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
@@ -66,7 +66,6 @@ function parseGucWrites(strings, values) {
 /**
  * @param tenantIds tenants the enumeration returns, in order
  * @param failFor   tenant ids whose transaction should fail to open
- * @param opts.chainEnabledIds ids whose auditChainEnabled is true (default: none — false)
  * @param opts.enumerationRejects when true, the enumeration read itself rejects,
  *   simulating withBypassRls throwing (lost scope, dropped connection, ...)
  * @param opts.fixtures { [tenantId]: { anchors?, rows?, chainedRows? } } — what
@@ -80,7 +79,6 @@ function parseGucWrites(strings, values) {
  */
 function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
   const {
-    chainEnabledIds = [],
     enumerationRejects = false,
     fixtures = {},
     reads = {},
@@ -157,10 +155,7 @@ function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
             if (enumerationRejects) {
               throw new Error("ENUMERATION_REJECTED: bypass transaction aborted");
             }
-            return tenantIds.map((id) => ({
-              id,
-              auditChainEnabled: chainEnabledIds.includes(id),
-            }));
+            return tenantIds.map((id) => ({ id }));
           },
         },
       };
@@ -461,23 +456,27 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     expect(errLineIncludes(errLines, "read threw")).toBe(true);
   });
 
-  it("verifies the sentinel when its audit_chain_enabled is true, with no SENTINEL_CHAIN_UNVERIFIABLE", async () => {
-    // The sentinel was once skipped and an enabled chain reported as a gap;
-    // now it is walked like every other tenant, so an enabled chain is no
-    // longer a coverage shortfall.
-    const other = "99999999-9999-4999-8999-999999999999";
-    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, other], [], {
-      chainEnabledIds: [SYSTEM_TENANT_ID],
+  it("reads an uppercase-spelled tenant id under the sentinel grant as that tenant", async () => {
+    // PostgreSQL returns uuids in lowercase. A row check comparing against the
+    // caller's spelling would call every row foreign; the path normalises once.
+    // (The sentinel's own id has no hex letters, so this is exercised on
+    // another tenant, as the integration cells run this path.)
+    const t = "abcdefab-cdef-4abc-8def-abcdefabcdef";
+    const prisma = makeStubPrisma([], [], {
+      fixtures: { [t]: { anchors: [anchor(t, 1)], rows: [chainRow(t, 1, "efefefef-efef-4fef-8fef-efefefefefef")] } },
     });
-    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, other]);
+    // No enumeration precedes a direct call: take the first slot as `t`'s.
+    prisma.transactions.push({ tenant: ENUMERATION, gucs: {}, options: undefined, queried: [] });
+    currentTenantId = t;
 
-    await runTick(prisma, new Map());
+    const result = await verifyChainUnderSentinelGrant(t.toUpperCase(), { prisma, logger: console });
 
-    const beat = heartbeatOf(logLines);
-    expect(beat.erroredTenantCount).toBe(0);
-    expect(beat.verifiedTenantCount).toBe(2);
-    expect(txOf(prisma, SYSTEM_TENANT_ID).queried).toHaveLength(2);
-    expect(errLineIncludes(errLines, "SENTINEL_CHAIN_UNVERIFIABLE")).toBe(false);
+    // No BYPASS_SCOPE_VIOLATION: both the anchor read and the walk ran and
+    // their rows were accepted as this tenant's. (The fixture's hashes are not
+    // a real chain, so the verdict itself is a tamper — not what is tested.)
+    expect(result.tenantId).toBe(t);
+    expect(txOf(prisma, t).queried).toHaveLength(2);
+    expect(txOf(prisma, t).gucs["app.bypass_rls"]).toBe("on");
   });
 
   it("does NOT throw when the GUC matches the tenant under verification", async () => {

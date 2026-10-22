@@ -67,7 +67,7 @@ const TICK_INTERVAL_MS = Number(
 const HYSTERESIS_REALERT_MS = Number(
   process.env.AUDIT_CHAIN_VERIFY_REALERT_MS ?? MS_PER_DAY,
 );
-const MAX_ROWS_PER_TENANT = Number(
+export const MAX_ROWS_PER_TENANT = Number(
   process.env.AUDIT_CHAIN_VERIFY_MAX_ROWS ?? 100_000,
 );
 
@@ -295,9 +295,12 @@ export async function verifyTenantChain(
  * on any other tenant it still reads only that tenant's rows.
  */
 export async function verifyChainUnderSentinelGrant(
-  tenantId: string,
+  rawTenantId: string,
   deps: VerifyDeps,
 ): Promise<VerifyResult> {
+  // PostgreSQL returns uuids in lowercase; the row checks compare against
+  // this one spelling, as the routing predicate does.
+  const tenantId = rawTenantId.toLowerCase();
   const grant = BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ;
   const fetched = await withBypassRls(
     deps.prisma,
