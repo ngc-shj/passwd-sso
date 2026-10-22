@@ -90,6 +90,33 @@ describe("check-destructive-migration gate", () => {
     });
   }
 
+  // `TRUNCATE` is also a table PRIVILEGE, and revoking it is how a migration
+  // removes truncation from a role. The tokenizer drops commas, so the
+  // privilege list reads as a run of privilege keywords after GRANT / REVOKE
+  // (or REVOKE GRANT OPTION FOR); the paired deny cases under T2 are a
+  // truncation statement directly after such a list and after a statement
+  // boundary, proving the narrowing stops at both.
+  const privilegeCases = [
+    ["REVOKE TRUNCATE alone", `REVOKE TRUNCATE ON "t" FROM r;`],
+    ["REVOKE TRUNCATE mid-list", `REVOKE DELETE, TRUNCATE, REFERENCES ON "t" FROM r;`],
+    ["GRANT TRUNCATE", `GRANT SELECT, TRUNCATE ON "t" TO r;`],
+    ["REVOKE GRANT OPTION FOR TRUNCATE", `REVOKE GRANT OPTION FOR TRUNCATE ON "t" FROM r;`],
+    [
+      "REVOKE TRUNCATE inside a DO $$ block",
+      `DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'r') THEN REVOKE DELETE, TRUNCATE ON "t" FROM r; END IF; END $$;`,
+    ],
+  ];
+
+  for (const [kind, sql] of privilegeCases) {
+    it(`T1c: passes on ${kind} (a privilege, not a truncation)`, () => {
+      addMigration("20260101000004_revoke_privilege", sql);
+
+      const r = runGate();
+
+      expect(r.status).toBe(0);
+    });
+  }
+
   it("T1: passes on an additive-only migration", () => {
     addMigration(
       "20260101000000_add_column",
@@ -125,6 +152,9 @@ describe("check-destructive-migration gate", () => {
     ["DROP CONSTRAINT", `ALTER TABLE "users" DROP CONSTRAINT "users_email_key";`],
     ["DROP VIEW", `DROP VIEW "user_summary";`],
     ["TRUNCATE", `TRUNCATE TABLE "extension_tokens";`],
+    // The privilege-list narrowing must stop at the statement boundary.
+    ["TRUNCATE after a REVOKE TRUNCATE", `REVOKE DELETE, TRUNCATE ON "t" FROM r; TRUNCATE "t";`],
+    ["TRUNCATE without a semicolon after a REVOKE", `REVOKE TRUNCATE ON "t" FROM r TRUNCATE "t";`],
     // A dollar-quote tag may contain digits after the first character; an
     // earlier [A-Za-z_]* pattern rejected $body1$, leaving the body unscanned.
     [

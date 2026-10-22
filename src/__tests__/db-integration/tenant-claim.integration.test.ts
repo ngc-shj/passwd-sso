@@ -387,9 +387,10 @@ describe("tenant_claims (C1)", () => {
     // Measured: PostgreSQL runs a referential action under the REFERENCED
     // table's owner, so a trigger it fires sees `current_user` = owner —
     // whoever issued the DELETE. `session_user` does not follow that switch.
-    // `passwd_app` holds DELETE on `tenants`, so this is the difference between
-    // attributing a tenant deletion to the application and to an operator, on
-    // the one table built to be believed later.
+    // Any non-owner role holding DELETE on `tenants` hits this (passwd_app held
+    // it until 20261023000000), so this is the difference between attributing a
+    // tenant deletion to that role and to an operator, on the one table built
+    // to be believed later.
     //
     // Every other cascade case here deletes as `ctx.su.prisma`, where the owner
     // and the caller are the same principal, so none of them can see it.

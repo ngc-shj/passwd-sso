@@ -88,7 +88,9 @@
 - Negative-test Cases 15/16 reset the throwaway table's policy first (Case 14 left an
   INITPLAN-violating one that would have stopped Block 1), calibrate with one passing run, snapshot
   the tenants policy once, refuse a non-canonical snapshot, restore after each case and re-run the
-  verify to exit 0, and run only under `CI=true`. Still executed only in CI.
+  verify to exit 0, and run only when `RLS_NEGATIVE_MUTATE_REAL_POLICY=1` is set (Phase 3 N2:
+  only the CI rls job sets it; under GitHub Actions without it the cases FAIL rather than SKIP).
+  Still executed only in CI.
 
 ## D10 — mutation-table and C7 acceptance executions (T10)
 
