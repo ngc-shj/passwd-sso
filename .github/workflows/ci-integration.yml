@@ -104,7 +104,6 @@ jobs:
       # localhost only).
       PASSWD_APP_PASSWORD: passwd_app_pass
       PASSWD_OUTBOX_WORKER_PASSWORD: passwd_outbox_pass
-      PASSWD_DCR_CLEANUP_WORKER_PASSWORD: passwd_dcr_pass
       PASSWD_RETENTION_GC_WORKER_PASSWORD: passwd_retention_gc_pass
       PASSWD_ANCHOR_PUBLISHER_PASSWORD: passwd_anchor_publisher_pass
 
@@ -156,9 +155,9 @@ jobs:
           -- passwd_outbox_worker: created by migration without password; set it now.
           ALTER ROLE passwd_outbox_worker WITH LOGIN PASSWORD '${PASSWD_OUTBOX_WORKER_PASSWORD}';
 
-          -- passwd_dcr_cleanup_worker: role kept-but-unused (absorbed by retention-gc-worker);
-          -- kept loginable so any stale reference surfaces an auth error rather than "role not found".
-          ALTER ROLE passwd_dcr_cleanup_worker WITH LOGIN PASSWORD '${PASSWD_DCR_CLEANUP_WORKER_PASSWORD}';
+          -- passwd_dcr_cleanup_worker: retired by migration 20261023010000 (NOLOGIN,
+          -- no password, no grants); scripts/audit-db-grants.mjs asserts that, so it
+          -- is deliberately NOT given a login here.
 
           -- passwd_retention_gc_worker: created by migration without password; set it now.
           ALTER ROLE passwd_retention_gc_worker WITH LOGIN PASSWORD '${PASSWD_RETENTION_GC_WORKER_PASSWORD}';

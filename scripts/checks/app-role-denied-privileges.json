@@ -126,6 +126,42 @@
       "table": "public.tenants",
       "privileges": ["DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
       "reason": "No production code path deletes a tenant (#934, SC5 of #923, migration 20261023000000): every DELETE FROM tenants is test teardown or a manual-test script running as the owner or a probe role. A DELETE as passwd_app would remove a tenant with no RESTRICT dependents and cascade to its claims, memberships, operator tokens, webhooks, delivery targets and directory-sync rows — and the deregister rows that cascade writes carry the owner in db_user, so they read as an operator action. The tenants RLS policy is not the bound, because its GUCs are settable by any role; this ACL is. TRUNCATE ignores RLS altogether, and REFERENCES and TRIGGER complete the set of privileges the role does not need on this table. SELECT, INSERT and UPDATE stay granted: tenant creation, lookup and settings updates run as passwd_app."
+    },
+    {
+      "role": "passwd_anchor_publisher",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "The audit-anchor publisher reads chain anchors and tenants and writes anchor publish state; it has no business with claim routing. Listed prescriptively (#935) for the same reason as the other worker roles' tenant_claim_events entries: absence alone is enforced only by the descriptive manifest, which `--write` regenerates from whatever the database currently holds. INSERT is denied outright: no writer here needs it, and a table-level grant reaches `seq`."
+    },
+    {
+      "role": "passwd_anchor_publisher",
+      "sequence": "public.tenant_claim_events_seq_seq",
+      "privileges": ["USAGE", "SELECT", "UPDATE"],
+      "reason": "Listed for the same reason as this role's tenant_claim_events entry above (#935)."
+    },
+    {
+      "role": "passwd_anchor_publisher",
+      "table": "public.tenant_claims",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "Claim routing must not be reachable from this role (#935); listed prescriptively for the same reason as the other worker roles' tenant_claims entries."
+    },
+    {
+      "role": "passwd_dcr_cleanup_worker",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "Retired (migration 20261023010000): NOLOGIN, holding nothing beyond PUBLIC, and scripts/audit-db-grants.mjs RETIRED_ROLES asserts that state; listed here as well so the claim-routing tables stay declared for every audited role. Listed prescriptively (#935) for the same reason as the other worker roles' tenant_claim_events entries: absence alone is enforced only by the descriptive manifest, which `--write` regenerates from whatever the database currently holds. INSERT is denied outright: no writer here needs it, and a table-level grant reaches `seq`."
+    },
+    {
+      "role": "passwd_dcr_cleanup_worker",
+      "sequence": "public.tenant_claim_events_seq_seq",
+      "privileges": ["USAGE", "SELECT", "UPDATE"],
+      "reason": "Listed for the same reason as this role's tenant_claim_events entry above (#935)."
+    },
+    {
+      "role": "passwd_dcr_cleanup_worker",
+      "table": "public.tenant_claims",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "Claim routing must not be reachable from this role (#935); listed prescriptively for the same reason as the other worker roles' tenant_claims entries."
     }
   ]
 }

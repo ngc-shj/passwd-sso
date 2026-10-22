@@ -12,11 +12,12 @@
 //
 // CONVERGENT for role ATTRIBUTES, passwords and memberships: re-running does
 // not just skip work, it forces every role back to the intended state. For each
-// role it CREATEs when absent and then ALWAYS applies
+// role it CREATEs when absent and otherwise ALWAYS applies
 // `ALTER ROLE ... <fixed attrs> PASSWORD <new>`, strips any inherited role
 // membership, and asserts the resulting pg_roles attributes. So a re-run with a
-// rotated password installs it, and a role manually escalated to
-// SUPERUSER/BYPASSRLS/REPLICATION is demoted back.
+// rotated password installs it, and — when run as a superuser — a role manually
+// escalated to SUPERUSER/BYPASSRLS/REPLICATION is demoted back. Run as the RDS
+// master (not a superuser), those three are checked instead and the run stops.
 //
 // NOT convergent for existing-object ACLs on the WORKER roles — those are owned
 // by the Prisma migrations and this script runs before them; see the scope note
@@ -39,6 +40,14 @@
 //   PASSWD_APP_PASSWORD             — passwd_app role password
 //   PASSWD_OUTBOX_WORKER_PASSWORD   — passwd_outbox_worker role password
 //   PASSWD_RETENTION_GC_WORKER_PASSWORD — passwd_retention_gc_worker role password
+//   PASSWD_ANCHOR_PUBLISHER_PASSWORD — passwd_anchor_publisher role password
+//
+// RDS: the master user is NOT a superuser. It may CREATE a role with any of the
+// attributes below, but `ALTER ROLE … NOSUPERUSER / NOBYPASSRLS / NOREPLICATION`
+// is refused (42501) even as a no-op — and a refused statement carrying
+// `PASSWORD '<cleartext>'` is written to the server log under the default
+// `log_min_error_statement`. convergeRole therefore checks, as a non-superuser,
+// everything that would be refused BEFORE it sends the password.
 
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
@@ -63,10 +72,11 @@ export { loadDeniedPolicy };
 // the Prisma migrations that create those tables (they carry IF NOT EXISTS role
 // guards) — mirror ONLY what infra/postgres/initdb/02-create-app-role.sql does
 // at initdb time (role creation + schema-level privileges).
-const ROLES = [
+export const ROLES = [
   { name: "passwd_app", pwEnv: "PASSWD_APP_PASSWORD" },
   { name: "passwd_outbox_worker", pwEnv: "PASSWD_OUTBOX_WORKER_PASSWORD" },
   { name: "passwd_retention_gc_worker", pwEnv: "PASSWD_RETENTION_GC_WORKER_PASSWORD" },
+  { name: "passwd_anchor_publisher", pwEnv: "PASSWD_ANCHOR_PUBLISHER_PASSWORD" },
 ];
 
 // The attribute set every role above must END UP with, applied on both CREATE
@@ -93,6 +103,89 @@ const ROLE_ATTR_EXPECTATIONS = {
 // names read back from pg_roles, which are not part of our hardcoded allowlist.
 function quoteIdent(name) {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+// The attributes only a real superuser can clear (or set) on another role.
+const SUPERUSER_ONLY_ATTRS = ["rolsuper", "rolbypassrls", "rolreplication"];
+
+// current_user, not session_user: PostgreSQL checks privileges against the
+// current role, and `SET ROLE` changes only that one.
+async function currentUserIsSuperuser(client) {
+  const { rows } = await client.query(
+    "SELECT rolsuper FROM pg_roles WHERE rolname = current_user",
+  );
+  return rows[0]?.rolsuper === true;
+}
+
+/**
+ * Everything a non-superuser's `ALTER ROLE … PASSWORD` would be refused for,
+ * checked BEFORE the statement is sent. A refused statement is logged in full
+ * under the default `log_min_error_statement`, password included.
+ */
+async function assertConvergeableWithoutSuperuser(client, name) {
+  const { rows } = await client.query(
+    `SELECT ${SUPERUSER_ONLY_ATTRS.join(", ")},
+            pg_has_role(current_user, oid, 'MEMBER WITH ADMIN OPTION') AS has_admin
+       FROM pg_roles WHERE rolname = $1`,
+    [name],
+  );
+  const target = rows[0];
+  const elevated = SUPERUSER_ONLY_ATTRS.filter((a) => target[a] === true);
+  if (elevated.length > 0) {
+    throw new Error(
+      `role ${name} has ${elevated.join(", ")} set. Only a real superuser can clear ` +
+        "it (on RDS, AWS support); this connection is not one.",
+    );
+  }
+  if (!target.has_admin) {
+    throw new Error(
+      `role ${name}: the current role lacks ADMIN OPTION on it, so it cannot alter it. ` +
+        "On RDS the master holds ADMIN OPTION on roles it created; a role created by " +
+        "another principal needs that principal to grant it.",
+    );
+  }
+}
+
+async function membershipsOf(client, name) {
+  const { rows } = await client.query(
+    `SELECT g.rolname AS granted, gr.rolname AS grantor
+       FROM pg_auth_members m
+       JOIN pg_roles g ON g.oid = m.roleid
+       JOIN pg_roles gr ON gr.oid = m.grantor
+       JOIN pg_roles r ON r.oid = m.member
+      WHERE r.rolname = $1`,
+    [name],
+  );
+  return rows;
+}
+
+/**
+ * Worker roles: SCHEMA-level and DEFAULT privileges only. Exported so the
+ * integration test can drive it against a recorder; the default is every
+ * converged role except passwd_app, whose privileges the caller sets itself.
+ */
+export async function grantWorkerSchemaPrivileges(
+  client,
+  workers = ROLES.filter((r) => r.name !== "passwd_app").map((r) => r.name),
+) {
+  for (const worker of workers) {
+    await client.query(`REVOKE ALL ON SCHEMA public FROM ${worker}`);
+    await client.query(
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM ${worker}`,
+    );
+    await client.query(
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM ${worker}`,
+    );
+    await client.query(
+      `DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO ${worker}', current_database()); END $$`,
+    );
+    await client.query(`GRANT USAGE ON SCHEMA public TO ${worker}`);
+    // Prevent SUPERUSER's ALTER DEFAULT PRIVILEGES from implicitly granting
+    // REFERENCES on future tables to the worker (defense-in-depth).
+    await client.query(
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE REFERENCES ON TABLES FROM ${worker}`,
+    );
+  }
 }
 
 /**
@@ -195,32 +288,51 @@ export async function convergeRole(client, name, password) {
   if (rowCount === 0) {
     await client.query(`CREATE ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
     console.log(`created role ${name}`);
-  } else {
+  } else if (await currentUserIsSuperuser(client)) {
+    // ALWAYS converge an existing role. It may carry the WRONG password (the
+    // operator supplied a new one) or have been altered to
+    // SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE out of band — skipping this
+    // silently leaves a privilege-escalated role in place and an unusable
+    // password. ALTER ROLE is the convergence point; it is idempotent.
     console.log(`role ${name} exists — converging attributes + password`);
+    await client.query(`ALTER ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
+  } else {
+    // A non-superuser (the RDS master) cannot write SUPERUSER / BYPASSRLS /
+    // REPLICATION, so it writes what it can and those three become checks.
+    console.log(`role ${name} exists — converging LOGIN/CREATEDB/CREATEROLE + password`);
+    await assertConvergeableWithoutSuperuser(client, name);
+    await client.query(`ALTER ROLE ${name} WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD ${pw}`);
   }
-  // ALWAYS converge, existing or not. A pre-existing role may carry the WRONG
-  // password (the operator supplied a new one) or have been altered to
-  // SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE out of band — skipping this for
-  // existing roles silently leaves a privilege-escalated role in place and an
-  // unusable password. ALTER ROLE is the convergence point; it is idempotent.
-  await client.query(`ALTER ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
 
   // Role MEMBERSHIP is not covered by ALTER ROLE's attribute list: an inherited
   // grant (e.g. GRANT rds_superuser TO passwd_app) re-introduces privileges the
   // attributes above just removed. Strip every membership — none of these roles
-  // is supposed to inherit from anything.
-  const { rows: memberships } = await client.query(
-    `SELECT g.rolname AS grantor
-       FROM pg_auth_members m
-       JOIN pg_roles g ON g.oid = m.roleid
-       JOIN pg_roles r ON r.oid = m.member
-      WHERE r.rolname = $1`,
-    [name],
-  );
-  for (const { grantor } of memberships) {
+  // is supposed to inherit from anything. PostgreSQL 16 records each grant's
+  // grantor, and a REVOKE without GRANTED BY removes only the current role's own
+  // grant, so another grantor's survives it (with a WARNING) — hence GRANTED BY,
+  // and the re-query below.
+  const memberships = await membershipsOf(client, name);
+  for (const { granted, grantor } of memberships) {
     // Role names come from pg_roles (server-side); re-quoted as identifiers.
-    await client.query(`REVOKE ${quoteIdent(grantor)} FROM ${name}`);
-    console.log(`  revoked membership ${grantor} from ${name}`);
+    try {
+      await client.query(
+        `REVOKE ${quoteIdent(granted)} FROM ${name} GRANTED BY ${quoteIdent(grantor)}`,
+      );
+    } catch (e) {
+      throw new Error(
+        `role ${name}: could not revoke its membership in ${granted} (granted by ${grantor}): ` +
+          `${e.message}`,
+        { cause: e },
+      );
+    }
+    console.log(`  revoked membership ${granted} (granted by ${grantor}) from ${name}`);
+  }
+  const remaining = await membershipsOf(client, name);
+  if (remaining.length > 0) {
+    throw new Error(
+      `role ${name} is still a member of: ` +
+        remaining.map((m) => `${m.granted} (granted by ${m.grantor})`).join(", "),
+    );
   }
 
   // Fail loudly if convergence did not actually take (defence against a future
@@ -407,24 +519,7 @@ async function main() {
     // Detecting that surplus is the job of `scripts/audit-db-grants.mjs`, which
     // diffs the live ACLs against the expected set after the migrations have
     // run.
-    for (const worker of ["passwd_outbox_worker", "passwd_retention_gc_worker"]) {
-      await client.query(`REVOKE ALL ON SCHEMA public FROM ${worker}`);
-      await client.query(
-        `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM ${worker}`,
-      );
-      await client.query(
-        `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM ${worker}`,
-      );
-      await client.query(
-        `DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO ${worker}', current_database()); END $$`,
-      );
-      await client.query(`GRANT USAGE ON SCHEMA public TO ${worker}`);
-      // Prevent SUPERUSER's ALTER DEFAULT PRIVILEGES from implicitly granting
-      // REFERENCES on future tables to the worker (defense-in-depth).
-      await client.query(
-        `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE REFERENCES ON TABLES FROM ${worker}`,
-      );
-    }
+    await grantWorkerSchemaPrivileges(client);
 
     await grantRoutineExecute(client);
 
