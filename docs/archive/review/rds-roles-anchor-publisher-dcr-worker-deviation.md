@@ -84,3 +84,23 @@ bootstrap, documented where that runs (`infra/terraform/README.md`, `docs/setup/
   hold).
 - Owner: none; revisit if a retired role ever keeps privileges, or if a second retired role is
   added.
+
+## D9 — Three fail-closed guards left unexercised (self R-check RT7, Minor)
+
+- `migration.sql`: the RAISE when a membership survives the GRANTED BY revokes. PostgreSQL 16's
+  `REVOKE … GRANTED BY` either removes the named grantor's row or raises (42501) — the guard is
+  the backstop for a version that does neither.
+- `migration.sql`: the RAISE when a default ACL naming the role is owned by a role the current user
+  is not a member of. Reaching it as a non-superuser needs the body's earlier
+  `REVOKE ALL ON ALL TABLES` to succeed as that user, which on PostgreSQL 16 requires holding some
+  privilege on every table (RDS: the master owns them; locally the superuser does). Tried as a
+  CREATEDB CREATEROLE stand-in: the REVOKE raised `permission denied for table accounts` first.
+  Reproducing the master's ownership is out of proportion; the superuser path cannot reach it
+  (`pg_has_role` is always true for a superuser). E1.
+- `convergeRole`: the throw when the post-revoke re-query still finds a membership — same
+  reasoning as the first.
+
+All three stop the run rather than letting it pass. Also learned in the attempt: a role without
+CREATEDB may not issue `NOCREATEDB` even as a no-op, so convergeRole's narrowed ALTER and the
+migration's `ALTER ROLE` assume the RDS master has CREATEDB, which it does; the convergeRole
+stand-in tests give the stand-in CREATEDB for that reason.
