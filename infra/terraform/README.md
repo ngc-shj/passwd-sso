@@ -180,8 +180,9 @@ password it also checks that the connection has CREATEROLE and CREATEDB and
 holds ADMIN OPTION on every existing role (the master has both attributes and
 holds ADMIN OPTION on every role it created); a failure stops the run with
 nothing sent, because a refused statement is written to the RDS log in full,
-password included. All roles converge in one transaction, so a failure part-way
-leaves every role as it was. Clearing an escalated attribute needs a real
+password included. Role convergence and the privilege sequence run in one
+transaction, so a run that does not print `bootstrap-rds-roles: done` changed
+nothing. Clearing an escalated attribute needs a real
 superuser, which on RDS means AWS support. A refusal no check can foresee (a
 role dropped in between, a password-check hook, a read-only or cancelled
 session) can still be logged.
