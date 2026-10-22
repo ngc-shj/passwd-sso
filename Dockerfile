@@ -49,7 +49,7 @@ COPY .npmrc ./
 # repo's package.json `overrides` do NOT apply here — the override has to be
 # written into this stage's own package.json before installing, or the
 # vulnerable copy ships in the runner via the COPY below and Trivy flags it.
-RUN PRISMA_VER=7.10.0 && \
+RUN PRISMA_VER=7.10.1 && \
     FMW_VER=9.7.0 && \
     DMT_VER=8.0.0 && \
     MYSQL2_VER=3.23.1 && \
