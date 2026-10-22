@@ -47,3 +47,14 @@ role; `main` removes them from both sides of the manifest comparison and from `-
 not of the deployment, so the manifest cannot describe it. Tests: unit rows for
 `creatorGrantKeys`, and an integration case that creates the same row shape
 (`GRANT … WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`) and expects the audit to pass.
+
+## D6 — Mechanical-check dispositions
+
+- `check-orphaned-checks.sh` reports `scripts/__tests__/audit-db-grants-role-state.test.mjs` as
+  having no caller. It is run by `vitest.config.ts`'s include glob
+  (`scripts/__tests__/**/*.test.mjs`), which the hook's basename search cannot see; the integration
+  test files are likewise run by `vitest.integration.config.ts`'s `src/**/*.integration.test.ts`.
+- `check-new-code-untested.sh` lists the new exports; each has tests in this diff
+  (`audit-db-grants-role-state.test.mjs`, `bootstrap-rds-roles.integration.test.ts`).
+- `check-deployment-artifact.sh` (R35 Tier-1): `rds-roles-anchor-publisher-dcr-worker-manual-test.md`
+  added.

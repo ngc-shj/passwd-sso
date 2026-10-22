@@ -1,6 +1,6 @@
 # Plan: rds-roles-anchor-publisher-dcr-worker
 
-Issue: #935 (SC6 of the tenants RLS work, `docs/archive/review/tenants-table-rls-plan.md`).
+Issue: `#935` (SC6 of the tenants RLS work, `docs/archive/review/tenants-table-rls-plan.md`).
 Branch: `feat/rds-roles-anchor-publisher-dcr-worker`, base `origin/main` 083899746.
 Revision 6 — after plan-review round 5 (`rds-roles-anchor-publisher-dcr-worker-review.md`).
 
@@ -322,7 +322,7 @@ without `--write`.
 - SC2 — Revoking PUBLIC's default EXECUTE on functions / USAGE on schema `public`: separate hardening.
 - SC3 — DROP ROLE for the DCR role: rejected by the user.
 - SC4 — `jackson_user` (jackson DB) stays outside the app DB audit.
-- SC5 — #933 / #936 are separate issues.
+- SC5 — `#933` / `#936` are separate issues.
 - SC6 — Bootstrap sends cleartext `PASSWORD` DDL, which RDS logs if the statement errors
   (`log_min_error_statement`). C1 removes the deterministic trigger (the full-attribute ALTER) and
   the preflight (elevated attributes, ADMIN OPTION) removes the known remaining ones; past
