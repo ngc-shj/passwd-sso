@@ -1105,7 +1105,10 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
           hasTablePrivilege(su, PROBE, `public.${PROBE_TABLE}`, "UPDATE");
         expect(await holdsUpdate()).toBe(false);
 
-        // main()'s shape: BEGIN -> blanket grant -> (failure) -> ROLLBACK.
+        // The engine property the bootstrap's transaction rests on: a blanket
+        // grant followed by a failure rolls back. That runBootstrap actually
+        // wraps the sequence in one transaction is the "runBootstrap rolls role
+        // convergence back …" case.
         await su.query("BEGIN");
         try {
           await su.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${PROBE_TABLE} TO ${PROBE}`);

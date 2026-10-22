@@ -191,3 +191,39 @@ RT5 OK; RT6 OK; RT7 R2-2; RT8 OK; RT10 OK; RT11 R2-1. Other rules unchanged.
   user mapping, tablespace — each with a precondition that the catalog row names the role. A user
   mapping is an OWNER dependency in `pg_shdepend`, so the ownership guard refuses it first; that row
   expects the ownership message. Red-proven by breaking the type branch alone.
+
+---
+
+# Round 3
+Date: 2026-10-23
+
+## Changes from Previous Round
+
+Round-2 findings N1, N2 (functionality), S5 (security) and R2-1, R2-2 (testing) confirmed resolved.
+Security: no findings, R43 comparison shows the single transaction removes the only partial-commit
+path (strict narrowing). Testing: no findings. Functionality: one Minor (A1).
+
+- A1 [Minor] [Adjacent] — T7 "rolls the blanket grant back when the sequence fails after it"
+  carried a comment describing the old `main()` shape. Status: new.
+
+## Recurring Issue Check (round-3 delta)
+
+Functionality: R5 resolved; R20 extracted body identical to the deleted block; R29/R49 recovery
+claims match the code; R50 N2 resolved by execution; RT9 A1. Security: R5 resolved; R29/R49
+resolved; R43 no widening. Testing: RT5/RT6/RT7/RT8/RT10/RT11 checked, no issues. All other rules
+unchanged.
+
+## Tightening-only skip — Round 3
+Findings applied directly (no Round 4 review):
+- A1 [Minor] stale T7 comment — `src/__tests__/db-integration/bootstrap-rds-roles.integration.test.ts`
+  (the comment above the hand-written BEGIN/GRANT/ROLLBACK) — rewritten to say the test pins the
+  engine's rollback property and that runBootstrap's own wrapping is the "runBootstrap rolls role
+  convergence back …" case.
+Justification: within Round 2's fix scope (the convergence restructure it describes), inline minor
+(comment only, no behaviour change), no security-boundary touch.
+
+## Final status
+
+All findings across three rounds are resolved or recorded (deviation D8 residual of the
+creator-grant exclusion; D9 migration guards unreachable under a superuser; SC1 and SC6 as new
+issues). Code review complete.
