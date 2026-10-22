@@ -213,6 +213,36 @@ const NON_DESTRUCTIVE_AFTER_DROP = new Set([
 const TRIGGER_EVENT_LEAD_IN = new Set(["BEFORE", "AFTER", "OR"]);
 
 /**
+ * The table privilege keywords a GRANT / REVOKE privilege list can hold.
+ * `TRUNCATE` is one of them, and revoking it is how a migration REMOVES
+ * truncation from a role.
+ */
+const TABLE_PRIVILEGE_KEYWORDS = new Set([
+  "SELECT",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "TRUNCATE",
+  "REFERENCES",
+  "TRIGGER",
+  "MAINTAIN",
+]);
+
+/**
+ * True when token `i` sits in a GRANT / REVOKE privilege list. tokenize() drops
+ * commas, so the list reads as a run of privilege keywords: walk back over it
+ * and require GRANT, REVOKE or `REVOKE GRANT OPTION FOR` immediately before.
+ * Any other token ends the walk — a statement boundary (`;`), ON, a column
+ * list — so a truncation statement after the list is still matched.
+ */
+function inPrivilegeList(t, i) {
+  let j = i - 1;
+  while (j >= 0 && TABLE_PRIVILEGE_KEYWORDS.has(t[j])) j--;
+  if (t[j] === "GRANT" || t[j] === "REVOKE") return true;
+  return at(t, j - 3, "REVOKE", "GRANT", "OPTION", "FOR");
+}
+
+/**
  * Destructive DDL, matched over the token stream against PostgreSQL's real
  * grammar (including optional keywords).
  */
@@ -231,7 +261,15 @@ const DESTRUCTIVE_MATCHERS = [
   // Fail-closed is preserved: in PostgreSQL's grammar a truncation statement is
   // never preceded by BEFORE / AFTER / OR, so this exclusion cannot admit one.
   // Same shape as NON_DESTRUCTIVE_AFTER_DROP above.
-  ["TRUNCATE", (t, i) => t[i] === "TRUNCATE" && !TRIGGER_EVENT_LEAD_IN.has(t[i - 1])],
+  //
+  // It is a table PRIVILEGE too (`REVOKE DELETE, TRUNCATE ON t FROM r`), which
+  // is likewise how a migration takes truncation away — see inPrivilegeList().
+  // No truncation statement can sit inside a GRANT / REVOKE privilege list.
+  [
+    "TRUNCATE",
+    (t, i) =>
+      t[i] === "TRUNCATE" && !TRIGGER_EVENT_LEAD_IN.has(t[i - 1]) && !inPrivilegeList(t, i),
+  ],
   // Any DROP except the constraint-relaxing forms above. Covers DROP TABLE /
   // COLUMN / VIEW / CONSTRAINT / TYPE / SEQUENCE / INDEX / FUNCTION / TRIGGER /
   // POLICY / SCHEMA / EXTENSION, the implicit `ALTER TABLE t DROP col` form, and
