@@ -212,3 +212,12 @@ Testing: RT7/RT6 H-1, H-2.
 | F-R9-3 | Minor | Prefix regex admits leading/trailing/double `/` and `.`/`..` | Segment regex; allow/deny table in tests |
 | T-J-2 | Minor | Cap red proof can stay green under module-level state; no allow case | Fresh module graph per boot, DB count asserted after each, next-boundary allow case |
 | F-R9-2 / T-J-3 | Minor | Pause removal not propagated (alarm/test "paused", `skipped_paused` test, emitter-less action, outbox comment, runbook 72 h, threat model, scenario) | All listed in C2/C6; action kept for historical rows; all-paused-publishes test |
+
+# Round 10 (plan revision 10)
+
+| ID | Sev | Finding | Resolution (revision 11) |
+|----|-----|---------|-------------------------|
+| T-K-1 / S-R10-1 / F-R10-3 | Major | Prefix regex uses lookahead; Terraform's RE2 refuses every value under `can()`; two engines decide one rule | Two RE2-safe parts (regex + `split` segment check), verified with `terraform console`; one HCL copy in a provider-less module tested by `terraform test` (verified locally on 1.15.8); same vector drives Zod in vitest; static test pins the HCL run values to the vector |
+| F-R10-1 | Minor | Counter increments on runs with nothing to publish | Counter tx returns `skipped_no_tenants` before incrementing; cap worded as runs past marker and tenant checks; no-tenant four-boot test |
+| F-R10-2 | Minor | Pause-removal propagation misses partial-pause test, verification doc pause section, worker-policy-manifest prose, dead `pauseCapFactor` | All added to C2/C6; `pauseCapFactor` and its constant removed |
+| S side note | — | "Same advisory lock" cannot hold across the commit | Reworded: same key, released at commit; overlap only over-counts |

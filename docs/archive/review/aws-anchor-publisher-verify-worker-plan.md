@@ -1,7 +1,7 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 10 — after plan-review rounds 1–9. Rounds 3–4 showed that hardening the publication
+Revision 11 — after plan-review rounds 1–10. Rounds 3–4 showed that hardening the publication
 protocol itself (published objects as the source of truth, key rotation, a database-write
 adversary, multiple destinations) is a design project of its own; by user decision it moves to
 a follow-up issue (SC5) and this plan keeps today's protocol — the database pointer and an
@@ -74,11 +74,17 @@ verifier.
   INSERT/SELECT/UPDATE on `system_settings`).
 - Crash or commit failure after a successful upload (or an upload aborted after S3 stored it):
   the transaction rolls back and the scheduler retries the same boundary every 15 min until
-  30 min before the next boundary. Attempts that reach the upload are counted per boundary in
-  `system_settings.audit_anchor_upload_attempts` ({boundary, count}). The count is incremented
-  in its own transaction, committed before the publish transaction opens: under the same
-  advisory lock and after the marker re-check, one upsert sets `count + 1` when the stored
-  boundary matches and 1 otherwise, and returns the result. Above 3 the run uploads nothing —
+  30 min before the next boundary. Runs that pass the marker and tenant checks are counted per
+  boundary in `system_settings.audit_anchor_upload_attempts` ({boundary, count}) — a run that
+  fails before the upload (signing, a corrupt previous manifest) costs an attempt too, which is
+  wanted: it would fail the same way again. The count is incremented in its own transaction,
+  committed before the publish transaction opens: that transaction takes the same advisory-lock
+  key (released at its commit; a run overlapping in the gap can only over-count, and the
+  deployment percentages keep runs from overlapping), re-checks the marker, returns
+  `skipped_no_tenants` without incrementing when no tenant is chain-enabled (so a deployment
+  with nothing to publish never reaches the cap), and otherwise runs one upsert setting
+  `count + 1` when the stored boundary matches and 1 otherwise, returning the result. Above 3
+  the run uploads nothing —
   in-process retries and boot runs alike — so neither a rollback nor a crash after the PUT
   resets it, and a crash-looping task cannot lock more versions. Cap reached emits its own
   `_logType` (`audit-anchor-publisher.upload_cap_reached`), alarmed, and writes one
@@ -90,10 +96,13 @@ verifier.
 - Pause: an upload failure persists one until the next boundary, as today, where it holds
   chain advancement in the outbox worker. Publishing no longer consults it: capped at the next
   boundary it could only ever block that boundary's own retries, so the filter and the
-  `skipped_paused` outcome go (the `skipped_paused` unit test is deleted;
+  `skipped_paused` outcome go (the `skipped_paused` unit test is deleted and the partial-pause
+  test is rewritten — both tenants are published, no `AUDIT_ANCHOR_PUBLISH_PAUSED` emit;
   `AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_PAUSED` stays in the enum, groups and messages for
   historical rows and is no longer emitted; the outbox worker's comment saying the publisher
-  emits it is corrected). A success clears it as today. A post-upload commit failure writes
+  emits it is corrected). `AUDIT_ANCHOR_PAUSE_CAP_FACTOR` and `PublisherConfig.pauseCapFactor`
+  are removed with the 3× term, which can no longer bind (callers in the publisher, its CLI and
+  the unit and integration tests updated). A success clears it as today. A post-upload commit failure writes
   no pause and emits its own `_logType` (`audit-anchor-publisher.commit_failed_after_upload`),
   alarmed.
 - Each attempt that fails writes its `AUDIT_ANCHOR_PUBLISH_FAILED` row and failure line: at
@@ -132,9 +141,16 @@ verifier.
   denied with no exception (a delete marker would hide an anchor from a read by key);
   `s3:PutLifecycleConfiguration` denied on the bucket ARN (a bucket-level action; an expiration
   rule creates delete markers). The prefix is validated as one or more `/`-separated segments
-  of `[A-Za-z0-9._-]`, none `.` or `..` (`^(?!\.\.?(/|$))[A-Za-z0-9._-]+(/(?!\.\.?(/|$))[A-Za-z0-9._-]+)*$`):
-  no `*` or `?`, which would widen every statement, and no leading, trailing or doubled `/`, which
-  would make the runbook's and the verification doc's keys differ from the builder's. The policy holds only as long as nobody
+  of `[A-Za-z0-9._-]`, none `.` or `..`: no `*` or `?`, which would widen every statement, and no
+  leading, trailing or doubled `/`, which would make the runbook's and the verification doc's
+  keys differ from the builder's. Terraform's `regex()` is RE2 (no lookahead; a lookahead
+  pattern under `can()` refuses every value — checked with `terraform console`), so the rule is
+  two RE2-safe parts: `can(regex("^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$", p)) &&
+  alltrue([for s in split("/", p) : s != "." && s != ".."])`. It lives once, as the variable
+  validation of a provider-less module `infra/terraform/modules/anchor-prefix` that the root
+  passes the prefix through, so `terraform test` can exercise it without AWS credentials (it
+  needs Terraform ≥ 1.6, which the CI job pins; the root's `required_version` is unchanged).
+  The publisher's env schema applies the same rule with the same two parts in Zod. The policy holds only as long as nobody
   replaces it — the account root always can — so changes to the anchors bucket's policy,
   lifecycle, Object Lock or versioning configuration are alarmed (an EventBridge rule on those
   CloudTrail events; a Terraform apply is the expected false positive), and the docs state the
@@ -217,7 +233,10 @@ verifier.
 `VERIFIER_PEPPER_KEY`, `SMTP_USER`, `SMTP_PASS`, `DEPLOYMENT_ID`, and the ja table's missing
 `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`), `docs/operations/deployment.md` (DEPLOYMENT_ID, bucket
 procedure, first-publish report), `docs/operations/alerts.md`,
-`docs/operations/audit-anchor-rotation-runbook.md` and `docs/security/audit-chain-threat-model.md`
+`docs/operations/audit-anchor-rotation-runbook.md`, `docs/security/audit-chain-threat-model.md`,
+the verification doc's "Pause-window protection boundary" section and the publisher's
+`retryPolicy`/`poisonMessageHandling` in `scripts/checks/worker-policy-manifest.json` (now the
+15-min retry loop and the persisted cap)
 (the pause now ends at the next boundary and no longer holds publishing — the "3× cadence = 72h"
 cap and its paging text go; the threat model's 72 h figure is restated; the attempt cap and its
 alarm are described),
@@ -268,6 +287,8 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
     transaction — the fourth still uploads; red: the count kept at module level). Allow case: at
     the next boundary the run reaches the upload with the count reset to 1;
   - every tenant paused: the run publishes (red: the filter restored → it skips);
+  - no chain-enabled tenant, four boots in a day: each reports `skipped_no_tenants`, the count
+    stays absent, no `upload_cap_reached` (red: increment before the tenant check);
   - a failure pauses only to the next boundary; injected transaction/upload bounds fail within
     the test budget;
   - overlap: A blocked mid-upload inside its transaction; its backend pid recorded by a test
@@ -299,8 +320,12 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
   sequence) against the exported key builder's output for a real kid and against
   `S3Destination`'s full key, and asserts neither matches the break-glass paths (red: a
   `YYYYMMDD` date; a pattern without the prefix; only the `NotResource` copy changed). Prefix
-  validation allow/deny: `a`, `a/b`, `a.b` allowed; `*`, `?`, `/a`, `a/`, `a//b`, `.`, `..`,
-  `a/../b` refused.
+  validation, one allow/deny vector (`a`, `a/b`, `a.b`, `.a` allowed; `*`, `?`, `/a`, `a/`,
+  `a//b`, `.`, `..`, `a/../b`, `a/./b` refused) run through both validators: `terraform test` in
+  the module (`command = plan`, `expect_failures = [var.prefix]` per refused value) in the
+  terraform CI job, and the Zod schema in vitest; a static test asserts the `.tftest.hcl` run
+  values equal the vector (red: the lookahead form fails the allowed runs; red: a value dropped
+  from the HCL).
 - C5: the terraform CI job; static pins with red fixtures (publisher percentages,
   `desired_count`, anchors Object Lock, SSE-S3, each bucket-policy statement — `Principal: "*"`
   with `ArnNotEquals aws:PrincipalArn`, no `NotPrincipal`; red fixtures for a third principal, a
