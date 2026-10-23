@@ -201,3 +201,14 @@ Testing: RT7/RT6 H-1, H-2.
 | F-R8-3 | Minor | `PutLifecycleConfiguration` is bucket-level; runbook hard-codes the prefix | Deny on the bucket ARN (red fixture on `bucket/*`); runbook uses the configured prefix |
 | S-R8-2 | Minor | Root can replace the bucket policy unnoticed | EventBridge alarm on policy/lifecycle/Object Lock/versioning changes for the anchors bucket; residual stated |
 | S-R8-3 | Minor | In-process attempt cap resets on restart | Count persisted per boundary in `system_settings.audit_anchor_upload_attempts`, honoured by boot and retries; boot-cap test |
+
+# Round 9 (plan revision 9)
+
+| ID | Sev | Finding | Resolution (revision 10) |
+|----|-----|---------|-------------------------|
+| F-R9-1 / S-R9-1 | Major | Attempt count written inside the publish tx rolls back with every failure; the cap never triggers | Increment committed in its own tx before the publish tx (same advisory lock, after marker re-check, atomic upsert returning the count); red: increment inside the publish tx |
+| T-J-1 | Major | Catch-all `NotResource` duplicates the manifest pattern; the key test pins one copy | Both copies extracted, asserted equal, each matched against builder and `S3Destination`; `NotResource` list pinned exactly; red: only the `NotResource` copy changed |
+| F-R9-3 / S-R9-1 | Minor | Cap-reached unalarmed; audit rows unbounded in a crash loop | `upload_cap_reached` `_logType` + alarm; one failure row per boundary |
+| F-R9-3 | Minor | Prefix regex admits leading/trailing/double `/` and `.`/`..` | Segment regex; allow/deny table in tests |
+| T-J-2 | Minor | Cap red proof can stay green under module-level state; no allow case | Fresh module graph per boot, DB count asserted after each, next-boundary allow case |
+| F-R9-2 / T-J-3 | Minor | Pause removal not propagated (alarm/test "paused", `skipped_paused` test, emitter-less action, outbox comment, runbook 72 h, threat model, scenario) | All listed in C2/C6; action kept for historical rows; all-paused-publishes test |

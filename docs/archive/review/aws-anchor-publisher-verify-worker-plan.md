@@ -1,7 +1,7 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 9 — after plan-review rounds 1–8. Rounds 3–4 showed that hardening the publication
+Revision 10 — after plan-review rounds 1–9. Rounds 3–4 showed that hardening the publication
 protocol itself (published objects as the source of truth, key rotation, a database-write
 adversary, multiple destinations) is a design project of its own; by user decision it moves to
 a follow-up issue (SC5) and this plan keeps today's protocol — the database pointer and an
@@ -75,20 +75,29 @@ verifier.
 - Crash or commit failure after a successful upload (or an upload aborted after S3 stored it):
   the transaction rolls back and the scheduler retries the same boundary every 15 min until
   30 min before the next boundary. Attempts that reach the upload are counted per boundary in
-  `system_settings.audit_anchor_upload_attempts` ({boundary, count}, written before the upload);
-  at 3 the boundary stops — in-process retries and boot runs alike, so a crash-looping task
-  cannot lock more versions. The marker keeps a repeat idempotent, so the last PUT of the day is
+  `system_settings.audit_anchor_upload_attempts` ({boundary, count}). The count is incremented
+  in its own transaction, committed before the publish transaction opens: under the same
+  advisory lock and after the marker re-check, one upsert sets `count + 1` when the stored
+  boundary matches and 1 otherwise, and returns the result. Above 3 the run uploads nothing —
+  in-process retries and boot runs alike — so neither a rollback nor a crash after the PUT
+  resets it, and a crash-looping task cannot lock more versions. Cap reached emits its own
+  `_logType` (`audit-anchor-publisher.upload_cap_reached`), alarmed, and writes one
+  `AUDIT_ANCHOR_PUBLISH_FAILED` row per boundary (the first run to see the cap; later runs log
+  only), so a planted cap is visible the same day, not at the ~25 h absence alarm. The marker keeps a repeat idempotent, so the last PUT of the day is
   the committed version; versioning keeps the earlier ones. A task down for the rest of the day
   leaves an uncommitted latest version that the next manifest does not reference; the next
   publish reports it as `MISSING_PRIOR_CADENCE_PUBLICATION`.
 - Pause: an upload failure persists one until the next boundary, as today, where it holds
   chain advancement in the outbox worker. Publishing no longer consults it: capped at the next
   boundary it could only ever block that boundary's own retries, so the filter and the
-  `skipped_paused` outcome go. A success clears it as today. A post-upload commit failure writes
+  `skipped_paused` outcome go (the `skipped_paused` unit test is deleted;
+  `AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_PAUSED` stays in the enum, groups and messages for
+  historical rows and is no longer emitted; the outbox worker's comment saying the publisher
+  emits it is corrected). A success clears it as today. A post-upload commit failure writes
   no pause and emits its own `_logType` (`audit-anchor-publisher.commit_failed_after_upload`),
   alarmed.
 - Each attempt that fails writes its `AUDIT_ANCHOR_PUBLISH_FAILED` row and failure line: at
-  most 3 per boundary.
+  most 3 per boundary, plus the one cap-reached row.
 - Budget: lock wait 10 s, S3 request/connection timeouts and an abort signal bounding the
   upload as a whole at 60 s, the publish transaction 90 s; `stopTimeout` 120 s (the Fargate
   maximum).
@@ -122,8 +131,10 @@ verifier.
   (extend-only under COMPLIANCE and the cap); `s3:DeleteObject` and `s3:DeleteObjectVersion`
   denied with no exception (a delete marker would hide an anchor from a read by key);
   `s3:PutLifecycleConfiguration` denied on the bucket ARN (a bucket-level action; an expiration
-  rule creates delete markers). The prefix is validated against `^[A-Za-z0-9._/-]+$` (non-empty;
-  no `*` or `?`, which would widen every statement). The policy holds only as long as nobody
+  rule creates delete markers). The prefix is validated as one or more `/`-separated segments
+  of `[A-Za-z0-9._-]`, none `.` or `..` (`^(?!\.\.?(/|$))[A-Za-z0-9._-]+(/(?!\.\.?(/|$))[A-Za-z0-9._-]+)*$`):
+  no `*` or `?`, which would widen every statement, and no leading, trailing or doubled `/`, which
+  would make the runbook's and the verification doc's keys differ from the builder's. The policy holds only as long as nobody
   replaces it — the account root always can — so changes to the anchors bucket's policy,
   lifecycle, Object Lock or versioning configuration are alarmed (an EventBridge rule on those
   CloudTrail events; a Terraform apply is the expected false positive), and the docs state the
@@ -179,9 +190,10 @@ verifier.
   false`, decided from the absence of any `audit_chain_anchors` row (not a new setting); an
   alarm when the chain-enabled tenant count (carried in every cadence line) falls from positive
   to 0. A deliberate full disable leaves the absence alarm in ALARM — that is the state to see;
-  the runbook says so; `skipped_already_published`, paused, failed and
+  the runbook says so; `skipped_already_published`, failed, `upload_cap_reached` and
   `lock_held` never count; an EventBridge alarm on the anchors bucket's configuration changes
-  (C3); log metric filters on the publisher's failure lines, each given a `_logType`
+  (C3); log metric filters on the publisher's failure lines (including `upload_cap_reached`),
+  each given a `_logType`
   (`cadence_error` lacks one); verify-worker heartbeat
   filters (`erroredTenantCount > 0`, `failedTenantCount > 0`, absence); both log groups in
   `rls_bypass_report_log_groups`; an EventBridge rule on CloudTrail's ECS `ExecuteCommand`.
@@ -205,6 +217,10 @@ verifier.
 `VERIFIER_PEPPER_KEY`, `SMTP_USER`, `SMTP_PASS`, `DEPLOYMENT_ID`, and the ja table's missing
 `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`), `docs/operations/deployment.md` (DEPLOYMENT_ID, bucket
 procedure, first-publish report), `docs/operations/alerts.md`,
+`docs/operations/audit-anchor-rotation-runbook.md` and `docs/security/audit-chain-threat-model.md`
+(the pause now ends at the next boundary and no longer holds publishing — the "3× cadence = 72h"
+cap and its paging text go; the threat model's 72 h figure is restated; the attempt cap and its
+alarm are described),
 `docs/security/audit-anchor-verification.md` (list every version of a key, not only the
 latest; the authoritative version of a key is the one whose sha256 the next manifest's
 `previousManifest` names — only for the newest key is it the latest version; other versions
@@ -245,8 +261,13 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
     fires): a pause is written; a test tenant's chain is advanced; the same-boundary retry
     publishes → two versions with different sha256, the latest equal to the pointer;
     `publish_paused_until` is NULL afterwards (red: the success skips the clear);
-  - the persisted attempt cap: three boots that each reach the upload, then a fourth that
-    reports cap-reached without uploading (red: the count kept in-process);
+  - the persisted attempt cap: three boots, each in a fresh module graph (`vi.resetModules()`),
+    whose attempts fail after the PUT stored the object; after each the DB holds
+    `{boundary, 1..3}`; a fourth reports `upload_cap_reached` without uploading, writing one
+    failure row, and a fifth writes none (red: the increment written inside the publish
+    transaction — the fourth still uploads; red: the count kept at module level). Allow case: at
+    the next boundary the run reaches the upload with the count reset to 1;
+  - every tenant paused: the run publishes (red: the filter restored → it skips);
   - a failure pauses only to the next boundary; injected transaction/upload bounds fail within
     the test budget;
   - overlap: A blocked mid-upload inside its transaction; its backend pid recorded by a test
@@ -272,9 +293,14 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
   and fails on unmodelled HCL. Verify worker: `--validate-env-only` allow/deny per axis from a
   temp cwd; SIGTERM during the sleep exits within seconds (red: plain `setTimeout`).
 - C3/C5 key contract: a static test extracts the manifest `Resource` pattern from the bucket
-  policy and matches it as S3 does (`?` one character, `*` any sequence) against the exported key
-  builder's output for a real kid and against `S3Destination`'s full key, and asserts it does not
-  match the break-glass paths (red: a `YYYYMMDD` date; a pattern without the prefix).
+  policy — both copies: the publisher-only statement's `Resource` and the catch-all's
+  `NotResource` — asserts they are equal and that the `NotResource` list is exactly that pattern
+  plus the two break-glass paths, and matches each copy as S3 does (`?` one character, `*` any
+  sequence) against the exported key builder's output for a real kid and against
+  `S3Destination`'s full key, and asserts neither matches the break-glass paths (red: a
+  `YYYYMMDD` date; a pattern without the prefix; only the `NotResource` copy changed). Prefix
+  validation allow/deny: `a`, `a/b`, `a.b` allowed; `*`, `?`, `/a`, `a/`, `a//b`, `.`, `..`,
+  `a/../b` refused.
 - C5: the terraform CI job; static pins with red fixtures (publisher percentages,
   `desired_count`, anchors Object Lock, SSE-S3, each bucket-policy statement — `Principal: "*"`
   with `ArnNotEquals aws:PrincipalArn`, no `NotPrincipal`; red fixtures for a third principal, a
@@ -289,8 +315,8 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
   asked for present in `outputs.tf`; `pool-factory.metric-filter.test.ts` with the new log
   groups; a metric-filter test that each new pattern matches a line the code really emits on
   its path and not the others (the healthy-cadence filter matches `published` and the
-  never-enabled `skipped_no_tenants`, not `skipped_already_published`, `failed`, paused or
-  `lock_held`; `skipped_no_tenants` with `everChainEnabled: false` matches and with `true` does
+  never-enabled `skipped_no_tenants`, not `skipped_already_published`, `failed`,
+  `upload_cap_reached` or `lock_held`; `skipped_no_tenants` with `everChainEnabled: false` matches and with `true` does
   not (red: a pattern without the field) — the derivation itself unit-tested with a fake
   returning zero and one `audit_chain_anchors` rows (red: hard-coded `false`; not isolatable on
   the shared integration database); the falls-to-zero alarm on a count going from 1 to 0;
@@ -332,7 +358,8 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
   new one's boot run publishes the boundary if it is unpublished, otherwise does nothing.
 - A commit lost after an upload: the scheduler retries the boundary within the day; the bucket
   keeps both versions, the latest is the one the chain points to.
-- An S3 hiccup on a boot run: one failure, paused only until the next boundary.
+- An S3 hiccup on a boot run: one failure; the 15-min retry publishes the boundary; the outbox
+  chain advancement is held only until then.
 
 ## Go/No-Go Gate
 
