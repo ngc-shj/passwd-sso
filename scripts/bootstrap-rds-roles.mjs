@@ -29,8 +29,14 @@
 // partially-failed run can simply be re-executed.
 //
 // DDL (CREATE ROLE) cannot use bind parameters — `CREATE ROLE x PASSWORD $1` is
-// a syntax error in Postgres. Passwords are therefore quoted with pg's
-// escapeLiteral() (server-correct string-literal escaping) and interpolated.
+// a syntax error in Postgres. The statement therefore carries a SCRAM-SHA-256
+// VERIFIER computed here (scripts/lib/scram-verifier.mjs), quoted with pg's
+// escapeLiteral() — never the cleartext. A refused statement, `log_statement =
+// ddl|all` and pg_stat_statements (which RDS preloads) record the statement
+// text, so the cleartext the script used to send is what they kept; runs made
+// before this change are covered in docs/operations/deployment.md "Prior
+// password exposure". Passwords must be ASCII: the verifier is derived without
+// SASLprep, which the server and node-postgres both apply (identity for ASCII).
 // Role NAMES are a fixed hardcoded allowlist below (never user input), so they
 // are interpolated directly.
 //
@@ -44,10 +50,10 @@
 //
 // RDS: the master user is NOT a superuser. It may CREATE a role with any of the
 // attributes below, but `ALTER ROLE … NOSUPERUSER / NOBYPASSRLS / NOREPLICATION`
-// is refused (42501) even as a no-op — and a refused statement carrying
-// `PASSWORD '<cleartext>'` is written to the server log under the default
-// `log_min_error_statement`. convergeRole therefore checks, as a non-superuser,
-// everything that would be refused BEFORE it sends the password.
+// is refused (42501) even as a no-op — and a refused statement is written to the
+// server log, verifier included, under the default `log_min_error_statement`.
+// convergeRole therefore checks, as a non-superuser, everything that would be
+// refused BEFORE it sends the password statement.
 
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
@@ -61,6 +67,11 @@ import {
   isSequenceEntry,
   assertSubjectKind,
 } from "./lib/denied-privileges.mjs";
+import {
+  assertUsablePassword,
+  resolveIterations,
+  scramSha256Verifier,
+} from "./lib/scram-verifier.mjs";
 // Re-exported so the integration test drives the SAME loader the script uses,
 // rather than a second import path that could diverge from it.
 export { loadDeniedPolicy };
@@ -303,12 +314,17 @@ export async function applyDeniedPrivileges(
  *
  * @param {import("pg").Client} client migration connection: a superuser, or the RDS master
  * @param {string} name role name (caller-controlled allowlist, not user input)
- * @param {string} password plaintext password to install
+ * @param {string} password plaintext password; only its verifier is sent
  */
 export async function convergeRole(client, name, password) {
   const { rowCount } = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [name]);
-  // escapeLiteral wraps + escapes for the server's string-literal syntax.
-  const pw = client.escapeLiteral(password);
+  // current_setting(…, true) is NULL, not an error, before PostgreSQL 16 — an
+  // error here would abort the caller's transaction.
+  const iterationsSetting = await client.query("SELECT current_setting('scram_iterations', true) AS i");
+  const verifier = scramSha256Verifier(password, {
+    iterations: resolveIterations(iterationsSetting.rows[0].i),
+  });
+  const pw = client.escapeLiteral(verifier);
   const superuser = await currentUserIsSuperuser(client);
   if (rowCount === 0) {
     if (!superuser) await assertCallerCanManageRoles(client);
@@ -587,6 +603,15 @@ async function main() {
     for (const r of ROLES) {
       if (!process.env[r.pwEnv]) {
         console.error(`ERROR: ${r.pwEnv} is required (password for ${r.name}).`);
+        process.exit(1);
+      }
+      // Every password is checked before the first connection, so a bad value
+      // in the last variable cannot leave the earlier roles converged. The
+      // message names the variable and the reason, never the value.
+      try {
+        assertUsablePassword(process.env[r.pwEnv]);
+      } catch (e) {
+        console.error(`ERROR: ${r.pwEnv}: ${e.message}.`);
         process.exit(1);
       }
     }

@@ -209,6 +209,30 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
   },
   {
     type: "literal",
+    key: "PASSWD_ANCHOR_PUBLISHER_PASSWORD",
+    justification:
+      "Password for the passwd_anchor_publisher NOSUPERUSER DB role used by the audit-anchor publisher. " +
+      "Consumed by docker-compose (forwarded, optional, to the db service for initdb), by " +
+      "scripts/set-audit-anchor-publisher-password.sh for existing clusters, and by " +
+      "scripts/bootstrap-rds-roles.mjs on RDS. Not read by the Next.js app.",
+    consumers: [
+      "docker-compose.yml",
+      "infra/postgres/initdb",
+      "scripts/set-audit-anchor-publisher-password.sh",
+      "scripts/bootstrap-rds-roles.mjs",
+    ],
+    reviewedAt: "2026-10-23",
+    includeInExample: true,
+    description:
+      "Password for the passwd_anchor_publisher least-privilege DB role.\n" +
+      "Used by infra/postgres/initdb to create the role on first boot; unset, the\n" +
+      "role is created NOLOGIN (no published fallback password). Must match the\n" +
+      "password in AUDIT_ANCHOR_PUBLISHER_DATABASE_URL.\n" +
+      "Generate with: openssl rand -hex 24",
+    secret: true,
+  },
+  {
+    type: "literal",
     key: "NEXT_RUNTIME",
     justification:
       "Provided by the Next.js framework at runtime; user configuration has no effect. " +

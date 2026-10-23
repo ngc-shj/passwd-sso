@@ -2,6 +2,16 @@
 -- Password is read from PASSWD_JACKSON_PASSWORD env var (set in docker-compose.yml).
 -- \getenv sets a psql client-side variable (NOT a GUC), expanded by :'varname'.
 
+-- Before any statement that carries a password, so the cleartext reaches no
+-- record of statement text: the server log (logged or refused), pg_stat_statements,
+-- and psql's own `LINE n:` error excerpt on the entrypoint's stderr. initdb runs as
+-- the bootstrap superuser, which may set all of these for its session.
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+SET pg_stat_statements.track_utility = off;
+\set VERBOSITY terse
+
 \getenv jackson_password PASSWD_JACKSON_PASSWORD
 
 -- Guard: only create if role doesn't already exist

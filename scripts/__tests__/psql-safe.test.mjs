@@ -18,6 +18,8 @@ const SCRIPTS = resolve(REPO_ROOT, "scripts");
 const LIB = resolve(SCRIPTS, "lib", "psql-safe.sh");
 
 const SENTINEL = "s3ntinel-pw";
+// The role password the set-*-password scripts read from stdin.
+const ROLE_PW = "r0le-pw-s3ntinel";
 
 // Scripts outside the class, each with the reason it is outside:
 //   pre-pr.sh        — runs psql through `docker exec` in the db container,
@@ -60,7 +62,9 @@ beforeEach(() => {
   log = join(work, "calls.log");
   binDir = join(work, "bin");
   spawnSync("mkdir", [binDir]);
-  // Records argv and the passfile it was handed, then succeeds silently.
+  // Records argv and the passfile it was handed, then succeeds. The
+  // set-*-password scripts ask for scram_iterations first; answer it, or they
+  // would never reach the call that carries the verifier.
   const fake = `#!/usr/bin/env bash
 {
   printf 'ARGV'; printf ' [%s]' "$@"; printf '\\n'
@@ -71,6 +75,7 @@ beforeEach(() => {
   fi
 } >> "${log}"
 cat >/dev/null
+case " $* " in *current_setting*) echo 4096 ;; esac
 exit 0
 `;
   writeFileSync(join(binDir, "psql"), fake);
@@ -186,7 +191,7 @@ describe("scripts that run psql against an operator URL", () => {
       APP_DATABASE_URL: `postgresql://passwd_app:${SENTINEL}-app@localhost:5432/passwd_sso`,
     };
     return spawnSync("bash", [join(SCRIPTS, f)], {
-      env: env(urls), input: "new-role-pw", encoding: "utf8", timeout: 30_000, cwd: REPO_ROOT,
+      env: env(urls), input: ROLE_PW, encoding: "utf8", timeout: 30_000, cwd: REPO_ROOT,
     });
   };
 
@@ -195,15 +200,22 @@ describe("scripts that run psql against an operator URL", () => {
     const calls = existsSync(log) ? readFileSync(log, "utf8") : "";
     const argvLines = calls.split("\n").filter((l) => l.startsWith("ARGV"));
     expect(argvLines.length, `${f} never reached psql: ${r.stderr}`).toBeGreaterThan(0);
+    // The set-*-password scripts make two calls — the iteration query and the
+    // ALTER carrying the verifier — and both must be checked, not just the first.
+    if (f.startsWith("set-") && f.endsWith("-password.sh")) {
+      expect(argvLines, `${f}: ${r.stderr}`).toHaveLength(2);
+    }
     for (const l of argvLines) {
       expect(l.startsWith("ARGV [-X]"), `${f}: ${l}`).toBe(true);
       expect(l, `${f} put the password in argv`).not.toContain(SENTINEL);
+      expect(l, `${f} put the role password in argv`).not.toContain(ROLE_PW);
     }
     // The password reached psql through the passfile instead, owner-only.
     expect(calls).toContain(`PASS=*:*:*:passwd_user:${SENTINEL}-mig`);
     expect(calls).toMatch(/^MODE=600$/m);
     expect(calls).not.toMatch(/^PGPASSWORD=(?!<unset>)/m);
     expect(r.stdout + r.stderr, `${f} echoed the password`).not.toContain(SENTINEL);
+    expect(r.stdout + r.stderr, `${f} echoed the role password`).not.toContain(ROLE_PW);
   });
 
   it.each(members)("%s: removes the passfile on exit", (f) => {

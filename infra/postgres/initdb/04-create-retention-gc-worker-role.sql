@@ -12,6 +12,16 @@
 -- Splitting keeps this role's creation independent of that pre-existing
 -- bootstrap-time error.
 
+-- Before any statement that carries a password, so the cleartext reaches no
+-- record of statement text: the server log (logged or refused), pg_stat_statements,
+-- and psql's own `LINE n:` error excerpt on the entrypoint's stderr. initdb runs as
+-- the bootstrap superuser, which may set all of these for its session.
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+SET pg_stat_statements.track_utility = off;
+\set VERBOSITY terse
+
 \getenv passwd_retention_gc_worker_password PASSWD_RETENTION_GC_WORKER_PASSWORD
 
 SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_retention_gc_worker')

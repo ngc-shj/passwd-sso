@@ -90,6 +90,9 @@ services:
       PASSWD_OUTBOX_WORKER_PASSWORD: ${PASSWD_OUTBOX_WORKER_PASSWORD:?PASSWD_OUTBOX_WORKER_PASSWORD is required}
       PASSWD_RETENTION_GC_WORKER_PASSWORD: ${PASSWD_RETENTION_GC_WORKER_PASSWORD:?PASSWD_RETENTION_GC_WORKER_PASSWORD is required}
       PASSWD_JACKSON_PASSWORD: ${PASSWD_JACKSON_PASSWORD:?PASSWD_JACKSON_PASSWORD is required}
+      # Optional (existing .env files predate it): unset, the initdb creates
+      # passwd_anchor_publisher NOLOGIN rather than with a published password.
+      PASSWD_ANCHOR_PUBLISHER_PASSWORD: ${PASSWD_ANCHOR_PUBLISHER_PASSWORD:-}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro

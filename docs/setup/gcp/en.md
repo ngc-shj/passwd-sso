@@ -22,7 +22,7 @@ This guide describes a production-oriented GCP deployment.
 - `HEALTH_REDIS_REQUIRED=true` (RECOMMENDED in production — fail the readiness probe when Redis is unreachable so the load balancer stops routing traffic to nodes where session-revocation tombstones cannot propagate)
 - `BLOB_BACKEND`
 - `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
-- `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; use `scripts/set-outbox-worker-password.sh` to rotate)
+- `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; use `scripts/set-outbox-worker-password.sh` to rotate. It sends a SCRAM-SHA-256 verifier, never the password; the managed admin is not a superuser, so it cannot turn statement logging off for its session, and the verifier can be logged under `log_statement = ddl|all`, on a refused statement, and kept by `pg_stat_statements`)
 
 If `BLOB_BACKEND=gcs`:
 - `GCS_ATTACHMENTS_BUCKET`

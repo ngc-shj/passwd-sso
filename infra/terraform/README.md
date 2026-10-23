@@ -166,9 +166,11 @@ actions ECS Exec needs (`iam.tf`; the app/worker tasks do NOT get this). The
 `node:alpine` base has no `psql` binary, so a version-controlled Node script,
 `scripts/bootstrap-rds-roles.mjs` (baked into the image), does the work via the
 `pg` module. It is idempotent and re-runnable: each role is guarded by a
-`pg_roles` existence check, and it safely quotes the passwords with pg's
-`escapeLiteral` (DDL cannot use bind parameters — `CREATE ROLE x PASSWORD $1` is
-a Postgres syntax error). Table-specific worker grants are issued later by the
+`pg_roles` existence check, and the statements carry a SCRAM-SHA-256 verifier
+computed in the script, never the password (DDL cannot use bind parameters —
+`CREATE ROLE x PASSWORD $1` is a Postgres syntax error — so whatever is sent is
+recorded by a refused-statement log line and by `pg_stat_statements`, which RDS
+preloads). Passwords must be ASCII. Table-specific worker grants are issued later by the
 Prisma migrations, exactly as with the Docker initdb path.
 
 The RDS master is NOT a superuser (docs/setup/aws/en.md "RDS master users are
@@ -179,13 +181,14 @@ NOCREATEDB NOCREATEROLE PASSWORD …`: it checks — not writes —
 password it also checks that the connection has CREATEROLE and CREATEDB and
 holds ADMIN OPTION on every existing role (the master has both attributes and
 holds ADMIN OPTION on every role it created); a failure stops the run with
-nothing sent, because a refused statement is written to the RDS log in full,
-password included. Role convergence and the privilege sequence run in one
+nothing sent, because a refused statement is written to the RDS log in full
+(now a verifier, not the password). Role convergence and the privilege sequence run in one
 transaction, so a run that does not print `bootstrap-rds-roles: done` changed
 nothing. Clearing an escalated attribute needs a real
 superuser, which on RDS means AWS support. A refusal no check can foresee (a
 role dropped in between, a password-check hook, a read-only or cancelled
-session) can still be logged.
+session) can still be logged — as a verifier. Runs made before `#941` sent the
+cleartext: see `docs/operations/deployment.md` "Prior password exposure".
 
 ```bash
 CLUSTER=$(terraform output -raw ecs_cluster_name)

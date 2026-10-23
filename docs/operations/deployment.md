@@ -180,16 +180,39 @@ secret").
 4. Re-run `./scripts/deploy.sh`. `prisma migrate deploy` is a no-op, the audit
    passes, and the services roll.
 
-**Prior password exposure.** The previous `convergeRole` sent `ALTER ROLE …
-NOSUPERUSER … PASSWORD '<cleartext>'` for every role, which RDS refuses with
-42501 and — under the default `log_min_error_statement` — writes to the
-PostgreSQL log in full. For any RDS deployment where the bootstrap ever ran,
-either:
+**Prior password exposure.** Before `#941` the bootstrap sent role passwords in
+cleartext: `ALTER ROLE … NOSUPERUSER … PASSWORD '<cleartext>'` for every role,
+which RDS refuses with 42501 and — under the default `log_min_error_statement` —
+writes to the PostgreSQL log in full, and every `CREATE/ALTER ROLE` it sent was
+kept verbatim by `pg_stat_statements`, which RDS preloads (`track_utility` on). It
+now sends a SCRAM-SHA-256 verifier instead (see "What a logged verifier exposes"
+below). For any RDS deployment where an earlier bootstrap ran:
 
+- check `pg_stat_statements` from the `postgres` database — never `CREATE
+  EXTENSION` in `passwd_sso`: its PUBLIC grants fail the grant audit on the next
+  deploy. The view is cluster-wide; the query matches the password clause rather
+  than the word (the app's `password_*` tables contain it) and prints a count, not
+  the text:
+
+  ```sql
+  -- connected to the postgres database
+  CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+  SELECT count(*) FROM pg_stat_statements
+   WHERE query ~* '\m(ROLE|USER)\M.*\mPASSWORD\s+E?'''
+     AND query NOT ILIKE '%PASSWORD ''SCRAM-SHA-256$%'
+     AND query NOT ILIKE '%PASSWORD ''md5%';
+  ```
+
+  A non-zero count means cleartext is still held there: clear it with `SELECT
+  pg_stat_statements_reset();` (needs EXECUTE on it; whether the RDS master holds
+  that, and may create the extension in `postgres` and read other roles' query
+  text, is unverified) — and rotate if it cannot be cleared or a snapshot taken
+  since may hold it;
 - confirm the RDS PostgreSQL logs from those runs have expired and were never
   downloaded or exported (this Terraform sets no
-  `enabled_cloudwatch_logs_exports`; check whether anyone added it), or
-- rotate those roles' passwords in step 3: generate new values, write them into
+  `enabled_cloudwatch_logs_exports`; check whether anyone added it). "The logs
+  expired" alone is not enough while `pg_stat_statements` may still hold the text;
+- or rotate those roles' passwords in step 3: generate new values, write them into
   the `*_DATABASE_URL` app-secret keys first (the same read-merge-write), then
   export them for the bootstrap. The running old tasks hold the old passwords in
   their environment, so they cannot open NEW connections from step 3 until step
@@ -537,8 +560,15 @@ When a migration intentionally changes a grant, regenerate the manifest with
 migration.
 
 ```sql
--- Production: create a non-superuser application role
-CREATE ROLE passwd_app LOGIN PASSWORD '<strong-password>' NOSUPERUSER NOBYPASSRLS;
+-- Production: create a non-superuser application role. No PASSWORD clause here:
+-- a cleartext literal would be logged on a refused statement, under
+-- log_statement=ddl|all, and kept by pg_stat_statements. Set it below with
+-- \password, which sends a verifier computed client-side.
+CREATE ROLE passwd_app LOGIN NOSUPERUSER NOBYPASSRLS;
+SET password_encryption = 'scram-sha-256';
+SET log_statement TO 'none';
+SET log_min_error_statement TO 'panic';
+\password passwd_app
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
 GRANT USAGE ON SCHEMA public TO passwd_app;
@@ -567,29 +597,56 @@ The Docker Compose dev setup enforces the same role separation: the `app` servic
 **Existing dev volumes.** `npm run db:migrate` retires `passwd_dcr_cleanup_worker`
 on its own. `passwd_anchor_publisher`, though, is `NOLOGIN` on a volume created
 before `infra/postgres/initdb/02-create-app-role.sql` gained it (the migration
-that created it there makes it `NOLOGIN`), and the grant audit now expects
-`LOGIN`. Check with
+that created it there makes it `NOLOGIN`), and on any volume initialised without
+`PASSWD_ANCHOR_PUBLISHER_PASSWORD` set — the initdb no longer falls back to a
+published password — while the grant audit expects `LOGIN`. Set
+`PASSWD_ANCHOR_PUBLISHER_PASSWORD` in `.env` to the password your
+`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` carries. Check with
 `docker compose exec -T db psql -U passwd_user -d passwd_sso -Atc "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'passwd_anchor_publisher'"`;
-if it prints `f`, converge it. Use the password your
-`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` carries — `passwd_anchor_publisher_pass` is
-the initdb fallback a fresh volume gets, since compose does not forward
-`PASSWD_ANCHOR_PUBLISHER_PASSWORD` to the `db` service:
+if it prints `f`, give it `LOGIN` and set the password:
 
 ```bash
+set -a; . ./.env; set +a
+: "${PASSWD_ANCHOR_PUBLISHER_PASSWORD:?set it in .env first}"
 docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso \
-  -v pw="${PASSWD_ANCHOR_PUBLISHER_PASSWORD:-passwd_anchor_publisher_pass}" <<'SQL'
-SET log_statement TO 'none';
-ALTER ROLE passwd_anchor_publisher WITH LOGIN PASSWORD :'pw';
-SQL
+  -c "ALTER ROLE passwd_anchor_publisher WITH LOGIN"
+printf '%s\n%s\n' "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" \
+  | docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso -q \
+      -c "SET password_encryption = 'scram-sha-256'" -c "SET log_statement TO 'none'" \
+      -c "SET log_min_error_statement TO 'panic'" -c "\password passwd_anchor_publisher"
 ```
 
-`:'pw'` is interpolated by psql as a quoted literal, which works only in script
-input (stdin), not in `-c`. `SET log_statement` keeps the DDL — password included
-— out of the `db` container log, as in the Jackson repair below. The `-v` value
-is visible in the process list while the command runs; this is a dev-only
-procedure, so do not reuse it with a production password.
-`scripts/set-audit-anchor-publisher-password.sh` sets the password only, not
-`LOGIN`, so it does not fix this.
+`\password` sends a verifier computed client-side, never the password. It reads
+the two lines from stdin only because `exec -T` gives psql no terminal — with one
+it would prompt instead, which is why `scripts/set-*-password.sh` do not use it.
+`printf` is a shell builtin, so the password reaches no process argument list.
+
+**Existing self-hosted volumes: the anchor publisher's published password.**
+Until this release, `docker-compose.yml` never forwarded
+`PASSWD_ANCHOR_PUBLISHER_PASSWORD` to `db`, so every volume initialised since
+`02-create-app-role.sql` gained the role has `passwd_anchor_publisher` as a
+`LOGIN` role whose password, `passwd_anchor_publisher_pass`, is in this
+repository — usable by any process on the compose network. On every such
+deployment, once:
+
+- if you run the publisher, rotate it: `scripts/set-audit-anchor-publisher-password.sh
+  < <(printf '%s' "$NEW_PASSWORD")`, then put the same value in
+  `PASSWD_ANCHOR_PUBLISHER_PASSWORD` and `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` in
+  `.env`;
+- if you do not, `ALTER ROLE passwd_anchor_publisher NOLOGIN` — the grant audit
+  then reports `rolcanlogin` against its manifest, which expects `LOGIN`.
+
+Check over a password path — the local socket and loopback are `trust` in the
+`postgres` image, so only `-h db` tests the password:
+`docker compose exec -T -e PGPASSWORD=passwd_anchor_publisher_pass db psql -h db -U passwd_anchor_publisher -d passwd_sso -c 'select 1'`
+must fail with `password authentication failed` (rotated) or `not permitted to
+log in` (`NOLOGIN`).
+
+**Role passwords must be ASCII.** `scripts/bootstrap-rds-roles.mjs` and
+`scripts/set-*-password.sh` compute the SCRAM verifier themselves, without the
+SASLprep normalisation the server and node-postgres apply (it is the identity for
+ASCII), so they refuse any other character. A value that worked before but is not
+ASCII must be rotated to one that is, e.g. `openssl rand -hex 32`.
 
 > **⚠️ Breaking change for existing dev environments**: After upgrading, run `docker compose down -v && docker compose up` to recreate the database with the new `passwd_app` role. The initdb scripts only run on first initialization (empty volume).
 
@@ -718,17 +775,28 @@ docker compose exec -T db sh -c '
   [ -n "$PASSWD_JACKSON_PASSWORD" ] || { echo "PASSWD_JACKSON_PASSWORD is not set in the db container" >&2; exit 1; }
   printf "%s\n%s\n" "$PASSWD_JACKSON_PASSWORD" "$PASSWD_JACKSON_PASSWORD" \
     | psql -U passwd_user -d postgres -q \
-        -c "SET log_statement TO '\''none'\''" -c "\password jackson_user"'
+        -c "SET password_encryption TO '\''scram-sha-256'\''" \
+        -c "SET log_statement TO '\''none'\''" \
+        -c "SET log_min_error_statement TO '\''panic'\''" -c "\password jackson_user"'
 ```
 
-The `SET log_statement` is not decoration. `\password` issues
-`ALTER USER ... PASSWORD 'SCRAM-SHA-256$4096:...'`, which is DDL — so under
-`log_statement=ddl` or `all` the **verifier** is written to the `db` container
-log, which this stack now retains at 20 MB × 5. A verifier is not
-password-equivalent, but it is offline-crackable at 4096 iterations, so it is
-worth keeping out of a log that gets shipped. Residual: if the statement *fails*,
-`log_min_error_statement=error` records it anyway. If that log has been exported
-anywhere, rotate `PASSWD_JACKSON_PASSWORD`.
+The SETs are not decoration. `\password` hashes with the session's
+`password_encryption`, and an `md5` hash works as the password itself under md5
+authentication, hence the first. It then issues `ALTER USER ... PASSWORD
+'SCRAM-SHA-256$4096:...'`, which is DDL — so under `log_statement=ddl` or `all`
+the **verifier** is written to the `db` container log, which this stack retains at
+20 MB × 5, and a refused one is logged under the default
+`log_min_error_statement=error`; the other two keep it out. If that log has been
+exported anywhere, rotate `PASSWD_JACKSON_PASSWORD`.
+
+**What a logged verifier exposes.** Not the password. It allows an offline guess
+against at least 4096 PBKDF2 iterations of it — slow against a generated secret
+(`openssl rand -hex 32`). And because it holds both StoredKey and ServerKey,
+whoever has it can pose as the server to a client that does not authenticate the
+server (no `sslmode=verify-full`, no `channel_binding=require`), take ClientKey
+from one exchange, and log in. The app on AWS connects with `verify-full`;
+operator `psql` sessions and a self-hosted network without TLS do not — rotate
+after a verifier leaks there.
 
 Step 3 — move ownership, then restart Jackson.
 

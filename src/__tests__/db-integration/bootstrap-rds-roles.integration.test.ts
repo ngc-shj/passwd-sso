@@ -18,6 +18,10 @@
  * T10 — convergeRole as a NOSUPERUSER CREATEROLE role, the RDS master's shape:
  *       converges what it may, and refuses BEFORE sending the password what it
  *       may not.
+ * T11 — no cleartext role password reaches the server (#941): the verifier
+ *       matches the server's own derivation, follows scram_iterations, is what
+ *       every password statement carries, and what set-*-password.sh sends
+ *       works through real psql as a superuser and as a non-superuser.
  *
  * Uses THROWAWAY probe roles — never the real passwd_* roles, which this DB's
  * app and workers depend on.
@@ -36,7 +40,9 @@ import {
   grantWorkerSchemaPrivileges,
   ROLES,
 } from "../../../scripts/bootstrap-rds-roles.mjs";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync, chmodSync, mkdirSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { scramSha256Verifier } from "../../../scripts/lib/scram-verifier.mjs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -205,16 +211,18 @@ async function inRolledBackTransaction(fn: (c: Client) => Promise<void>): Promis
  * convergeRole uses `query` and `escapeLiteral` only; its JSDoc types the
  * parameter as pg.Client, hence the cast.
  */
-function recordingClient(c: Client): { client: Client; statements: string[] } {
+function recordingClient(c: Client): { client: Client; statements: string[]; params: unknown[][] } {
   const statements: string[] = [];
+  const params: unknown[][] = [];
   const recorder = {
     escapeLiteral: (value: string) => c.escapeLiteral(value),
-    query: (text: string, params?: unknown[]) => {
+    query: (text: string, values?: unknown[]) => {
       statements.push(text);
-      return c.query(text, params);
+      params.push(values ?? []);
+      return c.query(text, values);
     },
   };
-  return { client: recorder as unknown as Client, statements };
+  return { client: recorder as unknown as Client, statements, params };
 }
 
 /** The preflight's ADMIN OPTION check — the positive control for the recorder. */
@@ -1371,6 +1379,229 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       expect(granted.filter((g) => g.endsWith(" TO passwd_anchor_publisher"))).toEqual(
         bypassFunctions.map((s) => `GRANT EXECUTE ON FUNCTION ${s} TO passwd_anchor_publisher`),
       );
+    });
+  });
+
+  describe("T11: verifiers, not cleartext (#941)", () => {
+    const VERIFIER_RE = /^SCRAM-SHA-256\$(\d+):([A-Za-z0-9+/=]+)\$/;
+
+    async function storedVerifier(c: Client, role: string): Promise<string> {
+      const { rows } = await c.query("SELECT rolpassword FROM pg_authid WHERE rolname = $1", [role]);
+      return rows[0].rolpassword;
+    }
+
+    it("matches the server's own derivation, salt and iterations taken from what it stored", async () => {
+      await inRolledBackTransaction(async (c) => {
+        await c.query("SET LOCAL scram_iterations = 10000");
+        await c.query("SET LOCAL password_encryption = 'scram-sha-256'");
+        for (const password of ["plain-pw", "tab\there", "q'uo\\te$"]) {
+          await c.query(`DROP ROLE IF EXISTS ${PROBE}`);
+          await c.query(`CREATE ROLE ${PROBE} PASSWORD ${c.escapeLiteral(password)}`);
+          const stored = await storedVerifier(c, PROBE);
+          const m = VERIFIER_RE.exec(stored);
+          expect(m, stored).not.toBeNull();
+          expect(m?.[1]).toBe("10000");
+          expect(
+            scramSha256Verifier(password, { iterations: 10000, salt: Buffer.from(m?.[2] ?? "", "base64") }),
+          ).toBe(stored);
+        }
+      });
+    });
+
+    it.each([
+      ["10000", "10000"],
+      ["1000", "4096"],
+    ])("derives with scram_iterations %s as %s", async (server, expected) => {
+      await inRolledBackTransaction(async (c) => {
+        await c.query(`SET LOCAL scram_iterations = ${server}`);
+        await convergeRole(c, PROBE, "iter-pw");
+        expect(VERIFIER_RE.exec(await storedVerifier(c, PROBE))?.[1]).toBe(expected);
+      });
+    });
+
+    it("every password statement carries a verifier and the password appears in no text or parameter", async () => {
+      const sentinel = "S3ntinelPw941x";
+      const seen: string[] = [];
+      const check = (statements: string[], params: unknown[][]) => {
+        for (const t of statements) expect(t).not.toContain(sentinel);
+        for (const p of params) expect(JSON.stringify(p)).not.toContain(sentinel);
+        seen.push(...statements.filter((t) => /\bPASSWORD\b/.test(t)));
+      };
+      await inRolledBackTransaction(async (c) => {
+        const first = recordingClient(c);
+        await convergeRole(first.client, PROBE, sentinel); // absent → CREATE
+        check(first.statements, first.params);
+        const second = recordingClient(c);
+        await convergeRole(second.client, PROBE, sentinel); // superuser ALTER
+        check(second.statements, second.params);
+      });
+      await inRolledBackTransaction(async (c) => {
+        await c.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE CREATEDB`);
+        await c.query(`SET LOCAL ROLE ${STANDIN}`);
+        await c.query(`CREATE ROLE ${PROBE} WITH NOLOGIN`);
+        const third = recordingClient(c);
+        await convergeRole(third.client, PROBE, sentinel); // non-superuser ALTER
+        check(third.statements, third.params);
+      });
+      // Positive control: each of the three spellings was seen, with a verifier.
+      expect(seen).toHaveLength(3);
+      expect(seen[0]).toMatch(new RegExp(`^CREATE ROLE ${PROBE} WITH .* PASSWORD 'SCRAM-SHA-256\\$`));
+      expect(seen[1]).toMatch(new RegExp(`^ALTER ROLE ${PROBE} WITH .*NOSUPERUSER.* PASSWORD 'SCRAM-SHA-256\\$`));
+      expect(seen[2]).toMatch(
+        new RegExp(`^ALTER ROLE ${PROBE} WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD 'SCRAM-SHA-256\\$`),
+      );
+    });
+
+    it("refuses a non-ASCII password in the last variable before connecting, naming only the variable", () => {
+      const spawnBootstrap = (anchorPassword: string) =>
+        spawnSync(process.execPath, [resolve(REPO_ROOT, "scripts/bootstrap-rds-roles.mjs")], {
+          encoding: "utf8",
+          timeout: 30_000,
+          env: {
+            ...process.env,
+            MIGRATION_DATABASE_URL: "postgresql://nobody:nothing@127.0.0.1:1/nothing",
+            PASSWD_APP_PASSWORD: "a",
+            PASSWD_OUTBOX_WORKER_PASSWORD: "b",
+            PASSWD_RETENTION_GC_WORKER_PASSWORD: "c",
+            PASSWD_ANCHOR_PUBLISHER_PASSWORD: anchorPassword,
+          },
+        });
+      const refused = spawnBootstrap("s3ntinel-é");
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain("PASSWD_ANCHOR_PUBLISHER_PASSWORD: password contains a non-ASCII character");
+      expect(`${refused.stdout}${refused.stderr}`).not.toMatch(/ECONNREFUSED|connect/i);
+      expect(`${refused.stdout}${refused.stderr}`).not.toContain("s3ntinel");
+      // Allow side: an ASCII value gets as far as the (unreachable) connection.
+      const allowed = spawnBootstrap("ascii-pw");
+      expect(allowed.status).toBe(1);
+      expect(`${allowed.stdout}${allowed.stderr}`).toMatch(/ECONNREFUSED|connect/i);
+    });
+
+    /**
+     * What set-*-password.sh sends, replayed through REAL psql against a probe
+     * role: the \gset/\if block and the SETs are psql/server behaviour no fake
+     * can stand for. The stdin is produced by the real script against a fake
+     * psql (as scripts/__tests__/set-role-password.test.mjs does), with the role
+     * name swapped for the probe's — no real role is touched.
+     *
+     * Both roles are committed (a separate psql process cannot see a rolled-back
+     * one). The stand-in creates the probe, so it holds ADMIN OPTION on it as
+     * the RDS master does; its password is random per run, LOGIN is granted last
+     * and revoked in `finally`, and dropProbeRoles runs before and after.
+     */
+    describe("set-*-password.sh replayed through real psql", () => {
+      const sentinel = "ReplayS3ntinel941";
+      let work: string;
+      let standinPassword: string;
+
+      /** Host psql when present, else the compose db service's, checked to be the same cluster. */
+      function psqlRunner(): { kind: "host" | "compose"; run: (user: string, password: string, input: string, args: string[]) => ReturnType<typeof spawnSync> } {
+        const url = new URL(superuserUrl());
+        const host = spawnSync("psql", ["--version"], { encoding: "utf8" });
+        if (host.status === 0) {
+          return {
+            kind: "host",
+            run: (user, password, input, args) => {
+              const u = new URL(url);
+              u.username = user;
+              u.password = "";
+              return spawnSync("psql", ["-X", u.toString(), ...args], {
+                input, encoding: "utf8", timeout: 30_000, env: { ...process.env, PGPASSWORD: password },
+              });
+            },
+          };
+        }
+        return {
+          kind: "compose",
+          run: (user, _password, input, args) =>
+            spawnSync(
+              "docker",
+              ["compose", "exec", "-T", "db", "psql", "-X", "-U", user, "-d", url.pathname.slice(1), ...args],
+              { input, encoding: "utf8", timeout: 30_000, cwd: REPO_ROOT },
+            ),
+        };
+      }
+
+      /** The ALTER stdin the real script builds, for the probe role. */
+      function scriptStdin(): string {
+        const bin = join(work, "bin");
+        const calls = join(work, "calls");
+        mkdirSync(bin);
+        mkdirSync(calls);
+        writeFileSync(
+          join(bin, "psql"),
+          `#!/usr/bin/env bash\nn=$(ls "${calls}" | wc -l)\ncat > "${calls}/$n"\ncase " $* " in *current_setting*) echo "\${FAKE_ITERATIONS}" ;; esac\n`,
+        );
+        chmodSync(join(bin, "psql"), 0o755);
+        const r = spawnSync("bash", [resolve(REPO_ROOT, "scripts/set-outbox-worker-password.sh")], {
+          input: sentinel,
+          encoding: "utf8",
+          timeout: 30_000,
+          env: {
+            PATH: `${bin}:${process.env.PATH}`,
+            TMPDIR: work,
+            MIGRATION_DATABASE_URL: "postgresql://u:p@localhost:5432/db",
+            FAKE_ITERATIONS: "4096",
+          },
+        });
+        expect(r.status, r.stderr).toBe(0);
+        const stdin = readdirSync(calls).map((f) => readFileSync(join(calls, f), "utf8"))
+          .find((t) => t.includes("ALTER ROLE"));
+        expect(stdin).toBeDefined();
+        return (stdin ?? "").replace("ALTER ROLE passwd_outbox_worker ", `ALTER ROLE ${PROBE} `);
+      }
+
+      beforeEach(async () => {
+        work = mkdtempSync(join(tmpdir(), "replay-"));
+        standinPassword = randomBytes(18).toString("base64url");
+        await su.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE`);
+        await su.query(`SET ROLE ${STANDIN}`);
+        await su.query(`CREATE ROLE ${PROBE} WITH LOGIN`);
+        await su.query("RESET ROLE");
+        await grantConnect(su);
+        await su.query(
+          `DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO ${STANDIN}', current_database()); END $$`,
+        );
+        // LOGIN last, so a failed setup leaves no role anyone can log in as.
+        await su.query(`ALTER ROLE ${STANDIN} WITH LOGIN PASSWORD ${su.escapeLiteral(standinPassword)}`);
+      });
+
+      afterEach(async () => {
+        try {
+          await su.query(`ALTER ROLE ${STANDIN} WITH NOLOGIN`);
+        } finally {
+          rmSync(work, { recursive: true, force: true });
+          await dropProbeRoles(su);
+        }
+      });
+
+      it("runs against the same cluster as this test, by the psql CI pins", async () => {
+        const runner = psqlRunner();
+        const expected = process.env.SET_ROLE_PASSWORD_EXPECT_PSQL;
+        if (expected) expect(runner.kind, `CI declared SET_ROLE_PASSWORD_EXPECT_PSQL=${expected}`).toBe(expected);
+        const viaPsql = runner.run(new URL(superuserUrl()).username, decodeURIComponent(new URL(superuserUrl()).password), "",
+          ["-Atc", "SELECT system_identifier FROM pg_control_system()"]);
+        expect(viaPsql.status, String(viaPsql.stderr)).toBe(0);
+        const { rows } = await su.query("SELECT system_identifier::text AS id FROM pg_control_system()");
+        expect(String(viaPsql.stdout).trim()).toBe(rows[0].id);
+      });
+
+      it.each([
+        ["the superuser", true],
+        ["a non-superuser CREATEROLE role", false],
+      ])("as %s: installs the recorded verifier, which logs in", async (_name, asSuperuser) => {
+        const stdin = scriptStdin();
+        const verifier = /PASSWORD '([^']+)'/.exec(stdin)?.[1];
+        const su_url = new URL(superuserUrl());
+        const [user, password] = asSuperuser
+          ? [su_url.username, decodeURIComponent(su_url.password)]
+          : [STANDIN, standinPassword];
+        const r = psqlRunner().run(user, password, stdin, ["-v", "ON_ERROR_STOP=1", "-f", "-"]);
+        expect(r.status, String(r.stderr)).toBe(0);
+        expect(await storedVerifier(su, PROBE)).toBe(verifier);
+        expect(await canAuthenticate(sentinel)).toBe(true);
+        expect(await canAuthenticate("wrong-pw")).toBe(false);
+      });
     });
   });
 });
