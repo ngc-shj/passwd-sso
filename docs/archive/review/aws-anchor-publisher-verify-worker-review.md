@@ -101,3 +101,28 @@ redesigned (revision 4) instead of patched:
 ## Recurring Issue Check (round-3 delta)
 Functionality: R38/R56 P1; R5/R48 P2; R49 P3; R55 P4; R41/R50 P5. Security: R43/R49/R55 R3-1;
 R29 R3-2. Testing: RT4/RT7 R-1; RT7/RT1/RT5 R-2; RT7 R-3, R-4.
+
+---
+
+# Round 4
+Date: 2026-10-24
+
+Round-3 findings resolved by the revision-4 redesign. Round 4 raised, against that redesign,
+F-Q1..Q5 (Major: key/DEPLOYMENT_ID changes, the untrusted-pointer branch, adoption's writes, a
+dropped lock connection, the runbook against the bucket policy), S-R4-1/R4-2 (Major: the
+unverifiable-pointer branch, rotation), T-D-1..D-5 (Major: red proofs and entry states of the
+new state machine) and Minors.
+
+Saturation is not the exit here (Majors remain): the findings are against the protocol
+redesign itself, each round's fix opening the next design question. By user decision the
+protocol redesign leaves this plan for a follow-up issue (SC5, carrying these findings), and
+revision 5 keeps today's protocol. What revision 5 keeps from round 4: the bucket-policy
+principal restriction (S-R4-3), the runbook advisory written with lock headers (F-Q5), the
+lock-timeout red proof via `pgErrorCode` (T-D-1, the lock taken inside the Prisma transaction),
+a pid-matched overlap observation with an injected wait (T-D-6). Findings that only exist in
+the redesign (F-Q1..Q4, Q6..Q8, S-R4-1/R4-2/R4-4, T-D-2..D-5) go to SC5.
+
+## Recurring Issue Check (round-4 delta)
+Functionality: R38/R56 Q1, Q3; R42 Q1, Q5; R49 Q2; R5/R54 Q4; R41 Q6; R53 Q7; R29 Q8.
+Security: R43/R49/R55 R4-1; R38 R4-2; R14/R43 R4-3; R29 R4-4. Testing: RT7 D-1..D-3; R38 D-4;
+RT11 D-5; RT4 D-6; R29 D-7.
