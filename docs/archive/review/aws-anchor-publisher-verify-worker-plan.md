@@ -1,7 +1,7 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 8 — after plan-review rounds 1–7. Rounds 3–4 showed that hardening the publication
+Revision 9 — after plan-review rounds 1–8. Rounds 3–4 showed that hardening the publication
 protocol itself (published objects as the source of truth, key rotation, a database-write
 adversary, multiple destinations) is a design project of its own; by user decision it moves to
 a follow-up issue (SC5) and this plan keeps today's protocol — the database pointer and an
@@ -60,7 +60,7 @@ verifier.
 ### C2 — cadence correctness (today's protocol, run on ECS)
 - `runCadence(boundary)` publishes the boundary it is given; the scheduler computes it. The
   boundary drives the idempotency marker, the artifact key and `anchoredAt`; the wall clock
-  drives `lastPublishedAt`, the pause filter, the pause cap and the concurrent-success guard.
+  drives `lastPublishedAt`, the pause and the concurrent-success guard.
 - Scheduler, extracted into an importable function with an injected clock and timer: at boot
   it awaits one run for the current boundary, then arms a `setTimeout` to the next boundary
   computed from the wall clock, and re-arms the same way after each run (no `setInterval`).
@@ -73,19 +73,20 @@ verifier.
   publish writes the marker with the manifest pointer (Prisma `upsert`; the role holds
   INSERT/SELECT/UPDATE on `system_settings`).
 - Crash or commit failure after a successful upload (or an upload aborted after S3 stored it):
-  the transaction rolls back and the scheduler retries the same boundary in-process every
-  15 min until 30 min before the next boundary — at most 3 attempts that reach the upload, then
-  it stops for the boundary. The marker keeps a repeat idempotent, so the last PUT of the day is
+  the transaction rolls back and the scheduler retries the same boundary every 15 min until
+  30 min before the next boundary. Attempts that reach the upload are counted per boundary in
+  `system_settings.audit_anchor_upload_attempts` ({boundary, count}, written before the upload);
+  at 3 the boundary stops — in-process retries and boot runs alike, so a crash-looping task
+  cannot lock more versions. The marker keeps a repeat idempotent, so the last PUT of the day is
   the committed version; versioning keeps the earlier ones. A task down for the rest of the day
   leaves an uncommitted latest version that the next manifest does not reference; the next
   publish reports it as `MISSING_PRIOR_CADENCE_PUBLICATION`.
-- Pause: an upload failure persists one, as today, until the next boundary (it holds chain
-  advancement in the outbox worker). The scheduler's same-boundary retries, and a boot run, run
-  past a pause that ends exactly at the next boundary (the one the current boundary's failure
-  wrote) — so a restart mid-day does not lose the boundary; a success clears it as today. The pause filter compares
-  against `max(wall clock, boundary)` so a timer firing early does not see the next day as
-  paused. A post-upload commit failure writes no pause and emits its own `_logType`
-  (`audit-anchor-publisher.commit_failed_after_upload`), alarmed.
+- Pause: an upload failure persists one until the next boundary, as today, where it holds
+  chain advancement in the outbox worker. Publishing no longer consults it: capped at the next
+  boundary it could only ever block that boundary's own retries, so the filter and the
+  `skipped_paused` outcome go. A success clears it as today. A post-upload commit failure writes
+  no pause and emits its own `_logType` (`audit-anchor-publisher.commit_failed_after_upload`),
+  alarmed.
 - Each attempt that fails writes its `AUDIT_ANCHOR_PUBLISH_FAILED` row and failure line: at
   most 3 per boundary.
 - Budget: lock wait 10 s, S3 request/connection timeouts and an abort signal bounding the
@@ -109,24 +110,32 @@ verifier.
   evidence unreadable); a bucket policy, each statement pinned by a static test:
   each `Deny` with `Principal: "*"` and an `ArnNotEquals aws:PrincipalArn` condition (a
   `NotPrincipal` would not match the task's assumed-role session and would deny the publisher
-  too). Write paths are split by key shape, matching the rotation runbook's layout (the archive
+  too). The manifest key is built by one exported function (date + kid → key, and the prefix
+  join), and the policy's manifest pattern is pinned to it by a test. Write paths are split by
+  key shape, matching the rotation runbook's layout (the archive
   verifiers read sits next to the manifests): manifests `<prefix>/????-??-??.kid-*.jws` — only
   the publisher's task role; `<prefix>/key-rotation-*` and `<prefix>/public-keys/*` — only the
   break-glass operator role (a variable validated as a role ARN; empty → an unconditional Deny
-  on those paths, never an empty condition list); the rest of the bucket — neither (a catch-all
-  Deny for every principal outside the two roles); `s3:PutObjectRetention` only the two roles
+  on those paths, never an empty condition list); the rest of the bucket — no one: an
+  unconditional `s3:PutObject` Deny with `NotResource` listing only the manifest pattern and the
+  two break-glass paths; `s3:PutObjectRetention` only the two roles
   (extend-only under COMPLIANCE and the cap); `s3:DeleteObject` and `s3:DeleteObjectVersion`
   denied with no exception (a delete marker would hide an anchor from a read by key);
-  `s3:PutLifecycleConfiguration` denied (an expiration rule creates delete markers). The prefix
-  is validated non-empty. `s3:PutObject` denied when
+  `s3:PutLifecycleConfiguration` denied on the bucket ARN (a bucket-level action; an expiration
+  rule creates delete markers). The prefix is validated against `^[A-Za-z0-9._/-]+$` (non-empty;
+  no `*` or `?`, which would widen every statement). The policy holds only as long as nobody
+  replaces it — the account root always can — so changes to the anchors bucket's policy,
+  lifecycle, Object Lock or versioning configuration are alarmed (an EventBridge rule on those
+  CloudTrail events; a Terraform apply is the expected false positive), and the docs state the
+  residual. `s3:PutObject` denied when
   `StringNotEquals s3:object-lock-mode = COMPLIANCE` (this also denies a PUT without the header,
   so the upload must keep sending it — stated in the code); `s3:PutObject` and
   `s3:PutObjectRetention` denied when `NumericGreaterThan
   s3:object-lock-remaining-retention-days` exceeds the default plus a margin; `s3:PutObject`
   denied when `s3:x-amz-server-side-encryption` is present and not `AES256`
   (`StringNotEqualsIfExists`). The runbook's operator writes (Step 4 advisory, Step 5 public key)
-  use `aws s3api put-object` with the lock headers as the break-glass role, run in the manual
-  test.
+  use `aws s3api put-object` with the lock headers as the break-glass role and the configured
+  prefix (not a hard-coded `audit-anchors/`), run in the manual test.
 - Existing anchors bucket: whether `object_lock_enabled` forces replacement in the provider
   in use is read from its schema in Phase 2; the docs give the procedure for the answer —
   never one that empties or recreates a bucket holding versions.
@@ -171,7 +180,8 @@ verifier.
   alarm when the chain-enabled tenant count (carried in every cadence line) falls from positive
   to 0. A deliberate full disable leaves the absence alarm in ALARM — that is the state to see;
   the runbook says so; `skipped_already_published`, paused, failed and
-  `lock_held` never count; log metric filters on the publisher's failure lines, each given a `_logType`
+  `lock_held` never count; an EventBridge alarm on the anchors bucket's configuration changes
+  (C3); log metric filters on the publisher's failure lines, each given a `_logType`
   (`cadence_error` lacks one); verify-worker heartbeat
   filters (`erroredTenantCount > 0`, `failedTenantCount > 0`, absence); both log groups in
   `rls_bypass_report_log_groups`; an EventBridge rule on CloudTrail's ECS `ExecuteCommand`.
@@ -219,9 +229,8 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
   key-provider `validateKeys` with the app task's env (publisher flag on, no anchor keys)
   succeeds, for both providers.
 - C2: the scheduler with an injected clock — boot run first; a timer 1 ms early still publishes
-  its boundary, including the day after a failure (the pause compared against the boundary);
-  wall-clock re-arm; the same-boundary retry after a commit failure and after an upload failure
-  (past its own pause), its 3-attempt cap and its stop before the next boundary; SIGTERM waits for the in-flight run. Integration, as the publisher role
+  its boundary, including the day after a failure; wall-clock re-arm; the same-boundary retry
+  after a commit failure and after an upload failure, its stop before the next boundary; SIGTERM waits for the in-flight run. Integration, as the publisher role
   (`beforeAll` fails unless the only chain-enabled tenants are the test's; the marker, pointer
   and deployment-id rows snapshotted and restored; far-future boundaries):
   - two runs for one boundary publish once;
@@ -233,11 +242,11 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
     the next boundary's `previousManifest.sha256` is the latest's; no pause written (red: write
     the pointer from the first attempt's sha);
   - upload aborted after the object was stored (MinIO wrapped so the PUT completes and the abort
-    fires): a pause is written; a test tenant's chain is advanced; the same-boundary retry runs
-    past the pause and publishes → two versions with different sha256, the latest equal to the
-    pointer; `publish_paused_until` is NULL afterwards (red: retries honour the pause →
-    `skipped_paused`; red: the success skips the clear);
-  - a boot run after an upload failure the same day runs past that pause and publishes;
+    fires): a pause is written; a test tenant's chain is advanced; the same-boundary retry
+    publishes → two versions with different sha256, the latest equal to the pointer;
+    `publish_paused_until` is NULL afterwards (red: the success skips the clear);
+  - the persisted attempt cap: three boots that each reach the upload, then a fourth that
+    reports cap-reached without uploading (red: the count kept in-process);
   - a failure pauses only to the next boundary; injected transaction/upload bounds fail within
     the test budget;
   - overlap: A blocked mid-upload inside its transaction; its backend pid recorded by a test
@@ -262,13 +271,19 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
   that mode's argument construction. The `ecs.tf` parser asserts four worker task definitions
   and fails on unmodelled HCL. Verify worker: `--validate-env-only` allow/deny per axis from a
   temp cwd; SIGTERM during the sleep exits within seconds (red: plain `setTimeout`).
+- C3/C5 key contract: a static test extracts the manifest `Resource` pattern from the bucket
+  policy and matches it as S3 does (`?` one character, `*` any sequence) against the exported key
+  builder's output for a real kid and against `S3Destination`'s full key, and asserts it does not
+  match the break-glass paths (red: a `YYYYMMDD` date; a pattern without the prefix).
 - C5: the terraform CI job; static pins with red fixtures (publisher percentages,
   `desired_count`, anchors Object Lock, SSE-S3, each bucket-policy statement — `Principal: "*"`
   with `ArnNotEquals aws:PrincipalArn`, no `NotPrincipal`; red fixtures for a third principal, a
   wildcard, an empty break-glass ARN rendered as an empty condition list instead of an
   unconditional Deny, an empty prefix, a publisher allowed on a break-glass path or the reverse,
-  a missing catch-all or delete Deny, and a principal exception on the lock-mode, retention-cap
-  or SSE statements — the publisher
+  a catch-all with a principal exception (the publisher writing `<prefix>/other` must be
+  denied), a prefix with `*`, a lifecycle Deny on `bucket/*` instead of the bucket ARN, a
+  missing delete Deny, and a principal exception on the lock-mode, retention-cap or SSE
+  statements — the publisher
   role's two actions, no task role on the verify worker); `deploy-rollback.test.mjs` with six
   services, failures at the fifth and sixth, and every output name the stubbed `terraform` was
   asked for present in `outputs.tf`; `pool-factory.metric-filter.test.ts` with the new log

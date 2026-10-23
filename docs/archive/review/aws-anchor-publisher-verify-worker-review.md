@@ -189,3 +189,15 @@ Round-6 findings resolved. New on revision 7, applied in revision 8:
 ## Recurring Issue Check (round-7 delta)
 Functionality: R42/R41 R7-1; R55 R7-2; R38 R7-3; R29/R34 R7-A1. Security: R42 R7-1; R49 R7-2.
 Testing: RT7/RT6 H-1, H-2.
+
+# Round 8 (plan revision 8)
+
+| ID | Sev | Finding | Resolution (revision 9) |
+|----|-----|---------|-------------------------|
+| T-I-1 | Major | The policy's manifest pattern is not bound to the key the code writes | Key builder + prefix join extracted; static test matches the Terraform pattern against it with S3 wildcard semantics, must not match break-glass paths; red fixtures |
+| T-I-2 | Minor | Boot-run pause bypass lacks a red proof | Obsolete: the publish-side pause filter is removed (F-R8-2) |
+| F-R8-1 / S-R8-1 | Minor | Catch-all Deny must be unconditional `NotResource`; prefix wildcards widen every statement | `NotResource` Deny with no principal exception; prefix `^[A-Za-z0-9._/-]+$`; red fixture: publisher writing `<prefix>/other` |
+| F-R8-2 | Minor | Every pause ends at the next boundary, so the publish filter can only block its own retries; `skipped_paused` unreachable | Filter and `skipped_paused` removed; pause kept for outbox chain advancement only |
+| F-R8-3 | Minor | `PutLifecycleConfiguration` is bucket-level; runbook hard-codes the prefix | Deny on the bucket ARN (red fixture on `bucket/*`); runbook uses the configured prefix |
+| S-R8-2 | Minor | Root can replace the bucket policy unnoticed | EventBridge alarm on policy/lifecycle/Object Lock/versioning changes for the anchors bucket; residual stated |
+| S-R8-3 | Minor | In-process attempt cap resets on restart | Count persisted per boundary in `system_settings.audit_anchor_upload_attempts`, honoured by boot and retries; boot-cap test |
