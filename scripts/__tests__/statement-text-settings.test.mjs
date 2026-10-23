@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 import {
   STATEMENT_TEXT_SETTINGS,
   TRANSACTION_START_SETTING,
+  statementScopedResetStatements,
+  statementScopedSetStatements,
   statementTextSetStatements,
 } from "../lib/statement-text-settings.mjs";
 import { runBootstrap } from "../bootstrap-rds-roles.mjs";
@@ -43,6 +45,29 @@ describe("statement-text settings", () => {
   ])("infra/postgres/initdb/%s sets exactly the list, in order", (f) => {
     const src = readFileSync(join(REPO_ROOT, "infra/postgres/initdb", f), "utf8");
     expect(setLines(src)).toEqual(LIST);
+  });
+});
+
+describe("the statement-scoped helpers the bootstrap wraps each password statement in", () => {
+  // Pinned to the list itself: the bootstrap's own test (T11) compares against
+  // these helpers, so a setting a helper dropped would pass there.
+  const names = STATEMENT_TEXT_SETTINGS.map(([n]) => n);
+  const setNames = statementScopedSetStatements().map((s) => /^SET (\S+) = /.exec(s)?.[1]);
+  const resetNames = statementScopedResetStatements().map((s) => /^RESET (\S+);$/.exec(s)?.[1]);
+
+  it("lists the transaction-start setting", () => {
+    expect(names).toContain(TRANSACTION_START_SETTING);
+  });
+
+  it("sets every listed setting but the transaction-start one, with the list's value", () => {
+    expect([...setNames, TRANSACTION_START_SETTING].sort()).toEqual([...names].sort());
+    expect(statementScopedSetStatements()).toEqual(
+      LIST.filter((s) => !s.startsWith(`SET ${TRANSACTION_START_SETTING} `)),
+    );
+  });
+
+  it("resets exactly what it set, in reverse", () => {
+    expect(resetNames).toEqual([...setNames].reverse());
   });
 });
 

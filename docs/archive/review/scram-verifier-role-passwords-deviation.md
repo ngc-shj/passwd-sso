@@ -159,5 +159,28 @@ reason, and was redone.
   categories are derived; pg_stat_statements is listed by hand; other extensions
   (pgaudit, auto_explain) and `pg_stat_activity.query` are residuals.
 - Test fix: the replay's non-superuser comparison reads server defaults on a fresh
-  connection — the shared `su` had run the bootstrap, which sets transaction
-  sampling for its session.
+  connection, independent of the shared `su`'s session state, which was observed
+  to differ from a fresh session's after earlier cases. (The first explanation
+  recorded here — that `su` had run the bootstrap — was wrong: the only
+  `runBootstrap` call goes through the stand-in on its own connection.)
+
+## D12 — Phase 3 round 3
+
+- The dev-volume anchor procedure grants `LOGIN` last, inside the guarded
+  in-container step and after `\password`: an unset variable stops it with the
+  role unchanged (checked on the dev container: guard exits 1, `rolcanlogin`
+  unchanged).
+- The statement-scoped SET/RESET helpers are pinned to the list itself, not only
+  compared with in T11. The initdb empty-value check binds `has_X` to the
+  environment variable X's own `\getenv` names, tracks `\elif`, and flags any
+  non-meta line carrying a `:'X'` value other than the password statement.
+
+Red proofs (scratch copy):
+
+| Mutation | What went red |
+|----------|---------------|
+| SET helper drops `debug_print_plan` | the set-pin and reset-pin cases |
+| RESET helper drops `debug_print_plan` | the reset-pin case only |
+| `has_X` accepts any `[ -n "$VAR" ]` | the mismatched-variable fixture only |
+| `\elif` not tracked | the `\elif` fixture only |
+| SELECT clause removed | the SELECT fixture only |

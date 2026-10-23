@@ -1644,8 +1644,8 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
           expect(settings).toEqual(STATEMENT_TEXT_SETTINGS.map(([, v]) => v.replace(/^'|'$/g, "")));
         } else {
           // Not settable here: the session keeps the server's defaults, read on
-          // a fresh connection (the shared `su` has run the bootstrap, which
-          // sets transaction sampling for its session).
+          // a fresh connection — independent of whatever the shared `su`'s
+          // session has picked up from earlier cases (it was observed to differ).
           const fresh = new Client({ connectionString: superuserUrl() });
           await fresh.connect();
           const { rows } = await fresh

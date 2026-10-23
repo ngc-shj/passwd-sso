@@ -86,19 +86,27 @@ function violations(src) {
 function emptyValueViolations(src) {
   const errs = [];
   const lines = statements(src);
+  const envOf = new Map(
+    lines.map((l) => /^\\getenv\s+([a-z_]+)\s+([A-Z_]+)$/.exec(l)).filter(Boolean).map((m) => [m[1], m[2]]),
+  );
   const stack = [];
   for (const l of lines) {
     if (/^\\if\b/.test(l)) stack.push(l);
     else if (/^\\endif\b/.test(l)) stack.pop();
-    else if (/^\\else\b/.test(l)) stack[stack.length - 1] = `else:${stack.at(-1)}`;
+    else if (/^\\(else|elif)\b/.test(l)) stack[stack.length - 1] = `${l}:${stack.at(-1)}`;
     const m = /PASSWORD\s+:'([a-z_]+)'/.exec(l);
     if (m) {
       const v = m[1];
       if (stack.at(-1) !== `\\if :has_${v}`) errs.push(`not under \\if :has_${v}: ${l}`);
-      const decided = lines.some((x) => x.startsWith(`\\set has_${v} \``) && /\[ -n "\$[A-Z_]+" \]/.test(x));
-      if (!decided) errs.push(`has_${v} is not decided by the shell`);
+      const env = envOf.get(v);
+      if (!env) errs.push(`${v} has no \\getenv`);
+      const decided = lines.some(
+        (x) => x.startsWith(`\\set has_${v} \``) && x.includes(`[ -n "$${env}" ]`),
+      );
+      if (!decided) errs.push(`has_${v} is not decided by the shell from $${env}`);
+    } else if (!l.startsWith("\\") && /:['"][a-z_]+['"]/.test(l)) {
+      errs.push(`sends a variable's value to the server: ${l}`);
     }
-    if (/^SELECT\s+:'/.test(l)) errs.push(`sends a variable's value to the server: ${l}`);
   }
   return errs;
 }
@@ -168,8 +176,12 @@ describe("the ordering rule (fixtures)", () => {
 
   it.each([
     ["gated on :{?X} directly", `\\getenv pw PW\n\\if :{?pw}\n  CREATE ROLE r PASSWORD :'pw';\n\\endif`, /not under \\if :has_pw/],
-    ["has_X decided by a server SELECT", `\\getenv pw PW\n\\set has_pw false\nSELECT :'pw' <> '' AS has_pw \\gset\n\\if :has_pw\n  CREATE ROLE r PASSWORD :'pw';\n\\endif`, /not decided by the shell|sends a variable's value/],
+    ["has_X decided by a server SELECT", `\\getenv pw PW\n\\set has_pw false\n\\if :has_pw\n  CREATE ROLE r PASSWORD :'pw';\n\\endif`, /not decided by the shell/],
+    ["a SELECT carrying the value", gated("pw", "PW") + `\nSELECT length(:'pw') > 0 AS x \\gset`, /sends a variable's value/],
+    ["has_X tested against another variable", gated("pw", "PW").replace('[ -n "$PW" ]', '[ -n "$OTHER" ]'), /not decided by the shell from \$PW/],
+    ["a password with no \\getenv", gated("pw", "PW").replace("\\getenv pw PW\n", ""), /pw has no \\getenv/],
     ["the password in the \\else branch", gated("pw", "PW").replace("CREATE ROLE r NOLOGIN", "ALTER ROLE r PASSWORD :'pw'"), /not under \\if :has_pw/],
+    ["the password in an \\elif branch", gated("pw", "PW").replace("\\else\n  CREATE ROLE r NOLOGIN;", "\\elif :x\n  ALTER ROLE r PASSWORD :'pw';"), /not under \\if :has_pw/],
   ])("refuses %s", (_name, src, msg) => {
     expect(emptyValueViolations(src).join("\n")).toMatch(msg);
   });

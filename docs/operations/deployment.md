@@ -617,17 +617,17 @@ if it prints `f`, give it `LOGIN` and set the password:
 # Recreate db so it carries .env's current value; the volume is kept. Compose,
 # not the shell, reads .env (it is not shell syntax, and init:env quotes values).
 docker compose up -d db
-docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso \
-  -c "ALTER ROLE passwd_anchor_publisher WITH LOGIN"
 docker compose exec -T db sh -c '
   [ -n "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" ] || { echo "PASSWD_ANCHOR_PUBLISHER_PASSWORD is not set in the db container" >&2; exit 1; }
   printf "%s\n%s\n" "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" \
     | psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso -q \
         -c "SET password_encryption = '\''scram-sha-256'\''; SET log_statement = '\''none'\''; SET log_min_error_statement = '\''panic'\''; SET log_min_duration_statement = -1; SET log_min_duration_sample = -1; SET log_transaction_sample_rate = 0; SET debug_print_parse = off; SET debug_print_rewritten = off; SET debug_print_plan = off; SET pg_stat_statements.track_utility = off" \
-        -c "\password passwd_anchor_publisher"'
+        -c "\password passwd_anchor_publisher" \
+        -c "ALTER ROLE passwd_anchor_publisher WITH LOGIN"'
 ```
 
-`\password` sends a verifier computed client-side, never the password. It reads
+`LOGIN` comes last, after the guard and the password: an unset variable stops the
+procedure with the role unchanged. `\password` sends a verifier computed client-side, never the password. It reads
 the two lines from stdin only because `exec -T` gives psql no terminal — with one
 it would prompt instead, which is why `scripts/set-*-password.sh` do not use it.
 The value comes from the `db` container's environment (as for Jackson below), and

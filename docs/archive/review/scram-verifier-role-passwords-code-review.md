@@ -1,6 +1,6 @@
 # Code Review: scram-verifier-role-passwords
 Date: 2026-10-24
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
 
@@ -66,3 +66,20 @@ Round-1 fixes confirmed by their filing experts except where noted below.
 ## Recurring Issue Check (round-2 delta)
 Functionality: R43 F-N2; R49 F-N3; R50/R29 F-N1. Security: R54 S-N1 (was F3); R42/R49 S-N2.
 Testing: R35/R50 T-N1; R42 T-N2.
+
+---
+
+# Round 3
+Date: 2026-10-24
+
+Security: no findings (round-2 findings resolved; the psql backtick evaluation has no
+injection or exposure path and fails closed). Functionality and Testing: round-2 findings
+resolved; new Minors, all fixed (D12):
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-N4 | Functionality | Minor | Fixed — `LOGIN` granted last, inside the guard |
+| T-N3 | Testing | Minor | Fixed — helpers pinned to the list; red-proven |
+| T-N4 | Testing | Minor | Fixed — `has_X` bound to X's own `\getenv` variable; red-proven |
+| T-N5 | Testing | Minor | Fixed — `\elif` tracked; any value-carrying non-meta line flagged; fixtures split; red-proven |
+| T-N6 | Testing | Minor | Fixed — the comment and D11 no longer give an unreproduced cause |
