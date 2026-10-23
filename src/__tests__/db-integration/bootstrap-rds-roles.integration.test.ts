@@ -1538,6 +1538,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
           encoding: "utf8",
           timeout: 30_000,
           env: {
+            NODE_ENV: "test",
             PATH: `${bin}:${process.env.PATH}`,
             TMPDIR: work,
             MIGRATION_DATABASE_URL: "postgresql://u:p@localhost:5432/db",
