@@ -4,11 +4,12 @@
 #
 # The statement carries a SCRAM-SHA-256 verifier (scripts/lib/scram-verifier.mjs),
 # never the password: a refused statement is logged under the default
-# `log_min_error_statement`, `log_statement = ddl|all` logs every one, and
-# pg_stat_statements keeps the text. On a superuser connection the session also
-# turns those three off before the ALTER, so not even the verifier is recorded.
-# A non-superuser (a managed-database admin) cannot set them; there the verifier
-# can still be recorded by all three — never the password.
+# `log_min_error_statement`, `log_statement = ddl|all` and
+# `log_min_duration_statement >= 0` log every one, and pg_stat_statements keeps
+# the text. On a superuser connection the session turns all four off before the
+# ALTER, so not even the verifier is recorded. A non-superuser (a
+# managed-database admin) cannot set them; there the verifier can still be
+# recorded by each — never the password.
 #
 # Not psql's \password: its prompt reads /dev/tty whenever the process has a
 # controlling terminal, so run from an operator's shell it would ignore the
@@ -37,7 +38,9 @@ set_role_password() {
         shift
         ;;
       *)
-        echo '{"level":"error","msg":"unknown flag","flag":"'"$1"'"}' >&2
+        # Not echoed: a password passed as an argument by mistake would
+        # otherwise land on stderr as well as in argv.
+        echo '{"level":"error","msg":"unknown argument (the password is read from stdin)"}' >&2
         exit 1
         ;;
     esac
@@ -77,8 +80,8 @@ set_role_password() {
 
   # The server's own scram_iterations (empty before PostgreSQL 16), so the
   # verifier is no weaker than one the server would make. DRY_RUN does not
-  # connect and uses the default.
-  local iterations="4096"
+  # connect; an empty value resolves to the default in the helper.
+  local iterations=""
   if [[ "$dry_run" != "1" ]]; then
     iterations="$(psql_safe "$DB_URL" -v ON_ERROR_STOP=1 -Atq \
       -c "SELECT current_setting('scram_iterations', true)")"
@@ -101,6 +104,7 @@ set_role_password() {
 \\if :su
 SET log_statement = 'none';
 SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
 SET pg_stat_statements.track_utility = off;
 \\endif
 ALTER ROLE ${role} PASSWORD '${verifier}';

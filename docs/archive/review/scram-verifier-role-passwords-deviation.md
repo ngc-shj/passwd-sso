@@ -78,3 +78,20 @@ host psql (`SET_ROLE_PASSWORD_EXPECT_PSQL=host`).
 - Upgrade-note check on the dev DB: `PGPASSWORD=passwd_anchor_publisher_pass psql -h
   db -U passwd_anchor_publisher` **logged in** — this dev volume carries the
   published password, as the note says every pre-change volume does.
+
+## D8 — Phase 2 self-check fixes
+
+- All three self-checks: the scripts' superuser block omitted `SET
+  log_min_duration_statement = -1`, which C4 sets in initdb — the plan's C3 listed
+  three sinks, C4 four. Added; the headers now name all four. Red-proven: removing
+  it turns the exact-stdin and DRY_RUN cases red (6).
+- The other three initdb LOGIN fallbacks (`passwd_app_pass`, `passwd_outbox_pass`,
+  `passwd_retention_gc_pass`) carried the same published-password problem as the
+  anchor publisher's. Compose requires their variables, so only another launcher
+  reached them; they are now `NOLOGIN` with a `\warn` too. Checked on a throwaway
+  `postgres:16-alpine` with no role variables: init completes, every role is
+  `NOLOGIN` with no password, one warning each.
+- An unknown argument is no longer echoed (a password passed positionally would
+  have reached stderr).
+- DRY_RUN passes an empty iteration value and lets the helper resolve it, instead
+  of a second copy of 4096.

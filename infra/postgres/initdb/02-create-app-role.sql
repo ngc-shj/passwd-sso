@@ -25,8 +25,10 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_app')
   \if :{?passwd_app_password}
     CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_app_password';
   \else
-    -- Fallback for local dev when PASSWD_APP_PASSWORD is not set
-    CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_app_pass';
+    -- No published fallback password (docker-compose.yml requires PASSWD_APP_PASSWORD, so
+    -- this branch is reached only by another launcher of this directory).
+    \warn 'PASSWD_APP_PASSWORD is not set — creating passwd_app NOLOGIN. Set it and rerun initdb.'
+    CREATE ROLE passwd_app WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   \endif
 \endif
 
@@ -67,8 +69,10 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_outbox
   \if :{?passwd_outbox_worker_password}
     CREATE ROLE passwd_outbox_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_outbox_worker_password';
   \else
-    -- Fallback for local dev when PASSWD_OUTBOX_WORKER_PASSWORD is not set
-    CREATE ROLE passwd_outbox_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_outbox_pass';
+    -- No published fallback password (docker-compose.yml requires PASSWD_OUTBOX_WORKER_PASSWORD, so
+    -- this branch is reached only by another launcher of this directory).
+    \warn 'PASSWD_OUTBOX_WORKER_PASSWORD is not set — creating passwd_outbox_worker NOLOGIN. Set it and rerun initdb.'
+    CREATE ROLE passwd_outbox_worker WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   \endif
 \endif
 

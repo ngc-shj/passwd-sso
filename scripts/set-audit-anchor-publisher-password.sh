@@ -18,10 +18,10 @@
 #
 # The server receives a SCRAM-SHA-256 verifier, never the password (see
 # scripts/lib/set-role-password.sh). On a superuser connection statement logging
-# and pg_stat_statements are off for the session; on a non-superuser one (a
-# managed-database admin) the verifier can still be logged under
-# `log_statement = ddl|all` or on a refused statement, and kept by
-# pg_stat_statements. The password must be ASCII with no line break.
+# (log_statement, log_min_error_statement, log_min_duration_statement) and
+# pg_stat_statements are off for the session; on a non-superuser one (a
+# managed-database admin) the verifier can still be logged by any of them and
+# kept by pg_stat_statements. The password must be ASCII with no line break.
 #
 # Environment variables:
 #   MIGRATION_DATABASE_URL  (required) Superuser connection URL (an admin role

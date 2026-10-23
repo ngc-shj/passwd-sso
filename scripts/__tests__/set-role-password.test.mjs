@@ -38,6 +38,7 @@ const expectedSql = (role, verifier) =>
   "\\if :su\n" +
   "SET log_statement = 'none';\n" +
   "SET log_min_error_statement = 'panic';\n" +
+  "SET log_min_duration_statement = -1;\n" +
   "SET pg_stat_statements.track_utility = off;\n" +
   "\\endif\n" +
   `ALTER ROLE ${role} PASSWORD '${verifier}';\n`;
