@@ -1,7 +1,7 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 7 — after plan-review rounds 1–6. Rounds 3–4 showed that hardening the publication
+Revision 8 — after plan-review rounds 1–7. Rounds 3–4 showed that hardening the publication
 protocol itself (published objects as the source of truth, key rotation, a database-write
 adversary, multiple destinations) is a design project of its own; by user decision it moves to
 a follow-up issue (SC5) and this plan keeps today's protocol — the database pointer and an
@@ -80,8 +80,9 @@ verifier.
   leaves an uncommitted latest version that the next manifest does not reference; the next
   publish reports it as `MISSING_PRIOR_CADENCE_PUBLICATION`.
 - Pause: an upload failure persists one, as today, until the next boundary (it holds chain
-  advancement in the outbox worker). The scheduler's same-boundary retries run past it (they
-  carry the boundary they retry); a success clears it as today. The pause filter compares
+  advancement in the outbox worker). The scheduler's same-boundary retries, and a boot run, run
+  past a pause that ends exactly at the next boundary (the one the current boundary's failure
+  wrote) — so a restart mid-day does not lose the boundary; a success clears it as today. The pause filter compares
   against `max(wall clock, boundary)` so a timer firing early does not see the next day as
   paused. A post-upload commit failure writes no pause and emits its own `_logType`
   (`audit-anchor-publisher.commit_failed_after_upload`), alarmed.
@@ -108,17 +109,24 @@ verifier.
   evidence unreadable); a bucket policy, each statement pinned by a static test:
   each `Deny` with `Principal: "*"` and an `ArnNotEquals aws:PrincipalArn` condition (a
   `NotPrincipal` would not match the task's assumed-role session and would deny the publisher
-  too): `s3:PutObject` on `<prefix>/*` unless the publisher's task role; `s3:PutObject` on
-  `advisories/*` unless the break-glass operator role (a variable validated as a role ARN; when
-  empty the condition lists no principal, so nobody writes there); `s3:PutObjectRetention`
-  unless one of the two (extend-only under COMPLIANCE and the cap); `s3:PutObject` denied when
+  too). Write paths are split by key shape, matching the rotation runbook's layout (the archive
+  verifiers read sits next to the manifests): manifests `<prefix>/????-??-??.kid-*.jws` — only
+  the publisher's task role; `<prefix>/key-rotation-*` and `<prefix>/public-keys/*` — only the
+  break-glass operator role (a variable validated as a role ARN; empty → an unconditional Deny
+  on those paths, never an empty condition list); the rest of the bucket — neither (a catch-all
+  Deny for every principal outside the two roles); `s3:PutObjectRetention` only the two roles
+  (extend-only under COMPLIANCE and the cap); `s3:DeleteObject` and `s3:DeleteObjectVersion`
+  denied with no exception (a delete marker would hide an anchor from a read by key);
+  `s3:PutLifecycleConfiguration` denied (an expiration rule creates delete markers). The prefix
+  is validated non-empty. `s3:PutObject` denied when
   `StringNotEquals s3:object-lock-mode = COMPLIANCE` (this also denies a PUT without the header,
   so the upload must keep sending it — stated in the code); `s3:PutObject` and
   `s3:PutObjectRetention` denied when `NumericGreaterThan
   s3:object-lock-remaining-retention-days` exceeds the default plus a margin; `s3:PutObject`
   denied when `s3:x-amz-server-side-encryption` is present and not `AES256`
-  (`StringNotEqualsIfExists`). Operator writes into the bucket (the rotation runbook's advisory)
-  use `aws s3api put-object` with the lock headers, run in the manual test.
+  (`StringNotEqualsIfExists`). The runbook's operator writes (Step 4 advisory, Step 5 public key)
+  use `aws s3api put-object` with the lock headers as the break-glass role, run in the manual
+  test.
 - Existing anchors bucket: whether `object_lock_enabled` forces replacement in the provider
   in use is read from its schema in Phase 2; the docs give the procedure for the answer —
   never one that empties or recreates a bucket holding versions.
@@ -192,8 +200,9 @@ latest; the authoritative version of a key is the one whose sha256 the next mani
 `previousManifest` names — only for the newest key is it the latest version; other versions
 created before the key's next boundary are retries; a version created later is a tamper signal
 to report, never one to prefer; a key no manifest references is expected only with a
-`MISSING_PRIOR_CADENCE_PUBLICATION` on the next publish, otherwise it is reported; the residual
-— a compromised publisher forging within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's `passwd_app` surplus stated fully
+`MISSING_PRIOR_CADENCE_PUBLICATION` on the next publish, otherwise it is reported; a delete
+marker on an anchor key is a tamper signal; the residual — a compromised publisher forging
+within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's `passwd_app` surplus stated fully
 (reads every table, not only unused writes).
 
 ## Testing strategy
@@ -224,8 +233,11 @@ to report, never one to prefer; a key no manifest references is expected only wi
     the next boundary's `previousManifest.sha256` is the latest's; no pause written (red: write
     the pointer from the first attempt's sha);
   - upload aborted after the object was stored (MinIO wrapped so the PUT completes and the abort
-    fires): a pause is written, the same-boundary retry runs past it and publishes, the latest
-    version equals the pointer (red: retries honour the pause → `skipped_paused`);
+    fires): a pause is written; a test tenant's chain is advanced; the same-boundary retry runs
+    past the pause and publishes → two versions with different sha256, the latest equal to the
+    pointer; `publish_paused_until` is NULL afterwards (red: retries honour the pause →
+    `skipped_paused`; red: the success skips the clear);
+  - a boot run after an upload failure the same day runs past that pause and publishes;
   - a failure pauses only to the next boundary; injected transaction/upload bounds fail within
     the test budget;
   - overlap: A blocked mid-upload inside its transaction; its backend pid recorded by a test
@@ -253,8 +265,10 @@ to report, never one to prefer; a key no manifest references is expected only wi
 - C5: the terraform CI job; static pins with red fixtures (publisher percentages,
   `desired_count`, anchors Object Lock, SSE-S3, each bucket-policy statement — `Principal: "*"`
   with `ArnNotEquals aws:PrincipalArn`, no `NotPrincipal`; red fixtures for a third principal, a
-  wildcard, an empty break-glass ARN that leaves a principal in the advisory condition, and a
-  principal exception on the lock-mode, retention-cap or SSE statements — the publisher
+  wildcard, an empty break-glass ARN rendered as an empty condition list instead of an
+  unconditional Deny, an empty prefix, a publisher allowed on a break-glass path or the reverse,
+  a missing catch-all or delete Deny, and a principal exception on the lock-mode, retention-cap
+  or SSE statements — the publisher
   role's two actions, no task role on the verify worker); `deploy-rollback.test.mjs` with six
   services, failures at the fifth and sixth, and every output name the stubbed `terraform` was
   asked for present in `outputs.tf`; `pool-factory.metric-filter.test.ts` with the new log
@@ -262,7 +276,9 @@ to report, never one to prefer; a key no manifest references is expected only wi
   its path and not the others (the healthy-cadence filter matches `published` and the
   never-enabled `skipped_no_tenants`, not `skipped_already_published`, `failed`, paused or
   `lock_held`; `skipped_no_tenants` with `everChainEnabled: false` matches and with `true` does
-  not (red: a pattern without the field); the falls-to-zero alarm on a count going from 1 to 0;
+  not (red: a pattern without the field) — the derivation itself unit-tested with a fake
+  returning zero and one `audit_chain_anchors` rows (red: hard-coded `false`; not isolatable on
+  the shared integration database); the falls-to-zero alarm on a count going from 1 to 0;
   the `commit_failed_after_upload` alarm); a parser test that every `valueFrom` key is in both README
   tables and that no non-publisher task names the signing key or tag secret.
 - C6: every documented command run once and recorded; the manual-test file lists each E1
@@ -276,6 +292,10 @@ to report, never one to prefer; a key no manifest references is expected only wi
 - SC2 — GitHub release destination wiring.
 - SC3 — a dedicated read-only role for the verify worker (issue filed with the PR).
 - SC4 — per-worker task roles for the outbox and retention-GC workers (issue filed with the PR).
+- SC6 — the rotation runbook names npm scripts that do not exist (`audit-anchor-kid`,
+  `audit-anchor-rotation-advisory`, `audit-anchor-emit-rotation-event`,
+  `audit-anchor-publish-pubkey`); this PR rewrites only the bucket writes of Steps 4–5 and
+  marks the other steps as not yet automated (issue filed with the PR).
 - SC5 — publication protocol hardening (issue filed with the PR, carrying rounds 3–4 of this
   plan's review): published objects as the source of truth, `If-None-Match` with adoption of a
   verified earlier upload, a pinned kid→key map across rotation and `DEPLOYMENT_ID` changes,

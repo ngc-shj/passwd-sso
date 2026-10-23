@@ -169,3 +169,23 @@ Round-5 findings resolved except F-R5-1 (half). New on revision 6, applied in re
 ## Recurring Issue Check (round-6 delta)
 Functionality: R38/R48 R6-1; R29/R49 R6-2; R41/R55 R6-3; R4 R6-4. Security: R49/R43 R6-1; R29
 R6-2; R53 R6-3. Testing: R49/R41 G-1; RT7 G-2, G-3.
+
+---
+
+# Round 7
+Date: 2026-10-24
+
+Round-6 findings resolved. New on revision 7, applied in revision 8:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-R7-1 / S-R7-1 | Functionality, Security | Major / Minor | Fixed — write paths split by key shape matching the runbook's layout (manifests publisher-only; `key-rotation-*`, `public-keys/*` break-glass-only), a catch-all Deny, non-empty prefix |
+| F-R7-2 | Functionality | Minor | Fixed — empty break-glass ARN → unconditional Deny |
+| F-R7-3 | Functionality | Minor | Fixed — a boot run also runs past the current boundary's pause |
+| S-R7-2 | Security | Minor | Fixed — Deny `DeleteObject`/`DeleteObjectVersion` and lifecycle configuration; delete markers named in the verification doc |
+| T-H-1, T-H-2 | Testing | Minor | Fixed — chain advanced before the aborted-upload retry, pause clear asserted; `everChainEnabled` derivation unit-tested |
+| F-R7-A1 | Functionality | Minor (adjacent) | SC6 — the runbook's missing npm scripts; this PR rewrites only the bucket writes |
+
+## Recurring Issue Check (round-7 delta)
+Functionality: R42/R41 R7-1; R55 R7-2; R38 R7-3; R29/R34 R7-A1. Security: R42 R7-1; R49 R7-2.
+Testing: RT7/RT6 H-1, H-2.
