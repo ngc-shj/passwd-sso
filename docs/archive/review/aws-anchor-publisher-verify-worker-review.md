@@ -240,3 +240,13 @@ Security: no findings.
 | F-R12-1 | Minor | Root prefix variable has no default; existing environments' plans fail | Default `"audit-anchors"` (runbook layout), in tfvars example and README; pinned |
 | T-M-1 / S-R12-1 | Minor | Pass-count gate can fail open on an unparsable summary | `test -json` under pipefail, exit status checked separately; node check requires one `test_summary` with pass, 0 failed/errored, `passed` = Terraform-verdict entries counted from the vector file (format verified locally on 1.15.8); red: no summary, one run fewer |
 | T-M-2 | Minor | Vector has Zod-only entries with divergent verdicts | Per-validator verdict columns; HCL pin and count use the Terraform column; red: empty entry's Zod verdict flipped |
+
+# Round 13 (plan revision 13)
+
+Security: no findings. Testing: no findings.
+
+| ID | Sev | Finding | Resolution |
+|----|-----|---------|------------|
+| F-R13-1 | Minor | Plan cites a README variable table that does not exist | Location named: `variables.tf` description, tfvars example, a new "Audit anchor publisher" subsection in both READMEs; not the secret-key table |
+
+Plan review complete: no Critical or Major findings remain after round 13.

@@ -1,7 +1,7 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 13 — after plan-review rounds 1–12. Rounds 3–4 showed that hardening the publication
+Revision 13 — after plan-review rounds 1–13 (round 13: one prose fix applied in place; plan review complete). Rounds 3–4 showed that hardening the publication
 protocol itself (published objects as the source of truth, key rotation, a database-write
 adversary, multiple destinations) is a design project of its own; by user decision it moves to
 a follow-up issue (SC5) and this plan keeps today's protocol — the database pointer and an
@@ -157,8 +157,10 @@ verifier.
   passes the prefix through, so `terraform test` can exercise it without AWS credentials (it
   needs Terraform ≥ 1.6, which the CI job pins; the root's `required_version` is unchanged).
   The root prefix variable defaults to `"audit-anchors"` (the runbook's existing layout, so an
-  existing environment's next plan needs no new value), listed in `terraform.tfvars.example`
-  and the README variable table. The root calls the module unconditionally with it, and the bucket
+  existing environment's next plan needs no new value), described in its `variables.tf`
+  `description`, `terraform.tfvars.example`, and a new "Audit anchor publisher" subsection of
+  `infra/terraform/README.md` and `README.ja.md` (default and validation rule) — not the
+  secret-key table, which lists Secrets Manager keys only. The root calls the module unconditionally with it, and the bucket
   policy and the task env read the prefix from the module's output (pinned statically, red: the
   call removed or given a constant; the default value pinned). The publisher's env schema applies the same segment rule
   in Zod only when the prefix is set and non-empty: an unset or empty prefix stays valid for
