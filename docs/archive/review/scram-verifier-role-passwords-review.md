@@ -62,3 +62,24 @@ applied in revision 3:
 Functionality: R3/R29 N6; R16/R41/R55 N2; R18 N3; R43/R52 N1; R49 N4. Security: R3 N2, N5;
 R14/R16 N1, N4; R29 N3, N4; R41 N4; R42 OK (member set recomputed); R49 N3, N5; R50 N3; RS3/RS5
 N6. Testing: R3 T1; R16/R50 T5; R42 T8; RT1 T6; RT7 T2, T3; RT10 T3, T10; RT11 T4.
+
+---
+
+# Round 3
+Date: 2026-10-23
+
+All round-2 findings confirmed resolved. New findings on revision 3, applied in revision 4:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| T-R3-T1 | Testing | Major | Fixed — the dropped live case returns as a replay of the recorded stdin against a probe role, as superuser and as the non-superuser stand-in; same-cluster check for the compose psql; `\if true` red proof |
+| T-R3-T2 / F-M1 | Testing, Functionality | Major / Minor | Fixed — outer `\if :{?v}` kept; one-shot check runs unset, empty and set |
+| S-R3-1 | Security | Minor | Fixed — order test anchors on the first password-interpolating statement |
+| S-R3-2 / F-M3 | Security, Functionality | Minor | Fixed — upgrade check over `-h db`; NOLOGIN option's audit mismatch and `.env` update stated |
+| S-R3-3 | Security | Minor | Fixed — anchor snippet written in full with its SETs |
+| S-R3-4 / F-M2 | Security, Functionality | Minor | Fixed — count excludes verifier and md5 statements, matches USER too; E1 note widened |
+| S-R3-5, T-R3-T3, T-R3-T4 | — | Minor | Fixed |
+
+## Recurring Issue Check (round-3 delta)
+Functionality: R41/R55 M1; R50 M2; R29 M3. Security: R29 R3-3, R3-5; R42/RT7 R3-1; R49 R3-5; R50
+R3-2, R3-4. Testing: RT1/R50/RT7 R3-T1; RT10 R3-T2, R3-T3; R3 R3-T4.
