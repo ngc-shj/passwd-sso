@@ -72,6 +72,7 @@ import {
   resolveIterations,
   scramSha256Verifier,
 } from "./lib/scram-verifier.mjs";
+import { statementTextSetStatements } from "./lib/statement-text-settings.mjs";
 // Re-exported so the integration test drives the SAME loader the script uses,
 // rather than a second import path that could diverge from it.
 export { loadDeniedPolicy };
@@ -571,6 +572,14 @@ export async function applyPrivilegeSequence(client, denied) {
  * @param {object[]} denied
  */
 export async function runBootstrap(client, roles, denied) {
+  // As a superuser, keep even the verifiers out of every record of statement
+  // text. Session SETs on this one-shot connection, before BEGIN: a SET LOCAL
+  // would come too late for log_transaction_sample_rate, decided at transaction
+  // start. The RDS master may not set these (42501); there the verifier can
+  // still be recorded — never the password.
+  if (await currentUserIsSuperuser(client)) {
+    for (const statement of statementTextSetStatements()) await client.query(statement);
+  }
   await inTransaction(client, async () => {
     await convergeRolesInTx(client, roles);
     await applyPrivilegeSequence(client, denied);

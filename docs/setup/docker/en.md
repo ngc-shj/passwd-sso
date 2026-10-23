@@ -155,7 +155,9 @@ Set the following values:
 >    `scripts/set-audit-anchor-publisher-password.sh`, which send a verifier,
 >    never the password. For `passwd_user` and `passwd_app`, use psql's
 >    `\password <role>` in an interactive session after
->    `SET password_encryption = 'scram-sha-256'; SET log_statement TO 'none';`
+>    `SET password_encryption = 'scram-sha-256';` and a `SET … ;` for each setting
+>    in `scripts/lib/statement-text-settings.mjs` (as `docs/operations/deployment.md`
+>    spells out for `passwd_app`)
 >    — not `ALTER ROLE … PASSWORD '<cleartext>'`, which the server log and
 >    `pg_stat_statements` would record.
 >

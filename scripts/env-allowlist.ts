@@ -212,9 +212,9 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     key: "PASSWD_ANCHOR_PUBLISHER_PASSWORD",
     justification:
       "Password for the passwd_anchor_publisher NOSUPERUSER DB role used by the audit-anchor publisher. " +
-      "Consumed by docker-compose (forwarded, optional, to the db service for initdb), by " +
-      "scripts/set-audit-anchor-publisher-password.sh for existing clusters, and by " +
-      "scripts/bootstrap-rds-roles.mjs on RDS. Not read by the Next.js app.",
+      "Consumed by docker-compose (forwarded, optional, to the db service for initdb) and by " +
+      "scripts/bootstrap-rds-roles.mjs on RDS. For existing clusters the same value is given to " +
+      "scripts/set-audit-anchor-publisher-password.sh on stdin. Not read by the Next.js app.",
     consumers: [
       "docker-compose.yml",
       "infra/postgres/initdb",

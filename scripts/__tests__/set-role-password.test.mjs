@@ -17,6 +17,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { scramSha256Verifier } from "../lib/scram-verifier.mjs";
+import { statementTextSetStatements } from "../lib/statement-text-settings.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
@@ -28,6 +29,17 @@ const MEMBERS = [
   ["set-audit-anchor-publisher-password.sh", "passwd_anchor_publisher"],
 ];
 
+describe("the set-*-password.sh member set", () => {
+  it("is every scripts/set-*-password.sh, each a call into the shared library for its role", () => {
+    const found = readdirSync(SCRIPTS).filter((f) => /^set-.*-password\.sh$/.test(f)).sort();
+    expect(found).toEqual(MEMBERS.map(([f]) => f).sort());
+    for (const [f, role] of MEMBERS) {
+      const lines = readFileSync(join(SCRIPTS, f), "utf8").trim().split("\n");
+      expect(lines.at(-1), f).toBe(`set_role_password ${role} ${f.replace(/\.sh$/, "")} "$@"`);
+    }
+  });
+});
+
 const SENTINEL = "Rol3Pw-s3ntinel-77";
 const URL = "postgresql://passwd_user:mig-pw@localhost:5432/passwd_sso";
 const VERIFIER_RE =
@@ -36,10 +48,7 @@ const VERIFIER_RE =
 const expectedSql = (role, verifier) =>
   "SELECT rolsuper AS su FROM pg_roles WHERE rolname = current_user \\gset\n" +
   "\\if :su\n" +
-  "SET log_statement = 'none';\n" +
-  "SET log_min_error_statement = 'panic';\n" +
-  "SET log_min_duration_statement = -1;\n" +
-  "SET pg_stat_statements.track_utility = off;\n" +
+  statementTextSetStatements().map((l) => `${l}\n`).join("") +
   "\\endif\n" +
   `ALTER ROLE ${role} PASSWORD '${verifier}';\n`;
 
@@ -90,7 +99,7 @@ printf '%s\\n' "$@" > "$d.argv"
 env > "$d.env"
 cat > "$d.stdin"
 case " $* " in
-  *current_setting*) printf '%s\\n' "\${FAKE_ITERATIONS-4096}" ;;
+  *current_setting*) printf '%s\\n' "\${FAKE_ITERATIONS-4096}"; exit "\${FAKE_ITER_EXIT:-0}" ;;
   *" -f "*) exit "\${FAKE_ALTER_EXIT:-0}" ;;
 esac
 exit 0
@@ -176,6 +185,34 @@ describe.each(MEMBERS)("%s", (script, role) => {
     expect(recompute(v, SENTINEL)).toBe(v);
   });
 
+  it("passes shell metacharacters through to the verifier byte for byte", () => {
+    const password = "-n it's$HOME\\%s `x`";
+    const r = run(script, { input: password });
+    expect(r.status, r.stderr).toBe(0);
+    const v = verifierOf(alterCall().stdin);
+    expect(recompute(v, password)).toBe(v);
+  });
+
+  it("refuses a positional argument without echoing it (a password passed by mistake)", () => {
+    const r = run(script, { args: [SENTINEL] });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("unknown argument");
+    expect(r.stdout + r.stderr).not.toContain(SENTINEL);
+    expect(calls()).toEqual([]);
+  });
+
+  it.each([
+    ["fails", { FAKE_ITER_EXIT: "2" }, null],
+    ["answers above node-postgres's limit", { FAKE_ITERATIONS: "200000" }, "above 100000"],
+    ["answers something that is not a number", { FAKE_ITERATIONS: "abc" }, "unsigned integer"],
+  ])("stops without an ALTER when the iteration query %s", (_name, env, reason) => {
+    const r = run(script, { env });
+    expect(r.status).not.toBe(0);
+    if (reason) expect(r.stderr).toContain(reason);
+    expect(alterCall()).toBeUndefined();
+    expect(r.stdout).not.toContain("OK —");
+  });
+
   it("drops trailing newlines from stdin, as a password typed or generated arrives", () => {
     const r = run(script, { input: `${SENTINEL}\n` });
     expect(r.status, r.stderr).toBe(0);
@@ -220,6 +257,7 @@ describe.each(MEMBERS)("%s", (script, role) => {
   it("fails without an OK line when the ALTER fails (e.g. the role is missing)", () => {
     const r = run(script, { env: { FAKE_ALTER_EXIT: "3" } });
     expect(r.status).not.toBe(0);
+    expect(alterCall(), "the ALTER was sent and failed, not skipped").toBeDefined();
     expect(r.stdout).not.toContain("OK —");
   });
 

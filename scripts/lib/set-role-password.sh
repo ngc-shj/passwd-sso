@@ -4,12 +4,13 @@
 #
 # The statement carries a SCRAM-SHA-256 verifier (scripts/lib/scram-verifier.mjs),
 # never the password: a refused statement is logged under the default
-# `log_min_error_statement`, `log_statement = ddl|all` and
-# `log_min_duration_statement >= 0` log every one, and pg_stat_statements keeps
-# the text. On a superuser connection the session turns all four off before the
-# ALTER, so not even the verifier is recorded. A non-superuser (a
-# managed-database admin) cannot set them; there the verifier can still be
-# recorded by each — never the password.
+# `log_min_error_statement`; `log_statement = ddl|all`, duration and sampled
+# logging and the debug_print_* parse trees record it too; pg_stat_statements
+# keeps the text. On a superuser connection the session turns every one of them
+# off before the ALTER (the list is scripts/lib/statement-text-settings.mjs, which
+# a test pins this file to), so not even the verifier is recorded. A
+# non-superuser (a managed-database admin) cannot set them; there the verifier
+# can still be recorded — never the password.
 #
 # Not psql's \password: its prompt reads /dev/tty whenever the process has a
 # controlling terminal, so run from an operator's shell it would ignore the
@@ -105,6 +106,11 @@ set_role_password() {
 SET log_statement = 'none';
 SET log_min_error_statement = 'panic';
 SET log_min_duration_statement = -1;
+SET log_min_duration_sample = -1;
+SET log_transaction_sample_rate = 0;
+SET debug_print_parse = off;
+SET debug_print_rewritten = off;
+SET debug_print_plan = off;
 SET pg_stat_statements.track_utility = off;
 \\endif
 ALTER ROLE ${role} PASSWORD '${verifier}';

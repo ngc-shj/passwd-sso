@@ -17,11 +17,10 @@
 #   Not `<<< "$PASSWORD"`: bash before 5.1 backs a here-string with a temp file.
 #
 # The server receives a SCRAM-SHA-256 verifier, never the password (see
-# scripts/lib/set-role-password.sh). On a superuser connection statement logging
-# (log_statement, log_min_error_statement, log_min_duration_statement) and
-# pg_stat_statements are off for the session; on a non-superuser one (a
-# managed-database admin) the verifier can still be logged by any of them and
-# kept by pg_stat_statements. The password must be ASCII with no line break.
+# scripts/lib/set-role-password.sh). On a superuser connection every setting
+# that records statement text (scripts/lib/statement-text-settings.mjs) is off
+# for the session; on a non-superuser one (a managed-database admin) the
+# verifier can still be logged and kept by pg_stat_statements. The password must be ASCII with no line break.
 #
 # Environment variables:
 #   MIGRATION_DATABASE_URL  (required) Superuser connection URL (an admin role

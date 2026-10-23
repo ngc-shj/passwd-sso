@@ -13,19 +13,16 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import {
+  STATEMENT_TEXT_SETTINGS,
+  statementTextSetStatements,
+} from "../lib/statement-text-settings.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INITDB = resolve(__dirname, "..", "..", "infra", "postgres", "initdb");
 
-const REQUIRED = [
-  "SET log_statement = 'none';",
-  "SET log_min_error_statement = 'panic';",
-  "SET log_min_duration_statement = -1;",
-  "SET pg_stat_statements.track_utility = off;",
-  "\\set VERBOSITY terse",
-];
-const GUCS = ["log_statement", "log_min_error_statement", "log_min_duration_statement",
-  "pg_stat_statements.track_utility"];
+const REQUIRED = [...statementTextSetStatements(), "\\set VERBOSITY terse"];
+const GUCS = STATEMENT_TEXT_SETTINGS.map(([name]) => name);
 
 /** Statement lines: no blank lines, no `--` comment lines. */
 const statements = (src) =>
@@ -62,9 +59,13 @@ function violations(src) {
       errs.push(`after the first statement (${lines[firstOther]}): ${r}`);
     }
   }
-  // Nothing after the block may undo it.
+  // Nothing after the block may undo it, by a statement or by running a file
+  // this check cannot see.
   lines.forEach((l) => {
     if (/^\\c(onnect)?\b/.test(l)) errs.push(`reconnects: ${l}`);
+    if (/^\\(i|ir|include|include_relative)\b/.test(l)) errs.push(`includes another file: ${l}`);
+    if (/\bset_config\s*\(/i.test(l)) errs.push(`set_config: ${l}`);
+    if (/^ALTER\s+(SYSTEM|ROLE|DATABASE)\b.*\bSET\b/i.test(l)) errs.push(`ALTER … SET: ${l}`);
     if (REQUIRED.includes(l)) return;
     for (const g of GUCS) {
       const re = new RegExp(`^(SET|RESET)\\s+(LOCAL\\s+|SESSION\\s+)?${g.replace(".", "\\.")}\\b`, "i");
@@ -120,6 +121,9 @@ describe("the ordering rule (fixtures)", () => {
     ["a later RESET", `${block}\nCREATE ROLE r PASSWORD 'p';\nRESET log_statement;`, /changes log_statement again/],
     ["a later SET LOCAL", `${block}\nSET LOCAL log_min_error_statement = 'error';`, /changes log_min_error_statement again/],
     ["a reconnect", `${block}\n\\c other\nCREATE ROLE r PASSWORD 'p';`, /reconnects/],
+    ["an included file", `${block}\n\\i other.sql`, /includes another file/],
+    ["set_config", `${block}\nSELECT set_config('log_statement', 'all', false);`, /set_config/],
+    ["ALTER SYSTEM SET", `${block}\nALTER SYSTEM SET log_statement = 'all';`, /ALTER … SET/],
   ])("refuses %s", (_name, src, msg) => {
     expect(violations(src).join("\n")).toMatch(msg);
   });

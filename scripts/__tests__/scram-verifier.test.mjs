@@ -104,13 +104,13 @@ describe("resolveIterations", () => {
   });
 
   it.each([
-    String(MAX_SCRAM_ITERATIONS + 1),
-    "abc",
-    " 4096",
-    "-1",
-    "4096.0",
-  ])("refuses %j", (server) => {
-    expect(() => resolveIterations(server)).toThrow();
+    [String(MAX_SCRAM_ITERATIONS + 1), `above ${MAX_SCRAM_ITERATIONS}`],
+    ["abc", "unsigned integer"],
+    [" 4096", "unsigned integer"],
+    ["-1", "unsigned integer"],
+    ["4096.0", "unsigned integer"],
+  ])("refuses %j", (server, reason) => {
+    expect(() => resolveIterations(server)).toThrow(reason);
   });
 });
 

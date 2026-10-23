@@ -376,8 +376,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/checks/app-role-denied-pr
 # resolves in the REPO, not in the image — so the same gate derives it from their
 # import statements.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/lib/denied-privileges.mjs ./scripts/lib/denied-privileges.mjs
-# The SCRAM verifier helper bootstrap-rds-roles.mjs imports (no cleartext password in role DDL).
+# The SCRAM verifier helper and the statement-text settings list bootstrap-rds-roles.mjs imports.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/lib/scram-verifier.mjs ./scripts/lib/scram-verifier.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/lib/statement-text-settings.mjs ./scripts/lib/statement-text-settings.mjs
 
 # Audit outbox worker (bundled by esbuild; pg + deps are external)
 COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js

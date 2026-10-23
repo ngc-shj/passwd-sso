@@ -31,7 +31,7 @@ ADMIN_API_TOKEN=<op_token> TARGET_VERSION=<int> scripts/rotate-master-key.sh    
 
 BACKUP_DIR=<dir> BACKUP_RETAIN=<n> scripts/backup-db.sh                               # Take + validate a full backup (passwd_sso, jackson, cluster globals); take-only, restore via docs/operations/dev-host-migration.md
 
-PASSWD_OUTBOX_WORKER_PASSWORD=<pass> MIGRATION_DATABASE_URL=<url> scripts/set-outbox-worker-password.sh  # Set worker DB role password
+MIGRATION_DATABASE_URL=<url> scripts/set-outbox-worker-password.sh < <(printf '%s' "$PASS")  # Set worker DB role password (read from stdin; sends a SCRAM verifier)
 
 MIGRATION_DATABASE_URL=<superuser-url> node scripts/bootstrap-rds-roles.mjs     # Create/converge least-privilege DB roles (RDS bootstrap; convergent, re-runnable)
 MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs         # Audit live effective privileges (table/column/schema/sequence/function/database/default-ACL/role-attrs, incl. PUBLIC + inherited) vs db-grants-manifest.json (--write to regenerate)

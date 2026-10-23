@@ -95,3 +95,37 @@ host psql (`SET_ROLE_PASSWORD_EXPECT_PSQL=host`).
   have reached stderr).
 - DRY_RUN passes an empty iteration value and lets the helper resolve it, instead
   of a second copy of 4096.
+
+## D9 — Phase 3 round 1: the statement-text settings, derived
+
+The settings list grew by review twice (three → four in D8, then
+`log_min_duration_sample`, `log_transaction_sample_rate`), so it was re-derived
+from the server rather than extended: every setting PostgreSQL files under "What
+to Log" / "When to Log" is either listed in `scripts/lib/statement-text-settings.mjs`
+(nine, adding the three `debug_print_*`, whose parse trees carry literals) or
+excluded with a reason in `statement-text-settings.integration.test.ts`, which
+fails on any unclassified one. The bootstrap imports the list (and, as a
+superuser, now sets it before `BEGIN`); the rotation library and initdb are pinned
+to it by `statement-text-settings.test.mjs`. All are session SETs: `SET LOCAL`
+would come too late for `log_transaction_sample_rate`, and `MIGRATION_DATABASE_URL`
+is a direct or session-pooled URL (prisma migrate requires one), so they cannot
+leak across clients.
+
+Executed on throwaway `postgres:16-alpine` with `log_min_duration_statement=0`,
+`log_transaction_sample_rate=1`, `log_min_duration_sample=0`, `debug_print_parse=on`:
+- initdb with sentinel passwords: 0 sentinel lines; a copy without the SET block:
+  25.
+- `\password` (pg_stat_statements preloaded): with the documented SETs 0 log lines
+  carrying `SCRAM-SHA-256` and 0 `pg_stat_statements` rows; without them 3 and 1.
+
+## D10 — Phase 3 round 1: red proofs for the new tests (scratch copy, base green)
+
+| Mutation | What went red |
+|----------|---------------|
+| `\if :su` → `\if false` | T11 replay as the superuser only (the new settings probe) |
+| role name emitted as `\"${role}\"` | both replay cases, at the swap guard, before psql; `passwd_outbox_worker`'s `rolpassword` unchanged |
+| unknown argument echoed again | the positional-argument case, ×3 |
+
+A first attempt quoted the role as `"${role}"`, which inside bash's double-quoted
+string closes and reopens the quote and changes nothing; it stayed green for that
+reason, and was redone.

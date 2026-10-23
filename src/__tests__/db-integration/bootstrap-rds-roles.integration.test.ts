@@ -43,6 +43,7 @@ import {
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync, chmodSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { scramSha256Verifier } from "../../../scripts/lib/scram-verifier.mjs";
+import { STATEMENT_TEXT_SETTINGS } from "../../../scripts/lib/statement-text-settings.mjs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1549,7 +1550,14 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         const stdin = readdirSync(calls).map((f) => readFileSync(join(calls, f), "utf8"))
           .find((t) => t.includes("ALTER ROLE"));
         expect(stdin).toBeDefined();
-        return (stdin ?? "").replace("ALTER ROLE passwd_outbox_worker ", `ALTER ROLE ${PROBE} `);
+        const replayed = (stdin ?? "").replace("ALTER ROLE passwd_outbox_worker ", `ALTER ROLE ${PROBE} `);
+        // Refuse before any real psql runs if the swap did not take: a silent
+        // miss would replay onto passwd_outbox_worker on the shared database.
+        const alters = replayed.match(/^ALTER ROLE .*$/gm) ?? [];
+        expect(alters).toHaveLength(1);
+        expect(alters[0]).toMatch(new RegExp(`^ALTER ROLE ${PROBE} PASSWORD 'SCRAM-SHA-256\\$`));
+        expect(replayed).not.toMatch(/\bpasswd_[a-z_]+\b/);
+        return replayed;
       }
 
       beforeEach(async () => {
@@ -1557,8 +1565,12 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         standinPassword = randomBytes(18).toString("base64url");
         await su.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE`);
         await su.query(`SET ROLE ${STANDIN}`);
-        await su.query(`CREATE ROLE ${PROBE} WITH LOGIN`);
-        await su.query("RESET ROLE");
+        try {
+          await su.query(`CREATE ROLE ${PROBE} WITH LOGIN`);
+        } finally {
+          // The shared connection must not stay the stand-in if this fails.
+          await su.query("RESET ROLE");
+        }
         await grantConnect(su);
         await su.query(
           `DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO ${STANDIN}', current_database()); END $$`,
@@ -1597,8 +1609,29 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         const [user, password] = asSuperuser
           ? [su_url.username, decodeURIComponent(su_url.password)]
           : [STANDIN, standinPassword];
-        const r = psqlRunner().run(user, password, stdin, ["-v", "ON_ERROR_STOP=1", "-f", "-"]);
+        // After the ALTER, in the same session: what each statement-text
+        // setting is now. The \if :su branch is psql behaviour no fake can
+        // stand for, and an ALTER that installs and logs in proves nothing
+        // about whether that branch ran.
+        const probe = `SELECT concat_ws('|', ${STATEMENT_TEXT_SETTINGS.map(
+          ([name]) => `coalesce(current_setting('${name}', true), '<unset>')`,
+        ).join(", ")});\n`;
+        const r = psqlRunner().run(user, password, stdin + probe, ["-v", "ON_ERROR_STOP=1", "-qAt", "-f", "-"]);
         expect(r.status, String(r.stderr)).toBe(0);
+        const settings = String(r.stdout).trim().split("|");
+        expect(settings, String(r.stdout)).toHaveLength(STATEMENT_TEXT_SETTINGS.length);
+        if (asSuperuser) {
+          expect(settings).toEqual(STATEMENT_TEXT_SETTINGS.map(([, v]) => v.replace(/^'|'$/g, "")));
+        } else {
+          // Not settable here: the session keeps the server's defaults.
+          const { rows } = await su.query(`SELECT ${STATEMENT_TEXT_SETTINGS.map(
+            ([name], i) => `coalesce(current_setting('${name}', true), '<unset>') AS s${i}`,
+          ).join(", ")}`);
+          expect(settings).toEqual(STATEMENT_TEXT_SETTINGS.map((_, i) => rows[0][`s${i}`]));
+          // log_statement's default is already 'none'; the others are the
+          // positive control that the defaults differ from what a superuser sets.
+          expect(settings).not.toEqual(STATEMENT_TEXT_SETTINGS.map(([, v]) => v.replace(/^'|'$/g, "")));
+        }
         expect(await storedVerifier(su, PROBE)).toBe(verifier);
         expect(await canAuthenticate(sentinel)).toBe(true);
         expect(await canAuthenticate("wrong-pw")).toBe(false);

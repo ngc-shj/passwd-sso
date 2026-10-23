@@ -565,9 +565,17 @@ migration.
 -- log_statement=ddl|all, and kept by pg_stat_statements. Set it below with
 -- \password, which sends a verifier computed client-side.
 CREATE ROLE passwd_app LOGIN NOSUPERUSER NOBYPASSRLS;
+-- The settings that record statement text (scripts/lib/statement-text-settings.mjs):
 SET password_encryption = 'scram-sha-256';
-SET log_statement TO 'none';
-SET log_min_error_statement TO 'panic';
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+SET log_min_duration_sample = -1;
+SET log_transaction_sample_rate = 0;
+SET debug_print_parse = off;
+SET debug_print_rewritten = off;
+SET debug_print_plan = off;
+SET pg_stat_statements.track_utility = off;
 \password passwd_app
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
@@ -606,14 +614,15 @@ published password — while the grant audit expects `LOGIN`. Set
 if it prints `f`, give it `LOGIN` and set the password:
 
 ```bash
-set -a; . ./.env; set +a
+# Only this key: a compose .env is not shell syntax, so it is not sourced.
+PASSWD_ANCHOR_PUBLISHER_PASSWORD="$(sed -n 's/^PASSWD_ANCHOR_PUBLISHER_PASSWORD=//p' .env)"
 : "${PASSWD_ANCHOR_PUBLISHER_PASSWORD:?set it in .env first}"
 docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso \
   -c "ALTER ROLE passwd_anchor_publisher WITH LOGIN"
 printf '%s\n%s\n' "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" \
   | docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso -q \
-      -c "SET password_encryption = 'scram-sha-256'" -c "SET log_statement TO 'none'" \
-      -c "SET log_min_error_statement TO 'panic'" -c "\password passwd_anchor_publisher"
+      -c "SET password_encryption = 'scram-sha-256'; SET log_statement = 'none'; SET log_min_error_statement = 'panic'; SET log_min_duration_statement = -1; SET log_min_duration_sample = -1; SET log_transaction_sample_rate = 0; SET debug_print_parse = off; SET debug_print_rewritten = off; SET debug_print_plan = off; SET pg_stat_statements.track_utility = off" \
+      -c "\password passwd_anchor_publisher"
 ```
 
 `\password` sends a verifier computed client-side, never the password. It reads
@@ -775,9 +784,8 @@ docker compose exec -T db sh -c '
   [ -n "$PASSWD_JACKSON_PASSWORD" ] || { echo "PASSWD_JACKSON_PASSWORD is not set in the db container" >&2; exit 1; }
   printf "%s\n%s\n" "$PASSWD_JACKSON_PASSWORD" "$PASSWD_JACKSON_PASSWORD" \
     | psql -U passwd_user -d postgres -q \
-        -c "SET password_encryption TO '\''scram-sha-256'\''" \
-        -c "SET log_statement TO '\''none'\''" \
-        -c "SET log_min_error_statement TO '\''panic'\''" -c "\password jackson_user"'
+        -c "SET password_encryption = '\''scram-sha-256'\''; SET log_statement = '\''none'\''; SET log_min_error_statement = '\''panic'\''; SET log_min_duration_statement = -1; SET log_min_duration_sample = -1; SET log_transaction_sample_rate = 0; SET debug_print_parse = off; SET debug_print_rewritten = off; SET debug_print_plan = off; SET pg_stat_statements.track_utility = off" \
+        -c "\password jackson_user"'
 ```
 
 The SETs are not decoration. `\password` hashes with the session's
@@ -786,7 +794,9 @@ authentication, hence the first. It then issues `ALTER USER ... PASSWORD
 'SCRAM-SHA-256$4096:...'`, which is DDL — so under `log_statement=ddl` or `all`
 the **verifier** is written to the `db` container log, which this stack retains at
 20 MB × 5, and a refused one is logged under the default
-`log_min_error_statement=error`; the other two keep it out. If that log has been
+`log_min_error_statement=error`, and duration or sampled logging, the debug_print_*
+parse trees and `pg_stat_statements` record it too; the rest of the SETs (the list
+in `scripts/lib/statement-text-settings.mjs`) keep it out. If that log has been
 exported anywhere, rotate `PASSWD_JACKSON_PASSWORD`.
 
 **What a logged verifier exposes.** Not the password. It allows an offline guess
