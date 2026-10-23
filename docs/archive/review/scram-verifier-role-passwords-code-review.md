@@ -83,3 +83,13 @@ resolved; new Minors, all fixed (D12):
 | T-N4 | Testing | Minor | Fixed — `has_X` bound to X's own `\getenv` variable; red-proven |
 | T-N5 | Testing | Minor | Fixed — `\elif` tracked; any value-carrying non-meta line flagged; fixtures split; red-proven |
 | T-N6 | Testing | Minor | Fixed — the comment and D11 no longer give an unreproduced cause |
+
+---
+
+# Round 4
+Date: 2026-10-24
+
+No findings from any expert. One cosmetic note applied: a fixture still named for a
+server SELECT it no longer contains was renamed. Review closed after 4 rounds; every
+Critical/Major finding was fixed and red-proven, and each Minor fixed or recorded
+with its reason.

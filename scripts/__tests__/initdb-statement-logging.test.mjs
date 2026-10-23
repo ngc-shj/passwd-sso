@@ -176,7 +176,7 @@ describe("the ordering rule (fixtures)", () => {
 
   it.each([
     ["gated on :{?X} directly", `\\getenv pw PW\n\\if :{?pw}\n  CREATE ROLE r PASSWORD :'pw';\n\\endif`, /not under \\if :has_pw/],
-    ["has_X decided by a server SELECT", `\\getenv pw PW\n\\set has_pw false\n\\if :has_pw\n  CREATE ROLE r PASSWORD :'pw';\n\\endif`, /not decided by the shell/],
+    ["has_X not decided by the shell", `\\getenv pw PW\n\\set has_pw false\n\\if :has_pw\n  CREATE ROLE r PASSWORD :'pw';\n\\endif`, /not decided by the shell/],
     ["a SELECT carrying the value", gated("pw", "PW") + `\nSELECT length(:'pw') > 0 AS x \\gset`, /sends a variable's value/],
     ["has_X tested against another variable", gated("pw", "PW").replace('[ -n "$PW" ]', '[ -n "$OTHER" ]'), /not decided by the shell from \$PW/],
     ["a password with no \\getenv", gated("pw", "PW").replace("\\getenv pw PW\n", ""), /pw has no \\getenv/],
