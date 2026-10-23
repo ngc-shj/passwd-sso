@@ -232,3 +232,11 @@ Security: no findings.
 | T-L-2 | Minor | Nothing pins that the root calls the prefix module | Static pin: unconditional call with the root variable; policy and task env read the module output; red: call removed or constant |
 | F-R11-1 | Minor | Zod rule would refuse an existing no-prefix deployment | Zod applies the segment rule only when set and non-empty; unset/empty in the Zod vector as allowed |
 | F-R11-2 | Minor | `terraform test` from the root reports success with no tests | CI runs `init` + `test` in the module and fails when the pass count is below the vector length |
+
+# Round 12 (plan revision 12)
+
+| ID | Sev | Finding | Resolution (revision 13) |
+|----|-----|---------|-------------------------|
+| F-R12-1 | Minor | Root prefix variable has no default; existing environments' plans fail | Default `"audit-anchors"` (runbook layout), in tfvars example and README; pinned |
+| T-M-1 / S-R12-1 | Minor | Pass-count gate can fail open on an unparsable summary | `test -json` under pipefail, exit status checked separately; node check requires one `test_summary` with pass, 0 failed/errored, `passed` = Terraform-verdict entries counted from the vector file (format verified locally on 1.15.8); red: no summary, one run fewer |
+| T-M-2 | Minor | Vector has Zod-only entries with divergent verdicts | Per-validator verdict columns; HCL pin and count use the Terraform column; red: empty entry's Zod verdict flipped |
