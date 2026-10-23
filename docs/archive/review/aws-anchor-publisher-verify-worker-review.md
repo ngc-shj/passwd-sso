@@ -43,3 +43,32 @@ Per-expert statuses in the sub-agent outputs; summarised:
   T-16; R41 T-1, T-2; R42 T-12, T-17, T-9; R47 T-17; R49 T-5; R50 T-8, T-1; R53 T-15; RT1 T-7,
   T-2; RT4 T-7; RT5 T-2, T-12; RT6 T-3, T-13; RT7 T-1, T-4, T-6, T-9; RT8 T-13; RT10 T-12, T-13;
   RT11 T-7, T-A1.
+
+---
+
+# Round 2
+Date: 2026-10-24
+
+Round-1 findings confirmed resolved except where continued below. New findings on revision 2,
+applied in revision 3:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-N1 / S-N1 | Functionality, Security | Critical / Major | Fixed — the anchor keys leave the app's boot-time key validation in both providers; test with the app task's env |
+| F-N2 | Functionality | Major | Fixed — two-phase publish: manifest stored as pending before the upload (outside any tx, bounded as a whole); 412/409 → GET, identical bytes = our own upload; the chain cannot fork |
+| F-N3 | Functionality | Major | Fixed — healthy-cadence absence alarm counts `published`, `skipped_no_tenants`, `skipped_already_published`; scenario corrected |
+| S-N2 | Security | Major | Fixed — CloudTrail trail a documented prerequisite, checked in the manual test |
+| T-N-1 | Testing | Major | Fixed — MinIO started by a digest-pinned `docker run` step |
+| T-N-2 | Testing | Major | Fixed — deny/allow asserted by bypass notices (report mode) |
+| T-N-3 | Testing | Major | Fixed — `beforeAll` refuses unless only the test's tenants are chain-enabled |
+| T-N-4 | Testing | Major | Fixed — container-scan runs the smoke in a docker-runner mode |
+| T-N-5 | Testing | Major | Fixed — overlap proved via `pg_locks`; `lock_held` live again via `lock_timeout` |
+| S-N5 | Security | Minor | Fixed — existing workers keep the shared role (retention-GC S3 deletes, outbox aws-sm); SC4 |
+| S-N3, S-N4, F-N4, F-N5, F-N6, T-N-6, T-N-7, T-N-8 | — | Minor | Fixed in revision 3 |
+
+Found while revising: phase B clears the pending record by `upsert` to an empty value — the
+publisher holds INSERT/SELECT/UPDATE on `system_settings` (manifest lines checked), no DELETE.
+
+## Recurring Issue Check (round-2 delta)
+Functionality: R3/R42 N1; R38/R56 N2; R41/R50 N3; R49 N4. Security: R3/R42 N1, N5; R41/R49 N2;
+R29 N3. Testing: R16/R41/R50 N-1; R14/R49 N-2; RT4 N-5; RT7/RT9 N-4; RT8/RT10 N-2; RT11 N-3, N-7.
