@@ -148,3 +148,24 @@ Review of revision 5 (today's protocol). Applied in revision 6:
 Functionality: R49/R29 R5-1; R38/R48 R5-2; R41/R31 R5-3; R41/R50 R5-4; R18/R29 R5-5. Security:
 R43/R49/R55 R5-1; R49 R5-2; R14/R31 R5-3; R29 R5-4. Testing: RT7 E-1, E-4; RT11 E-5; RT4 E-3;
 R49 E-2.
+
+---
+
+# Round 6
+Date: 2026-10-24
+
+Round-5 findings resolved except F-R5-1 (half). New on revision 6, applied in revision 7:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-R6-1 / T-G-1 | Functionality, Testing | Major | Fixed — same-boundary retries run past the pause their own upload failure wrote; 3-attempt cap; aborted-but-stored upload case added |
+| F-R6-2 | Functionality | Major | Fixed — every Deny `Principal: "*"` + `ArnNotEquals aws:PrincipalArn` (a `NotPrincipal` would deny the publisher's assumed-role session); empty break-glass ARN lists no principal |
+| S-R6-1 | Security | Minor | Fixed — break-glass `PutObject` only on `advisories/*`; S3 data-event selector in the trail prerequisite |
+| S-R6-2 | Security | Minor | Fixed — verification doc names the authoritative version and the expected orphan |
+| S-R6-3 / F-R6-4 | Security, Functionality | Minor | Fixed — at most 3 upload-reaching attempts per boundary; `commit_failed_after_upload` alarm; ≤3 failure rows per boundary |
+| F-R6-3 / T-G-2 | Functionality, Testing | Minor | Fixed — `everChainEnabled` from `audit_chain_anchors` rows; the disable steady state documented; filter test pair |
+| T-G-3 | Testing | Minor | Fixed — red fixtures for the principal conditions |
+
+## Recurring Issue Check (round-6 delta)
+Functionality: R38/R48 R6-1; R29/R49 R6-2; R41/R55 R6-3; R4 R6-4. Security: R49/R43 R6-1; R29
+R6-2; R53 R6-3. Testing: R49/R41 G-1; RT7 G-2, G-3.
