@@ -3,103 +3,45 @@
 #
 # Usage:
 #   MIGRATION_DATABASE_URL=<superuser-url> \
-#   scripts/set-outbox-worker-password.sh <<< "$PASSWORD"
+#   scripts/set-outbox-worker-password.sh < <(printf '%s' "$PASSWORD")
 #
 #   # k8s example (stdin from secret):
 #   MIGRATION_DATABASE_URL=<superuser-url> \
 #   kubectl exec --stdin ... -- bash scripts/set-outbox-worker-password.sh \
 #     < <(kubectl get secret ... -o jsonpath='{.data.password}' | base64 -d)
 #
+#   Not `<<< "$PASSWORD"`: bash before 5.1 backs a here-string with a temp file.
+#
+# The server receives a SCRAM-SHA-256 verifier, never the password (see
+# scripts/lib/set-role-password.sh). On a superuser connection every setting
+# that records statement text (scripts/lib/statement-text-settings.mjs) is off
+# for the session; on a non-superuser one (a managed-database admin) the
+# verifier can still be logged and kept by pg_stat_statements. The password must be ASCII with no line break.
+#
 # Environment variables:
-#   MIGRATION_DATABASE_URL  (required) Superuser connection URL
+#   MIGRATION_DATABASE_URL  (required) Superuser connection URL (an admin role
+#                           that may ALTER the role works, with the residual above)
 #   DRY_RUN                 (optional) When set to "1", print the would-be psql
-#                           command (password redacted) and exit 0 without
-#                           invoking psql. For testing only.
+#                           command (verifier redacted) and exit 0 without
+#                           connecting. For testing only.
 #
 # Flags:
 #   --print-args-file <path>  (only honoured when DRY_RUN=1) Write the generated
-#                             stdin SQL (ALTER ROLE with quoted password) to <path>
-#                             (mode 0600). Used by tests to assert the password
-#                             reaches psql without argv exposure.
+#                             stdin SQL to a NEW file at <path> (mode 0600; an
+#                             existing path is refused). Test-only.
 #
-# Password input:
-#   The password must be provided on stdin. If stdin is a tty or empty, the
-#   script exits 1 with a structured error. This avoids password exposure via
-#   shell history, kubectl audit logs, or `ps` output.
+# Requires psql and node.
 #
 # Exit codes:
 #   0 — success (or DRY_RUN=1 with valid input)
-#   1 — error (missing env vars, missing stdin password, psql failure, etc.)
+#   1 — error (missing env vars, refused password, psql failure, etc.)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/psql-safe.sh
 source "$SCRIPT_DIR/lib/psql-safe.sh"
+# shellcheck source=lib/set-role-password.sh
+source "$SCRIPT_DIR/lib/set-role-password.sh"
 
-MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL:-}"
-DRY_RUN="${DRY_RUN:-}"
-PRINT_ARGS_FILE=""
-
-# Parse --print-args-file flag.
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --print-args-file)
-      shift
-      PRINT_ARGS_FILE="${1:-}"
-      shift
-      ;;
-    *)
-      echo '{"level":"error","msg":"unknown flag","flag":"'"$1"'"}' >&2
-      exit 1
-      ;;
-  esac
-done
-
-if [[ -z "$MIGRATION_DATABASE_URL" ]]; then
-  echo '{"level":"error","msg":"MIGRATION_DATABASE_URL is required"}' >&2
-  exit 1
-fi
-
-trap psql_safe_cleanup EXIT
-psql_safe_url DB_URL "$MIGRATION_DATABASE_URL"
-
-# Read password from stdin. Reject tty (interactive) or empty input.
-if [[ -t 0 ]]; then
-  echo '{"level":"error","msg":"password expected on stdin (use < <(...) or pipe)"}' >&2
-  exit 1
-fi
-
-new_password="$(cat)"
-
-if [[ -z "$new_password" ]]; then
-  echo '{"level":"error","msg":"password expected on stdin (use < <(...) or pipe)"}' >&2
-  exit 1
-fi
-
-# SQL-safe quoting: double every single quote in the password. The quote is
-# held in a variable because a backslash-escaped quote in the replacement
-# (\'\') keeps its backslash on bash >= 4.3, corrupting the SQL literal.
-q="'"
-escaped="${new_password//${q}/${q}${q}}"
-
-if [[ "$DRY_RUN" == "1" ]]; then
-  # Print sanitised representation (password redacted).
-  echo "[DRY_RUN] would invoke: psql -X \"${DB_URL}\" -f - (stdin: ALTER ROLE passwd_outbox_worker WITH PASSWORD '<REDACTED>';)" >&2
-
-  if [[ -n "$PRINT_ARGS_FILE" ]]; then
-    # Write the generated stdin SQL (with quote-doubled password) to file for
-    # test assertion only. umask 077 ensures mode 0600.
-    (
-      umask 077
-      printf "ALTER ROLE passwd_outbox_worker WITH PASSWORD '%s';\n" "$escaped" > "$PRINT_ARGS_FILE"
-    )
-  fi
-  exit 0
-fi
-
-psql_safe "$DB_URL" -f - <<EOF
-ALTER ROLE passwd_outbox_worker WITH PASSWORD '$escaped';
-EOF
-
-echo "[set-outbox-worker-password] OK — password updated for passwd_outbox_worker"
+set_role_password passwd_outbox_worker set-outbox-worker-password "$@"

@@ -65,7 +65,7 @@ Store these in Secrets Manager:
 - `REDIS_URL` (REQUIRED in production — see [Redis](#app-service))
 - `BLOB_BACKEND`
 - `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
-- `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; use `scripts/set-outbox-worker-password.sh` to rotate)
+- `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; on AWS rotate it by re-running `scripts/bootstrap-rds-roles.mjs` with the new value — the image has no `psql`, which `scripts/set-*-password.sh` need)
 - `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (least-privilege role `passwd_anchor_publisher`; no ECS task consumes it yet)
 - `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is not stored on its own: it is an input to `scripts/bootstrap-rds-roles.mjs` only, taken from the userinfo of `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (a second stored copy could drift from the URL)
 
@@ -138,7 +138,10 @@ true superuser fails with SQLSTATE 42501, including:
   The master has CREATEROLE and CREATEDB and holds ADMIN OPTION on every role it
   created. What no check can see — a role dropped in between, a password-check
   hook in a custom parameter group, a read-only or cancelled session — can
-  still refuse the statement and log it.
+  still refuse the statement and log it. What it logs is a SCRAM-SHA-256
+  verifier: the script never sends the password (see
+  `docs/operations/deployment.md` "Prior password exposure" for runs made before
+  that).
 - Attaching a placeholder GUC to a routine (`CREATE FUNCTION ... SET app.x`),
   and `GRANT SET ON PARAMETER` to work around it.
 

@@ -29,8 +29,14 @@
 // partially-failed run can simply be re-executed.
 //
 // DDL (CREATE ROLE) cannot use bind parameters — `CREATE ROLE x PASSWORD $1` is
-// a syntax error in Postgres. Passwords are therefore quoted with pg's
-// escapeLiteral() (server-correct string-literal escaping) and interpolated.
+// a syntax error in Postgres. The statement therefore carries a SCRAM-SHA-256
+// VERIFIER computed here (scripts/lib/scram-verifier.mjs), quoted with pg's
+// escapeLiteral() — never the cleartext. A refused statement, `log_statement =
+// ddl|all` and pg_stat_statements (which RDS preloads) record the statement
+// text, so the cleartext the script used to send is what they kept; runs made
+// before this change are covered in docs/operations/deployment.md "Prior
+// password exposure". Passwords must be ASCII: the verifier is derived without
+// SASLprep, which the server and node-postgres both apply (identity for ASCII).
 // Role NAMES are a fixed hardcoded allowlist below (never user input), so they
 // are interpolated directly.
 //
@@ -44,10 +50,10 @@
 //
 // RDS: the master user is NOT a superuser. It may CREATE a role with any of the
 // attributes below, but `ALTER ROLE … NOSUPERUSER / NOBYPASSRLS / NOREPLICATION`
-// is refused (42501) even as a no-op — and a refused statement carrying
-// `PASSWORD '<cleartext>'` is written to the server log under the default
-// `log_min_error_statement`. convergeRole therefore checks, as a non-superuser,
-// everything that would be refused BEFORE it sends the password.
+// is refused (42501) even as a no-op — and a refused statement is written to the
+// server log, verifier included, under the default `log_min_error_statement`.
+// convergeRole therefore checks, as a non-superuser, everything that would be
+// refused BEFORE it sends the password statement.
 
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
@@ -61,6 +67,17 @@ import {
   isSequenceEntry,
   assertSubjectKind,
 } from "./lib/denied-privileges.mjs";
+import {
+  assertUsablePassword,
+  resolveIterations,
+  scramSha256Verifier,
+} from "./lib/scram-verifier.mjs";
+import {
+  STATEMENT_TEXT_SETTINGS,
+  TRANSACTION_START_SETTING,
+  statementScopedResetStatements,
+  statementScopedSetStatements,
+} from "./lib/statement-text-settings.mjs";
 // Re-exported so the integration test drives the SAME loader the script uses,
 // rather than a second import path that could diverge from it.
 export { loadDeniedPolicy };
@@ -296,6 +313,28 @@ export async function applyDeniedPrivileges(
 }
 
 /**
+ * Run one password statement with every record of statement text off, as a
+ * superuser, and back on straight after — so the verifier is not recorded and
+ * the GRANTs and REVOKEs around it still are. A non-superuser (the RDS master)
+ * may not set these; there the verifier can still be recorded, never the
+ * password. A failure aborts the caller's transaction, so nothing else runs
+ * with them off.
+ *
+ * @param {import("pg").Client} client
+ * @param {boolean} superuser
+ * @param {string} statement
+ */
+async function withStatementTextOff(client, superuser, statement) {
+  if (!superuser) {
+    await client.query(statement);
+    return;
+  }
+  for (const s of statementScopedSetStatements()) await client.query(s);
+  await client.query(statement);
+  for (const s of statementScopedResetStatements()) await client.query(s);
+}
+
+/**
  * Converge one role to the intended attributes + password, stripping any
  * inherited membership. Exported so the integration test can exercise the exact
  * production convergence logic against throwaway probe roles instead of the
@@ -303,16 +342,21 @@ export async function applyDeniedPrivileges(
  *
  * @param {import("pg").Client} client migration connection: a superuser, or the RDS master
  * @param {string} name role name (caller-controlled allowlist, not user input)
- * @param {string} password plaintext password to install
+ * @param {string} password plaintext password; only its verifier is sent
  */
 export async function convergeRole(client, name, password) {
   const { rowCount } = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [name]);
-  // escapeLiteral wraps + escapes for the server's string-literal syntax.
-  const pw = client.escapeLiteral(password);
+  // current_setting(…, true) is NULL, not an error, before PostgreSQL 16 — an
+  // error here would abort the caller's transaction.
+  const iterationsSetting = await client.query("SELECT current_setting('scram_iterations', true) AS i");
+  const verifier = scramSha256Verifier(password, {
+    iterations: resolveIterations(iterationsSetting.rows[0].i),
+  });
+  const pw = client.escapeLiteral(verifier);
   const superuser = await currentUserIsSuperuser(client);
   if (rowCount === 0) {
     if (!superuser) await assertCallerCanManageRoles(client);
-    await client.query(`CREATE ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
+    await withStatementTextOff(client, superuser, `CREATE ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
     console.log(`created role ${name}`);
   } else if (superuser) {
     // ALWAYS converge an existing role. It may carry the WRONG password (the
@@ -321,13 +365,13 @@ export async function convergeRole(client, name, password) {
     // silently leaves a privilege-escalated role in place and an unusable
     // password. ALTER ROLE is the convergence point; it is idempotent.
     console.log(`role ${name} exists — converging attributes + password`);
-    await client.query(`ALTER ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
+    await withStatementTextOff(client, superuser, `ALTER ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
   } else {
     // A non-superuser (the RDS master) cannot write SUPERUSER / BYPASSRLS /
     // REPLICATION, so it writes what it can and those three become checks.
     console.log(`role ${name} exists — converging LOGIN/CREATEDB/CREATEROLE + password`);
     await assertConvergeableWithoutSuperuser(client, name);
-    await client.query(`ALTER ROLE ${name} WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD ${pw}`);
+    await withStatementTextOff(client, superuser, `ALTER ROLE ${name} WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD ${pw}`);
   }
 
   // Role MEMBERSHIP is not covered by ALTER ROLE's attribute list: an inherited
@@ -555,6 +599,13 @@ export async function applyPrivilegeSequence(client, denied) {
  * @param {object[]} denied
  */
 export async function runBootstrap(client, roles, denied) {
+  // As a superuser, transaction sampling is off for this one-shot session: it
+  // is decided when a transaction starts, so it cannot be scoped to a statement
+  // like the rest (see withStatementTextOff). The RDS master may not set it.
+  if (await currentUserIsSuperuser(client)) {
+    const [, value] = STATEMENT_TEXT_SETTINGS.find(([name]) => name === TRANSACTION_START_SETTING);
+    await client.query(`SET ${TRANSACTION_START_SETTING} = ${value}`);
+  }
   await inTransaction(client, async () => {
     await convergeRolesInTx(client, roles);
     await applyPrivilegeSequence(client, denied);
@@ -587,6 +638,15 @@ async function main() {
     for (const r of ROLES) {
       if (!process.env[r.pwEnv]) {
         console.error(`ERROR: ${r.pwEnv} is required (password for ${r.name}).`);
+        process.exit(1);
+      }
+      // Every password is checked before the first connection, so a bad value
+      // in the last variable cannot leave the earlier roles converged. The
+      // message names the variable and the reason, never the value.
+      try {
+        assertUsablePassword(process.env[r.pwEnv]);
+      } catch (e) {
+        console.error(`ERROR: ${r.pwEnv}: ${e.message}.`);
         process.exit(1);
       }
     }

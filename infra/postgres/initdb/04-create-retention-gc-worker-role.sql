@@ -12,17 +12,41 @@
 -- Splitting keeps this role's creation independent of that pre-existing
 -- bootstrap-time error.
 
+-- Before any statement that carries a password, so the cleartext reaches no
+-- record of statement text: the server log (logged, refused, timed, sampled or
+-- as a parse tree), pg_stat_statements, and psql's own `LINE n:` error excerpt on
+-- the entrypoint's stderr. The list is scripts/lib/statement-text-settings.mjs
+-- (a test pins these lines to it). initdb runs as the bootstrap superuser, which
+-- may set all of them for its session.
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+SET log_min_duration_sample = -1;
+SET log_transaction_sample_rate = 0;
+SET debug_print_parse = off;
+SET debug_print_rewritten = off;
+SET debug_print_plan = off;
+SET pg_stat_statements.track_utility = off;
+\set VERBOSITY terse
+
 \getenv passwd_retention_gc_worker_password PASSWD_RETENTION_GC_WORKER_PASSWORD
 
 SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_retention_gc_worker')
   THEN 'true' ELSE 'false' END AS should_create_retention_gc_worker \gset
 
+-- Defined but empty (a launcher passing VAR= ) counts as unset: CREATE ROLE …
+-- PASSWORD '' would make a LOGIN role with no password. Tested by the shell
+-- (psql backticks), so the value is never sent to the server to compare.
+\set has_passwd_retention_gc_worker_password `[ -n "$PASSWD_RETENTION_GC_WORKER_PASSWORD" ] && echo true || echo false`
+
 \if :should_create_retention_gc_worker
-  \if :{?passwd_retention_gc_worker_password}
+  \if :has_passwd_retention_gc_worker_password
     CREATE ROLE passwd_retention_gc_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_retention_gc_worker_password';
   \else
-    -- Fallback for local dev when PASSWD_RETENTION_GC_WORKER_PASSWORD is not set
-    CREATE ROLE passwd_retention_gc_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_retention_gc_pass';
+    -- No published fallback password (docker-compose.yml requires PASSWD_RETENTION_GC_WORKER_PASSWORD, so
+    -- this branch is reached only by another launcher of this directory).
+    \warn 'PASSWD_RETENTION_GC_WORKER_PASSWORD is not set — creating passwd_retention_gc_worker NOLOGIN. Set it and rerun initdb.'
+    CREATE ROLE passwd_retention_gc_worker WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   \endif
 \endif
 

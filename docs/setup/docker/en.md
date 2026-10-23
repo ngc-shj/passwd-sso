@@ -128,6 +128,7 @@ Set the following values:
 | `PASSWD_APP_PASSWORD` | Password for the `passwd_app` NOSUPERUSER DB role (Next.js runtime). Used by `docker-compose` for `DATABASE_URL` AND forwarded to `initdb` for role creation. Container fails to start if unset. | `openssl rand -hex 24` |
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | Password for the `passwd_outbox_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `OUTBOX_WORKER_DATABASE_URL`. Required when running the audit-outbox-worker. Use `scripts/set-outbox-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
 | `PASSWD_RETENTION_GC_WORKER_PASSWORD` | Password for the `passwd_retention_gc_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `RETENTION_GC_DATABASE_URL`. Required when running the retention-gc-worker. Use `scripts/set-retention-gc-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
+| `PASSWD_ANCHOR_PUBLISHER_PASSWORD` | Password for the `passwd_anchor_publisher` DB role (set during `initdb`; unset, the role is created `NOLOGIN`). Must match `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`. Use `scripts/set-audit-anchor-publisher-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
 
 > **Upgrading from a pre-2026-05-16 deployment**: `docker-compose.yml` and
 > `docker-compose.override.yml` previously fell back to the public default
@@ -147,10 +148,18 @@ Set the following values:
 >    PASSWD_RETENTION_GC_WORKER_PASSWORD=passwd_dcr_pass
 >    ```
 > 2. **Rotate to new passwords** (recommended): generate fresh values with
->    `openssl rand -hex 24`, write them to `.env`, then `ALTER ROLE` each
->    role to match. For the worker roles use the dedicated rotation scripts
->    `scripts/set-outbox-worker-password.sh` and
->    `scripts/set-retention-gc-worker-password.sh`.
+>    `openssl rand -hex 24`, write them to `.env`, then set each role to
+>    match. For the worker roles use the dedicated rotation scripts
+>    `scripts/set-outbox-worker-password.sh`,
+>    `scripts/set-retention-gc-worker-password.sh` and
+>    `scripts/set-audit-anchor-publisher-password.sh`, which send a verifier,
+>    never the password. For `passwd_user` and `passwd_app`, use psql's
+>    `\password <role>` in an interactive session after
+>    `SET password_encryption = 'scram-sha-256';` and a `SET … ;` for each setting
+>    in `scripts/lib/statement-text-settings.mjs` (as `docs/operations/deployment.md`
+>    spells out for `passwd_app`)
+>    — not `ALTER ROLE … PASSWORD '<cleartext>'`, which the server log and
+>    `pg_stat_statements` would record.
 >
 | `BLOB_BACKEND` | Attachment storage backend | `db`, `s3`, `azure`, or `gcs` |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=s3` | e.g., `ap-northeast-1`, bucket name |

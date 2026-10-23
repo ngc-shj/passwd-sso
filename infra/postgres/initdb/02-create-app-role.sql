@@ -5,18 +5,42 @@
 -- Password is read from PASSWD_APP_PASSWORD env var (set in docker-compose.yml).
 -- \getenv sets a psql client-side variable (NOT a GUC), expanded by :'varname'.
 
+-- Before any statement that carries a password, so the cleartext reaches no
+-- record of statement text: the server log (logged, refused, timed, sampled or
+-- as a parse tree), pg_stat_statements, and psql's own `LINE n:` error excerpt on
+-- the entrypoint's stderr. The list is scripts/lib/statement-text-settings.mjs
+-- (a test pins these lines to it). initdb runs as the bootstrap superuser, which
+-- may set all of them for its session.
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+SET log_min_duration_sample = -1;
+SET log_transaction_sample_rate = 0;
+SET debug_print_parse = off;
+SET debug_print_rewritten = off;
+SET debug_print_plan = off;
+SET pg_stat_statements.track_utility = off;
+\set VERBOSITY terse
+
 \getenv passwd_app_password PASSWD_APP_PASSWORD
 
 -- Guard: only create if role doesn't already exist
 SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_app')
   THEN 'true' ELSE 'false' END AS should_create \gset
 
+-- Defined but empty (a launcher passing VAR= ) counts as unset: CREATE ROLE …
+-- PASSWORD '' would make a LOGIN role with no password. Tested by the shell
+-- (psql backticks), so the value is never sent to the server to compare.
+\set has_passwd_app_password `[ -n "$PASSWD_APP_PASSWORD" ] && echo true || echo false`
+
 \if :should_create
-  \if :{?passwd_app_password}
+  \if :has_passwd_app_password
     CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_app_password';
   \else
-    -- Fallback for local dev when PASSWD_APP_PASSWORD is not set
-    CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_app_pass';
+    -- No published fallback password (docker-compose.yml requires PASSWD_APP_PASSWORD, so
+    -- this branch is reached only by another launcher of this directory).
+    \warn 'PASSWD_APP_PASSWORD is not set — creating passwd_app NOLOGIN. Set it and rerun initdb.'
+    CREATE ROLE passwd_app WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   \endif
 \endif
 
@@ -53,12 +77,19 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO pa
 SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_outbox_worker')
   THEN 'true' ELSE 'false' END AS should_create_worker \gset
 
+-- Defined but empty (a launcher passing VAR= ) counts as unset: CREATE ROLE …
+-- PASSWORD '' would make a LOGIN role with no password. Tested by the shell
+-- (psql backticks), so the value is never sent to the server to compare.
+\set has_passwd_outbox_worker_password `[ -n "$PASSWD_OUTBOX_WORKER_PASSWORD" ] && echo true || echo false`
+
 \if :should_create_worker
-  \if :{?passwd_outbox_worker_password}
+  \if :has_passwd_outbox_worker_password
     CREATE ROLE passwd_outbox_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_outbox_worker_password';
   \else
-    -- Fallback for local dev when PASSWD_OUTBOX_WORKER_PASSWORD is not set
-    CREATE ROLE passwd_outbox_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_outbox_pass';
+    -- No published fallback password (docker-compose.yml requires PASSWD_OUTBOX_WORKER_PASSWORD, so
+    -- this branch is reached only by another launcher of this directory).
+    \warn 'PASSWD_OUTBOX_WORKER_PASSWORD is not set — creating passwd_outbox_worker NOLOGIN. Set it and rerun initdb.'
+    CREATE ROLE passwd_outbox_worker WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   \endif
 \endif
 
@@ -97,12 +128,19 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_anchor_publisher')
   THEN 'true' ELSE 'false' END AS should_create_anchor_publisher \gset
 
+-- docker-compose.yml forwards the variable as ${…:-}, so an unset one arrives as
+-- an empty string, which \getenv still defines: test for a non-empty value. Tested
+-- by the shell (psql backticks), so the value is never sent to the server.
+\set has_passwd_anchor_publisher_password `[ -n "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" ] && echo true || echo false`
+
 \if :should_create_anchor_publisher
-  \if :{?passwd_anchor_publisher_password}
+  \if :has_passwd_anchor_publisher_password
     CREATE ROLE passwd_anchor_publisher WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_anchor_publisher_password';
   \else
-    -- Fallback for local dev when PASSWD_ANCHOR_PUBLISHER_PASSWORD is not set
-    CREATE ROLE passwd_anchor_publisher WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_anchor_publisher_pass';
+    -- No published fallback password: a LOGIN role with a password in this
+    -- repository would be one any process on the network could use.
+    \warn 'PASSWD_ANCHOR_PUBLISHER_PASSWORD is not set — creating passwd_anchor_publisher NOLOGIN. Set it and rerun initdb, or see docs/operations/deployment.md.'
+    CREATE ROLE passwd_anchor_publisher WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   \endif
 \endif
 
