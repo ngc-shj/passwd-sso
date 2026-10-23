@@ -1,7 +1,7 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 5 — after plan-review rounds 1–4. Rounds 3–4 showed that hardening the publication
+Revision 6 — after plan-review rounds 1–5. Rounds 3–4 showed that hardening the publication
 protocol itself (published objects as the source of truth, key rotation, a database-write
 adversary, multiple destinations) is a design project of its own; by user decision it moves to
 a follow-up issue (SC5) and this plan keeps today's protocol — the database pointer and an
@@ -72,12 +72,16 @@ verifier.
   from `MAX(last_published_at) >= boundary`, so an upgraded install does not republish today. A
   publish writes the marker with the manifest pointer (Prisma `upsert`; the role holds
   INSERT/SELECT/UPDATE on `system_settings`).
-- Crash or commit failure after a successful upload: the transaction rolls back, the next run
-  rebuilds and re-PUTs the same key; versioning keeps the earlier version, and the latest
-  version is the manifest whose pointer committed, so the chain stays consistent. The
-  verification doc says to read the latest version and that earlier versions of a key are
-  benign retries.
-- A failed run pauses at most until the next boundary.
+- Crash or commit failure after a successful upload (or an upload aborted after S3 stored it):
+  the transaction rolls back and the scheduler retries the same boundary with a bounded backoff
+  (every 15 min until 30 min before the next boundary) — the marker keeps a repeat idempotent,
+  so the last PUT of the day is the committed version. Versioning keeps the earlier one. A task
+  down for the rest of the day leaves an uncommitted latest version that the next manifest does
+  not reference; the next publish reports it as `MISSING_PRIOR_CADENCE_PUBLICATION`.
+- Which failures persist a pause: upload failures only, as today; a pause lasts at most until
+  the next boundary, and the pause filter compares against `max(wall clock, boundary)` so a
+  timer firing early does not see the next day as paused. A post-upload commit failure writes
+  no pause.
 - Budget: lock wait 10 s, S3 request/connection timeouts and an abort signal bounding the
   upload as a whole at 60 s, the publish transaction 90 s; `stopTimeout` 120 s (the Fargate
   maximum).
@@ -85,8 +89,8 @@ verifier.
   `desired_count = min(1, var.worker_desired_count)`.
 - First publish on a fresh install with chain-enabled tenants reports
   `MISSING_PRIOR_CADENCE_PUBLICATION` once; with none it returns `skipped_no_tenants` daily.
-- The publisher keeps trusting `system_settings` (the pointer, the new marker) as it does today;
-  the database-write adversary is SC5's.
+- The publisher keeps trusting `system_settings` for the pointer, as today (SC5). The new marker
+  is a database-writable way to make runs skip, so no alarm treats a skip as healthy (C5).
 
 ### C3 — S3 destination
 - `@aws-sdk/client-s3`, a pinned dependency, imported statically by `s3-destination.ts` and
@@ -98,7 +102,9 @@ verifier.
   SSE-S3 (anchors are signed and tag-pseudonymised, and a deletable CMK could make locked
   evidence unreadable); a bucket policy, each statement pinned by a static test:
   `s3:PutObject` and `s3:PutObjectRetention` denied to any principal but the publisher's task
-  role; `s3:PutObject` denied when
+  role and one break-glass operator role named by a variable (the rotation advisory; retention
+  on versions that already exist) — the lock-mode, retention-cap and SSE statements apply to it
+  too, and its writes are CloudTrail data events; `s3:PutObject` denied when
   `StringNotEquals s3:object-lock-mode = COMPLIANCE` (this also denies a PUT without the header,
   so the upload must keep sending it — stated in the code); `s3:PutObject` and
   `s3:PutObjectRetention` denied when `NumericGreaterThan
@@ -144,10 +150,12 @@ verifier.
 - `enable_s3_audit_anchors` is validated true (the app already refuses to boot without a
   destination; the GitHub destination has no wiring — SC2).
 - Monitoring: publisher down alarm sized past a deploy's zero-task gap; a healthy-cadence
-  absence alarm (~25 h) on a `_logType` the publisher emits for `published`,
-  `skipped_already_published` and `skipped_no_tenants` (the line carrying the chain-enabled
-  tenant count) — not for paused, failed or `lock_held`; log metric filters on the publisher's failure lines, each given a `_logType`
-  (`cadence_error` lacks one) and including `ANCHOR_KEY_EXISTS`; verify-worker heartbeat
+  absence alarm (~25 h) on a `_logType` the publisher emits only for `published` — each
+  healthy boundary yields exactly one — and for `skipped_no_tenants` on a deployment that has
+  never had a chain-enabled tenant; an alarm when the chain-enabled tenant count (carried in
+  every cadence line) falls from positive to 0; `skipped_already_published`, paused, failed and
+  `lock_held` never count; log metric filters on the publisher's failure lines, each given a `_logType`
+  (`cadence_error` lacks one); verify-worker heartbeat
   filters (`erroredTenantCount > 0`, `failedTenantCount > 0`, absence); both log groups in
   `rls_bypass_report_log_groups`; an EventBridge rule on CloudTrail's ECS `ExecuteCommand`.
 - ECS Exec logging `NONE`, explicit: the bootstrap's operator shell holds role passwords; the
@@ -169,8 +177,11 @@ verifier.
 `VERIFIER_PEPPER_KEY`, `SMTP_USER`, `SMTP_PASS`, `DEPLOYMENT_ID`, and the ja table's missing
 `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`), `docs/operations/deployment.md` (DEPLOYMENT_ID, bucket
 procedure, first-publish report), `docs/operations/alerts.md`,
-`docs/security/audit-anchor-verification.md` (read a key's latest version; earlier versions of
-a key are retries after a lost commit; the chain is followed through `previousManifest`), `CLAUDE.md` (`worker:*`). The verify worker's `passwd_app` surplus stated fully
+`docs/security/audit-anchor-verification.md` (list every version of a key, not only the
+latest; a legitimate retry is created before the key's next boundary — a version created later
+is a tamper signal to report, never one to prefer; the chain is followed through
+`previousManifest`; the residual — a compromised publisher forging within the same day — is
+SC5's), `CLAUDE.md` (`worker:*`). The verify worker's `passwd_app` surplus stated fully
 (reads every table, not only unused writes).
 
 ## Testing strategy
@@ -187,20 +198,30 @@ a key are retries after a lost commit; the chain is followed through `previousMa
   key-provider `validateKeys` with the app task's env (publisher flag on, no anchor keys)
   succeeds, for both providers.
 - C2: the scheduler with an injected clock — boot run first; a timer 1 ms early still publishes
-  its boundary; wall-clock re-arm; SIGTERM waits for the in-flight run. Integration, as the
-  publisher role (`beforeAll` fails unless the only chain-enabled tenants are the test's; the
-  marker, pointer and deployment-id rows snapshotted and restored; far-future boundaries):
-  two runs for one boundary publish once; boot catch-up; the absent-marker derivation; a
-  failure pauses only to the next boundary; injected transaction/upload bounds fail within the
-  test budget; a commit forced to fail after the upload (a `PublisherConfig` hook) then a rerun
-  → on MinIO the key has two versions and the latest is the committed manifest, and the next
-  boundary's `previousManifest.sha256` is its; overlap — A blocked mid-upload inside its
-  transaction holds the lock, B is observed waiting in `pg_locks` (matched by A's backend pid),
-  A released within B's injected wait → exactly `["published", "skipped_already_published"]`;
-  `lock_held` with a second session holding the advisory lock (no failure emit, no pause). Red
-  proofs: no marker read → two `published`; no lock → two `published`; a top-level `code` read
-  instead of `pgErrorCode` (the Prisma adapter nests 55P03) → `failed`. Existing publisher
-  tests add the marker to cleanup and make their fake key-aware.
+  its boundary, including the day after a failure (the pause compared against the boundary);
+  wall-clock re-arm; the same-boundary retry after a failure and its stop before the next
+  boundary; SIGTERM waits for the in-flight run. Integration, as the publisher role
+  (`beforeAll` fails unless the only chain-enabled tenants are the test's; the marker, pointer
+  and deployment-id rows snapshotted and restored; far-future boundaries):
+  - two runs for one boundary publish once;
+  - the absent-marker derivation: `last_published_at` seeded at or after the boundary with no
+    marker → `skipped_already_published`; seeded below → publishes (red: derivation removed);
+  - lost commit: a `PublisherConfig` hook fails the commit after the upload; a test tenant's
+    `chain_seq`/`prev_hash` is advanced; the retry for the same boundary publishes → on MinIO two
+    versions with different sha256, the latest equal to the committed pointer's, the earlier not;
+    the next boundary's `previousManifest.sha256` is the latest's; no pause written (red: write
+    the pointer from the first attempt's sha);
+  - a failure pauses only to the next boundary; injected transaction/upload bounds fail within
+    the test budget;
+  - overlap: A blocked mid-upload inside its transaction; its backend pid recorded by a test
+    hook (`pg_backend_pid()` in the transaction); B observed waiting in `pg_locks` for that pid
+    within a deadline; A released within B's injected `lock_timeout` → exactly
+    `["published", "skipped_already_published"]` (red: no lock → the wait is never observed, the
+    deadline fails the case; no marker read → two `published`);
+  - `lock_held`: a second session holds `pg_advisory_lock` (released in `finally`), injected
+    `lock_timeout` → `lock_held`, no failure emit, no pause (red: a top-level `code` read instead
+    of `pgErrorCode` — the Prisma adapter nests 55P03 under `P2010` → `failed`).
+  Existing publisher tests add the marker to cleanup and make their fake key-aware.
 - C3: integration against MinIO (the CI step; fail loudly when absent, never skip), probed
   first on the CI digest for retention support (E2): bucket with Object
   Lock; `S3Destination.upload` through its options; `GetObjectRetention` COMPLIANCE at the
@@ -220,8 +241,9 @@ a key are retries after a lost commit; the chain is followed through `previousMa
   services, failures at the fifth and sixth, and every output name the stubbed `terraform` was
   asked for present in `outputs.tf`; `pool-factory.metric-filter.test.ts` with the new log
   groups; a metric-filter test that each new pattern matches a line the code really emits on
-  its path and not the others (the healthy-cadence filter matches `published`,
-  `skipped_already_published` and `skipped_no_tenants`, not `failed`, paused or `lock_held`); a parser test that every `valueFrom` key is in both README
+  its path and not the others (the healthy-cadence filter matches `published` and the
+  never-enabled `skipped_no_tenants`, not `skipped_already_published`, `failed`, paused or
+  `lock_held`; the falls-to-zero alarm on a count going from 1 to 0); a parser test that every `valueFrom` key is in both README
   tables and that no non-publisher task names the signing key or tag secret.
 - C6: every documented command run once and recorded; the manual-test file lists each E1
   deferral (incl. the trail prerequisite: an exec session produces the SNS notification) with
@@ -237,8 +259,10 @@ a key are retries after a lost commit; the chain is followed through `previousMa
 - SC5 — publication protocol hardening (issue filed with the PR, carrying rounds 3–4 of this
   plan's review): published objects as the source of truth, `If-None-Match` with adoption of a
   verified earlier upload, a pinned kid→key map across rotation and `DEPLOYMENT_ID` changes,
-  fail-closed on an unverifiable pointer, secondary destinations, and the database-write
-  adversary (today the publisher trusts `system_settings`).
+  binding the JWS header `kid` to the key name's in `verify()`, fail-closed on an unverifiable
+  pointer, secondary destinations, a GitHub-only deployment's trusted pointer (and read-back via
+  release assets), the verifier's one-version-per-key rule once overwrites are prevented, and
+  the database-write adversary (today the publisher trusts `system_settings`).
 - `worker-policy-manifest.json`: the publisher's single-owner claim corrected to the mechanism;
   symbols cited, not line numbers; the boundary write is a Prisma `upsert` the sweep-bounds
   check accepts.
@@ -251,8 +275,8 @@ a key are retries after a lost commit; the chain is followed through `previousMa
   and reports the missing prior cadence once; the verifier's heartbeat appears hourly.
 - Deploy across a boundary: the old publisher drains and stops before the new one starts; the
   new one's boot run publishes the boundary if it is unpublished, otherwise does nothing.
-- A commit lost after an upload: the next run re-PUTs the key; the bucket keeps both versions,
-  the latest is the one the chain points to.
+- A commit lost after an upload: the scheduler retries the boundary within the day; the bucket
+  keeps both versions, the latest is the one the chain points to.
 - An S3 hiccup on a boot run: one failure, paused only until the next boundary.
 
 ## Go/No-Go Gate

@@ -126,3 +126,25 @@ the redesign (F-Q1..Q4, Q6..Q8, S-R4-1/R4-2/R4-4, T-D-2..D-5) go to SC5.
 Functionality: R38/R56 Q1, Q3; R42 Q1, Q5; R49 Q2; R5/R54 Q4; R41 Q6; R53 Q7; R29 Q8.
 Security: R43/R49/R55 R4-1; R38 R4-2; R14/R43 R4-3; R29 R4-4. Testing: RT7 D-1..D-3; R38 D-4;
 RT11 D-5; RT4 D-6; R29 D-7.
+
+---
+
+# Round 5
+Date: 2026-10-24
+
+Review of revision 5 (today's protocol). Applied in revision 6:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-R5-1 | Functionality | Major | Fixed — same-boundary retry with bounded backoff within the day; the remaining orphan case documented and reported |
+| F-R5-2 | Functionality | Major | Fixed — pause compared against `max(wall clock, boundary)` |
+| F-R5-3 / S-R5-3 | Functionality, Security | Major / Minor | Fixed — one break-glass operator role in the principal exception, still under the lock/retention/SSE statements |
+| S-R5-1 / F-R5-4 | Security, Functionality | Major / Minor | Fixed — healthy-cadence counts only `published` (and never-enabled `skipped_no_tenants`); falls-to-zero alarm restored |
+| S-R5-2 | Security | Major | Fixed — verification doc lists every version; a version created after the next boundary is a tamper signal |
+| T-E-1 | Testing | Major | Fixed — chain advanced between attempts; latest sha = pointer ≠ earlier; red proof |
+| F-R5-5, S-R5-4, T-E-2..E-5 | — | Minor | Fixed in revision 6 |
+
+## Recurring Issue Check (round-5 delta)
+Functionality: R49/R29 R5-1; R38/R48 R5-2; R41/R31 R5-3; R41/R50 R5-4; R18/R29 R5-5. Security:
+R43/R49/R55 R5-1; R49 R5-2; R14/R31 R5-3; R29 R5-4. Testing: RT7 E-1, E-4; RT11 E-5; RT4 E-3;
+R49 E-2.
