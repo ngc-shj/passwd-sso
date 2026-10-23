@@ -37,3 +37,28 @@ Per-expert statuses are in the sub-agent outputs; summarised:
   S3, S5; RS3 OK; RS5 S2; RS1/RS2 N/A; RS4/RS6 OK.
 - Testing: R3 T4; R16/R50 T1, T8; R19 T6; R29 T10, T11; R35 T1, T9; R42 T4, T9; RT1 T3; RT5 T5;
   RT7 T2, T4, T9, T10; RT8 T5, T7; RT10 T7, T2; RT2/RT6/RT11 OK.
+
+---
+
+# Round 2
+Date: 2026-10-23
+
+Round-1 fixes confirmed by their filing experts except where noted. New findings on revision 2,
+applied in revision 3:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-N1 | Functionality | Major | Fixed — regression from revision 2: unconditional SETs + ON_ERROR_STOP broke non-superuser admins (Azure/GCP docs); SETs now under `\if :su` |
+| F-N2 / S-N4 | Functionality, Security | Major / Minor | Fixed — compose passes `""` for an unset variable and `\getenv` defines it; `02` branches on a non-empty value |
+| F-N3 | Functionality | Major | Fixed — env-allowlist, `.env.example`, `init:env` for the new compose variable |
+| F-N4 / S-N3 | Functionality, Security | Major / Minor | Fixed — pgss check from the `postgres` database, by count; never `CREATE EXTENSION` in `passwd_sso`; reset privilege stated |
+| S-N1 | Security | Major | Fixed — upgrade note: rotate or `NOLOGIN` the anchor-publisher role on existing volumes |
+| S-N2 | Security | Major | Fixed — every documented `\password` preceded by `SET password_encryption = 'scram-sha-256'` and the logging SETs |
+| T-R2-T1, T2, T3 | Testing | Major | Fixed — fake psql answers the iteration query; exact-stdin assertion with ON_ERROR_STOP; node stub for the format guard and node-absent |
+| T-R2-T4, T5 | Testing | Major | Resolved by removal — the live save/restore of real roles is dropped (its failure paths overwrite shared credentials); the helper is proven against the server in C2 and the glue by exact-stdin cases; each script run once by hand and recorded |
+| S-N5, S-N6, S-N7, S-N8, F-N5, F-N6, A1, T-R2-T6..T10 | — | Minor | Fixed in revision 3 (`track_utility` placeholder SET checked on the dev DB) |
+
+## Recurring Issue Check (round-2 delta)
+Functionality: R3/R29 N6; R16/R41/R55 N2; R18 N3; R43/R52 N1; R49 N4. Security: R3 N2, N5;
+R14/R16 N1, N4; R29 N3, N4; R41 N4; R42 OK (member set recomputed); R49 N3, N5; R50 N3; RS3/RS5
+N6. Testing: R3 T1; R16/R50 T5; R42 T8; RT1 T6; RT7 T2, T3; RT10 T3, T10; RT11 T4.

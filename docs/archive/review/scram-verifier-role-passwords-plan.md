@@ -1,7 +1,7 @@
 # Plan: scram-verifier-role-passwords
 
 Issue: `#941`. Branch `feat/scram-verifier-role-passwords`, base `origin/main` 3383b3fcb.
-Revision 2 — after plan-review round 1 (`scram-verifier-role-passwords-review.md`). Split out of
+Revision 3 — after plan-review rounds 1–2 (`scram-verifier-role-passwords-review.md`). Split out of
 `aws-anchor-publisher-and-scram-verifier` (branch `feat/aws-anchor-publisher-and-scram-verifier`,
 commit 32f392d3a) after its round-1 review.
 
@@ -59,8 +59,12 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
   ASCII fast path), so the helper's raw-byte derivation matches; for non-ASCII it would not.
   Behaviour change: a non-ASCII `PASSWD_*_PASSWORD` that worked before is now refused; remedy is an
   ASCII value (`openssl rand -hex 32`), documented.
-- CLI: `node scripts/lib/scram-verifier.mjs --iterations <n>` reads the password from stdin
-  verbatim (no stripping) and prints the verifier; exit 1 with no output on refusal.
+- `resolveIterations` accepts the text `current_setting` returns: `^[0-9]+$` or empty/NULL (→
+  4096); anything else is refused.
+- CLI: `node scripts/lib/scram-verifier.mjs --iterations <server value>` resolves the value itself,
+  reads the password from stdin verbatim (no stripping) and prints the verifier; on refusal it
+  exits 1 and prints only the reason, never the value. The same holds for every refusal message in
+  C2 and C3.
 
 ### C2 — bootstrap-rds-roles sends verifiers
 - `main` validates every `PASSWD_*_PASSWORD` (non-empty, ASCII) before connecting.
@@ -78,16 +82,23 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
 - Not `\password`: psql's prompt reads `/dev/tty` when the process has a controlling terminal, so
   from an operator's shell the piped password would be ignored.
 - Each script: turns xtrace off before reading the password and never restores it; reads stdin
-  with `$(cat)` (strips trailing newlines, so `<<<` and `openssl rand` output work); refuses
-  empty, an interior LF or any CR, non-ASCII; reads `current_setting('scram_iterations', true)`
-  with one psql call; builds the verifier with `printf '%s' "$pw" | node
-  "$SCRIPT_DIR/lib/scram-verifier.mjs" --iterations "$n"`; checks it against
-  `^SCRAM-SHA-256\$[0-9]+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$`; sends on stdin with
-  `-v ON_ERROR_STOP=1`: `SET log_statement = 'none'; SET log_min_error_statement = 'panic'; ALTER
-  ROLE <role> PASSWORD '<verifier>';`. The scripts require a superuser URL, which may set both.
+  with `$(cat)` (strips trailing newlines); refuses empty, an interior LF or any CR, non-ASCII;
+  reads `current_setting('scram_iterations', true)` with one psql call; builds the verifier with
+  `printf '%s' "$pw" | node "$SCRIPT_DIR/lib/scram-verifier.mjs" --iterations "$n"`; checks it
+  against `^SCRAM-SHA-256\$[0-9]+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$`; sends on
+  stdin with `-v ON_ERROR_STOP=1`:
+  `SELECT rolsuper AS su FROM pg_roles WHERE rolname = current_user \gset`, then under `\if :su`
+  `SET log_statement = 'none'; SET log_min_error_statement = 'panic'; SET
+  pg_stat_statements.track_utility = off;`, then `ALTER ROLE <role> PASSWORD '<verifier>';`.
+  The SETs are superuser-only; the scripts are also documented for Azure/GCP admins, which are not
+  superusers, so the SETs are conditional and the residual for them (the verifier under
+  `log_statement = ddl|all` or on a refused statement) is stated in the header.
 - `node` missing → exit 1 naming the requirement. Role missing → exit ≠ 0, no OK line.
-- DRY_RUN computes the verifier (so it exercises the live path) and prints the statement with the
-  verifier redacted; `PRINT_ARGS_FILE` records the statement with the verifier.
+- DRY_RUN does not connect: it builds the verifier with iterations 4096 and prints the statement
+  with the verifier redacted; `PRINT_ARGS_FILE` (test-only) refuses an existing path and records
+  the statement with the verifier.
+- Header usage becomes `printf '%s' "$PASSWORD" | …` or `< <(…)` (a here-string can be a temp
+  file on bash < 5.1).
 
 ### C4 — initdb
 - Each file that creates a LOGIN role with a password (`01`, `02`, `04`; derived by
@@ -95,23 +106,41 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
   log_statement = 'none'`, `SET log_min_error_statement = 'panic'`, `SET
   log_min_duration_statement = -1`, and `\set VERBOSITY terse` (psql's client-side `LINE n:`
   excerpt goes to the container's stderr). The initdb runs as the bootstrap superuser.
-- `docker-compose.yml` forwards `PASSWD_ANCHOR_PUBLISHER_PASSWORD` to `db` without `:?` (existing
-  `.env` files lack it); `02`'s fallback becomes `NOLOGIN` with a `\warn`, as `01` does for
-  jackson. The CI workflow sets the variable, so CI keeps a LOGIN role.
+- Also `SET pg_stat_statements.track_utility = off` (a placeholder is accepted when the library
+  is not loaded).
+- `docker-compose.yml` forwards `PASSWD_ANCHOR_PUBLISHER_PASSWORD` to `db` as `${…:-}` (existing
+  `.env` files lack it, so not `:?`). Compose passes an empty string for an unset variable, which
+  `\getenv` defines, so `02` branches on a non-empty value (`SELECT :'v' <> '' … \gset`), not on
+  `:{?v}`; with no value the role is `NOLOGIN` with a `\warn`, as `01` does for jackson. CI does
+  not run initdb; its LOGIN comes from its own `ALTER ROLE` in `ci-integration.yml`.
+- The new compose variable goes through the env-docs contract: `scripts/env-allowlist.ts` entry
+  (consumers: compose, initdb, `set-audit-anchor-publisher-password.sh`), `npm run
+  generate:env-example`, the `init:env` prompt, `check:env-docs` green.
 
 ### C5 — docs
+- Every documented `\password` is preceded by `SET password_encryption = 'scram-sha-256'` (it
+  follows the server's setting, and an md5 hash is password-equivalent under md5 auth) and `SET
+  log_statement TO 'none'` / `log_min_error_statement TO 'panic'` (Jackson Step 2 included).
 - `deployment.md`: production `passwd_app` snippet creates the role without a password, then
   `\password passwd_app` interactively (a tty prompt is what is wanted there); the anchor-publisher
   snippet becomes `ALTER ROLE … WITH LOGIN` plus the host value piped to `docker compose exec -T db
-  psql … -c "SET log_statement TO 'none'" -c "\password passwd_anchor_publisher"` (`-T`: no tty, so
-  stdin is read — executed at plan time, see testing).
+  psql … -c "\password passwd_anchor_publisher"` (`-T`: no tty, so stdin is read — executed at plan
+  time); the "Existing dev volumes" paragraph says a fresh volume without the variable gets a
+  `NOLOGIN` role, and `audit-db-grants` expects LOGIN, so set it.
+- Upgrade note for every existing self-hosted volume: the anchor-publisher role was created LOGIN
+  with the published `passwd_anchor_publisher_pass`; rotate it with
+  `set-audit-anchor-publisher-password.sh`, or `ALTER ROLE passwd_anchor_publisher NOLOGIN` when the
+  publisher is not run. Check: a login attempt with that password must fail.
 - `docs/setup/docker/en.md`: the rotation prose names all three scripts and the `\password`
   procedure for roles without one.
 - "Prior password exposure" (`deployment.md`), `infra/terraform/README.md`, `docs/setup/aws/en.md`,
   bootstrap header: a refused statement now logs a verifier; earlier runs left cleartext in the log
-  and in `pg_stat_statements` — check with `SELECT query FROM pg_stat_statements WHERE query ILIKE
-  '%PASSWORD%'`, clear with `pg_stat_statements_reset()`, and rotate when snapshots exist; "logs
-  expired" alone is no longer sufficient.
+  and in `pg_stat_statements`. Check from the `postgres` database (never `CREATE EXTENSION` in
+  `passwd_sso`: its PUBLIC grants fail `audit-db-grants`), creating the extension there if absent,
+  with `SELECT count(*) FROM pg_stat_statements WHERE query ILIKE '%ROLE%PASSWORD%'` (a count, so
+  the cleartext is not printed to the terminal); clear with `pg_stat_statements_reset()` (needs
+  its EXECUTE grant; on RDS unverified, E1) and rotate when it cannot be cleared or snapshots exist;
+  "logs expired" alone is no longer sufficient.
 - What a verifier exposes (stated once, next to the Jackson note): not the password; enables an
   offline guess against ≥4096 PBKDF2 iterations of the password; with StoredKey and ServerKey an
   attacker who can pose as the server to a client that does not authenticate it (no `verify-full`,
@@ -119,6 +148,8 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
   uses `verify-full`; operator `psql` sessions and self-hosted non-TLS networks do not — rotate
   after a verifier leaks there.
 - The non-ASCII refusal (C1) in the bootstrap header and `deployment.md`.
+- `docs/setup/aws/en.md` names `bootstrap-rds-roles.mjs` as the rotation path on AWS (the image has
+  no psql); `docs/setup/{azure,gcp}/en.md` keep the scripts and state the non-superuser residual.
 
 ## Testing strategy
 
@@ -149,25 +180,38 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
   - non-ASCII: spawn the CLI as the existing unreachable-URL case does, with the bad value in the
     last `PASSWD_*` variable → exit 1 and the refusal, no connection error; all-ASCII against the
     same URL reaches the connection error.
-- C3, one test file parametrised over the three scripts (replacing the two per-script files):
-  - fake psql (PATH) records argv, stdin and env; the password is a sentinel; assert it is absent
-    from argv, env, stdout, stderr — including under `bash -x` — while stdin carries the verifier
-    (positive control: the verifier recomputed from the sentinel with its parsed salt).
-  - trailing LF accepted; interior LF, CR, empty, non-ASCII refused with the fake-psql log absent
-    (paired with an allow case where it is present).
-  - DRY_RUN prints no verifier; `PRINT_ARGS_FILE` holds one that recomputes from the input.
-  - `psql-safe.test.mjs`'s live-branch fake records stdin; its existing argv-URL assertion stays.
-- C3 live integration, one case per script: a probe role renamed per run is not possible (role
-  names are fixed), so each case runs the real script against the dev/CI DB on its real role inside
-  a save/restore of `rolpassword` (read before, `ALTER ROLE … PASSWORD '<saved verifier>'` after),
-  then logs in over scram with the new password (and fails with a wrong one). psql: host binary if
-  present, else a PATH shim forwarding to `docker compose exec -T db psql`; CI pins the host binary
-  (`expect` env, as `backup-db.test.mjs` Group B does) so it fails rather than skips.
-- C4: a unit test derives the file set (`PASSWORD` in `infra/postgres/initdb/*.sql`), asserts the
-  three `SET`s and `\set VERBOSITY terse` are top-level, before the first role statement, with no
-  `\c`, `RESET` or re-`SET` between; red-proven on fixtures. Plus a one-shot check recorded in the
-  deviation log: a throwaway `postgres:16-alpine -c log_statement=all` with this initdb directory
-  and a sentinel `PASSWD_APP_PASSWORD`; the container log has no sentinel (red without the SETs).
+- C3, one test file parametrised over the three scripts (replacing the two per-script files);
+  the fake psql (first on PATH) records argv, stdin and env per call and answers the
+  `current_setting` call with a value the case chooses:
+  - the ALTER call's stdin equals, exactly, the `\gset`/`\if` block with the three SETs followed by
+    `ALTER ROLE <role> PASSWORD '<v>'`, where `<v>` recomputes from the sentinel with its parsed
+    salt; its argv carries `-v ON_ERROR_STOP=1`. Red proofs: drop one SET; hard-code 4096.
+  - iterations: fake answers `10000` → `SCRAM-SHA-256$10000:`; empty → 4096; `1000` → 4096.
+  - the sentinel is absent from argv, env, stdout and stderr, including under `bash -x`.
+  - trailing LF: input `sentinel\n` → `<v>` recomputes from `sentinel`. Interior LF, CR, empty,
+    non-ASCII → exit ≠ 0 and no ALTER call (paired with the allow case that has one).
+  - a `node` stub printing `x';DROP ROLE y;--`, and one printing nothing → exit ≠ 0, no ALTER call,
+    no OK line; `node` absent from PATH → exit 1 naming it.
+  - DRY_RUN prints no verifier and makes no psql call; `PRINT_ARGS_FILE` holds a verifier that
+    recomputes from the input; an existing `PRINT_ARGS_FILE` path is refused.
+  - `psql-safe.test.mjs`'s fake answers `4096` to the iteration query and the case asserts two
+    calls for each set-* script, both with `-X` and the passfile.
+- C3 live: not automated. The scripts are glue around the helper (proven against the server in the
+  C2 cross-implementation and login cases) and psql (proven by the exact-stdin cases); a live case
+  would have to overwrite real roles' passwords on the shared DB. Each script is run once by hand
+  against the dev DB, with the role's password restored, and the run recorded in the deviation
+  log.
+- C4: a unit test derives the file set (`PASSWORD` in `infra/postgres/initdb/*.sql`) and pins it
+  (`01`, `02`, `04`); asserts the SETs and `\set VERBOSITY terse` are top-level statements (not in
+  a comment, not inside `\if`), before the first role statement, with no `\c`, `RESET` or re-`SET`
+  between; red-proven on fixtures (missing, after, inside `\if`, commented out). Plus a one-shot
+  check recorded in the deviation log: a throwaway `postgres:16-alpine -c log_statement=all` with
+  this initdb directory, a sentinel `PASSWD_APP_PASSWORD`, `PASSWD_ANCHOR_PUBLISHER_PASSWORD` set
+  empty, and a fixture file that sends a deliberately refused role statement with a sentinel after
+  the SETs: neither the server log nor the entrypoint's stderr carries a sentinel (red without the
+  SETs), and `passwd_anchor_publisher` is `NOLOGIN`.
+- C2 integration isolation: `SET scram_iterations` cases run inside a transaction with `SET
+  LOCAL`. `resolveIterations` unit cases add `"100000"` (accepted) and `"10000"` as text.
 - C5: every documented command is run once and recorded.
 
 ## Considerations & constraints
