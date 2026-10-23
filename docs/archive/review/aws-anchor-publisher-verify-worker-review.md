@@ -72,3 +72,32 @@ publisher holds INSERT/SELECT/UPDATE on `system_settings` (manifest lines checke
 ## Recurring Issue Check (round-2 delta)
 Functionality: R3/R42 N1; R38/R56 N2; R41/R50 N3; R49 N4. Security: R3/R42 N1, N5; R41/R49 N2;
 R29 N3. Testing: R16/R41/R50 N-1; R14/R49 N-2; RT4 N-5; RT7/RT9 N-4; RT8/RT10 N-2; RT11 N-3, N-7.
+
+---
+
+# Round 3
+Date: 2026-10-24
+
+Round-2 findings resolved (F-N1..N6, S-N1..N5, T-N-1..N-8 except T-N-5, continued below). Round 3
+found the revision-3 two-phase design defective in ways that patches would compound, so C2 was
+redesigned (revision 4) instead of patched:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| T-R-1 | Testing | Critical | Resolved by redesign — a session-level advisory lock spans the whole run, so overlap is observable (`pg_locks`) and the red proofs can fail |
+| F-P1 | Functionality | Major | Resolved by redesign — no pending record; a forward walk adopts verified objects, so an unrecorded upload is settled before the next boundary chains |
+| F-P2 | Functionality | Major | Resolved by redesign — one lock for the whole run |
+| S-R3-1 | Security | Major | Resolved by redesign — no decision rests on a `system_settings` value alone; the pointer is trusted only after its object verifies |
+| T-R-2 | Testing | Major | Fixed — crash and conflict cases run on `S3Destination`/MinIO and the create-only filesystem destination |
+| T-R-3 | Testing | Major | Resolved by redesign — no pending reuse to distinguish |
+| T-R-4 | Testing | Major | Fixed — `lock_held` by an external session holding the lock; nested SQLSTATE via `pgErrorCode` red-proven |
+| F-P3 | Functionality | Minor | Fixed — 409 retried within the bound; adopted objects checked with `GetObjectRetention` |
+| F-P4 | Functionality | Minor | Resolved by redesign — no pending record, no in-band empty sentinel |
+| F-P5 | Functionality | Minor | Fixed — `already_published` counts as healthy only when decided from a verified object |
+| F-P6 | Functionality | Minor | Fixed — concrete budget under Fargate's 120 s `stopTimeout` |
+| S-R3-2 | Security | Minor | Fixed — SC4 reason corrected |
+| T-R-5 | Testing | Minor | Fixed — the crash case asserts B_{n+1}'s `previousManifest.sha256` |
+
+## Recurring Issue Check (round-3 delta)
+Functionality: R38/R56 P1; R5/R48 P2; R49 P3; R55 P4; R41/R50 P5. Security: R43/R49/R55 R3-1;
+R29 R3-2. Testing: RT4/RT7 R-1; RT7/RT1/RT5 R-2; RT7 R-3, R-4.

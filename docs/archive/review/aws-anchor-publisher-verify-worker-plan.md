@@ -1,7 +1,10 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 3 — after plan-review rounds 1–2 (`aws-anchor-publisher-verify-worker-review.md`). It
+Revision 4 — after plan-review rounds 1–3. Round 3 showed the two-phase design of revision 3
+kept its decision state in `system_settings` (writable by `passwd_app`) and admitted cross-
+boundary and unlocked-phase forks; C2 is redesigned around the published objects as the source
+of truth. (`aws-anchor-publisher-verify-worker-review.md`). It
 replaces `aws-anchor-publisher-and-scram-verifier-plan.md`, whose `#941` half shipped in `#945`.
 
 User decisions: the audit-chain verify worker is included and connects as `passwd_app`;
@@ -61,26 +64,37 @@ verifier.
   it awaits one run for the current boundary, then arms a `setTimeout` to the next boundary
   computed from the wall clock, and re-arms the same way after each run (no `setInterval`).
   SIGTERM stops arming and waits for an in-flight run before disconnecting.
-- Two phases, the upload between them and outside any transaction:
-  - A (one transaction, `lock_timeout` set, SQLSTATE 55P03 → `lock_held`, not a failure):
-    `pg_advisory_xact_lock`; the idempotency read of
-    `system_settings.audit_anchor_last_published_boundary` — equal → `skipped_already_published`
-    (absent: derived from `MAX(last_published_at) >= boundary`, so an upgraded install does not
-    republish today) — before the missing-prior safety net; a `pending` record for this
-    boundary is reused if present, otherwise the manifest is built, signed and stored as
-    `audit_anchor_pending_publication` (boundary, key, sha256, the artifact bytes).
-  - Upload: bounded as a whole (attempts and backoff included) by an abort signal.
-  - On 412 or 409: a read of the key (the role's only GET, scoped to the prefix); identical
-    bytes to the pending record → our own earlier upload, continue; different → failure
-    `ANCHOR_KEY_EXISTS`, alerted.
-  - B (one transaction): marker, manifest pointer and `lastPublishedAt` written, pending
-    cleared by an `upsert` to an empty value — the role holds INSERT/SELECT/UPDATE on
-    `system_settings` (manifest-checked), not DELETE, and gains none.
-  A crash between phases leaves the pending record; the next run (boot or boundary) re-uploads
-  the same bytes, meets 412, finds them identical and completes B — the manifest chain cannot
-  fork.
+- The published objects are the source of truth, not database state. The run holds a
+  session-level advisory lock on a dedicated connection for its whole duration (acquired with a
+  bounded wait; not acquired → `lock_held`, not a failure), so two runs never interleave.
+- The database keeps one pointer, `audit_anchor_previous_manifest`, extended with the boundary
+  it anchors (an existing pointer without one takes it from its key's date). It is trusted only
+  after its object is read back from the primary destination and verified (signature with the
+  publisher's own key, `anchoredAt`, deployment id, and its sha256) — `system_settings` is
+  writable by `passwd_app`, so a database value alone never decides to skip or what to upload.
+- Under the lock, for the boundary to publish:
+  1. Walk forward from the pointer's boundary to this one (bounded, at most a year of
+     boundaries): an object at a boundary's key that verifies and whose `previousManifest` is
+     the current pointer is adopted — the pointer advances to it. This settles an upload whose
+     database write never happened (a crash, a timeout, a task replaced mid-run), so the chain
+     cannot fork. An object that does not verify, or chains elsewhere, is `ANCHOR_KEY_EXISTS`:
+     alerted, nothing uploaded for that boundary.
+  2. Pointer now at this boundary → `already_published` (decided from the verified object).
+  3. Otherwise build and sign the manifest chained to the pointer and upload it with
+     `If-None-Match: *` (bounded as a whole: attempts and backoff, by an abort signal). Created
+     → in one transaction the pointer advances and `lastPublishedAt` is written. 412/409 → read
+     the key (a 409 retried within the bound until the object is readable) and apply step 1's
+     test to it.
+  No pending record and no separate marker exist; the upload is outside any transaction.
+- The primary destination is the first configured one that can read back (S3, filesystem).
+  `AnchorDestination` gains `read(key)` and `upload` reports created/exists; the filesystem
+  destination becomes create-only (`wx`). A deployment whose only destination cannot read back
+  (GitHub) keeps today's database-pointer behaviour, stated in the docs (SC2).
+- Adopted objects are also checked with `GetObjectRetention` (COMPLIANCE, retain-until at least
+  the expected date) on S3; the role gains `s3:GetObjectRetention`.
 - A failed run pauses at most until the next boundary.
-- The task's `stopTimeout` exceeds the upload bound and both transactions.
+- Budget: lock wait 10 s, upload bound 60 s, pointer transaction 10 s; the task's
+  `stopTimeout` 120 s (the Fargate maximum) covers them; SIGTERM waits for the in-flight run.
 - ECS: `deployment_maximum_percent = 100`, `deployment_minimum_healthy_percent = 0`,
   `desired_count = min(1, var.worker_desired_count)`.
 - The first publish on a fresh install with chain-enabled tenants reports
@@ -132,16 +146,19 @@ verifier.
   `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, signing key, tag secret, `DEPLOYMENT_ID`. Verify
   worker: `AUDIT_CHAIN_VERIFY_DATABASE_URL` from the app secret's `DATABASE_URL`.
 - The app task no longer receives the signing key or the tag secret (C1 moved the requirement).
-- Task roles: the publisher's own, carrying only `s3:PutObject`, `s3:PutObjectRetention` and
-  `s3:GetObject` (for C2's 412 check) on `bucket/<prefix>/*`; the verify worker gets none; the
-  anchor policy leaves the shared role. The outbox and retention-GC workers keep the shared
-  role: retention-GC deletes attachment blobs when `S3_ATTACHMENTS_BUCKET` is set and the outbox
-  worker reads Secrets Manager under `KEY_PROVIDER=aws-sm` — splitting their roles is SC4.
+- Task roles: the publisher's own, carrying only `s3:PutObject`, `s3:PutObjectRetention`,
+  `s3:GetObject` and `s3:GetObjectRetention` (C2's read-back) on `bucket/<prefix>/*`; the verify
+  worker gets none; the anchor policy leaves the shared role. The retention-GC worker keeps the
+  shared role (it deletes attachment blobs when `S3_ATTACHMENTS_BUCKET` is set); the outbox
+  worker keeps it too, though it gains only unused attachments access from it (the shared role
+  has no Secrets Manager action) — per-worker roles are SC4.
 - `enable_s3_audit_anchors` is validated true (the app already refuses to boot without a
   destination; the GitHub destination has no wiring — SC2).
 - Monitoring: publisher down alarm sized past a deploy's zero-task gap; a healthy-cadence
-  absence alarm (~25 h) on a `_logType` the publisher emits for `published`,
-  `skipped_no_tenants` and `skipped_already_published` (not for paused, failed or `lock_held`); log metric filters on the publisher's failure lines, each given a `_logType`
+  absence alarm (~25 h) on a `_logType` the publisher emits for `published`, an adoption, and
+  `already_published` decided from a verified object (C2), and for `skipped_no_tenants` with the
+  chain-enabled tenant count in the line and an alarm when it falls to 0 after being positive —
+  not for paused, failed or `lock_held`; log metric filters on the publisher's failure lines, each given a `_logType`
   (`cadence_error` lacks one) and including `ANCHOR_KEY_EXISTS`; verify-worker heartbeat
   filters (`erroredTenantCount > 0`, `failedTenantCount > 0`, absence); both log groups in
   `rls_bypass_report_log_groups`; an EventBridge rule on CloudTrail's ECS `ExecuteCommand`.
@@ -183,18 +200,25 @@ boundary), `CLAUDE.md` (`worker:*`). The verify worker's `passwd_app` surplus st
   succeeds, for both providers.
 - C2: the scheduler with an injected clock — boot run first; a timer 1 ms early still publishes
   its boundary; wall-clock re-arm; SIGTERM waits for the in-flight run. Integration, as the
-  publisher role: `beforeAll` fails unless the only chain-enabled tenants are the test's (so a
-  far-future boundary cannot move a real anchor), and the global rows (`…last_published_boundary`,
-  `…pending_publication`, `…previous_manifest`, `…deployment_id`) are snapshotted and restored;
-  two runs publish once; the boot-run catch-up; the absent-marker derivation; a crash after the
-  upload (destination succeeds, phase B forced to fail) then a rerun → one object, the chain
-  linked, no `ANCHOR_KEY_EXISTS`; a different object at the key → `ANCHOR_KEY_EXISTS`; a failure
-  pauses only to the next boundary; transaction and upload timeouts are `PublisherConfig`
-  fields, so a 500 ms bound against a 1.5 s destination fails within the test budget. The race
-  test proves overlap: while A holds the lock (its upload held on a deferred), B is observed in
-  `pg_locks` waiting; then exactly `["published", "skipped_already_published"]`; with
-  `lock_timeout` below the hold, `lock_held`. Red proofs: no lock → two `published`; no marker
-  read → two `published`. Existing publisher tests add the new keys to cleanup and make their
+  publisher role, against MinIO through `S3Destination` and against the create-only filesystem
+  destination (`beforeAll` fails unless the only chain-enabled tenants are the test's; the
+  pointer and deployment-id rows snapshotted and restored; far-future boundaries):
+  - two runs for one boundary → one object, the second `already_published`;
+  - crash after upload (the pointer transaction forced to fail by a `PublisherConfig` hook),
+    then the next boundary's run → B_n adopted, B_{n+1} chained to it (asserted from
+    B_{n+1}'s `previousManifest.sha256`), one object each — the round-3 fork case;
+  - a pointer row moved to a future boundary or another sha (as `passwd_app` could) → not
+    trusted: the run reads back, finds no matching verified object, and publishes or reports;
+  - an unverifiable object at the key → `ANCHOR_KEY_EXISTS`, nothing uploaded, pointer
+    unchanged;
+  - a transaction-timeout/upload-bound case with injected bounds;
+  - overlap: a second session holding the advisory lock → `lock_held` after the bounded wait,
+    no failure emit, no pause; a run blocked mid-upload holds the lock (observed in `pg_locks`
+    from another session) and a concurrent run waits;
+  - red proofs: no read-back walk (crash case forks); trusting the pointer row (the moved-
+    pointer case skips); a top-level `code` instead of `pgErrorCode` for the lock timeout
+    (reports `failed`).
+  Existing publisher tests add the new pointer field to their fixtures and cleanup and make their
   fake key-aware.
 - C3: integration against MinIO (the CI step; fail loudly when absent, never skip), probed
   first on the CI digest for `If-None-Match` and retention support (E2): bucket with Object
@@ -248,7 +272,7 @@ boundary), `CLAUDE.md` (`worker:*`). The verify worker's `passwd_app` surplus st
 | ID | Subject | Status |
 |----|---------|--------|
 | C1 | publisher stands alone (no `@/lib/prisma`, own non-throwing audit path, env) | pending |
-| C2 | cadence correctness (explicit boundary, scheduler, two-phase publish, idempotency, pause cap, deploys) | pending |
+| C2 | cadence correctness (explicit boundary, scheduler, published objects as truth, session lock, pause cap, deploys) | pending |
 | C3 | S3 destination (bundled SDK, no overwrite, Object Lock, SSE-S3, policy, supply chain) | pending |
 | C4 | bundles, smoke, in-image boot | pending |
 | C5 | AWS wiring (tasks, roles, app secrets, alarms, deploy, CI) | pending |
