@@ -35,11 +35,9 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_retent
   THEN 'true' ELSE 'false' END AS should_create_retention_gc_worker \gset
 
 -- Defined but empty (a launcher passing VAR= ) counts as unset: CREATE ROLE …
--- PASSWORD '' would make a LOGIN role with no password.
-\set has_passwd_retention_gc_worker_password false
-\if :{?passwd_retention_gc_worker_password}
-  SELECT :'passwd_retention_gc_worker_password' <> '' AS has_passwd_retention_gc_worker_password \gset
-\endif
+-- PASSWORD '' would make a LOGIN role with no password. Tested by the shell
+-- (psql backticks), so the value is never sent to the server to compare.
+\set has_passwd_retention_gc_worker_password `[ -n "$PASSWD_RETENTION_GC_WORKER_PASSWORD" ] && echo true || echo false`
 
 \if :should_create_retention_gc_worker
   \if :has_passwd_retention_gc_worker_password

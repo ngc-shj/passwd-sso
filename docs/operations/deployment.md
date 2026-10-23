@@ -614,21 +614,24 @@ published password — while the grant audit expects `LOGIN`. Set
 if it prints `f`, give it `LOGIN` and set the password:
 
 ```bash
-# Only this key: a compose .env is not shell syntax, so it is not sourced.
-PASSWD_ANCHOR_PUBLISHER_PASSWORD="$(sed -n 's/^PASSWD_ANCHOR_PUBLISHER_PASSWORD=//p' .env)"
-: "${PASSWD_ANCHOR_PUBLISHER_PASSWORD:?set it in .env first}"
+# Recreate db so it carries .env's current value; the volume is kept. Compose,
+# not the shell, reads .env (it is not shell syntax, and init:env quotes values).
+docker compose up -d db
 docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso \
   -c "ALTER ROLE passwd_anchor_publisher WITH LOGIN"
-printf '%s\n%s\n' "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" \
-  | docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso -q \
-      -c "SET password_encryption = 'scram-sha-256'; SET log_statement = 'none'; SET log_min_error_statement = 'panic'; SET log_min_duration_statement = -1; SET log_min_duration_sample = -1; SET log_transaction_sample_rate = 0; SET debug_print_parse = off; SET debug_print_rewritten = off; SET debug_print_plan = off; SET pg_stat_statements.track_utility = off" \
-      -c "\password passwd_anchor_publisher"
+docker compose exec -T db sh -c '
+  [ -n "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" ] || { echo "PASSWD_ANCHOR_PUBLISHER_PASSWORD is not set in the db container" >&2; exit 1; }
+  printf "%s\n%s\n" "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" \
+    | psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso -q \
+        -c "SET password_encryption = '\''scram-sha-256'\''; SET log_statement = '\''none'\''; SET log_min_error_statement = '\''panic'\''; SET log_min_duration_statement = -1; SET log_min_duration_sample = -1; SET log_transaction_sample_rate = 0; SET debug_print_parse = off; SET debug_print_rewritten = off; SET debug_print_plan = off; SET pg_stat_statements.track_utility = off" \
+        -c "\password passwd_anchor_publisher"'
 ```
 
 `\password` sends a verifier computed client-side, never the password. It reads
 the two lines from stdin only because `exec -T` gives psql no terminal — with one
 it would prompt instead, which is why `scripts/set-*-password.sh` do not use it.
-`printf` is a shell builtin, so the password reaches no process argument list.
+The value comes from the `db` container's environment (as for Jackson below), and
+`printf` is a shell builtin, so it reaches no process argument list.
 
 **Existing self-hosted volumes: the anchor publisher's published password.**
 Until this release, `docker-compose.yml` never forwarded
@@ -783,7 +786,7 @@ neither the host's shell history nor any process argument list.
 docker compose exec -T db sh -c '
   [ -n "$PASSWD_JACKSON_PASSWORD" ] || { echo "PASSWD_JACKSON_PASSWORD is not set in the db container" >&2; exit 1; }
   printf "%s\n%s\n" "$PASSWD_JACKSON_PASSWORD" "$PASSWD_JACKSON_PASSWORD" \
-    | psql -U passwd_user -d postgres -q \
+    | psql -X -v ON_ERROR_STOP=1 -U passwd_user -d postgres -q \
         -c "SET password_encryption = '\''scram-sha-256'\''; SET log_statement = '\''none'\''; SET log_min_error_statement = '\''panic'\''; SET log_min_duration_statement = -1; SET log_min_duration_sample = -1; SET log_transaction_sample_rate = 0; SET debug_print_parse = off; SET debug_print_rewritten = off; SET debug_print_plan = off; SET pg_stat_statements.track_utility = off" \
         -c "\password jackson_user"'
 ```

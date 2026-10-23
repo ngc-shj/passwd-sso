@@ -26,11 +26,9 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'jackson_user'
   THEN 'true' ELSE 'false' END AS should_create_jackson \gset
 
 -- Defined but empty (a launcher passing VAR= ) counts as unset: CREATE ROLE …
--- PASSWORD '' would make a LOGIN role with no password.
-\set has_jackson_password false
-\if :{?jackson_password}
-  SELECT :'jackson_password' <> '' AS has_jackson_password \gset
-\endif
+-- PASSWORD '' would make a LOGIN role with no password. Tested by the shell
+-- (psql backticks), so the value is never sent to the server to compare.
+\set has_jackson_password `[ -n "$PASSWD_JACKSON_PASSWORD" ] && echo true || echo false`
 
 \if :should_create_jackson
   \if :has_jackson_password

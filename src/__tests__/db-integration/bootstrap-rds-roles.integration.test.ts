@@ -43,7 +43,11 @@ import {
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync, chmodSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { scramSha256Verifier } from "../../../scripts/lib/scram-verifier.mjs";
-import { STATEMENT_TEXT_SETTINGS } from "../../../scripts/lib/statement-text-settings.mjs";
+import {
+  STATEMENT_TEXT_SETTINGS,
+  statementScopedResetStatements,
+  statementScopedSetStatements,
+} from "../../../scripts/lib/statement-text-settings.mjs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1423,18 +1427,34 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
     it("every password statement carries a verifier and the password appears in no text or parameter", async () => {
       const sentinel = "S3ntinelPw941x";
       const seen: string[] = [];
-      const check = (statements: string[], params: unknown[][]) => {
+      const sets = statementScopedSetStatements();
+      const resets = statementScopedResetStatements();
+      // As a superuser each password statement sits between the SETs and the
+      // RESETs, and nothing else does — the GRANTs and REVOKEs stay logged. A
+      // non-superuser may not set them, so its statement is bare.
+      const check = (statements: string[], params: unknown[][], superuser: boolean) => {
         for (const t of statements) expect(t).not.toContain(sentinel);
         for (const p of params) expect(JSON.stringify(p)).not.toContain(sentinel);
-        seen.push(...statements.filter((t) => /\bPASSWORD\b/.test(t)));
+        const at = statements.findIndex((t) => /\bPASSWORD\b/.test(t));
+        expect(at).toBeGreaterThanOrEqual(0);
+        seen.push(statements[at]);
+        const before = statements.slice(Math.max(0, at - sets.length), at);
+        const after = statements.slice(at + 1, at + 1 + resets.length);
+        if (superuser) {
+          expect(before).toEqual(sets);
+          expect(after).toEqual(resets);
+          expect(statements.filter((t) => t.startsWith("SET "))).toHaveLength(sets.length);
+        } else {
+          expect(statements.filter((t) => /^(SET|RESET) /.test(t))).toEqual([]);
+        }
       };
       await inRolledBackTransaction(async (c) => {
         const first = recordingClient(c);
         await convergeRole(first.client, PROBE, sentinel); // absent → CREATE
-        check(first.statements, first.params);
+        check(first.statements, first.params, true);
         const second = recordingClient(c);
         await convergeRole(second.client, PROBE, sentinel); // superuser ALTER
-        check(second.statements, second.params);
+        check(second.statements, second.params, true);
       });
       await inRolledBackTransaction(async (c) => {
         await c.query(`CREATE ROLE ${STANDIN} WITH NOLOGIN NOSUPERUSER CREATEROLE CREATEDB`);
@@ -1442,7 +1462,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         await c.query(`CREATE ROLE ${PROBE} WITH NOLOGIN`);
         const third = recordingClient(c);
         await convergeRole(third.client, PROBE, sentinel); // non-superuser ALTER
-        check(third.statements, third.params);
+        check(third.statements, third.params, false);
       });
       // Positive control: each of the three spellings was seen, with a verifier.
       expect(seen).toHaveLength(3);
@@ -1623,10 +1643,16 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         if (asSuperuser) {
           expect(settings).toEqual(STATEMENT_TEXT_SETTINGS.map(([, v]) => v.replace(/^'|'$/g, "")));
         } else {
-          // Not settable here: the session keeps the server's defaults.
-          const { rows } = await su.query(`SELECT ${STATEMENT_TEXT_SETTINGS.map(
-            ([name], i) => `coalesce(current_setting('${name}', true), '<unset>') AS s${i}`,
-          ).join(", ")}`);
+          // Not settable here: the session keeps the server's defaults, read on
+          // a fresh connection (the shared `su` has run the bootstrap, which
+          // sets transaction sampling for its session).
+          const fresh = new Client({ connectionString: superuserUrl() });
+          await fresh.connect();
+          const { rows } = await fresh
+            .query(`SELECT ${STATEMENT_TEXT_SETTINGS.map(
+              ([name], i) => `coalesce(current_setting('${name}', true), '<unset>') AS s${i}`,
+            ).join(", ")}`)
+            .finally(() => fresh.end());
           expect(settings).toEqual(STATEMENT_TEXT_SETTINGS.map((_, i) => rows[0][`s${i}`]));
           // log_statement's default is already 'none'; the others are the
           // positive control that the defaults differ from what a superuser sets.

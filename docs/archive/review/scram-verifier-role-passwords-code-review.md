@@ -1,6 +1,6 @@
 # Code Review: scram-verifier-role-passwords
 Date: 2026-10-24
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 
@@ -47,3 +47,22 @@ push); locally the compose fallback (`verified-local`).
 ## Resolution Status
 
 All Critical/Major findings fixed and red-proven; Minors fixed or recorded above.
+
+---
+
+# Round 2
+Date: 2026-10-24
+
+Round-1 fixes confirmed by their filing experts except where noted below.
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-N1 (continuing F-F3) | Functionality | Major | Fixed — the round-1 `sed` kept `init:env`'s quotes; the procedure now lets compose read `.env` (D11) |
+| S-N1 / F-N2 | Security, Functionality | Major / Minor | Fixed — bootstrap suppression scoped to each password statement; red-proven (D11). initdb keeps file scope (one-shot, grants are repository files) |
+| S-N2 / F-N3 / T-N2 | Security, Functionality, Testing | Minor | Fixed — initdb emptiness decided in the shell, never sent; the module states the derived categories and names the extension and `pg_stat_activity` residuals |
+| S-N3 | Security | Minor | Fixed — Jackson psql with `-X -v ON_ERROR_STOP=1` |
+| T-N1 | Testing | Minor | Fixed — static empty-value check with fixtures; executed empty/set on throwaway PG16 (D11) |
+
+## Recurring Issue Check (round-2 delta)
+Functionality: R43 F-N2; R49 F-N3; R50/R29 F-N1. Security: R54 S-N1 (was F3); R42/R49 S-N2.
+Testing: R35/R50 T-N1; R42 T-N2.

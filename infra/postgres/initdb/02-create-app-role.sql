@@ -29,11 +29,9 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_app')
   THEN 'true' ELSE 'false' END AS should_create \gset
 
 -- Defined but empty (a launcher passing VAR= ) counts as unset: CREATE ROLE …
--- PASSWORD '' would make a LOGIN role with no password.
-\set has_passwd_app_password false
-\if :{?passwd_app_password}
-  SELECT :'passwd_app_password' <> '' AS has_passwd_app_password \gset
-\endif
+-- PASSWORD '' would make a LOGIN role with no password. Tested by the shell
+-- (psql backticks), so the value is never sent to the server to compare.
+\set has_passwd_app_password `[ -n "$PASSWD_APP_PASSWORD" ] && echo true || echo false`
 
 \if :should_create
   \if :has_passwd_app_password
@@ -80,11 +78,9 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_outbox
   THEN 'true' ELSE 'false' END AS should_create_worker \gset
 
 -- Defined but empty (a launcher passing VAR= ) counts as unset: CREATE ROLE …
--- PASSWORD '' would make a LOGIN role with no password.
-\set has_passwd_outbox_worker_password false
-\if :{?passwd_outbox_worker_password}
-  SELECT :'passwd_outbox_worker_password' <> '' AS has_passwd_outbox_worker_password \gset
-\endif
+-- PASSWORD '' would make a LOGIN role with no password. Tested by the shell
+-- (psql backticks), so the value is never sent to the server to compare.
+\set has_passwd_outbox_worker_password `[ -n "$PASSWD_OUTBOX_WORKER_PASSWORD" ] && echo true || echo false`
 
 \if :should_create_worker
   \if :has_passwd_outbox_worker_password
@@ -133,15 +129,12 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_anchor
   THEN 'true' ELSE 'false' END AS should_create_anchor_publisher \gset
 
 -- docker-compose.yml forwards the variable as ${…:-}, so an unset one arrives as
--- an empty string, which \getenv still defines: test for a non-empty value, inside
--- the :{?…} test (an undefined variable would leave :'…' unexpanded).
-\set has_anchor_publisher_password false
-\if :{?passwd_anchor_publisher_password}
-  SELECT :'passwd_anchor_publisher_password' <> '' AS has_anchor_publisher_password \gset
-\endif
+-- an empty string, which \getenv still defines: test for a non-empty value. Tested
+-- by the shell (psql backticks), so the value is never sent to the server.
+\set has_passwd_anchor_publisher_password `[ -n "$PASSWD_ANCHOR_PUBLISHER_PASSWORD" ] && echo true || echo false`
 
 \if :should_create_anchor_publisher
-  \if :has_anchor_publisher_password
+  \if :has_passwd_anchor_publisher_password
     CREATE ROLE passwd_anchor_publisher WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_anchor_publisher_password';
   \else
     -- No published fallback password: a LOGIN role with a password in this

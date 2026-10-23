@@ -72,7 +72,12 @@ import {
   resolveIterations,
   scramSha256Verifier,
 } from "./lib/scram-verifier.mjs";
-import { statementTextSetStatements } from "./lib/statement-text-settings.mjs";
+import {
+  STATEMENT_TEXT_SETTINGS,
+  TRANSACTION_START_SETTING,
+  statementScopedResetStatements,
+  statementScopedSetStatements,
+} from "./lib/statement-text-settings.mjs";
 // Re-exported so the integration test drives the SAME loader the script uses,
 // rather than a second import path that could diverge from it.
 export { loadDeniedPolicy };
@@ -308,6 +313,28 @@ export async function applyDeniedPrivileges(
 }
 
 /**
+ * Run one password statement with every record of statement text off, as a
+ * superuser, and back on straight after — so the verifier is not recorded and
+ * the GRANTs and REVOKEs around it still are. A non-superuser (the RDS master)
+ * may not set these; there the verifier can still be recorded, never the
+ * password. A failure aborts the caller's transaction, so nothing else runs
+ * with them off.
+ *
+ * @param {import("pg").Client} client
+ * @param {boolean} superuser
+ * @param {string} statement
+ */
+async function withStatementTextOff(client, superuser, statement) {
+  if (!superuser) {
+    await client.query(statement);
+    return;
+  }
+  for (const s of statementScopedSetStatements()) await client.query(s);
+  await client.query(statement);
+  for (const s of statementScopedResetStatements()) await client.query(s);
+}
+
+/**
  * Converge one role to the intended attributes + password, stripping any
  * inherited membership. Exported so the integration test can exercise the exact
  * production convergence logic against throwaway probe roles instead of the
@@ -329,7 +356,7 @@ export async function convergeRole(client, name, password) {
   const superuser = await currentUserIsSuperuser(client);
   if (rowCount === 0) {
     if (!superuser) await assertCallerCanManageRoles(client);
-    await client.query(`CREATE ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
+    await withStatementTextOff(client, superuser, `CREATE ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
     console.log(`created role ${name}`);
   } else if (superuser) {
     // ALWAYS converge an existing role. It may carry the WRONG password (the
@@ -338,13 +365,13 @@ export async function convergeRole(client, name, password) {
     // silently leaves a privilege-escalated role in place and an unusable
     // password. ALTER ROLE is the convergence point; it is idempotent.
     console.log(`role ${name} exists — converging attributes + password`);
-    await client.query(`ALTER ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
+    await withStatementTextOff(client, superuser, `ALTER ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
   } else {
     // A non-superuser (the RDS master) cannot write SUPERUSER / BYPASSRLS /
     // REPLICATION, so it writes what it can and those three become checks.
     console.log(`role ${name} exists — converging LOGIN/CREATEDB/CREATEROLE + password`);
     await assertConvergeableWithoutSuperuser(client, name);
-    await client.query(`ALTER ROLE ${name} WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD ${pw}`);
+    await withStatementTextOff(client, superuser, `ALTER ROLE ${name} WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD ${pw}`);
   }
 
   // Role MEMBERSHIP is not covered by ALTER ROLE's attribute list: an inherited
@@ -572,13 +599,12 @@ export async function applyPrivilegeSequence(client, denied) {
  * @param {object[]} denied
  */
 export async function runBootstrap(client, roles, denied) {
-  // As a superuser, keep even the verifiers out of every record of statement
-  // text. Session SETs on this one-shot connection, before BEGIN: a SET LOCAL
-  // would come too late for log_transaction_sample_rate, decided at transaction
-  // start. The RDS master may not set these (42501); there the verifier can
-  // still be recorded — never the password.
+  // As a superuser, transaction sampling is off for this one-shot session: it
+  // is decided when a transaction starts, so it cannot be scoped to a statement
+  // like the rest (see withStatementTextOff). The RDS master may not set it.
   if (await currentUserIsSuperuser(client)) {
-    for (const statement of statementTextSetStatements()) await client.query(statement);
+    const [, value] = STATEMENT_TEXT_SETTINGS.find(([name]) => name === TRANSACTION_START_SETTING);
+    await client.query(`SET ${TRANSACTION_START_SETTING} = ${value}`);
   }
   await inTransaction(client, async () => {
     await convergeRolesInTx(client, roles);

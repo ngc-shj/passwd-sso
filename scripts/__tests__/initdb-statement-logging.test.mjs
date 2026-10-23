@@ -77,6 +77,32 @@ function violations(src) {
   return errs;
 }
 
+/**
+ * Violations of the empty-value rule: a role gets a password only under
+ * `\\if :has_X`, where has_X is decided by the shell (`[ -n "$VAR" ]` in psql
+ * backticks) — an empty value counts as unset, and the value is never sent to
+ * the server just to compare it.
+ */
+function emptyValueViolations(src) {
+  const errs = [];
+  const lines = statements(src);
+  const stack = [];
+  for (const l of lines) {
+    if (/^\\if\b/.test(l)) stack.push(l);
+    else if (/^\\endif\b/.test(l)) stack.pop();
+    else if (/^\\else\b/.test(l)) stack[stack.length - 1] = `else:${stack.at(-1)}`;
+    const m = /PASSWORD\s+:'([a-z_]+)'/.exec(l);
+    if (m) {
+      const v = m[1];
+      if (stack.at(-1) !== `\\if :has_${v}`) errs.push(`not under \\if :has_${v}: ${l}`);
+      const decided = lines.some((x) => x.startsWith(`\\set has_${v} \``) && /\[ -n "\$[A-Z_]+" \]/.test(x));
+      if (!decided) errs.push(`has_${v} is not decided by the shell`);
+    }
+    if (/^SELECT\s+:'/.test(l)) errs.push(`sends a variable's value to the server: ${l}`);
+  }
+  return errs;
+}
+
 describe("infra/postgres/initdb statement logging", () => {
   it("derives the files that set a role password, and they are the expected set", () => {
     expect(members(INITDB)).toEqual([
@@ -88,6 +114,10 @@ describe("infra/postgres/initdb statement logging", () => {
 
   it.each(members(INITDB))("%s turns statement logging off before its first statement", (f) => {
     expect(violations(readFileSync(join(INITDB, f), "utf8"))).toEqual([]);
+  });
+
+  it.each(members(INITDB))("%s gives a role a password only when the shell found it non-empty", (f) => {
+    expect(emptyValueViolations(readFileSync(join(INITDB, f), "utf8"))).toEqual([]);
   });
 });
 
@@ -126,6 +156,22 @@ describe("the ordering rule (fixtures)", () => {
     ["ALTER SYSTEM SET", `${block}\nALTER SYSTEM SET log_statement = 'all';`, /ALTER … SET/],
   ])("refuses %s", (_name, src, msg) => {
     expect(violations(src).join("\n")).toMatch(msg);
+  });
+
+  const gated = (v, env) =>
+    `\\getenv ${v} ${env}\n\\set has_${v} \`[ -n "$${env}" ] && echo true || echo false\`\n` +
+    `\\if :has_${v}\n  CREATE ROLE r PASSWORD :'${v}';\n\\else\n  CREATE ROLE r NOLOGIN;\n\\endif`;
+
+  it("accepts a password gated on a shell-decided has_ variable (allow side)", () => {
+    expect(emptyValueViolations(gated("pw", "PW"))).toEqual([]);
+  });
+
+  it.each([
+    ["gated on :{?X} directly", `\\getenv pw PW\n\\if :{?pw}\n  CREATE ROLE r PASSWORD :'pw';\n\\endif`, /not under \\if :has_pw/],
+    ["has_X decided by a server SELECT", `\\getenv pw PW\n\\set has_pw false\nSELECT :'pw' <> '' AS has_pw \\gset\n\\if :has_pw\n  CREATE ROLE r PASSWORD :'pw';\n\\endif`, /not decided by the shell|sends a variable's value/],
+    ["the password in the \\else branch", gated("pw", "PW").replace("CREATE ROLE r NOLOGIN", "ALTER ROLE r PASSWORD :'pw'"), /not under \\if :has_pw/],
+  ])("refuses %s", (_name, src, msg) => {
+    expect(emptyValueViolations(src).join("\n")).toMatch(msg);
   });
 
   it("derives a fixture directory's member set from PASSWORD outside comments", () => {

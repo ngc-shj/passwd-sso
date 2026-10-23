@@ -129,3 +129,35 @@ Executed on throwaway `postgres:16-alpine` with `log_min_duration_statement=0`,
 A first attempt quoted the role as `"${role}"`, which inside bash's double-quoted
 string closes and reopens the quote and changes nothing; it stayed green for that
 reason, and was redone.
+
+## D11 — Phase 3 round 2
+
+- The bootstrap's statement-text SETs are scoped to each password statement (SET
+  before, RESET after, inside the transaction), so a superuser run's GRANTs and
+  REVOKEs stay logged; only `log_transaction_sample_rate` is a session SET before
+  `BEGIN` (decided at transaction start; sampling is not the audit concern).
+  initdb keeps them for the whole file — it runs once on an empty volume and its
+  grants are the repository's own files. Red-proven: removing the RESETs turns the
+  T11 wrapping assertion red.
+- initdb no longer sends a password to the server to test it for emptiness: `has_X`
+  is decided by the shell in psql backticks (`[ -n "$VAR" ]`), and a static check
+  requires every `PASSWORD :'X'` to sit under `\if :has_X` decided that way.
+  Executed on throwaway `postgres:16-alpine` (`log_statement=all`, duration,
+  sampled and `debug_print_parse` logging on): all five variables empty → init
+  completes, every role `NOLOGIN` with no password; all set → every role `LOGIN`
+  and each sentinel logs in over the container IP; 0 sentinel lines either way.
+- The dev-volume anchor procedure lets compose read `.env` (recreate `db`, then
+  the Jackson pattern inside the container): `npm run init:env` writes quoted
+  values, which the previous `sed` extraction kept as part of the password.
+  Checked: compose resolves a quoted and an unquoted line to the same value; the
+  in-container guard stops when the variable is absent (as it is on the current
+  dev container, created before compose forwarded it). The D9 run of the old
+  procedure used an unquoted line and could not see this.
+- The Jackson procedure runs psql with `-X -v ON_ERROR_STOP=1`, so a failing SET
+  stops it before `\password`.
+- `statement-text-settings.mjs` states its reach: PostgreSQL's two logging
+  categories are derived; pg_stat_statements is listed by hand; other extensions
+  (pgaudit, auto_explain) and `pg_stat_activity.query` are residuals.
+- Test fix: the replay's non-superuser comparison reads server defaults on a fresh
+  connection — the shared `su` had run the bootstrap, which sets transaction
+  sampling for its session.

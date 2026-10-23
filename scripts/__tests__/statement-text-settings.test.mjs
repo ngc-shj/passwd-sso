@@ -11,6 +11,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   STATEMENT_TEXT_SETTINGS,
+  TRANSACTION_START_SETTING,
   statementTextSetStatements,
 } from "../lib/statement-text-settings.mjs";
 import { runBootstrap } from "../bootstrap-rds-roles.mjs";
@@ -61,11 +62,15 @@ describe("runBootstrap", () => {
     };
   };
 
-  it("as a superuser, sets the list on the session before the transaction begins", async () => {
+  it("as a superuser, sets only transaction sampling on the session before the transaction begins", async () => {
+    // The rest are scoped to each password statement (convergeRole, T11), so
+    // the GRANTs and REVOKEs of the run stay logged.
     const c = fakeClient(true);
     await expect(runBootstrap(c, [], [])).rejects.toThrow("stop at BEGIN");
     const beforeBegin = c.statements.slice(0, c.statements.indexOf("BEGIN"));
-    expect(beforeBegin.filter((s) => s.startsWith("SET "))).toEqual(LIST);
+    expect(beforeBegin.filter((s) => s.startsWith("SET "))).toEqual([
+      `SET ${TRANSACTION_START_SETTING} = 0`,
+    ]);
   });
 
   it("as a non-superuser (the RDS master), sends none of them — it may not set them", async () => {
