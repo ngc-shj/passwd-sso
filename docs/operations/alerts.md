@@ -341,9 +341,9 @@ emit "past the transaction" does not clear it.
 > chained tenant a default `fromSeq=1` verify would report a false TAMPER (see
 > `docs/security/audit-chain-threat-model.md#retention-purge-interaction`). The
 > migration **checks** that flag and refuses rather than assuming it, and the
-> integration suite asserts both the retention and the flag together. If you ever
-> enable the chain on `__system__`, fix the verify's start sequence first — the
-> retention is already set, so the interaction becomes real at that moment.
+> integration suite asserts both the retention and the flag together. Enabling
+> the chain on `__system__` makes the interaction real; see "Enabling the chain
+> on `__system__`" under `audit-chain-verify-heartbeat` before doing so.
 
 ## `delivery.dead_lettered` / `webhook_delivery.dead_lettered`
 
@@ -487,15 +487,52 @@ strictly stronger than `verifiedTenantCount < tenantCount`:
 tick that verified every listed tenant can still report
 `erroredTenantCount = 1`.)
 
-`tenantCount` counts the tenants the worker verifies, which is every tenant
-except `__system__`. The worker cannot open a tenant context on the
-sentinel (it is the FK target of every unattributable audit row), so it
-leaves it out of all three counts rather than reporting it as verified.
-Its `audit_chain_enabled` is false by default, so there is no chain to
-verify; if someone enables it, the tick reports
-`SENTINEL_CHAIN_UNVERIFIABLE` (below). A deployment with no tenants besides
-`__system__` therefore reports `tenantCount = 0` with
-`erroredTenantCount = 0`.
+`tenantCount` counts the tenants the worker verifies, which is every tenant,
+`__system__` included, whatever its `audit_chain_enabled`. The worker cannot
+open a tenant context on the sentinel (it is the FK target of every
+unattributable audit row), so it reads the sentinel's anchor and chained
+rows under the `AUDIT_CHAIN_VERIFY_SENTINEL_READ` bypass grant, which names
+only `audit_chain_anchors` and `audit_logs`. With its chain off (the
+default) the sentinel has no anchor and no chained rows and verifies clean.
+A deployment with no tenants besides `__system__` therefore reports
+`tenantCount = 1` with `erroredTenantCount = 0`.
+
+**Enabling the chain on `__system__`.** Keep it off. Until the purge
+watermark exists (the `purged_up_to_seq` TODO in
+`docs/security/audit-chain-threat-model.md#retention-purge-interaction`),
+enabling it is one-way: the sentinel will eventually fail every tick, and
+turning the chain off again does not clear that.
+
+- `20260902120000_set_system_tenant_audit_retention` gave the sentinel a
+  365-day retention, and a purge removes rows (`created_at` before the
+  cutoff) without renumbering `chain_seq` or touching the anchor. From the
+  first sweep after the first chained row is 365 days old, the walk reports
+  TAMPER at the first retained row; once every chained row is purged, the
+  anchor remains with nothing to walk and it reports RANGE_INCOMPLETE. Both
+  count in `failedTenantCount`. Clearing the retention instead brings back
+  the unbounded growth that migration exists to stop (unauthenticated
+  callers can create these rows), and trades the false TAMPER for
+  TRUNCATED, below. The same holds for any tenant whose chain was once
+  enabled; the sentinel is simply the one whose retention is already set.
+- The sentinel's volume is driven by pre-auth inflow and system events, so
+  it is the tenant most likely to pass `AUDIT_CHAIN_VERIFY_MAX_ROWS` and
+  report TRUNCATED (counted in `failedTenantCount`). Raise that, and
+  `AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` with it.
+
+To stop chaining new rows (on RDS the owner is under FORCE RLS, so the
+write runs in a transaction-scoped tenant scope without `READ ONLY`):
+
+```sql
+BEGIN;
+SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
+UPDATE tenants SET audit_chain_enabled = false
+WHERE id = '00000000-0000-4000-8000-000000000002';
+COMMIT;
+```
+
+This is not a recovery: the rows and anchor already written stay and are
+still verified every tick, so the failures above still arrive once
+retention reaches them.
 
 **Enumeration failures (#923).** `tenants` now carries the same RLS
 policy as every other table, so the worker's tenant-list read runs under
@@ -514,37 +551,24 @@ reason:
 - `TENANT_ENUMERATION_INCOMPLETE` — it returned tenants but not
   `__system__`, i.e. a tenant-scoped rather than a bypass read. The
   tenants it did return are still verified.
-- `SENTINEL_CHAIN_UNVERIFIABLE` — `__system__`'s `audit_chain_enabled`
-  is true, which no migration sets and which this worker cannot verify.
 
 None of these throws: a throw would skip the heartbeat and leave only
 the absence alarm, which cannot distinguish "inert" from "dead".
-**Recovery**: for the three enumeration reasons, treat the verifier as
-inert, as for `RLS_CONTEXT_MISSING` below: check that the worker's role
-holds EXECUTE on `public.rls_bypass_admits` and SELECT on `tenants`, and
-that `SYSTEM_MAINTENANCE_TENANT_LOOKUP` still names `tenant`. For
-`SENTINEL_CHAIN_UNVERIFIABLE`, decide explicitly, as
-`20260902120000_set_system_tenant_audit_retention` does (it refuses to
-turn the chain off for you; see
-`docs/security/audit-chain-threat-model.md#retention-purge-interaction`):
-either disable the chain on `__system__`, accepting that its rows go
-unverified, or keep it and accept this alert until sentinel verification
-exists. Disabling it on RDS (owner under FORCE RLS) is a write, so it runs
-in a transaction-scoped tenant scope without `READ ONLY`:
-
-```sql
-BEGIN;
-SET LOCAL app.tenant_id = '00000000-0000-4000-8000-000000000002';
-UPDATE tenants SET audit_chain_enabled = false
-WHERE id = '00000000-0000-4000-8000-000000000002';
-COMMIT;
-```
+**Recovery**: treat the verifier as inert, as for `RLS_CONTEXT_MISSING`
+below: check that the worker's role holds EXECUTE on
+`public.rls_bypass_admits` and SELECT on `tenants`, and that
+`SYSTEM_MAINTENANCE_TENANT_LOOKUP` still names `tenant`.
 
 **Recovery (per-tenant failures)**: the accompanying `tick incomplete`
 stderr line names the failing tenant ids. `RLS_CONTEXT_MISSING` there
 means the worker lost its RLS context and its reads would have
 returned zero rows — treat as "the verifier is inert", not as a
-per-tenant blip. `P2028` means the read outgrew
+per-tenant blip. `BYPASS_CONTEXT_MISSING` is the same for `__system__`,
+which is read under a bypass: the bypass was not set with the
+`AUDIT_CHAIN_VERIFY_SENTINEL_READ` grant. `BYPASS_SCOPE_VIOLATION` means a
+read for `__system__` returned another tenant's row — the query lost its
+`WHERE tenant_id` — or more than one anchor row; treat either as a code
+defect. `P2028` means the read outgrew
 `AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` (default 60s); raise it or lower
 `AUDIT_CHAIN_VERIFY_MAX_ROWS`.
 

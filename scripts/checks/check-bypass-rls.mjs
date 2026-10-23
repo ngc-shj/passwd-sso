@@ -416,7 +416,8 @@ const ALLOWED_USAGE = new Set([
   // Audit-chain verify worker (C3): the tenant enumeration (now that `tenants`
   // carries the same RLS policy as every other table) runs under the named
   // SYSTEM_MAINTENANCE_TENANT_LOOKUP grant, once per tick, before the
-  // per-tenant withTenantRls walk.
+  // per-tenant withTenantRls walk; the `__system__` sentinel, which
+  // withTenantRls refuses, is walked under AUDIT_CHAIN_VERIFY_SENTINEL_READ.
   "scripts/audit-chain-verify-worker.ts",
 ]);
 

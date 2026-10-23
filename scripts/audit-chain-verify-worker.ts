@@ -22,6 +22,13 @@
  * for the tenant being verified; that matches the `WHERE tenant_id = $1` these
  * queries already carry, and is tighter than a blanket bypass.
  *
+ * The `__system__` sentinel is the exception: withTenantRls refuses it (a
+ * context scoped to it would expose every unattributable audit row), so its
+ * chain is read under the AUDIT_CHAIN_VERIFY_SENTINEL_READ bypass grant, which
+ * names only audit_chain_anchors and audit_logs. That grant admits every
+ * tenant's rows of those two tables; what confines the read to the sentinel is
+ * the same `WHERE tenant_id = $1`, plus assertions on the rows that come back.
+ *
  * This failure mode is silent by construction — unlike the audit_outbox case,
  * which raised 22P02 once a GUC had been touched on the connection. Hence the
  * GUC precondition assertion in verifyTenantChain: an inert verifier must not
@@ -35,7 +42,7 @@
  * manufactured assurance one layer up.
  */
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import {
@@ -48,7 +55,7 @@ import { MS_PER_HOUR, MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
-import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { BYPASS_GRANT, readBypassState } from "@/lib/tenant-rls-grants";
 import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 
 config({ path: resolve(process.cwd(), ".env.local") });
@@ -60,7 +67,7 @@ const TICK_INTERVAL_MS = Number(
 const HYSTERESIS_REALERT_MS = Number(
   process.env.AUDIT_CHAIN_VERIFY_REALERT_MS ?? MS_PER_DAY,
 );
-const MAX_ROWS_PER_TENANT = Number(
+export const MAX_ROWS_PER_TENANT = Number(
   process.env.AUDIT_CHAIN_VERIFY_MAX_ROWS ?? 100_000,
 );
 
@@ -99,6 +106,7 @@ interface ChainRowRaw {
 }
 
 interface AnchorRow {
+  tenant_id: string;
   chain_seq: string;
   prev_hash: Uint8Array;
 }
@@ -111,93 +119,85 @@ export interface VerifyDeps {
   };
 }
 
-export async function verifyTenantChain(
-  tenantId: string,
-  deps: VerifyDeps,
-): Promise<VerifyResult> {
-  // Only the READS hold the transaction. verifyChainRows below is pure —
-  // canonicalisation plus a SHA-256 per row, no DB — so leaving it inside the
-  // callback would spend an operator-tunable amount of JS CPU inside Prisma's
-  // interactive-transaction budget for no benefit. The budget is stated rather
-  // than inherited: the default is 5s, and MAX_ROWS_PER_TENANT is the knob an
-  // operator turns up for exactly the tenant whose walk is already the slowest.
-  const fetched = await withTenantRls(
-    deps.prisma,
+type ChainRead =
+  | { kind: "no-anchor"; chainedRows: number }
+  | { kind: "walk"; anchorSeq: number; anchorPrevHash: Uint8Array; rows: ChainRowRaw[] };
+
+/**
+ * The reads both paths share. `checkScope` is the bypass path's: there the
+ * policy admits every tenant's rows, so the rows that come back are checked
+ * against the tenant being verified rather than trusted to the WHERE alone.
+ */
+async function readChain(tx: Prisma.TransactionClient, tenantId: string, checkScope: boolean): Promise<ChainRead> {
+  // The anchor is read first and for the same reason the endpoint reads it:
+  // without it, a tenant whose rows were all deleted walks zero rows, finds
+  // nothing wrong, and reports healthy — which is precisely the state periodic
+  // monitoring exists to notice.
+  const anchors = await tx.$queryRawUnsafe<AnchorRow[]>(
+    `SELECT tenant_id, chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1`,
     tenantId,
-    async (tx) => {
-      // Precondition, asserted rather than assumed. Every read below returns
-      // zero rows with no error when app.tenant_id is unset, so "the wrapper
-      // was removed" and "this tenant has no audit rows" are indistinguishable
-      // from the result alone. This is the assertion that makes a future
-      // refactor loud instead of silently reinstating the inert verifier.
-      const [guc] = await tx.$queryRawUnsafe<
-        Array<{ tenant_id: string | null }>
-      >(`SELECT current_setting('app.tenant_id', true) AS tenant_id`);
-      if (guc?.tenant_id !== tenantId) {
-        throw new Error(
-          `RLS_CONTEXT_MISSING: app.tenant_id is ${JSON.stringify(
-            guc?.tenant_id ?? null,
-          )}, expected ${tenantId} — reads would silently return zero rows`,
-        );
-      }
-
-      // The anchor is read first and for the same reason the endpoint reads it:
-      // without it, a tenant whose rows were all deleted walks zero rows, finds
-      // nothing wrong, and reports healthy — which is precisely the state periodic
-      // monitoring exists to notice.
-      const anchors = await tx.$queryRawUnsafe<AnchorRow[]>(
-        `SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1`,
-        tenantId,
+  );
+  if (checkScope) {
+    const foreign = anchors.find((a) => a.tenant_id !== tenantId);
+    if (foreign) throw scopeViolation(tenantId, foreign.tenant_id, "audit_chain_anchors");
+    if (anchors.length > 1) {
+      throw new Error(
+        `BYPASS_SCOPE_VIOLATION: audit_chain_anchors returned ${anchors.length} rows ` +
+          `while verifying ${JSON.stringify(tenantId)}, expected at most 1`,
       );
+    }
+  }
 
-      if (anchors.length === 0) {
-        const counted = await tx.$queryRawUnsafe<{ count: bigint }[]>(
-          `SELECT COUNT(*) AS count
+  if (anchors.length === 0) {
+    const counted = await tx.$queryRawUnsafe<{ count: bigint }[]>(
+      `SELECT COUNT(*) AS count
          FROM audit_logs
          WHERE tenant_id = $1
            AND chain_seq IS NOT NULL`,
-          tenantId,
-        );
-        const chainedRows = Number(counted[0]?.count ?? 0);
-        return { kind: "no-anchor" as const, chainedRows };
-      }
+      tenantId,
+    );
+    return { kind: "no-anchor", chainedRows: Number(counted[0]?.count ?? 0) };
+  }
 
-      const anchorSeq = Number(anchors[0].chain_seq);
+  const anchorSeq = Number(anchors[0].chain_seq);
 
-      // Bounded by the anchor's seq, matching the endpoint's query. The anchor is
-      // read first, so on a tenant still writing audit rows the walk would
-      // otherwise pick up rows appended after it — ending on a hash later than the
-      // head the anchor recorded, and reporting ANCHOR_HASH_MISMATCH for a
-      // perfectly healthy chain. On the monitoring path that is a page in the
-      // middle of the night for nothing, and worse, it trains the reader to
-      // discount the alert that matters.
-      const rows = await tx.$queryRawUnsafe<ChainRowRaw[]>(
-        `SELECT id, tenant_id, created_at,
-              chain_seq, event_hash, chain_prev_hash, metadata
+  // Bounded by the anchor's seq, matching the endpoint's query. The anchor is
+  // read first, so on a tenant still writing audit rows the walk would
+  // otherwise pick up rows appended after it — ending on a hash later than the
+  // head the anchor recorded, and reporting ANCHOR_HASH_MISMATCH for a
+  // perfectly healthy chain. On the monitoring path that is a page in the
+  // middle of the night for nothing, and worse, it trains the reader to
+  // discount the alert that matters.
+  const rows = await tx.$queryRawUnsafe<ChainRowRaw[]>(
+    `SELECT id, tenant_id, created_at,
+            chain_seq, event_hash, chain_prev_hash, metadata
        FROM audit_logs
        WHERE tenant_id = $1
          AND chain_seq IS NOT NULL
          AND chain_seq <= $2
        ORDER BY chain_seq ASC
        LIMIT $3`,
-        tenantId,
-        BigInt(anchorSeq),
-        MAX_ROWS_PER_TENANT,
-      );
-
-      return {
-        kind: "walk" as const,
-        anchorSeq,
-        anchorPrevHash: anchors[0].prev_hash,
-        rows,
-      };
-    },
-    {
-      timeout: CHAIN_VERIFY_TX_TIMEOUT_MS,
-      maxWait: CHAIN_VERIFY_TX_MAX_WAIT_MS,
-    },
+    tenantId,
+    BigInt(anchorSeq),
+    MAX_ROWS_PER_TENANT,
   );
+  if (checkScope) {
+    const foreign = rows.find((r) => r.tenant_id !== tenantId);
+    if (foreign) throw scopeViolation(tenantId, foreign.tenant_id, "audit_logs");
+  }
 
+  return { kind: "walk", anchorSeq, anchorPrevHash: anchors[0].prev_hash, rows };
+}
+
+/** Carries tenant ids only — never a row id or metadata; it reaches stderr. */
+function scopeViolation(expected: string, offending: string, table: string): Error {
+  return new Error(
+    `BYPASS_SCOPE_VIOLATION: ${table} returned a row of tenant ${JSON.stringify(offending)} ` +
+      `while verifying ${JSON.stringify(expected)}`,
+  );
+}
+
+function resultOf(tenantId: string, fetched: ChainRead): VerifyResult {
   if (fetched.kind === "no-anchor") {
     return {
       tenantId,
@@ -243,6 +243,95 @@ export async function verifyTenantChain(
   };
 }
 
+const TX_BUDGET = {
+  timeout: CHAIN_VERIFY_TX_TIMEOUT_MS,
+  maxWait: CHAIN_VERIFY_TX_MAX_WAIT_MS,
+};
+
+export async function verifyTenantChain(
+  tenantId: string,
+  deps: VerifyDeps,
+): Promise<VerifyResult> {
+  // The predicate withTenantRls refuses on: the sentinel cannot be opened as a
+  // tenant context, so its chain is read under the named bypass instead.
+  if (tenantId.toLowerCase() === SYSTEM_TENANT_ID) {
+    return verifyChainUnderSentinelGrant(tenantId, deps);
+  }
+
+  // Only the READS hold the transaction. verifyChainRows is pure —
+  // canonicalisation plus a SHA-256 per row, no DB — so leaving it inside the
+  // callback would spend an operator-tunable amount of JS CPU inside Prisma's
+  // interactive-transaction budget for no benefit. The budget is stated rather
+  // than inherited: the default is 5s, and MAX_ROWS_PER_TENANT is the knob an
+  // operator turns up for exactly the tenant whose walk is already the slowest.
+  const fetched = await withTenantRls(
+    deps.prisma,
+    tenantId,
+    async (tx) => {
+      // Precondition, asserted rather than assumed. Every read below returns
+      // zero rows with no error when app.tenant_id is unset, so "the wrapper
+      // was removed" and "this tenant has no audit rows" are indistinguishable
+      // from the result alone. This is the assertion that makes a future
+      // refactor loud instead of silently reinstating the inert verifier.
+      const [guc] = await tx.$queryRawUnsafe<
+        Array<{ tenant_id: string | null }>
+      >(`SELECT current_setting('app.tenant_id', true) AS tenant_id`);
+      if (guc?.tenant_id !== tenantId) {
+        throw new Error(
+          `RLS_CONTEXT_MISSING: app.tenant_id is ${JSON.stringify(
+            guc?.tenant_id ?? null,
+          )}, expected ${tenantId} — reads would silently return zero rows`,
+        );
+      }
+      return readChain(tx, tenantId, false);
+    },
+    TX_BUDGET,
+  );
+  return resultOf(tenantId, fetched);
+}
+
+/**
+ * The sentinel's read path: the AUDIT_CHAIN_VERIFY_SENTINEL_READ bypass, with
+ * the rows that come back checked against `tenantId`. Exported so integration
+ * tests can run it on throwaway tenants rather than the shared sentinel; used
+ * on any other tenant it still reads only that tenant's rows.
+ */
+export async function verifyChainUnderSentinelGrant(
+  rawTenantId: string,
+  deps: VerifyDeps,
+): Promise<VerifyResult> {
+  // PostgreSQL returns uuids in lowercase; the row checks compare against
+  // this one spelling, as the routing predicate does.
+  const tenantId = rawTenantId.toLowerCase();
+  const fetched = await withBypassRls(
+    deps.prisma,
+    async (tx) => {
+      // The tenant path's precondition, for a bypass: an inert one reads zero
+      // rows with no error, exactly as an unset app.tenant_id does. Compared
+      // with the grant constant, not a value handed in, so a call made with
+      // some other grant fails here.
+      const state = await readBypassState(tx);
+      const expected = BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ;
+      if (
+        state === null ||
+        state.bypassRls !== "on" ||
+        state.purpose !== expected.purpose ||
+        state.tables !== expected.tables
+      ) {
+        throw new Error(
+          `BYPASS_CONTEXT_MISSING: bypass_rls=${JSON.stringify(state?.bypassRls ?? null)} ` +
+            `purpose=${JSON.stringify(state?.purpose ?? null)} tables=${JSON.stringify(state?.tables ?? null)}, ` +
+            `expected the AUDIT_CHAIN_VERIFY_SENTINEL_READ grant — reads would be inert or mis-scoped`,
+        );
+      }
+      return readChain(tx, tenantId, true);
+    },
+    BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ,
+    TX_BUDGET,
+  );
+  return resultOf(tenantId, fetched);
+}
+
 // ── Worker main loop ─────────────────────────────────────────────
 
 interface TenantState {
@@ -270,12 +359,12 @@ export async function runTick(
   // failure here is reported like any other incomplete tick rather than
   // thrown: a throw would skip the heartbeat and leave only the absence alarm,
   // which cannot tell "inert" from "dead".
-  let tenants: Array<{ id: string; auditChainEnabled: boolean }> = [];
+  let tenants: Array<{ id: string }> = [];
   let enumerationError: unknown = null;
   try {
     tenants = await withBypassRls(
       prisma,
-      (tx) => tx.tenant.findMany({ select: { id: true, auditChainEnabled: true } }),
+      (tx) => tx.tenant.findMany({ select: { id: true } }),
       BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP,
     );
   } catch (err) {
@@ -294,14 +383,11 @@ export async function runTick(
   // deployed alert keys on), not a healthy tick; the tenants it did return are
   // still verified.
   //
-  // The sentinel itself is not verified here: withTenantRls refuses to open a
-  // context on it — it is the FK target of every unattributable audit row, so
-  // a context scoped to it would expose all of them. It is left out of the
-  // counts rather than counted as verified, since nothing about its chain is
-  // read. Its audit_chain_enabled is false (a retention migration refuses to
-  // run otherwise); if that ever changes, the tick reports it as unverifiable.
+  // Every tenant is verified, the sentinel included and whatever its
+  // audit_chain_enabled: a chain enabled once and then disabled keeps its rows
+  // and anchor. verifyTenantChain reads the sentinel under its own bypass grant.
   const sentinel = tenants.find((t) => t.id === SYSTEM_TENANT_ID);
-  const verifiable = tenants.map((t) => t.id).filter((id) => id !== SYSTEM_TENANT_ID);
+  const verifiable = tenants.map((t) => t.id);
   const enumerationReason: keyof typeof ENUMERATION_FAILURE | null =
     enumerationError !== null
       ? "TENANT_ENUMERATION_FAILED"
@@ -317,12 +403,6 @@ export async function runTick(
       enumerationReason,
       ENUMERATION_FAILURE[enumerationReason],
       enumerationError !== null ? errorLogFields(enumerationError) : null,
-    );
-  }
-  if (sentinel?.auditChainEnabled) {
-    errored++;
-    logger.error(
-      "audit-chain-verify-worker: tick incomplete — reason=SENTINEL_CHAIN_UNVERIFIABLE (the system tenant's audit chain is enabled, but no tenant context can be opened on it)",
     );
   }
   for (const tenantId of verifiable) {
@@ -387,8 +467,8 @@ export async function runTick(
   // COVERAGE rides on the same line as counts. A partial tick must never read
   // as fully verified, so alert on `verifiedTenantCount < tenantCount` rather
   // than on the heartbeat's absence.
-  // Per-tenant failures only; the enumeration and sentinel reasons above have
-  // their own lines.
+  // Per-tenant failures only; the enumeration reasons above have their own
+  // lines.
   if (erroredTenantIds.length > 0) {
     logger.error(
       "audit-chain-verify-worker: tick incomplete — %d/%d tenants failed to verify: %s",

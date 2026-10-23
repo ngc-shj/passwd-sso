@@ -22,6 +22,7 @@
  * The script seeds a temporary MCP client + tokens, exercises rotate + replay,
  * verifies the audit row shape, then deletes the test fixture (try/finally).
  */
+import type { Prisma } from "@prisma/client";
 import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 import { BYPASS_GRANT, setBypassGucs } from "@/lib/tenant-rls-grants";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -44,10 +45,16 @@ function hashToken(t: string): string {
   return createHash("sha256").update(t).digest("hex");
 }
 
-async function withTenantRls<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
+// The GUCs are transaction-local, so the callback must query through `tx`: a
+// query on the global client runs on another connection, outside them. (This
+// script connects as a superuser, so RLS does not apply either way.)
+async function withTenantRls<T>(
+  tenantId: string,
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await setBypassGucs(tx, BYPASS_GRANT.MANUAL_MCP_REPLAY_VERIFICATION, { tenantId });
-    return fn();
+    return fn(tx);
   });
 }
 
@@ -67,14 +74,14 @@ async function main() {
   console.log("=== MCP refresh-token replay → audit row verification ===\n");
 
   // Pick any tenant + a user from that tenant
-  const tenant = await withTenantRls(NIL_UUID, () =>
-    prisma.tenant.findFirst({ orderBy: { createdAt: "asc" } })
+  const tenant = await withTenantRls(NIL_UUID, (tx) =>
+    tx.tenant.findFirst({ orderBy: { createdAt: "asc" } })
   );
   if (!tenant) throw new Error("No tenants in DB — seed required");
   console.log("Tenant:", tenant.id, tenant.slug);
 
-  const user = await withTenantRls(tenant.id, () =>
-    prisma.user.findFirst({ where: { tenantId: tenant.id } })
+  const user = await withTenantRls(tenant.id, (tx) =>
+    tx.user.findFirst({ where: { tenantId: tenant.id } })
   );
   if (!user) throw new Error(`No user found for tenant ${tenant.id}`);
   console.log("User:", user.id);
@@ -86,8 +93,8 @@ async function main() {
   const accessTokenStr = "mcpa_" + randomBytes(32).toString("base64url");
   const familyId = randomUUID();
 
-  const client = await withTenantRls(tenant.id, () =>
-    prisma.mcpClient.create({
+  const client = await withTenantRls(tenant.id, (tx) =>
+    tx.mcpClient.create({
       data: {
         tenantId: tenant.id,
         clientId: clientIdStr,
@@ -100,8 +107,8 @@ async function main() {
   );
 
   try {
-    const access = await withTenantRls(tenant.id, () =>
-      prisma.mcpAccessToken.create({
+    const access = await withTenantRls(tenant.id, (tx) =>
+      tx.mcpAccessToken.create({
         data: {
           tokenHash: hashToken(accessTokenStr),
           clientId: client.id,
@@ -112,8 +119,8 @@ async function main() {
         },
       })
     );
-    await withTenantRls(tenant.id, () =>
-      prisma.mcpRefreshToken.create({
+    await withTenantRls(tenant.id, (tx) =>
+      tx.mcpRefreshToken.create({
         data: {
           tokenHash: hashToken(refreshTokenStr),
           familyId,
@@ -156,8 +163,8 @@ async function main() {
     console.log("\nWaiting 2s for audit_outbox → audit_logs propagation...");
     await new Promise((r) => setTimeout(r, 2000));
 
-    const logRows = await withTenantRls(tenant.id, () =>
-      prisma.auditLog.findMany({
+    const logRows = await withTenantRls(tenant.id, (tx) =>
+      tx.auditLog.findMany({
         where: { tenantId: tenant.id, action: "MCP_REFRESH_TOKEN_REPLAY" },
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -170,8 +177,8 @@ async function main() {
       row = logRows[0];
       console.log("\nVerified against audit_logs (worker drained).");
     } else {
-      const outboxRows = await withTenantRls(tenant.id, () =>
-        prisma.auditOutbox.findMany({
+      const outboxRows = await withTenantRls(tenant.id, (tx) =>
+        tx.auditOutbox.findMany({
           where: {
             tenantId: tenant.id,
             payload: { path: ["action"], equals: "MCP_REFRESH_TOKEN_REPLAY" },
@@ -221,10 +228,10 @@ async function main() {
     if (!allPass) process.exitCode = 1;
   } finally {
     // Always clean up — even if assertions failed
-    await withTenantRls(tenant.id, async () => {
-      await prisma.mcpRefreshToken.deleteMany({ where: { clientId: client.id } });
-      await prisma.mcpAccessToken.deleteMany({ where: { clientId: client.id } });
-      await prisma.mcpClient.delete({ where: { id: client.id } });
+    await withTenantRls(tenant.id, async (tx) => {
+      await tx.mcpRefreshToken.deleteMany({ where: { clientId: client.id } });
+      await tx.mcpAccessToken.deleteMany({ where: { clientId: client.id } });
+      await tx.mcpClient.delete({ where: { id: client.id } });
     });
     console.log("\n(test data cleaned up)");
   }

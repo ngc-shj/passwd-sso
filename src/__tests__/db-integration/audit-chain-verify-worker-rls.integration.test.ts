@@ -16,6 +16,14 @@
  *
  * The role matters: these cases MUST run as `passwd_app`. A superuser client
  * bypasses RLS outright and passes against the unfixed code.
+ *
+ * The `__system__` sentinel cannot be opened as a tenant context, so its chain
+ * is read under the AUDIT_CHAIN_VERIFY_SENTINEL_READ bypass instead. That path
+ * is exercised on throwaway tenant A while tenant B also has a chain: the grant
+ * admits every tenant's rows, so B is what a lost `WHERE tenant_id` would pull
+ * into A's walk. No case here writes rows for the real sentinel or touches its
+ * audit_chain_enabled — on a shared DB the outbox worker and the anchor
+ * publisher would act on that irreversibly.
  */
 
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
@@ -40,14 +48,19 @@ import {
   computeCanonicalBytes,
   computeEventHash,
 } from "@/lib/audit/audit-chain";
-import { runTick, verifyTenantChain } from "@/../scripts/audit-chain-verify-worker";
+import {
+  MAX_ROWS_PER_TENANT,
+  runTick,
+  verifyChainUnderSentinelGrant,
+  verifyTenantChain,
+} from "@/../scripts/audit-chain-verify-worker";
 
 const CHAIN_LENGTH = 3;
 
 describe("audit-chain verify worker RLS context", () => {
   let ctx: TestContext;
   let tenantId: string;
-  let userId: string;
+  let otherTenantId: string;
   const logger = { error: () => {}, info: () => {} };
 
   beforeAll(async () => {
@@ -58,15 +71,18 @@ describe("audit-chain verify worker RLS context", () => {
   });
   beforeEach(async () => {
     tenantId = await ctx.createTenant();
-    userId = await ctx.createUser(tenantId);
-    await insertChainedRows(CHAIN_LENGTH);
+    otherTenantId = await ctx.createTenant();
+    await insertChainedRows(tenantId, CHAIN_LENGTH);
+    await insertChainedRows(otherTenantId, CHAIN_LENGTH);
   });
   afterEach(async () => {
     await ctx.deleteTestData(tenantId);
+    await ctx.deleteTestData(otherTenantId);
   });
 
-  /** Seed a valid chain of `count` rows plus a matching anchor. */
-  async function insertChainedRows(count: number): Promise<string[]> {
+  /** Seed a valid chain of `count` rows for `tenantId` plus a matching anchor. */
+  async function insertChainedRows(tenantId: string, count: number): Promise<string[]> {
+    const userId = await ctx.createUser(tenantId);
     const ids: string[] = [];
     let prevHash: Buffer = Buffer.from([0x00]);
 
@@ -220,7 +236,94 @@ describe("audit-chain verify worker RLS context", () => {
     expect(result.walkedThrough).toBeGreaterThan(0);
   });
 
-  it("C3: runTick enumerates tenants under bypass as passwd_app, matching the superuser count with no coverage shortfall", async () => {
+  it("verifies tenant A's chain under the sentinel-read grant as passwd_app, with B's chain present", async () => {
+    // Visibility on the bypass path: the grant is what makes A's rows visible
+    // to passwd_app, and a clean walk of exactly CHAIN_LENGTH rows shows B's
+    // rows, which the grant admits just as well, stayed out of it (joined in,
+    // they would interleave by chain_seq and break the walk at seq 1).
+    const result = await verifyChainUnderSentinelGrant(tenantId, {
+      prisma: ctx.app.prisma,
+      logger,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.anchorChecked).toBe(true);
+    expect(result.totalVerified).toBe(CHAIN_LENGTH);
+  });
+
+  it("detects a tampered row of tenant A under the sentinel-read grant", async () => {
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `UPDATE audit_logs SET metadata = '{"tampered":true}'::jsonb
+         WHERE tenant_id = $1::uuid AND chain_seq = 2`,
+        tenantId,
+      );
+    });
+
+    const result = await verifyChainUnderSentinelGrant(tenantId, {
+      prisma: ctx.app.prisma,
+      logger,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.firstTamperedSeq).toBe(2);
+    expect(result.walkedThrough).toBeGreaterThan(0);
+  });
+
+  it("verifies the sentinel as passwd_app without throwing, matching what a superuser reads of it", async () => {
+    // On a clean DB the sentinel has no chain, so this proves the routing
+    // (withTenantRls would throw RlsSentinelContextRefused) and that the
+    // bypass precondition holds on a real database — not visibility, which
+    // the tenant-A cases above prove. Read-only: nothing is written for the
+    // sentinel.
+    const result = await verifyTenantChain(SYSTEM_TENANT_ID, {
+      prisma: ctx.app.prisma,
+      logger,
+    });
+
+    const [truth] = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<
+        Array<{ anchor_seq: bigint | null; chained: bigint; walkable: bigint }>
+      >(
+        `SELECT
+           (SELECT chain_seq FROM audit_chain_anchors WHERE tenant_id = $1::uuid) AS anchor_seq,
+           (SELECT COUNT(*) FROM audit_logs
+             WHERE tenant_id = $1::uuid AND chain_seq IS NOT NULL) AS chained,
+           (SELECT COUNT(*) FROM audit_logs
+             WHERE tenant_id = $1::uuid AND chain_seq IS NOT NULL
+               AND chain_seq <= (SELECT chain_seq FROM audit_chain_anchors
+                                  WHERE tenant_id = $1::uuid)) AS walkable`,
+        SYSTEM_TENANT_ID,
+      );
+    });
+
+    if (truth.anchor_seq === null) {
+      expect(result.totalVerified).toBe(0);
+      expect(result.ok).toBe(Number(truth.chained) === 0);
+    } else {
+      // Assumes the sentinel's chain is intact: a broken one (e.g. rows purged
+      // by its retention) stops the walk early and fails this, as it should.
+      // The head hash is compared only when the walk reached the anchor, so a
+      // walk the row cap cut short has anchorChecked false.
+      expect(result.anchorChecked).toBe(
+        Number(truth.anchor_seq) >= 1 &&
+          Number(truth.walkable) <= MAX_ROWS_PER_TENANT,
+      );
+      expect(result.totalVerified).toBe(
+        Math.min(Number(truth.walkable), MAX_ROWS_PER_TENANT),
+      );
+      if (Number(truth.walkable) <= MAX_ROWS_PER_TENANT) {
+        expect(result.ok).toBe(true);
+        expect(result.reason).toBeUndefined();
+      } else {
+        expect(result.reason).toBe("TRUNCATED");
+      }
+    }
+  });
+
+  it("C3: runTick enumerates tenants under bypass as passwd_app, matching the superuser count of all tenants (sentinel included) with no coverage shortfall", async () => {
     // `tenants` now carries RLS too (C1): a bare `prisma.tenant.findMany` as
     // passwd_app would see zero rows and every tenant would walk an empty
     // chain — the same silent failure this file's other cells exist to catch,
@@ -245,10 +348,9 @@ describe("audit-chain verify worker RLS context", () => {
     const [{ count: superuserTenantCount }] = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       return tx.$queryRawUnsafe<Array<{ count: bigint }>>(
-        // The sentinel is enumerated but not verified (withTenantRls refuses
-        // it), so it is outside tenantCount.
-        `SELECT COUNT(*) AS count FROM tenants WHERE id <> $1::uuid`,
-        SYSTEM_TENANT_ID,
+        // Every tenant is verified, the sentinel included (under its own
+        // bypass grant), so tenantCount is the count of all tenants.
+        `SELECT COUNT(*) AS count FROM tenants`,
       );
     });
     expect(heartbeat.tenantCount).toBe(Number(superuserTenantCount));

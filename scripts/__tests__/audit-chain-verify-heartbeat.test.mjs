@@ -8,17 +8,23 @@
  * therefore rides on the counts carried by the same line, which is what an
  * operator alerts on for a partial tick.
  *
- * Also pins the RLS precondition (`RLS_CONTEXT_MISSING`) — the branch's
- * anti-regression device, which the integration suite structurally cannot reach
- * because withTenantRls always sets the GUC there.
+ * Also pins the read-path preconditions — `RLS_CONTEXT_MISSING` on the tenant
+ * path, `BYPASS_CONTEXT_MISSING` and `BYPASS_SCOPE_VIOLATION` on the sentinel's
+ * bypass path — which the integration suite structurally cannot reach because
+ * the real wrappers always set the GUCs there.
  *
- * No DB: runTick is driven with a stub client.
+ * No DB: runTick is driven with a stub client that records, per transaction,
+ * the GUCs the wrappers wrote and answers `current_setting` reads from them.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runTick } from "../audit-chain-verify-worker.ts";
+import { runTick, verifyChainUnderSentinelGrant } from "../audit-chain-verify-worker.ts";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const HEARTBEAT = "audit-chain-verify-heartbeat";
+const SENTINEL_GRANT = BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ;
+const ENUMERATION = "enumeration";
+const FOREIGN = "abababab-abab-4bab-8bab-abababababab";
 
 // console.error applies printf formatting, so a reason passed as a %s/%j
 // argument never appears in the format string itself — only in a later
@@ -27,94 +33,150 @@ function errLineIncludes(errLines, text) {
   return errLines.some((args) => args.some((a) => String(a).includes(text)));
 }
 
+/** The `verify threw` line for `tenantId`, or undefined. */
+function threwFor(errLines, tenantId) {
+  return errLines.find(
+    ([fmt, id]) => String(fmt).includes("verify threw") && id === tenantId,
+  );
+}
+
+function heartbeatOf(logLines) {
+  return JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+}
+
 /**
- * @param tenantIds tenants the tick should walk
- * @param failFor   tenant ids whose verify should throw
- * @param opts.chainEnabledIds ids whose auditChainEnabled is true (default: none — false)
+ * The `set_config(name, value, true)` calls of one tagged `$executeRaw`, as
+ * { name: value }. A value is either a literal in the SQL text or a bound
+ * template value — the setters use both — so the text is rejoined with a marker
+ * per bound value and each call resolved against `values`.
+ */
+function parseGucWrites(strings, values) {
+  const sql = strings.reduce(
+    (acc, s, i) => acc + s + (i < values.length ? `\u0000${i}\u0000` : ""),
+    "",
+  );
+  const writes = {};
+  const re = /set_config\('([^']+)',\s*(?:'([^']*)'|\u0000(\d+)\u0000)/g;
+  for (const m of sql.matchAll(re)) {
+    writes[m[1]] = m[2] !== undefined ? m[2] : values[Number(m[3])];
+  }
+  return writes;
+}
+
+/**
+ * @param tenantIds tenants the enumeration returns, in order
+ * @param failFor   tenant ids whose transaction should fail to open
  * @param opts.enumerationRejects when true, the enumeration read itself rejects,
  *   simulating withBypassRls throwing (lost scope, dropped connection, ...)
+ * @param opts.fixtures { [tenantId]: { anchors?, rows?, chainedRows? } } — what
+ *   the anchor read, walk and chained-row count return for the tenant bound as
+ *   $1. A tenant without an entry has no anchor and no chained rows.
+ * @param opts.reads { [tenantId]: { tenantIdSetting?, bypassState? } } — what
+ *   that tenant's transaction reports instead of what it wrote:
+ *   `tenantIdSetting` replaces current_setting('app.tenant_id') on the tenant
+ *   path; `bypassState` is merged over readBypassState's row, or `null` for no
+ *   row at all.
  */
 function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
-  const { chainEnabledIds = [], enumerationRejects = false } = opts;
-  // The tenant enumeration itself now runs under withBypassRls (C3), so it is
-  // the FIRST $transaction call runTick makes — before any per-tenant
-  // withTenantRls call verifyTenantChain opens. Serve that call with a tx
-  // carrying `$executeRaw` (setBypassGucs writes through it) and
-  // `tenant.findMany`; every later call is a per-tenant read.
-  let transactionCallCount = 0;
+  const {
+    enumerationRejects = false,
+    fixtures = {},
+    reads = {},
+  } = opts;
+  /** One record per $transaction call, in call order. */
+  const transactions = [];
   return {
-    // verifyTenantChain wraps its reads in withTenantRls, which opens a
-    // transaction — so failing here is exactly how a broken RLS context
-    // reaches runTick.
+    transactions,
     $transaction: async (fn, txOpts) => {
-      transactionCallCount += 1;
-      if (transactionCallCount === 1) {
-        return fn({
-          $executeRaw: async () => 0,
-          tenant: {
-            findMany: async () => {
-              // Thrown here, not returned as a rejection value: this is what
-              // withBypassRls's $transaction call itself failing looks like
-              // from runTick's perspective (its try/catch around the call).
-              if (enumerationRejects) {
-                throw new Error("ENUMERATION_REJECTED: bypass transaction aborted");
-              }
-              return tenantIds.map((id) => ({
-                id,
-                auditChainEnabled: chainEnabledIds.includes(id),
-              }));
-            },
-          },
-        });
+      // The tenant enumeration runs under withBypassRls, so it is the FIRST
+      // $transaction call runTick makes — before any per-tenant one.
+      const label = transactions.length === 0 ? ENUMERATION : currentTenantId;
+      const record = { tenant: label, gucs: {}, options: txOpts, queried: [] };
+      transactions.push(record);
+      // Failing at the open is exactly how a broken context reaches runTick.
+      if (label !== ENUMERATION && failFor.includes(label)) {
+        throw new Error(`RLS_CONTEXT_MISSING: app.tenant_id is null, expected ${label}`);
       }
-      txOptions = txOpts;
+      const read = reads[label] ?? {};
       const tx = {
-        $executeRaw: async () => 0,
-        $queryRawUnsafe: async (sql) => {
-          // withTenantRls sets the GUC through $executeRaw; the first read in
-          // verifyTenantChain is the precondition assertion.
-          if (String(sql).includes("current_setting")) {
-            // gucOverride lets a case simulate a context that was never
-            // established, which is the only way to reach the precondition
-            // throw without deleting the wrapper.
+        // setBypassGucs / setTenantGucs write through the tagged form.
+        $executeRaw: async (strings, ...values) => {
+          Object.assign(record.gucs, parseGucWrites(strings, values));
+          return 0;
+        },
+        // readBypassState's tagged read.
+        $queryRaw: async (strings) => {
+          if (!strings.join("").includes("current_setting")) {
+            throw new Error(`stub: unexpected $queryRaw ${strings.join("?")}`);
+          }
+          if (read.bypassState === null) return [];
+          return [
+            {
+              bypass_rls: record.gucs["app.bypass_rls"] ?? null,
+              purpose: record.gucs["app.bypass_purpose"] ?? null,
+              tenant_id: record.gucs["app.tenant_id"] ?? null,
+              tables: record.gucs["app.bypass_tables"] ?? null,
+              ...read.bypassState,
+            },
+          ];
+        },
+        $queryRawUnsafe: async (sql, ...params) => {
+          const text = String(sql);
+          if (text.includes("current_setting")) {
             return [
-              { tenant_id: gucOverride === undefined ? currentTenantId : gucOverride },
+              {
+                tenant_id:
+                  "tenantIdSetting" in read
+                    ? read.tenantIdSetting
+                    : (record.gucs["app.tenant_id"] ?? null),
+              },
             ];
           }
-          if (String(sql).includes("audit_chain_anchors") && anchorRows) {
-            return anchorRows;
+          const tenantId = params[0];
+          // A mislabelled transaction (a wrong trackTenantOrder list) would
+          // otherwise serve one tenant's fixture to another and pass quietly.
+          // Case-insensitive, as PostgreSQL's uuid equality is: a spelling
+          // difference must reach the worker's own row checks, not stop here.
+          if (String(tenantId).toLowerCase() !== label) {
+            throw new Error(`stub: transaction for ${label} queried ${tenantId}`);
           }
-          // No anchor, no chained rows -> a legitimately empty, healthy chain.
-          return [];
+          record.queried.push(text);
+          const fixture = fixtures[label] ?? {};
+          if (text.includes("audit_chain_anchors")) return fixture.anchors ?? [];
+          if (text.includes("COUNT(*)")) {
+            return [{ count: BigInt(fixture.chainedRows ?? 0) }];
+          }
+          if (text.includes("audit_logs")) return fixture.rows ?? [];
+          throw new Error(`stub: unexpected query ${text}`);
+        },
+        tenant: {
+          findMany: async () => {
+            // Thrown here, not returned as a rejection value: this is what
+            // withBypassRls's $transaction call itself failing looks like
+            // from runTick's perspective (its try/catch around the call).
+            if (enumerationRejects) {
+              throw new Error("ENUMERATION_REJECTED: bypass transaction aborted");
+            }
+            return tenantIds.map((id) => ({ id }));
+          },
         },
       };
-      if (failFor.includes(currentTenantId)) {
-        throw new Error(
-          `RLS_CONTEXT_MISSING: app.tenant_id is null, expected ${currentTenantId}`,
-        );
-      }
       return fn(tx);
     },
   };
 }
 
-// withTenantRls receives the tenant id, but the stub's $transaction does not;
+// The wrappers receive the tenant id, but the stub's $transaction does not;
 // runTick walks tenants serially, so tracking the current one is sufficient.
 let currentTenantId = null;
-/** undefined = report the real tenant id; otherwise the value to report. */
-let gucOverride;
-/** Options withTenantRls forwarded to $transaction on the last call. */
-let txOptions;
-/** When set, the anchors query returns this instead of []. */
-let anchorRows;
 
 /** Advance `currentTenantId` in walk order as each transaction opens. */
 function trackTenantOrder(prisma, order) {
   let i = 0;
   let callCount = 0;
   const orig = prisma.$transaction;
-  // Forward opts: dropping it here would make the tx-budget assertion vacuous
-  // even with the stub capturing it.
+  // Forward opts: dropping it here would make the tx-budget assertions vacuous
+  // even with the stub recording them.
   prisma.$transaction = async (fn, opts) => {
     callCount += 1;
     // The enumeration transaction (withBypassRls) is always the first call —
@@ -123,6 +185,34 @@ function trackTenantOrder(prisma, order) {
     currentTenantId = order[i++];
     return orig(fn, opts);
   };
+}
+
+function txOf(prisma, tenantId) {
+  return prisma.transactions.find((t) => t.tenant === tenantId);
+}
+
+function anchor(tenantId, seq) {
+  return { tenant_id: tenantId, chain_seq: String(seq), prev_hash: Buffer.alloc(32) };
+}
+
+function chainRow(tenantId, seq, id) {
+  return {
+    id,
+    tenant_id: tenantId,
+    created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, seq)),
+    chain_seq: BigInt(seq),
+    event_hash: Buffer.alloc(32, seq),
+    chain_prev_hash: Buffer.alloc(32),
+    metadata: {},
+  };
+}
+
+/** Run a tick whose only tenant is the sentinel. */
+async function sentinelTick(opts) {
+  const prisma = makeStubPrisma([SYSTEM_TENANT_ID], [], opts);
+  trackTenantOrder(prisma, [SYSTEM_TENANT_ID]);
+  await runTick(prisma, new Map());
+  return prisma;
 }
 
 describe("audit-chain-verify liveness vs coverage signals", () => {
@@ -146,24 +236,21 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     currentTenantId = null;
-    gucOverride = undefined;
-    txOptions = undefined;
-    anchorRows = undefined;
   });
 
   it("emits the heartbeat with full coverage when every tenant verified", async () => {
-    const tenants = ["11111111-1111-4111-8111-111111111111"];
+    const t = "11111111-1111-4111-8111-111111111111";
     // The sentinel is always in the real enumeration; omitting it here would
     // incidentally trip TENANT_ENUMERATION_INCOMPLETE and corrupt this test's
     // own count, which is not what it is pinning down.
-    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, ...tenants]);
-    trackTenantOrder(prisma, tenants);
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, t]);
 
     await runTick(prisma, new Map());
 
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
-    expect(beat.tenantCount).toBe(1);
-    expect(beat.verifiedTenantCount).toBe(1);
+    const beat = heartbeatOf(logLines);
+    expect(beat.tenantCount).toBe(2);
+    expect(beat.verifiedTenantCount).toBe(2);
     expect(beat.erroredTenantCount).toBe(0);
   });
 
@@ -174,13 +261,13 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     const ok = "33333333-3333-4333-8333-333333333333";
     const bad = "44444444-4444-4444-8444-444444444444";
     const prisma = makeStubPrisma([SYSTEM_TENANT_ID, ok, bad], [bad]);
-    trackTenantOrder(prisma, [ok, bad]);
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, ok, bad]);
 
     await runTick(prisma, new Map());
 
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
-    expect(beat.tenantCount).toBe(2);
-    expect(beat.verifiedTenantCount).toBe(1);
+    const beat = heartbeatOf(logLines);
+    expect(beat.tenantCount).toBe(3);
+    expect(beat.verifiedTenantCount).toBe(2);
     expect(beat.erroredTenantCount).toBe(1);
     // verifiedTenantCount < tenantCount is the coverage alarm's predicate.
     expect(beat.verifiedTenantCount).toBeLessThan(beat.tenantCount);
@@ -189,7 +276,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
   it("names the failing tenants so the coverage alarm is actionable", async () => {
     const bad = "22222222-2222-4222-8222-222222222222";
     const prisma = makeStubPrisma([SYSTEM_TENANT_ID, bad], [bad]);
-    trackTenantOrder(prisma, [bad]);
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, bad]);
 
     await runTick(prisma, new Map());
 
@@ -197,7 +284,8 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
       String(fmt).includes("tick incomplete"),
     );
     expect(incomplete).toBeDefined();
-    expect(incomplete.slice(1, 4)).toEqual([1, 1, bad]);
+    // 1 failed of 2 enumerated: the sentinel is in the denominator.
+    expect(incomplete.slice(1, 4)).toEqual([1, 2, bad]);
   });
 
   it("throws RLS_CONTEXT_MISSING when the GUC was never established", async () => {
@@ -205,30 +293,52 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     // from silently reinstating the inert verifier. Reaching it needs a
     // context that reports the wrong tenant, not a deleted wrapper.
     const t = "55555555-5555-4555-8555-555555555555";
-    gucOverride = null;
-    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
-    trackTenantOrder(prisma, [t]);
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t], [], {
+      reads: { [t]: { tenantIdSetting: null } },
+    });
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, t]);
 
     await runTick(prisma, new Map());
 
-    const threw = errLines.find(([fmt]) => String(fmt).includes("verify threw"));
+    const threw = threwFor(errLines, t);
     expect(threw).toBeDefined();
     expect(String(threw[2])).toMatch(/RLS_CONTEXT_MISSING/);
+    // No read ran on a context that failed its precondition.
+    expect(txOf(prisma, t).queried).toEqual([]);
     // And it counts as a coverage shortfall rather than a silent pass.
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    const beat = heartbeatOf(logLines);
     expect(beat.erroredTenantCount).toBe(1);
   });
 
   it("forwards an explicit transaction budget, not Prisma's 5s default", async () => {
-    // The whole point of the F5 fix. Without capturing opts here, dropping the
+    // The whole point of the F5 fix. Without recording opts, dropping the
     // { timeout, maxWait } argument reds nothing.
     const t = "77777777-7777-4777-8777-777777777777";
-    const prisma = makeStubPrisma([t]);
-    trackTenantOrder(prisma, [t]);
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, t]);
 
     await runTick(prisma, new Map());
 
-    expect(txOptions?.timeout).toBeGreaterThan(5000);
+    // The tenant path's own transaction, set up by withTenantRls.
+    const tenantTx = txOf(prisma, t);
+    expect(tenantTx.gucs["app.tenant_id"]).toBe(t);
+    expect(tenantTx.options?.timeout).toBeGreaterThan(5000);
+  });
+
+  it("forwards the stated budget on the sentinel's bypass transaction too", async () => {
+    // Its own recorded options, not the last transaction's: the sentinel is
+    // walked first here, so a tenant-path budget opened after it cannot stand
+    // in for a dropped argument on the bypass call.
+    const t = "77777777-7777-4777-8777-777777777777";
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, t]);
+
+    await runTick(prisma, new Map());
+
+    const sentinelTx = txOf(prisma, SYSTEM_TENANT_ID);
+    expect(sentinelTx.gucs["app.bypass_rls"]).toBe("on");
+    expect(sentinelTx.options?.timeout).toBeGreaterThan(5000);
+    expect(sentinelTx.options?.maxWait).toBeGreaterThan(0);
   });
 
   it("counts a tampered tenant as verified, not as a coverage shortfall", async () => {
@@ -237,21 +347,24 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     // inside `if (result.ok)` would turn every real tamper into a
     // "verifier is inert" page and hide the critical behind the high.
     const t = "88888888-8888-4888-8888-888888888888";
-    // An anchor claiming chain_seq 1 with no chained rows -> ok:false.
-    anchorRows = [{ chain_seq: "1", prev_hash: Buffer.from([0]) }];
-    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
-    trackTenantOrder(prisma, [t]);
+    // An anchor claiming chain_seq 1 with no chained rows -> ok:false. Keyed
+    // to t, so the sentinel keeps its own (empty, healthy) chain.
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t], [], {
+      fixtures: { [t]: { anchors: [anchor(t, 1)] } },
+    });
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, t]);
 
     await runTick(prisma, new Map());
 
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
-    expect(beat.verifiedTenantCount).toBe(1);
+    const beat = heartbeatOf(logLines);
+    expect(beat.verifiedTenantCount).toBe(2);
     expect(beat.erroredTenantCount).toBe(0);
     expect(beat.failedTenantCount).toBe(1);
-    // And the tamper line itself is emitted.
-    expect(
-      errLines.some(([fmt]) => String(fmt).includes("CHAIN_VERIFY_FAILED")),
-    ).toBe(true);
+    // And the tamper line itself is emitted, for that tenant.
+    const failedLine = errLines.find(([fmt]) =>
+      String(fmt).includes("CHAIN_VERIFY_FAILED"),
+    );
+    expect(failedLine?.[1]).toBe(t);
   });
 
   it("emits TENANT_ENUMERATION_EMPTY and a non-zero erroredTenantCount when enumeration returns no tenants (C3)", async () => {
@@ -262,43 +375,46 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
 
     await runTick(prisma, new Map());
 
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    const beat = heartbeatOf(logLines);
     expect(beat.tenantCount).toBe(0);
     expect(beat.verifiedTenantCount).toBe(0);
     expect(beat.erroredTenantCount).toBe(1);
     expect(errLineIncludes(errLines, "TENANT_ENUMERATION_EMPTY")).toBe(true);
   });
 
-  it("leaves the sentinel tenant out of the counts without opening a per-tenant context", async () => {
-    // withTenantRls's assertOpenableTenantContext unconditionally refuses the
-    // sentinel (src/lib/tenant-rls.ts) — verifyTenantChain would throw on it
-    // EVERY tick if runTick tried. Enumeration always includes it, so runTick
-    // must skip it, never opening the per-tenant transaction stubbed below, and
-    // must not claim it was verified.
+  it("verifies the sentinel under the sentinel-read grant and counts it", async () => {
+    // withTenantRls refuses the sentinel, so it is read under the named bypass
+    // instead — and counted like every other tenant, with no `verify threw`.
     const other = "99999999-9999-4999-8999-999999999999";
     const prisma = makeStubPrisma([SYSTEM_TENANT_ID, other]);
-    // Only the non-sentinel tenant opens a per-tenant (withTenantRls) tx.
-    trackTenantOrder(prisma, [other]);
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, other]);
 
     await runTick(prisma, new Map());
 
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
-    expect(beat.tenantCount).toBe(1);
-    expect(beat.verifiedTenantCount).toBe(1);
+    const sentinelTx = txOf(prisma, SYSTEM_TENANT_ID);
+    expect(sentinelTx.gucs["app.bypass_rls"]).toBe("on");
+    expect(sentinelTx.gucs["app.bypass_purpose"]).toBe(SENTINEL_GRANT.purpose);
+    expect(sentinelTx.gucs["app.bypass_tables"]).toBe(SENTINEL_GRANT.tables);
+    // The reads ran (anchor lookup, then the chained-row count).
+    expect(sentinelTx.queried).toHaveLength(2);
+    // The other tenant stays on the tenant path.
+    expect(txOf(prisma, other).gucs["app.bypass_rls"]).toBe("off");
+    expect(threwFor(errLines, SYSTEM_TENANT_ID)).toBeUndefined();
+
+    const beat = heartbeatOf(logLines);
+    expect(beat.tenantCount).toBe(2);
+    expect(beat.verifiedTenantCount).toBe(2);
     expect(beat.erroredTenantCount).toBe(0);
   });
 
   it("treats [SYSTEM_TENANT_ID] alone as a complete, healthy tick (allow side)", async () => {
-    // A single-tenant deployment with no other tenants yet is the minimum
-    // healthy state: the sentinel is present (enumeration is complete) and
-    // there is nothing left to verify. No per-tenant tx opens.
-    const prisma = makeStubPrisma([SYSTEM_TENANT_ID]);
+    // A deployment with no other tenants yet is the minimum healthy state: the
+    // sentinel is present (enumeration is complete) and is itself verified.
+    await sentinelTick();
 
-    await runTick(prisma, new Map());
-
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
-    expect(beat.tenantCount).toBe(0);
-    expect(beat.verifiedTenantCount).toBe(0);
+    const beat = heartbeatOf(logLines);
+    expect(beat.tenantCount).toBe(1);
+    expect(beat.verifiedTenantCount).toBe(1);
     expect(beat.erroredTenantCount).toBe(0);
     expect(
       errLines.some(([fmt]) => String(fmt).includes("tick incomplete")),
@@ -316,7 +432,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
 
     await runTick(prisma, new Map());
 
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    const beat = heartbeatOf(logLines);
     expect(beat.erroredTenantCount).toBe(1);
     expect(beat.verifiedTenantCount).toBe(1);
     expect(errLineIncludes(errLines, "TENANT_ENUMERATION_INCOMPLETE")).toBe(
@@ -332,7 +448,7 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
 
     await runTick(prisma, new Map());
 
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    const beat = heartbeatOf(logLines);
     expect(beat.tenantCount).toBe(0);
     expect(beat.verifiedTenantCount).toBe(0);
     expect(beat.erroredTenantCount).toBe(1);
@@ -342,38 +458,191 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     expect(errLineIncludes(errLines, "read threw")).toBe(true);
   });
 
-  it("flags the sentinel's chain as unverifiable when audit_chain_enabled is true (SENTINEL_CHAIN_UNVERIFIABLE)", async () => {
-    // The sentinel is never walked (withTenantRls refuses it), so a sentinel
-    // whose chain is enabled is a gap the tick must surface rather than
-    // silently skip.
-    const other = "99999999-9999-4999-8999-999999999999";
-    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, other], [], {
-      chainEnabledIds: [SYSTEM_TENANT_ID],
+  it("reads an uppercase-spelled tenant id under the sentinel grant as that tenant", async () => {
+    // PostgreSQL returns uuids in lowercase. A row check comparing against the
+    // caller's spelling would call every row foreign; the path normalises once.
+    // (The sentinel's own id has no hex letters, so this is exercised on
+    // another tenant, as the integration cells run this path.)
+    const t = "abcdefab-cdef-4abc-8def-abcdefabcdef";
+    const prisma = makeStubPrisma([], [], {
+      fixtures: { [t]: { anchors: [anchor(t, 1)], rows: [chainRow(t, 1, "efefefef-efef-4fef-8fef-efefefefefef")] } },
     });
-    trackTenantOrder(prisma, [other]);
+    // No enumeration precedes a direct call: take the first slot as `t`'s.
+    prisma.transactions.push({ tenant: ENUMERATION, gucs: {}, options: undefined, queried: [] });
+    currentTenantId = t;
 
-    await runTick(prisma, new Map());
+    const result = await verifyChainUnderSentinelGrant(t.toUpperCase(), { prisma, logger: console });
 
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
-    expect(beat.erroredTenantCount).toBe(1);
-    expect(beat.verifiedTenantCount).toBe(1);
-    expect(
-      errLines.some(([fmt]) =>
-        String(fmt).includes("SENTINEL_CHAIN_UNVERIFIABLE"),
-      ),
-    ).toBe(true);
+    // No BYPASS_SCOPE_VIOLATION: both the anchor read and the walk ran and
+    // their rows were accepted as this tenant's. (The fixture's hashes are not
+    // a real chain, so the verdict itself is a tamper — not what is tested.)
+    expect(result.tenantId).toBe(t);
+    expect(txOf(prisma, t).queried).toHaveLength(2);
+    expect(txOf(prisma, t).gucs["app.bypass_rls"]).toBe("on");
   });
 
   it("does NOT throw when the GUC matches the tenant under verification", async () => {
     // Allow side: an assertion that always fired would be caught here.
     const t = "66666666-6666-4666-8666-666666666666";
     const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t]);
-    trackTenantOrder(prisma, [t]);
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, t]);
 
     await runTick(prisma, new Map());
 
     expect(errLines.find(([fmt]) => String(fmt).includes("verify threw"))).toBeUndefined();
-    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    const beat = heartbeatOf(logLines);
     expect(beat.erroredTenantCount).toBe(0);
+  });
+
+  describe("sentinel bypass precondition (BYPASS_CONTEXT_MISSING)", () => {
+    /** The sentinel's thrown message; also asserts no read ran and it errored. */
+    function missingContextMessage(prisma) {
+      const threw = threwFor(errLines, SYSTEM_TENANT_ID);
+      expect(threw).toBeDefined();
+      const message = String(threw[2]);
+      expect(message).toContain("BYPASS_CONTEXT_MISSING");
+      expect(txOf(prisma, SYSTEM_TENANT_ID).queried).toEqual([]);
+      const beat = heartbeatOf(logLines);
+      expect(beat.erroredTenantCount).toBe(1);
+      expect(beat.verifiedTenantCount).toBe(0);
+      return message;
+    }
+
+    it("throws when bypass_rls is not on", async () => {
+      const prisma = await sentinelTick({
+        reads: { [SYSTEM_TENANT_ID]: { bypassState: { bypass_rls: "off" } } },
+      });
+      expect(missingContextMessage(prisma)).toContain('bypass_rls="off"');
+    });
+
+    it("throws when the purpose differs from the grant's", async () => {
+      const purpose = BYPASS_GRANT.WEBAUTHN_AUTHORIZE_CREDENTIAL.purpose;
+      expect(purpose).not.toBe(SENTINEL_GRANT.purpose);
+      const prisma = await sentinelTick({
+        reads: { [SYSTEM_TENANT_ID]: { bypassState: { purpose } } },
+      });
+      expect(missingContextMessage(prisma)).toContain(
+        `purpose=${JSON.stringify(purpose)}`,
+      );
+    });
+
+    it("throws when the tables differ from the grant's", async () => {
+      // Same purpose, wider table set: only the tables comparison can catch it.
+      const tables = BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP.tables;
+      expect(BYPASS_GRANT.SYSTEM_MAINTENANCE_TENANT_LOOKUP.purpose).toBe(
+        SENTINEL_GRANT.purpose,
+      );
+      const prisma = await sentinelTick({
+        reads: { [SYSTEM_TENANT_ID]: { bypassState: { tables } } },
+      });
+      expect(missingContextMessage(prisma)).toContain(
+        `tables=${JSON.stringify(tables)}`,
+      );
+    });
+
+    it("throws when readBypassState returns no row", async () => {
+      const prisma = await sentinelTick({
+        reads: { [SYSTEM_TENANT_ID]: { bypassState: null } },
+      });
+      expect(missingContextMessage(prisma)).toContain(
+        "bypass_rls=null purpose=null tables=null",
+      );
+    });
+  });
+
+  describe("sentinel bypass row scope (BYPASS_SCOPE_VIOLATION)", () => {
+    function scopeViolationMessage() {
+      const threw = threwFor(errLines, SYSTEM_TENANT_ID);
+      expect(threw).toBeDefined();
+      const beat = heartbeatOf(logLines);
+      expect(beat.erroredTenantCount).toBe(1);
+      expect(beat.verifiedTenantCount).toBe(0);
+      return String(threw[2]);
+    }
+
+    it("throws on a foreign anchor row", async () => {
+      await sentinelTick({
+        fixtures: { [SYSTEM_TENANT_ID]: { anchors: [anchor(FOREIGN, 3)] } },
+      });
+      const message = scopeViolationMessage();
+      expect(message).toContain(
+        `BYPASS_SCOPE_VIOLATION: audit_chain_anchors returned a row of tenant ${JSON.stringify(FOREIGN)} ` +
+          `while verifying ${JSON.stringify(SYSTEM_TENANT_ID)}`,
+      );
+    });
+
+    it("throws on the sentinel's own anchor followed by a foreign one", async () => {
+      await sentinelTick({
+        fixtures: {
+          [SYSTEM_TENANT_ID]: {
+            anchors: [anchor(SYSTEM_TENANT_ID, 1), anchor(FOREIGN, 3)],
+          },
+        },
+      });
+      expect(scopeViolationMessage()).toContain(
+        `audit_chain_anchors returned a row of tenant ${JSON.stringify(FOREIGN)}`,
+      );
+    });
+
+    it("throws on two anchor rows even when both are the sentinel's (at most one row)", async () => {
+      // The only case the row-count half alone decides: no foreign tenant id
+      // is there to find.
+      await sentinelTick({
+        fixtures: {
+          [SYSTEM_TENANT_ID]: {
+            anchors: [anchor(SYSTEM_TENANT_ID, 1), anchor(SYSTEM_TENANT_ID, 2)],
+          },
+        },
+      });
+      expect(scopeViolationMessage()).toContain(
+        `BYPASS_SCOPE_VIOLATION: audit_chain_anchors returned 2 rows ` +
+          `while verifying ${JSON.stringify(SYSTEM_TENANT_ID)}, expected at most 1`,
+      );
+    });
+
+    it("throws on a foreign walked row, naming the tenant but not the row", async () => {
+      const foreignRowId = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+      await sentinelTick({
+        fixtures: {
+          [SYSTEM_TENANT_ID]: {
+            anchors: [anchor(SYSTEM_TENANT_ID, 2)],
+            rows: [
+              chainRow(SYSTEM_TENANT_ID, 1, "efefefef-efef-4fef-8fef-efefefefefef"),
+              chainRow(FOREIGN, 2, foreignRowId),
+            ],
+          },
+        },
+      });
+      const message = scopeViolationMessage();
+      expect(message).toContain(
+        `BYPASS_SCOPE_VIOLATION: audit_logs returned a row of tenant ${JSON.stringify(FOREIGN)} ` +
+          `while verifying ${JSON.stringify(SYSTEM_TENANT_ID)}`,
+      );
+      expect(message).not.toContain(foreignRowId);
+    });
+
+    it("does not throw when the anchor and walked rows are all the sentinel's (allow side)", async () => {
+      // The positive control for the cases above: same shape, own tenant id.
+      // The rows' hashes are not a real chain, so the walk reports a tamper —
+      // verified and failed, not errored.
+      const prisma = await sentinelTick({
+        fixtures: {
+          [SYSTEM_TENANT_ID]: {
+            anchors: [anchor(SYSTEM_TENANT_ID, 2)],
+            rows: [
+              chainRow(SYSTEM_TENANT_ID, 1, "efefefef-efef-4fef-8fef-efefefefefef"),
+              chainRow(SYSTEM_TENANT_ID, 2, "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd"),
+            ],
+          },
+        },
+      });
+      expect(threwFor(errLines, SYSTEM_TENANT_ID)).toBeUndefined();
+      // Anchor read, then the walk.
+      expect(txOf(prisma, SYSTEM_TENANT_ID).queried).toHaveLength(2);
+      const beat = heartbeatOf(logLines);
+      expect(beat.verifiedTenantCount).toBe(1);
+      expect(beat.erroredTenantCount).toBe(0);
+      expect(beat.failedTenantCount).toBe(1);
+    });
   });
 });
