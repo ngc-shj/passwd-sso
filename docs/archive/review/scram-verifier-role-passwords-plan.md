@@ -1,7 +1,7 @@
 # Plan: scram-verifier-role-passwords
 
 Issue: `#941`. Branch `feat/scram-verifier-role-passwords`, base `origin/main` 3383b3fcb.
-Revision 4 — after plan-review rounds 1–3 (`scram-verifier-role-passwords-review.md`). Split out of
+Revision 5 — after plan-review rounds 1–4 (locked) (`scram-verifier-role-passwords-review.md`). Split out of
 `aws-anchor-publisher-and-scram-verifier` (branch `feat/aws-anchor-publisher-and-scram-verifier`,
 commit 32f392d3a) after its round-1 review.
 
@@ -145,9 +145,10 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
   bootstrap header: a refused statement now logs a verifier; earlier runs left cleartext in the log
   and in `pg_stat_statements`. Check from the `postgres` database (never `CREATE EXTENSION` in
   `passwd_sso`: its PUBLIC grants fail `audit-db-grants`), creating the extension there if absent,
-  with `SELECT count(*) FROM pg_stat_statements WHERE query ILIKE '%PASSWORD%' AND query NOT ILIKE
-  '%PASSWORD ''SCRAM-SHA-256$%' AND query NOT ILIKE '%PASSWORD ''md5%'` (a count, so the cleartext
-  is not printed; verifier statements written after this change are excluded; whether the RDS
+  with `SELECT count(*) FROM pg_stat_statements WHERE query ~* '\m(ROLE|USER)\M.*\mPASSWORD\s+E?'''
+  AND query NOT ILIKE '%PASSWORD ''SCRAM-SHA-256$%' AND query NOT ILIKE '%PASSWORD ''md5%'` (the
+  clause, not the word: the view is cluster-wide and the app's `password_*` tables match the word;
+  a count, so the cleartext is not printed; verifier statements written after this change are excluded; whether the RDS
   master can create the extension in `postgres` and read other roles' text is unverified, E1); clear with `pg_stat_statements_reset()` (needs
   its EXECUTE grant; on RDS unverified, E1) and rotate when it cannot be cleared or snapshots exist;
   "logs expired" alone is no longer sufficient.
@@ -207,8 +208,12 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
   - `psql-safe.test.mjs`'s fake answers `4096` to the iteration query and the case asserts two
     calls for each set-* script, both with `-X` and the passfile.
 - C3 replay against real psql (integration): the stdin the fake psql recorded, with the role
-  name replaced by a probe role, is fed to real psql once as the superuser and once as the existing
-  NOSUPERUSER CREATEROLE stand-in (given LOGIN and a password in the test); each asserts exit 0,
+  name replaced by a probe role, is fed to real psql once as the superuser and once as a
+  NOSUPERUSER CREATEROLE stand-in. Both roles are committed (a separate psql process cannot see a
+  rolled-back one): the stand-in gets LOGIN, a password and CONNECT; the probe role is created by
+  the stand-in (`SET ROLE`), so it holds ADMIN OPTION on it, and gets CONNECT; the stand-in's
+  password is `randomBytes` per run, LOGIN is granted last and revoked in `finally` before the
+  drop, and `dropProbeRoles` runs in both `beforeAll` and `afterAll`; each asserts exit 0,
   `rolpassword` equals the recorded verifier, the sentinel logs in over scram and a wrong password
   gets `28P01`. No real role is touched. psql: the host binary (pinned in CI), else `docker compose
   exec -T db psql`, after asserting both connections report the same `system_identifier`. Red
@@ -220,9 +225,10 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
 - C4: a unit test derives the file set (`PASSWORD` in `infra/postgres/initdb/*.sql`) and pins it
   (`01`, `02`, `04`); asserts `SET log_statement`, `log_min_error_statement`,
   `log_min_duration_statement`, `pg_stat_statements.track_utility` and `\set VERBOSITY terse` are
-  top-level statements (not in a comment, not inside `\if`), before the first statement that
-  interpolates a password variable (`:'…password…'`), with no `\c`, `RESET` or re-`SET` between;
-  red-proven on fixtures (missing, after the `SELECT :'v'`, inside `\if`, commented out). Plus a
+  top-level statements (not in a comment, not inside `\if`), before every statement other than
+  `\getenv`, with no `\c`, `RESET` or re-`SET` between;
+  red-proven on fixtures (missing, after the `SELECT :'v'`, inside `\if`, commented out, a SET
+  after a statement interpolating a variable not named `*password*`). Plus a
   one-shot check recorded in the deviation log: a throwaway `postgres:16-alpine -c
   log_statement=all` with this initdb directory, a sentinel `PASSWD_APP_PASSWORD`, and a fixture
   file that sends a deliberately refused role statement with a sentinel after the SETs: neither
@@ -231,7 +237,10 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
   `NOLOGIN`; a sentinel → `LOGIN`, the sentinel logs in, no log carries it.
 - C2 integration isolation: `SET scram_iterations` cases run inside a transaction with `SET
   LOCAL`. `resolveIterations` unit cases add `"100000"` (accepted) and `"10000"` as text.
-- C5: every documented command is run once and recorded.
+- C5: every documented command is run once and recorded. The `pg_stat_statements` count runs on a
+  throwaway `postgres:16-alpine` with the library preloaded, with controls: one seeded cleartext
+  `ALTER ROLE … PASSWORD 'x'` → count ≥ 1; one seeded verifier statement → adds 0; a query on a
+  `password_entries`-named table → adds 0.
 
 ## Considerations & constraints
 
@@ -251,8 +260,8 @@ plus prose instructions found by reading (a grep cannot match "ALTER ROLE each r
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | SCRAM verifier helper | pending |
-| C2 | bootstrap-rds-roles sends verifiers | pending |
-| C3 | set-*-password.sh send a verifier | pending |
-| C4 | initdb: logging off, no published LOGIN password | pending |
-| C5 | docs | pending |
+| C1 | SCRAM verifier helper | locked |
+| C2 | bootstrap-rds-roles sends verifiers | locked |
+| C3 | set-*-password.sh send a verifier | locked |
+| C4 | initdb: logging off, no published LOGIN password | locked |
+| C5 | docs | locked |

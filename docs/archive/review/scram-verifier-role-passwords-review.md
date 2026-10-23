@@ -83,3 +83,18 @@ All round-2 findings confirmed resolved. New findings on revision 3, applied in 
 ## Recurring Issue Check (round-3 delta)
 Functionality: R41/R55 M1; R50 M2; R29 M3. Security: R29 R3-3, R3-5; R42/RT7 R3-1; R49 R3-5; R50
 R3-2, R3-4. Testing: RT1/R50/RT7 R3-T1; RT10 R3-T2, R3-T3; R3 R3-T4.
+
+---
+
+# Round 4
+Date: 2026-10-23
+
+All round-3 findings confirmed resolved. Round 4 raised Minors only, all applied in revision 5:
+F-A1 / T-R4-T1 / S-R4-2 (committed stand-in and probe roles: stand-in creates the probe, random
+password, LOGIN revoked in `finally`, pre- and post-clean), T-R4-T2 (order check anchors on every
+non-`\getenv` statement, fixture with a variable not named `*password*`), T-R4-T3 / S-R4-1 (pgss
+count matches the clause not the word — the app's `password_*` tables would otherwise keep it
+non-zero — run with positive and negative controls).
+
+Plan phase closed after 4 rounds: no Critical or Major open; the round-4 findings were Minors
+against test mechanics and one detection query, all applied; every contract locked.
