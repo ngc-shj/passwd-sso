@@ -1,7 +1,7 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 11 — after plan-review rounds 1–10. Rounds 3–4 showed that hardening the publication
+Revision 12 — after plan-review rounds 1–11. Rounds 3–4 showed that hardening the publication
 protocol itself (published objects as the source of truth, key rotation, a database-write
 adversary, multiple destinations) is a design project of its own; by user decision it moves to
 a follow-up issue (SC5) and this plan keeps today's protocol — the database pointer and an
@@ -19,7 +19,9 @@ anchors bucket always has Object Lock; one PR; protocol hardening deferred (SC5)
   integration + CI.
 - Verification environment constraints:
   - E1 — no AWS environment runs. Terraform is gated by a new CI job (`fmt -check`,
-    `init -backend=false`, `validate`); nothing is planned or applied. ECS deployment
+    `init -backend=false`, `validate`, and in `modules/anchor-prefix` `init -backend=false` then
+    `test`, failing when the reported pass count is below the vector's length — from the root,
+    `terraform test` finds no test file and reports success); nothing is planned or applied. ECS deployment
     behaviour, IAM evaluation, bucket-policy conditions and Object Lock on real S3 are
     `blocked-deferred` to the next AWS bootstrap and listed with their checks in
     `aws-anchor-publisher-verify-worker-manual-test.md`. Everything in the publisher's own
@@ -150,7 +152,12 @@ verifier.
   validation of a provider-less module `infra/terraform/modules/anchor-prefix` that the root
   passes the prefix through, so `terraform test` can exercise it without AWS credentials (it
   needs Terraform ≥ 1.6, which the CI job pins; the root's `required_version` is unchanged).
-  The publisher's env schema applies the same rule with the same two parts in Zod. The policy holds only as long as nobody
+  The root calls the module unconditionally with the root prefix variable, and the bucket
+  policy and the task env read the prefix from the module's output (pinned statically, red: the
+  call removed or given a constant). The publisher's env schema applies the same segment rule
+  in Zod only when the prefix is set and non-empty: an unset or empty prefix stays valid for
+  non-Terraform deployments that write at the bucket root; non-empty is Terraform's alone,
+  because the bucket policy needs it. The policy holds only as long as nobody
   replaces it — the account root always can — so changes to the anchors bucket's policy,
   lifecycle, Object Lock or versioning configuration are alarmed (an EventBridge rule on those
   CloudTrail events; a Terraform apply is the expected false positive), and the docs state the
@@ -266,8 +273,12 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
 - C2: the scheduler with an injected clock — boot run first; a timer 1 ms early still publishes
   its boundary, including the day after a failure; wall-clock re-arm; the same-boundary retry
   after a commit failure and after an upload failure, its stop before the next boundary; SIGTERM waits for the in-flight run. Integration, as the publisher role
-  (`beforeAll` fails unless the only chain-enabled tenants are the test's; the marker, pointer
-  and deployment-id rows snapshotted and restored; far-future boundaries):
+  (`beforeAll` fails unless the only chain-enabled tenants are the test's; the marker, pointer,
+  deployment-id and `audit_anchor_upload_attempts` rows snapshotted and restored, and the
+  attempts row deleted in every publisher test's `afterEach`; far-future boundaries; the cap
+  and no-tenant cases assert the attempts row is absent at their start — red: the cleanup
+  dropped and the cap case run before the lost-commit case, which then reports
+  `upload_cap_reached`):
   - two runs for one boundary publish once;
   - the absent-marker derivation: `last_published_at` seeded at or after the boundary with no
     marker → `skipped_already_published`; seeded below → publishes (red: derivation removed);
@@ -299,7 +310,7 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
   - `lock_held`: a second session holds `pg_advisory_lock` (released in `finally`), injected
     `lock_timeout` → `lock_held`, no failure emit, no pause (red: a top-level `code` read instead
     of `pgErrorCode` — the Prisma adapter nests 55P03 under `P2010` → `failed`).
-  Existing publisher tests add the marker to cleanup and make their fake key-aware.
+  Existing publisher tests add the marker and the attempts row to cleanup and make their fake key-aware.
 - C3: integration against MinIO (the CI step; fail loudly when absent, never skip), probed
   first on the CI digest for retention support (E2): bucket with Object
   Lock; `S3Destination.upload` through its options; `GetObjectRetention` COMPLIANCE at the
@@ -320,7 +331,7 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
   sequence) against the exported key builder's output for a real kid and against
   `S3Destination`'s full key, and asserts neither matches the break-glass paths (red: a
   `YYYYMMDD` date; a pattern without the prefix; only the `NotResource` copy changed). Prefix
-  validation, one allow/deny vector (`a`, `a/b`, `a.b`, `.a` allowed; `*`, `?`, `/a`, `a/`,
+  validation, one allow/deny vector (Zod side also allows unset and empty; `a`, `a/b`, `a.b`, `.a` allowed; `*`, `?`, `/a`, `a/`,
   `a//b`, `.`, `..`, `a/../b`, `a/./b` refused) run through both validators: `terraform test` in
   the module (`command = plan`, `expect_failures = [var.prefix]` per refused value) in the
   terraform CI job, and the Zod schema in vitest; a static test asserts the `.tftest.hcl` run

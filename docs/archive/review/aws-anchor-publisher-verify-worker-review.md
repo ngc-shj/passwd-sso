@@ -221,3 +221,14 @@ Testing: RT7/RT6 H-1, H-2.
 | F-R10-1 | Minor | Counter increments on runs with nothing to publish | Counter tx returns `skipped_no_tenants` before incrementing; cap worded as runs past marker and tenant checks; no-tenant four-boot test |
 | F-R10-2 | Minor | Pause-removal propagation misses partial-pause test, verification doc pause section, worker-policy-manifest prose, dead `pauseCapFactor` | All added to C2/C6; `pauseCapFactor` and its constant removed |
 | S side note | — | "Same advisory lock" cannot hold across the commit | Reworded: same key, released at commit; overlap only over-counts |
+
+# Round 11 (plan revision 11)
+
+Security: no findings.
+
+| ID | Sev | Finding | Resolution (revision 12) |
+|----|-----|---------|-------------------------|
+| T-L-1 | Major | Global attempts row missing from snapshot/restore and cleanup; order-dependent cap failures | Row added to snapshot/restore and every publisher test's `afterEach`; cap and no-tenant cases assert absence at start; red: cleanup dropped, cap case first |
+| T-L-2 | Minor | Nothing pins that the root calls the prefix module | Static pin: unconditional call with the root variable; policy and task env read the module output; red: call removed or constant |
+| F-R11-1 | Minor | Zod rule would refuse an existing no-prefix deployment | Zod applies the segment rule only when set and non-empty; unset/empty in the Zod vector as allowed |
+| F-R11-2 | Minor | `terraform test` from the root reports success with no tests | CI runs `init` + `test` in the module and fails when the pass count is below the vector length |
