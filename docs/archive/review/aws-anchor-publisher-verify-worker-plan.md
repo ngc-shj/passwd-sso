@@ -1,176 +1,210 @@
 # Plan: aws-anchor-publisher-verify-worker
 
 Issue: `#940`. Branch `feat/aws-anchor-publisher-verify-worker`, base `origin/main` 022ca4eac.
-Revision 1 of this plan; it replaces `aws-anchor-publisher-and-scram-verifier-plan.md` (whose
-`#941` half shipped in `#945`) and answers that plan's round-1 review
-(`aws-anchor-publisher-and-scram-verifier-review.md`).
+Revision 2 — after plan-review round 1 (`aws-anchor-publisher-verify-worker-review.md`). It
+replaces `aws-anchor-publisher-and-scram-verifier-plan.md`, whose `#941` half shipped in `#945`.
 
 User decisions: the audit-chain verify worker is included and connects as `passwd_app`;
 `@aws-sdk/client-s3` becomes a dependency, statically imported so esbuild bundles it; the
-publisher runs as a long-lived ECS service with the replacement problems fixed in code (not a
-scheduled task); the anchors bucket always has Object Lock.
+publisher runs as a long-lived ECS service with the replacement problems fixed in code; the
+anchors bucket always has Object Lock; one PR.
 
 ## Project context
 
-- Type: `mixed` (workers, Terraform, Dockerfile, docs). Tests: unit + real-PostgreSQL
+- Type: `mixed` (workers, Terraform, Dockerfile, CI, docs). Tests: unit + real-PostgreSQL
   integration + CI.
 - Verification environment constraints:
-  - E1 — no AWS environment runs. Terraform is checked by `terraform fmt -check` and
-    `terraform validate` (with `init -backend=false`), run locally and recorded; nothing is
-    planned or applied. ECS behaviour (deployment percentages, task replacement, IAM
-    evaluation, S3 Object Lock acceptance) is `blocked-deferred` to the next AWS bootstrap; the
-    code paths they exercise are tested locally (cadence idempotency and catch-up against the
-    dev DB, the S3 PUT against MinIO with Object Lock, the bundles booted with each task's exact
-    env).
-  - E2 — MinIO is the local S3. Whether the existing S3 destination integration test runs
-    depends on a MinIO container; the plan makes it run in CI or records why not (Phase 2).
+  - E1 — no AWS environment runs. Terraform is gated by a new CI job (`fmt -check`,
+    `init -backend=false`, `validate`); nothing is planned or applied. ECS deployment
+    behaviour, IAM evaluation, bucket-policy conditions and Object Lock on real S3 are
+    `blocked-deferred` to the next AWS bootstrap and listed with their checks in
+    `aws-anchor-publisher-verify-worker-manual-test.md`. Everything in the publisher's own
+    behaviour is tested locally.
+  - E2 — MinIO stands in for S3, in CI too (a service container). Whether this MinIO
+    release honours `If-None-Match: *` and Object Lock retention headers is checked first in
+    Phase 2; a gap is recorded and the affected check moves to the manual test.
 
 ## Objective
 
-Make external audit anchoring actually happen on AWS, and run the audit-chain verifier there.
-Today production validation requires `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`, but no task
-publishes; and if one did, it would crash at module load, could not reach S3 (no SDK in the
-image, retention headers refused by a bucket without Object Lock, a missing IAM action), and
-would double-publish or skip a day across task replacement. No deployment runs the verifier.
+Make external audit anchoring happen on AWS, correctly, and run the audit-chain verifier there.
+Today production requires `AUDIT_ANCHOR_PUBLISHER_ENABLED=true` but no task publishes; a task
+would crash at module load, could not write to S3, and would double-publish, skip or shift a
+day across replacement, timer drift, a failed boot run or a slow upload. No deployment runs the
+verifier.
 
 ## Contracts
 
 ### C1 — the publisher stands alone
-- The bundle's module graph does not reach `@/lib/prisma` (which builds the app pool at load
-  and throws without `DATABASE_URL`). Audit emits go through the publisher's own pool: a helper
-  opens its own transaction under a named bypass grant, builds the payload with
-  `buildOutboxPayload` (`@/lib/audit/audit-payload`) and writes it with `enqueueAuditInTx`
-  (`@/lib/audit/audit-outbox-in-tx`) — the prisma-free pair the operator CLI already uses.
-  `passwd_anchor_publisher` already holds `INSERT` on `audit_outbox`; the grant used names
-  `auditOutbox`. The structured log line `logAuditAsync` emits synchronously is kept as a
-  `console` JSON line with `_logType`.
-- Env: the publisher's schema makes `DATABASE_URL` optional and, under production, requires
-  `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` — the refinement the outbox and retention-GC workers
-  already have.
-- Control class: fail-closed gate — the bundle smoke (C3) boots it with exactly the task's
-  env, which has no `DATABASE_URL`.
+- Its module graph does not reach `@/lib/prisma` (measured: only `@/lib/audit/audit` pulls it
+  in). Audit emits go through a helper in `src/workers/audit-anchor-publisher.ts`: its own
+  transaction under the existing `BYPASS_GRANT.AUDIT_WRITE_DIRECT_OUTBOX` (`["auditOutbox"]`),
+  payload from `buildOutboxPayload`, row written with `tx.auditOutbox.createMany` — no
+  `RETURNING`, so the role's `INSERT` on `audit_outbox` suffices (`create()` would need
+  `SELECT`). `tenantId` is fixed to `SYSTEM_TENANT_ID` inside the helper. It never throws:
+  `auditLogger` emits the structured line as `logAuditAsync` does, and a failed write goes to
+  `deadLetterLogger`. Emits that ran inside the publish transaction move after it.
+  `AUDIT_ANCHOR_PUBLISH` is unchanged. The bypass gate's allowances for the publisher file
+  gain the `AUDIT_WRITE` purpose if they lack it.
+- Env: `DATABASE_URL` optional; production requires `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, the
+  signing key and the tag secret — requirements that move out of the app's schema (C5);
+  `AUDIT_ANCHOR_PUBLISHER_ENABLED` parses `"false"` as false (today `z.coerce.boolean`).
 
-### C2 — cadence under task replacement
-- Idempotent per boundary: the publish transaction, after the advisory lock, reads
-  `system_settings.audit_anchor_last_published_boundary`; equal to the current boundary →
-  `skipped_already_published`, no upload. A successful publish writes it in the same
-  transaction as the manifest pointer.
-- Catch-up: at boot the publisher runs one cadence immediately, then aligns to the next
-  boundary. Idempotency makes the boot run a no-op when the boundary is already published; a
-  task replaced across a boundary publishes it on start. A boundary missed entirely (the task
-  down longer than a cadence) stays missed; the next publish reports
-  `MISSING_PRIOR_CADENCE_PUBLICATION` as today.
-- ECS: the publisher service runs `deployment_maximum_percent = 100`,
-  `deployment_minimum_healthy_percent = 0`, `desired_count = min(1, var.worker_desired_count)`.
-  The advisory lock plus C2's idempotency cover any remaining overlap.
-- `worker-policy-manifest.json`'s single-owner claim for the publisher is corrected to the
-  mechanism above.
+### C2 — cadence correctness
+- `runCadence(boundary)` publishes the boundary it is given; the scheduler computes it.
+- Scheduler, extracted into an importable function with an injected clock and timer: at boot
+  it awaits one run for the current boundary, then arms a `setTimeout` to the next boundary
+  computed from the wall clock, and re-arms the same way after each run (no `setInterval`).
+  SIGTERM stops arming and waits for an in-flight run before disconnecting.
+- Inside the transaction: blocking `pg_advisory_xact_lock`, then the idempotency read of
+  `system_settings.audit_anchor_last_published_boundary` (before the missing-prior safety
+  net); equal → `skipped_already_published`. When the key is absent, it is derived from
+  `MAX(last_published_at) >= boundary` so an upgraded install does not republish today.
+  A publish writes it with the manifest pointer, through Prisma `upsert`.
+- A failed run pauses at most until the next boundary.
+- The publish transaction has an explicit timeout; the S3 client's request and connection
+  timeouts are below it. The task's `stopTimeout` exceeds both.
+- ECS: `deployment_maximum_percent = 100`, `deployment_minimum_healthy_percent = 0`,
+  `desired_count = min(1, var.worker_desired_count)`.
+- The first publish on a fresh install still reports `MISSING_PRIOR_CADENCE_PUBLICATION`;
+  stated in the docs.
 
-### C3 — bundles and the smoke that boots them
-- Member set: `ls scripts/*-worker.ts scripts/*-publisher.ts` — outbox, retention-GC, verify,
-  publisher. The Dockerfile bundles and `COPY`s all four; `npm run worker:audit-anchor-publisher`
-  joins the `worker:*` scripts.
-- `check-worker-bundle-smoke.sh` extracts every `npx esbuild scripts/… --outfile=dist/…` (not
-  only `*-worker.ts`), and fails unless the filesystem member set, the esbuild set and the
-  `COPY dist/*.js` set are equal. It boots each bundle from an empty temporary cwd (no `.env`)
-  with exactly the env names its ECS task definition gives it (the map lives in the smoke and a
-  test pins it to `ecs.tf`). A Dockerfile override (`WORKER_BUNDLE_SMOKE_DOCKERFILE`) makes the
-  red proofs fixture-based.
-- The publisher's `--validate-env-only` also constructs its destinations (so a missing SDK
-  fails at boot, not at the first boundary). The verify worker gains `--validate-env-only`:
-  a database URL (dedicated or fallback) present and parseable, numeric settings finite and
-  positive.
-- Control class: fail-closed gate (pre-pr + CI static job).
+### C3 — S3 destination
+- `@aws-sdk/client-s3`, a pinned dependency, imported statically by `s3-destination.ts` and
+  bundled into the publisher. `OptionalModuleName` keeps it for `s3-blob-store.ts`.
+- `S3Destination` takes client options (endpoint, path style, credentials) defaulting to `{}`.
+- Every PUT sends `IfNoneMatch: "*"`. A 412 is a failure (`ANCHOR_KEY_EXISTS`), alerted, not a
+  success: an anchor is never replaced. Recovery documented.
+- Anchors bucket: Object Lock always on, default retention COMPLIANCE 2557 days; versioning;
+  SSE-S3 (anchors are signed and tag-pseudonymised, and a deletable CMK could make locked
+  evidence unreadable); a bucket policy denying a PUT without `s3:if-none-match`, a lock mode
+  other than COMPLIANCE, or a retention above the default plus a margin.
+- Existing anchors bucket: whether `object_lock_enabled` forces replacement in the provider
+  in use is read from its schema in Phase 2; the docs give the procedure for the answer —
+  never one that empties or recreates a bucket holding versions.
+- Supply chain: the license allowlist, `check-crypto-auth-deps-classified.mjs` (SigV4 signing
+  with task credentials) and `npm audit --omit=dev` (the only CVE gate for code esbuild
+  inlines, which Trivy cannot see) are each run and their outcome recorded.
 
-### C4 — S3 destination
-- `@aws-sdk/client-s3` is a dependency, imported statically by `s3-destination.ts`, bundled into
-  the publisher (it leaves `OptionalModuleName`; the blob stores keep loading theirs at runtime).
-- The anchors bucket always has Object Lock (`object_lock_enabled = true`, decoupled from
-  `enable_s3_object_lock`, which stays the attachments switch). It is a create-time attribute;
-  for an existing anchors bucket the docs give the replacement procedure.
-- The publisher's role gets `s3:PutObjectRetention` beside PUT/GET/LIST, no `DeleteObject`, and
-  `kms:GenerateDataKey`/`kms:Decrypt` on `var.s3_kms_key_arn` when set.
+### C4 — bundles, the smoke, and the image
+- Member set: the ECS task `command` entries plus `worker-policy-manifest.json` entrypoints —
+  outbox, retention-GC, verify, publisher. The Dockerfile bundles and `COPY`s all four;
+  `npm run worker:audit-anchor-publisher` added.
+- `check-worker-bundle-smoke.sh`: extracts every esbuild invocation writing `dist/`; fails
+  unless the member set, the esbuild set and the `COPY` set are equal; boots each bundle with
+  `env -i` plus only the env names its task definition gives it (pinned to `ecs.tf` by a parser
+  test that refuses HCL it does not model), from an empty temp cwd, and requires each bundle's
+  positive marker (`env validation passed`; for the publisher also `destinations ready`).
+  Override `WORKER_BUNDLE_SMOKE_DOCKERFILE` for fixtures.
+- `container-scan` runs each of the four bundles inside the built image with
+  `--validate-env-only` and its task env — the only check that sees what the runner stage
+  ships.
+- The verify worker gains `--validate-env-only` (URL present and parseable, numeric settings
+  finite and positive) and an interruptible sleep.
 
-### C5 — ECS (Terraform)
-- Task definitions, services, log groups and outputs for `audit-anchor-publisher` and
-  `audit-chain-verify-worker`, mirroring the existing workers except where C2 says otherwise.
-- Publisher: environment `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`, the S3 bucket; secrets
-  `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET`,
-  `DEPLOYMENT_ID`. Verify worker: secret `AUDIT_CHAIN_VERIFY_DATABASE_URL` from the app secret's
-  `DATABASE_URL` key (`passwd_app`; it holds write privileges the read-only worker does not need
-  — accepted, user decision; a dedicated read-only role is SC3).
-- Task roles: the publisher gets its own role carrying only the anchor S3 policy (C4); the
-  verify worker gets none. The anchor S3 policy leaves the shared task role — the app does not
-  publish anchors, so this narrows it.
-- `DEPLOYMENT_ID`: a new app-secret key, a UUID generated once; the docs check for an existing
-  `system_settings.audit_anchor_deployment_id` first (restored or migrated data) and point to
-  the rotation runbook's mismatch recovery.
-- Monitoring: `RunningTaskCount` alarms for both; log metric filters and alarms for the
-  publisher's `cadence_failed` / `upload_failed` (a running task that cannot publish is
-  invisible to `RunningTaskCount`) and for the verify worker's heartbeat
-  (`erroredTenantCount > 0`, `failedTenantCount > 0`, absence); both log groups join
-  `rls_bypass_report_log_groups`.
-- `scripts/deploy.sh` advances and rolls back all six services.
-- ECS Exec on the cluster: `logging = "NONE"` stated explicitly — the RDS bootstrap has the
-  operator export role passwords in that shell (round-1 S-A2 of the `#941` plan).
-- The verify worker's sleep is interruptible, so SIGTERM ends it without waiting for the tick.
+### C5 — AWS wiring
+- Task definitions, services, log groups, outputs for the publisher and the verify worker.
+  Publisher: env `AUDIT_ANCHOR_PUBLISHER_ENABLED`, bucket, prefix; secrets
+  `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`, signing key, tag secret, `DEPLOYMENT_ID`. Verify
+  worker: `AUDIT_CHAIN_VERIFY_DATABASE_URL` from the app secret's `DATABASE_URL`.
+- The app task no longer receives the signing key or the tag secret (C1 moved the requirement).
+- Task roles: the publisher's own, carrying only `s3:PutObject` and `s3:PutObjectRetention` on
+  `bucket/<prefix>/*`; the verify worker, the outbox worker and the retention-GC worker get
+  none (none calls AWS); the shared role keeps only what the app uses.
+- `enable_s3_audit_anchors` is validated true (the app already refuses to boot without a
+  destination; the GitHub destination has no wiring — SC2).
+- Monitoring: publisher down alarm sized past a deploy's zero-task gap; a published-absence
+  alarm (~25 h); log metric filters on the publisher's failure lines, each given a `_logType`
+  (`cadence_error` lacks one) and including `ANCHOR_KEY_EXISTS`; verify-worker heartbeat
+  filters (`erroredTenantCount > 0`, `failedTenantCount > 0`, absence); both log groups in
+  `rls_bypass_report_log_groups`; an EventBridge alarm on ECS `ExecuteCommand`.
+- ECS Exec logging `NONE`, explicit: the bootstrap's operator shell holds role passwords; the
+  remaining audit is CloudTrail `ExecuteCommand`, alarmed above.
+- `scripts/deploy.sh` advances and rolls back six services.
+- `DEPLOYMENT_ID`: a new app-secret key; reuse a stored value only for a successor of the same
+  deployment whose predecessor is gone — a clone or restored copy generates a new one and
+  follows the rotation runbook.
+- CI: a terraform job (pinned `setup-terraform`); the app path filter includes
+  `infra/terraform/*.tf` and `infra/terraform/README*.md`; a MinIO service in
+  `ci-integration.yml`.
 
 ### C6 — docs
-- `docs/setup/aws/en.md` (service table, keys), `infra/terraform/README.md` and `README.ja.md`
-  (the secret key table, including the keys tasks already name but the docs omit:
-  `VERIFIER_PEPPER_KEY`, `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET`, `SMTP_USER`,
-  `SMTP_PASS`, and `DEPLOYMENT_ID`), `docs/operations/deployment.md`, `docs/operations/alerts.md`,
-  `CLAUDE.md` (`worker:*` list). "No ECS task consumes it yet" goes.
+`docs/setup/aws/en.md`, `infra/terraform/README.md` and `README.ja.md` (key tables incl.
+`VERIFIER_PEPPER_KEY`, `SMTP_USER`, `SMTP_PASS`, `DEPLOYMENT_ID`, and the ja table's missing
+`AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`), `docs/operations/deployment.md` (DEPLOYMENT_ID, bucket
+procedure, first-publish report), `docs/operations/alerts.md`,
+`docs/security/audit-anchor-verification.md` (one version per key; `LastModified` against the
+boundary), `CLAUDE.md` (`worker:*`). The verify worker's `passwd_app` surplus stated fully
+(reads every table, not only unused writes).
 
 ## Testing strategy
 
-- C1: integration — the publisher's audit emit helper writes an outbox row as
-  `passwd_anchor_publisher` (real role, its own grant); a unit check that the publisher's esbuild
-  metafile has no `src/lib/prisma.ts` input (red proof: re-import `logAuditAsync`).
-- C2: integration against the dev DB on a throwaway deployment/boundary key — two `runCadence`
-  calls for one boundary publish once (`skipped_already_published` second); a boot-time run
-  after a boundary publishes; a boot-time run for an already-published boundary is a no-op.
-  Red proofs: remove the idempotency read; remove the boot run.
-- C3: the smoke's self-test (fixture Dockerfiles): a `COPY` missing, an esbuild missing, a
-  filesystem worker missing from both, a bundle needing `DATABASE_URL` its task lacks — each
-  red; the real tree green. The env map pinned to `ecs.tf` by a parser test. Verify worker
-  `--validate-env-only` env test with allow/deny per axis (no URL, dedicated, fallback, NaN
-  tick), run from a temp cwd.
-- C4: the S3 destination integration test against MinIO with Object Lock enabled on its bucket
-  (real SDK, no mock); its unit test stops mocking the module loader.
-- C5: `terraform fmt -check` and `terraform validate` run and recorded (E1); a static test that
-  every `terraform output -raw X` in `deploy.sh` exists in `outputs.tf`; `deploy-rollback.test.mjs`
-  with six services and a failure on the fifth and sixth; `pool-factory.metric-filter.test.ts`
-  with the two new log groups; every `valueFrom` key a task names is listed in the README key
-  table (parser test).
-- C6: every documented command run once and recorded.
+- C1: unit — the helper mocked per action (five sites: published, paused, failed after
+  rollback, missing-prior, deployment-id mismatch); integration as a new
+  `passwd_anchor_publisher` `TestRole` — the helper writes a row (allow) and a grant not naming
+  `auditOutbox` is refused (deny); the failure-after-rollback and missing-prior paths leave an
+  outbox row; an esbuild metafile check, reusing the smoke's Dockerfile-extracted args, that
+  `src/lib/prisma.ts` is not an input (red: re-import `logAuditAsync`); a publisher env test
+  in the retention-GC pattern (production with only `DATABASE_URL` → refused naming the
+  dedicated URL; dedicated → 0; non-production fallback → 0; `"false"` → disabled).
+- C2: the scheduler with an injected clock — the boot run precedes any timer; a timer firing
+  1 ms early still publishes its boundary; re-arm from the wall clock; SIGTERM waits for the
+  in-flight run. Integration, as the publisher role, with the global rows
+  (`audit_anchor_last_published_boundary`, `…previous_manifest`, `…deployment_id`)
+  snapshotted and restored and a far-future boundary: two runs publish once; a boot run after
+  an unpublished boundary publishes; the absent-marker derivation; a failure pauses only to the
+  next boundary; a transaction timeout below the upload's duration fails without a marker.
+  Existing publisher tests add the new key to cleanup and make their fake key-aware; the race
+  test accepts `skipped_already_published`.
+- C3: integration against MinIO (CI service; fail loudly when absent, never skip): bucket
+  created with Object Lock; `S3Destination.upload` through its options; `GetObjectRetention`
+  is COMPLIANCE at the expected date; a second PUT to the key gets 412 and the publisher
+  reports `ANCHOR_KEY_EXISTS`; the same PUT to a bucket without Object Lock is refused (the
+  test tells the two apart). The unit test mocks `@aws-sdk/client-s3`; the old
+  `requireOptionalModule` contract test is rewritten.
+- C4: the smoke self-test on fixture Dockerfiles — a missing `COPY`, a missing esbuild, a
+  member in neither, a bundle exiting 0 without its marker, a bundle reading `DATABASE_URL`
+  its task lacks (passed explicitly to prove `env -i`) — each red; the real tree green; per-test
+  timeouts set from a measurement. The `ecs.tf` parser asserts four worker task definitions and
+  fails on unmodelled `concat`/ternaries. Verify worker: `--validate-env-only` allow/deny per
+  axis from a temp cwd; SIGTERM during the sleep exits within seconds (red: plain
+  `setTimeout`).
+- C5: the terraform CI job; static pins with red fixtures (publisher percentages,
+  `desired_count`, anchors Object Lock, SSE-S3, no `DeleteObject` / no GET in the publisher
+  role, no task role on the three workers); `deploy-rollback.test.mjs` with six services,
+  failures at the fifth and sixth, and every output name the stubbed `terraform` was asked for
+  present in `outputs.tf`; `pool-factory.metric-filter.test.ts` with the new log groups; a
+  metric-filter test that each new pattern matches a line the code really emits on its failure
+  path and not its success line; a parser test that every `valueFrom` key is in both README
+  tables and that no non-publisher task names the signing key or tag secret.
+- C6: every documented command run once and recorded; the manual-test file lists each E1
+  deferral with its command and expected observation.
 
 ## Considerations & constraints
 
-- SC1 — publisher and verify worker in `docker-compose.workers.yml` and `infra/k8s/` — follow-up
-  issue filed with the PR.
-- SC2 — the GitHub release destination has no task wiring (`enable_s3_audit_anchors = false`
-  leaves the publisher without a destination; it exits fatally at boot, visibly).
-- SC3 — a dedicated read-only role for the verify worker.
-- The verify worker as `passwd_app` reads every tenant's chain under named grants, as the
-  maintenance endpoint can; its write privileges go unused.
+- SC1 — publisher and verify worker in `docker-compose.workers.yml` / `infra/k8s/` (issue filed
+  with the PR).
+- SC2 — GitHub release destination wiring.
+- SC3 — a dedicated read-only role for the verify worker (issue filed with the PR).
+- `worker-policy-manifest.json`: the publisher's single-owner claim corrected to the mechanism;
+  symbols cited, not line numbers; the boundary write is a Prisma `upsert` the sweep-bounds
+  check accepts.
 
 ## User operation scenarios
 
-- First AWS bootstrap: generate `DEPLOYMENT_ID`, put it and the publisher URL in the app
-  secret, apply, deploy; six services; the publisher publishes at its first boundary, the
-  verifier's heartbeat appears hourly.
-- A deploy at 23:59 before a boundary: the old publisher stops before the new one starts; the
-  new one's boot run publishes the boundary if the old one did not.
-- An existing anchors bucket without Object Lock: the docs' replacement procedure.
+- First AWS bootstrap: generate `DEPLOYMENT_ID`; app secret gets it and the publisher URL;
+  apply; deploy; six services; the publisher's boot run publishes immediately (reporting the
+  missing prior cadence once); the verifier's heartbeat appears hourly.
+- Deploy across a boundary: the old publisher drains and stops before the new one starts; the
+  new one's boot run publishes the boundary if it is unpublished, otherwise does nothing.
+- An S3 hiccup on a boot run: one failure, paused only until the next boundary.
 
 ## Go/No-Go Gate
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | publisher stands alone (no `@/lib/prisma`, own audit path, env) | pending |
-| C2 | cadence idempotency, boot catch-up, no-overlap deploys | pending |
-| C3 | four bundles, smoke over them with each task's env | pending |
-| C4 | S3 SDK bundled, Object Lock, IAM | pending |
-| C5 | ECS tasks/services/roles/alarms/deploy | pending |
+| C1 | publisher stands alone (no `@/lib/prisma`, own non-throwing audit path, env) | pending |
+| C2 | cadence correctness (explicit boundary, scheduler, idempotency, pause cap, timeouts, deploys) | pending |
+| C3 | S3 destination (bundled SDK, no overwrite, Object Lock, SSE-S3, policy, supply chain) | pending |
+| C4 | bundles, smoke, in-image boot | pending |
+| C5 | AWS wiring (tasks, roles, app secrets, alarms, deploy, CI) | pending |
 | C6 | docs | pending |
