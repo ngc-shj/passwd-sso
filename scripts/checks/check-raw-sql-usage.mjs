@@ -143,7 +143,8 @@
  *   - NON_LITERAL_IMPORT (D-5 refinement): a non-literal `import()`/`require()`
  *     argument denies everywhere except a measured allowlist of the files that
  *     load a module by a computed specifier on purpose (a tsx loader over an
- *     absolute path, the i18n namespace loader, the crypto WASM loader); a
+ *     absolute path, the i18n namespace loader, the crypto WASM loader, the
+ *     Jackson probe's oauth4webapi loader); a
  *     count mismatch in one of those files denies too, as does an
  *     allowlisted path that no longer exists among the scanned files
  *     (checked once, after the per-file loop) — so the audited set cannot
@@ -1734,10 +1735,11 @@ function checkPrismaExtends(sf, rel) {
 
 // ---------------------------------------------------------------------------
 // NON_LITERAL_IMPORT (D-5 refinement) — a non-literal `import()`/`require()`
-// argument is a tripwire everywhere EXCEPT a measured allowlist of the three
+// argument is a tripwire everywhere EXCEPT a measured allowlist of the four
 // files that load a module by a computed specifier on purpose today (a tsx
 // loader over an absolute path, the i18n namespace loader, the crypto WASM
-// loader). Re-measure with `grep -c "await import("` on a count change; a
+// loader, and the Jackson probe, which must import the ESM-only oauth4webapi
+// copy @auth/core itself resolves — a bare specifier could resolve another). Re-measure with `grep -c "await import("` on a count change; a
 // MISMATCH in an allowlisted file's count denies too, so the audited set
 // cannot drift silently in either direction.
 // ---------------------------------------------------------------------------
@@ -1745,6 +1747,7 @@ const NON_LITERAL_IMPORT_ALLOWLIST = new Map([
   ["scripts/check-env-docs.ts", 4],
   ["src/i18n/messages.ts", 2],
   ["src/lib/crypto/crypto-client.ts", 1],
+  ["scripts/probes/jackson-connection-binding.mjs", 1],
 ]);
 
 function checkNonLiteralImportSpecifiers(sf, rel) {
