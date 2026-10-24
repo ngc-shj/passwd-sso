@@ -121,6 +121,37 @@ Check that no refusal message contains a client secret or the raw JSON.
 
 **Expected:** the callback fails. The server log shows an `OperationProcessingError` from the token exchange (Jackson's non-JSON 401), and no session is created. Restore the secret afterwards.
 
+### Test 8: state and code manipulation
+
+**Steps:**
+1. Click the `IdP B` button and copy the Jackson authorize URL (as in Test 4). Remove the `state` parameter and open it.
+2. Start a sign-in through B, authenticate, and before the callback loads, copy the callback URL (`code` and `state`). In a second browser profile, start a sign-in through B and stop at IdP B; then open the copied callback URL in that second profile.
+3. Start a sign-in through B, and replace the `state` value on the returning callback URL with a different string.
+
+**Expected:**
+- Step 1: Jackson rejects the authorize request ("Please specify a state…", M10).
+- Step 2: the callback is refused by Auth.js (the `state` / `nonce` cookies of the second profile do not match), and no session is created in the second profile. This is the code-injection case PKCE does not cover for these providers; `nonce` is the control.
+- Step 3: refused with an Auth.js `InvalidCheck` error; no session.
+
+---
+
+## Adversarial scenarios
+
+| Scenario | Covered by |
+|---|---|
+| Cross-tenant access: one customer's IdP asserts another tenant's claim | Test 3 (refused under strict), Test 5 (unenforced in off mode, logged) |
+| Claim squatting through another connection, and its remedy | Test 3b |
+| Connection substitution (`idp_hint`) and attacker-added PKCE | Test 4 |
+| Redirect / `state` manipulation, authorization-code injection | Test 8 |
+| Stale or wrong connection credentials | Test 7 |
+| Boot with an unsafe provider configuration | Test 1 |
+
+## Rollback
+
+- **App:** redeploy the previous image. The migration is additive: the new columns are nullable, the old code names none of them, and the widened operation CHECK accepts every value the old code writes. Before redeploying, restore the old Jackson configuration (`AUTH_JACKSON_ID` as the old version expected it, no `AUTH_JACKSON_CONNECTIONS`), since the previous version has no per-connection providers and connection B's users cannot sign in on it.
+- **Data:** nothing to undo. Bindings written by `bind` / `add --provider` stay in `tenant_claims.provider`, and the previous version ignores them; they apply again when this version is redeployed. Rows the previous version registers in the meantime have a NULL provider and show up in `list --unbound`.
+- **Do not** drop the migration's columns to roll back: `tenant_claim_events` is the routing history, and dropping `old_provider` / `new_provider` loses it.
+
 ---
 
 ## Results
@@ -134,3 +165,4 @@ Check that no refusal message contains a client secret or the raw JSON.
 | 5 | | |
 | 6 | | |
 | 7 | | |
+| 8 | | |
