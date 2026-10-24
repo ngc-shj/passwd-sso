@@ -126,7 +126,10 @@ runs at most one task and a deploy stops the old one before starting the new.
 **Publisher task role reuse** — the anchors bucket policy lets only the publisher's
 task role write a manifest key, and the role's trust policy admits ECS tasks of this
 account only (`aws:SourceAccount`). Within the account, a principal allowed
-`iam:PassRole` on it can still run a task of its own choosing as that role. A task runs
+`iam:PassRole` on it can still run a task of its own choosing as that role. The control
+for that whole class is who holds `iam:PassRole` on the publisher role — an SCP or
+permission boundary the operator owns, outside this stack; the alarms below are detective
+and cover a bounded part of it. Through direct ECS calls in this stack's region, a task runs
 with the role iff (a) an override names it, or its task definition does — (b1) one of
 another family, or (b2) one of the publisher's own family, legitimate only for a task the
 publisher service launched. SURFACED, not prevented, route by route: (a) a `RunTask` /
@@ -141,7 +144,10 @@ trail needed), and any `RunTask` / `StartTask` of that family whatever `group` i
 (`<name_prefix>-audit-anchor-publisher-family-run-task`). RESIDUAL: the deploy path
 itself — an `UpdateService` / `CreateService` pointing the publisher service at a revision
 of its family registered outside a deploy runs it as the publisher's own task, which no
-rule tells from a deploy — and changes to the role itself (`UpdateAssumeRolePolicy`,
+rule tells from a deploy — the same calls in any other region (the role is global; EventBridge
+rules and the ECS and CloudTrail events they match are regional), another AWS service that
+launches ECS tasks under a role it is passed (AWS Batch's `jobRoleArn` on Fargate, for one),
+and changes to the role itself (`UpdateAssumeRolePolicy`,
 `PutRolePolicy`, `AttachRolePolicy`, `DeleteRole` + `CreateRole`), which reach CloudTrail
 but are not alarmed by this stack — IAM events reach EventBridge only in `us-east-1`,
 where it has no provider; that alarm is the operator's (`docs/operations/alerts.md`

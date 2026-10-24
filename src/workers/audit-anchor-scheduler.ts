@@ -27,6 +27,12 @@ export const ANCHOR_RETRY_INTERVAL_MS = 15 * MS_PER_MINUTE;
 export const ANCHOR_RETRY_STOP_BEFORE_NEXT_MS = 30 * MS_PER_MINUTE;
 /** Same-boundary retries after the first run, whatever the failure stage. */
 export const ANCHOR_MAX_RETRIES_PER_BOUNDARY = 3;
+/**
+ * setTimeout's largest delay. Node replaces a larger one with 1 ms, so a wall
+ * clock stepped back by weeks would turn the early-fire re-arm into a busy
+ * loop; waiting in steps of at most this keeps it a wait.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export type TimerHandle = unknown;
 
@@ -91,7 +97,7 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
         return;
       }
       inFlight = runAndArm(boundary, retries);
-    }, Math.max(0, at - now()));
+    }, Math.min(Math.max(0, at - now()), MAX_TIMER_DELAY_MS));
   }
 
   /** `retries`: the same-boundary retries already run before this one. */

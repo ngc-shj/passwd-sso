@@ -289,7 +289,14 @@ to another task"): IAM events on the publisher role (`UpdateAssumeRolePolicy`, `
 `AttachRolePolicy`, `DeleteRole` + `CreateRole`) reach EventBridge only in `us-east-1`, where this
 stack has no provider; and the deploy path itself — an `UpdateService` / `CreateService` pointing
 the publisher service at a revision of its family registered outside a deploy runs as the
-service's own task and raises nothing. Confirm the operator's own rule (organisation trail or
+service's own task and raises nothing; the same ECS calls in another region; another AWS service
+launching ECS tasks with the role (e.g. a Batch job definition's `jobRoleArn`). Check who holds
+`iam:PassRole` on the publisher role (`aws iam simulate-principal-policy` for each operator role,
+or the organisation's SCPs) — that is the control for this class. Optionally try binding the
+role's trust policy to this cluster (`aws:SourceArn` `ArnLike`
+`arn:aws:ecs:<region>:<account>:task/<cluster>/*`) on a non-production deploy: if the publisher
+service still assumes the role and a task in another cluster is refused, it can replace part of
+this residual (not adopted here because its value could not be verified without AWS). Confirm the operator's own rule (organisation trail or
 `us-east-1`) exists if one is claimed; otherwise record the residual as accepted.
 
 Rollback: none (step 3 changes nothing). Stop the migrate task if it is still running:

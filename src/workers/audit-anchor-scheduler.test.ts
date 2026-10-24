@@ -10,6 +10,7 @@ import {
   ANCHOR_MAX_RETRIES_PER_BOUNDARY,
   ANCHOR_RETRY_INTERVAL_MS,
   ANCHOR_RETRY_STOP_BEFORE_NEXT_MS,
+  MAX_TIMER_DELAY_MS,
 } from "./audit-anchor-scheduler";
 import type { CadenceOutcome } from "./audit-anchor-publisher";
 
@@ -33,6 +34,8 @@ function linesOf(mock: ReturnType<typeof vi.fn>, logType: string): Array<Record<
 const EXHAUSTED = "audit-anchor-publisher.retries_exhausted";
 
 const MINUTE = 60 * 1000;
+/** Far above any case here (the largest needs about 8); a looping scheduler hits it. */
+const MAX_HARNESS_FIRES = 50;
 const CADENCE_MS = 24 * 60 * MINUTE;
 const OFFSET_MS = 5 * MINUTE;
 
@@ -77,6 +80,7 @@ function makeHarness(startMs: number) {
   let nowMs = startMs;
   const timers: FakeTimer[] = [];
   const runs: number[] = [];
+  let fires = 0;
   let outcomeFor: (boundaryMs: number, run: number) => CadenceOutcome | Promise<CadenceOutcome> = () => PUBLISHED;
 
   const scheduler = createAnchorScheduler({
@@ -115,6 +119,11 @@ function makeHarness(startMs: number) {
     },
     /** Fire the live timer at `atMs` (default: its own deadline) and let the run settle. */
     async fire(atMs?: number): Promise<void> {
+      // A scheduler that loops would otherwise spin here in microtasks, out
+      // of reach of the per-test timeout; fail it by name instead.
+      if (++fires > MAX_HARNESS_FIRES) {
+        throw new Error(`harness: more than ${MAX_HARNESS_FIRES} timer fires, the scheduler is looping`);
+      }
       const timer = this.pending();
       timer.cleared = true;
       nowMs = atMs ?? timer.at;
@@ -153,6 +162,25 @@ describe("createAnchorScheduler", () => {
     await h.fire();
     expect(h.runs).toEqual([B0, B1]);
     expect(h.pending().at).toBe(B1 + CADENCE_MS);
+  });
+
+  it("waits in bounded steps when the wall clock is weeks behind the deadline", async () => {
+    // Node turns a delay above 2^31-1 ms into 1 ms; an uncapped re-arm after a
+    // clock stepped back by weeks would spin.
+    await h.scheduler.start();
+    const stepBack = 60 * CADENCE_MS;
+    await h.fire(B1 - stepBack);
+
+    expect(h.runs).toEqual([B0]);
+    const first = h.pending();
+    expect(first.at - (B1 - stepBack)).toBe(MAX_TIMER_DELAY_MS);
+
+    await h.fire();
+    expect(h.runs).toEqual([B0]);
+    expect(h.pending().at).toBeLessThanOrEqual(B1);
+
+    await h.fire(B1);
+    expect(h.runs).toEqual([B0, B1]);
   });
 
   it("a timer firing exactly at its deadline runs once", async () => {

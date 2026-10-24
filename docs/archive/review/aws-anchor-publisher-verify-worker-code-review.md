@@ -117,3 +117,16 @@ unpinned), R-2 (two cases publish the next boundary under a clock a day behind),
 - N3: the scheduler re-arms for the remainder when a timer fires before its deadline, so no run
   happens before its boundary; the round-2 accepted residual no longer exists.
 - N2, R-1, R-2, R-3 as specified.
+
+### Round 4
+Findings: testing Q-1 (a looping scheduler hangs the suite), functionality N4 (re-arm delay
+unbounded; >24.8 days overflows to 1 ms and busy-loops), N5 and security R4-1 (role routes in
+other regions, and via AWS services that launch ECS tasks such as Batch). All Minor.
+- Q-1: harness fire cap (50) — red-proved with the `<=` mutant.
+- N4: `MAX_TIMER_DELAY_MS` cap — red-proved.
+- N5 / R4-1: not another alarm. The role-route member set has expanded four times, which is the
+  signal to change mechanism rather than add members: the preventive control for the class is
+  `iam:PassRole` on the publisher role (operator-owned SCP / permission boundary). Docs narrowed
+  to "direct ECS calls in this region" with the other routes as residual; the manual test checks
+  who holds `iam:PassRole` and carries the `aws:SourceArn` trust binding as an optional,
+  AWS-verified experiment. A follow-up issue records the PassRole control.

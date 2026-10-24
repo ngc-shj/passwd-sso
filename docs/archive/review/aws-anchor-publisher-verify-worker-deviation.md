@@ -299,3 +299,22 @@ two `worker:*` lines with the user's approval.
   `now: wallClockAt(next)` (same keys and destinations).
 - **P6** — the `lock_held` case takes a third decoy, `(1::bigint << 32) + hashtext(...)::bigint`
   (classid 1, same objid, objsubid 1), released in `finally`; the exact-pid assertion stays.
+
+### D15: round-4 review — bounded re-arm, harness fire cap, role-route class stated as bounded
+
+- `MAX_TIMER_DELAY_MS` (2^31−1) caps the scheduler's re-arm delay: Node turns a larger delay
+  into 1 ms, so a wall clock stepped back by weeks would have busy-looped. Red: uncapped → the
+  bounded-steps test fails.
+- The scheduler test harness throws after 50 timer fires, so a looping scheduler fails a named
+  test instead of hanging the suite in microtasks. Red: the `<=` mutant now fails five tests
+  immediately.
+- Role-route class: the member set had grown four times (override → another family's
+  registration → own family outside the service → another AWS service / another region). Per
+  the escalation rule, the mechanism changes instead of a fifth rule: every route needs
+  `iam:PassRole` on the publisher role, so the control for the class is who holds it (an SCP or
+  permission boundary, operator-owned, outside this stack). The docs now state the alarms as
+  detective coverage of direct ECS calls in this region and list other regions and
+  service-launched tasks (Batch `jobRoleArn`) as residual. Binding the trust policy with
+  `aws:SourceArn` to the cluster was considered and not adopted: its value cannot be verified
+  without AWS and a wrong value stops all publishing; the manual test carries it as an
+  optional experiment.

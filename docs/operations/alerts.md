@@ -1038,12 +1038,17 @@ a forged manifest.
 A task of the publisher's **own** family needs neither an override nor a new
 family; that route has its own section, "Publisher-family task outside the
 publisher service" (below). Together the three cover every way a task gets the
-role: (a) an override names it — the first rule; (b1) a task definition of
+role through direct ECS calls in this stack's region: (a) an override names it — the first rule; (b1) a task definition of
 another family names it — the second rule, at registration; (b2) a task
 definition of the publisher's family names it, which is legitimate only for a
 task the publisher service launched — the next section.
 
-**Not alarmed by this stack.** Changes to the role itself —
+**Not alarmed by this stack.** Every route needs `iam:PassRole` on the publisher
+role, so restricting who holds it (an SCP or permission boundary) is the control
+for the whole class; these rules only detect part of it. Outside their reach: the
+same ECS calls in any other region — the role is global, the rules and the
+events they match are regional — and another AWS service that launches ECS tasks
+under a role it is passed (AWS Batch's `jobRoleArn` on Fargate, for one). Changes to the role itself —
 `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, a `DeleteRole`
 followed by a `CreateRole` of the same name — are IAM events, which EventBridge
 delivers only in `us-east-1`. This configuration has no provider there, so they
