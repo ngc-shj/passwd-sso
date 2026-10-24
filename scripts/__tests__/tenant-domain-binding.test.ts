@@ -145,6 +145,25 @@ describe("bind file", () => {
     expect(parsed.ok && parsed.lines.map((l) => l.claim)).toEqual(["acme.example", "beta.example"]);
   });
 
+  // A stored claim may start with "#" (printable ASCII); its data line would
+  // read back as a comment and drop out of --apply without a word.
+  it("lists a claim starting with # in a not-written note instead of as a data line", () => {
+    const text = formatBindFile([row({ claim: "#acme" }), row({ claim: "acme.example" })]);
+    const lines = text.split("\n");
+    expect(lines.filter((l) => l.startsWith("#acme\t"))).toEqual([]);
+    expect(text).toMatch(/^# Not written: 1 claim\(s\) starting with "#"/m);
+    expect(lines).toContain(`#   #acme (tenant ${TENANT})`);
+    const parsed = parseBindFile(text, PROVIDERS);
+    expect(parsed.ok && parsed.lines.map((l) => l.claim)).toEqual(["acme.example"]);
+  });
+
+  it("writes no not-written note when every claim is writable", () => {
+    const text = formatBindFile([row({ claim: "acme.example" })]);
+    expect(text).not.toContain("Not written");
+    const parsed = parseBindFile(text, PROVIDERS);
+    expect(parsed.ok && parsed.lines.map((l) => l.claim)).toEqual(["acme.example"]);
+  });
+
   it("puts the flags on a comment line above the data line", () => {
     const lines = formatBindFile([
       row({ flags: { createdBy: "backfill", uuidClaim: true, operatorEvents: ["reassign"], registerProvider: A } }),
@@ -173,6 +192,9 @@ describe("bind file", () => {
     ["a bidi character in the provider", valid(line("acme.example", `${A}${String.fromCodePoint(0x202e)}`)), /provider contains a control.*<U\+202E>/],
     ["a non-canonical evidence", valid(`acme.example\t${TENANT}\t${A}\tnone=0;total=1;${A}=1`), /not in the canonical form/],
     ["a tenant that is not a UUID", valid(`acme.example\tacme\t${A}\t${A}=1;none=0;total=1`), /is not a UUID/],
+    ["CRLF line endings", valid(line("acme.example", A)).replaceAll("\n", "\r\n"), /CRLF line endings: save it with LF line endings, no BOM/],
+    ["a leading byte-order mark", `\uFEFF${valid(line("acme.example", A))}`, /byte-order mark: save it with LF line endings, no BOM/],
+    ["a lone carriage return inside a cell", valid(line("acme\r.example", A)), /claim contains a control.*<U\+000D>/],
   ])("refuses the whole file on %s", (_label, text, message) => {
     const parsed = parseBindFile(text, PROVIDERS);
     expect(parsed.ok).toBe(false);
@@ -232,7 +254,12 @@ describe("sign-in provider refs", () => {
   it("names a ref of a removed provider unknown, not some configured one", () => {
     const pepper = deriveIdentifierPepper(PEPPER_ENV);
     const removed = refMappingFor(["saml-jackson-gone"], pepper);
-    const ref = removed.kind === "map" ? [...removed.idByRef.keys()][0] : "";
+    // Narrowed by assertion, not by a fallback: an empty ref would make the
+    // expectation below compare "unknown (ref )" with itself.
+    expect(removed.kind).toBe("map");
+    if (removed.kind !== "map") return;
+    const ref = [...removed.idByRef.keys()][0];
+    expect(ref).toMatch(/^[0-9a-f]{16}$/);
     expect(describeSignInProviderRef(ref, refMappingFor([A, B], pepper))).toBe(
       `${SIGN_IN_REF_LABEL.UNKNOWN} (ref ${ref})`,
     );

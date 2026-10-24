@@ -83,6 +83,14 @@ describe("providerRef", () => {
     expect(providerRef("saml-jackson-a", pepper)).not.toBe(sameKey);
   });
 
+  // Stored refs are mapped back by recomputing them, so a change to the key
+  // derivation (the HKDF info, the truncation) orphans every ref already in
+  // audit_logs. Every other cell here recomputes through the same function and
+  // stays green under such a change.
+  it("is the recorded vector", () => {
+    expect(providerRef("saml-jackson-alpha", pepper)).toBe("dd43d743db696294");
+  });
+
   it("never contains the provider id", () => {
     expect(providerRef("google", pepper)).not.toContain("google");
   });

@@ -152,15 +152,30 @@ export function formatFlags(flags: BindRowFlags): string {
   ].join("; ");
 }
 
+/** What starts a comment line, which `parseBindFile` skips. */
+const BIND_FILE_COMMENT_PREFIX = "#";
+
+/**
+ * Whether a stored claim can be a bind file data line. A claim starting with
+ * `#` is printable ASCII, so the registry stores it, but its line would read
+ * back as a comment and be skipped without a word — so it is not written, and
+ * `formatBindFile` lists it in a note instead.
+ */
+export function isBindFileWritable(claim: string): boolean {
+  return !claim.startsWith(BIND_FILE_COMMENT_PREFIX);
+}
+
 /**
  * The whole file. Rows in the order given; each data line under its own flag
  * line. The claim column is written as stored, not escaped: the
  * `tenant_claims_claim_normalized` CHECK holds it to printable ASCII, so it
  * cannot carry a tab or a line break, and escaping `<` would turn it into a
  * different claim that `--apply` then fails to find. A claim outside that
- * class throws rather than being written.
+ * class throws rather than being written. A claim `isBindFileWritable` refuses
+ * is listed in a "not written" note at the top instead of as a line.
  */
 export function formatBindFile(rows: readonly BindFileRow[]): string {
+  const notWritten = rows.filter((row) => !isBindFileWritable(row.claim));
   const lines: string[] = [
     BIND_FILE_HEADER,
     "# tenant-domain bind file: every active tenant claim with no provider binding.",
@@ -170,10 +185,18 @@ export function formatBindFile(rows: readonly BindFileRow[]): string {
     "# or leave it empty to skip the line. Do not edit evidence; --apply recomputes and compares it.",
     "# This file lists every tenant's claims: keep it outside the repository and delete it after --apply.",
   ];
+  if (notWritten.length > 0) {
+    lines.push(
+      `# Not written: ${notWritten.length} claim(s) starting with "${BIND_FILE_COMMENT_PREFIX}", which this file would`,
+      "# read back as comments. Bind each one with `tenant-domain bind --claim <claim> --provider <id> --by <label>`:",
+      ...notWritten.map((row) => `#   ${escapeUnsafeDisplayChars(row.claim)} (tenant ${row.tenantId})`),
+    );
+  }
   for (const row of rows) {
     if (!storableClaimSchema.safeParse(row.claim).success) {
       throw new Error(`bind file: stored claim "${escapeUnsafeDisplayChars(row.claim)}" is not printable ASCII`);
     }
+    if (!isBindFileWritable(row.claim)) continue;
     lines.push(`# ${escapeUnsafeDisplayChars(row.claim)}: ${formatFlags(row.flags)}`);
     lines.push(
       [row.claim, row.tenantId, suggestedProvider(row.evidence) ?? "", formatEvidence(row.evidence)].join("\t"),
@@ -203,6 +226,15 @@ export type BindFileParse =
  * the file; every value echoed in an error is escaped.
  */
 export function parseBindFile(text: string, claimProviders: ReadonlySet<string>): BindFileParse {
+  // Refused up front, by name: an editor that saved the file with a BOM or
+  // CRLF endings otherwise surfaces as a header mismatch or a carriage return
+  // in the evidence column, neither of which says what to change.
+  if (text.startsWith("\uFEFF")) {
+    return { ok: false, errors: ["the file starts with a byte-order mark: save it with LF line endings, no BOM"] };
+  }
+  if (text.includes("\r\n")) {
+    return { ok: false, errors: ["the file has CRLF line endings: save it with LF line endings, no BOM"] };
+  }
   const raw = text.split("\n");
   if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
   const errors: string[] = [];
@@ -225,7 +257,7 @@ export function parseBindFile(text: string, claimProviders: ReadonlySet<string>)
   const seen = new Map<string, number>();
   body.forEach((line, index) => {
     const lineNo = index + 2;
-    if (line === "" || line.startsWith("#")) return;
+    if (line === "" || line.startsWith(BIND_FILE_COMMENT_PREFIX)) return;
     const cells = line.split("\t");
     if (cells.length !== BIND_FILE_COLUMNS.length) {
       errors.push(

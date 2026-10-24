@@ -38,7 +38,11 @@ vi.mock("next-auth", () => ({
 }));
 
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { runToken } from "@/__tests__/helpers/tenant-claim-fixtures";
+import {
+  runToken,
+  stubClaimProviderEnv,
+  type ProviderEnvSpec,
+} from "@/__tests__/helpers/tenant-claim-fixtures";
 import "@/auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
@@ -74,42 +78,6 @@ const GOOGLE = "google";
 const ALPHA = "saml-jackson-alpha";
 const BRAVO = "saml-jackson-bravo";
 const PEPPER = "cli-binding-integration-pepper-0123456789abcdef";
-
-const PROVIDER_ENV_KEYS = [
-  "AUTH_GOOGLE_ID",
-  "AUTH_GOOGLE_SECRET",
-  "AUTH_JACKSON_ID",
-  "AUTH_JACKSON_SECRET",
-  "AUTH_JACKSON_CONNECTIONS",
-  "JACKSON_URL",
-  "AUTH_CLAIM_BINDING",
-] as const;
-
-type ProviderEnvSpec = { google?: boolean; connections?: readonly string[]; mode?: "strict" | "off" };
-
-/** The SSO provider env, with only the variables the spec names set. `{}` is "no app env". */
-function stubProviders(spec: ProviderEnvSpec): void {
-  for (const key of PROVIDER_ENV_KEYS) vi.stubEnv(key, "");
-  if (spec.google) {
-    vi.stubEnv("AUTH_GOOGLE_ID", "cli-binding-google-id");
-    vi.stubEnv("AUTH_GOOGLE_SECRET", "cli-binding-google-secret");
-  }
-  if (spec.connections && spec.connections.length > 0) {
-    vi.stubEnv("JACKSON_URL", "http://jackson.invalid");
-    vi.stubEnv(
-      "AUTH_JACKSON_CONNECTIONS",
-      JSON.stringify(
-        spec.connections.map((id) => ({
-          id: id.replace("saml-jackson-", ""),
-          name: id,
-          clientId: `client-${id}`,
-          clientSecret: `secret-${id}`,
-        })),
-      ),
-    );
-  }
-  if (spec.mode) vi.stubEnv("AUTH_CLAIM_BINDING", spec.mode);
-}
 
 /** Two Jackson connections: the derived mode is strict whatever the variable says. */
 const TWO_CONNECTIONS: ProviderEnvSpec = { connections: [ALPHA, BRAVO], mode: "strict" };
@@ -259,7 +227,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
 
   describe("add", () => {
     it("create with --provider binds the row and the register event", async () => {
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("create-bound");
       const out = captureOutput();
@@ -275,7 +243,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("create with --unbound writes a NULL row and event outside strict", async () => {
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("create-unbound");
       captureOutput();
@@ -286,7 +254,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("create with neither --provider nor --unbound is refused outside strict, writing nothing", async () => {
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("create-neither");
       const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops", yes: true });
@@ -297,7 +265,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("refuses --provider together with --unbound", async () => {
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("create-both");
       const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops", provider: ALPHA, unbound: true, yes: true });
@@ -306,11 +274,29 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       await ctx.deleteTestData(tenantId);
     });
 
+    it("refuses --accept-unused-provider together with --unbound", async () => {
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
+      const tenantId = await ctx.createTenant();
+      const claim = freshClaim("create-unbound-accept");
+      const result = await cmdAdd({
+        tenant: tenantId,
+        domain: claim,
+        by: "ops",
+        unbound: true,
+        acceptUnusedProvider: true,
+        yes: true,
+      });
+      expect(result).toMatchObject({ ok: false, code: 1 });
+      expect(result.message).toContain("--accept-unused-provider");
+      expect(await claimRow(claim)).toBeNull();
+      await ctx.deleteTestData(tenantId);
+    });
+
     it.each([
       ["--provider", { provider: ALPHA }, ALPHA],
       ["--unbound", { unbound: true }, null],
     ] as const)("unrevoke with %s sets the row's provider and records it", async (_label, flags, expected) => {
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("unrevoke");
       await seedClaim(tenantId, claim, { provider: null, revokedAt: new Date() });
@@ -329,7 +315,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       // --unbound exists only outside strict, so this arm has one provider.
       ["--unbound", ONE_PROVIDER_OFF, { unbound: true }, null],
     ] as const)("re-point with --from and %s moves the row and its binding together", async (_label, spec, flags, expected) => {
-      stubProviders(spec);
+      stubClaimProviderEnv(spec);
       const losing = await ctx.createTenant();
       const gaining = await ctx.createTenant();
       const claim = freshClaim("repoint");
@@ -352,7 +338,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("re-point without --provider is refused outside strict, leaving the row where it was", async () => {
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       const losing = await ctx.createTenant();
       const gaining = await ctx.createTenant();
       const claim = freshClaim("repoint-neither");
@@ -366,7 +352,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("an already-registered claim: the same binding is a no-op, a different one is refused with bind named", async () => {
-      stubProviders({ connections: [ALPHA, BRAVO], mode: "strict" });
+      stubClaimProviderEnv({ connections: [ALPHA, BRAVO], mode: "strict" });
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("idempotent");
       await seedClaim(tenantId, claim, { provider: ALPHA });
@@ -393,7 +379,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     ] as const)(
       "Google + Jackson with AUTH_CLAIM_BINDING %s: strict, boot refused, and add needs --provider",
       async (_label, mode) => {
-        stubProviders({ google: true, connections: [ALPHA], ...(mode ? { mode } : {}) });
+        stubClaimProviderEnv({ google: true, connections: [ALPHA], ...(mode ? { mode } : {}) });
         expect(deriveClaimBindingMode()).toBe(CLAIM_BINDING_MODE.STRICT);
         expect(() => assertClaimBindingBootConfig()).toThrow(/AUTH_CLAIM_BINDING/);
 
@@ -416,7 +402,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     );
 
     it("one provider and the variable unset: off, and add --unbound is allowed", async () => {
-      stubProviders({ google: true });
+      stubClaimProviderEnv({ google: true });
       expect(deriveClaimBindingMode()).toBe(CLAIM_BINDING_MODE.OFF);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("one-off");
@@ -430,7 +416,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
 
   describe("--provider validation", () => {
     it("with the app env: an unconfigured provider is refused, a configured one allowed", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("validate");
       const refused = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops", provider: "saml-jackson-gone", yes: true });
@@ -442,7 +428,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("without the app env: checked against the pattern with a warning; a malformed id is refused", async () => {
-      stubProviders({});
+      stubClaimProviderEnv({});
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("pattern");
       const refused = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops", provider: "Saml_Jackson", yes: true });
@@ -461,7 +447,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     it.each([SIGNIN_ACTOR_LABEL, BACKFILL_CREATED_BY_LABEL, DEREGISTER_ACTOR_LABEL, " Backfill ", "DB-Delete"])(
       "refuses %j on add and bind, before writing",
       async (label) => {
-        stubProviders(ONE_PROVIDER_OFF);
+        stubClaimProviderEnv(ONE_PROVIDER_OFF);
         const tenantId = await ctx.createTenant();
         const claim = freshClaim("reserved");
         const added = await cmdAdd({ tenant: tenantId, domain: claim, by: label, unbound: true, yes: true });
@@ -474,7 +460,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     );
 
     it("accepts a label that only contains a reserved one (the adjacent allow)", async () => {
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("label-allow");
       captureOutput();
@@ -487,7 +473,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
 
   describe("evidence majority", () => {
     it("exactly half is refused; half plus one is allowed", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const half = await tenantWith([ALPHA], [ALPHA], [BRAVO], []);
       const halfPlusOne = await tenantWith([ALPHA], [ALPHA], [ALPHA], [BRAVO]);
       const claimHalf = freshClaim("half");
@@ -502,7 +488,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("--accept-unused-provider overrides the refusal (the override allow pair)", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([ALPHA], [BRAVO], [BRAVO]);
       const claim = freshClaim("override");
       captureOutput();
@@ -515,7 +501,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("counts only this tenant's ACTIVE members", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([ALPHA], []);
       await member(tenantId, [BRAVO], { deactivated: true });
       const neighbour = await tenantWith([BRAVO], [BRAVO], [BRAVO]);
@@ -539,7 +525,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     };
 
     it("re-point: a concurrent change of the provider alone is a refusal", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const losing = await ctx.createTenant();
       const gaining = await ctx.createTenant();
       const claim = freshClaim("cas-repoint");
@@ -561,7 +547,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("unrevoke: a concurrent change of the provider alone is a refusal", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("cas-unrevoke");
       const revokedAt = new Date();
@@ -572,13 +558,55 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       expect(await claimRow(claim)).toMatchObject({ provider: BRAVO, revokedAt });
       await ctx.deleteTestData(tenantId);
     });
+
+    // The revoke event records the row's provider, so the provider is part of
+    // remove's CAS: without it a rebind committed during the prompt is revoked
+    // under an event naming the provider it replaced.
+    it.each([
+      ["an unbound", null],
+      ["a bound", ALPHA],
+    ] as const)("remove: a concurrent rebind of %s row is a refusal and records no event", async (_label, provider) => {
+      stubClaimProviderEnv(TWO_CONNECTIONS);
+      const tenantId = await ctx.createTenant();
+      const claim = freshClaim("cas-remove");
+      await seedClaim(tenantId, claim, { provider });
+      captureOutput();
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "ops", confirm: rebindDuring(claim, BRAVO) });
+      expect(result).toMatchObject({ ok: false, code: 1 });
+      expect(result.message).toContain("modified concurrently");
+      expect(await claimRow(claim)).toMatchObject({ provider: BRAVO, revokedAt: null });
+      expect(await events(claim)).toHaveLength(0);
+      await ctx.deleteTestData(tenantId);
+    });
+
+    it.each([
+      ["an unbound", null],
+      ["a bound", ALPHA],
+    ] as const)("remove: %s row with no concurrent change is revoked under its own provider", async (_label, provider) => {
+      stubClaimProviderEnv(TWO_CONNECTIONS);
+      const tenantId = await ctx.createTenant();
+      const claim = freshClaim("cas-remove-allow");
+      await seedClaim(tenantId, claim, { provider });
+      captureOutput();
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "ops", confirm: async () => true });
+      expect(result).toMatchObject({ ok: true });
+      expect((await claimRow(claim))?.revokedAt).not.toBeNull();
+      expect(await events(claim)).toEqual([
+        expect.objectContaining({
+          operation: TENANT_CLAIM_EVENT_OPERATION.REVOKE,
+          oldProvider: provider,
+          newProvider: provider,
+        }),
+      ]);
+      await ctx.deleteTestData(tenantId);
+    });
   });
 
   // ─── bind --claim ───────────────────────────────────────────────────────
 
   describe("bind --claim", () => {
     it("binds a NULL row and records a rebind with both providers", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([ALPHA]);
       const claim = freshClaim("bind-null");
       await seedClaim(tenantId, claim);
@@ -601,7 +629,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("moves a binding, and the same provider again is a no-op", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([BRAVO]);
       const claim = freshClaim("bind-move");
       await seedClaim(tenantId, claim, { provider: ALPHA });
@@ -616,7 +644,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("refuses a revoked claim and an absent one", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await ctx.createTenant();
       const revoked = freshClaim("bind-revoked");
       await seedClaim(tenantId, revoked, { revokedAt: new Date() });
@@ -629,7 +657,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("refuses an unconfigured provider with the app env", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("bind-unconfigured");
       await seedClaim(tenantId, claim);
@@ -641,7 +669,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("runs without the app env, against the pattern with a warning", async () => {
-      stubProviders({});
+      stubClaimProviderEnv({});
       const tenantId = await tenantWith([ALPHA]);
       const claim = freshClaim("bind-noenv");
       await seedClaim(tenantId, claim);
@@ -652,7 +680,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("refuses a minority provider unless --accept-unused-provider", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([ALPHA], [BRAVO], [BRAVO]);
       const claim = freshClaim("bind-override");
       await seedClaim(tenantId, claim);
@@ -664,7 +692,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("a concurrent rebind while the operator reads is a CAS refusal", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("bind-cas");
       await seedClaim(tenantId, claim);
@@ -689,7 +717,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
 
   describe("list and history", () => {
     it("list shows each row's provider", async () => {
-      stubProviders({});
+      stubClaimProviderEnv({});
       const tenantId = await ctx.createTenant();
       const bound = freshClaim("list-bound");
       const unbound = freshClaim("list-unbound");
@@ -703,7 +731,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("list --unbound with the app env: NULL and unconfigured rows, never a bound one, with a suggestion", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([BRAVO], [BRAVO]);
       const nullClaim = freshClaim("unbound-null");
       const goneClaim = freshClaim("unbound-gone");
@@ -723,7 +751,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("list --unbound without the app env: NULL rows only, and says the rest were not evaluated", async () => {
-      stubProviders({});
+      stubClaimProviderEnv({});
       const tenantId = await ctx.createTenant();
       const nullClaim = freshClaim("noenv-null");
       const goneClaim = freshClaim("noenv-gone");
@@ -737,7 +765,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("history prints old and new provider on every row", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([BRAVO]);
       const claim = freshClaim("history");
       await seedClaim(tenantId, claim, { provider: ALPHA });
@@ -754,7 +782,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       ["with", TWO_CONNECTIONS],
       ["without", {}],
     ] as const)("list, history and remove run %s the app env", async (_label, spec) => {
-      stubProviders(spec);
+      stubClaimProviderEnv(spec);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("each-command");
       await seedClaim(tenantId, claim, { provider: ALPHA });
@@ -797,7 +825,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
 
   describe("bind --from-members --out", () => {
     it("writes the review file, mode 0600, and nothing to the database", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([ALPHA]);
       const claim = freshClaim("out-nowrite");
       await seedClaim(tenantId, claim);
@@ -811,8 +839,28 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       await ctx.deleteTestData(tenantId);
     });
 
+    it("names a stored claim starting with # as not written, and writes the others as lines", async () => {
+      stubClaimProviderEnv(TWO_CONNECTIONS);
+      const tenantId = await tenantWith([ALPHA]);
+      const hashed = `#${freshClaim("out-hash")}`;
+      const plain = freshClaim("out-plain");
+      await seedClaim(tenantId, hashed);
+      await seedClaim(tenantId, plain);
+      const file = join(scratch, "bind.tsv");
+      captureOutput();
+      const result = await cmdBindFromMembers({ out: file });
+      expect(result).toMatchObject({ ok: true });
+      expect(result.message).toContain(`NOT WRITTEN`);
+      expect(result.message).toContain(`"${hashed}"`);
+      const text = readFileSync(file, "utf8");
+      expect(text).toContain(`#   ${hashed} (tenant ${tenantId})`);
+      expect(dataLine(text, plain)?.[0]).toBe(plain);
+      expect(dataLine(text, hashed)).toBeUndefined();
+      await ctx.deleteTestData(tenantId);
+    });
+
     it("refuses an existing path and leaves it untouched", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const file = join(scratch, "exists.tsv");
       writeFileSync(file, "operator notes\n");
       const result = await cmdBindFromMembers({ out: file });
@@ -832,7 +880,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
         },
       ],
     ])("refuses %s, creating nothing", async (_label, target) => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const file = target();
       // Every target resolves into the real repository: registered before the
       // call, so a regression that writes the file cannot leave it there.
@@ -844,13 +892,13 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("allows a path outside the repository (the adjacent allow)", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       captureOutput();
       expect(await cmdBindFromMembers({ out: join(scratch, "outside.tsv") })).toMatchObject({ ok: true });
     });
 
     it("refuses without the app env, creating nothing", async () => {
-      stubProviders({});
+      stubClaimProviderEnv({});
       const file = join(scratch, "noenv.tsv");
       const result = await cmdBindFromMembers({ out: file });
       expect(result.message).toContain("needs the app's environment");
@@ -858,7 +906,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("suggests a provider for unanimous tenants, including the shapes an upgrade holds, and none for a minority intruder", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const unanimous = await tenantWith([ALPHA], [ALPHA]);
       const backfilled = await tenantWith([BRAVO]);
       const preChange = await tenantWith([ALPHA]);
@@ -875,10 +923,10 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       await seedClaim(unanimous, claims.unanimous, { createdBy: SIGNIN_ACTOR_LABEL });
       await seedClaim(backfilled, claims.backfilled, { createdBy: BACKFILL_CREATED_BY_LABEL });
       // A pre-change register event: written by `add --unbound`, new_provider NULL.
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       captureOutput();
       expect((await cmdAdd({ tenant: preChange, domain: claims.preChange, by: "ops", unbound: true, yes: true })).ok).toBe(true);
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       await seedClaim(intruded, claims.intruded);
       await seedClaim(empty, claims.empty);
 
@@ -896,7 +944,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("flags operator-declared, re-pointed and unrevoked rows", async () => {
-      stubProviders(ONE_PROVIDER_OFF);
+      stubClaimProviderEnv(ONE_PROVIDER_OFF);
       const losing = await ctx.createTenant();
       const tenantId = await tenantWith([ALPHA]);
       const repointed = freshClaim("flag-repointed");
@@ -906,7 +954,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       captureOutput();
       expect((await cmdAdd({ tenant: tenantId, domain: repointed, by: "ops", from: losing, unbound: true, yes: true })).ok).toBe(true);
       expect((await cmdAdd({ tenant: tenantId, domain: unrevoked, by: "ops", unbound: true, yes: true })).ok).toBe(true);
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const file = join(scratch, "flags.tsv");
       expect((await cmdBindFromMembers({ out: file })).ok).toBe(true);
       const text = readFileSync(file, "utf8");
@@ -921,7 +969,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       ["a tab", () => "ops\tadmin"],
       ["a bidi override", () => `ops${String.fromCodePoint(0x202e)}admin`],
     ])("a created_by holding %s yields exactly one data line for its row", async (_label, createdBy) => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([ALPHA]);
       const claim = freshClaim("poisoned");
       await seedClaim(tenantId, claim, { createdBy: createdBy(tenantId) });
@@ -957,7 +1005,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     }
 
     it("--out then --apply with no change binds every eligible line; a rerun reports them already bound", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const a = await tenantWith([ALPHA], [ALPHA]);
       const b = await tenantWith([BRAVO]);
       const claimA = freshClaim("apply-a");
@@ -982,7 +1030,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("binds only the kept lines and lists operator-chosen ones apart", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const kept = await tenantWith([ALPHA]);
       const blanked = await tenantWith([ALPHA]);
       const chosen = await tenantWith([BRAVO], [BRAVO], [ALPHA]);
@@ -1007,7 +1055,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("refuses lines whose row or evidence changed, a zero-member tenant and a minority; the rest commit; exit non-zero", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const ok = await tenantWith([ALPHA]);
       const casLost = await tenantWith([ALPHA]);
       const changed = await tenantWith([ALPHA]);
@@ -1056,7 +1104,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       ["an unconfigured provider", (t: string) => `gone.bind.example\t${t}\tsaml-jackson-gone\t${ALPHA}=1;none=0;total=1`],
       ["an escaped control character", (t: string) => `ctl${String.fromCodePoint(0x7f)}.example\t${t}\t${ALPHA}\t${ALPHA}=1;none=0;total=1`],
     ] as const)("refuses the whole file on %s, applying nothing; without the defect it applies", async (_label, defect) => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await tenantWith([ALPHA]);
       const claim = freshClaim("contract");
       await seedClaim(tenantId, claim);
@@ -1083,7 +1131,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     });
 
     it("refuses without the app env", async () => {
-      stubProviders({});
+      stubClaimProviderEnv({});
       const file = join(scratch, "noenv-apply.tsv");
       writeFileSync(file, `${BIND_FILE_HEADER}\n`);
       expect((await cmdBindApply({ file, by: "ops", yes: true })).message).toContain("needs the app's environment");
@@ -1094,7 +1142,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
 
   describe("sign-in after the CLI binds", () => {
     it("add --provider X: a strict sign-in through X resolves, through another provider is refused", async () => {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("signin-x");
       captureOutput();
@@ -1114,7 +1162,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       await seedClaim(googleTenant, googleClaim, { createdBy: SIGNIN_ACTOR_LABEL });
       await seedClaim(jacksonTenant, jacksonClaim, { createdBy: SIGNIN_ACTOR_LABEL });
 
-      stubProviders({ google: true, connections: [ALPHA] });
+      stubClaimProviderEnv({ google: true, connections: [ALPHA] });
       vi.resetModules();
       await expect(import("@/auth.config")).rejects.toThrow(/AUTH_CLAIM_BINDING/);
 
@@ -1127,7 +1175,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
         return reviewed;
       })();
 
-      stubProviders({ google: true, connections: [ALPHA], mode: "strict" });
+      stubClaimProviderEnv({ google: true, connections: [ALPHA], mode: "strict" });
       // Strict before the binding lands: the NULL rows refuse — the state the boot refusal prevents.
       expect((await firstSignIn(googleClaim, GOOGLE)).allowed).toBe(false);
       expect(await cmdBindApply({ file, by: "ops", yes: true })).toMatchObject({ ok: true });
@@ -1153,7 +1201,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     const HEADING = "Claims strict binding REFUSED for the presenting provider";
 
     async function deniedThrough(provider: string): Promise<{ tenantId: string; claim: string; ref: unknown }> {
-      stubProviders(TWO_CONNECTIONS);
+      stubClaimProviderEnv(TWO_CONNECTIONS);
       const tenantId = await ctx.createTenant();
       const claim = freshClaim("unmapped");
       await seedClaim(tenantId, claim, { provider: provider === ALPHA ? BRAVO : ALPHA });
@@ -1188,7 +1236,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
 
     it("names a ref of a removed provider unknown", async () => {
       const { tenantId, claim, ref } = await deniedThrough(ALPHA);
-      stubProviders({ connections: [BRAVO], mode: "strict" });
+      stubClaimProviderEnv({ connections: [BRAVO], mode: "strict" });
       const out = captureOutput();
       await cmdUnmapped({ days: 1 });
       expect(lineFor(out.text(), claim)).toContain(`signInProvider="${SIGN_IN_REF_LABEL.UNKNOWN} (ref ${String(ref)})"`);
@@ -1207,7 +1255,7 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
 
     it("says unmappable without the app env", async () => {
       const { tenantId, claim } = await deniedThrough(ALPHA);
-      stubProviders({});
+      stubClaimProviderEnv({});
       const out = captureOutput();
       await cmdUnmapped({ days: 1 });
       expect(lineFor(out.text(), claim)).toContain(`signInProvider="${SIGN_IN_REF_LABEL.NO_PROVIDERS}`);

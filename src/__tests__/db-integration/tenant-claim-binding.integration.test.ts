@@ -36,7 +36,11 @@ import {
   type PrismaWithPool,
   type TestContext,
 } from "./helpers";
-import { runToken } from "@/__tests__/helpers/tenant-claim-fixtures";
+import {
+  runToken,
+  stubClaimProviderEnv,
+  type ProviderEnvSpec,
+} from "@/__tests__/helpers/tenant-claim-fixtures";
 import "@/auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
@@ -74,24 +78,18 @@ const SIGN_IN_PROVIDER = "saml-jackson-alpha";
 /** Another customer's connection: a row bound here is "bound-other". */
 const OTHER_PROVIDER = "saml-jackson-bravo";
 
-/** Env for a derived mode, with only the variables the derivation reads set. */
+/**
+ * The env each mode is derived from, as a deployment that runs in it is
+ * configured: off is one claim provider, strict is two (strict is then forced,
+ * and set, as the boot check requires).
+ */
+const MODE_ENV = {
+  off: { connections: [SIGN_IN_PROVIDER] },
+  strict: { connections: [SIGN_IN_PROVIDER, OTHER_PROVIDER], mode: CLAIM_BINDING_MODE.STRICT },
+} as const satisfies Record<ClaimBindingMode, ProviderEnvSpec>;
+
 function stubModeEnv(mode: ClaimBindingMode): void {
-  for (const key of [
-    "AUTH_GOOGLE_ID",
-    "AUTH_GOOGLE_SECRET",
-    "AUTH_JACKSON_ID",
-    "AUTH_JACKSON_SECRET",
-    "AUTH_JACKSON_CONNECTIONS",
-    "JACKSON_URL",
-    "AUTH_CLAIM_BINDING",
-  ]) {
-    vi.stubEnv(key, "");
-  }
-  // One claim provider either way, so the mode is the variable's: strict is
-  // opted into, off is the default.
-  vi.stubEnv("AUTH_GOOGLE_ID", "binding-test-google-id");
-  vi.stubEnv("AUTH_GOOGLE_SECRET", "binding-test-google-secret");
-  if (mode === CLAIM_BINDING_MODE.STRICT) vi.stubEnv("AUTH_CLAIM_BINDING", "strict");
+  stubClaimProviderEnv(MODE_ENV[mode]);
 }
 
 const ROW_STATE = {
@@ -202,12 +200,76 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     return user.email;
   }
 
-  function signInParams(email: string, claim: string, provider = SIGN_IN_PROVIDER): SignInParams {
+  /**
+   * `providerAccountId` defaults to a fresh, unlinked subject — a first-ever
+   * sign-in. An existing user signs in through an account linked to them
+   * (`linkAccount`): Auth.js refuses an unlinked one whose email names a user,
+   * and so does the callback, before any write.
+   */
+  function signInParams(
+    email: string,
+    claim: string,
+    provider = SIGN_IN_PROVIDER,
+    providerAccountId = `subject-${randomUUID()}`,
+  ): SignInParams {
     return {
       user: { id: "pre-generated-id", email },
-      account: { provider, type: "oidc", providerAccountId: `subject-${randomUUID()}` },
+      account: { provider, type: "oidc", providerAccountId },
       profile: { tenant_id: claim },
     };
+  }
+
+  /** Link a provider account to a user, as Auth.js's linkAccount would; returns its subject. */
+  async function linkAccount(userId: string, tenantId: string, provider = SIGN_IN_PROVIDER): Promise<string> {
+    const providerAccountId = `subject-${randomUUID()}`;
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO accounts (id, user_id, tenant_id, type, provider, provider_account_id)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'oidc', $4, $5)`,
+        randomUUID(),
+        userId,
+        tenantId,
+        provider,
+        providerAccountId,
+      );
+    });
+    return providerAccountId;
+  }
+
+  /** End the user's active membership: the state a departed member signs in from (row 4/8). */
+  async function deactivateMemberships(userId: string): Promise<void> {
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `UPDATE tenant_members SET deactivated_at = now() WHERE user_id = $1::uuid AND deactivated_at IS NULL`,
+        userId,
+      );
+    });
+  }
+
+  /**
+   * A row-4/8 join moves the user's column but not their accounts or sessions,
+   * which keep the old tenant and would block its teardown (both tenant FKs
+   * are RESTRICT); deleteTestData sweeps neither by tenant.
+   */
+  async function dropAuthRows(userId: string): Promise<void> {
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(`DELETE FROM sessions WHERE user_id = $1::uuid`, userId);
+      await tx.$executeRawUnsafe(`DELETE FROM accounts WHERE user_id = $1::uuid`, userId);
+    });
+  }
+
+  async function tenantOf(userId: string): Promise<string> {
+    const user = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { tenantId: true } });
+    return user.tenantId;
+  }
+
+  /** A user of `tenantId` with an account linked through `provider`. */
+  async function existingUser(tenantId: string, provider = SIGN_IN_PROVIDER) {
+    const userId = await ctx.createUser(tenantId);
+    return { userId, email: await emailOf(userId), providerAccountId: await linkAccount(userId, tenantId, provider) };
   }
 
   /**
@@ -233,14 +295,25 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     );
   }
 
-  async function signIn(path: Path, claim: string, ownerTenantId: string): Promise<{ allowed: boolean; email: string }> {
+  /**
+   * The subject of a grid sign-in, created before the sign-in so a snapshot
+   * taken after it measures the sign-in alone. A first-ever sign-in has no
+   * user yet, only the email it will arrive with.
+   */
+  async function subjectFor(path: Path, ownerTenantId: string) {
+    if (path === PATH.EXISTING_USER) return existingUser(ownerTenantId);
+    return { email: `bind-${randomUUID()}@example.invalid`, providerAccountId: undefined };
+  }
+
+  async function signIn(
+    path: Path,
+    claim: string,
+    subject: { email: string; providerAccountId: string | undefined },
+  ): Promise<boolean> {
     if (path === PATH.EXISTING_USER) {
-      const userId = await ctx.createUser(ownerTenantId);
-      const email = await emailOf(userId);
-      return { allowed: await capturedSignIn()(signInParams(email, claim)), email };
+      return capturedSignIn()(signInParams(subject.email, claim, SIGN_IN_PROVIDER, subject.providerAccountId));
     }
-    const email = `bind-${randomUUID()}@example.invalid`;
-    return { allowed: await firstSignIn(email, claim), email };
+    return firstSignIn(subject.email, claim);
   }
 
   const GRID = (Object.keys(VERDICT) as ClaimBindingMode[]).flatMap((mode) =>
@@ -256,29 +329,33 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     await bindClaim(owner, claim, ROW_PROVIDER[rowState]);
     try {
       const expected: Expected = VERDICT[mode][rowState];
+      const subject = await subjectFor(path, owner);
+      const before = await snapshot(claim, subject.email, owner);
+      const allowed = await signIn(path, claim, subject);
+      const after = await snapshot(claim, subject.email, owner);
+
       if (expected.kind === "allow") {
-        const { allowed, email } = await signIn(path, claim, owner);
         expect(allowed).toBe(true);
+        // A delta, not a count: the existing user was already a member, so
+        // "one membership" held before the sign-in ran. Their sign-in changes
+        // nothing (row 5); a first-ever one adds exactly the user and their
+        // membership, under the claim's existing row.
+        expect(after).toEqual(
+          path === PATH.EXISTING_USER
+            ? before
+            : { ...before, users: before.users + 1, members: before.members + 1 },
+        );
         const member = await ctx.su.prisma.$queryRaw<{ n: bigint }[]>`
           SELECT COUNT(*)::bigint AS n FROM tenant_members m JOIN users u ON u.id = m.user_id
-           WHERE u.email = ${email} AND m.tenant_id = ${owner}::uuid AND m.deactivated_at IS NULL
+           WHERE u.email = ${subject.email} AND m.tenant_id = ${owner}::uuid AND m.deactivated_at IS NULL
         `;
         expect(Number(member[0]!.n)).toBe(1);
         expect(await outboxRowsForClaim(claim)).toHaveLength(0);
         return;
       }
 
-      // The existing user is a fixture written before the sign-in; snapshot
-      // after it exists so the delta measures the sign-in alone.
-      const userId = path === PATH.EXISTING_USER ? await ctx.createUser(owner) : null;
-      const email = userId ? await emailOf(userId) : `bind-${randomUUID()}@example.invalid`;
-      const before = await snapshot(claim, email, owner);
-      const allowed =
-        path === PATH.EXISTING_USER
-          ? await capturedSignIn()(signInParams(email, claim))
-          : await firstSignIn(email, claim);
       expect(allowed).toBe(false);
-      expect(await snapshot(claim, email, owner)).toEqual(before);
+      expect(after).toEqual(before);
 
       const rows = await outboxRowsForClaim(claim);
       expect(rows).toHaveLength(1);
@@ -297,8 +374,54 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     }
   });
 
+  /**
+   * An existing user presenting a claim nobody has registered: row 8, the user
+   * has no active membership, so the sign-in creates the tenant and the claim
+   * and joins it. The row is bound to the presenting provider in either mode —
+   * the existing-user twin of the first-registration cell below, through
+   * `ensureTenantMembershipForSignIn` rather than `createUser`.
+   *
+   * Row 9a (a bootstrap member) is not a cell: its migration transaction
+   * upserts the new membership before deleting the bootstrap one, which
+   * `tenant_members_one_active_per_user` refuses, so on a real database that
+   * arm ends in provider_error today. Reported, not pinned.
+   */
+  it.each([CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT])(
+    "%s mode, existing user with no active membership, unregistered claim: registered to the presenting provider",
+    async (mode) => {
+      stubModeEnv(mode);
+      const home = await ctx.createTenant();
+      const claim = freshClaim(`existing-register-${mode}`);
+      let created: string | null = null;
+      const user = await existingUser(home);
+      try {
+        await deactivateMemberships(user.userId);
+
+        expect(
+          await capturedSignIn()(signInParams(user.email, claim, SIGN_IN_PROVIDER, user.providerAccountId)),
+        ).toBe(true);
+
+        const row = await ctx.su.prisma.tenantClaim.findUniqueOrThrow({ where: { claim } });
+        created = row.tenantId;
+        ctx.trackTenant(created);
+        expect(row.provider).toBe(SIGN_IN_PROVIDER);
+        const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({
+          operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER,
+          newProvider: SIGN_IN_PROVIDER,
+        });
+        expect(await tenantOf(user.userId)).toBe(created);
+      } finally {
+        await dropAuthRows(user.userId);
+        await ctx.deleteTestData(home);
+        if (created) await ctx.deleteTestData(created);
+      }
+    },
+  );
+
   it("strict, Google: a row bound to google resolves a google sign-in", async () => {
-    stubModeEnv(CLAIM_BINDING_MODE.STRICT);
+    stubClaimProviderEnv({ google: true, connections: [SIGN_IN_PROVIDER], mode: CLAIM_BINDING_MODE.STRICT });
     const owner = await ctx.createTenant();
     const claim = freshClaim("google-strict");
     await bindClaim(owner, claim, "google");
@@ -356,6 +479,240 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     } finally {
       await ctx.deleteTestData(owner);
     }
+  });
+
+  /**
+   * S1 — whose rows a sign-in writes. Auth.js calls the signIn callback BEFORE
+   * its own account-link check and refuses an unlinked account whose email
+   * names a user (`OAuthAccountNotLinked`) only afterwards, so a callback that
+   * took the user by the asserted email committed membership writes for a
+   * user Auth.js then refused to sign in. The attacker here administers the
+   * IdP behind their own connection, has their own tenant's claim bound to it,
+   * and asserts the victim's email.
+   *
+   * The victim states: a departed member (no active membership), whom row 4
+   * would join to the attacker's tenant and realign — a write that commits —
+   * and a bootstrap member, the finding's own case. The bootstrap migration
+   * fails on its own today (see the row-9a note above), so the bootstrap
+   * victim's cells pin "refused, nothing written" but the red proof for a
+   * write that lands is the departed member's.
+   */
+  describe("S1: the sign-in subject is the user Auth.js signs in", () => {
+    const VICTIM_STATE = { DEPARTED: "departed member", BOOTSTRAP: "bootstrap member" } as const;
+    type VictimState = (typeof VICTIM_STATE)[keyof typeof VICTIM_STATE];
+
+    type Victim = { userId: string; email: string; home: string };
+
+    /** The victim and their rows: a vault entry, a session, and the account they signed up through. */
+    async function seedVictim(state: VictimState, accountProvider: string): Promise<Victim> {
+      const home = await ctx.createTenant();
+      if (state === VICTIM_STATE.BOOTSTRAP) {
+        await ctx.su.prisma.$executeRaw`UPDATE tenants SET is_bootstrap = true WHERE id = ${home}::uuid`;
+      }
+      const userId = await ctx.createUser(home);
+      await linkAccount(userId, home, accountProvider);
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO password_entries (
+             id, user_id, tenant_id,
+             encrypted_blob, blob_iv, blob_auth_tag,
+             encrypted_overview, overview_iv, overview_auth_tag,
+             key_version, aad_version, created_at, updated_at
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 'overview', $4, $5, 1, 1, now(), now())`,
+          randomUUID(),
+          userId,
+          home,
+          "0".repeat(24),
+          "0".repeat(32),
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+           VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+          randomUUID(),
+          randomUUID().replace(/-/g, ""),
+          userId,
+          home,
+        );
+      });
+      if (state === VICTIM_STATE.DEPARTED) await deactivateMemberships(userId);
+      return { userId, email: await emailOf(userId), home };
+    }
+
+    /** Every row of the victim's a sign-in could move, as text so a change anywhere shows. */
+    async function victimRows(userId: string): Promise<string> {
+      const [row] = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<{ rows: string }[]>(
+          `SELECT json_build_object(
+             'user', (SELECT json_build_object('tenant', tenant_id, 'email', email) FROM users WHERE id = $1::uuid),
+             'members', (SELECT json_agg(json_build_object('tenant', tenant_id, 'active', deactivated_at IS NULL) ORDER BY tenant_id)
+                           FROM tenant_members WHERE user_id = $1::uuid),
+             'entries', (SELECT json_agg(json_build_object('id', id, 'tenant', tenant_id) ORDER BY id)
+                           FROM password_entries WHERE user_id = $1::uuid),
+             'sessions', (SELECT json_agg(json_build_object('id', id, 'tenant', tenant_id) ORDER BY id)
+                            FROM sessions WHERE user_id = $1::uuid),
+             'accounts', (SELECT json_agg(json_build_object('provider', provider, 'sub', provider_account_id, 'tenant', tenant_id)
+                            ORDER BY provider, provider_account_id) FROM accounts WHERE user_id = $1::uuid)
+           )::text AS rows`,
+          userId,
+        );
+      });
+      return row!.rows;
+    }
+
+    async function activeMembers(tenantId: string): Promise<number> {
+      return ctx.su.prisma.tenantMember.count({ where: { tenantId, deactivatedAt: null } });
+    }
+
+    async function notLinkedRows(userId: string): Promise<OutboxRow[]> {
+      return ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<OutboxRow[]>(
+          `SELECT tenant_id::text, payload->'metadata' AS metadata, row_to_json(o)::text AS row_text
+             FROM audit_outbox o
+            WHERE payload->>'action' = 'AUTH_LOGIN_FAILURE' AND payload->>'userId' = $1`,
+          userId,
+        );
+      });
+    }
+
+    /** The attacker's tenant, with its claim bound to the attacker's own connection. */
+    async function attackerTenant(mode: ClaimBindingMode): Promise<{ tenantId: string; claim: string }> {
+      const tenantId = await ctx.createTenant();
+      const claim = freshClaim(`s1-${mode}`);
+      await bindClaim(tenantId, claim, SIGN_IN_PROVIDER);
+      return { tenantId, claim };
+    }
+
+    async function teardown(victim: Victim | null, ...tenants: string[]): Promise<void> {
+      if (victim) await dropAuthRows(victim.userId);
+      for (const tenantId of tenants) await ctx.deleteTestData(tenantId);
+    }
+
+    const DENY_GRID = [CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT].flatMap((mode) =>
+      Object.values(VICTIM_STATE).map((state) => [mode, state] as const),
+    );
+
+    it.each(DENY_GRID)(
+      "%s mode, %s: an unlinked account asserting the victim's email is refused before any write",
+      async (mode, state) => {
+        stubModeEnv(mode);
+        const attacker = await attackerTenant(mode);
+        let victim: Victim | null = null;
+        try {
+          victim = await seedVictim(state, OTHER_PROVIDER);
+          const before = await victimRows(victim.userId);
+          const attackerMembers = await activeMembers(attacker.tenantId);
+          const subject = `attacker-${randomUUID()}`;
+
+          const allowed = await capturedSignIn()(
+            signInParams(victim.email, attacker.claim, SIGN_IN_PROVIDER, subject),
+          );
+
+          expect(allowed).toBe(false);
+          expect(await victimRows(victim.userId)).toBe(before);
+          expect(await activeMembers(attacker.tenantId)).toBe(attackerMembers);
+          expect(await ctx.su.prisma.account.count({ where: { provider: SIGN_IN_PROVIDER, providerAccountId: subject } })).toBe(0);
+          expect(await ctx.su.prisma.tenantClaimEvent.count({ where: { claim: attacker.claim } })).toBe(0);
+          const rows = await notLinkedRows(victim.userId);
+          expect(rows).toHaveLength(1);
+          expect(rows[0]!.tenant_id).toBe(victim.home);
+          expect(rows[0]!.metadata.reason).toBe("account_not_linked");
+          expect(rows[0]!.metadata).not.toHaveProperty("claim");
+        } finally {
+          await teardown(victim, attacker.tenantId, ...(victim ? [victim.home] : []));
+        }
+      },
+    );
+
+    it.each(DENY_GRID)(
+      "%s mode, %s: a linked account asserting the victim's email signs in its own user and writes nothing for the victim",
+      async (mode, state) => {
+        stubModeEnv(mode);
+        const attacker = await attackerTenant(mode);
+        let victim: Victim | null = null;
+        try {
+          victim = await seedVictim(state, OTHER_PROVIDER);
+          const insider = await existingUser(attacker.tenantId);
+          const before = await victimRows(victim.userId);
+
+          // Auth.js hands the callback the linked user for a linked account;
+          // the profile-shaped user is passed anyway, so the subject can only
+          // have come from the account row.
+          const allowed = await capturedSignIn()(
+            signInParams(victim.email, attacker.claim, SIGN_IN_PROVIDER, insider.providerAccountId),
+          );
+
+          expect(allowed).toBe(true);
+          expect(await victimRows(victim.userId)).toBe(before);
+          expect(await tenantOf(insider.userId)).toBe(attacker.tenantId);
+          expect(await notLinkedRows(victim.userId)).toHaveLength(0);
+        } finally {
+          await teardown(victim, attacker.tenantId, ...(victim ? [victim.home] : []));
+        }
+      },
+    );
+
+    it.each([CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT])(
+      "%s mode: the victim's own linked account resolves them as before (row 4 join)",
+      async (mode) => {
+        stubModeEnv(mode);
+        const target = await attackerTenant(mode);
+        let victim: Victim | null = null;
+        try {
+          victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
+          const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+
+          expect(await capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own))).toBe(true);
+          expect(await tenantOf(victim.userId)).toBe(target.tenantId);
+          expect(
+            await ctx.su.prisma.tenantMember.count({
+              where: { userId: victim.userId, tenantId: target.tenantId, deactivatedAt: null },
+            }),
+          ).toBe(1);
+        } finally {
+          await teardown(victim, ...(victim ? [victim.home] : []), target.tenantId);
+        }
+      },
+    );
+
+    /**
+     * Google with GOOGLE_WORKSPACE_DOMAINS set links by email, so an unlinked
+     * Google account whose email names a user proceeds with that user. The
+     * flag is read when auth.config.ts loads, hence the fresh module graph.
+     */
+    it("Google with email linking on: an unlinked account whose email names a user proceeds with that user", async () => {
+      const domain = freshClaim("s1-google");
+      stubClaimProviderEnv({ google: true });
+      vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", domain);
+      vi.resetModules();
+      const loaded = nextAuthConfigs.length;
+      await import("@/auth");
+      const fresh = nextAuthConfigs[loaded] as { callbacks?: { signIn?: SignInCallback } } | undefined;
+      const freshSignIn = fresh?.callbacks?.signIn;
+      if (!freshSignIn) throw new Error("the fresh src/auth.ts did not hand NextAuth a signIn callback");
+      const { allowsDangerousEmailAccountLinking } = await import("@/auth.config");
+      expect(allowsDangerousEmailAccountLinking("google")).toBe(true);
+
+      const target = await ctx.createTenant();
+      await bindClaim(target, domain, "google");
+      let victim: Victim | null = null;
+      try {
+        victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
+        const allowed = await freshSignIn({
+          user: { id: "google-subject", email: victim.email },
+          account: { provider: "google", type: "oidc", providerAccountId: `google-${randomUUID()}` },
+          profile: { hd: domain },
+        });
+
+        expect(allowed).toBe(true);
+        expect(await tenantOf(victim.userId)).toBe(target);
+        expect(await notLinkedRows(victim.userId)).toHaveLength(0);
+      } finally {
+        await teardown(victim, ...(victim ? [victim.home] : []), target);
+      }
+    });
   });
 
   describe("off-mode mismatch warning", () => {
@@ -665,16 +1022,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
       [CLAIM_BINDING_MODE.STRICT, false],
       [CLAIM_BINDING_MODE.OFF, true],
     ] as const)("%s: a NULL row through createUser is allowed=%s", async (mode, allowed) => {
-      for (const key of ["AUTH_CLAIM_BINDING", "AUTH_JACKSON_CONNECTIONS", "AUTH_JACKSON_ID", "AUTH_JACKSON_SECRET"]) {
-        vi.stubEnv(key, "");
-      }
-      vi.stubEnv("AUTH_GOOGLE_ID", "binding-test-google-id");
-      vi.stubEnv("AUTH_GOOGLE_SECRET", "binding-test-google-secret");
-      if (mode === CLAIM_BINDING_MODE.STRICT) {
-        vi.stubEnv("JACKSON_URL", "http://jackson.invalid");
-        vi.stubEnv("AUTH_JACKSON_ID", "binding-test-client");
-        vi.stubEnv("AUTH_JACKSON_SECRET", "binding-test-secret");
-      }
+      stubClaimProviderEnv(
+        mode === CLAIM_BINDING_MODE.STRICT ? { google: true, connections: [SIGN_IN_PROVIDER] } : { google: true },
+      );
       vi.resetModules();
       const { createCustomAdapter: freshAdapter } = await import("@/lib/auth/session/auth-adapter");
       const { tenantClaimStorage: freshStorage } = await import("@/lib/tenant/tenant-claim-storage");

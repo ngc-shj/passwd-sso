@@ -314,6 +314,32 @@ describe("auth.config Jackson providers", () => {
     }
   });
 
+  // src/auth.ts's signIn callback decides which user a sign-in writes for from
+  // allowsDangerousEmailAccountLinking; Auth.js decides from the provider's own
+  // flag. They must agree for every configured provider.
+  it.each([
+    ["with GOOGLE_WORKSPACE_DOMAINS", "example.com", true],
+    ["without GOOGLE_WORKSPACE_DOMAINS", "", false],
+  ])("the linking predicate agrees with every constructed provider %s", async (_label, domains, googleLinks) => {
+    stubJackson();
+    vi.stubEnv("AUTH_GOOGLE_ID", "google-id");
+    vi.stubEnv("AUTH_GOOGLE_SECRET", "google-secret");
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", domains);
+    const mod = await import("@/auth.config");
+    const providers = mod.default.providers as unknown as Array<{
+      id: string;
+      allowDangerousEmailAccountLinking?: boolean;
+      options?: { allowDangerousEmailAccountLinking?: boolean };
+    }>;
+    expect(providers.map((p) => p.id)).toContain("google");
+    for (const provider of providers) {
+      const flag =
+        provider.options?.allowDangerousEmailAccountLinking ?? provider.allowDangerousEmailAccountLinking ?? false;
+      expect(mod.allowsDangerousEmailAccountLinking(provider.id), provider.id).toBe(flag);
+    }
+    expect(mod.allowsDangerousEmailAccountLinking("google")).toBe(googleLinks);
+  });
+
   it("maps the Jackson profile onto the user", async () => {
     stubJackson();
     const [provider] = await jacksonProviders();

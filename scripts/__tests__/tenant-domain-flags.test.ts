@@ -3,10 +3,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   BOOLEAN_FLAGS,
+  SUBCOMMAND_FLAGS,
   VALUE_FLAG_HINTS,
+  findStrayFlags,
   findValuelessFlag,
   getStringFlag,
   parseFlags,
+  strayFlagsError,
   valuelessError,
 } from "../lib/tenant-domain-flags";
 import {
@@ -225,6 +228,87 @@ describe("tenant-domain flag parsing", () => {
 
   it("refuses a repeated --yes", () => {
     expect(errorOf(["--yes", "--yes"])).toContain("--yes was given more than once");
+  });
+
+  // Round-1 F4 (Phase 3): a flag valid for SOME subcommand passed parseFlags
+  // everywhere and was dropped where nothing read it.
+  describe("per-subcommand accepted flags", () => {
+    function strayOf(subcommand: string, argv: string[]): string[] {
+      const parsed = parseFlags(argv, subcommand);
+      if (!parsed.ok) throw new Error(`expected parse to succeed: ${parsed.error}`);
+      return findStrayFlags(parsed.flags, subcommand);
+    }
+
+    it.each([
+      ["remove", ["--tenant", "t", "--domain", "d", "--by", "ops", "--provider", "google"], ["provider"]],
+      ["list", ["--provider", "google"], ["provider"]],
+      ["list", ["--from-members", "--out", "/tmp/x"], ["from-members", "out"]],
+      ["add", ["--tenant", "t", "--domain", "d", "--by", "ops", "--claim", "c"], ["claim"]],
+      ["add", ["--tenant", "t", "--domain", "d", "--by", "ops", "--from-members"], ["from-members"]],
+      ["history", ["--domain", "d", "--unbound"], ["unbound"]],
+      ["realign", ["--user", "u", "--tenant", "t", "--by", "ops", "--accept-unused-provider"], ["accept-unused-provider"]],
+      ["unmapped", ["--out", "/tmp/x"], ["out"]],
+      ["measure", ["--yes"], ["yes"]],
+    ])("%s refuses %j", (subcommand, argv, stray) => {
+      expect(strayOf(subcommand, argv)).toEqual(stray);
+    });
+
+    it.each([
+      ["list", ["--tenant", "t", "--unbound"]],
+      ["unmapped", ["--days", "180"]],
+      ["add", ["--tenant", "t", "--domain", "d", "--by", "ops", "--from", "f", "--provider", "google", "--accept-unused-provider", "--yes"]],
+      ["add", ["--tenant", "t", "--domain", "d", "--by", "ops", "--unbound"]],
+      ["bind", ["--claim", "c", "--provider", "google", "--by", "ops", "--accept-unused-provider", "--yes"]],
+      ["bind", ["--from-members", "--out", "/tmp/x"]],
+      ["bind", ["--apply", "/tmp/x", "--by", "ops", "--yes"]],
+      ["remove", ["--tenant", "t", "--domain", "d", "--by", "ops", "--yes"]],
+      ["history", ["--domain", "d", "--tenant", "t", "--after", "3"]],
+      ["realign", ["--user", "u", "--tenant", "t", "--by", "ops", "--yes"]],
+      ["measure", []],
+      ["backfill-owning-column", ["--by", "ops", "--apply", "--yes", "--limit", "5"]],
+    ])("%s accepts the documented form %j", (subcommand, argv) => {
+      expect(strayOf(subcommand, argv)).toEqual([]);
+    });
+
+    it("leaves an unknown subcommand to the usage", () => {
+      expect(strayOf("preflight", ["--tenant", "t"])).toEqual([]);
+    });
+
+    it("names the subcommand and every stray flag, escaped", () => {
+      expect(strayFlagsError(["provider", "claim"], "remove")).toMatch(/^remove does not read --provider, --claim\. Refusing/);
+      expect(strayFlagsError(["x\u202e"], "list")).not.toContain("\u202e");
+    });
+
+    it("each subcommand accepts exactly the flags its dispatch reads", () => {
+      // Derived from the CLI, the same three read spellings as the known-flag
+      // test above: a case in main()'s switch (or dispatchBind, for bind) that
+      // reads a flag its SUBCOMMAND_FLAGS entry lacks would refuse a valid
+      // command; one that lists a flag the case never reads would drop it.
+      const cli = readFileSync(resolve(__dirname, "../tenant-domain.ts"), "utf8");
+      const switchStart = cli.indexOf("switch (subcommand) {");
+      const switchBody = cli.slice(switchStart, cli.indexOf("    default:", switchStart));
+      const bindBody = cli.slice(cli.indexOf("async function dispatchBind("), cli.indexOf("async function main("));
+      const SPELLINGS = [
+        /getStringFlag\(flags,\s*"([^"]+)"\)/g,
+        /flags\.get\("([^"]+)"\)/g,
+        /flags\.has\("([^"]+)"\)/g,
+      ];
+      const readsOf = (body: string): string[] => {
+        const read = new Set<string>();
+        for (const re of SPELLINGS) for (const m of body.matchAll(re)) read.add(m[1]);
+        // `yes` is read once above the switch and passed on as an identifier.
+        if (/(?<![-\w])yes(?=\s*[,})])/.test(body)) read.add("yes");
+        return [...read].sort();
+      };
+      const cases = switchBody.split(/\n    case "/).slice(1).map((chunk) => {
+        const name = chunk.slice(0, chunk.indexOf('"'));
+        return [name, readsOf(name === "bind" ? bindBody : chunk)] as const;
+      });
+      expect(cases.map(([name]) => name)).toEqual(Object.keys(SUBCOMMAND_FLAGS));
+      for (const [name, reads] of cases) {
+        expect(reads, name).toEqual([...SUBCOMMAND_FLAGS[name as keyof typeof SUBCOMMAND_FLAGS]].sort());
+      }
+    });
   });
 
   describe("--apply under bind takes the reviewed file (C3)", () => {

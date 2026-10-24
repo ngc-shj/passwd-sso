@@ -42,7 +42,7 @@ import {
   CLAIM_REFUSAL_REASON,
   toAuditProvider,
 } from "@/lib/audit/auth-failure-mapping";
-import authConfig from "./auth.config";
+import authConfig, { allowsDangerousEmailAccountLinking } from "./auth.config";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { errorLogFields } from "@/lib/logger/error-fields";
 
@@ -685,9 +685,64 @@ async function claimedTenantMembership(
   }, BYPASS_GRANT.AUTH_TENANT_CLAIM_MEMBERSHIP);
 }
 
+// One instance, shared by NextAuth and the signIn callback's subject lookup
+// below, so both read accounts and users through the same methods.
+const adapter = createCustomAdapter();
+
+type OAuthSignInSubject =
+  /** `userId` null: no user yet — the first-ever sign-in path. */
+  | { kind: "user"; userId: string | null }
+  /** Auth.js will refuse with OAuthAccountNotLinked; `userId` is the email's user. */
+  | { kind: "not_linked"; userId: string };
+
+/**
+ * The user an OAuth/OIDC sign-in will be signed in as, resolved the way
+ * Auth.js's `handleLoginOrRegister` resolves it, through the same adapter
+ * methods.
+ *
+ * Auth.js calls the signIn callback BEFORE its own account-link check, so the
+ * callback cannot take the user by the IdP-asserted email: every membership
+ * write below — the bootstrap migration, the row-4 join and realignment —
+ * commits in its own transaction, and Auth.js's later `OAuthAccountNotLinked`
+ * does not undo it. An IdP asserting another user's email, with a claim bound
+ * to the IdP's own tenant, would move that user's tenant and data while the
+ * session itself was refused.
+ *
+ * - The provider account is linked: its user, whatever email is asserted.
+ * - Not linked, and the email names a user: that user only where the provider
+ *   links by email (`allowsDangerousEmailAccountLinking`, the predicate the
+ *   provider construction uses); otherwise `not_linked`.
+ * - Not linked, no such user: none.
+ *
+ * Not modelled: a sign-in made while another session is active, which Auth.js
+ * links to that session's user. The app has no linking flow; such a sign-in is
+ * resolved as if no session existed — refused, or, through a provider that
+ * links by email, resolved to the user whose email that provider vouches for.
+ */
+async function resolveOAuthSignInSubject(
+  account: Account,
+  email: string | null | undefined,
+): Promise<OAuthSignInSubject> {
+  const { getUserByAccount, getUserByEmail } = adapter;
+  if (!getUserByAccount || !getUserByEmail) {
+    throw new Error("auth adapter does not implement getUserByAccount/getUserByEmail");
+  }
+  const linked = await getUserByAccount({
+    provider: account.provider,
+    providerAccountId: account.providerAccountId,
+  });
+  if (linked) return { kind: "user", userId: linked.id };
+  if (!email) return { kind: "user", userId: null };
+  const byEmail = await getUserByEmail(email);
+  if (!byEmail) return { kind: "user", userId: null };
+  return allowsDangerousEmailAccountLinking(account.provider)
+    ? { kind: "user", userId: byEmail.id }
+    : { kind: "not_linked", userId: byEmail.id };
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   basePath: getAuthRouteBasePath(),
-  adapter: createCustomAdapter(),
+  adapter,
   session: {
     strategy: "database",
     // Outer cookie/session ceiling. Matches the policy ceiling
@@ -799,7 +854,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // id before the user row is actually inserted (new OAuth sign-in).
       let userId: string | null = null;
       const lookupEmail = params.user?.email;
-      if (lookupEmail) {
+      const account = params.account;
+      if (account && (account.type === "oauth" || account.type === "oidc")) {
+        const subject = await resolveOAuthSignInSubject(account, lookupEmail);
+        if (subject.kind === "not_linked") {
+          await emitAuthLoginFailure({
+            email: emailForAudit,
+            provider: auditProvider,
+            reason: "account_not_linked",
+            userId: subject.userId,
+          });
+          return false;
+        }
+        userId = subject.userId;
+      } else if (lookupEmail) {
         const existing = await withBypassRls(prisma, async (tx) =>
           tx.user.findUnique({
             where: { email: lookupEmail },

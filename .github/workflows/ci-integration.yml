@@ -274,6 +274,7 @@ jobs:
   # the version its digest is listed under.
   jackson-probe:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -302,6 +303,13 @@ jobs:
       # @auth/core resolves); the probe asserts its version against the lockfile.
       - name: Install dependencies
         run: npm ci
+
+      # The matrix above is what this job measures; the drift test holds it to
+      # the images docker-compose.yml and terraform.tfvars.example reference.
+      # Run here as well as in app-ci, so a PR that changes only the matrix or
+      # a tfvars re-tag cannot leave this job green on a list that has drifted.
+      - name: Check the probe matrix against the referenced Jackson images
+        run: npx vitest run scripts/__tests__/jackson-probe-images.test.mjs
 
       # Teardown is registered before anything is created, so a failed start or
       # probe still removes the server and network; the server log is printed on

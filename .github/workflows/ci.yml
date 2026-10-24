@@ -83,6 +83,11 @@ jobs:
               - "infra/terraform/*.tf"
               - "infra/terraform/README*.md"
               - "infra/terraform/modules/anchor-prefix/**"
+              # scripts/__tests__/jackson-probe-images.test.mjs holds the
+              # jackson-probe matrix in ci-integration.yml to the Jackson images
+              # these reference; a re-tag or a matrix edit alone must run it.
+              - "infra/terraform/**/terraform.tfvars.example"
+              - ".github/workflows/ci-integration.yml"
               - "CLAUDE.md"
             extension:
               - "extension/**"

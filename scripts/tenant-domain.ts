@@ -164,6 +164,8 @@ import {
   getStringFlag,
   findValuelessFlag,
   valuelessError,
+  findStrayFlags,
+  strayFlagsError,
   type ParsedFlags,
 } from "./lib/tenant-domain-flags";
 import {
@@ -178,6 +180,7 @@ import {
   formatBindFile,
   formatEvidence,
   formatFlags,
+  isBindFileWritable,
   isInsideWorktree,
   isMajority,
   parseBindFile,
@@ -1154,12 +1157,18 @@ const REASSIGNMENT_WARNING = [
  * is written only on an explicit `--unbound`.
  */
 function resolveAddBinding(
-  args: { provider?: string; unbound?: boolean },
+  args: { provider?: string; unbound?: boolean; acceptUnusedProvider?: boolean },
   appEnv: AppEnv,
 ): { ok: true; provider: string | null } | { ok: false; result: CmdResult } {
   const refuse = (message: string) => ({ ok: false as const, result: { ok: false, code: 1, message } });
   if (args.provider !== undefined && args.unbound === true) {
     return refuse("--provider and --unbound contradict each other; give one.");
+  }
+  if (args.unbound === true && args.acceptUnusedProvider === true) {
+    return refuse(
+      "--accept-unused-provider overrides the member evidence for a --provider binding; an --unbound claim " +
+        "has no provider to accept. Drop one of them.",
+    );
   }
   if (args.provider === undefined) {
     if (appEnv.mode === CLAIM_BINDING_MODE.STRICT) {
@@ -1708,9 +1717,13 @@ export async function cmdRemove(args: {
         // Hoisted rather than inlined into `data`: the event below must
         // record the SAME instant that was written, not a second
         // `new Date()` a few microseconds later.
+        //
+        // The provider is part of the CAS because the event records it: a
+        // rebind committed while the operator read the prompt would otherwise
+        // be revoked under an event naming the provider it replaced.
         const revokedAt = new Date();
         const result = await tx.tenantClaim.updateMany({
-          where: { claim, tenantId: tenant.id, revokedAt: null },
+          where: { claim, tenantId: tenant.id, revokedAt: null, provider: existing.provider },
           data: { revokedAt },
         });
         if (result.count === 0) {
@@ -2314,15 +2327,22 @@ export async function cmdBindFromMembers(args: { out: string }): Promise<CmdResu
     );
     writeSync(fd, formatBindFile(rows));
     written = true;
-    const suggested = rows.filter((row) => suggestedProvider(row.evidence) !== null).length;
+    const lines = rows.filter((row) => isBindFileWritable(row.claim));
+    const notWritten = rows.filter((row) => !isBindFileWritable(row.claim));
+    const suggested = lines.filter((row) => suggestedProvider(row.evidence) !== null).length;
     return {
       ok: true,
       code: 0,
       rows,
       message:
-        `Wrote ${rows.length} unbound claim(s) to ${escapeUnsafeDisplayChars(args.out)} (mode 0600); ` +
+        `Wrote ${lines.length} unbound claim(s) to ${escapeUnsafeDisplayChars(args.out)} (mode 0600); ` +
         `${suggested} carry a suggested provider. Review and edit the provider column, then run ` +
-        "`bind --apply <file> --by <label>`. Delete the file afterwards.",
+        "`bind --apply <file> --by <label>`. Delete the file afterwards." +
+        (notWritten.length === 0
+          ? ""
+          : `\nNOT WRITTEN: ${notWritten.length} claim(s) starting with "#", which the file would read back as ` +
+            "comments (listed in its header note). Bind each with `bind --claim <claim> --provider <id> --by <label>`: " +
+            notWritten.map((row) => `"${escapeUnsafeDisplayChars(row.claim)}"`).join(", ")),
     };
   } finally {
     closeSync(fd);
@@ -3108,6 +3128,13 @@ async function main(): Promise<void> {
   const valueless = findValuelessFlag(flags, subcommand);
   if (valueless) {
     console.error(valuelessError(valueless, subcommand));
+    process.exitCode = 1;
+    return;
+  }
+
+  const stray = findStrayFlags(flags, subcommand);
+  if (subcommand !== undefined && stray.length > 0) {
+    console.error(strayFlagsError(stray, subcommand));
     process.exitCode = 1;
     return;
   }

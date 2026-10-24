@@ -35,7 +35,7 @@
 - `unmapped` prints `boundProvider` and the mapped `signInProvider` on provider-binding rows. It adds two labels: "unmappable (no provider configuration)" when the CLI has no app env, and "no ref stored" when the app stored no ref.
 - New bypass grants: `TENANT_CLAIM_BINDING_READ` (`list --unbound`, `--out`) and `TENANT_CLAIM_BINDING_WRITE` (`add`, `bind`, `--apply`). `add` now reads accounts and events, so it moves to the WRITE grant. `TENANT_CLAIM_REGISTER` stays with `remove`.
 - The coverage gate now resolves `TENANT_CLAIM_EVENT_OPERATION.<KEY>` to its value. Before this, an arm naming the constant and another naming the literal counted as two operations, and an unknown key went unchecked. The self-test has fixtures for both cases.
-- Existing CLI tests: the 46 `cmdAdd` calls in `tenant-claim-cli.integration.test.ts` pass `unbound: true`. The dev `.env` configures no claim provider, so those calls run in off mode.
+- Existing CLI tests: the 46 `cmdAdd` calls in `tenant-claim-cli.integration.test.ts` pass `unbound: true`. Its `beforeEach` stubs the provider env to none (`stubClaimProviderEnv({})`, Phase 3 round 1), so those calls run in off mode whatever the developer's `.env` configures.
 - Red proofs ran on a copy (`src`, `scripts`, `prisma`, `messages`, configs, `.env`) under the session scratchpad, with `node_modules` symlinked. The copy has a minimal `.git` (HEAD/objects/refs written as files, no git command) so `rev-parse` resolves inside it. Each mutated file was restored from the real tree after its run.
 
 ### D6: B5 choices
@@ -48,21 +48,23 @@
 - The probe is documented by pointing at the `jackson-probe` CI job and its matrix, not as a docker command line, because this batch may not start containers to verify one.
 
 ### D7 — Red proofs
-Each mutation ran on a scratch copy (D5's layout), never on the real tree, and the mutated file was restored after its run. A mutation counts only when the listed tests passed unmutated in the same copy first. B2 and B3 are copied from their batch reports. B1, B4 and the Phase 2 R-check fixes were run for this record.
+Each mutation ran on a scratch copy (D5's layout), never on the real tree, and the mutated file was restored after its run. A mutation counts only when the listed tests passed unmutated in the same copy first. B3 is copied from its batch report. B1, B4 and the Phase 2 R-check fixes were run for this record, and B2 and the Phase 3 round 1 fixes were run in round 1.
 
-**B2** (the B2 report does not name the unmutated run per mutation, so none is recorded here)
+**B2**, re-run in Phase 3 round 1 on its own copy (`b742-r1`, D5's layout), each mutation precisely as defined in the first column. Unmutated first: unit `tenant-management`, `resolve-tenant-by-claim`, `auth-adapter`, `auth`, `identifier-pepper`, `auth-failure`, `auth-failure-mapping`, `tenant-domain-binding` 289/289; integration `tenant-claim-binding` + `tenant-claim-cli-binding` 119/119.
 
 | Mutation | Tests that went red |
 |----------|---------------------|
-| M1 mismatch allowed | unit 3 (adjudicator arm, resolver, creator); integration 4 (strict bound-other ×2 paths, no-pepper cell, race) |
-| M2 NULL matched in strict | unit 3; integration 3 (strict unbound ×2 paths, forced-strict fresh-module cell) |
-| M3 provider dropped in `createUser` | integration missing-provider cell. Unit initially survived through a leftover session-meta mock; both C5 unit tests were tightened to pin the refusing arm, and unit fails too after that |
-| M3b producer drops `store.provider` | unit "stores tenant claim…" |
-| M4 provider replaced by a constant | unit 3; integration 7 (strict bound-same, both registration cells, warn cells, C5 allows) |
-| M5 ref replaced by raw id | unit 4; integration 5 |
-| M6 prefix compare instead of distinctness | unit shared-prefix allow test |
-| M7 HKDF info changed | golden vectors 4 |
-| M7b floor changed | golden vectors 4 |
+| M1 `adjudicateClaimBinding`'s strict `row.provider !== signInProvider` arm disabled (mismatch allowed) | unit: `strict: returns claim_provider_mismatch for a row bound elsewhere, with no create`; `strict: a row bound to another provider is a mismatch carrying the owner`; `provider_mismatch`. integration: `strict mode, bound-other row, existing-user` / `first-sign-in`; `without a pepper the refusal row stores no ref, and still names the binding`; `one tenant, one binding; the loser gets claim_provider_mismatch`; `list --unbound with the app env: NULL and unconfigured rows, never a bound one, with a suggestion`; `add --provider X: a strict sign-in through X resolves, through another provider is refused`; the four `unmapped` cells (binding heading with the provider mapped back; removed provider unknown; unmappable without a pepper; unmappable without the app env) |
+| M2 the strict NULL arm returns a tenant instead of `unbound` (NULL matched) | unit: `strict: returns claim_unbound for a NULL row, with no create`; `strict: a NULL row is unbound carrying the owner`; `unbound`. integration: `strict mode, unbound row, existing-user` / `first-sign-in`; `strict: a NULL row through createUser is allowed=false`; `list --unbound with the app env…`; `upgrade: NULL rows under Google + Jackson refuse boot; after --out/--apply and strict, sign-ins resolve` |
+| M3 `createUser`'s `pendingProvider === null` refusal disabled (the claim resolves with no provider) | unit: `createUser > refuses a pending claim that carries no provider, without resolving it`. integration: `refuses a claim with no provider with provider_error and writes nothing` |
+| M3b the signIn callback stops setting `store.provider` | unit: `stores tenant claim in tenantClaimStorage for new user`; `takes the first-sign-in path for an unlinked account whose email names no user`. integration: every first-sign-in grid cell (off and strict × three row states); both `first registration binds the claim to the presenting provider` cells; the three `off-mode mismatch warning` cells; `strict, Google: a row bound to google resolves a google sign-in`; `without a pepper…`; `add --provider X…`; `upgrade…`; the four `unmapped` cells |
+| M4a `lookupFromRow` passes the constant `"google"` to the adjudicator | unit: `off: no mismatch warning for a row bound to the same provider`. integration: `strict mode, bound-same row, existing-user` / `first-sign-in`; `a bound-same row: warned=false`; both C5 `allows when the session meta …` cells; the strict S1 linked-account and own-account cells (3); `add --provider X…`; `upgrade…` |
+| M4b `findOrCreateTenantForClaim` registers the claim with provider `"google"` (first create) | unit: `creates a new tenant with its claim row in one nested create when not found`; `creates a tenant for a non-domain claim like acmecorp (NF2)`. integration: both `first registration binds…` cells; both `existing user with no active membership, unregistered claim` cells; `one tenant, one binding…` |
+| M5 `providerRefOf` returns the raw provider id | unit: `providerRefOf stores no ref without a pepper, and the keyed ref with one`; `maps the ref the app stores back to its provider id, under one env`. integration: `strict mode, bound-other row` and `strict mode, unbound row` × both paths; `unmapped > prints the denial under the binding heading…; app and CLI refs agree` |
+| M6 `findProviderRefCollision` compares the first 8 hex characters | unit: `allows refs that share a long prefix (distinctness, not a prefix test)` |
+| M7 `PROVIDER_REF_INFO` changed to `-v2` | **survived** (app and CLI recompute through the same function). Round 1 adds `providerRef > is the recorded vector`; with it, the same mutation reds that cell (unmutated 16/16) |
+| M7c `IDENTIFIER_PEPPER_INFO` changed to `-v2` (the B2 report's "HKDF info" mutation, by its "golden vectors" result) | unit: `AUTH_SECRET fallback is the recorded HKDF output`; `a below-floor pepper falls through to a usable AUTH_SECRET`; `memoises the first derivation until reset`; `AUTH_SECRET fallback: the derived pepper and the hash are the recorded vectors` |
+| M7b `MIN_KEY_MATERIAL_LENGTH` 32 → 16 | unit: `a below-floor pepper falls through to a usable AUTH_SECRET`; `below-floor pepper and secret: no key material`; `AUTH_SECRET shorter than 32 chars is treated as absent`; `below-floor pepper and secret: no hash, unkeyed` |
 
 **B3** (unmutated: `scripts/__tests__/tenant-domain-binding.test.ts` and `tenant-claim-cli-binding.integration.test.ts`, the two files its mutation script ran)
 
@@ -77,6 +79,26 @@ Each mutation ran on a scratch copy (D5's layout), never on the real tree, and t
 | M5 `--apply` skips evidence comparison | integration partial-failure cell |
 | M6 ref mapping keyed by raw id | unit "maps the ref the app stores back…"; integration unmapped "…app and CLI refs agree" |
 | post-B5: implicit-reassign hint without the binding flag (on the B3 copy) | integration "refuses a domain already owned by a different tenant…" |
+
+**Phase 3 round 1** (copy `b742-r1`. Unmutated first: `src/auth.test.ts` + `src/auth.config.test.ts` 124/124 and the S1 block of `tenant-claim-binding.integration.test.ts` 11/11; `tenant-domain-binding` + `tenant-domain-flags` + `tenant-domain-cli-dispatch` 130/130 and `tenant-claim-cli-binding.integration.test.ts` 72/72)
+
+| Mutation | Tests that went red |
+|----------|---------------------|
+| S1a the OAuth/OIDC subject resolution skipped (`if (account && false)`): the email lookup again for every type | integration: all eight S1 deny cells (`{off, strict} × {departed, bootstrap} member`: `an unlinked account asserting the victim's email is refused before any write`, `a linked account asserting the victim's email signs in its own user and writes nothing for the victim`). unit: all four `OAuth/OIDC sign-in subject` cells that resolve through the adapter |
+| S1b the `getUserByAccount` step removed (email first) | integration: the four linked-account deny cells; both `the victim's own linked account resolves them as before (row 4 join)`. unit: `writes for the linked account's user, whatever email is asserted` |
+| S1c the `allowsDangerousEmailAccountLinking` exception removed (always `not_linked`) | integration: `Google with email linking on: an unlinked account whose email names a user proceeds with that user`. unit: `proceeds with the email's user where the provider links by email`; `refuses an unlinked account whose email names a user, before any write` (it asserts the predicate was consulted) |
+| S1d the Google provider's flag hard-coded `true` instead of the predicate | unit: `the linking predicate agrees with every constructed provider without GOOGLE_WORKSPACE_DOMAINS` |
+| F1 `cmdRemove`'s CAS without `provider` | integration: `remove: a concurrent rebind of an unbound row …` and `… of a bound row is a refusal and records no event` |
+| S2 the `isBindFileWritable` skip removed (a `#` claim written as a line) | unit: `lists a claim starting with # in a not-written note instead of as a data line`. integration: `names a stored claim starting with # as not written, and writes the others as lines` |
+| F3a the CRLF refusal removed | unit: `refuses the whole file on CRLF line endings` |
+| F3b the BOM refusal removed | unit: `refuses the whole file on a leading byte-order mark` |
+| F4a the stray-flag refusal in `main()` disabled | dispatch: `refuses a flag the subcommand does not read, before reaching a handler` |
+| F4b `provider` dropped from `SUBCOMMAND_FLAGS.add` | unit: `add accepts the documented form […--provider…]`; `each subcommand accepts exactly the flags its dispatch reads` |
+| F4c `provider` added to `SUBCOMMAND_FLAGS.remove` | unit: `remove refuses […--provider google]`; `each subcommand accepts exactly the flags its dispatch reads`. dispatch: `refuses a flag the subcommand does not read…` |
+| F4d `add`'s `--unbound` + `--accept-unused-provider` refusal disabled | integration: `refuses --accept-unused-provider together with --unbound` |
+| T2 the pre-fix `tenant-claim-cli.integration.test.ts` (from HEAD) with `AUTH_GOOGLE_ID/SECRET`, `JACKSON_URL`, a one-entry `AUTH_JACKSON_CONNECTIONS` and `AUTH_CLAIM_BINDING=strict` exported in the shell | 30 of 102 red (the `add --unbound` cells refused under the derived strict mode). The post-fix file under the same shell env: 102/102 |
+
+Not red-proved: T3 and T7 change fixtures and assertions, and the B2 rows above exercise them (M4a reds the strict two-connection cells, M4b the new existing-user registration cells). T6's narrowing has no source mutation that reaches it without also changing `refMappingFor`'s other callers. T1/T5 are workflow edits with no test reading them.
 
 **B1** (unmutated: `src/auth.config.jackson-wire.test.ts` 11/11, `src/lib/auth/jackson-providers.test.ts` 136/136)
 
@@ -106,3 +128,12 @@ Each mutation ran on a scratch copy (D5's layout), never on the real tree, and t
 | `pepper === null` early return removed | unit "is not checked without a pepper, because no ref is stored then"; unit "the boot assertion passes for real refs of distinct ids, and is skipped without a pepper" |
 
 Unmutated, the race cell won 37/13, 31/19, 24/26, 14/36 and 24/26 (`saml-jackson-alpha`/`saml-jackson-bravo`) over five runs, so its at-least-one-win-each assertion is not flaky.
+
+### D8: Phase 3 round 1 choices
+- **Security (S1):** for an OAuth/OIDC sign-in, the signIn callback now resolves the subject the way Auth.js will, through the adapter's own `getUserByAccount` / `getUserByEmail`, before any membership write. A linked account resolves to its user. An unlinked account whose email names a user proceeds only where `allowsDangerousEmailAccountLinking` (exported from `auth.config.ts` and used by the Google provider's construction) allows it. Otherwise the callback refuses with the new reason `account_not_linked`, filed under that user. Magic link and other account types keep the email lookup. A sign-in made while another session is active is resolved as if there were no session; the app has no account-linking flow. The adapter instance is hoisted so NextAuth and the callback share it.
+- Found while writing the S1 allow cells, not fixed (out of this round's scope): the bootstrap migration (rows 6 / 9a) upserts the new membership before deleting the bootstrap one, and `tenant_members_one_active_per_user` refuses that. On a real database every bootstrap-member sign-in into a claimed tenant ends in `provider_error`. The unit suite mocks Prisma and no integration cell drove the arm. The S1 cells use a departed member for the write that commits, and the bootstrap victim's cells pin "refused, nothing written".
+- F3: a bind file with a BOM or CRLF endings is refused up front with "save it with LF line endings, no BOM". It is not normalised, so the file `--apply` reads is the file the operator reviewed byte for byte. A lone `\r` inside a cell is still the cell check's refusal.
+- S2: a claim starting with `#` is not written as a line. `formatBindFile` lists it in a "Not written" header note, and `bind --from-members` names it in its output, with `bind --claim` as the path for it.
+- F4: `SUBCOMMAND_FLAGS` lists the flags each subcommand reads, and `main()` refuses any other before dispatch. A unit test derives each set from the CLI's own flag reads per `case`.
+- T4: re-running B2 found that a change to `PROVIDER_REF_INFO` reds nothing, because every ref cell recomputes through `providerRef`. Stored refs are mapped back by recomputation, so such a change orphans every ref already written. `identifier-pepper.test.ts` gains a recorded vector for `providerRef`.
+- T2: the provider env key list is `Record<ProviderEnvKey, true>` in the shared fixture module, so a variable added to `jackson-providers.ts` must be listed there to compile. `stubClaimProviderEnv` asserts the derived mode against the documented rule.

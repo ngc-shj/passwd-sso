@@ -130,6 +130,15 @@ const {
   };
 });
 
+// The adapter's own account/email lookups, which the signIn callback resolves
+// an OAuth/OIDC sign-in's subject through, and the linking predicate it shares
+// with the provider construction in auth.config.ts.
+const { mockGetUserByAccount, mockGetUserByEmail, mockAllowsDangerousEmailAccountLinking } = vi.hoisted(() => ({
+  mockGetUserByAccount: vi.fn(),
+  mockGetUserByEmail: vi.fn(),
+  mockAllowsDangerousEmailAccountLinking: vi.fn(),
+}));
+
 const { mockNextAuth } = vi.hoisted(() => ({
   mockNextAuth: vi.fn(() => ({
     handlers: {},
@@ -144,7 +153,10 @@ vi.mock("next-auth", () => ({
 }));
 
 vi.mock("@/lib/auth/session/auth-adapter", () => ({
-  createCustomAdapter: vi.fn(() => ({})),
+  createCustomAdapter: vi.fn(() => ({
+    getUserByAccount: mockGetUserByAccount,
+    getUserByEmail: mockGetUserByEmail,
+  })),
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -205,11 +217,13 @@ vi.mock("@/lib/logger", () => ({
 
 vi.mock("./auth.config", () => ({
   default: { callbacks: {} },
+  allowsDangerousEmailAccountLinking: mockAllowsDangerousEmailAccountLinking,
 }));
 
 import type { Account } from "next-auth";
 import { ensureTenantMembershipForSignIn, assertBootstrapSingleMember } from "./auth";
 import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
+import { toAuditProvider } from "@/lib/audit/auth-failure-mapping";
 import type { ClaimLookup, ClaimTenantResolution } from "@/lib/tenant/tenant-management";
 import type { TenantClaimExtraction } from "@/lib/tenant/tenant-claim";
 // The REAL producer, not a literal (round-6 SEC-R6-3): `ClaimRefusalDiagnosis`
@@ -1237,7 +1251,7 @@ describe("signIn callback", () => {
   const signInCallback = (nextAuthInitArgs[0] as any).callbacks.signIn as (
     params: {
       user: { id?: string; email?: string };
-      account?: { provider: string } | null;
+      account?: { provider: string; type?: string; providerAccountId?: string } | null;
       profile?: Record<string, unknown> | null;
     },
   ) => Promise<boolean>;
@@ -1675,6 +1689,120 @@ describe("signIn callback", () => {
       provider: "google",
       reason: "provider_error",
       userId: "real-db-id",
+    });
+  });
+
+  // S1: Auth.js runs this callback BEFORE its account-link check, so the user
+  // an OAuth/OIDC sign-in writes for must be the one Auth.js signs in — never
+  // the user the IdP-asserted email happens to name.
+  describe("OAuth/OIDC sign-in subject", () => {
+    const LINKED_USER = "00000000-0000-4000-b000-000000000001";
+    const EMAIL_USER = "00000000-0000-4000-b000-000000000002";
+    const OIDC_ACCOUNT = { provider: "saml-jackson-alpha", type: "oidc", providerAccountId: "idp-sub-1" };
+
+    beforeEach(() => {
+      mockGetUserByAccount.mockResolvedValue(null);
+      mockGetUserByEmail.mockResolvedValue(null);
+      mockAllowsDangerousEmailAccountLinking.mockReturnValue(false);
+      mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
+      mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
+      mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+      mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
+      mockPrisma.user.findUnique.mockResolvedValue({ tenantId: "00000000-0000-4000-a000-000000000001" });
+      for (const handle of STRANDED_MODEL_HANDLES) {
+        strandedDelegate(handle).count.mockResolvedValue(0);
+      }
+    });
+
+    it("writes for the linked account's user, whatever email is asserted", async () => {
+      mockGetUserByAccount.mockResolvedValue({ id: LINKED_USER, email: "linked@corp.example" });
+      mockGetUserByEmail.mockResolvedValue({ id: EMAIL_USER, email: "victim@corp.example" });
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "victim@corp.example" },
+        account: OIDC_ACCOUNT,
+        profile: {},
+      });
+
+      expect(result).toBe(true);
+      expect(mockGetUserByAccount).toHaveBeenCalledWith({
+        provider: OIDC_ACCOUNT.provider,
+        providerAccountId: OIDC_ACCOUNT.providerAccountId,
+      });
+      expect(mockGetUserByEmail).not.toHaveBeenCalled();
+      expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ userId: LINKED_USER }) }),
+      );
+    });
+
+    it("refuses an unlinked account whose email names a user, before any write", async () => {
+      mockGetUserByEmail.mockResolvedValue({ id: EMAIL_USER, email: "victim@corp.example" });
+
+      const result = await signInCallback({
+        user: { id: "idp-sub-1", email: "victim@corp.example" },
+        account: OIDC_ACCOUNT,
+        profile: {},
+      });
+
+      expect(result).toBe(false);
+      expect(mockAllowsDangerousEmailAccountLinking).toHaveBeenCalledWith(OIDC_ACCOUNT.provider);
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "victim@corp.example",
+        // The real mapping: this connection is not configured in the unit env.
+        provider: toAuditProvider(OIDC_ACCOUNT.provider),
+        reason: "account_not_linked",
+        userId: EMAIL_USER,
+      });
+      expect(mockResolveTenantByClaim).not.toHaveBeenCalled();
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockTenantClaimStore.tenantClaim).toBeNull();
+    });
+
+    it("proceeds with the email's user where the provider links by email", async () => {
+      mockGetUserByEmail.mockResolvedValue({ id: EMAIL_USER, email: "user@corp.example" });
+      mockAllowsDangerousEmailAccountLinking.mockReturnValue(true);
+
+      const result = await signInCallback({
+        user: { id: "google-sub", email: "user@corp.example" },
+        account: { provider: "google", type: "oidc", providerAccountId: "google-sub" },
+        profile: {},
+      });
+
+      expect(result).toBe(true);
+      expect(mockAllowsDangerousEmailAccountLinking).toHaveBeenCalledWith("google");
+      expect(mockEmitAuthLoginFailure).not.toHaveBeenCalled();
+      expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ userId: EMAIL_USER }) }),
+      );
+    });
+
+    it("takes the first-sign-in path for an unlinked account whose email names no user", async () => {
+      const result = await signInCallback({
+        user: { id: "idp-sub-1", email: "new@corp.example" },
+        account: OIDC_ACCOUNT,
+        profile: {},
+      });
+
+      expect(result).toBe(true);
+      expect(mockGetUserByEmail).toHaveBeenCalledWith("new@corp.example");
+      expect(mockTenantClaimStore.tenantClaim).toBe("tenant-acme");
+      expect(mockTenantClaimStore.provider).toBe(OIDC_ACCOUNT.provider);
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it("leaves a non-OAuth account type on the email lookup", async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "magic@example.com" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "magic@example.com" },
+        profile: null,
+      });
+
+      expect(result).toBe(true);
+      expect(mockGetUserByAccount).not.toHaveBeenCalled();
+      expect(mockGetUserByEmail).not.toHaveBeenCalled();
     });
   });
 

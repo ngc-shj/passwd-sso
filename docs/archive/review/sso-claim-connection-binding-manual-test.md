@@ -133,6 +133,18 @@ Check that no refusal message contains a client secret or the raw JSON.
 - Step 2: the callback is refused by Auth.js (the `state` / `nonce` cookies of the second profile do not match), and no session is created in the second profile. This is the code-injection case PKCE does not cover for these providers; `nonce` is the control.
 - Step 3: refused with an Auth.js `InvalidCheck` error; no session.
 
+### Test 9: post-merge — the probe jobs are required checks
+
+A job that is not a required status check does not block a merge when it fails or never runs, and `ci-integration.yml` does not declare which of its jobs are required.
+
+**Steps:** after merge, a repository admin adds `jackson-probe (1.52.2)` and `jackson-probe (1.42.0)` to the required status checks of `main`, in the branch protection settings. Then read them back:
+
+```bash
+gh api repos/:owner/:repo/branches/main/protection/required_status_checks --jq '.contexts, .checks'
+```
+
+**Expected:** both names are listed. A matrix entry renamed or added later changes the check name, so it has to be registered again.
+
 ---
 
 ## Adversarial scenarios
@@ -166,3 +178,4 @@ Check that no refusal message contains a client secret or the raw JSON.
 | 6 | | |
 | 7 | | |
 | 8 | | |
+| 9 | | |

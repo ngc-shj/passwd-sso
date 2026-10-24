@@ -23,6 +23,7 @@ import {
   ALIAS_CLAIM,
   NON_DOMAIN_CLAIM,
   runToken,
+  stubClaimProviderEnv,
 } from "@/__tests__/helpers/tenant-claim-fixtures";
 import {
   cmdList,
@@ -106,6 +107,10 @@ describe("tenant-domain CLI (C7)", () => {
     if (!process.env.MIGRATION_DATABASE_URL) {
       vi.stubEnv("MIGRATION_DATABASE_URL", process.env.DATABASE_URL as string);
     }
+    // No claim provider, so the CLI runs in off mode whatever the developer's
+    // `.env` configures: `add --unbound`, which most cells here use, is refused
+    // when the env derives strict.
+    stubClaimProviderEnv({});
   });
 
   afterEach(() => {

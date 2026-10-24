@@ -31,6 +31,21 @@ const magicLinkEmailLimiter = createRateLimiter({
 });
 
 const allowedGoogleDomains = parseAllowedGoogleDomains();
+
+/**
+ * Whether Auth.js links a sign-in through `providerId` to an existing user by
+ * email alone (`allowDangerousEmailAccountLinking`). The provider construction
+ * below and `src/auth.ts`'s signIn callback both read this: the callback has to
+ * decide which user a sign-in is for BEFORE Auth.js does, and a second copy of
+ * the condition would let the two disagree about whose rows it writes.
+ *
+ * Google only, and only with a domain restriction: without one, any Google
+ * account could take over an existing account by matching its email address.
+ */
+export function allowsDangerousEmailAccountLinking(providerId: string): boolean {
+  return providerId === GOOGLE_PROVIDER_ID && allowedGoogleDomains.length > 0;
+}
+
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
 const useSecureCookies = isSecureCookieFromAuthUrl();
@@ -62,10 +77,7 @@ export default {
           Google({
             clientId: process.env.AUTH_GOOGLE_ID,
             clientSecret: process.env.AUTH_GOOGLE_SECRET,
-            // Allow account linking only when domain restriction is active.
-            // Without domain restriction, any Google account could hijack
-            // an existing account by matching on email address.
-            allowDangerousEmailAccountLinking: allowedGoogleDomains.length > 0,
+            allowDangerousEmailAccountLinking: allowsDangerousEmailAccountLinking(GOOGLE_PROVIDER_ID),
             authorization: {
               params: {
                 // Restrict to specific domain (optional, omit for personal accounts).
@@ -90,8 +102,9 @@ export default {
     // IdP be redeemed here. `state` (login CSRF; Jackson also requires it) and
     // `nonce` (code injection) carry the checks instead. Token-endpoint auth
     // stays Auth.js's default, client_secret_basic. Never set
-    // allowDangerousEmailAccountLinking on these: an IdP behind one connection
-    // must not take over an account created through another.
+    // allowDangerousEmailAccountLinking on these (and
+    // allowsDangerousEmailAccountLinking answers false for them): an IdP behind
+    // one connection must not take over an account created through another.
     ...jacksonProviders.map(
       (connection): OIDCConfig<JacksonProfile> => ({
         id: connection.id,

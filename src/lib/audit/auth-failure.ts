@@ -56,7 +56,15 @@ export type AuthLoginFailureReason =
    * sign-in came through — the signature of one connection's IdP asserting
    * another customer's claim.
    */
-  | "tenant_claim_provider_mismatch";
+  | "tenant_claim_provider_mismatch"
+  /**
+   * An OAuth/OIDC sign-in whose provider account is linked to no user, while
+   * the email it asserts belongs to an existing one, through a provider that
+   * does not link by email. Auth.js would refuse it (`OAuthAccountNotLinked`)
+   * after the signIn callback; the callback refuses it first, so nothing is
+   * written for the user that email names. `userId` is that user.
+   */
+  | "account_not_linked";
 
 /**
  * What a binding refusal adds to the audit row. The row is readable by the

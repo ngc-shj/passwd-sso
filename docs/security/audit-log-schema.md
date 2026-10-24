@@ -12,7 +12,7 @@ here rather than left to convention.
 | Field | Type | Set when | Notes |
 |---|---|---|---|
 | `provider` | `AuthProvider` | always | `"google" \| "nodemailer" \| "saml" \| "passkey" \| "credentials" \| "unknown"` — every configured Jackson provider (`saml-jackson`, `saml-jackson-<id>`) maps to `"saml"` |
-| `reason` | `AuthLoginFailureReason` | always | `"unknown_email" \| "tenant_mismatch" \| "provider_error" \| "magic_link_expired" \| "credential_mismatch" \| "tenant_claim_unmapped" \| "tenant_claim_system_tenant" \| "tenant_claim_unbound" \| "tenant_claim_provider_mismatch"` — the last three are described [below](#tenant-claim-reasons-and-provider-binding-fields) |
+| `reason` | `AuthLoginFailureReason` | always | `"unknown_email" \| "tenant_mismatch" \| "provider_error" \| "magic_link_expired" \| "credential_mismatch" \| "tenant_claim_unmapped" \| "tenant_claim_system_tenant" \| "tenant_claim_unbound" \| "tenant_claim_provider_mismatch" \| "account_not_linked"` — `tenant_claim_system_tenant`, `tenant_claim_unbound` and `tenant_claim_provider_mismatch` are described [below](#tenant-claim-reasons-and-provider-binding-fields), `account_not_linked` [after them](#account_not_linked) |
 | `identifierHash` | `string \| null` | see below | HMAC-SHA256(pepper, `email.toLowerCase() + ":" + tenantId`), first 16 hex chars (64 bits) |
 | `identifierHashScope` | `"tenant" \| "global" \| "unkeyed" \| null` | see below | which binding produced `identifierHash`, or why none was produced |
 | `claim` | `string` | only when the caller passed one | the raw tenant claim value extracted from the IdP response, truncated to `MAX_TENANT_CLAIM_LENGTH` |
@@ -35,6 +35,12 @@ The two binding reasons are filed under the tenant that owns the claim, so that 
 `tenant-domain unmapped` maps a ref back to a provider ID: it recomputes the refs of the configured providers under the pepper from the env it loaded. A ref that matches none of them is printed as unknown, for example a provider since removed. With no pepper the CLI prints refs as unmappable, and a row with no ref as "no ref stored". The operator-only structured log line `auth.tenant_claim.binding_refused` (`docs/operations/alerts.md`) carries both raw IDs.
 
 Neither key is in `EXTERNAL_DELIVERY_METADATA_BLOCKLIST`. Both reach external sinks unchanged: `boundProvider` is the receiving tenant's own value, and `signInProviderRef` is keyed.
+
+## `account_not_linked`
+
+An OAuth/OIDC sign-in (Google, or a Jackson connection) whose provider account is not linked to any user, while the email it asserts belongs to an existing user, through a provider that does not link accounts by email. Only Google with `GOOGLE_WORKSPACE_DOMAINS` set links by email. Auth.js refuses such a sign-in with `OAuthAccountNotLinked`, but only after the signIn callback has run, so the callback refuses it first and writes nothing for that user: no tenant membership change, no bootstrap migration. The row's `userId` is the user that the asserted email names. The row is filed under that user's tenant. It carries no claim fields.
+
+A legitimate user sees this reason when they sign in through a provider other than the one their account was created with. An IdP asserting another user's email produces the same row.
 
 ## `identifierHash` / `identifierHashScope`
 

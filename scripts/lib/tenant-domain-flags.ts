@@ -75,6 +75,28 @@ export type AnyValueFlag = ValueFlag | ScopedValueFlag;
  */
 export const BOOLEAN_FLAGS = ["yes", "apply", "unbound", "accept-unused-provider", "from-members"] as const;
 
+export type BooleanFlag = (typeof BOOLEAN_FLAGS)[number];
+
+/**
+ * The flags each subcommand reads — every other one stops the command, the
+ * module's rule applied per subcommand. Without it a flag valid for SOME
+ * subcommand passed `parseFlags` everywhere and was dropped where nothing read
+ * it: `remove --provider`, `list --from-members` and `add --claim` looked
+ * applied and were not. `bind` additionally narrows this set per form
+ * (`dispatchBind`). A subcommand absent here is not one, and gets the usage.
+ */
+export const SUBCOMMAND_FLAGS = {
+  list: ["tenant", "unbound"],
+  unmapped: ["days"],
+  add: ["tenant", "domain", "by", "from", "provider", "unbound", "accept-unused-provider", "yes"],
+  bind: ["claim", "provider", "by", "accept-unused-provider", "yes", "apply", "from-members", "out"],
+  remove: ["tenant", "domain", "by", "yes"],
+  history: ["domain", "tenant", "after"],
+  realign: ["user", "tenant", "by", "yes"],
+  measure: [],
+  "backfill-owning-column": ["by", "apply", "yes", "limit"],
+} as const satisfies Record<string, readonly (ValueFlag | ScopedValueFlag | BooleanFlag)[]>;
+
 export type ParsedFlags = Map<string, string | true>;
 
 export type FlagParseResult =
@@ -232,4 +254,22 @@ export function findValuelessFlag(flags: ParsedFlags, subcommand?: string): AnyV
     if (flags.get(name) === true) return name;
   }
   return null;
+}
+
+/**
+ * The flags given that `subcommand` does not read, in command-line order. Empty
+ * for a subcommand `SUBCOMMAND_FLAGS` does not list — the caller prints the
+ * usage for that one.
+ */
+export function findStrayFlags(flags: ParsedFlags, subcommand: string | undefined): string[] {
+  if (subcommand === undefined || !Object.prototype.hasOwnProperty.call(SUBCOMMAND_FLAGS, subcommand)) return [];
+  const accepted: readonly string[] = SUBCOMMAND_FLAGS[subcommand as keyof typeof SUBCOMMAND_FLAGS];
+  return [...flags.keys()].filter((name) => !accepted.includes(name));
+}
+
+export function strayFlagsError(stray: readonly string[], subcommand: string): string {
+  return (
+    `${escapeUnsafeDisplayChars(subcommand)} does not read ${stray.map((name) => `--${escapeUnsafeDisplayChars(name)}`).join(", ")}. ` +
+    "Refusing rather than ignoring it: a flag the operator wrote must either take effect or stop the command."
+  );
 }
