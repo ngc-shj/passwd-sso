@@ -130,3 +130,13 @@ other regions, and via AWS services that launch ECS tasks such as Batch). All Mi
   to "direct ECS calls in this region" with the other routes as residual; the manual test checks
   who holds `iam:PassRole` and carries the `aws:SourceArn` trust binding as an optional,
   AWS-verified experiment. A follow-up issue records the PassRole control.
+
+### Round 5
+Findings: security R5-1 and functionality N6 (converged: the docs named `iam:PassRole` as the
+control for the whole class, but the role-change routes — `UpdateAssumeRolePolicy`,
+`DeleteRole` + `CreateRole` — need no PassRole), testing S-1 (the bounded-delay test compared
+against the imported constant, so an off-by-one cap passes). All Minor.
+- R5-1 / N6: the threat model, alerts.md and the manual test now name two controls — who holds
+  `iam:PassRole` on the role (task-launch routes) and who holds IAM write actions on it
+  (role-change routes) — and the manual test simulates both.
+- S-1: `MAX_TIMER_DELAY_MS` pinned to `2 ** 31 - 1`.

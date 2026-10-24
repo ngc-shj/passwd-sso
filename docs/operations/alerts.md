@@ -1043,9 +1043,11 @@ another family names it — the second rule, at registration; (b2) a task
 definition of the publisher's family names it, which is legitimate only for a
 task the publisher service launched — the next section.
 
-**Not alarmed by this stack.** Every route needs `iam:PassRole` on the publisher
-role, so restricting who holds it (an SCP or permission boundary) is the control
-for the whole class; these rules only detect part of it. Outside their reach: the
+**Not alarmed by this stack.** Every task-launch route needs `iam:PassRole` on
+the publisher role, so restricting who holds it (an SCP or permission boundary) is
+the control for those; these rules only detect part of them. The role-change routes
+below need no `iam:PassRole`: their control is who holds `iam:UpdateAssumeRolePolicy`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:DeleteRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePermissionsBoundary`, `iam:DeleteRole`, and `iam:CreateRole` scoped to its name on the
+publisher role. Outside their reach: the
 same ECS calls in any other region — the role is global, the rules and the
 events they match are regional — and another AWS service that launches ECS tasks
 under a role it is passed (AWS Batch's `jobRoleArn` on Fargate, for one). Changes to the role itself —

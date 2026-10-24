@@ -164,6 +164,12 @@ describe("createAnchorScheduler", () => {
     expect(h.pending().at).toBe(B1 + CADENCE_MS);
   });
 
+  it("caps the delay at setTimeout's own limit, 2^31 - 1 ms", () => {
+    // Pinned to Node's value, not to the constant: one more and Node replaces
+    // the delay with 1 ms, which is the busy loop the cap exists to prevent.
+    expect(MAX_TIMER_DELAY_MS).toBe(2 ** 31 - 1);
+  });
+
   it("waits in bounded steps when the wall clock is weeks behind the deadline", async () => {
     // Node turns a delay above 2^31-1 ms into 1 ms; an uncapped re-arm after a
     // clock stepped back by weeks would spin.
