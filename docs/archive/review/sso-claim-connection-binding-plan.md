@@ -1,6 +1,6 @@
 # Plan: sso-claim-connection-binding
 
-Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 4.
+Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 5.
 
 ## Project context
 
@@ -81,7 +81,9 @@ completed through one Jackson connection's client with another connection's IdP.
 ### C2 — binding mode
 - Claim-presenting providers: `google` when registered (the same exported predicate
   `auth.config.ts` and `env-schema.ts` use), every Jackson provider. `AUTH_CLAIM_BINDING` is
-  `off` | `strict`; any other value is refused. With two or more claim providers the app refuses to
+  `off` | `strict`; any other value is refused. The derived mode is `strict` whenever there are two
+  or more claim providers, whatever the variable says (fail closed on its own); with one it is the
+  variable's value, default `off`. Separately, with two or more the app refuses to
   boot unless it is `strict` — explicitly set, so an upgrade of a Google + Jackson deployment stops
   at deploy time with a message naming the runbook (C6) instead of silently refusing every
   claim-routed sign-in on NULL rows. With one, `strict` is opt-in.
@@ -104,8 +106,9 @@ completed through one Jackson connection's client with another connection's IdP.
   it (no NULL row in strict), and outside strict a NULL row needs an explicit `--unbound`. Every
   such writer runs one evidence check on the target tenant: per provider, how many of its active
   members have an account there, against the total; whether the claim was registered by sign-in
-  and through which provider (from `tenant_claim_events`, `actor_label = 'signin'`,
-  `new_provider` — "unknown" for events written before this change). It refuses when members using
+  — the row's own `tenant_claims.created_by` in (`signin`, `backfill`; `backfill` rows are the
+  tenants the old sign-in path created) — and, as a hint only, the provider of its `register`
+  event (`new_provider`; "unknown" for pre-change events and for rows with no event). It refuses when members using
   `<id>` are not a majority unless `--accept-unused-provider`; a zero-member tenant is reported as
   "no evidence" and proceeds (normal onboarding before anyone signs in). Existing CAS clauses (re-point, unrevoke) gain
   `provider`.
@@ -113,7 +116,8 @@ completed through one Jackson connection's client with another connection's IdP.
   CAS on `(tenant_id, provider, revoked_at)`, event `rebind` (operation CHECK widened; the gate's
   self-test and the operation-check test follow). `bind --from-members --by <label>` lists by
   default and writes only with `--apply` (as `backfill-owning-column` does). It binds a NULL row
-  without the override only when the row was registered by sign-in and every active member has an
+  without the override only when the row was registered by sign-in (`created_by`, above — not the
+  event, which pre-change rows lack) and every active member has an
   account at that one claim provider (a single member counts as unanimous, said in the output);
   every other row is listed with per-provider counts and the count of members using no claim
   provider. Without the app env it refuses (it cannot tell which account providers are claim
@@ -135,8 +139,11 @@ completed through one Jackson connection's client with another connection's IdP.
 - Reasons `tenant_claim_unbound`, `tenant_claim_provider_mismatch`. The audit row (readable by
   the owning tenant's admins) carries `boundProvider` and `signInProviderRef` — a truncated HMAC of the
   presenting provider id keyed with the identifier pepper (domain-separated; no ref is stored when
-  no pepper is configured), computed by one helper shared with the CLI, refs of the configured set
-  checked distinct where the set is built, so one customer's connection name is not shown to another; the
+  no pepper is configured), computed by one helper in a prisma-free module shared with the CLI
+  (pepper injectable for tests). The CLI takes the pepper from the app env it loads
+  (`AUDIT_IDENTIFIER_PEPPER`, else derived from `AUTH_SECRET`, as the app does); without it
+  `unmapped` prints refs as "unmappable (no pepper)", distinct from "unknown provider". Refs of the
+  configured set are checked distinct by a pure function over the ref list where the set is built, so one customer's connection name is not shown to another; the
   structured log line and `tenant-domain unmapped` (which maps refs against the configured set)
   show both ids. Carried through `SignInTenantResult`, `TenantClaimUnusableError`,
   `emitAuthLoginFailure`'s parameters, and the `unmapped` query (selected, grouped and printed).
@@ -208,7 +215,9 @@ updated with M1–M11.
   `users`/`tenants`/`tenant_members`/`tenant_claims`/`tenant_claim_events` delta and an audit row
   with the reason, `signInProviderRef`, `boundProvider` and the owning tenant — and no raw
   sign-in provider id anywhere in that row (the raw `boundProvider` is the control); `unmapped`
-  maps a ref to its id and prints a ref of a removed provider as unknown. Off-mode warn: payload
+  maps a ref to its id, prints a ref of a removed provider as unknown and, without the pepper, as
+  unmappable; the app's and the CLI's refs agree under one env; without a pepper the app stores no
+  ref. Distinctness function: a synthetic duplicate refused, a distinct list allowed. Off-mode warn: payload
   key set pinned, negative controls (bound-same, NULL). C5 missing-provider refusal. Concurrent
   first registration through two providers (`raceTwoClients`, 50×): one tenant, one binding, the
   loser `claim_provider_mismatch`. CLI: every writer arm with and without `--provider` (claim row
@@ -216,8 +225,12 @@ updated with M1–M11.
   `add --provider X` → strict sign-in through X resolves; `bind` cells (CAS lost, revoked, absent,
   unconfigured provider, override allow pair, evidence listing scoped to this tenant's active
   members, rebind event values, same-provider no-op, `--from-members` list-by-default and
-  `--apply`, a single-member sign-in-registered tenant bound, a minority-intruder tenant and an
-  operator-declared row listed, refusal without the app env); CAS lost on re-point and unrevoke when
+  `--apply`, a single-member sign-in-registered tenant bound, `backfill` rows and rows with no or a
+  pre-change event (the shapes an upgrade holds) bound when unanimous, a minority-intruder tenant
+  and an operator-declared row listed, refusal without the app env); evidence majority at exactly
+  half (refused), half plus one (allowed), zero members (proceeds, "no evidence"); derived mode
+  `strict` with two or more providers and the variable unset or `off` (and boot still refused),
+  `off` with one and unset; `add` with and without `--provider` in that window; CAS lost on re-point and unrevoke when
   only the provider changed;
   each CLI command with and without the app env; a real strict denial selected by `unmapped` and
   printed under the new heading; an upgrade scenario (NULL rows, Google + Jackson env → boot
