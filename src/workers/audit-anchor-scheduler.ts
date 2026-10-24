@@ -5,9 +5,10 @@
  * so a timer that fires early still publishes the boundary it was armed for.
  * The next timer is computed from the wall clock after each run (no
  * setInterval, which drifts and keeps firing on the old phase across a long
- * run). A run that failed at or after the upload is retried for the same
- * boundary until shortly before the next one; the publisher's persisted
- * attempt count bounds how many of those reach the destination.
+ * run). A failed run is retried for the same boundary until shortly before
+ * the next one — a database outage at the boundary must not cost the day; the
+ * publisher's persisted attempt count bounds how many of those reach the
+ * destination.
  */
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
@@ -39,10 +40,9 @@ export type AnchorScheduler = {
   stop: () => Promise<void>;
 };
 
-/** A failure the same boundary should be retried for: the upload or after it. */
+/** A failure the same boundary should be retried for, at any stage. */
 function isRetryable(outcome: CadenceOutcome | null): boolean {
-  if (outcome === null) return true;
-  return outcome.kind === "failed" && outcome.stage !== "before_upload";
+  return outcome === null || outcome.kind === "failed";
 }
 
 export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorScheduler {

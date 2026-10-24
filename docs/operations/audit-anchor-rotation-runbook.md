@@ -378,8 +378,8 @@ instances: it only stops a publisher configured for another deployment from boot
 
 - A failure to build or sign the manifest (including an `audit_anchor_previous_manifest` that
   does not parse) fails the run before the upload: `failureReason: "CADENCE_FAILED:<code>"`,
-  stage `before_upload`. It costs an attempt and is not retried in-process — it would fail the
-  same way again.
+  stage `before_upload`. It costs an attempt and is retried every 15 minutes like any failure, so
+  a deterministic one reaches the cap (`upload_cap_reached`) after three runs.
 - Escalate to engineering. Roll back the publisher worker to the prior release if a release
   introduced it.
 

@@ -758,9 +758,10 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
 
 - `before_upload` — the run failed before uploading: the database unreachable,
   the signing step, or an `audit_anchor_previous_manifest` that does not parse.
-  It still cost an attempt, and it is **not** retried in-process: it would fail
-  the same way again. Fix it and restart the service for a boot run, or the
-  boundary is missed until the next one.
+  It cost an attempt and is retried every 15 minutes, so a transient database
+  outage at the boundary does not cost the day; a deterministic failure reaches
+  `upload_cap_reached` after three runs. Fix it and delete the
+  `audit_anchor_upload_attempts` row if the boundary must still be published.
 - `upload` — a destination refused or the 60 s upload bound fired
   (`UPLOAD_TIMEOUT`). `upload_failed` names the destination and carries
   `error.code` (`AccessDenied` usually means the bucket policy or the task role

@@ -73,7 +73,7 @@ export const PUBLISHER_AUDIT_DEAD_LETTER_REASON = "anchor_publisher_emit_failed"
 /** `null` only where the run failed before it could read the tenants. */
 type TenantCount = { chainEnabledTenantCount: number | null };
 
-/** Where a failed run stopped: the scheduler retries `upload` and `after_upload`. */
+/** Where a failed run stopped. */
 export type FailureStage = "before_upload" | "upload" | "after_upload";
 
 export type CadenceOutcome =
@@ -536,8 +536,10 @@ export class AuditAnchorPublisher {
 
         // Every chain-enabled tenant is published. A pause holds chain
         // advancement in the outbox worker; it no longer holds publishing.
+        // Ordered, so a retry over an unchanged chain signs the same bytes.
         const anchors = await tx.auditChainAnchor.findMany({
           where: { tenantId: { in: tenantIds } },
+          orderBy: { tenantId: "asc" },
         });
         const rows: AnchorRow[] = anchors.map((a) => ({
           tenantId: a.tenantId,

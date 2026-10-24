@@ -21,7 +21,7 @@
   specified but KMS is not configured" to every PUT carrying the header.
 - **Impact**: integration tests only; `docker-compose.override.yml` gains the entrypoint.
 
-### D3: scheduler retries only `upload` and `after_upload` failures in-process
+### D3 (superseded, see D8): scheduler retries only `upload` and `after_upload` failures in-process
 
 - **Plan**: retry the same boundary after a commit failure or an upload failure.
 - **Actual**: a `before_upload` failure (signing, corrupt previous manifest) is not retried
@@ -73,3 +73,28 @@
   (it is a SQL `LIMIT`; a fraction would fail every tick).
 - `_logType` constants (`PUBLISHER_LOG_TYPE`, `SCHEDULER_LOG_TYPE`) were inlined as literals:
   `check-worker-logtype.mjs` reads only string literals.
+
+### D8: every failed run is retried; anchors read in tenant-id order (found while documenting)
+
+- **Was (D3)**: a `before_upload` failure was not retried in-process, so a transient database
+  outage at the boundary cost the whole day.
+- **Now**: any `failed` outcome is retried every 15 min until 30 min before the next boundary
+  (the plan's wording); the persisted cap bounds a deterministic failure at three runs.
+  `lock_held` and `upload_cap_reached` are not retried.
+- The manifest's anchors are read `orderBy: { tenantId: "asc" }`, so a retry over an unchanged
+  chain signs the same bytes (an unordered read returned heap order).
+- Red proofs on a scratchpad copy: the old `isRetryable` fails the new scheduler test; dropping
+  `orderBy` fails the tenant-order integration test.
+- `audit_anchor_object_lock_days`'s description no longer claims leap days: the publisher's
+  retain-until is 7 × 365 = 2555 days, under the 2557 default.
+
+### D9: accepted code behaviour recorded by the docs batch
+
+- The chain-enabled-fell-to-zero alarm is level-triggered (every `skipped_no_tenants` run with
+  count 0 and `everChainEnabled: true`), not edge-triggered; CloudWatch notifies on the state
+  transition, so it is one notification per disable.
+- `previousManifest.uri` is `s3-object-lock://<artifactKey>` without the prefix, and its
+  `sha256` is over the canonical payload, not the object bytes; documented in the verification
+  doc. Changing either is a protocol change (SC5).
+- No application path writes `tenants.audit_chain_enabled`; a disable is a direct database
+  change, as before this PR.

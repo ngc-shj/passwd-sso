@@ -162,8 +162,23 @@ describe("createAnchorScheduler", () => {
     expect(h.pending().at).toBe(B1);
   });
 
-  it("does not retry a failure before the upload", async () => {
-    h.setOutcome(() => SIGNING_FAILED);
+  it("retries the same boundary after a failure before the upload", async () => {
+    // A database outage at the boundary fails before the upload; it must not
+    // cost the day. The persisted attempt count bounds a deterministic one.
+    h.setOutcome((_, run) => (run === 1 ? SIGNING_FAILED : PUBLISHED));
+    await h.scheduler.start();
+
+    expect(h.pending().at).toBe(B0 + 3 * 60 * MINUTE + ANCHOR_RETRY_INTERVAL_MS);
+    await h.fire();
+    expect(h.runs).toEqual([B0, B0]);
+    expect(h.pending().at).toBe(B1);
+  });
+
+  it.each<CadenceOutcome>([
+    { kind: "lock_held", reason: "LOCK_HELD_BY_OTHER_INSTANCE", chainEnabledTenantCount: 1 },
+    { kind: "upload_cap_reached", reason: "UPLOAD_ATTEMPT_CAP_REACHED", attempts: 4, chainEnabledTenantCount: 1 },
+  ])("does not retry $kind", async (outcome) => {
+    h.setOutcome(() => outcome);
     await h.scheduler.start();
 
     expect(h.pending().at).toBe(B1);

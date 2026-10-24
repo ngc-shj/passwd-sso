@@ -351,7 +351,7 @@ variable "audit_anchor_break_glass_role_arn" {
 variable "audit_anchor_object_lock_days" {
   type        = number
   default     = 2557
-  description = "Default COMPLIANCE retention (days) of the anchors bucket. 2557 days covers the publisher's 7-year retain-until including leap days. The bucket policy refuses a retention more than 31 days past this, so raising it is also what raises that cap."
+  description = "Default COMPLIANCE retention (days) of the anchors bucket. 2557 days is above the publisher's 7 × 365-day retain-until (2555 days). The bucket policy refuses a retention more than 31 days past this, so raising it is also what raises that cap."
 
   validation {
     condition     = var.audit_anchor_object_lock_days >= 2557

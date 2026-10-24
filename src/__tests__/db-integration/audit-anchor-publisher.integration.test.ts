@@ -185,6 +185,24 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     );
   });
 
+  it("lists the manifest's tenants in tenant-id order, whatever order the rows are stored in", async () => {
+    // Rewriting the lower id's anchor row moves its tuple behind the other's,
+    // so an unordered read returns the higher id first.
+    const [lower, higher] = [tenantA, tenantB].sort();
+    await seedChainTenant(ctx.su, lower!, { enabled: true, chainSeq: 9 });
+    const boundary = nextBoundary();
+    const config = makePublisherConfig([fsDestination()]);
+
+    expect(await publisher(config).runCadence(boundary)).toMatchObject({ kind: "published" });
+
+    const jws = await fs.readFile(path.join(tmpDir, buildManifestArtifactKey(boundary, config.signingKeyKid)), "utf-8");
+    const manifest = verifyManifest(jws.trim(), derivePublicKey(config.signingKey));
+    expect(manifest.tenants.map((t) => t.tenantTag)).toEqual([
+      computeTenantTag(lower!, config.tagSecret),
+      computeTenantTag(higher!, config.tagSecret),
+    ]);
+  });
+
   it("the bypass-notice measurement sees an outbox write under a grant without auditOutbox (control)", async () => {
     const boundary = nextBoundary();
     const notices = await expectBypassNotices(() =>
