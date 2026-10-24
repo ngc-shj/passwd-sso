@@ -1,6 +1,6 @@
 # Plan: sso-claim-connection-binding
 
-Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 5.
+Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 6.
 
 ## Project context
 
@@ -106,22 +106,25 @@ completed through one Jackson connection's client with another connection's IdP.
   it (no NULL row in strict), and outside strict a NULL row needs an explicit `--unbound`. Every
   such writer runs one evidence check on the target tenant: per provider, how many of its active
   members have an account there, against the total; whether the claim was registered by sign-in
-  — the row's own `tenant_claims.created_by` in (`signin`, `backfill`; `backfill` rows are the
-  tenants the old sign-in path created) — and, as a hint only, the provider of its `register`
-  event (`new_provider`; "unknown" for pre-change events and for rows with no event). It refuses when members using
+  — the row's `tenant_claims.created_by`, whether the claim equals the tenant's own id (the
+  `external_id = id` shape `20260228010000` left in every pre-existing tenant, carried into
+  `backfill` rows), and any operator `reassign`/`unrevoke` events — and the provider of its
+  `register` event (`new_provider`; "unknown" for pre-change events and rows with no event). This
+  is evidence for the operator, not an attestation: the history predates provenance, so no field
+  of it decides a binding on its own. `--by` reserves `backfill` as well as `signin` (one constant,
+  same normalisation). It refuses when members using
   `<id>` are not a majority unless `--accept-unused-provider`; a zero-member tenant is reported as
   "no evidence" and proceeds (normal onboarding before anyone signs in). Existing CAS clauses (re-point, unrevoke) gain
   `provider`.
 - `tenant-domain bind --claim <c> --provider <id> --by <label>` changes an active row's binding —
   CAS on `(tenant_id, provider, revoked_at)`, event `rebind` (operation CHECK widened; the gate's
-  self-test and the operation-check test follow). `bind --from-members --by <label>` lists by
-  default and writes only with `--apply` (as `backfill-owning-column` does). It binds a NULL row
-  without the override only when the row was registered by sign-in (`created_by`, above — not the
-  event, which pre-change rows lack) and every active member has an
-  account at that one claim provider (a single member counts as unanimous, said in the output);
-  every other row is listed with per-provider counts and the count of members using no claim
-  provider. Without the app env it refuses (it cannot tell which account providers are claim
-  providers). The upgrade path.
+  self-test and the operation-check test follow). The upgrade path is two steps:
+  `bind --from-members --out <file>` writes one line per NULL row — claim, tenant, the suggested
+  provider (set only when every active member has an account at exactly one claim provider; a
+  single member counts, said in the output), and the evidence above; it writes nothing to the DB
+  and refuses without the app env. `bind --apply <file> --by <label>` binds exactly the lines the
+  operator kept, each through `bind`'s own evidence check and CAS (row still NULL, same tenant).
+  The heuristic suggests; the operator's reviewed file decides.
 - `--provider` is validated against the configured provider set when the app env is present;
   without it, against the pattern, with a warning. `list --unbound` without the app env lists NULL
   rows only and says that rows bound to unconfigured providers were not evaluated. Flags in
@@ -140,7 +143,8 @@ completed through one Jackson connection's client with another connection's IdP.
   the owning tenant's admins) carries `boundProvider` and `signInProviderRef` — a truncated HMAC of the
   presenting provider id keyed with the identifier pepper (domain-separated; no ref is stored when
   no pepper is configured), computed by one helper in a prisma-free module shared with the CLI
-  (pepper injectable for tests). The CLI takes the pepper from the app env it loads
+  (pepper injectable for tests); the pepper derivation itself (`getIdentifierPepper`'s source
+  precedence, floor and HKDF info) moves into that module and `auth-failure.ts` imports it. The CLI takes the pepper from the app env it loads
   (`AUDIT_IDENTIFIER_PEPPER`, else derived from `AUTH_SECRET`, as the app does); without it
   `unmapped` prints refs as "unmappable (no pepper)", distinct from "unknown provider". Refs of the
   configured set are checked distinct by a pure function over the ref list where the set is built, so one customer's connection name is not shown to another; the
@@ -175,7 +179,8 @@ Upgrade notes (breaking): hardened legacy Jackson (real connection credentials r
 Jackson deployments: stop the old app (or let it drain), run `migrate` (on ECS as its own task),
 review for past exposure if the deployment ran with `AUTH_REDIRECT_PROXY_URL` and two or more
 Jackson connections (`tenant-domain list` with `created_by`, `history`, members' account
-providers), run `tenant-domain bind --from-members` then `--apply`, resolve the listed rest, rerun
+providers), run `tenant-domain bind --from-members --out <file>`, review and edit it, run
+`bind --apply <file>`, resolve the rest one by one, rerun
 `list --unbound` once the old version is gone, set `AUTH_CLAIM_BINDING=strict`, start the app. README (en/ja) SAML section rewritten (per-connection config, why PKCE is off — M1/M9, nonce as
 the code-injection control, `FLATTEN_RAW_CLAIMS=false` required, distinct IdP entityIds, strict
 rules, measured Jackson versions and that a Jackson bump requires a probe run, the id-immutability
@@ -225,9 +230,11 @@ updated with M1–M11.
   `add --provider X` → strict sign-in through X resolves; `bind` cells (CAS lost, revoked, absent,
   unconfigured provider, override allow pair, evidence listing scoped to this tenant's active
   members, rebind event values, same-provider no-op, `--from-members` list-by-default and
-  `--apply`, a single-member sign-in-registered tenant bound, `backfill` rows and rows with no or a
-  pre-change event (the shapes an upgrade holds) bound when unanimous, a minority-intruder tenant
-  and an operator-declared row listed, refusal without the app env); evidence majority at exactly
+  `--out` writes no DB row; suggestions for unanimous tenants (incl. `backfill` rows and rows with no
+  or a pre-change event — the shapes an upgrade holds), none for a minority-intruder tenant;
+  UUID-claim, operator-declared and re-pointed/unrevoked rows flagged; `--apply` binds only the kept
+  lines, refuses a line whose row changed (CAS), and runs the evidence check; refusal without the
+  app env; `--by backfill` refused like `signin`); evidence majority at exactly
   half (refused), half plus one (allowed), zero members (proceeds, "no evidence"); derived mode
   `strict` with two or more providers and the variable unset or `off` (and boot still refused),
   `off` with one and unset; `add` with and without `--provider` in that window; CAS lost on re-point and unrevoke when
