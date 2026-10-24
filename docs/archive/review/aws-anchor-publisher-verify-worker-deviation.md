@@ -98,3 +98,12 @@
   doc. Changing either is a protocol change (SC5).
 - No application path writes `tenants.audit_chain_enabled`; a disable is a direct database
   change, as before this PR.
+
+### D10: CI-only gates run by hand (parity disposition)
+
+Exit status 0 for each, run on HEAD before push: `npm run licenses:check:strict`,
+`npm run licenses:check:cli:strict`, `npm run licenses:check:ext:strict`,
+`node scripts/checks/check-npm-audit.mjs`, `bash scripts/check-state-mutation-centralization.sh`;
+`terraform fmt -check -recursive`, root `validate`, the module's `terraform test -json` and
+`check-terraform-test-count.mjs` (15/15). `scripts/pre-pr.sh`: 85 passed. CLAUDE.md gained the
+two `worker:*` lines with the user's approval.
