@@ -60,3 +60,16 @@
 - The app CI path filter also includes `infra/terraform/modules/anchor-prefix/**`, because
   vitest reads its vector file and `.tftest.hcl`.
 - Not changed: `envs/*/terraform.tfvars.example` — the prefix default suffices.
+
+### D7: batch 2 choices
+
+- The smoke's per-task env map is checked in (`scripts/checks/worker-bundle-smoke.json`) and
+  pinned to `ecs.tf` by a test through the HCL evaluator, not generated at run time:
+  `container-scan` installs neither tsx nor the repo's dependencies.
+- The docker-runner mode boots in the image's WORKDIR `/app` (what ECS runs from), not an
+  empty temp cwd; the metafile forbidden-input check runs in host mode only, since docker mode
+  boots already-built bundles.
+- The verify worker also requires `AUDIT_CHAIN_VERIFY_MAX_ROWS` to be a safe positive integer
+  (it is a SQL `LIMIT`; a fraction would fail every tick).
+- `_logType` constants (`PUBLISHER_LOG_TYPE`, `SCHEDULER_LOG_TYPE`) were inlined as literals:
+  `check-worker-logtype.mjs` reads only string literals.
