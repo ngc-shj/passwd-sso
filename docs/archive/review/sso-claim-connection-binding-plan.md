@@ -1,6 +1,6 @@
 # Plan: sso-claim-connection-binding
 
-Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 2.
+Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 3.
 
 ## Project context
 
@@ -29,8 +29,10 @@ Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4
   401; if the app sends any verifier matching the attacker's challenge, 200 and the client secret
   is never checked. The app must never put a `code_verifier` on the wire for these providers.
 - M10: Jackson rejects an authorize request without `state` ("Please specify a state…") on both
-  versions — today's legacy provider (default `checks: ["pkce"]`, no state) cannot complete a
-  sign-in, so hardening it removes no working configuration.
+  versions. Today's legacy provider sends no state — unless `AUTH_REDIRECT_PROXY_URL` is set, which
+  makes Auth.js add one; such a deployment signs in today over PKCE, where Jackson never checked
+  `AUTH_JACKSON_SECRET`. Hardening can therefore break a deployment whose secret is stale or whose
+  client id is `dummy`/encoded; the boot refusal makes that loud, and the upgrade notes say so.
 - M6: no field in id_token or userinfo names the authenticating connection in a way the attacker
   cannot choose. M7: with `FLATTEN_RAW_CLAIMS=true` an IdP can override id_token `requested` and
   `nonce` and userinfo `aud`/`clientID`.
@@ -66,15 +68,23 @@ completed through one Jackson connection's client with another connection's IdP.
   `/api/auth/callback/<provider id>`.
 - `allowDangerousEmailAccountLinking` is never set on a Jackson provider.
 - Control class: enforceable boundary, conditional on: no `code_verifier` on the wire (M9 —
-  pinned by a wire-level test), each connection's own credentials, a Jackson version the probe
-  passes, SAML connections whose IdPs have distinct entityIds and signing keys (Jackson selects
-  candidates by Issuer; stated in docs, SC5). Adjudication authority: Jackson's token endpoint.
+  pinned by a wire-level test), each connection's own credentials, a stable id → connection
+  mapping (re-pointing an id to another connection gives that connection's IdP sign-in as every
+  account and binding under it; a replaced connection gets a new id), a Jackson version the probe
+  passes (measured: 1.42.0, 1.52.2), SAML connections whose IdPs have distinct entityIds and signing
+  keys (Jackson selects candidates by Issuer; SC5). Adjudication authority: Jackson's token
+  endpoint.
 
 ### C2 — binding mode
-- Claim-presenting providers: `google` when configured, every Jackson provider. When there are
-  two or more, binding is strict regardless of configuration; `AUTH_CLAIM_BINDING=strict` forces
-  it with one. No configuration selects off with two or more.
-- Control class: fail-closed gate; computed once from the C1 parser and the Google env.
+- Claim-presenting providers: `google` when registered (the same exported predicate
+  `auth.config.ts` and `env-schema.ts` use), every Jackson provider. `AUTH_CLAIM_BINDING` is
+  `off` | `strict`; any other value is refused. With two or more claim providers the app refuses to
+  boot unless it is `strict` — explicitly set, so an upgrade of a Google + Jackson deployment stops
+  at deploy time with a message naming the runbook (C6) instead of silently refusing every
+  claim-routed sign-in on NULL rows. With one, `strict` is opt-in.
+- Control class: fail-closed gate. The mode is computed by one exported function from the env
+  (no module-level cache); the adjudicator takes it as an argument, so tests select it explicitly
+  and one integration cell per mode runs the production derivation.
 
 ### C3 — claim provenance recorded
 - `tenant_claims.provider VARCHAR(64) NULL`, CHECK on the shared provider-id pattern (one TS
@@ -83,17 +93,27 @@ completed through one Jackson connection's client with another connection's IdP.
   for `passwd_app` in a migration, `scripts/checks/app-role-denied-privileges.json` columnGrants,
   `bootstrap-rds-roles.mjs`, `db-grants-manifest.json`; the BEFORE DELETE deregister trigger
   copies `OLD.provider`; `tenant-domain history` prints them.
-- Writers: sign-in registration (both `tenant.create` arms) records the presenting provider;
-  `tenant-domain add --provider <full provider id>` records it (create and unrevoke arms);
-  `add --from` re-point sets it from `--provider` or resets it to NULL, shown in the preview;
-  new `tenant-domain bind --claim <c> --provider <id> --by <label>` changes the binding of an
-  existing active row — CAS on `(tenant_id, provider, revoked_at)`, event operation `rebind`
-  (CHECK widened, `check-tenant-claim-event-coverage.mjs` updated), prints the account providers
-  of the tenant's active members and refuses when none use `<id>` unless `--accept-unused-provider`.
-  `--provider` is validated against the configured provider set when the app env is present,
-  otherwise against the pattern with a warning. Flags registered in `tenant-domain-flags.ts`.
-- `tenant-domain list` shows the provider; `list --unbound` lists rows strict mode refuses
-  (NULL, or a provider no longer configured), using the adjudicator's predicate.
+- Writers: sign-in registration (both `tenant.create` arms) records the presenting provider.
+  CLI writers that set a provider — `add` create and unrevoke, `add --from` re-point, and the new
+  `bind` — take `--provider <full provider id>`; in strict mode `add`/`add --from` refuse without
+  it (no NULL row in strict), and outside strict a NULL row needs an explicit `--unbound`. Every
+  such writer runs one evidence check on the target tenant: the account providers of its active
+  members, whether the tenant was created by sign-in and through which provider; it refuses when
+  no member uses `<id>` unless `--accept-unused-provider`, and reports a zero-member tenant as
+  "no evidence" rather than as an unused provider. Existing CAS clauses (re-point, unrevoke) gain
+  `provider`.
+- `tenant-domain bind --claim <c> --provider <id> --by <label>` changes an active row's binding —
+  CAS on `(tenant_id, provider, revoked_at)`, event `rebind` (operation CHECK widened; the gate's
+  self-test and the operation-check test follow). `bind --from-members --by <label>` binds every
+  NULL row whose tenant's active members use exactly one claim provider, without the override, and
+  lists the rest — the upgrade path.
+- `--provider` is validated against the configured provider set when the app env is present;
+  without it, against the pattern, with a warning. `list --unbound` without the app env lists NULL
+  rows only and says that rows bound to unconfigured providers were not evaluated. Flags in
+  `tenant-domain-flags.ts`.
+- `tenant-domain list` shows the provider; `list --unbound` lists rows strict mode refuses (NULL,
+  or a provider no longer configured), using the adjudicator's predicate, with a suggested provider
+  when the members use exactly one.
 
 ### C4 — binding adjudicator
 - One function in `tenant-management.ts` decides after `findClaimRow` (which now selects
@@ -101,13 +121,20 @@ completed through one Jackson connection's client with another connection's IdP.
   (required) and call it. Arm order: revoked (existing `claim_taken`) → in strict, NULL provider
   → `claim_unbound`, provider ≠ sign-in → `claim_provider_mismatch`. Both arms carry the owning
   tenant and exist in `ClaimLookup` and `ClaimTenantResolution`.
-- Reasons `tenant_claim_unbound`, `tenant_claim_provider_mismatch`; audit metadata adds
-  `signInProvider` and `boundProvider` (deployment-defined ids). Consumers to change:
+- Reasons `tenant_claim_unbound`, `tenant_claim_provider_mismatch`. The audit row (readable by
+  the owning tenant's admins) carries `boundProvider` and `signInProviderRef` — a short hash of the
+  presenting provider id, so one customer's connection name is not shown to another; the
+  structured log line and `tenant-domain unmapped` (which maps refs against the configured set)
+  show both ids. Carried through `SignInTenantResult`, `TenantClaimUnusableError`,
+  `emitAuthLoginFailure`'s parameters, and the `unmapped` query (selected, grouped and printed).
+  Consumers to change: `bucketOf` (becomes a full reason → bucket table), the new heading's
+  `printGroup` call in `cmdUnmapped`,
   `refusalFromLookup`, `claimRefusalOf`, `lookupRefusalReason`, `SignInTenantResult.reason`,
   `TenantClaimUnusableError` kinds, `ClaimRefusalKind`, `CLAIM_REFUSAL_REASON`,
   `UNMAPPED_SELECTED_REASONS`, a new `UNMAPPED_BUCKET` (heading: investigate first — a mismatch
-  is the attack's signature; bind only to the provider the tenant's members use, `tenant-domain
-  bind`), README cause table (en/ja), `docs/security/audit-log-schema.md` (also add the missing
+  is the attack's signature; if the bound tenant was created by sign-in through another customer's
+  provider, re-point the claim to the rightful tenant with `add --from … --provider <theirs>`;
+  never `bind` the rightful provider into it), README cause table (en/ja), `docs/security/audit-log-schema.md` (also add the missing
   `tenant_claim_system_tenant`), `check-audit-metadata-narrative.mjs` allowlist.
 - Off mode (single claim provider, not forced): resolution unchanged; a mismatch on a bound row
   logs `auth.tenant_claim.provider_mismatch` (provider ids, tenant id). With one claim provider
@@ -119,27 +146,42 @@ completed through one Jackson connection's client with another connection's IdP.
 - `ensureTenantMembershipForSignIn(userId, account, profile)` reads the provider from `account`
   (required); `tenantClaimStorage` becomes `{ tenantClaim, provider }` set together, read by
   `createUser`. A claim present with no provider is refused (`provider_error`, logged) — no NULL
-  fallback. `route.ts`'s initial store gains `provider: null`.
+  fallback. In `createUser`, when `sessionMetaStorage` carries a provider that differs from the
+  claim store's, the sign-in is refused (`provider_error`) inside the transaction; an absent
+  session meta is not a refusal. `route.ts`'s initial store gains `provider: null`.
 
 ### C6 — docs
-README (en/ja) SAML section rewritten (per-connection config, why PKCE is off — M1/M9, nonce as
+Upgrade notes (breaking): hardened legacy Jackson (real connection credentials required); Google +
+Jackson deployments must run `migrate`, `tenant-domain bind --from-members`, resolve the listed
+rest, then set `AUTH_CLAIM_BINDING=strict` before starting the app. README (en/ja) SAML section rewritten (per-connection config, why PKCE is off — M1/M9, nonce as
 the code-injection control, `FLATTEN_RAW_CLAIMS=false` required, distinct IdP entityIds, strict
-rules, migration: `list --unbound` → `bind`), `docs/setup/*`, `docs/operations/alerts.md`, the
+rules, measured Jackson versions and that a Jackson bump requires a probe run, the id-immutability
+consequence, migration: `list --unbound` → `bind`), `docs/setup/*`, `docs/operations/alerts.md`, the
 cookie comment in `auth.config.ts` (login CSRF rests on state, not PKCE, for Jackson), `#742`
 updated with M1–M11.
 
 ## Testing strategy
 
-- C1 wire test (unit, `@auth/core`'s real sign-in and callback, `fetch` mocked at the network
+- C1 wire test (unit, `@auth/core`'s real sign-in and callback over the production provider
+  objects from `jackson-providers.ts` — legacy and two entries — `fetch` mocked at the network
   boundary): authorize URL carries `state` and `nonce`, no `code_challenge`; token request has
-  `Authorization: Basic` with that provider's credentials and no `code_verifier`; each provider
-  uses its own entry. Red: `pkce` added; two entries' secrets swapped.
+  `Authorization: Basic` with that provider's credentials and no `code_verifier`, also when a
+  valid PKCE cookie left by a Google sign-in is present. Red: `pkce` added; two entries' secrets
+  swapped; the provider reading the cookie.
 - C1 probe (`scripts/probes/jackson-connection-binding.mjs`, committed, keys generated at run
-  time, asserts and exits non-zero): M8a/M8c 200, M8b 401, M9 without verifier 401, positive
-  control M1 (PKCE) 200. Runs in `ci-integration.yml` via `docker run` of Jackson pinned by digest
-  (image parameterised), teardown registered first.
-- C1/C2 env: one parser; allow/deny matrix (1 Jackson + off; 2 → strict; Google + 1 → strict;
-  legacy + entries; each refusal paired with an adjacent allow); no secret in any message;
+  time, asserts and exits non-zero): every attack case first asserts that IdP A's signed response
+  produced a code, then the 401 and its credential-check body (M8b, M5a, M9 without verifier);
+  M8a/M8c 200; positive controls M1 (PKCE) 200 and M9 with the attacker's verifier 200. It runs in
+  a node container on the probe network, exchanges tokens through the oauth4webapi copy
+  `@auth/core` resolves (version asserted), and signs SAML with the pinned Jackson image's
+  `@boxyhq/saml20` (stated). `ci-integration.yml` runs it as a matrix over every Jackson image the
+  repo references (a drift test pins the list to `docker-compose.yml` and the Terraform image),
+  with teardown registered first; its path filter gains the compose file, `infra/terraform/**`,
+  `src/auth.ts`, `src/auth.config.ts` and the sign-in page.
+- C1/C2 env: one parser; allow/deny matrix — Google alone off; 1 Jackson off; forced strict with
+  one; two or more with `strict` boots, with `off`/unset refused; invalid or miscased mode refused;
+  Google ID without secret not counted; no claim providers; refusals under production, development
+  and test — each refusal paired with an adjacent allow; no secret in any message;
   consumer tests (`toAuditProvider`, auth-provider route, sign-in page parity with registered
   ids, env-schema production rule with only the new var); `isJacksonProviderId` adjacency.
 - C3/C4/C5 real-DB integration on the app role, through the production entry points
@@ -152,8 +194,15 @@ updated with M1–M11.
   first registration through two providers (`raceTwoClients`, 50×): one tenant, one binding, the
   loser `claim_provider_mismatch`. CLI: every writer arm with and without `--provider` (claim row
   and event row), `bind` CAS and refusal, `list --unbound` with a bound negative control,
-  `add --provider X` → strict sign-in through X resolves. Column grant asserted with
-  `has_column_privilege`. CHECK accept/deny on both columns.
+  `add --provider X` → strict sign-in through X resolves; `bind` cells (CAS lost, revoked, absent,
+  unconfigured provider, override allow pair, evidence listing scoped to this tenant's active
+  members, rebind event values, same-provider no-op, `--from-members` ambiguous rows left);
+  each CLI command with and without the app env; a real strict denial selected by `unmapped` and
+  printed under the new heading; an upgrade scenario (NULL rows, Google + Jackson env → boot
+  refused; after `bind --from-members` and strict → sign-ins resolve). Column grants asserted with
+  `has_column_privilege`. Provider-id parity: one corpus (empty, 64/65 chars, uppercase, `_`,
+  trailing newline, non-ASCII, the longest generable id) through the TS predicate and each of the
+  three live CHECKs read from `pg_constraint`, identical verdicts. C5 agreement cells.
 - Typed fixtures for claim rows (explicit `provider`), arm tables as `Record<kind, …> satisfies`,
   `importOriginal` spreads, and the store type's `provider` required so every literal site fails
   to compile until updated.

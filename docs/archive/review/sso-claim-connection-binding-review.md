@@ -47,3 +47,17 @@ Kept in each expert's output (R1–R57, RS1–RS6, RT1–RT11); fired rules are 
 - M11: 1.42.0 behaves the same for every binding-relevant case (the M1 hole exists there too); tag is `1.42.0`, the repo's `v1.42.0` is an ECR re-tag.
 
 Revision 2 addresses every round-1 finding; dispositions map: legacy hardened and kept (F1 func, F1 sec, F5 func), migration avoided by keeping the legacy id (F1 func, F2 sec), `bind` arm (F2 func, F5 sec), events old/new + grants + trigger (F3 func, F8 sec, T8), wire test + committed CI probe (F4 func, F6 sec, T1, T2), one parser (F6 func, F11 sec, T12), consumer table (F7 func), audit ids (F8 func, F10 sec), Google in the count with derived strict (F9 func, F3 sec), clientId uniqueness + immutable id (F4 sec — fingerprint pinning not adopted: unique clientId across entries plus immutable id documented; a re-pointed id is an operator config change, recorded as residual), entry points and assertions (T3–T14), scope-outs SC1–SC6 (F12, F13 sec, F13 func, SC3 squatting opt-out).
+
+## Round 2 (plan revision 2)
+
+### Security
+R2-1 Major (members evidence only on `bind`; bucket text points to the squatter), R2-2 Minor (id re-point transfer understated), R2-3 Minor (`signInProvider` names one customer to another in a tenant-readable row), R2-4 Minor [Adjacent] (derived strict locks out Google + Jackson on upgrade), R2-5 Minor (Google predicate), R2-6 Minor (tested versions undocumented).
+
+### Functionality
+N1 Major (M10 conclusion ignores `AUTH_REDIRECT_PROXY_URL`), N2 Major (derived strict lockout, no runbook — converges with R2-4, T-N13), N3 Major (`add`/`add --from` create NULL rows strict refuses), N4 Major (`bucketOf`, `printGroup`, audit-id carriage missing from C4), N5–N8 Minor (CAS on provider; C5 disagreement policy; `off` with ≥2 silently ignored; CLI without app env).
+
+### Testing
+N1 Major (path filter), N2 Major (one digest, two deployed versions), N3 Major (probe environment/deps), N4 Major (status-only negative asserts), N5 Major (wire test must use production providers + leftover PKCE cookie), N6 Major (mode computed once vs grid), N7 Major (env matrix gaps), N8 Major (`bind` cells), N9 Major (parity must be behavioural over three live CHECKs), N10 Major (CLI with/without app env), N11–N12 Minor, N13 Major [Adjacent] (upgrade lockout), T18 Minor (manual-test file — created in Phase 2).
+
+### Revision 3
+Upgrade lockout (R2-4, N2, T-N13, N7): boot refused with ≥2 claim providers unless `AUTH_CLAIM_BINDING=strict` is set explicitly; `off` with ≥2 refused; `bind --from-members` and an upgrade runbook. Squat remediation (R2-1): evidence check on every provider-setting writer, created-by-sign-in shown, zero-member "no evidence", bucket text names re-point. N3: `--provider` required in strict, `--unbound` explicit otherwise. N4: consumer additions. R2-3: `signInProviderRef` hash in the tenant-readable row. R2-2, R2-5, R2-6, N1, N5, N6, N8: stated in C1/C2/C3/C5/C6. Testing N1–N10, N11, N12: one line each in the strategy; cell-level detail left to Phase 2 (plan granularity is not where these converge).
