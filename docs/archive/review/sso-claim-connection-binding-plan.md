@@ -307,3 +307,28 @@ updated with M1–M11.
 | C4 | binding adjudicator, reasons, buckets | locked |
 | C5 | provider through the sign-in hand-off | locked |
 | C6 | docs and issue update | locked |
+
+## Implementation Checklist
+
+Batches (B1 ∥ B4 first; then B2, B3, B5; each reviewed, verified and committed before the next):
+- **B1 — C1, C2**: `src/lib/auth/jackson-providers.ts` (parser, `isJacksonProviderId`, Google
+  registration predicate, mode derivation, boot check, provider-id pattern constant),
+  `src/auth.config.ts`, `src/lib/env-schema.ts` (+ tests in all three env trees),
+  `src/app/[locale]/auth/signin/page.tsx`, `src/app/api/user/auth-provider/route.ts`,
+  `src/lib/audit/auth-failure-mapping.ts`, `scripts/env-descriptions.ts`, `.env.example`
+  (generator), `scripts/env-allowlist.ts` if it lists auth vars; wire test through `@auth/core`.
+- **B2 — C3 (schema), C4, C5**: migration (columns, CHECKs, grants, deregister trigger,
+  operation CHECK), `prisma/schema.prisma`, `scripts/checks/app-role-denied-privileges.json`,
+  `db-grants-manifest.json`, `bootstrap-rds-roles.mjs`; `tenant-management.ts` adjudicator and
+  arms; `tenant-claim-event.ts`; `src/auth.ts`; `auth-adapter.ts`; `tenant-claim-storage`;
+  `src/app/api/auth/[...nextauth]/route.ts`; reasons, buckets, audit metadata, pepper module move
+  (golden vectors first); real-DB integration grid.
+- **B3 — C3 (CLI)**: `scripts/tenant-domain.ts` (`add --provider/--unbound`, re-point, unrevoke,
+  `bind`, `--from-members --out`, `--apply`, `list`/`--unbound`, `history`, `unmapped`),
+  `scripts/lib/tenant-domain-flags.ts`, `scripts/lib/tenant-domain-buckets.ts`,
+  `check-tenant-claim-event-coverage.mjs` + self-test; CLI integration tests.
+- **B4 — C1 probe**: `scripts/probes/jackson-connection-binding.mjs`, `ci-integration.yml`
+  (matrix, path filter), drift test.
+- **B5 — C6**: README (en/ja), `docs/setup/*`, `docs/operations/alerts.md`,
+  `docs/security/audit-log-schema.md`, `infra/terraform/ecs.tf` secrets, manual-test file, `#742`
+  comment.
