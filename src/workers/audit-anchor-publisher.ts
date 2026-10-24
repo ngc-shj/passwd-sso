@@ -68,23 +68,6 @@ export const DEFAULT_TX_TIMEOUT_MS = 90 * MS_PER_SECOND;
 /** The dead-letter reason for an emit whose outbox write failed. */
 export const PUBLISHER_AUDIT_DEAD_LETTER_REASON = "anchor_publisher_emit_failed";
 
-/**
- * Every `_logType` the publisher emits for a cadence run. The healthy line is
- * what the absence alarm counts: one per healthy boundary, and nothing else
- * may emit it.
- */
-export const PUBLISHER_LOG_TYPE = {
-  CADENCE: "audit-anchor-publisher.cadence",
-  CADENCE_HEALTHY: "audit-anchor-publisher.cadence_healthy",
-  CADENCE_FAILED: "audit-anchor-publisher.cadence_failed",
-  UPLOAD_FAILED: "audit-anchor-publisher.upload_failed",
-  UPLOAD_CAP_REACHED: "audit-anchor-publisher.upload_cap_reached",
-  COMMIT_FAILED_AFTER_UPLOAD: "audit-anchor-publisher.commit_failed_after_upload",
-  LOCK_HELD: "audit-anchor-publisher.lock_held",
-  MISSING_PRIOR_CADENCE: "audit-anchor-publisher.missing_prior_cadence",
-  PAUSE_PERSIST_FAILED: "audit-anchor-publisher.pause_persist_failed",
-} as const;
-
 // --- Public types ---
 
 /** `null` only where the run failed before it could read the tenants. */
@@ -405,10 +388,12 @@ export class AuditAnchorPublisher {
       {
         ...outcome,
         boundary: boundary.toISOString(),
-        _logType: PUBLISHER_LOG_TYPE.CADENCE,
+        _logType: "audit-anchor-publisher.cadence",
       },
-      PUBLISHER_LOG_TYPE.CADENCE,
+      "audit-anchor-publisher.cadence",
     );
+    // The healthy line is what the absence alarm counts: one per healthy
+    // boundary, and nothing else may emit it.
     const healthy =
       outcome.kind === "published" ||
       (outcome.kind === "skipped_no_tenants" && !outcome.everChainEnabled);
@@ -418,9 +403,9 @@ export class AuditAnchorPublisher {
           outcome: outcome.kind,
           boundary: boundary.toISOString(),
           chainEnabledTenantCount: outcome.chainEnabledTenantCount,
-          _logType: PUBLISHER_LOG_TYPE.CADENCE_HEALTHY,
+          _logType: "audit-anchor-publisher.cadence_healthy",
         },
-        PUBLISHER_LOG_TYPE.CADENCE_HEALTHY,
+        "audit-anchor-publisher.cadence_healthy",
       );
     }
     return outcome;
@@ -463,9 +448,9 @@ export class AuditAnchorPublisher {
         {
           boundary: boundaryIso,
           attempts: gate.attempts,
-          _logType: PUBLISHER_LOG_TYPE.UPLOAD_CAP_REACHED,
+          _logType: "audit-anchor-publisher.upload_cap_reached",
         },
-        PUBLISHER_LOG_TYPE.UPLOAD_CAP_REACHED,
+        "audit-anchor-publisher.upload_cap_reached",
       );
       // One row per boundary: only the first run past the cap writes it.
       if (gate.attempts === AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP + 1) {
@@ -534,9 +519,9 @@ export class AuditAnchorPublisher {
               {
                 prevCadenceBoundary: prevBoundary.toISOString(),
                 maxPublished,
-                _logType: PUBLISHER_LOG_TYPE.MISSING_PRIOR_CADENCE,
+                _logType: "audit-anchor-publisher.missing_prior_cadence",
               },
-              PUBLISHER_LOG_TYPE.MISSING_PRIOR_CADENCE,
+              "audit-anchor-publisher.missing_prior_cadence",
             );
             pendingEmits.push({
               action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
@@ -609,9 +594,9 @@ export class AuditAnchorPublisher {
                 {
                   destination: dest.name,
                   error: errorLogFields(uploadErr),
-                  _logType: PUBLISHER_LOG_TYPE.UPLOAD_FAILED,
+                  _logType: "audit-anchor-publisher.upload_failed",
                 },
-                PUBLISHER_LOG_TYPE.UPLOAD_FAILED,
+                "audit-anchor-publisher.upload_failed",
               );
               // Token, not narrative: this value is persisted to
               // audit_logs.metadata.failureReason, which the tenant reads via
@@ -698,9 +683,9 @@ export class AuditAnchorPublisher {
             boundary: boundaryIso,
             artifactKey,
             error: errorLogFields(err),
-            _logType: PUBLISHER_LOG_TYPE.COMMIT_FAILED_AFTER_UPLOAD,
+            _logType: "audit-anchor-publisher.commit_failed_after_upload",
           },
-          PUBLISHER_LOG_TYPE.COMMIT_FAILED_AFTER_UPLOAD,
+          "audit-anchor-publisher.commit_failed_after_upload",
         );
         return this.fail(boundary, { reason, stage: "after_upload", chainEnabledTenantCount, artifactKey });
       }
@@ -720,8 +705,8 @@ export class AuditAnchorPublisher {
 
   private lockHeld(boundary: Date, chainEnabledTenantCount: number | null): CadenceOutcome {
     getLogger().info(
-      { boundary: boundary.toISOString(), _logType: PUBLISHER_LOG_TYPE.LOCK_HELD },
-      PUBLISHER_LOG_TYPE.LOCK_HELD,
+      { boundary: boundary.toISOString(), _logType: "audit-anchor-publisher.lock_held" },
+      "audit-anchor-publisher.lock_held",
     );
     return { kind: "lock_held", reason: "LOCK_HELD_BY_OTHER_INSTANCE", chainEnabledTenantCount };
   }
@@ -731,8 +716,8 @@ export class AuditAnchorPublisher {
     failure: { reason: string; stage: FailureStage; chainEnabledTenantCount: number | null; artifactKey: string | null },
   ): Promise<CadenceOutcome> {
     getLogger().error(
-      { reason: failure.reason, stage: failure.stage, _logType: PUBLISHER_LOG_TYPE.CADENCE_FAILED },
-      PUBLISHER_LOG_TYPE.CADENCE_FAILED,
+      { reason: failure.reason, stage: failure.stage, _logType: "audit-anchor-publisher.cadence_failed" },
+      "audit-anchor-publisher.cadence_failed",
     );
     await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED, {
       failureReason: failure.reason,
@@ -787,9 +772,9 @@ export class AuditAnchorPublisher {
       getLogger().error(
         {
           error: errorLogFields(pauseErr),
-          _logType: PUBLISHER_LOG_TYPE.PAUSE_PERSIST_FAILED,
+          _logType: "audit-anchor-publisher.pause_persist_failed",
         },
-        PUBLISHER_LOG_TYPE.PAUSE_PERSIST_FAILED,
+        "audit-anchor-publisher.pause_persist_failed",
       );
     }
   }

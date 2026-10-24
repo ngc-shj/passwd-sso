@@ -18,12 +18,6 @@ export const ANCHOR_RETRY_INTERVAL_MS = 15 * MS_PER_MINUTE;
 /** No same-boundary retry is armed closer than this to the next boundary. */
 export const ANCHOR_RETRY_STOP_BEFORE_NEXT_MS = 30 * MS_PER_MINUTE;
 
-export const SCHEDULER_LOG_TYPE = {
-  CADENCE_ERROR: "audit-anchor-publisher.cadence_error",
-  RETRY_SCHEDULED: "audit-anchor-publisher.retry_scheduled",
-  NEXT_SCHEDULED: "audit-anchor-publisher.next_scheduled",
-} as const;
-
 export type TimerHandle = unknown;
 
 export type AnchorSchedulerDeps = {
@@ -71,9 +65,9 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
         {
           boundary: boundary.toISOString(),
           error: errorLogFields(err),
-          _logType: SCHEDULER_LOG_TYPE.CADENCE_ERROR,
+          _logType: "audit-anchor-publisher.cadence_error",
         },
-        SCHEDULER_LOG_TYPE.CADENCE_ERROR,
+        "audit-anchor-publisher.cadence_error",
       );
       return null;
     }
@@ -101,9 +95,9 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
         {
           boundary: boundary.toISOString(),
           retryAt: new Date(retryAt).toISOString(),
-          _logType: SCHEDULER_LOG_TYPE.RETRY_SCHEDULED,
+          _logType: "audit-anchor-publisher.retry_scheduled",
         },
-        SCHEDULER_LOG_TYPE.RETRY_SCHEDULED,
+        "audit-anchor-publisher.retry_scheduled",
       );
       arm(retryAt, boundary);
       return;
@@ -115,8 +109,8 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
       currentCadenceBoundary(new Date(now()), deps.cadenceMs, deps.publishOffsetMs).getTime() + deps.cadenceMs;
     const next = new Date(Math.max(nextOfBoundary, fromWallClock));
     log.info(
-      { boundary: next.toISOString(), _logType: SCHEDULER_LOG_TYPE.NEXT_SCHEDULED },
-      SCHEDULER_LOG_TYPE.NEXT_SCHEDULED,
+      { boundary: next.toISOString(), _logType: "audit-anchor-publisher.next_scheduled" },
+      "audit-anchor-publisher.next_scheduled",
     );
     arm(next.getTime(), next);
   }
