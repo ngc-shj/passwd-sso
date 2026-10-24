@@ -419,3 +419,46 @@ within the same day — is SC5's), `CLAUDE.md` (`worker:*`). The verify worker's
 | C4 | bundles, smoke, in-image boot | pending |
 | C5 | AWS wiring (tasks, roles, app secrets, alarms, deploy, CI) | pending |
 | C6 | docs | pending |
+
+## Implementation Checklist
+
+Batches (sequential except 1a ∥ 1b; each batch reviewed and committed before the next starts):
+
+- **1a — publisher core (C1, C2, C3 key builder, Zod prefix rule)**:
+  `src/workers/audit-anchor-publisher.ts` (explicit boundary, attempt-count tx, lock_timeout +
+  blocking lock + `pgErrorCode`, marker, pause filter removed, prisma-free audit helper,
+  `buildManifestArtifactKey` exported), new scheduler module under `src/workers/`,
+  `scripts/audit-anchor-publisher.ts` (scheduler, env, `destinations ready` marker),
+  `src/lib/env-schema.ts` (publisher requirements moved, boolean parse, prefix rule),
+  `src/lib/key-provider/env-provider.ts` + `base-cloud-provider` `validateKeys`,
+  `boot-public-contract.d.txt`, `src/lib/constants/audit/audit.ts` (`PAUSE_CAP_FACTOR` removed),
+  `src/workers/audit-outbox-worker.ts` comment; tests in every tree that references the changed
+  symbols: `src/workers/audit-anchor-publisher.test.ts`,
+  `src/__tests__/db-integration/audit-anchor-{publisher,fail-closed}.integration.test.ts`,
+  `anchor-publisher-key-load.integration.test.ts`, `src/__tests__/env.test.ts`,
+  `src/lib/env.test.ts`, `src/lib/env-schema.test.ts`, key-provider tests.
+  Reuse: `BYPASS_GRANT.AUDIT_WRITE_DIRECT_OUTBOX`, `buildOutboxPayload`
+  (`src/lib/audit/audit-payload.ts`), `auditLogger`/`deadLetterLogger`
+  (`src/lib/audit/audit-logger.ts`), `pgErrorCode` (`src/lib/prisma/prisma-error.ts`),
+  `errorLogFields`, `MS_PER_*`, `SYSTEM_TENANT_ID`/`SYSTEM_ACTOR_ID`, db-integration `helpers.ts`.
+- **1b — S3 destination (C3 code)**: `src/lib/audit/anchor-destinations/s3-destination.ts`
+  (static import, client options, exported key join), its unit test, the S3 integration test
+  (MinIO, Object Lock probe), `package.json`/lock (pinned `@aws-sdk/client-s3`),
+  `src/lib/blob-store/runtime-module.ts`, `ci-integration.yml` MinIO step, license allowlist,
+  `check-crypto-auth-deps-classified.mjs`, `npm audit --omit=dev`.
+- **3 — AWS wiring (C5)**: `infra/terraform/*.tf`, `modules/anchor-prefix` + tests + vector file,
+  `terraform.tfvars.example`, `scripts/deploy.sh`, CI terraform job + count check, static
+  Terraform tests, Zod vector test, metric-filter tests, `deploy-rollback.test.mjs`.
+- **2 — bundles and smoke (C4)**: `Dockerfile`, `check-worker-bundle-smoke.sh` + self-test,
+  `ecs.tf` env parser test, verify worker `--validate-env-only` + interruptible sleep,
+  `container-scan` docker-runner mode, `package.json` `worker:audit-anchor-publisher`,
+  esbuild metafile check (C1).
+- **4 — docs (C6)** and `worker-policy-manifest.json` prose, manual-test file.
+
+CI gate parity (`extract-ci-checks.sh` vs `scripts/pre-pr.sh`): CI-only gates are
+`npm run licenses:check{,:cli,:ext}:strict`, `node scripts/checks/check-npm-audit.mjs` and
+`bash scripts/check-state-mutation-centralization.sh`; the new terraform job (`fmt -check`,
+`validate`, module `test -json` + count check) is CI-only too. Disposition: each is run by hand
+before push and its exit status recorded in the deviation log, since this PR adds a dependency
+(licenses, audit) and Terraform. Multi-line `run:` blocks in `ci.yml`/`ci-integration.yml` are
+read by hand for the jobs this PR touches.
