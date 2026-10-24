@@ -877,7 +877,19 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ] && \
     printf "${BOLD}▸ Integration tests${RESET}\n"
     printf "  (skipped — PREPR_SKIP_INTEGRATION=1; CI ci-integration.yml is authoritative)\n\n"
   elif node -e 'const{Pool}=require("pg");const p=new Pool({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:3000,statement_timeout:3000});p.query("select 1").then(()=>process.exit(0)).catch(()=>process.exit(1)).finally(()=>p.end())' 2>/dev/null; then
-    run_step "Integration tests"  npm run test:integration
+    # The audit-anchor S3 suites fail, never skip, without MinIO; refuse up
+    # front with how to start it instead of failing those suites later.
+    anchor_s3_endpoint="${ANCHOR_TEST_S3_ENDPOINT:-http://127.0.0.1:9000}"
+    if curl -fsS --max-time 3 -o /dev/null "${anchor_s3_endpoint}/minio/health/ready" 2>/dev/null; then
+      export ANCHOR_TEST_S3_ENDPOINT="$anchor_s3_endpoint"
+      run_step "Integration tests"  npm run test:integration
+    else
+      printf "${BOLD}▸ Integration tests${RESET}\n"
+      printf "${RED}ERROR: MinIO is not ready at %s (the audit-anchor S3 suites need it).${RESET}\n" "$anchor_s3_endpoint" >&2
+      printf "  Start it with \`docker compose up -d minio\`, or set ANCHOR_TEST_S3_ENDPOINT to a ready MinIO.\n\n" >&2
+      failed=$((failed + 1))
+      failures+=("Integration tests (MinIO not ready)|")
+    fi
   else
     printf "${BOLD}▸ Integration tests${RESET}\n"
     printf "  (skipped — no Postgres reachable within 3s; start docker compose or set DATABASE_URL)\n\n"

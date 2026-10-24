@@ -54,6 +54,20 @@ output "attachments_bucket_name" {
   value = var.enable_s3_attachments ? aws_s3_bucket.attachments[0].bucket : null
 }
 
+output "audit_anchors_bucket_name" {
+  value = var.enable_s3_audit_anchors ? aws_s3_bucket.audit_anchors[0].bucket : null
+}
+
+output "audit_anchor_s3_prefix" {
+  value       = local.audit_anchor_prefix
+  description = "Validated key prefix the publisher writes manifests under (operator writes use it too)"
+}
+
+output "audit_anchor_publisher_task_role_arn" {
+  value       = aws_iam_role.ecs_audit_anchor_publisher_task.arn
+  description = "The only principal the anchors bucket policy lets write a manifest"
+}
+
 output "cloudfront_domain_name" {
   value = var.enable_cloudfront ? aws_cloudfront_distribution.attachments[0].domain_name : null
 }
@@ -106,6 +120,14 @@ output "ecs_retention_gc_worker_service_name" {
   value = aws_ecs_service.retention_gc_worker.name
 }
 
+output "ecs_audit_anchor_publisher_service_name" {
+  value = aws_ecs_service.audit_anchor_publisher.name
+}
+
+output "ecs_audit_chain_verify_worker_service_name" {
+  value = aws_ecs_service.audit_chain_verify_worker.name
+}
+
 # Task-definition ARNs + network config — consumed by scripts/deploy.sh to run
 # the migration and advance each service to the new revision post-migration.
 output "app_task_definition_arn" {
@@ -126,6 +148,14 @@ output "audit_outbox_worker_task_definition_arn" {
 
 output "retention_gc_worker_task_definition_arn" {
   value = aws_ecs_task_definition.retention_gc_worker.arn
+}
+
+output "audit_anchor_publisher_task_definition_arn" {
+  value = aws_ecs_task_definition.audit_anchor_publisher.arn
+}
+
+output "audit_chain_verify_worker_task_definition_arn" {
+  value = aws_ecs_task_definition.audit_chain_verify_worker.arn
 }
 
 output "private_subnet_ids" {

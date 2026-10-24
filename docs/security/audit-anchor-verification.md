@@ -34,7 +34,7 @@ curl -fsSL "$ARCHIVE_URL/<date>.kid-<kid>.jws" -o manifest.jws
 
 # 2. Extract the kid from the JWS protected header
 KID=$(cut -d. -f1 manifest.jws \
-  | awk '{ pad=length($0)%4; if(pad) for(i=pad;i<4;i++) printf "="; print }' \
+  | awk '{ pad=length($0)%4; if(pad) for(i=pad;i<4;i++) $0=$0"="; print }' \
   | tr '_-' '/+' \
   | base64 -d \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['kid'])")
@@ -54,16 +54,20 @@ openssl pkey -inform DER -pubin -in anchor.der -out anchor.pem
 # 5. Reassemble signing input (header.payload) and extract signature
 HEADER_PAYLOAD="$(cut -d. -f1,2 manifest.jws)"
 SIG_B64=$(cut -d. -f3 manifest.jws \
-  | awk '{ pad=length($0)%4; if(pad) for(i=pad;i<4;i++) printf "="; print }' \
+  | awk '{ pad=length($0)%4; if(pad) for(i=pad;i<4;i++) $0=$0"="; print }' \
   | tr '_-' '/+')
 printf '%s' "$SIG_B64" | base64 -d > sig.bin
 
-# 6. Verify with openssl (or use: passwd-sso audit-verify --manifest manifest.jws)
-printf '%s' "$HEADER_PAYLOAD" \
-  | openssl pkeyutl -verify -pubin -inkey anchor.pem -sigfile sig.bin \
-      -pkeyopt digest:  # Ed25519 uses no pre-hash; leave blank
+# 6. Verify with openssl (or use: passwd-sso audit-verify --manifest manifest.jws).
+#    Ed25519 signs the message itself, not a digest: -rawin, with the input as a file
+#    (openssl needs its size for this one-shot operation).
+printf '%s' "$HEADER_PAYLOAD" > signing-input.bin
+openssl pkeyutl -verify -pubin -inkey anchor.pem -rawin -in signing-input.bin -sigfile sig.bin
 # Expected: "Signature Verified Successfully"
 ```
+
+Base64url padding is appended (`$0=$0"="`), never prepended: a leading `=` makes `base64 -d`
+refuse the input.
 
 For most use cases, the `passwd-sso audit-verify` CLI (below) is simpler and handles
 base64url padding, key fetching, and chain regression checks automatically.
@@ -166,18 +170,84 @@ first contract obligation, whichever is earliest.
 
 ## Pause-window protection boundary
 
-The audit anchor publisher runs daily. Events committed to `audit_logs` with
-`chain_seq ≤ last_published_chain_seq` are protected by the most-recent published manifest.
-Events with `chain_seq > last_published_chain_seq` (including rows pending in `audit_outbox`
-during a publisher pause) are NOT yet covered by any manifest.
+The audit anchor publisher runs once a day, at the cadence boundary (00:05 UTC), and the
+manifest's `anchoredAt` is that boundary. Events committed to `audit_logs` with
+`chain_seq ≤` your tenant's `chainSeq` in the most recent published manifest are protected
+by it. Later events are NOT yet covered by any manifest.
 
-The publisher is fail-closed: if the signing key is unavailable, it blocks chain advancement
-for affected tenants and pauses for up to 3× the cadence (72 hours). After that window, on-call
-is paged. During a pause, new events continue to be recorded in `audit_logs` but their
-chain-seq values are not yet committed to any manifest, widening the unprotected window.
+When an upload fails, the publisher pauses chain advancement for the manifest's tenants
+until the **next cadence boundary** at most — no longer the 72 hours (3× cadence) this
+section used to state. During the pause new events wait in `audit_outbox` and are chained
+into `audit_logs` once it ends, so a pause never lets the chain run ahead of a manifest. The
+pause no longer holds publishing: the publisher retries the same boundary every 15 minutes,
+at most three times per process and not later than 30 minutes before the next boundary (at
+most three attempts per boundary reach the upload, across restarts), and a
+successful publish clears the pause. When every attempt fails, the pause still ends at the
+next boundary, the chain advances, and those events are covered only by the next manifest
+that publishes.
+
+A publisher that cannot start — a missing signing key stops it at boot — writes no pause at
+all: the chain keeps advancing and nothing is anchored until it is restored. Either way the
+gap is visible to you: consecutive manifests whose `anchoredAt` values are more than one day
+apart, and to the operator as `MISSING_PRIOR_CADENCE_PUBLICATION` on the next publish.
 
 If you require assurance of recently-created events, check `anchoredAt` in the manifest to
 confirm the snapshot covers your time window.
+
+---
+
+## Object versions
+
+The anchors bucket is versioned and COMPLIANCE-locked, and one day's key can hold more than
+one version: a publish whose upload succeeded but whose database commit did not is retried,
+and the retry PUTs the same key again (the publisher sends no conditional write). Verify
+against every version, not only the latest:
+
+```bash
+# Operator: every version and delete marker under the prefix
+aws s3api list-object-versions --bucket <bucket> --prefix "<prefix>/" --region <region> \
+  --query '{Versions: Versions[].[Key, VersionId, LastModified, IsLatest], DeleteMarkers: DeleteMarkers[].[Key, VersionId, LastModified]}'
+aws s3api get-object --bucket <bucket> --key "<prefix>/<date>.kid-<kid>.jws" \
+  --version-id <version-id> --region <region> manifest.jws
+```
+
+A manifest's `previousManifest.sha256` is the SHA-256 of the previous manifest's canonical
+JSON — the JWS payload, base64url-decoded — not of the object's bytes or its ETag; this is
+what `passwd-sso audit-verify --prior-manifest` compares. By hand:
+
+```bash
+cut -d. -f2 manifest.jws \
+  | tr '_-' '/+' \
+  | awk '{ pad=length($0)%4; if(pad) for(i=pad;i<4;i++) $0=$0"="; print }' \
+  | base64 -d | sha256sum
+```
+
+Its `previousManifest.uri` is `s3-object-lock://<date>.kid-<kid>.jws`: the key without the
+bucket's prefix.
+
+The rules, per key:
+
+- **The authoritative version** of a key is the one whose SHA-256 the next published
+  manifest's `previousManifest.sha256` names. Only for the newest key, which no manifest
+  names yet, is it the latest version — and it is provisional until the next manifest names it.
+- **Other versions created before the key's next boundary** (its date + 1 day, 00:05 UTC) are
+  retries: expected, never authoritative.
+- **A version created after the key's next boundary** is a tamper signal. Report it; never
+  prefer it. Every publisher run for a key starts before that boundary, and its two
+  transactions are bounded at 90 seconds each, so allow those few minutes (plus clock skew) and
+  no more.
+- **A key that no manifest references** is expected only when the next publish reported
+  `MISSING_PRIOR_CADENCE_PUBLICATION` (an `AUDIT_ANCHOR_PUBLISH_FAILED` row your operator can
+  show you): the upload was stored but never committed. Otherwise report it.
+- **A delete marker on an anchor key** is a tamper signal. The bucket policy refuses deletes to
+  everyone, so one means the policy was replaced.
+
+**Residual.** These rules cannot tell a retry from a version written by a compromised
+publisher — or by anyone holding its task role — before the day's boundary passes, and the
+next manifest chains to whichever sha256 the database pointer holds. Preventing a second
+version of a past key, and making the published objects rather than the database the source of
+truth, is the protocol-hardening follow-up (SC5 in
+`docs/archive/review/aws-anchor-publisher-verify-worker-plan.md`).
 
 ---
 

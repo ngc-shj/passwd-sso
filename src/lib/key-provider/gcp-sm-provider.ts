@@ -13,8 +13,6 @@
  *   GCP_SM_SECRET_VERIFIER_PEPPER       — secret name for verifier pepper
  *   GCP_SM_SECRET_DIRECTORY_SYNC        — secret name for directory sync key
  *   GCP_SM_SECRET_WEBAUTHN_PRF          — secret name for WebAuthn PRF secret
- *   GCP_SM_SECRET_AUDIT_ANCHOR_SIGNING      — secret name for audit anchor signing key
- *   GCP_SM_SECRET_AUDIT_ANCHOR_TAG_SECRET   — secret name for audit anchor tag secret
  */
 
 import type { KeyName } from "./types";
@@ -73,8 +71,6 @@ export class GcpSmKeyProvider extends BaseCloudKeyProvider {
     "verifier-pepper": "GCP_SM_SECRET_VERIFIER_PEPPER",
     "directory-sync": "GCP_SM_SECRET_DIRECTORY_SYNC",
     "webauthn-prf": "GCP_SM_SECRET_WEBAUTHN_PRF",
-    "audit-anchor-signing": "GCP_SM_SECRET_AUDIT_ANCHOR_SIGNING",
-    "audit-anchor-tag-secret": "GCP_SM_SECRET_AUDIT_ANCHOR_TAG_SECRET",
   };
 
   protected readonly defaultSecretNames: Record<KeyName, string> = {
@@ -82,8 +78,6 @@ export class GcpSmKeyProvider extends BaseCloudKeyProvider {
     "verifier-pepper": "verifier-pepper-key",
     "directory-sync": "directory-sync-key",
     "webauthn-prf": "webauthn-prf-secret",
-    "audit-anchor-signing": "audit-anchor-signing-key",
-    "audit-anchor-tag-secret": "audit-anchor-tag-secret",
   };
 
   constructor(config: GcpSmConfig) {

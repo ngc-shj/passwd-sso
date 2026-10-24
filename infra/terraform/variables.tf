@@ -319,7 +319,44 @@ variable "smtp_auth_enabled" {
 variable "enable_s3_audit_anchors" {
   type        = bool
   default     = true
-  description = "Create the S3 bucket that receives audit-chain anchors. Production requires AUDIT_ANCHOR_PUBLISHER_ENABLED=true and at least one destination; turn this off only if you configure the GitHub destination instead."
+  description = "Create the S3 bucket that receives audit-chain anchors. Must be true: production requires AUDIT_ANCHOR_PUBLISHER_ENABLED=true and a destination, and the S3 bucket is the only destination this configuration wires."
+
+  validation {
+    # The app refuses to boot in production without an anchor destination, and
+    # the GitHub release destination has no wiring here — turning this off
+    # leaves a stack whose app tasks crash-loop and whose publisher has nowhere
+    # to write.
+    condition     = var.enable_s3_audit_anchors
+    error_message = "enable_s3_audit_anchors must be true: the anchors bucket is the only audit-anchor destination this configuration wires."
+  }
+}
+
+variable "audit_anchor_s3_prefix" {
+  type        = string
+  default     = "audit-anchors"
+  description = "Key prefix the audit-anchor publisher writes under in the anchors bucket (no leading or trailing '/'). The bucket policy is built on it: manifests at <prefix>/YYYY-MM-DD.kid-<kid>.jws, operator writes at <prefix>/key-rotation-* and <prefix>/public-keys/*. Validated by modules/anchor-prefix: '/'-separated segments of [A-Za-z0-9._-], none '.' or '..'. The default is the rotation runbook's existing layout."
+}
+
+variable "audit_anchor_break_glass_role_arn" {
+  type        = string
+  default     = ""
+  description = "IAM role ARN of the break-glass operator allowed to write <prefix>/key-rotation-* and <prefix>/public-keys/* in the anchors bucket (rotation runbook Steps 4-5). Empty = nobody may write those paths."
+
+  validation {
+    condition     = var.audit_anchor_break_glass_role_arn == "" || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$", var.audit_anchor_break_glass_role_arn))
+    error_message = "audit_anchor_break_glass_role_arn must be empty or an IAM role ARN (arn:aws:iam::<account-id>:role/<name>)."
+  }
+}
+
+variable "audit_anchor_object_lock_days" {
+  type        = number
+  default     = 2557
+  description = "Default COMPLIANCE retention (days) of the anchors bucket. 2557 days is above the publisher's 7 × 365-day retain-until (2555 days). The bucket policy refuses a retention more than 31 days past this, so raising it is also what raises that cap."
+
+  validation {
+    condition     = var.audit_anchor_object_lock_days >= 2557
+    error_message = "audit_anchor_object_lock_days must be at least 2557: the publisher locks every anchor for 7 years (AUDIT_ANCHOR_RETENTION_YEARS)."
+  }
 }
 
 variable "enable_s3_attachments" {

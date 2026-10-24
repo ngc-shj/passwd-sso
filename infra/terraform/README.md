@@ -113,8 +113,9 @@ MASTER_PW=$(aws secretsmanager get-secret-value --secret-id "$MASTER_ARN" \
 #   app-secrets.json: DATABASE_URL (passwd_app@$DB_HOST), MIGRATION_DATABASE_URL
 #   (master@$DB_HOST), REDIS_URL ($REDIS_HOST), OUTBOX_WORKER_DATABASE_URL,
 #   RETENTION_GC_DATABASE_URL, AUDIT_ANCHOR_PUBLISHER_DATABASE_URL (password from
-#   `openssl rand -hex 32`), plus the app secrets (AUTH_*, SHARE_MASTER_KEY,
-#   SESSION_TOKEN_HMAC_KEY, …).
+#   `openssl rand -hex 32`), the publisher's AUDIT_ANCHOR_SIGNING_KEY,
+#   AUDIT_ANCHOR_TAG_SECRET and DEPLOYMENT_ID (see "Audit anchor publisher"),
+#   plus the app secrets (AUTH_*, SHARE_MASTER_KEY, SESSION_TOKEN_HMAC_KEY, …).
 scripts/put-terraform-secrets.sh --name-prefix passwd-sso-prod \
   --app-file ./app-secrets.json --jackson-file ./jackson-secrets.json
 
@@ -418,14 +419,23 @@ userinfo of that URL — the secret is its only copy.
 | `REDIS_URL` | Redis connection string |
 | `OUTBOX_WORKER_DATABASE_URL` | Least-privilege DB URL for the audit-outbox-worker ECS service (`passwd_outbox_worker` role) |
 | `RETENTION_GC_DATABASE_URL` | Least-privilege DB URL for the retention-gc-worker ECS service (`passwd_retention_gc_worker` role) |
-| `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | Least-privilege DB URL for the audit-anchor publisher (`passwd_anchor_publisher` role). No ECS task consumes it yet — no task definition runs the publisher — but `bootstrap-rds-roles.mjs` gives the role `LOGIN` with this password, so the value is generated and held here. |
+| `VERIFIER_PEPPER_KEY` | Vault-data HMAC pepper (256-bit hex). **Required in production.** Mapped into the app ECS task. Generate with `npm run generate:key`. |
+| `SMTP_USER` | SMTP username for magic-link email. Read only when `smtp_host` is set and `smtp_auth_enabled = true`; an empty string means an unauthenticated relay (ECS refuses a missing key). |
+| `SMTP_PASS` | SMTP password, under the same conditions as `SMTP_USER`. |
+| `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | Least-privilege DB URL for the audit-anchor publisher ECS service (`passwd_anchor_publisher` role). `bootstrap-rds-roles.mjs` gives the role `LOGIN` with this password; the secret is its only copy. |
+| `AUDIT_ANCHOR_SIGNING_KEY` | Ed25519 seed the publisher signs manifests with (32-byte hex). Mapped into the publisher task only. Generate with `npm run generate:audit-anchor-signing-key`. |
+| `AUDIT_ANCHOR_TAG_SECRET` | HMAC secret for tenant tags in manifests (32-byte hex). Mapped into the publisher task only. Generate with `npm run generate:audit-anchor-tag-secret`. |
+| `DEPLOYMENT_ID` | UUID naming this deployment in every manifest; the publisher refuses to boot when it differs from the one stored on its first boot. Generate once per deployment; reuse a stored value only for a successor of the same deployment whose predecessor is gone — a clone or a restored copy gets a new one. Mapped into the publisher task only. |
 
-Both background workers run as dedicated ECS services (`*-audit-outbox-worker`,
-`*-retention-gc-worker`) on the app image (`node dist/<worker>.js`),
-`desired_count = 1`, no load balancer. ECS restarts a crashed task automatically.
-Liveness is alarmed via `RunningTaskCount < 1` (Container Insights) — see
-monitoring.tf. Without these workers, audit events stay PENDING and retention is
-never enforced, so the worker DB URLs above MUST be populated before apply.
+The four background workers run as dedicated ECS services
+(`*-audit-outbox-worker`, `*-retention-gc-worker`, `*-audit-anchor-publisher`,
+`*-audit-chain-verify-worker`) on the app image (`node dist/<worker>.js`),
+`desired_count = var.worker_desired_count` (the publisher's capped at 1), no load
+balancer. ECS restarts a crashed task automatically. Liveness is alarmed via
+`RunningTaskCount < 1` (Container Insights) for the first three and by heartbeat
+absence for the verify worker — see monitoring.tf. Without these workers, audit
+events stay PENDING, retention is never enforced and nothing is anchored, so the
+worker DB URLs and the publisher's keys above MUST be populated before apply.
 
 > **Rotating `SESSION_TOKEN_HMAC_KEY`.** The session-token DB digest and the
 > Redis session-cache key are both derived from this key, so changing it changes
@@ -445,6 +455,112 @@ never enforced, so the worker DB URLs above MUST be populated before apply.
 | `NEXTAUTH_URL` | Jackson public URL |
 | `EXTERNAL_URL` | Jackson external URL |
 | `NEXTAUTH_SECRET` | Jackson session encryption key |
+
+## Audit anchor publisher
+
+`*-audit-anchor-publisher` (`ecs.tf`) signs one manifest per daily cadence
+boundary (00:05 UTC) and writes it to the anchors bucket (`storage.tf`);
+`*-audit-chain-verify-worker` walks every tenant's audit chain hourly and logs a
+heartbeat. Both run on the app image.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `audit_anchor_s3_prefix` | `"audit-anchors"` | Key prefix the publisher writes under, and that every bucket-policy statement is built on. Validated by `modules/anchor-prefix` (rule below). The default is the rotation runbook's existing layout, so an existing environment's next plan needs no new value. |
+| `audit_anchor_break_glass_role_arn` | `""` | IAM role ARN (validated as `arn:aws…:iam::<12 digits>:role/<name>`) of the operator allowed to write the rotation runbook's Step 4–5 objects. Empty: nobody may write those paths (an unconditional Deny). Set it before running those steps. |
+| `audit_anchor_object_lock_days` | `2557` | Default COMPLIANCE retention of the bucket, validated `>= 2557`. The publisher sends its own retain-until (2555 days, 7 × 365) on every PUT; the bucket policy refuses a retention more than 31 days past this value, so raising it also raises that cap. |
+| `enable_s3_audit_anchors` | `true` | Validated `true`: production refuses to boot without an anchor destination, and the S3 bucket is the only one this configuration wires. |
+
+**Prefix rule.** One or more `/`-separated segments of `[A-Za-z0-9._-]`, none
+`.` or `..`: no `*` or `?` (which would widen every policy statement) and no
+leading, trailing or doubled `/` (which would make the documented keys differ
+from the ones the publisher builds). `a`, `a/b`, `a.b` and `.a` are accepted;
+`""`, `*`, `?`, `/a`, `a/`, `a//b`, `.`, `..`, `a/../b` and `a/./b` are refused.
+The rule exists once in Terraform, as the variable validation of the
+provider-less module `modules/anchor-prefix`; the root calls it unconditionally,
+and the bucket policy, the publisher's IAM policy and its task env all read the
+module's output. It is exercised without AWS credentials by `terraform test` in
+that module against `prefix-vectors.json`, the same vectors the publisher's Zod
+schema is tested with. The publisher itself accepts an unset or empty prefix
+(bucket root) for deployments outside this Terraform; here it is always
+non-empty, because the bucket policy needs it.
+
+**Who may write what** (`aws_s3_bucket_policy.audit_anchors`; every statement is a
+`Deny` with `Principal: "*"` and, where it has an exception, an `ArnNotEquals
+aws:PrincipalArn` condition):
+
+| Keys | Holds | Writer |
+|------|-------|--------|
+| `<prefix>/????-??-??.kid-*.jws` | daily manifests | the publisher's task role only |
+| `<prefix>/key-rotation-*` | rotation advisory (runbook Step 4) | the break-glass role only |
+| `<prefix>/public-keys/*` | public-key archive (runbook Step 5) | the break-glass role only |
+| anything else | — | nobody, the publisher included |
+
+On top of that: `s3:DeleteObject` and `s3:DeleteObjectVersion` are refused to
+everyone; so are `s3:ReplicateObject`, `s3:ReplicateDelete` and
+`s3:ReplicateTags` (a replica is written under those, not `s3:PutObject`, and
+this bucket is never a replication destination); `s3:PutObjectRetention` is refused to all but those two roles;
+`s3:PutLifecycleConfiguration` is refused on the bucket; a `PutObject` without
+`x-amz-object-lock-mode: COMPLIANCE` (header absent included), with a retention
+past the cap, or with SSE other than `AES256` is refused. The bucket has Object
+Lock (always, independent of `enable_s3_object_lock`), versioning and SSE-S3
+(never `s3_kms_key_arn`: a CMK scheduled for deletion would make locked evidence
+unreadable), and `prevent_destroy`. The policy holds only while nobody replaces
+it, and the account root always can: a change to the bucket's policy,
+lifecycle, Object Lock or versioning configuration fires the EventBridge rule
+`<name_prefix>-audit-anchor-bucket-config-change` (a Terraform apply that
+touches them is the expected false positive). An existing anchors bucket
+created without Object Lock needs an in-place step before the next plan — see
+`docs/operations/deployment.md` "Existing anchors bucket without Object Lock".
+
+**Services.**
+
+- Publisher: its own task role (`*-ecs-audit-anchor-publisher-task`, only
+  `s3:PutObject` and `s3:PutObjectRetention` on `<bucket>/<prefix>/*` — no read,
+  list or delete; assumable by this account's ECS tasks only, `aws:SourceAccount`,
+  and any `RunTask`/`StartTask` passing it as a task-role override fires the
+  EventBridge rule `<name_prefix>-audit-anchor-publisher-role-override`; IAM
+  changes to the role are not alarmed by this stack, see
+  `docs/operations/alerts.md`); env `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`, the bucket, the
+  prefix and `AWS_REGION`; secrets `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`,
+  `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` and `DEPLOYMENT_ID` (no
+  other task receives the last three). `desired_count = min(1,
+  worker_desired_count)`, `deployment_maximum_percent = 100`,
+  `deployment_minimum_healthy_percent = 0`: a deploy stops the old task (SIGTERM;
+  it stops scheduling and finishes an in-flight run within `stopTimeout = 120`)
+  before the new one starts, and the new task's boot run publishes the current
+  boundary only if it is unpublished. Log group
+  `/ecs/<name_prefix>/audit-anchor-publisher`.
+- Verify worker: no task role (it calls no AWS API); its only secret is the app
+  secret's `DATABASE_URL`, passed as `AUDIT_CHAIN_VERIFY_DATABASE_URL`. That is
+  the `passwd_app` role, which reads every table the app reads and keeps every
+  write the app has, though the worker reads only `tenants`,
+  `audit_chain_anchors` and `audit_logs` — a dedicated read-only role is a
+  follow-up (SC3). Log group `/ecs/<name_prefix>/audit-chain-verify-worker`.
+- Both log groups are in the RLS bypass-report metric filters.
+- The cluster sets ECS Exec session logging to `NONE` explicitly: the bootstrap's
+  operator shell handles role passwords, and a transcript would keep them. The
+  remaining audit of an exec session is CloudTrail's `ExecuteCommand`, alarmed by
+  the EventBridge rule `<name_prefix>-ecs-execute-command` — which, like the
+  bucket-configuration rule, receives events only from an account with a trail
+  logging management events. Terraform defines no trail; see
+  `docs/operations/deployment.md` "CloudTrail prerequisite".
+
+**`DEPLOYMENT_ID`.** Generate once per deployment (`node -e
+'console.log(crypto.randomUUID())'`) and add it to the app secret. Reuse a stored
+value only for a successor of the same deployment whose predecessor is gone; a
+clone or a restored copy generates a new one and follows the rotation runbook's
+"DEPLOYMENT_ID change recovery". See `docs/operations/deployment.md`
+"`DEPLOYMENT_ID`".
+
+**Outputs** used by the runbooks and `scripts/deploy.sh`:
+`audit_anchors_bucket_name`, `audit_anchor_s3_prefix`,
+`audit_anchor_publisher_task_role_arn`, `ecs_audit_anchor_publisher_service_name`,
+`ecs_audit_chain_verify_worker_service_name`,
+`audit_anchor_publisher_task_definition_arn` and
+`audit_chain_verify_worker_task_definition_arn`. `deploy.sh` advances and rolls
+back all six services.
+
+Alarms and what to do about each: `docs/operations/alerts.md`.
 
 ## Production Recommendations
 

@@ -9,9 +9,7 @@ export type KeyName =
   | "share-master"
   | "verifier-pepper"
   | "directory-sync"
-  | "webauthn-prf"
-  | "audit-anchor-signing"
-  | "audit-anchor-tag-secret";
+  | "webauthn-prf";
 
 export interface KeyProvider {
   /** Fetch a key by name. For versioned keys (share-master), pass version. */

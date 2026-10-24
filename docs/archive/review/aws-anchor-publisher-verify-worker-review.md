@@ -1,0 +1,252 @@
+# Plan Review: aws-anchor-publisher-verify-worker
+Date: 2026-10-24
+Review round: 1
+
+## Changes from Previous Round
+
+Initial review (fresh reviewers) of revision 1. The earlier combined plan's round-1 review is
+`aws-anchor-publisher-and-scram-verifier-review.md`.
+
+## Merged findings and disposition (applied in revision 2)
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F1 | Functionality | Critical | Fixed — `createMany` (no RETURNING), INSERT suffices |
+| T-1 | Testing | Critical | Fixed — MinIO service in CI, fail-loud, Object Lock bucket, paired refusal case |
+| F2 | Functionality | Major | Fixed — explicit boundary, wall-clock re-arm, awaited boot run, blocking lock |
+| F3 | Functionality | Major | Fixed — pause capped at the next boundary |
+| F4 / S7 | Functionality, Security | Major / Minor | Fixed — non-throwing helper on `auditLogger`/`deadLetterLogger`, `AUDIT_WRITE_DIRECT_OUTBOX`, own transaction, file named |
+| F5 | Functionality | Major | Fixed — `OptionalModuleName` keeps client-s3 for the blob store |
+| F6 | Functionality | Major | Fixed — explicit tx timeout, S3 timeouts below it, SIGTERM drain, `stopTimeout` |
+| F7 | Functionality | Major | Fixed — deploy-gap-sized down alarm, published-absence alarm, `_logType` on `cadence_error` |
+| S1 | Security | Major | Fixed — `If-None-Match: *`, bucket policy, 412 = alerted failure, verification doc |
+| S2 | Security | Major | Fixed — signing key/tag secret required only by the publisher; app task drops them |
+| S3 | Security | Major | Fixed — anchors bucket SSE-S3 |
+| T-2 | Testing | Major | Fixed — client-options seam; contract test rewritten |
+| T-3 | Testing | Major | Fixed — scheduler extracted with injected clock |
+| T-4, T-5, T-11 | Testing | Major / Minor | Fixed — positive markers, in-image boot in container-scan, `env -i` |
+| T-6 | Testing | Major | Fixed — filters on real emitted lines, pinned by a test |
+| T-7, T-A1 | Testing | Major / Minor | Fixed — snapshot/restore of global rows, far-future boundary, key-aware fake |
+| T-8 / F14 | Testing, Functionality | Major / Minor | Fixed — terraform CI job |
+| T-9 | Testing | Major | Fixed — stubbed terraform records asked output names |
+| T-10 | Testing | Major | Fixed — CI path filter |
+| T-12 | Testing | Major | Fixed — per-site emits, publisher TestRole, deny pair |
+| T-13, T-14, T-15, T-16 | Testing | Major | Fixed — publisher env test, SIGTERM test, measured timeouts, manual-test file |
+| S4, S5, S6/F13, S8, S9, S10, S11, F8, F9, F10, F11, F12, T-17..T-20, A1 (env coerce), S-A1 | — | Minor | Fixed in revision 2 |
+
+## Recurring Issue Check
+Per-expert statuses in the sub-agent outputs; summarised:
+- Functionality: R1/R9/R17/R18 F4; R3 F5; R14/R29 F1; R16/R42 F10; R33 F14; R38 F3; R41/R50 F7;
+  R49 F10, F2, F6; R55 F8.
+- Security: R1/R43/R54 S7; R29/R31 S6; R34 A1; R43 S2; R49 S1, S3; RS* N/A or OK.
+- Testing: R3/R19 T-7, T-12; R14 T-12; R16 T-5, T-11; R18/R33 T-10; R29 T-6; R32 T-4, T-5; R35
+  T-16; R41 T-1, T-2; R42 T-12, T-17, T-9; R47 T-17; R49 T-5; R50 T-8, T-1; R53 T-15; RT1 T-7,
+  T-2; RT4 T-7; RT5 T-2, T-12; RT6 T-3, T-13; RT7 T-1, T-4, T-6, T-9; RT8 T-13; RT10 T-12, T-13;
+  RT11 T-7, T-A1.
+
+---
+
+# Round 2
+Date: 2026-10-24
+
+Round-1 findings confirmed resolved except where continued below. New findings on revision 2,
+applied in revision 3:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-N1 / S-N1 | Functionality, Security | Critical / Major | Fixed — the anchor keys leave the app's boot-time key validation in both providers; test with the app task's env |
+| F-N2 | Functionality | Major | Fixed — two-phase publish: manifest stored as pending before the upload (outside any tx, bounded as a whole); 412/409 → GET, identical bytes = our own upload; the chain cannot fork |
+| F-N3 | Functionality | Major | Fixed — healthy-cadence absence alarm counts `published`, `skipped_no_tenants`, `skipped_already_published`; scenario corrected |
+| S-N2 | Security | Major | Fixed — CloudTrail trail a documented prerequisite, checked in the manual test |
+| T-N-1 | Testing | Major | Fixed — MinIO started by a digest-pinned `docker run` step |
+| T-N-2 | Testing | Major | Fixed — deny/allow asserted by bypass notices (report mode) |
+| T-N-3 | Testing | Major | Fixed — `beforeAll` refuses unless only the test's tenants are chain-enabled |
+| T-N-4 | Testing | Major | Fixed — container-scan runs the smoke in a docker-runner mode |
+| T-N-5 | Testing | Major | Fixed — overlap proved via `pg_locks`; `lock_held` live again via `lock_timeout` |
+| S-N5 | Security | Minor | Fixed — existing workers keep the shared role (retention-GC S3 deletes, outbox aws-sm); SC4 |
+| S-N3, S-N4, F-N4, F-N5, F-N6, T-N-6, T-N-7, T-N-8 | — | Minor | Fixed in revision 3 |
+
+Found while revising: phase B clears the pending record by `upsert` to an empty value — the
+publisher holds INSERT/SELECT/UPDATE on `system_settings` (manifest lines checked), no DELETE.
+
+## Recurring Issue Check (round-2 delta)
+Functionality: R3/R42 N1; R38/R56 N2; R41/R50 N3; R49 N4. Security: R3/R42 N1, N5; R41/R49 N2;
+R29 N3. Testing: R16/R41/R50 N-1; R14/R49 N-2; RT4 N-5; RT7/RT9 N-4; RT8/RT10 N-2; RT11 N-3, N-7.
+
+---
+
+# Round 3
+Date: 2026-10-24
+
+Round-2 findings resolved (F-N1..N6, S-N1..N5, T-N-1..N-8 except T-N-5, continued below). Round 3
+found the revision-3 two-phase design defective in ways that patches would compound, so C2 was
+redesigned (revision 4) instead of patched:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| T-R-1 | Testing | Critical | Resolved by redesign — a session-level advisory lock spans the whole run, so overlap is observable (`pg_locks`) and the red proofs can fail |
+| F-P1 | Functionality | Major | Resolved by redesign — no pending record; a forward walk adopts verified objects, so an unrecorded upload is settled before the next boundary chains |
+| F-P2 | Functionality | Major | Resolved by redesign — one lock for the whole run |
+| S-R3-1 | Security | Major | Resolved by redesign — no decision rests on a `system_settings` value alone; the pointer is trusted only after its object verifies |
+| T-R-2 | Testing | Major | Fixed — crash and conflict cases run on `S3Destination`/MinIO and the create-only filesystem destination |
+| T-R-3 | Testing | Major | Resolved by redesign — no pending reuse to distinguish |
+| T-R-4 | Testing | Major | Fixed — `lock_held` by an external session holding the lock; nested SQLSTATE via `pgErrorCode` red-proven |
+| F-P3 | Functionality | Minor | Fixed — 409 retried within the bound; adopted objects checked with `GetObjectRetention` |
+| F-P4 | Functionality | Minor | Resolved by redesign — no pending record, no in-band empty sentinel |
+| F-P5 | Functionality | Minor | Fixed — `already_published` counts as healthy only when decided from a verified object |
+| F-P6 | Functionality | Minor | Fixed — concrete budget under Fargate's 120 s `stopTimeout` |
+| S-R3-2 | Security | Minor | Fixed — SC4 reason corrected |
+| T-R-5 | Testing | Minor | Fixed — the crash case asserts B_{n+1}'s `previousManifest.sha256` |
+
+## Recurring Issue Check (round-3 delta)
+Functionality: R38/R56 P1; R5/R48 P2; R49 P3; R55 P4; R41/R50 P5. Security: R43/R49/R55 R3-1;
+R29 R3-2. Testing: RT4/RT7 R-1; RT7/RT1/RT5 R-2; RT7 R-3, R-4.
+
+---
+
+# Round 4
+Date: 2026-10-24
+
+Round-3 findings resolved by the revision-4 redesign. Round 4 raised, against that redesign,
+F-Q1..Q5 (Major: key/DEPLOYMENT_ID changes, the untrusted-pointer branch, adoption's writes, a
+dropped lock connection, the runbook against the bucket policy), S-R4-1/R4-2 (Major: the
+unverifiable-pointer branch, rotation), T-D-1..D-5 (Major: red proofs and entry states of the
+new state machine) and Minors.
+
+Saturation is not the exit here (Majors remain): the findings are against the protocol
+redesign itself, each round's fix opening the next design question. By user decision the
+protocol redesign leaves this plan for a follow-up issue (SC5, carrying these findings), and
+revision 5 keeps today's protocol. What revision 5 keeps from round 4: the bucket-policy
+principal restriction (S-R4-3), the runbook advisory written with lock headers (F-Q5), the
+lock-timeout red proof via `pgErrorCode` (T-D-1, the lock taken inside the Prisma transaction),
+a pid-matched overlap observation with an injected wait (T-D-6). Findings that only exist in
+the redesign (F-Q1..Q4, Q6..Q8, S-R4-1/R4-2/R4-4, T-D-2..D-5) go to SC5.
+
+## Recurring Issue Check (round-4 delta)
+Functionality: R38/R56 Q1, Q3; R42 Q1, Q5; R49 Q2; R5/R54 Q4; R41 Q6; R53 Q7; R29 Q8.
+Security: R43/R49/R55 R4-1; R38 R4-2; R14/R43 R4-3; R29 R4-4. Testing: RT7 D-1..D-3; R38 D-4;
+RT11 D-5; RT4 D-6; R29 D-7.
+
+---
+
+# Round 5
+Date: 2026-10-24
+
+Review of revision 5 (today's protocol). Applied in revision 6:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-R5-1 | Functionality | Major | Fixed — same-boundary retry with bounded backoff within the day; the remaining orphan case documented and reported |
+| F-R5-2 | Functionality | Major | Fixed — pause compared against `max(wall clock, boundary)` |
+| F-R5-3 / S-R5-3 | Functionality, Security | Major / Minor | Fixed — one break-glass operator role in the principal exception, still under the lock/retention/SSE statements |
+| S-R5-1 / F-R5-4 | Security, Functionality | Major / Minor | Fixed — healthy-cadence counts only `published` (and never-enabled `skipped_no_tenants`); falls-to-zero alarm restored |
+| S-R5-2 | Security | Major | Fixed — verification doc lists every version; a version created after the next boundary is a tamper signal |
+| T-E-1 | Testing | Major | Fixed — chain advanced between attempts; latest sha = pointer ≠ earlier; red proof |
+| F-R5-5, S-R5-4, T-E-2..E-5 | — | Minor | Fixed in revision 6 |
+
+## Recurring Issue Check (round-5 delta)
+Functionality: R49/R29 R5-1; R38/R48 R5-2; R41/R31 R5-3; R41/R50 R5-4; R18/R29 R5-5. Security:
+R43/R49/R55 R5-1; R49 R5-2; R14/R31 R5-3; R29 R5-4. Testing: RT7 E-1, E-4; RT11 E-5; RT4 E-3;
+R49 E-2.
+
+---
+
+# Round 6
+Date: 2026-10-24
+
+Round-5 findings resolved except F-R5-1 (half). New on revision 6, applied in revision 7:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-R6-1 / T-G-1 | Functionality, Testing | Major | Fixed — same-boundary retries run past the pause their own upload failure wrote; 3-attempt cap; aborted-but-stored upload case added |
+| F-R6-2 | Functionality | Major | Fixed — every Deny `Principal: "*"` + `ArnNotEquals aws:PrincipalArn` (a `NotPrincipal` would deny the publisher's assumed-role session); empty break-glass ARN lists no principal |
+| S-R6-1 | Security | Minor | Fixed — break-glass `PutObject` only on `advisories/*`; S3 data-event selector in the trail prerequisite |
+| S-R6-2 | Security | Minor | Fixed — verification doc names the authoritative version and the expected orphan |
+| S-R6-3 / F-R6-4 | Security, Functionality | Minor | Fixed — at most 3 upload-reaching attempts per boundary; `commit_failed_after_upload` alarm; ≤3 failure rows per boundary |
+| F-R6-3 / T-G-2 | Functionality, Testing | Minor | Fixed — `everChainEnabled` from `audit_chain_anchors` rows; the disable steady state documented; filter test pair |
+| T-G-3 | Testing | Minor | Fixed — red fixtures for the principal conditions |
+
+## Recurring Issue Check (round-6 delta)
+Functionality: R38/R48 R6-1; R29/R49 R6-2; R41/R55 R6-3; R4 R6-4. Security: R49/R43 R6-1; R29
+R6-2; R53 R6-3. Testing: R49/R41 G-1; RT7 G-2, G-3.
+
+---
+
+# Round 7
+Date: 2026-10-24
+
+Round-6 findings resolved. New on revision 7, applied in revision 8:
+
+| ID | Source | Sev | Disposition |
+|----|--------|-----|-------------|
+| F-R7-1 / S-R7-1 | Functionality, Security | Major / Minor | Fixed — write paths split by key shape matching the runbook's layout (manifests publisher-only; `key-rotation-*`, `public-keys/*` break-glass-only), a catch-all Deny, non-empty prefix |
+| F-R7-2 | Functionality | Minor | Fixed — empty break-glass ARN → unconditional Deny |
+| F-R7-3 | Functionality | Minor | Fixed — a boot run also runs past the current boundary's pause |
+| S-R7-2 | Security | Minor | Fixed — Deny `DeleteObject`/`DeleteObjectVersion` and lifecycle configuration; delete markers named in the verification doc |
+| T-H-1, T-H-2 | Testing | Minor | Fixed — chain advanced before the aborted-upload retry, pause clear asserted; `everChainEnabled` derivation unit-tested |
+| F-R7-A1 | Functionality | Minor (adjacent) | SC6 — the runbook's missing npm scripts; this PR rewrites only the bucket writes |
+
+## Recurring Issue Check (round-7 delta)
+Functionality: R42/R41 R7-1; R55 R7-2; R38 R7-3; R29/R34 R7-A1. Security: R42 R7-1; R49 R7-2.
+Testing: RT7/RT6 H-1, H-2.
+
+# Round 8 (plan revision 8)
+
+| ID | Sev | Finding | Resolution (revision 9) |
+|----|-----|---------|-------------------------|
+| T-I-1 | Major | The policy's manifest pattern is not bound to the key the code writes | Key builder + prefix join extracted; static test matches the Terraform pattern against it with S3 wildcard semantics, must not match break-glass paths; red fixtures |
+| T-I-2 | Minor | Boot-run pause bypass lacks a red proof | Obsolete: the publish-side pause filter is removed (F-R8-2) |
+| F-R8-1 / S-R8-1 | Minor | Catch-all Deny must be unconditional `NotResource`; prefix wildcards widen every statement | `NotResource` Deny with no principal exception; prefix `^[A-Za-z0-9._/-]+$`; red fixture: publisher writing `<prefix>/other` |
+| F-R8-2 | Minor | Every pause ends at the next boundary, so the publish filter can only block its own retries; `skipped_paused` unreachable | Filter and `skipped_paused` removed; pause kept for outbox chain advancement only |
+| F-R8-3 | Minor | `PutLifecycleConfiguration` is bucket-level; runbook hard-codes the prefix | Deny on the bucket ARN (red fixture on `bucket/*`); runbook uses the configured prefix |
+| S-R8-2 | Minor | Root can replace the bucket policy unnoticed | EventBridge alarm on policy/lifecycle/Object Lock/versioning changes for the anchors bucket; residual stated |
+| S-R8-3 | Minor | In-process attempt cap resets on restart | Count persisted per boundary in `system_settings.audit_anchor_upload_attempts`, honoured by boot and retries; boot-cap test |
+
+# Round 9 (plan revision 9)
+
+| ID | Sev | Finding | Resolution (revision 10) |
+|----|-----|---------|-------------------------|
+| F-R9-1 / S-R9-1 | Major | Attempt count written inside the publish tx rolls back with every failure; the cap never triggers | Increment committed in its own tx before the publish tx (same advisory lock, after marker re-check, atomic upsert returning the count); red: increment inside the publish tx |
+| T-J-1 | Major | Catch-all `NotResource` duplicates the manifest pattern; the key test pins one copy | Both copies extracted, asserted equal, each matched against builder and `S3Destination`; `NotResource` list pinned exactly; red: only the `NotResource` copy changed |
+| F-R9-3 / S-R9-1 | Minor | Cap-reached unalarmed; audit rows unbounded in a crash loop | `upload_cap_reached` `_logType` + alarm; one failure row per boundary |
+| F-R9-3 | Minor | Prefix regex admits leading/trailing/double `/` and `.`/`..` | Segment regex; allow/deny table in tests |
+| T-J-2 | Minor | Cap red proof can stay green under module-level state; no allow case | Fresh module graph per boot, DB count asserted after each, next-boundary allow case |
+| F-R9-2 / T-J-3 | Minor | Pause removal not propagated (alarm/test "paused", `skipped_paused` test, emitter-less action, outbox comment, runbook 72 h, threat model, scenario) | All listed in C2/C6; action kept for historical rows; all-paused-publishes test |
+
+# Round 10 (plan revision 10)
+
+| ID | Sev | Finding | Resolution (revision 11) |
+|----|-----|---------|-------------------------|
+| T-K-1 / S-R10-1 / F-R10-3 | Major | Prefix regex uses lookahead; Terraform's RE2 refuses every value under `can()`; two engines decide one rule | Two RE2-safe parts (regex + `split` segment check), verified with `terraform console`; one HCL copy in a provider-less module tested by `terraform test` (verified locally on 1.15.8); same vector drives Zod in vitest; static test pins the HCL run values to the vector |
+| F-R10-1 | Minor | Counter increments on runs with nothing to publish | Counter tx returns `skipped_no_tenants` before incrementing; cap worded as runs past marker and tenant checks; no-tenant four-boot test |
+| F-R10-2 | Minor | Pause-removal propagation misses partial-pause test, verification doc pause section, worker-policy-manifest prose, dead `pauseCapFactor` | All added to C2/C6; `pauseCapFactor` and its constant removed |
+| S side note | — | "Same advisory lock" cannot hold across the commit | Reworded: same key, released at commit; overlap only over-counts |
+
+# Round 11 (plan revision 11)
+
+Security: no findings.
+
+| ID | Sev | Finding | Resolution (revision 12) |
+|----|-----|---------|-------------------------|
+| T-L-1 | Major | Global attempts row missing from snapshot/restore and cleanup; order-dependent cap failures | Row added to snapshot/restore and every publisher test's `afterEach`; cap and no-tenant cases assert absence at start; red: cleanup dropped, cap case first |
+| T-L-2 | Minor | Nothing pins that the root calls the prefix module | Static pin: unconditional call with the root variable; policy and task env read the module output; red: call removed or constant |
+| F-R11-1 | Minor | Zod rule would refuse an existing no-prefix deployment | Zod applies the segment rule only when set and non-empty; unset/empty in the Zod vector as allowed |
+| F-R11-2 | Minor | `terraform test` from the root reports success with no tests | CI runs `init` + `test` in the module and fails when the pass count is below the vector length |
+
+# Round 12 (plan revision 12)
+
+| ID | Sev | Finding | Resolution (revision 13) |
+|----|-----|---------|-------------------------|
+| F-R12-1 | Minor | Root prefix variable has no default; existing environments' plans fail | Default `"audit-anchors"` (runbook layout), in tfvars example and README; pinned |
+| T-M-1 / S-R12-1 | Minor | Pass-count gate can fail open on an unparsable summary | `test -json` under pipefail, exit status checked separately; node check requires one `test_summary` with pass, 0 failed/errored, `passed` = Terraform-verdict entries counted from the vector file (format verified locally on 1.15.8); red: no summary, one run fewer |
+| T-M-2 | Minor | Vector has Zod-only entries with divergent verdicts | Per-validator verdict columns; HCL pin and count use the Terraform column; red: empty entry's Zod verdict flipped |
+
+# Round 13 (plan revision 13)
+
+Security: no findings. Testing: no findings.
+
+| ID | Sev | Finding | Resolution |
+|----|-----|---------|------------|
+| F-R13-1 | Minor | Plan cites a README variable table that does not exist | Location named: `variables.tf` description, tfvars example, a new "Audit anchor publisher" subsection in both READMEs; not the secret-key table |
+
+Plan review complete: no Critical or Major findings remain after round 13.

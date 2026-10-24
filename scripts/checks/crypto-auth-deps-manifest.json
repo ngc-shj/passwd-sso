@@ -94,6 +94,13 @@
       "detectedBy": ["dynamic-import"],
       "owners": ["security"],
       "category": "kdf"
+    },
+    "@aws-sdk/client-s3": {
+      "workspace": "root",
+      "reason": "SigV4 request signing with the ECS task-role credentials (SDK default credential chain) for the audit-anchor publisher's Object Lock PUTs; bundled into the publisher by esbuild.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "signature"
     }
   },
   "excluded": {

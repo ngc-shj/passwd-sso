@@ -45,6 +45,8 @@ Audit outbox worker (separate process):
 ```bash
 npm run worker:audit-outbox    # Run the outbox worker (requires OUTBOX_WORKER_DATABASE_URL)
 npm run worker:retention-gc    # Run the retention GC worker (requires RETENTION_GC_DATABASE_URL)
+npm run worker:audit-anchor-publisher  # Run the audit-anchor publisher (AUDIT_ANCHOR_PUBLISHER_ENABLED=true + DEPLOYMENT_ID, AUDIT_ANCHOR_SIGNING_KEY, AUDIT_ANCHOR_TAG_SECRET, a destination; production requires AUDIT_ANCHOR_PUBLISHER_DATABASE_URL)
+npm run worker:audit-chain-verify      # Run the audit-chain verify worker (AUDIT_CHAIN_VERIFY_DATABASE_URL, else DATABASE_URL)
 npm run test:integration       # Run real-DB integration tests (requires running Postgres)
 ```
 

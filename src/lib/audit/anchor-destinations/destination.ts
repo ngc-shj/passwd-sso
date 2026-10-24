@@ -6,5 +6,6 @@ export interface AnchorDestination {
     artifactBytes: Buffer;
     artifactKey: string;
     contentType: string;
+    signal?: AbortSignal;
   }): Promise<void>;
 }

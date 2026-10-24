@@ -220,6 +220,32 @@ without one:
 It is stated here rather than left implied, because the forwarder note below used
 to justify the exclusion on a premise that covers only the other two.
 
+**`anchor_publisher_emit_failed` also fires with a healthy database.** The
+audit-anchor publisher writes its own `AUDIT_ANCHOR_*` rows (scope `TENANT`,
+tenant `__system__`) straight to `audit_outbox` under the
+`AUDIT_WRITE_DIRECT_OUTBOX` bypass grant, which names `auditOutbox` alone, as
+`passwd_anchor_publisher`, which holds `INSERT` on `audit_outbox` (the grant in
+`prisma/migrations/20260502000000_audit_anchor_publisher_phase2`). When that
+write fails, the line carries `action`, `reason: "anchor_publisher_emit_failed"`
+and `error` (`{name, code}`) and the row is lost; the publisher's own
+`audit-anchor-publisher.*` lines still say what the run did. With the database
+up, the cause is drift in one of the two: the grant in
+`src/lib/tenant-rls-grants.ts` no longer naming `auditOutbox` (the bypass then
+refuses the table), or the role's `INSERT` on `audit_outbox` (or its `EXECUTE`
+on `public.rls_bypass_admits`) revoked — `error.code: "42501"`. On AWS it is
+alarmed on its own: filter and alarm
+`<name_prefix>-audit-anchor-publisher-dead-letter` on the publisher's log group
+(the awslogs driver reads the container's stdout, so the forwarder exclusion
+below does not apply there).
+**Recovery**: `node scripts/audit-db-grants.mjs` (as `MIGRATION_DATABASE_URL`)
+names a revoked privilege. Re-grant it as the owner — for the table, the
+migration's own statement, `GRANT INSERT ON TABLE "audit_outbox" TO
+passwd_anchor_publisher;`; on RDS `scripts/bootstrap-rds-roles.mjs` re-grants
+the function `EXECUTE`s. A grant entry that drifted is a code change: restore it
+and redeploy. The lost rows are
+not recoverable — the publisher's `cadence` lines for the same boundaries are
+the record of what they would have said.
+
 A further reason, `emit_inside_rls_context`, exists but does **not** appear under
 this `_logType` — see `audit-refused` below. It ships on its own logger
 precisely because the forwarder filters on `_logType` and does not read `reason`,
@@ -457,9 +483,17 @@ the resulting always-firing alarm gets muted.
 
 **Severity**: high
 **Trigger**: no event for > 2 hours
-**Recovery**: restart `worker:audit-chain-verify` service; check
-DB SELECT permissions on `audit_logs` and `tenants`.
+**Recovery**: restart the verify worker (on ECS the `*-audit-chain-verify-worker`
+service; elsewhere `npm run worker:audit-chain-verify`); check DB SELECT
+permissions on `audit_logs` and `tenants`. On ECS it connects as `passwd_app`
+through the app secret's `DATABASE_URL`, so a rotated app password reaches it
+only when its task restarts.
 
+CloudWatch (`infra/terraform/monitoring.tf`): filter
+`<name_prefix>-audit-chain-verify-heartbeat` on
+`/ecs/<name_prefix>/audit-chain-verify-worker`, alarm
+`<name_prefix>-audit-chain-verify-heartbeat-absent` (fewer than one heartbeat in
+each of two consecutive hours; missing data breaches).
 Datadog: monitor on `absence(_logType="audit-chain-verify-heartbeat") for 2h`
 Sentry Cron Monitor: register `audit-chain-verify` with schedule `0 * * * *`.
 
@@ -572,6 +606,8 @@ defect. `P2028` means the read outgrew
 `AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` (default 60s); raise it or lower
 `AUDIT_CHAIN_VERIFY_MAX_ROWS`.
 
+CloudWatch: alarm `<name_prefix>-audit-chain-verify-errored` (the heartbeat's
+`erroredTenantCount` summed over an hour, `>= 1`).
 Datadog: `@_logType:audit-chain-verify-heartbeat @erroredTenantCount:>0`
 Loki: `{_logType="audit-chain-verify-heartbeat"} | json | erroredTenantCount > 0`
 
@@ -583,6 +619,8 @@ Loki: `{_logType="audit-chain-verify-heartbeat"} | json | erroredTenantCount > 0
 `CHAIN_VERIFY_FAILED` stderr line below carries the reason and the
 first offending `chain_seq`.
 
+CloudWatch: alarm `<name_prefix>-audit-chain-verify-failed` (the heartbeat's
+`failedTenantCount` summed over an hour, `>= 1`).
 Datadog: `@_logType:audit-chain-verify-heartbeat @failedTenantCount:>0`
 Loki: `{_logType="audit-chain-verify-heartbeat"} | json | failedTenantCount > 0`
 
@@ -608,6 +646,464 @@ sink.
 Snapshot the affected tenant's `audit_logs` and `audit_chain_anchors`,
 notify security team, investigate.
 
+## Audit anchor publisher
+
+The publisher (`src/workers/audit-anchor-publisher.ts`, scheduled by
+`src/workers/audit-anchor-scheduler.ts`) runs once per daily cadence boundary
+(00:05 UTC) and logs one `audit-anchor-publisher.cadence` line per run, whose
+`kind` is the outcome: `published`, `skipped_already_published`,
+`skipped_no_tenants`, `lock_held`, `upload_cap_reached` or `failed` (with
+`reason` and `stage`). Every line carries `boundary` and
+`chainEnabledTenantCount`. A failed run, at any stage, and a `lock_held` run are
+retried for the same boundary every 15 minutes, at most three times per process
+and never later than 30 minutes before the next boundary (23:35 UTC). When a
+retryable run gets no retry the scheduler logs
+`audit-anchor-publisher.retries_exhausted` (warn, with `boundary`, `retries` and
+`reason`: `count` when the three are used up, `window_closed` when the next
+retry would land inside the last 30 minutes) and waits. `upload_cap_reached` is
+not retried. All of these wait for the next boundary or the next boot run.
+
+On AWS every filter below reads `/ecs/<name_prefix>/audit-anchor-publisher`, and
+every alarm notifies the SNS alarm topic (`infra/terraform/monitoring.tf`).
+
+To get a boot run now — after fixing a cause that the next boundary would
+otherwise wait for — restart the service on the same task definition:
+
+```bash
+aws ecs update-service --cluster <cluster> --service <name_prefix>-audit-anchor-publisher \
+  --force-new-deployment --region <region>
+```
+
+Reading what the database holds (as the owner role; `system_settings` admits
+only a bypassed session):
+
+```sql
+BEGIN READ ONLY;
+SET LOCAL app.bypass_rls = 'on';
+SET LOCAL app.bypass_tables = 'system_settings';
+SET LOCAL app.bypass_purpose = 'system_maintenance';
+SELECT key, value, updated_at FROM system_settings
+WHERE key LIKE 'audit_anchor_%' ORDER BY key;
+ROLLBACK;
+```
+
+`audit_anchor_last_published_boundary` is the boundary marker,
+`audit_anchor_previous_manifest` the pointer the next manifest chains to, and
+`audit_anchor_upload_attempts` the attempt count (`{boundary, count}`). A count
+row that does not parse is replaced by the next run with the first count past
+the cap for that run's boundary (see `upload_cap_reached`).
+
+The marker only moves forward. A run whose boundary is at or before the marker
+is `skipped_already_published`; one strictly before it also logs
+`audit-anchor-publisher.stale_boundary` (below). Two markers fail every run
+before the upload, uncounted, as a database-write incident (it was damaged or
+planted):
+
+- one that is not the ISO-8601 timestamp a publish writes
+  (`2026-01-15T00:05:00.000Z`): `reason: CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`;
+- one later than the wall clock's current boundary — a boundary no publish has
+  reached yet: `reason: CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`. Read as
+  published, it would skip every boundary up to its date with no alarm but the
+  cadence-absent one a day later. A marker equal to the current boundary is a
+  publish of today and skips as usual.
+
+Either way, restore the marker to the last boundary a `published` line names
+(or delete it, and the anchors' `last_published_at` stands in) and restart the
+service for a boot run. For `BOUNDARY_MARKER_AHEAD`, first confirm the task's
+clock is right (`date -u` against the cadence lines' timestamps): a clock that
+runs behind makes a marker it wrote itself look ahead, and the fix there is the
+clock, not the row.
+
+## `audit-anchor-publisher.stale_boundary`
+
+**Severity**: high
+**Trigger**: any occurrence (filter and alarm
+`<name_prefix>-audit-anchor-publisher-stale-boundary`). Warn level, with
+`boundary` and `marker`; the run is a `skipped_already_published`.
+**What it means**: a run for a boundary found the marker past it but not past
+the wall clock's current boundary. The run skips rather than write the marker
+back. On ECS this has no legitimate cause: a boundary's retries stop 30 minutes
+before the next, and a timer never runs before its boundary, so this process
+never runs a boundary after it published a later one. Another writer moved the
+marker — a second publisher against this database, or a database write. It is
+never a clock that went back: that clock's current boundary is earlier too, so
+the marker reads as ahead of it and the run fails closed with
+`CADENCE_FAILED:BOUNDARY_MARKER_AHEAD` (see the boundary-marker notes above).
+**Recovery**: look for a second publisher first. Run the holder query under
+`audit-anchor-publisher.lock_held` (below), and list every session the
+publisher's pool would open:
+
+```sql
+SELECT pid, usename, client_addr, backend_start, state
+FROM pg_stat_activity
+WHERE application_name = 'passwd-sso-audit-anchor-publisher';
+```
+
+More than the one task's connections, or a `client_addr` that is not the
+service's task, is a second publisher: stop it, then compare `marker` with the
+`published` lines (below) — a boundary it published is in the bucket under its
+key. If there is none, treat the marker as a database-write incident (see
+`cadence_healthy`): restore it to the last boundary a `published` line names.
+
+## `audit-anchor-publisher.cadence_healthy`
+
+Logged once per healthy boundary, and only then: a `published` run, or a
+`skipped_no_tenants` run on an install where no tenant has ever enabled the
+chain (`everChainEnabled: false`, decided by the absence of any
+`audit_chain_anchors` row). `skipped_already_published`, `failed`,
+`upload_cap_reached` and `lock_held` never emit it (nor does a
+`stale_boundary` skip, which is a `skipped_already_published`): the boundary marker is a
+database row, so a skip must not read as health.
+
+**Severity**: high
+**Trigger**: the alarm `<name_prefix>-audit-anchor-cadence-absent` — no line
+(filter `<name_prefix>-audit-anchor-cadence-healthy`) in each of 25 consecutive
+hours; missing data breaches.
+**What it means**: no boundary has been published for over a day. Look for the
+cause among the other publisher alarms: the service down, every run failing,
+the attempt cap, or no tenant chain-enabled any more.
+**Recovery**: read the last day's cadence lines (below); fix what their `reason`
+names; restart the service for a boot run. If the runs report
+`skipped_already_published` while no `published` line exists for that boundary,
+the marker was written by something other than a publish — treat it as a
+database-write incident (the publisher trusts `system_settings`; see
+`docs/security/audit-anchor-verification.md`).
+
+A **deliberate full disable** — every tenant's chain turned off after one was
+on — leaves this alarm in ALARM, and that is the state to see: nothing is being
+anchored. Do not silence it to make the dashboard green. On a new stack the
+alarm can be in ALARM from creation until the publisher's first healthy run.
+
+```bash
+aws logs tail /ecs/<name_prefix>/audit-anchor-publisher --since 26h --region <region> \
+  --filter-pattern '{ $._logType = "audit-anchor-publisher.cadence" }'
+```
+
+## `audit-anchor-publisher.cadence`
+
+The per-run line above. One alarm reads it directly:
+
+**Severity**: high
+**Trigger**: the alarm `<name_prefix>-audit-anchor-chain-enabled-fell-to-zero` —
+a cadence line with `kind: "skipped_no_tenants"`, `chainEnabledTenantCount: 0`
+and `everChainEnabled: true`.
+**What it means**: no tenant is chain-enabled now, though one was. It is not
+edge-triggered: every run in that state matches, so it fires at each boundary
+and each boot run until a tenant is chain-enabled again (the cadence-absent
+alarm follows a day later).
+**Recovery**: no application path writes `tenants.audit_chain_enabled`, so the
+change was made in the database directly; find who made it from the database's
+own logs. If the disable was deliberate, the state is correct and both alarms
+stay as they are. If not, treat it as a database-write incident and re-enable
+the chain with a tenant-scoped `UPDATE` (the shape of the `__system__` one under
+`audit-chain-verify-heartbeat`, with `true`).
+
+## `audit-anchor-publisher.upload_cap_reached`
+
+**Severity**: high
+**Trigger**: any occurrence (filter and alarm
+`<name_prefix>-audit-anchor-publisher-upload-cap-reached`).
+**What it means**: three runs for this boundary already passed the marker and
+tenant checks — each counted in `audit_anchor_upload_attempts` before it could
+upload — so this run uploaded nothing. The first run past the cap writes one
+`AUDIT_ANCHOR_PUBLISH_FAILED` row (`failureReason: UPLOAD_ATTEMPT_CAP_REACHED`);
+later runs for the same boundary log only. The cap exists so that a crash loop
+or a retry storm cannot lock more versions of the day's key.
+
+The line also fires, with `countUnreadable: true`, when the stored
+`audit_anchor_upload_attempts` value does not parse (not JSON, or not
+`{boundary, count}` with a positive integer count). Such a value cannot say how
+many runs reached the upload, so the run treats the boundary as past the cap:
+it overwrites the value with `{boundary: <this boundary>, count: 4}`, uploads
+nothing, and writes the one row with `failureReason:
+UPLOAD_ATTEMPT_COUNT_UNREADABLE` instead.
+**Recovery**: read the boundary's earlier `cadence_failed` lines for the cause
+(and ECS task-stop events, for a crash loop). A count nobody's runs explain —
+or an unreadable one, which no publisher writes — is a planted or damaged row:
+a database-write incident. The count resets on its own: the next boundary's
+first run counts 1 and publishes. The missed boundary is then reported once as
+`MISSING_PRIOR_CADENCE_PUBLICATION`.
+
+## `audit-anchor-publisher.commit_failed_after_upload`
+
+**Severity**: high
+**Trigger**: any occurrence (alarm
+`<name_prefix>-audit-anchor-publisher-commit-failed-after-upload`).
+**What it means**: every destination accepted the manifest, then the publish
+transaction did not commit (a database error, the 90 s transaction bound, a lost
+connection). The object is stored, the pointer and marker are not. No pause is
+written — the destination is healthy. The scheduler retries the boundary every
+15 minutes; the retry PUTs the same key again, so the bucket keeps both
+versions, and the one the next manifest's `previousManifest` names is the
+committed one.
+**Recovery**: read `error.code` on the line and check the database. Confirm a
+later `published` line for the same `boundary`. If none follows before the next
+boundary, that version stays unreferenced and the next publish reports
+`MISSING_PRIOR_CADENCE_PUBLICATION`.
+
+## `audit-anchor-publisher.cadence_failed` / `audit-anchor-publisher.upload_failed`
+
+**Severity**: high
+**Trigger**: any occurrence (alarms
+`<name_prefix>-audit-anchor-publisher-cadence-failed` and
+`<name_prefix>-audit-anchor-publisher-upload-failed`).
+**What it means**: `cadence_failed` is every failed run, with `reason` (a token,
+also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
+
+- `before_upload` — the run failed before uploading. Either before the attempt
+  count was written — the database unreachable, the tenants read failing — in
+  which case it cost no attempt; or after it — the signing step, or an
+  `audit_anchor_previous_manifest` that does not parse — in which case it cost
+  one. A boundary marker that does not parse, or one past the wall clock's
+  current boundary, fails here too, before the count
+  (`CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`,
+  `CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`; see "Audit anchor publisher" above). Both are retried every 15 minutes (at most three times per process), so
+  a transient database outage at the boundary does not cost the day; a
+  deterministic failure after the count reaches `upload_cap_reached` after
+  three runs, and one before it stops at `retries_exhausted`. (An
+  `audit_anchor_upload_attempts` value that does not parse is not a failure
+  here: it reports `upload_cap_reached` with `countUnreadable: true`, and the
+  next boundary recovers by itself.) Fix it and delete the
+  `audit_anchor_upload_attempts` row if the boundary must still be published.
+- `upload` — a destination refused or the 60 s upload bound fired
+  (`UPLOAD_TIMEOUT`). `upload_failed` names the destination and carries
+  `error.code` (`AccessDenied` usually means the bucket policy or the task role
+  drifted from Terraform). The run also pauses the manifest's tenants until the
+  next boundary: the audit-outbox worker stops advancing their chains, and the
+  15-minute retry that publishes clears it.
+- `after_upload` — see `commit_failed_after_upload` above.
+
+Rows per boundary: the persisted count admits at most three counted runs across
+restarts, each writing at most one failure row, plus the one cap row (either
+reason). A failure before the count is written is not counted, so the count
+does not bound it; the scheduler does: each process runs a boundary at most
+four times (the first run and at most three retries), and so writes at most
+that many failure rows for it per process start, counted runs included.
+
+## `audit-anchor-publisher.pause_persist_failed`
+
+**Severity**: medium
+**Trigger**: any occurrence (alarm
+`<name_prefix>-audit-anchor-publisher-pause-persist-failed`).
+**What it means**: after an upload failure, writing the pause failed. The outbox
+worker keeps advancing those tenants' chains past what was published; the next
+publish covers them, so nothing is lost, but the protection window is wider.
+**Recovery**: check the database (`error.code`).
+
+## `audit-anchor-publisher.pool.error` / `audit-anchor-publisher.cadence_error`
+
+`pool.error` is the publisher's `pg` pool reporting a dropped idle connection
+(alarm `<name_prefix>-audit-anchor-publisher-pool-error`); alert on a sustained
+rate, as for `worker.pool.error`. `cadence_error` means a run threw out of
+`runCadence`, which is written never to throw — a code defect (alarm
+`<name_prefix>-audit-anchor-publisher-cadence-error`); the scheduler retries
+the boundary as for an upload failure.
+
+## `audit-anchor-publisher.missing_prior_cadence`
+
+Warn level, not alarmed. A run found that no chain-enabled tenant's
+`last_published_at` reaches the previous boundary. When that run publishes, it
+writes one `AUDIT_ANCHOR_PUBLISH_FAILED` row (`failureReason:
+MISSING_PRIOR_CADENCE_PUBLICATION`) after its own commit; a run that fails
+writes only its own failure row, so the retries that follow do not repeat it
+and the run that publishes reports the gap once. It never stops the publish.
+
+Expected **once**, on the first publish after a tenant enables the chain. Any
+later occurrence means a boundary was never committed — the publisher was down
+for that whole day, every attempt failed, or the cap was reached. In the bucket
+that day's key may hold versions no manifest references, which
+`docs/security/audit-anchor-verification.md` treats as expected only in exactly
+this case.
+
+## `audit-anchor-publisher.lock_held`
+
+**Severity**: high
+**Trigger**: any occurrence (filter and alarm
+`<name_prefix>-audit-anchor-publisher-lock-held`).
+**What it means**: the run waited 10 s (`lock_timeout`) for the publish lock
+another session held, and stood down. It writes no failure row and no pause. It
+is retried for the same boundary like a failure (every 15 minutes, at most three
+times per process, not inside the last 30 minutes); if the holder published in
+the meantime, the retry's marker re-check makes it `skipped_already_published`.
+Nothing guarantees the holder publishes — any role that can connect can take
+the advisory lock — so after the retries the boundary waits like any other
+failure. On ECS it should never occur: the service runs one task and a deploy
+stops the old one before starting the new, so a held lock means a second
+publisher, or some other session holding the key, against this database.
+**Recovery**: find the holder, as a role that can read every session's
+`pg_stat_activity` row (the RDS master user, or a member of `pg_read_all_stats`):
+
+```sql
+SELECT l.pid, a.usename, a.application_name, a.client_addr, a.backend_start, a.xact_start, a.state
+FROM pg_locks l JOIN pg_stat_activity a USING (pid)
+WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+  AND l.classid = ((hashtext('audit-anchor-publish')::bigint >> 32) & 4294967295)::oid
+  AND l.objid = (hashtext('audit-anchor-publish')::bigint & 4294967295)::oid;
+```
+
+The lock is `pg_advisory_xact_lock(hashtext('audit-anchor-publish'))`:
+`hashtext` returns an `int4`, which the one-argument (`bigint`) form widens, so
+PostgreSQL stores it with `objsubid = 1`, the key's high 32 bits as `classid`
+(0 for this key, whose hash is positive) and its low 32 bits as `objid`. A
+publisher's own session shows `application_name =
+passwd-sso-audit-anchor-publisher`. Stop the process that owns it (a second
+publisher: scale it down; anything else: `SELECT pg_terminate_backend(<pid>)`
+once you know what it is), then restart the service for a boot run if the
+boundary is still unpublished.
+
+## audit-anchor-publisher down
+
+**Severity**: high
+**Trigger**: alarm `<name_prefix>-audit-anchor-publisher-down` — Container
+Insights `RunningTaskCount` below 1 for 10 consecutive minutes (missing data
+breaches). Ten, not the other workers' two, because the publisher deploys with
+`deployment_minimum_healthy_percent = 0`: every deploy has a window with no task
+while the old one drains (up to its 120 s `stopTimeout`) and the new one starts.
+**Recovery**: read the stopped tasks' reason (ECS task-stop events) and the
+publisher's fatal lines, which are plain JSON without `_logType`:
+`env validation failed` (path and code only, never the value),
+`audit-anchor-publisher.boot_failed` (e.g. `DeploymentIdMismatchError` — see
+`docs/operations/deployment.md` "`DEPLOYMENT_ID`"), or a secret key the task
+definition names but the app secret lacks (the task never starts). A service
+scaled to 0 on purpose keeps this alarm in ALARM.
+
+```bash
+aws logs tail /ecs/<name_prefix>/audit-anchor-publisher --since 1h --region <region> \
+  --filter-pattern '"boot_failed"'
+```
+
+## ECS Exec session opened
+
+**Severity**: medium
+**Trigger**: the EventBridge rule `<name_prefix>-ecs-execute-command` (CloudTrail
+`ExecuteCommand` from `ecs.amazonaws.com`) — one SNS notification per session.
+**What it means**: someone opened a shell in a task. ECS Exec session logging is
+`NONE` (the bootstrap shell handles role passwords), so this event is the only
+record. The rule receives events only from an account with a trail logging
+management events (`docs/operations/deployment.md` "CloudTrail prerequisite").
+**Recovery**: match it to a known operator action (the event names the principal,
+cluster, task and container). An unexplained session is an incident: what it did
+left no transcript.
+
+## Anchors bucket configuration changed
+
+**Severity**: high
+**Trigger**: the EventBridge rule `<name_prefix>-audit-anchor-bucket-config-change`
+— `PutBucketPolicy`, `DeleteBucketPolicy`, `PutBucketLifecycle`,
+`PutBucketLifecycleConfiguration`, `PutObjectLockConfiguration` or
+`PutBucketVersioning` on the anchors bucket. Same trail prerequisite.
+**What it means**: the bucket policy that decides who may write an anchor holds
+only while nobody replaces it, and the account root always can. **A Terraform
+apply that touches these resources is the expected false positive** — compare
+the event's principal and time with the apply.
+**Recovery**: anything else is a tamper attempt on the evidence store. Capture
+the current state before changing it, then let Terraform report the drift:
+
+```bash
+aws s3api get-bucket-policy --bucket <bucket> --region <region>
+aws s3api get-object-lock-configuration --bucket <bucket> --region <region>
+aws s3api get-bucket-versioning --bucket <bucket> --region <region>
+terraform plan -var-file=envs/prod/terraform.tfvars
+```
+
+## Publisher task role passed to another task
+
+**Severity**: high
+**Trigger**: either EventBridge rule, same trail prerequisite. Both match the
+role by its full ARN and by its bare name (`*-ecs-audit-anchor-publisher-task`),
+since CloudTrail records the request as sent and `RegisterTaskDefinition`
+accepts either spelling:
+
+- `<name_prefix>-audit-anchor-publisher-role-override` — CloudTrail `RunTask`
+  or `StartTask` whose `overrides.taskRoleArn` is the publisher's task role;
+- `<name_prefix>-audit-anchor-publisher-role-task-definition` — CloudTrail
+  `RegisterTaskDefinition` whose `taskRoleArn` is the publisher's task role and
+  whose `family` is anything but the publisher's own
+  (`<name_prefix>-audit-anchor-publisher`). A run of such a definition needs no
+  override, so the first rule never sees it.
+
+**What it means**: that role is the only principal the anchors bucket policy
+lets write a manifest, and its trust policy admits any ECS task of this account
+(`aws:SourceAccount`). A task run with it — any image, any command — can write
+one. The publisher's own service never sends an override and registers only its
+own family, so there is no expected false positive.
+**Recovery**: the event names the principal, the cluster and the task
+definition. Stop any task running it (`aws ecs stop-task`); for a registered
+definition, deregister it (`aws ecs deregister-task-definition`). Then remove
+`iam:PassRole` on the publisher role from that principal. Compare the bucket's versions for the
+day's key against the `published` cadence lines
+(`docs/security/audit-anchor-verification.md`): a version no publish explains is
+a forged manifest.
+
+A task of the publisher's **own** family needs neither an override nor a new
+family; that route has its own section, "Publisher-family task outside the
+publisher service" (below). Together the three cover every way a task gets the
+role through direct ECS calls in this stack's region: (a) an override names it — the first rule; (b1) a task definition of
+another family names it — the second rule, at registration; (b2) a task
+definition of the publisher's family names it, which is legitimate only for a
+task the publisher service launched — the next section.
+
+**Not alarmed by this stack.** Every task-launch route needs `iam:PassRole` on
+the publisher role, so restricting who holds it (an SCP or permission boundary) is
+the control for those; these rules only detect part of them. The role-change routes
+below need no `iam:PassRole`: their control is who holds `iam:UpdateAssumeRolePolicy`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:DeleteRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePermissionsBoundary`, `iam:DeleteRolePermissionsBoundary`, `iam:DeleteRole`, and `iam:CreateRole` scoped to its name (and, for any customer-managed policy attached to it, `iam:CreatePolicyVersion` / `iam:SetDefaultPolicyVersion` on that policy; Terraform gives it an inline policy only) on the
+publisher role. Outside their reach: the
+same ECS calls in any other region — the role is global, the rules and the
+events they match are regional — and another AWS service that launches ECS tasks
+under a role it is passed (AWS Batch's `jobRoleArn` on Fargate, for one). Changes to the role itself —
+`UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, a `DeleteRole`
+followed by a `CreateRole` of the same name — are IAM events, which EventBridge
+delivers only in `us-east-1`. This configuration has no provider there, so they
+reach CloudTrail and are not alarmed here. Nor is the deploy path itself: an
+`UpdateService` (or a `CreateService` replacing the service) that points the
+publisher service at a revision of its family registered outside a deploy —
+another image or command — runs that revision as the publisher's own task,
+which no rule can tell from a deploy (`terraform plan` shows the service's task
+definition drifted; `aws ecs describe-services` names the revision). Alarming
+the IAM events is the operator's: an organisation trail's rules, or an
+EventBridge rule in `us-east-1` matching `eventSource: iam.amazonaws.com` with
+`requestParameters.roleName` set to the publisher role's name. `terraform plan`
+reports a drifted trust or inline policy.
+
+## Publisher-family task outside the publisher service
+
+**Severity**: high
+**Trigger**: either of two EventBridge rules.
+
+- `<name_prefix>-audit-anchor-publisher-family-task-outside-service` — the
+  native ECS "ECS Task State Change" event (no trail needed) for a task whose
+  `taskDefinitionArn` is a revision of the publisher's family (the family's ARN
+  followed by `:`, so a family whose name only starts with it does not match)
+  and that is either outside this stack's cluster or in it with a `group` other
+  than `service:<name_prefix>-audit-anchor-publisher`. ECS sets `group` to
+  `service:<service name>` for a task a service launched and to
+  `family:<family>` by default for one started otherwise. A task emits several
+  state changes, so one task can notify more than once.
+- `<name_prefix>-audit-anchor-publisher-family-run-task` — CloudTrail `RunTask`
+  or `StartTask` naming the publisher's family in `taskDefinition` (`family`,
+  `family:revision` or the full ARN), in any cluster (needs the trail). `group`
+  is a parameter of both calls, so a caller can claim the publisher service's
+  group and pass the first rule; this one sees the call whatever it claims. The
+  service's scheduler starts its tasks without either call, so a deploy raises
+  neither rule.
+
+**What it means**: a task is running the publisher's task definition — so its
+task role, the only principal the anchors bucket policy lets write a manifest —
+without the publisher service having launched it: a `RunTask` / `StartTask`, a
+service other than the publisher's, or a service of the publisher's name in
+another cluster. Such a task can write a manifest, and a revision registered
+outside a deploy can carry any image and command. There is no expected false
+positive.
+**Recovery**: the event names the task, its cluster, its group and the
+revision (the CloudTrail one also names the principal). Stop the task
+(`aws ecs stop-task --cluster <cluster> --task <task>`); if a service launched
+it, delete that service. Compare the revision with the one the publisher
+service runs (`aws ecs describe-services`) and deregister any revision no
+deploy registered. Remove `ecs:RunTask` / `ecs:StartTask` (or `iam:PassRole` on
+the publisher role) from the principal that started it. Then compare the
+bucket's versions for the day's key against the `published` cadence lines
+(`docs/security/audit-anchor-verification.md`), as for the rules above.
+
 ## `rls.bypass_not_granted`
 
 Emitted by the pool listener in `src/lib/db/pool-factory.ts`. The database
@@ -628,15 +1124,15 @@ refused.
 enforce mode is turned on.
 
 CloudWatch: the `RlsBypassNotGranted` metric. There is one filter each on
-the app, audit-outbox-worker and retention-gc-worker log groups, and the
-`rls-bypass-not-granted` alarm fires on `Sum >= 1` in 5 minutes
-(`infra/terraform/monitoring.tf`). Operator scripts write the same record
-to stderr.
+the app, audit-outbox-worker, retention-gc-worker, audit-anchor-publisher and
+audit-chain-verify-worker log groups, and the `rls-bypass-not-granted` alarm
+fires on `Sum >= 1` in 5 minutes (`infra/terraform/monitoring.tf`). Operator
+scripts write the same record to stderr.
 
-**Not covered:** the audit-anchor-publisher has no Terraform-managed log
-group, so its reports reach no metric. Wherever it runs, collect its stdout
-and match the same `_logType`. A log group, a filter and a positive canary
-for it are preconditions of enforce mode.
+**Not covered:** outside AWS the publisher and the verify worker have no
+managed log group (the compose files do not define them yet); wherever they
+run, collect their stdout and match the same `_logType`. A positive canary for
+each filter is a precondition of enforce mode.
 
 Datadog: `{ _logType="rls.bypass_not_granted" OR _logType="rls.bypass_notice_unparsed" }`
 
@@ -696,4 +1192,6 @@ in operator config:
 
 Operators MUST pick at least one external destination before
 treating the audit chain as evidentiary. Without external anchoring
-the chain detects tampering within the database boundary only.
+the chain detects tampering within the database boundary only. On AWS
+that destination is the Terraform-managed S3 Object Lock bucket (see
+"Audit anchor publisher" above).

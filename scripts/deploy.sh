@@ -17,7 +17,9 @@ set -Eeuo pipefail
 #      the digest, and VERIFY the signature before trusting the image
 #   3. terraform apply -var-file=... -var app_image=<digest>   (task defs only)
 #   4. run the migrate task, wait for exit 0
-#   5. update-service app + jackson + both workers to the new task-def ARNs
+#   5. update-service app + jackson + the four workers (audit-outbox,
+#      retention-gc, audit-anchor-publisher, audit-chain-verify) to the new
+#      task-def ARNs
 #   6. wait for every service to stabilize; fail on a rolled-back deployment
 #
 # Images are addressed by DIGEST from step 2 onward, so the bytes that were
@@ -295,7 +297,9 @@ for pair in \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_app_service_name):$(td_arn app_task_definition_arn)" \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_jackson_service_name):$(td_arn jackson_task_definition_arn)" \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_audit_outbox_worker_service_name):$(td_arn audit_outbox_worker_task_definition_arn)" \
-  "$(terraform -chdir="$TF_DIR" output -raw ecs_retention_gc_worker_service_name):$(td_arn retention_gc_worker_task_definition_arn)"; do
+  "$(terraform -chdir="$TF_DIR" output -raw ecs_retention_gc_worker_service_name):$(td_arn retention_gc_worker_task_definition_arn)" \
+  "$(terraform -chdir="$TF_DIR" output -raw ecs_audit_anchor_publisher_service_name):$(td_arn audit_anchor_publisher_task_definition_arn)" \
+  "$(terraform -chdir="$TF_DIR" output -raw ecs_audit_chain_verify_worker_service_name):$(td_arn audit_chain_verify_worker_task_definition_arn)"; do
   SVC="${pair%%:*}"; TD="${pair#*:}"
   BEFORE=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --region "$REGION" \
     --query 'services[0].taskDefinition' --output text)
@@ -314,7 +318,7 @@ done
 # believe the stack is consistent.
 #
 # Defined BEFORE the update loop and armed via trap so that a failure of the
-# update-service call ITSELF (e.g. the 2nd of 4 throttled/denied) still triggers
+# update-service call ITSELF (e.g. the 2nd of 6 throttled/denied) still triggers
 # compensation; under `set -e` the script would otherwise exit at that line and
 # never reach a rollback defined further down.
 ROLLBACK_DONE=false

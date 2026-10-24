@@ -17,9 +17,12 @@
  * the GUCs the wrappers wrote and answers `current_setting` reads from them.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { format } from "node:util";
 import { runTick, verifyChainUnderSentinelGrant } from "../audit-chain-verify-worker.ts";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { matchesFilterPattern } from "@/__tests__/helpers/cloudwatch-filter-pattern";
+import { TerraformConfig, TERRAFORM_DIR, plain } from "@/__tests__/helpers/hcl-subset";
 
 const HEARTBEAT = "audit-chain-verify-heartbeat";
 const SENTINEL_GRANT = BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ;
@@ -33,7 +36,11 @@ function errLineIncludes(errLines, text) {
   return errLines.some((args) => args.some((a) => String(a).includes(text)));
 }
 
-/** The `verify threw` line for `tenantId`, or undefined. */
+/**
+ * The `verify threw` line for `tenantId`, or undefined: [fmt, tenantId,
+ * errorLogFields, detail], where detail is the worker's own precondition
+ * message or null.
+ */
 function threwFor(errLines, tenantId) {
   return errLines.find(
     ([fmt, id]) => String(fmt).includes("verify threw") && id === tenantId,
@@ -71,6 +78,8 @@ function parseGucWrites(strings, values) {
  * @param opts.fixtures { [tenantId]: { anchors?, rows?, chainedRows? } } — what
  *   the anchor read, walk and chained-row count return for the tenant bound as
  *   $1. A tenant without an entry has no anchor and no chained rows.
+ * @param opts.openErrors { [tenantId]: Error } — what that tenant's transaction
+ *   throws at the open, as a driver error would reach runTick
  * @param opts.reads { [tenantId]: { tenantIdSetting?, bypassState? } } — what
  *   that tenant's transaction reports instead of what it wrote:
  *   `tenantIdSetting` replaces current_setting('app.tenant_id') on the tenant
@@ -82,6 +91,7 @@ function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
     enumerationRejects = false,
     fixtures = {},
     reads = {},
+    openErrors = {},
   } = opts;
   /** One record per $transaction call, in call order. */
   const transactions = [];
@@ -97,6 +107,7 @@ function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
       if (label !== ENUMERATION && failFor.includes(label)) {
         throw new Error(`RLS_CONTEXT_MISSING: app.tenant_id is null, expected ${label}`);
       }
+      if (label in openErrors) throw openErrors[label];
       const read = reads[label] ?? {};
       const tx = {
         // setBypassGucs / setTenantGucs write through the tagged form.
@@ -302,12 +313,35 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
 
     const threw = threwFor(errLines, t);
     expect(threw).toBeDefined();
-    expect(String(threw[2])).toMatch(/RLS_CONTEXT_MISSING/);
+    expect(threw[2]).toEqual({ name: "ChainVerifyPreconditionError", code: "RLS_CONTEXT_MISSING" });
+    expect(String(threw[3])).toMatch(/RLS_CONTEXT_MISSING/);
     // No read ran on a context that failed its precondition.
     expect(txOf(prisma, t).queried).toEqual([]);
     // And it counts as a coverage shortfall rather than a silent pass.
     const beat = heartbeatOf(logLines);
     expect(beat.erroredTenantCount).toBe(1);
+  });
+
+  it("prints any other thrown error as its name and code, never its message", async () => {
+    // A driver or Prisma message can carry a connection target or a query
+    // with its bound parameters; only the worker's own preconditions print one.
+    const t = "66666666-6666-4666-8666-666666666666";
+    const leak = "postgresql://verify_role:s3cr3t@db.internal:5432/passwd_sso";
+    const err = Object.assign(new Error(`connect failed: ${leak}`), { code: "ECONNREFUSED" });
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t], [], { openErrors: { [t]: err } });
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, t]);
+
+    await runTick(prisma, new Map());
+
+    const threw = threwFor(errLines, t);
+    expect(threw).toBeDefined();
+    expect(threw[2]).toEqual({ name: "Error", code: "ECONNREFUSED" });
+    expect(threw[3]).toBeNull();
+    // As console.error prints it.
+    const printed = errLines.map((args) => format(...args)).join("\n");
+    expect(printed).toContain(`tenant=${t} verify threw: error={"name":"Error","code":"ECONNREFUSED"}`);
+    expect(printed).not.toContain(leak);
+    expect(heartbeatOf(logLines).erroredTenantCount).toBe(1);
   });
 
   it("forwards an explicit transaction budget, not Prisma's 5s default", async () => {
@@ -499,7 +533,8 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     function missingContextMessage(prisma) {
       const threw = threwFor(errLines, SYSTEM_TENANT_ID);
       expect(threw).toBeDefined();
-      const message = String(threw[2]);
+      expect(threw[2]).toEqual({ name: "ChainVerifyPreconditionError", code: "BYPASS_CONTEXT_MISSING" });
+      const message = String(threw[3]);
       expect(message).toContain("BYPASS_CONTEXT_MISSING");
       expect(txOf(prisma, SYSTEM_TENANT_ID).queried).toEqual([]);
       const beat = heartbeatOf(logLines);
@@ -557,7 +592,8 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
       const beat = heartbeatOf(logLines);
       expect(beat.erroredTenantCount).toBe(1);
       expect(beat.verifiedTenantCount).toBe(0);
-      return String(threw[2]);
+      expect(threw[2]).toEqual({ name: "ChainVerifyPreconditionError", code: "BYPASS_SCOPE_VIOLATION" });
+      return String(threw[3]);
     }
 
     it("throws on a foreign anchor row", async () => {
@@ -644,5 +680,72 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
       expect(beat.erroredTenantCount).toBe(0);
       expect(beat.failedTenantCount).toBe(1);
     });
+  });
+});
+
+// The heartbeat against the CloudWatch filters that count it
+// (infra/terraform/monitoring.tf), as Terraform renders them: each matches the
+// line a tick of that kind really emits, and not the others.
+describe("audit-chain-verify heartbeat vs its metric filters", () => {
+  const tf = new TerraformConfig(TERRAFORM_DIR);
+  const counts = plain(tf.local("audit_chain_verify_count_alarms"));
+  const countPattern = (key) =>
+    String(tf.attr(tf.resource("aws_cloudwatch_log_metric_filter", "audit_chain_verify_count"), "pattern", { each: { key, value: counts[key] } }));
+  const heartbeatPattern = String(tf.attr(tf.resource("aws_cloudwatch_log_metric_filter", "audit_chain_verify_heartbeat"), "pattern"));
+
+  const healthyT = "11111111-1111-4111-8111-111111111111";
+  const tamperedT = "88888888-8888-4888-8888-888888888888";
+  /** The heartbeat of one tick over `prisma`, as the JSON line it logs. */
+  async function beatOf(prisma, order) {
+    const logged = [];
+    vi.spyOn(console, "log").mockImplementation((...a) => logged.push(a.map(String).join(" ")));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      trackTenantOrder(prisma, order);
+      await runTick(prisma, new Map());
+    } finally {
+      vi.restoreAllMocks();
+      currentTenantId = null;
+    }
+    return heartbeatOf(logged);
+  }
+
+  const ticks = {};
+  beforeEach(async () => {
+    ticks.healthy = await beatOf(makeStubPrisma([SYSTEM_TENANT_ID, healthyT]), [SYSTEM_TENANT_ID, healthyT]);
+    ticks.errored = await beatOf(makeStubPrisma([SYSTEM_TENANT_ID, healthyT], [healthyT]), [SYSTEM_TENANT_ID, healthyT]);
+    ticks.failed = await beatOf(
+      makeStubPrisma([SYSTEM_TENANT_ID, tamperedT], [], { fixtures: { [tamperedT]: { anchors: [anchor(tamperedT, 1)] } } }),
+      [SYSTEM_TENANT_ID, tamperedT],
+    );
+  });
+
+  const matching = (p) => Object.keys(ticks).filter((k) => matchesFilterPattern(p, ticks[k])).sort();
+
+  it("counts every tick's heartbeat for the absence alarm, whatever it found", () => {
+    expect(matching(heartbeatPattern)).toEqual(["errored", "failed", "healthy"]);
+  });
+
+  it("raises the errored filter only for a tick with a tenant that failed to verify", () => {
+    expect(matching(countPattern("errored"))).toEqual(["errored"]);
+  });
+
+  it("raises the failed filter only for a tick with a tampered chain", () => {
+    expect(matching(countPattern("failed"))).toEqual(["failed"]);
+  });
+
+  it("alarms on the heartbeat's absence for 2 h, silence breaching", () => {
+    const alarm = tf.resource("aws_cloudwatch_metric_alarm", "audit_chain_verify_heartbeat_absent");
+    expect(tf.attr(alarm, "treat_missing_data")).toBe("breaching");
+    expect(Number(tf.attr(alarm, "period")) * Number(tf.attr(alarm, "evaluation_periods"))).toBe(2 * 3600);
+  });
+
+  it("binds the filters to the verify worker's log group", () => {
+    for (const name of ["audit_chain_verify_heartbeat", "audit_chain_verify_count"]) {
+      const filter = tf.resource("aws_cloudwatch_log_metric_filter", name);
+      expect(String(tf.attr(filter, "log_group_name", { each: { key: "errored", value: "erroredTenantCount" } }))).toBe(
+        "<ref:aws_cloudwatch_log_group.audit_chain_verify_worker.name>",
+      );
+    }
   });
 });

@@ -119,6 +119,22 @@ export interface VerifyDeps {
   };
 }
 
+/**
+ * A read-path precondition this worker asserts. Its message is built here from
+ * tenant ids and GUC values only, so it is printed with the `verify threw`
+ * line; any other error is reduced to errorLogFields, since a driver or Prisma
+ * message can carry a connection target or a query with its parameters.
+ */
+class ChainVerifyPreconditionError extends Error {
+  constructor(
+    readonly code: "RLS_CONTEXT_MISSING" | "BYPASS_CONTEXT_MISSING" | "BYPASS_SCOPE_VIOLATION",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ChainVerifyPreconditionError";
+  }
+}
+
 type ChainRead =
   | { kind: "no-anchor"; chainedRows: number }
   | { kind: "walk"; anchorSeq: number; anchorPrevHash: Uint8Array; rows: ChainRowRaw[] };
@@ -141,7 +157,8 @@ async function readChain(tx: Prisma.TransactionClient, tenantId: string, checkSc
     const foreign = anchors.find((a) => a.tenant_id !== tenantId);
     if (foreign) throw scopeViolation(tenantId, foreign.tenant_id, "audit_chain_anchors");
     if (anchors.length > 1) {
-      throw new Error(
+      throw new ChainVerifyPreconditionError(
+        "BYPASS_SCOPE_VIOLATION",
         `BYPASS_SCOPE_VIOLATION: audit_chain_anchors returned ${anchors.length} rows ` +
           `while verifying ${JSON.stringify(tenantId)}, expected at most 1`,
       );
@@ -191,7 +208,8 @@ async function readChain(tx: Prisma.TransactionClient, tenantId: string, checkSc
 
 /** Carries tenant ids only — never a row id or metadata; it reaches stderr. */
 function scopeViolation(expected: string, offending: string, table: string): Error {
-  return new Error(
+  return new ChainVerifyPreconditionError(
+    "BYPASS_SCOPE_VIOLATION",
     `BYPASS_SCOPE_VIOLATION: ${table} returned a row of tenant ${JSON.stringify(offending)} ` +
       `while verifying ${JSON.stringify(expected)}`,
   );
@@ -277,7 +295,8 @@ export async function verifyTenantChain(
         Array<{ tenant_id: string | null }>
       >(`SELECT current_setting('app.tenant_id', true) AS tenant_id`);
       if (guc?.tenant_id !== tenantId) {
-        throw new Error(
+        throw new ChainVerifyPreconditionError(
+          "RLS_CONTEXT_MISSING",
           `RLS_CONTEXT_MISSING: app.tenant_id is ${JSON.stringify(
             guc?.tenant_id ?? null,
           )}, expected ${tenantId} — reads would silently return zero rows`,
@@ -318,7 +337,8 @@ export async function verifyChainUnderSentinelGrant(
         state.purpose !== expected.purpose ||
         state.tables !== expected.tables
       ) {
-        throw new Error(
+        throw new ChainVerifyPreconditionError(
+          "BYPASS_CONTEXT_MISSING",
           `BYPASS_CONTEXT_MISSING: bypass_rls=${JSON.stringify(state?.bypassRls ?? null)} ` +
             `purpose=${JSON.stringify(state?.purpose ?? null)} tables=${JSON.stringify(state?.tables ?? null)}, ` +
             `expected the AUDIT_CHAIN_VERIFY_SENTINEL_READ grant — reads would be inert or mis-scoped`,
@@ -448,9 +468,10 @@ export async function runTick(
       errored++;
       erroredTenantIds.push(tenantId);
       logger.error(
-        "audit-chain-verify-worker: tenant=%s verify threw: %O",
+        "audit-chain-verify-worker: tenant=%s verify threw: error=%j detail=%s",
         tenantId,
-        err,
+        errorLogFields(err),
+        err instanceof ChainVerifyPreconditionError ? err.message : null,
       );
     }
   }
@@ -499,13 +520,73 @@ export async function runTick(
   );
 }
 
+export interface EnvIssue {
+  path: string;
+  code: "missing" | "invalid_url" | "not_positive_finite" | "not_positive_integer";
+}
+
+/**
+ * The checks --validate-env-only runs, and main() runs before connecting. An
+ * issue names the variable and what is wrong, never the value: the URL carries
+ * a password.
+ */
+export function validateWorkerEnv(env: NodeJS.ProcessEnv): EnvIssue[] {
+  const issues: EnvIssue[] = [];
+  const urlName = env.AUDIT_CHAIN_VERIFY_DATABASE_URL !== undefined ? "AUDIT_CHAIN_VERIFY_DATABASE_URL" : "DATABASE_URL";
+  const url = env[urlName];
+  if (!url) {
+    issues.push({ path: "AUDIT_CHAIN_VERIFY_DATABASE_URL", code: "missing" });
+  } else if (!URL.canParse(url)) {
+    issues.push({ path: urlName, code: "invalid_url" });
+  }
+  // Each value as the module-level constants read it. A NaN tick sleeps 0 ms
+  // and spins; a zero or negative one does the same.
+  const settings: Array<[string, number]> = [
+    ["AUDIT_CHAIN_VERIFY_TICK_INTERVAL_MS", TICK_INTERVAL_MS],
+    ["AUDIT_CHAIN_VERIFY_REALERT_MS", HYSTERESIS_REALERT_MS],
+    ["AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS", CHAIN_VERIFY_TX_TIMEOUT_MS],
+  ];
+  for (const [path, value] of settings) {
+    if (!Number.isFinite(value) || value <= 0) issues.push({ path, code: "not_positive_finite" });
+  }
+  // A row count is a SQL LIMIT, which refuses a fraction on every tick.
+  if (!Number.isSafeInteger(MAX_ROWS_PER_TENANT) || MAX_ROWS_PER_TENANT <= 0) {
+    issues.push({ path: "AUDIT_CHAIN_VERIFY_MAX_ROWS", code: "not_positive_integer" });
+  }
+  return issues;
+}
+
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+export function interruptibleSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
 async function main(): Promise<void> {
-  const databaseUrl =
-    process.env.AUDIT_CHAIN_VERIFY_DATABASE_URL ?? process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error("AUDIT_CHAIN_VERIFY_DATABASE_URL or DATABASE_URL required");
+  const issues = validateWorkerEnv(process.env);
+  if (issues.length > 0) {
+    for (const issue of issues) {
+      console.error(JSON.stringify({ level: "error", msg: "env validation failed", ...issue }));
+    }
     process.exit(1);
   }
+  if (process.argv.includes("--validate-env-only")) {
+    console.log(JSON.stringify({ level: "info", msg: "env validation passed" }));
+    process.exit(0);
+  }
+  const databaseUrl = process.env.AUDIT_CHAIN_VERIFY_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!databaseUrl) process.exit(1); // refused by validateWorkerEnv above
 
   registerBypassNoticeSink(stderrBypassNoticeSink);
   const pool = createPool({ connectionString: databaseUrl });
@@ -513,11 +594,16 @@ async function main(): Promise<void> {
 
   const states = new Map<string, TenantState>();
   const stop = { value: false };
+  // Aborted on a signal so the hour-long sleep between ticks ends at once:
+  // ECS sends SIGTERM and SIGKILLs 30 s later.
+  const wake = new AbortController();
   process.on("SIGTERM", () => {
     stop.value = true;
+    wake.abort();
   });
   process.on("SIGINT", () => {
     stop.value = true;
+    wake.abort();
   });
 
   console.log(
@@ -528,9 +614,9 @@ async function main(): Promise<void> {
     try {
       await runTick(prisma, states);
     } catch (err) {
-      console.error("audit-chain-verify-worker: tick threw:", err);
+      console.error("audit-chain-verify-worker: tick threw: error=%j", errorLogFields(err));
     }
-    await new Promise((r) => setTimeout(r, TICK_INTERVAL_MS));
+    await interruptibleSleep(TICK_INTERVAL_MS, wake.signal);
   }
 
   await prisma.$disconnect();
@@ -544,7 +630,7 @@ if (
     process.argv[1].endsWith("audit-chain-verify-worker.js"))
 ) {
   main().catch((err) => {
-    console.error(err);
+    console.error("audit-chain-verify-worker: fatal: error=%j", errorLogFields(err));
     process.exit(1);
   });
 }

@@ -100,26 +100,49 @@ resource "aws_iam_role_policy" "ecs_migrate_exec_ssm" {
   })
 }
 
-# Anchors are evidence: PUT and GET, deliberately NO s3:DeleteObject. Combined
-# with bucket versioning, a compromised app task can neither erase a published
-# anchor nor overwrite one destructively — which is the whole point of anchoring
-# the chain outside the database.
-resource "aws_iam_role_policy" "ecs_audit_anchor_s3" {
+data "aws_caller_identity" "current" {}
+
+################################################################################
+# Audit-anchor publisher task role. Its OWN role, not the shared ecs_task one:
+# the anchors bucket policy (storage.tf) denies s3:PutObject on the manifest key
+# shape to every principal but this role's ARN, and the replication write
+# actions to every principal, so a compromised app or worker task — which runs
+# as ecs_task — cannot write a manifest by either route. The verify worker has
+# no task role at all.
+################################################################################
+
+# Assumable only by ECS tasks in this account (the confused-deputy guard). That
+# does not bound which task: a principal allowed iam:PassRole on this role can
+# run any task with it as a taskRoleArn override, which the EventBridge rule
+# audit_anchor_publisher_role_override (monitoring.tf) surfaces.
+resource "aws_iam_role" "ecs_audit_anchor_publisher_task" {
+  name = "${local.name_prefix}-ecs-audit-anchor-publisher-task"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+      Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }
+    }]
+  })
+  tags = local.tags
+}
+
+# PUT with its lock headers (which needs PutObjectRetention too), under the
+# prefix only. No GET, LIST or DELETE: the publisher reads its previous
+# manifest pointer from the database, not the bucket.
+resource "aws_iam_role_policy" "ecs_audit_anchor_publisher_s3" {
   count = var.enable_s3_audit_anchors ? 1 : 0
-  name  = "${local.name_prefix}-ecs-audit-anchor-s3"
-  role  = aws_iam_role.ecs_task.id
+  name  = "${local.name_prefix}-ecs-audit-anchor-publisher-s3"
+  role  = aws_iam_role.ecs_audit_anchor_publisher_task.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["s3:PutObject", "s3:GetObject"]
-        Resource = "${aws_s3_bucket.audit_anchors[0].arn}/*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
-        Resource = aws_s3_bucket.audit_anchors[0].arn
+        Action   = ["s3:PutObject", "s3:PutObjectRetention"]
+        Resource = "${aws_s3_bucket.audit_anchors[0].arn}/${local.audit_anchor_prefix}/*"
       },
     ]
   })

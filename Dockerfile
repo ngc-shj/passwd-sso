@@ -143,6 +143,20 @@ RUN npx esbuild scripts/retention-gc-worker.ts \
       --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
       --tsconfig=tsconfig.json \
       --alias:@=./src
+# @aws-sdk/client-s3 is deliberately NOT external: the runner stage ships no
+# copy of it, so the S3 destination works only because esbuild inlines it.
+RUN npx esbuild scripts/audit-anchor-publisher.ts \
+      --bundle --platform=node --target=node24 \
+      --outfile=dist/audit-anchor-publisher.js \
+      --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
+      --tsconfig=tsconfig.json \
+      --alias:@=./src
+RUN npx esbuild scripts/audit-chain-verify-worker.ts \
+      --bundle --platform=node --target=node24 \
+      --outfile=dist/audit-chain-verify-worker.js \
+      --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
+      --tsconfig=tsconfig.json \
+      --alias:@=./src
 
 # Stage 3: Production image
 FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS runner
@@ -215,7 +229,7 @@ RUN TAR_VER=7.5.21 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
     BE_VER=5.0.12 && \
-    UNDICI_VER=6.28.1 && \
+    UNDICI_VER=6.29.1 && \
     IPADDR_VER=10.4.0 && \
     PACOTE_VER=21.5.1 && \
     NPM_VER=11.16.0 && \
@@ -384,6 +398,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/lib/statement-text-settin
 COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js
 # Retention-GC worker (bundled by esbuild; pg + deps are external)
 COPY --from=builder --chown=nextjs:nodejs /app/dist/retention-gc-worker.js ./dist/retention-gc-worker.js
+# Audit-anchor publisher (bundled by esbuild; pg + deps are external, the S3 SDK is inlined)
+COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-anchor-publisher.js ./dist/audit-anchor-publisher.js
+# Audit-chain verify worker (bundled by esbuild; pg + deps are external)
+COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-chain-verify-worker.js ./dist/audit-chain-verify-worker.js
 COPY --from=builder /app/node_modules/pg ./node_modules/pg
 COPY --from=builder /app/node_modules/pg-connection-string ./node_modules/pg-connection-string
 COPY --from=builder /app/node_modules/pg-int8 ./node_modules/pg-int8

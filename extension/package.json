@@ -22,7 +22,7 @@
     "@crxjs/vite-plugin": {
       "rollup": "^2.80.0"
     },
-    "undici": ">=7.29.1 <8"
+    "undici": ">=7.30.1 <8"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^3.0.0",

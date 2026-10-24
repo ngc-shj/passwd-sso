@@ -9,7 +9,8 @@
  *   3. DESTINATION_DIVERGENCE adversarial — two runs upload different bytes;
  *      verify the verifier detects divergence via SHA-256 comparison.
  *      NOTE: this test is at the destination layer; for a full verifier-layer
- *      DESTINATION_DIVERGENCE test, see TODO in the test file for audit-anchor-publisher.
+ *      DESTINATION_DIVERGENCE test, see the DESTINATION_DIVERGENCE it.todo in
+ *      audit-anchor-publisher.integration.test.ts.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
@@ -251,7 +252,7 @@ describe("GitHubReleaseDestination — fake server integration", () => {
     //   3. Run the verifier which cross-checks primary vs secondary SHA-256.
     //   4. Assert the verifier returns a DESTINATION_DIVERGENCE error.
     // This requires the verifier CLI sub-command which is not yet implemented.
-    // Tracked as a follow-up item in audit-anchor-publisher.integration.test.ts.
+    // Tracked as the DESTINATION_DIVERGENCE it.todo in audit-anchor-publisher.integration.test.ts.
 
     const artifactBytes1 = Buffer.from("original-signed-manifest-bytes", "utf-8");
     const artifactBytes2 = Buffer.from("tampered-manifest-bytes-after-signing", "utf-8");

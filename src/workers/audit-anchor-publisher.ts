@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod/v4";
-import type { PrismaClient } from "@prisma/client";
+import type { AuditAction, Prisma, PrismaClient } from "@prisma/client";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import {
@@ -9,9 +9,16 @@ import {
   ACTOR_TYPE,
 } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
-import { BYPASS_GRANT, setBypassGucs } from "@/lib/tenant-rls-grants";
+import { MS_PER_SECOND } from "@/lib/constants/time";
+import { BYPASS_GRANT, setBypassGucs, setLockTimeout } from "@/lib/tenant-rls-grants";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { createPool, createPrismaClient } from "@/lib/db/pool-factory";
-import { logAuditAsync } from "@/lib/audit/audit";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
+// Not `@/lib/audit/audit`: that module imports `@/lib/prisma`, which builds the
+// application pool at import and throws without DATABASE_URL. The publisher
+// runs on its own role and URL, so its module graph must not reach it (C1).
+import { buildOutboxPayload, type AuditLogParams } from "@/lib/audit/audit-payload";
+import { auditLogger, deadLetterLogger } from "@/lib/audit/audit-logger";
 import {
   buildManifest,
   canonicalize,
@@ -33,14 +40,90 @@ export class DeploymentIdMismatchError extends Error {
   }
 }
 
+/**
+ * The boundary marker holds no timestamp in the form a publish writes. It
+ * cannot say which boundaries are published, so the run fails closed rather
+ * than reading it as published or as absent. Its `code` is what the failure
+ * reason carries.
+ */
+class BoundaryMarkerUnreadableError extends Error {
+  readonly code = "BOUNDARY_MARKER_UNREADABLE";
+  constructor() {
+    super("audit anchor boundary marker is not an ISO-8601 timestamp");
+    this.name = "BoundaryMarkerUnreadableError";
+  }
+}
+
+/**
+ * The boundary marker is past the wall clock's current boundary: no publish
+ * this clock allows wrote it. Read as published, it would skip every boundary
+ * until its date, unalarmed, so the run fails closed. Its `code` is what the
+ * failure reason carries.
+ */
+class BoundaryMarkerAheadError extends Error {
+  readonly code = "BOUNDARY_MARKER_AHEAD";
+  constructor() {
+    super("audit anchor boundary marker is past the current cadence boundary");
+    this.name = "BoundaryMarkerAheadError";
+  }
+}
+
+/** The upload bound fired. Its `code` is what the failure reason carries. */
+class UploadTimeoutError extends Error {
+  readonly code = "UPLOAD_TIMEOUT";
+  constructor() {
+    super("anchor upload exceeded its time bound");
+    this.name = "UploadTimeoutError";
+  }
+}
+
+// --- Constants ---
+
+/** The publish lock's key, hashed by `advisoryXactLock`. */
+export const ADVISORY_LOCK_KEY = "audit-anchor-publish";
+const SQLSTATE_LOCK_NOT_AVAILABLE = "55P03";
+
+export const SETTING_DEPLOYMENT_ID = "audit_anchor_deployment_id";
+export const SETTING_PREVIOUS_MANIFEST = "audit_anchor_previous_manifest";
+export const SETTING_LAST_PUBLISHED_BOUNDARY = "audit_anchor_last_published_boundary";
+export const SETTING_UPLOAD_ATTEMPTS = "audit_anchor_upload_attempts";
+
+/** Runs per boundary that may reach the upload; the next one reports the cap. */
+export const AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP = 3;
+
+export const DEFAULT_LOCK_TIMEOUT_MS = 10 * MS_PER_SECOND;
+export const DEFAULT_UPLOAD_TIMEOUT_MS = 60 * MS_PER_SECOND;
+export const DEFAULT_TX_TIMEOUT_MS = 90 * MS_PER_SECOND;
+
+/** The dead-letter reason for an emit whose outbox write failed. */
+export const PUBLISHER_AUDIT_DEAD_LETTER_REASON = "anchor_publisher_emit_failed";
+
 // --- Public types ---
 
+/** `null` only where the run failed before it could read the tenants. */
+type TenantCount = { chainEnabledTenantCount: number | null };
+
+/** Where a failed run stopped. */
+export type FailureStage = "before_upload" | "upload" | "after_upload";
+
 export type CadenceOutcome =
-  | { kind: "published"; manifestSha256: string; destinations: string[]; tenantsCount: number }
-  | { kind: "lock_held"; reason: "LOCK_HELD_BY_OTHER_INSTANCE" }
-  | { kind: "skipped_no_tenants"; reason: "NO_CHAIN_ENABLED_TENANTS" }
-  | { kind: "skipped_paused"; reason: "PUBLISH_PAUSED_ACTIVE" }
-  | { kind: "failed"; reason: string };
+  | ({ kind: "published"; manifestSha256: string; destinations: string[]; tenantsCount: number } & TenantCount)
+  | ({ kind: "lock_held"; reason: "LOCK_HELD_BY_OTHER_INSTANCE" } & TenantCount)
+  | ({ kind: "skipped_already_published"; reason: "BOUNDARY_ALREADY_PUBLISHED" } & TenantCount)
+  | ({ kind: "skipped_no_tenants"; reason: "NO_CHAIN_ENABLED_TENANTS"; everChainEnabled: boolean } & TenantCount)
+  | ({ kind: "upload_cap_reached"; reason: "UPLOAD_ATTEMPT_CAP_REACHED"; attempts: number } & TenantCount)
+  | ({ kind: "failed"; reason: string; stage: FailureStage } & TenantCount);
+
+/**
+ * Test seams. Production passes none. `inTx` runs inside the publish
+ * transaction once the advisory lock is held; `afterUpload` runs after every
+ * destination accepted the artifact and before the commit's writes, so a
+ * throw there is a commit lost after the upload.
+ */
+export type PublisherHooks = {
+  inTx?: (tx: Prisma.TransactionClient) => Promise<void>;
+  afterUpload?: () => Promise<void>;
+};
 
 export type PublisherConfig = {
   databaseUrl: string;
@@ -51,7 +134,15 @@ export type PublisherConfig = {
   destinations: AnchorDestination[];
   cadenceMs: number;
   publishOffsetMs: number;
-  pauseCapFactor: number;
+  /** `SET LOCAL lock_timeout` before the advisory lock. Default 10 s. */
+  lockTimeoutMs?: number;
+  /** Bound on the upload to every destination, as a whole. Default 60 s. */
+  uploadTimeoutMs?: number;
+  /** Bound on each transaction. Default 90 s. */
+  txTimeoutMs?: number;
+  /** Wall clock in epoch ms. Default `Date.now`. */
+  now?: () => number;
+  hooks?: PublisherHooks;
 };
 
 // --- Cadence math ---
@@ -71,6 +162,135 @@ export function previousCadenceBoundary(now: Date, cadenceMs: number, offsetMs: 
   return new Date(current.getTime() - cadenceMs);
 }
 
+/**
+ * The manifest's object key, `YYYY-MM-DD.kid-<kid>.jws`. The single source of
+ * the key shape: the anchors bucket policy's manifest pattern is pinned to it.
+ */
+export function buildManifestArtifactKey(boundary: Date, kid: string): string {
+  return `${boundary.toISOString().slice(0, 10)}.kid-${kid}.jws`;
+}
+
+// --- Internals ---
+
+const previousManifestSchema = z.object({
+  uri: z.string().url(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
+const uploadAttemptsSchema = z.object({
+  boundary: z.string(),
+  count: z.number().int().positive(),
+});
+
+const UNREADABLE = Symbol("unreadable");
+
+function parseUploadAttempts(raw: string): z.infer<typeof uploadAttemptsSchema> | typeof UNREADABLE {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return UNREADABLE;
+  }
+  const parsed = uploadAttemptsSchema.safeParse(json);
+  return parsed.success ? parsed.data : UNREADABLE;
+}
+
+type PendingEmit = { action: AuditAction; metadata: Record<string, unknown> };
+
+type AttemptGate =
+  | { kind: "already_published"; chainEnabledTenantCount: number }
+  | { kind: "no_tenants"; everChainEnabled: boolean }
+  | { kind: "counted"; attempts: number; countUnreadable: boolean; chainEnabledTenantCount: number };
+
+class LockHeldSignal {
+  constructor(readonly chainEnabledTenantCount: number | null) {}
+}
+
+function isLockNotAvailable(err: unknown): boolean {
+  return pgErrorCode(err) === SQLSTATE_LOCK_NOT_AVAILABLE;
+}
+
+/** Reject when `signal` aborts, whether or not `work` honours it. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+async function chainEnabledTenantIds(tx: Prisma.TransactionClient): Promise<string[]> {
+  const tenants = await tx.tenant.findMany({
+    where: { auditChainEnabled: true },
+    select: { id: true },
+  });
+  return tenants.map((t) => t.id);
+}
+
+/** `value` as the epoch ms a publish wrote it from, or null when it is not one. */
+function parseMarker(value: string): number | null {
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms) || new Date(ms).toISOString() !== value) return null;
+  return ms;
+}
+
+/**
+ * Whether `boundary` is already published. The marker decides, and it is
+ * monotonic: a marker at or past the boundary means published, so a marker a
+ * later boundary wrote never lets an earlier one publish (and write the marker
+ * backwards). One past the boundary is reported as `stale_boundary`. A marker
+ * that does not parse throws BoundaryMarkerUnreadableError; one past
+ * `wallBoundaryMs`, the wall clock's current boundary, throws
+ * BoundaryMarkerAheadError — read as published it would skip every boundary
+ * up to its own. An install that predates the marker has none, and there the
+ * anchors' `last_published_at` stands in, so an upgrade does not republish the
+ * boundary it already published.
+ */
+async function isBoundaryPublished(
+  tx: Prisma.TransactionClient,
+  boundary: Date,
+  tenantIds: string[],
+  wallBoundaryMs: number,
+): Promise<boolean> {
+  const marker = await tx.systemSetting.findUnique({
+    where: { key: SETTING_LAST_PUBLISHED_BOUNDARY },
+  });
+  if (marker) {
+    const markerMs = parseMarker(marker.value);
+    if (markerMs === null) throw new BoundaryMarkerUnreadableError();
+    if (markerMs > wallBoundaryMs) throw new BoundaryMarkerAheadError();
+    if (markerMs > boundary.getTime()) {
+      getLogger().warn(
+        {
+          boundary: boundary.toISOString(),
+          marker: marker.value,
+          _logType: "audit-anchor-publisher.stale_boundary",
+        },
+        "audit-anchor-publisher.stale_boundary",
+      );
+    }
+    return markerMs >= boundary.getTime();
+  }
+  if (tenantIds.length === 0) return false;
+  const rows = await tx.$queryRaw<{ max_published: Date | null }[]>`
+    SELECT MAX(last_published_at) AS max_published
+    FROM audit_chain_anchors
+    WHERE tenant_id = ANY(${tenantIds}::uuid[])
+  `;
+  const maxPublished = rows[0]?.max_published;
+  return maxPublished != null && maxPublished.getTime() >= boundary.getTime();
+}
+
 // --- Publisher class ---
 
 export class AuditAnchorPublisher {
@@ -82,6 +302,89 @@ export class AuditAnchorPublisher {
     this.config = deps.config;
   }
 
+  private get lockTimeoutMs(): number {
+    return this.config.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+  }
+
+  private get txOptions(): { timeout: number } {
+    return { timeout: this.config.txTimeoutMs ?? DEFAULT_TX_TIMEOUT_MS };
+  }
+
+  private wallClock(): Date {
+    return new Date((this.config.now ?? Date.now)());
+  }
+
+  /** The wall clock's current boundary. */
+  private wallClockBoundaryMs(): number {
+    return currentCadenceBoundary(this.wallClock(), this.config.cadenceMs, this.config.publishOffsetMs).getTime();
+  }
+
+  /**
+   * Write one audit row through the outbox on its own transaction. Never
+   * throws: the structured line goes out first, as `logAuditAsync` emits it,
+   * and a failed write goes to the dead-letter stream.
+   *
+   * `createMany`, not `create`: it issues no RETURNING, so the role's INSERT
+   * on `audit_outbox` suffices. The bypass is the grant naming `auditOutbox`
+   * alone, with no tenant id set, so the grant is what admits the row.
+   */
+  private async emitAudit(action: AuditAction, metadata: Record<string, unknown>): Promise<void> {
+    const params: AuditLogParams = {
+      scope: AUDIT_SCOPE.TENANT,
+      action,
+      userId: SYSTEM_ACTOR_ID,
+      actorType: ACTOR_TYPE.SYSTEM,
+      tenantId: SYSTEM_TENANT_ID,
+      metadata,
+    };
+    const payload = buildOutboxPayload(params);
+
+    try {
+      auditLogger.info(
+        {
+          audit: {
+            scope: payload.scope,
+            action: payload.action,
+            userId: payload.userId,
+            actorType: payload.actorType,
+            serviceAccountId: payload.serviceAccountId,
+            tenantId: SYSTEM_TENANT_ID,
+            teamId: payload.teamId,
+            targetType: payload.targetType,
+            targetId: payload.targetId,
+            metadata: payload.metadata,
+            ip: payload.ip,
+            userAgent: payload.userAgent,
+          },
+        },
+        `audit.${payload.action}`,
+      );
+    } catch {
+      // Never let forwarding break the publisher
+    }
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await setBypassGucs(tx, BYPASS_GRANT.AUDIT_WRITE_DIRECT_OUTBOX);
+        await tx.auditOutbox.createMany({
+          data: [{ tenantId: SYSTEM_TENANT_ID, payload: payload as unknown as Prisma.InputJsonValue }],
+        });
+      });
+    } catch (err) {
+      deadLetterLogger.warn(
+        {
+          scope: params.scope,
+          action: params.action,
+          userId: params.userId,
+          tenantId: SYSTEM_TENANT_ID,
+          reason: PUBLISHER_AUDIT_DEAD_LETTER_REASON,
+          error: errorLogFields(err),
+        },
+        "audit.dead_letter",
+      );
+    }
+  }
+
   /**
    * Boot validation: enforce DEPLOYMENT_ID against system_settings.
    * Call once at startup before runCadence.
@@ -89,181 +392,266 @@ export class AuditAnchorPublisher {
    */
   async ensureDeploymentIdMatch(): Promise<void> {
     const { deploymentId } = this.config;
-    const prisma = this.prisma;
 
-    await prisma.$transaction(async (tx) => {
+    const stored = await this.prisma.$transaction(async (tx) => {
       await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
 
       // Insert if not exists
       await tx.$executeRaw`
         INSERT INTO system_settings (key, value, updated_at)
-        VALUES ('audit_anchor_deployment_id', ${deploymentId}, now())
+        VALUES (${SETTING_DEPLOYMENT_ID}, ${deploymentId}, now())
         ON CONFLICT (key) DO NOTHING
       `;
 
       const rows = await tx.$queryRaw<{ value: string }[]>`
-        SELECT value FROM system_settings WHERE key = 'audit_anchor_deployment_id'
+        SELECT value FROM system_settings WHERE key = ${SETTING_DEPLOYMENT_ID}
       `;
-
-      const stored = rows[0]?.value;
-      if (stored !== deploymentId) {
-        await logAuditAsync({
-          scope: AUDIT_SCOPE.TENANT,
-          action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
-          userId: SYSTEM_ACTOR_ID,
-          actorType: ACTOR_TYPE.SYSTEM,
-          tenantId: SYSTEM_TENANT_ID,
-          metadata: {
-            failureReason: "DEPLOYMENT_ID_MISMATCH",
-            expected: deploymentId,
-            found: stored ?? null,
-          },
-        });
-        throw new DeploymentIdMismatchError(deploymentId, stored ?? "(none)");
-      }
+      return rows[0]?.value;
     });
+
+    if (stored !== deploymentId) {
+      await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED, {
+        failureReason: "DEPLOYMENT_ID_MISMATCH",
+        expected: deploymentId,
+        found: stored ?? null,
+      });
+      throw new DeploymentIdMismatchError(deploymentId, stored ?? "(none)");
+    }
   }
 
-  /** Single cadence cycle. Idempotent on cadence boundary via PG advisory lock. */
-  async runCadence(now: Date): Promise<CadenceOutcome> {
+  /**
+   * Count this run against `boundary`, on its own transaction committed before
+   * the publish transaction opens — so neither a rollback nor a crash after
+   * the PUT undoes it. Takes the publish lock, re-checks the marker, and does
+   * not count a run with nothing to publish.
+   */
+  private async claimAttempt(boundary: Date): Promise<AttemptGate> {
+    let tenantCount: number | null = null;
+    try {
+      return await this.prisma.$transaction(async (tx): Promise<AttemptGate> => {
+        await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
+        const tenantIds = await chainEnabledTenantIds(tx);
+        tenantCount = tenantIds.length;
+        await setLockTimeout(tx, this.lockTimeoutMs);
+        await advisoryXactLock(tx, ADVISORY_LOCK_KEY);
+
+        if (await isBoundaryPublished(tx, boundary, tenantIds, this.wallClockBoundaryMs())) {
+          return { kind: "already_published", chainEnabledTenantCount: tenantIds.length };
+        }
+        if (tenantIds.length === 0) {
+          const anyAnchor = await tx.auditChainAnchor.findFirst({ select: { tenantId: true } });
+          return { kind: "no_tenants", everChainEnabled: anyAnchor !== null };
+        }
+
+        // Read-then-write is safe under the advisory lock every publisher
+        // takes. A stored value that does not parse cannot say how many runs
+        // reached the upload, so this boundary is treated as past the cap:
+        // the value is overwritten with the first count past it, and the next
+        // boundary starts again at 1. Failing the run instead would leave the
+        // value in place and wedge every boundary, uncounted.
+        const boundaryIso = boundary.toISOString();
+        const storedRow = await tx.systemSetting.findUnique({ where: { key: SETTING_UPLOAD_ATTEMPTS } });
+        const previous = storedRow ? parseUploadAttempts(storedRow.value) : null;
+        const countUnreadable = previous === UNREADABLE;
+        const count = countUnreadable
+          ? AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP + 1
+          : previous?.boundary === boundaryIso
+            ? previous.count + 1
+            : 1;
+        const value = JSON.stringify({ boundary: boundaryIso, count });
+        await tx.systemSetting.upsert({
+          where: { key: SETTING_UPLOAD_ATTEMPTS },
+          update: { value },
+          create: { key: SETTING_UPLOAD_ATTEMPTS, value },
+        });
+        return { kind: "counted", attempts: count, countUnreadable, chainEnabledTenantCount: tenantIds.length };
+      }, this.txOptions);
+    } catch (err) {
+      if (isLockNotAvailable(err)) throw new LockHeldSignal(tenantCount);
+      throw err;
+    }
+  }
+
+  /** One cadence run for `boundary`. Logs the cadence line; never throws. */
+  async runCadence(boundary: Date): Promise<CadenceOutcome> {
+    const outcome = await this.runCadenceInner(boundary);
+    const log = getLogger();
+    log.info(
+      {
+        ...outcome,
+        boundary: boundary.toISOString(),
+        _logType: "audit-anchor-publisher.cadence",
+      },
+      "audit-anchor-publisher.cadence",
+    );
+    // The healthy line is what the absence alarm counts: one per healthy
+    // boundary, and nothing else may emit it.
+    const healthy =
+      outcome.kind === "published" ||
+      (outcome.kind === "skipped_no_tenants" && !outcome.everChainEnabled);
+    if (healthy) {
+      log.info(
+        {
+          outcome: outcome.kind,
+          boundary: boundary.toISOString(),
+          chainEnabledTenantCount: outcome.chainEnabledTenantCount,
+          _logType: "audit-anchor-publisher.cadence_healthy",
+        },
+        "audit-anchor-publisher.cadence_healthy",
+      );
+    }
+    return outcome;
+  }
+
+  private async runCadenceInner(boundary: Date): Promise<CadenceOutcome> {
     const { config } = this;
     const log = getLogger();
+    const boundaryIso = boundary.toISOString();
 
-    const currentBoundary = currentCadenceBoundary(now, config.cadenceMs, config.publishOffsetMs);
-    const prevBoundary = previousCadenceBoundary(now, config.cadenceMs, config.publishOffsetMs);
+    // Step 1: the attempt count, committed before anything is uploaded.
+    let gate: AttemptGate;
+    try {
+      gate = await this.claimAttempt(boundary);
+    } catch (err) {
+      if (err instanceof LockHeldSignal) {
+        return this.lockHeld(boundary, err.chainEnabledTenantCount);
+      }
+      const reason = `CADENCE_FAILED:${errorLogFields(err).code}`;
+      return this.fail(boundary, { reason, stage: "before_upload", chainEnabledTenantCount: null, artifactKey: null });
+    }
 
+    if (gate.kind === "already_published") {
+      return {
+        kind: "skipped_already_published",
+        reason: "BOUNDARY_ALREADY_PUBLISHED",
+        chainEnabledTenantCount: gate.chainEnabledTenantCount,
+      };
+    }
+    if (gate.kind === "no_tenants") {
+      return {
+        kind: "skipped_no_tenants",
+        reason: "NO_CHAIN_ENABLED_TENANTS",
+        everChainEnabled: gate.everChainEnabled,
+        chainEnabledTenantCount: 0,
+      };
+    }
+    if (gate.attempts > AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP) {
+      log.error(
+        {
+          boundary: boundaryIso,
+          attempts: gate.attempts,
+          countUnreadable: gate.countUnreadable,
+          _logType: "audit-anchor-publisher.upload_cap_reached",
+        },
+        "audit-anchor-publisher.upload_cap_reached",
+      );
+      // One row per boundary: only the first run past the cap writes it.
+      if (gate.attempts === AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP + 1) {
+        await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED, {
+          failureReason: gate.countUnreadable ? "UPLOAD_ATTEMPT_COUNT_UNREADABLE" : "UPLOAD_ATTEMPT_CAP_REACHED",
+          attempts: gate.attempts,
+          anchoredAt: boundaryIso,
+        });
+      }
+      return {
+        kind: "upload_cap_reached",
+        reason: "UPLOAD_ATTEMPT_CAP_REACHED",
+        attempts: gate.attempts,
+        chainEnabledTenantCount: gate.chainEnabledTenantCount,
+      };
+    }
+
+    // Step 2: the publish transaction, upload inside.
+    const now = this.wallClock();
+    const prevBoundary = new Date(boundary.getTime() - config.cadenceMs);
+    const pendingEmits: PendingEmit[] = [];
+    let chainEnabledTenantCount: number | null = gate.chainEnabledTenantCount;
     let tenantsInManifest: string[] = [];
-    let manifestSha256 = "";
     let artifactKey = "";
-    let artifactBytes = Buffer.alloc(0);
-    let primaryUri = "";
-    // Captured for the post-rollback pause-persistence step (closes Phase 3 R1
-    // newly-discovered FR6 bug): when upload throws inside the publish tx, the
-    // tx rolls back and any in-tx UPDATE to publish_paused_until is lost.
-    // We capture the pause context here, throw to roll back the publish, then
-    // run a SEPARATE tx in the catch block to persist publishPausedUntil.
-    let maxAnchorUpdatedAt = 0;
     let uploadFailedReason: string | null = null;
+    let uploaded = false;
 
     try {
-      const outcome = await this.prisma.$transaction(async (tx) => {
-        // Step 1: Set bypass RLS
+      const outcome = await this.prisma.$transaction(async (tx): Promise<CadenceOutcome> => {
         await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
+        const tenantIds = await chainEnabledTenantIds(tx);
+        chainEnabledTenantCount = tenantIds.length;
+        await setLockTimeout(tx, this.lockTimeoutMs);
+        await advisoryXactLock(tx, ADVISORY_LOCK_KEY);
+        await config.hooks?.inTx?.(tx);
 
-        // Step 2: Acquire advisory lock
-        const lockRows = await tx.$queryRaw<{ acquired: boolean }[]>`
-          SELECT pg_try_advisory_xact_lock(hashtext('audit-anchor-publish')) AS acquired
-        `;
-        const acquired = lockRows[0]?.acquired ?? false;
-        if (!acquired) {
-          return { kind: "lock_held" as const, reason: "LOCK_HELD_BY_OTHER_INSTANCE" as const };
+        // Another run may have published between the two transactions.
+        if (await isBoundaryPublished(tx, boundary, tenantIds, this.wallClockBoundaryMs())) {
+          return {
+            kind: "skipped_already_published",
+            reason: "BOUNDARY_ALREADY_PUBLISHED",
+            chainEnabledTenantCount: tenantIds.length,
+          };
+        }
+        if (tenantIds.length === 0) {
+          const anyAnchor = await tx.auditChainAnchor.findFirst({ select: { tenantId: true } });
+          return {
+            kind: "skipped_no_tenants",
+            reason: "NO_CHAIN_ENABLED_TENANTS",
+            everChainEnabled: anyAnchor !== null,
+            chainEnabledTenantCount: 0,
+          };
         }
 
-        // Step 3: Cadence-end safety net — check previous cadence completion
-        const chainEnabledTenants = await tx.tenant.findMany({
-          where: { auditChainEnabled: true },
-          select: { id: true, auditChainEnabled: true },
-        });
-
-        if (chainEnabledTenants.length > 0) {
-          const tenantIds = chainEnabledTenants.map((t) => t.id);
-          const prevCadenceBoundaryMs = prevBoundary.getTime();
-
-          // Only check if prevBoundary is non-genesis (> epoch start)
-          if (prevCadenceBoundaryMs > config.publishOffsetMs) {
-            const maxPublishedRows = await tx.$queryRaw<{ max_published: Date | null }[]>`
-              SELECT MAX(last_published_at) AS max_published
-              FROM audit_chain_anchors
-              WHERE last_published_at IS NOT NULL
-                AND tenant_id = ANY(${tenantIds}::uuid[])
-            `;
-            const maxPublished = maxPublishedRows[0]?.max_published;
-            if (!maxPublished || maxPublished.getTime() < prevCadenceBoundaryMs) {
-              log.warn(
-                { prevCadenceBoundary: prevBoundary.toISOString(), maxPublished },
-                "audit-anchor-publisher.missing_prior_cadence",
-              );
-              // Informational only — do NOT abort
-              await logAuditAsync({
-                scope: AUDIT_SCOPE.TENANT,
-                action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
-                userId: SYSTEM_ACTOR_ID,
-                actorType: ACTOR_TYPE.SYSTEM,
-                tenantId: SYSTEM_TENANT_ID,
-                metadata: {
-                  failureReason: "MISSING_PRIOR_CADENCE_PUBLICATION",
-                  prevCadenceBoundary: prevBoundary.toISOString(),
-                  maxPublishedAt: maxPublished?.toISOString() ?? null,
-                },
-              });
-            }
-          }
-        }
-
-        // Step 4: Read chain-enabled tenants and their anchors
-        const tenants = await tx.tenant.findMany({
-          where: { auditChainEnabled: true },
-          select: { id: true, auditChainEnabled: true },
-        });
-
-        if (tenants.length === 0) {
-          return { kind: "skipped_no_tenants" as const, reason: "NO_CHAIN_ENABLED_TENANTS" as const };
-        }
-
-        const tenantIds = tenants.map((t) => t.id);
-        const anchors = await tx.auditChainAnchor.findMany({
-          where: { tenantId: { in: tenantIds } },
-        });
-
-        // Step 5: Filter paused tenants
-        const nonPausedAnchors = anchors.filter((a) => {
-          if (a.publishPausedUntil && a.publishPausedUntil > now) {
-            // Emit informational pause event
-            void logAuditAsync({
-              scope: AUDIT_SCOPE.TENANT,
-              action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_PAUSED,
-              userId: SYSTEM_ACTOR_ID,
-              actorType: ACTOR_TYPE.SYSTEM,
-              tenantId: SYSTEM_TENANT_ID,
+        // Cadence-end safety net — informational, never aborts.
+        if (prevBoundary.getTime() > config.publishOffsetMs) {
+          const maxPublishedRows = await tx.$queryRaw<{ max_published: Date | null }[]>`
+            SELECT MAX(last_published_at) AS max_published
+            FROM audit_chain_anchors
+            WHERE last_published_at IS NOT NULL
+              AND tenant_id = ANY(${tenantIds}::uuid[])
+          `;
+          const maxPublished = maxPublishedRows[0]?.max_published;
+          if (!maxPublished || maxPublished.getTime() < prevBoundary.getTime()) {
+            log.warn(
+              {
+                prevCadenceBoundary: prevBoundary.toISOString(),
+                maxPublished,
+                _logType: "audit-anchor-publisher.missing_prior_cadence",
+              },
+              "audit-anchor-publisher.missing_prior_cadence",
+            );
+            pendingEmits.push({
+              action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
               metadata: {
-                tenantId: a.tenantId,
-                pausedUntil: a.publishPausedUntil.toISOString(),
+                failureReason: "MISSING_PRIOR_CADENCE_PUBLICATION",
+                prevCadenceBoundary: prevBoundary.toISOString(),
+                maxPublishedAt: maxPublished?.toISOString() ?? null,
               },
             });
-            return false;
           }
-          return true;
-        });
-
-        if (nonPausedAnchors.length === 0) {
-          return { kind: "skipped_paused" as const, reason: "PUBLISH_PAUSED_ACTIVE" as const };
         }
 
-        // Step 6: Build anchor rows
-        const rows: AnchorRow[] = nonPausedAnchors.map((a) => ({
+        // Every chain-enabled tenant is published. A pause holds chain
+        // advancement in the outbox worker; it no longer holds publishing.
+        // Ordered, so a retry over an unchanged chain signs the same bytes.
+        const anchors = await tx.auditChainAnchor.findMany({
+          where: { tenantId: { in: tenantIds } },
+          orderBy: { tenantId: "asc" },
+        });
+        const rows: AnchorRow[] = anchors.map((a) => ({
           tenantId: a.tenantId,
           chainSeq: a.chainSeq,
           prevHash: Buffer.from(a.prevHash),
           epoch: a.epoch ?? 1,
         }));
 
-        // Step 7: Fetch previous manifest reference
         const prevManifestRow = await tx.systemSetting.findUnique({
-          where: { key: "audit_anchor_previous_manifest" },
-        });
-        const prevManifestSchema = z.object({
-          uri: z.string().url(),
-          sha256: z.string().regex(/^[0-9a-f]{64}$/),
+          where: { key: SETTING_PREVIOUS_MANIFEST },
         });
         const previousManifest = prevManifestRow
-          ? prevManifestSchema.parse(JSON.parse(prevManifestRow.value))
+          ? previousManifestSchema.parse(JSON.parse(prevManifestRow.value))
           : null;
 
-        // Step 8: Build + sign manifest
         const manifest = buildManifest({
           tenants: rows,
           deploymentId: config.deploymentId,
-          anchoredAt: currentBoundary,
+          anchoredAt: boundary,
           previousManifest,
           tagSecret: config.tagSecret,
         });
@@ -271,183 +659,219 @@ export class AuditAnchorPublisher {
         const canonicalBytes = canonicalize(manifest);
         const jws = sign(canonicalBytes, config.signingKey, config.signingKeyKid);
 
-        manifestSha256 = createHash("sha256").update(canonicalBytes).digest("hex");
-        const dateStr = currentBoundary.toISOString().slice(0, 10);
-        artifactKey = `${dateStr}.kid-${config.signingKeyKid}.jws`;
-        artifactBytes = Buffer.from(jws, "utf-8");
+        const manifestSha256 = createHash("sha256").update(canonicalBytes).digest("hex");
+        artifactKey = buildManifestArtifactKey(boundary, config.signingKeyKid);
+        const artifactBytes = Buffer.from(jws, "utf-8");
+        tenantsInManifest = anchors.map((a) => a.tenantId);
 
-        tenantsInManifest = nonPausedAnchors.map((a) => a.tenantId);
-        // Capture the latest anchor.updatedAt outside the tx so the post-rollback
-        // pause-persist step (catch block) can compute the same cap formula
-        // without re-querying. Closes plan F3 + Phase 3 R1 FR6 bug.
-        maxAnchorUpdatedAt = nonPausedAnchors.reduce(
-          (latest, a) => Math.max(latest, a.updatedAt.getTime()),
-          0,
+        // Upload to all destinations, bounded as a whole. A rollback after
+        // this point leaves the object stored; the marker keeps the retry
+        // idempotent and versioning keeps the earlier PUT.
+        const controller = new AbortController();
+        const timer = setTimeout(
+          () => controller.abort(new UploadTimeoutError()),
+          config.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS,
         );
-
-        // Step 9: Upload to all destinations (inside tx per plan Round 5 pattern)
-        // NOTE: in-tx UPDATE to publish_paused_until is ROLLED BACK on throw, so
-        // we only capture the failure reason here and persist the pause window
-        // in a separate tx in the catch block (see Phase 3 R1 newly-discovered
-        // FR6 bug fix at the catch-handler below).
-        for (const dest of config.destinations) {
-          try {
-            await dest.upload({
-              artifactBytes,
-              artifactKey,
-              contentType: "application/jose",
-            });
-          } catch (uploadErr) {
-            log.error(
-              {
-                destination: dest.name,
-                error: errorLogFields(uploadErr),
-                _logType: "audit-anchor-publisher.upload_failed",
-              },
-              "audit-anchor-publisher.upload_failed",
-            );
-            // Token, not narrative. This value is re-emitted by the outer catch
-            // 50 lines below AND persisted to audit_logs.metadata.failureReason,
-            // where the tenant reads it via /api/tenant/audit-logs — so putting
-            // the message here would undo the reduction two lines above and put
-            // it in a durable, tenant-visible place besides. Which destination
-            // failed and with what code is what diagnosis needs; the `error`
-            // field and `_logType` above carry the rest.
-            uploadFailedReason = `${dest.name}_UPLOAD_FAILED:${errorLogFields(uploadErr).code}`;
-            throw new Error(uploadFailedReason);
+        try {
+          for (const dest of config.destinations) {
+            try {
+              await untilAborted(
+                dest.upload({
+                  artifactBytes,
+                  artifactKey,
+                  contentType: "application/jose",
+                  signal: controller.signal,
+                }),
+                controller.signal,
+              );
+            } catch (uploadErr) {
+              log.error(
+                {
+                  destination: dest.name,
+                  error: errorLogFields(uploadErr),
+                  _logType: "audit-anchor-publisher.upload_failed",
+                },
+                "audit-anchor-publisher.upload_failed",
+              );
+              // Token, not narrative: this value is persisted to
+              // audit_logs.metadata.failureReason, which the tenant reads via
+              // /api/tenant/audit-logs. Which destination failed and with what
+              // code is what diagnosis needs; the `error` field and `_logType`
+              // above carry the rest.
+              uploadFailedReason = `${dest.name}_UPLOAD_FAILED:${errorLogFields(uploadErr).code}`;
+              throw new Error(uploadFailedReason);
+            }
           }
+        } finally {
+          clearTimeout(timer);
         }
+        uploaded = true;
+        await config.hooks?.afterUpload?.();
 
         // Determine primary URI (first destination)
-        primaryUri = config.destinations.length > 0
-          ? `${config.destinations[0]!.name}://${artifactKey}`
+        const firstDestination = config.destinations[0];
+        const primaryUri = firstDestination
+          ? `${firstDestination.name}://${artifactKey}`
           : `local://${artifactKey}`;
 
-        // Step 10: Update last_published_at
         await tx.auditChainAnchor.updateMany({
           where: { tenantId: { in: tenantsInManifest } },
           data: { lastPublishedAt: now, publishPausedUntil: null },
         });
 
-        // Step 11: Update previousManifest pointer
         const manifestPtr = JSON.stringify({ uri: primaryUri, sha256: manifestSha256 });
         await tx.systemSetting.upsert({
-          where: { key: "audit_anchor_previous_manifest" },
+          where: { key: SETTING_PREVIOUS_MANIFEST },
           update: { value: manifestPtr },
-          create: { key: "audit_anchor_previous_manifest", value: manifestPtr },
+          create: { key: SETTING_PREVIOUS_MANIFEST, value: manifestPtr },
+        });
+        // Forward only: the re-check above, under the lock, found the marker
+        // absent or before this boundary.
+        await tx.systemSetting.upsert({
+          where: { key: SETTING_LAST_PUBLISHED_BOUNDARY },
+          update: { value: boundaryIso },
+          create: { key: SETTING_LAST_PUBLISHED_BOUNDARY, value: boundaryIso },
         });
 
         return {
-          kind: "published" as const,
+          kind: "published",
           manifestSha256,
           destinations: config.destinations.map((d) => d.name),
           tenantsCount: tenantsInManifest.length,
+          chainEnabledTenantCount: tenantIds.length,
         };
-      });
+      }, this.txOptions);
 
-      // Step 12: Emit success audit event AFTER tx commits
+      // Success audit event AFTER the transaction commits. The missing-prior
+      // row goes out only with a publish: a failed run would otherwise write
+      // it on every retry, and the run that publishes reports it once.
       if (outcome.kind === "published") {
-        await logAuditAsync({
-          scope: AUDIT_SCOPE.TENANT,
-          action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED,
-          userId: SYSTEM_ACTOR_ID,
-          actorType: ACTOR_TYPE.SYSTEM,
-          tenantId: SYSTEM_TENANT_ID,
-          metadata: {
-            manifestSha256: outcome.manifestSha256,
-            destinations: outcome.destinations,
-            tenantsCount: outcome.tenantsCount,
-            artifactKey,
-            anchoredAt: currentBoundary.toISOString(),
-          },
+        await this.flushEmits(pendingEmits);
+        await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED, {
+          manifestSha256: outcome.manifestSha256,
+          destinations: outcome.destinations,
+          tenantsCount: outcome.tenantsCount,
+          artifactKey,
+          anchoredAt: boundaryIso,
         });
       }
 
       return outcome;
     } catch (err) {
-      // This catch covers the WHOLE publish transaction, not just the upload:
-      // the set_config statements, every Prisma read, the previous-manifest
-      // JSON.parse and its Zod parse, and the signing step. So `err.message`
-      // here is a pg connection string, a Prisma query with its bound
-      // parameters, or a parser echoing the input it choked on — and `reason`
-      // is written to audit_logs.metadata.failureReason, which the tenant reads
-      // via /api/tenant/audit-logs. That field's other producers in this file
-      // (DEPLOYMENT_ID_MISMATCH, MISSING_PRIOR_CADENCE_PUBLICATION) are tokens;
-      // this one was the exception.
-      //
-      // `uploadFailedReason` being set means `err` is our own wrapper around a
-      // token that already carries the driver's code, so reducing it a second
-      // time would yield {Error, unknown} and read as a failed extraction. The
-      // original upload error's full { name, code } is on the per-destination
-      // `upload_failed` line above.
-      const reason = uploadFailedReason ?? `CADENCE_FAILED:${errorLogFields(err).code}`;
-      log.error(
-        { reason, _logType: "audit-anchor-publisher.cadence_failed" },
-        "audit-anchor-publisher.cadence_failed",
-      );
-
-      // Persist publishPausedUntil in a SEPARATE tx — the publish tx rolled
-      // back on throw, so any in-tx pause UPDATE is lost. This closes the
-      // FR6 fail-closed gap discovered in Phase 3 R1 fix-batch-C testing.
-      // Only fires when upload failed AND we have tenants to pause.
-      if (uploadFailedReason && tenantsInManifest.length > 0) {
-        try {
-          await this.prisma.$transaction(async (tx2) => {
-            await setBypassGucs(tx2, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
-            // Pause cap formula (closes plan F3): LEAST(now + 1× cadence,
-            // GREATEST(anchor.updatedAt, now) + N× cadence).
-            const pauseUntil = new Date(
-              Math.min(
-                now.getTime() + config.cadenceMs,
-                Math.max(maxAnchorUpdatedAt, now.getTime()) + config.pauseCapFactor * config.cadenceMs,
-              ),
-            );
-            // R2-S1: guard against the race where ANOTHER publisher instance
-            // succeeded its publish between our publish-tx rollback and this
-            // pause-persist tx commit. The success path sets
-            // `lastPublishedAt = now` and clears `publishPausedUntil = NULL`.
-            // We must NOT overwrite that NULL with our stale pauseUntil.
-            // The `lastPublishedAt: { lt: now }` clause ensures the pause is
-            // only written when no concurrent success has updated past `now`.
-            await tx2.auditChainAnchor.updateMany({
-              where: {
-                tenantId: { in: tenantsInManifest },
-                OR: [
-                  { lastPublishedAt: null },
-                  { lastPublishedAt: { lt: now } },
-                ],
-              },
-              data: { publishPausedUntil: pauseUntil },
-            });
-          });
-        } catch (pauseErr) {
-          // Pause persistence failure is observability-only — the publisher
-          // already failed, and the next cron tick's safety net will detect
-          // the missing prior cadence. Do not mask the original error.
-          log.error(
-            {
-              error: errorLogFields(pauseErr),
-              _logType: "audit-anchor-publisher.pause_persist_failed",
-            },
-            "audit-anchor-publisher.pause_persist_failed",
-          );
-        }
+      if (!uploaded && isLockNotAvailable(err)) {
+        return this.lockHeld(boundary, chainEnabledTenantCount);
       }
 
-      await logAuditAsync({
-        scope: AUDIT_SCOPE.TENANT,
-        action: AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED,
-        userId: SYSTEM_ACTOR_ID,
-        actorType: ACTOR_TYPE.SYSTEM,
-        tenantId: SYSTEM_TENANT_ID,
-        metadata: {
-          failureReason: reason,
-          artifactKey: artifactKey || null,
-          anchoredAt: currentBoundary.toISOString(),
-        },
-      });
+      // The catch covers the WHOLE publish transaction — set_config, every
+      // Prisma read, the previous-manifest parse, the signing step and the
+      // commit — so `err.message` may be a connection string, a query with its
+      // bound parameters, or a parser echoing its input. `reason` reaches
+      // audit_logs.metadata.failureReason, which the tenant reads; it is a
+      // token. `uploadFailedReason` already carries the driver's code, and the
+      // per-destination `upload_failed` line carries the original error.
+      if (uploaded) {
+        // Stored but not committed: the next manifest will not reference this
+        // version, and the retry for the boundary re-PUTs the key. No pause —
+        // the destination is healthy.
+        const reason = `COMMIT_FAILED_AFTER_UPLOAD:${errorLogFields(err).code}`;
+        log.error(
+          {
+            boundary: boundaryIso,
+            artifactKey,
+            error: errorLogFields(err),
+            _logType: "audit-anchor-publisher.commit_failed_after_upload",
+          },
+          "audit-anchor-publisher.commit_failed_after_upload",
+        );
+        return this.fail(boundary, { reason, stage: "after_upload", chainEnabledTenantCount, artifactKey });
+      }
 
-      return { kind: "failed", reason };
+      if (uploadFailedReason && tenantsInManifest.length > 0) {
+        await this.persistPause(tenantsInManifest, now);
+      }
+      const reason = uploadFailedReason ?? `CADENCE_FAILED:${errorLogFields(err).code}`;
+      return this.fail(boundary, {
+        reason,
+        stage: uploadFailedReason ? "upload" : "before_upload",
+        chainEnabledTenantCount,
+        artifactKey: artifactKey || null,
+      });
+    }
+  }
+
+  private lockHeld(boundary: Date, chainEnabledTenantCount: number | null): CadenceOutcome {
+    getLogger().info(
+      { boundary: boundary.toISOString(), _logType: "audit-anchor-publisher.lock_held" },
+      "audit-anchor-publisher.lock_held",
+    );
+    return { kind: "lock_held", reason: "LOCK_HELD_BY_OTHER_INSTANCE", chainEnabledTenantCount };
+  }
+
+  private async fail(
+    boundary: Date,
+    failure: { reason: string; stage: FailureStage; chainEnabledTenantCount: number | null; artifactKey: string | null },
+  ): Promise<CadenceOutcome> {
+    getLogger().error(
+      { reason: failure.reason, stage: failure.stage, _logType: "audit-anchor-publisher.cadence_failed" },
+      "audit-anchor-publisher.cadence_failed",
+    );
+    await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED, {
+      failureReason: failure.reason,
+      artifactKey: failure.artifactKey,
+      anchoredAt: boundary.toISOString(),
+    });
+    return {
+      kind: "failed",
+      reason: failure.reason,
+      stage: failure.stage,
+      chainEnabledTenantCount: failure.chainEnabledTenantCount,
+    };
+  }
+
+  private async flushEmits(pendingEmits: PendingEmit[]): Promise<void> {
+    for (const { action, metadata } of pendingEmits.splice(0)) {
+      await this.emitAudit(action, metadata);
+    }
+  }
+
+  /**
+   * Persist the pause after an upload failure, in a SEPARATE transaction — the
+   * publish transaction rolled back, and its writes with it. It lasts until the
+   * next boundary by the wall clock, holding chain advancement in the outbox
+   * worker until a retry or the next boundary publishes.
+   */
+  private async persistPause(tenantIds: string[], now: Date): Promise<void> {
+    const { config } = this;
+    const pauseUntil = new Date(
+      currentCadenceBoundary(now, config.cadenceMs, config.publishOffsetMs).getTime() + config.cadenceMs,
+    );
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await setBypassGucs(tx, BYPASS_GRANT.AUDIT_ANCHOR_PUBLISH, { tenantId: SYSTEM_TENANT_ID });
+        // Guard against another instance having published between our
+        // rollback and this write: its success set `lastPublishedAt` past
+        // `now` and cleared the pause, which must not be overwritten.
+        await tx.auditChainAnchor.updateMany({
+          where: {
+            tenantId: { in: tenantIds },
+            OR: [
+              { lastPublishedAt: null },
+              { lastPublishedAt: { lt: now } },
+            ],
+          },
+          data: { publishPausedUntil: pauseUntil },
+        });
+      }, this.txOptions);
+    } catch (pauseErr) {
+      // Observability only — the run already failed, and the next run's
+      // safety net detects the missing cadence. Do not mask the original.
+      getLogger().error(
+        {
+          error: errorLogFields(pauseErr),
+          _logType: "audit-anchor-publisher.pause_persist_failed",
+        },
+        "audit-anchor-publisher.pause_persist_failed",
+      );
     }
   }
 }

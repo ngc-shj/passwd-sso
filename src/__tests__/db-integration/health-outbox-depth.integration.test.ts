@@ -81,6 +81,19 @@ describe("health audit_outbox depth on a pooled connection", () => {
   it("rejects with 22P02 when the depth query runs outside a bypass transaction", async () => {
     // The control clause: the pre-fix shape. It proves the poisoning is real,
     // so the passing case below cannot be passing for a stale reason.
+    // RLS evaluates the tenant branch per row, so an empty audit_outbox raises
+    // nothing and this control would read null. It held only while earlier
+    // files happened to leave rows behind; it owns its row now.
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_outbox
+           (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at)
+         VALUES (gen_random_uuid(), $1::uuid, '{"probe":"depth-control"}'::jsonb,
+                 'PENDING', 0, 5, now(), now())`,
+        tenantId,
+      );
+    });
     await poisonGuc();
     let sqlState: string | null = null;
     try {

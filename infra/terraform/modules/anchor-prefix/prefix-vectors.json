@@ -1,0 +1,24 @@
+{
+  "$comment": "Anchor S3 prefix vectors, one verdict per validator. `terraform` is the modules/anchor-prefix variable validation (tests/prefix.tftest.hcl runs every entry whose verdict is not n/a); `zod` is AUDIT_ANCHOR_DESTINATION_S3_PREFIX in auditAnchorPublisherEnvSchema. `value: null` is the variable unset, which Terraform never sees (the root variable has a default). Non-empty values must agree; the empty prefix is valid for a non-Terraform deployment writing at the bucket root, and refused by Terraform because the bucket policy needs a prefix.",
+  "vectors": [
+    { "value": null, "terraform": "n/a", "zod": "allow" },
+    { "value": "", "terraform": "deny", "zod": "allow" },
+    { "value": "audit-anchors", "terraform": "allow", "zod": "allow" },
+    { "value": "a", "terraform": "allow", "zod": "allow" },
+    { "value": "a/b", "terraform": "allow", "zod": "allow" },
+    { "value": "a.b", "terraform": "allow", "zod": "allow" },
+    { "value": ".a", "terraform": "allow", "zod": "allow" },
+    { "value": "..a", "terraform": "allow", "zod": "allow" },
+    { "value": "a..b", "terraform": "allow", "zod": "allow" },
+    { "value": "a/..b", "terraform": "allow", "zod": "allow" },
+    { "value": "*", "terraform": "deny", "zod": "deny" },
+    { "value": "?", "terraform": "deny", "zod": "deny" },
+    { "value": "/a", "terraform": "deny", "zod": "deny" },
+    { "value": "a/", "terraform": "deny", "zod": "deny" },
+    { "value": "a//b", "terraform": "deny", "zod": "deny" },
+    { "value": ".", "terraform": "deny", "zod": "deny" },
+    { "value": "..", "terraform": "deny", "zod": "deny" },
+    { "value": "a/../b", "terraform": "deny", "zod": "deny" },
+    { "value": "a/./b", "terraform": "deny", "zod": "deny" }
+  ]
+}

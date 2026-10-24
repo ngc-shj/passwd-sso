@@ -13,8 +13,6 @@
  *   AZ_KV_SECRET_VERIFIER_PEPPER           — secret name for verifier pepper
  *   AZ_KV_SECRET_DIRECTORY_SYNC            — secret name for directory sync key
  *   AZ_KV_SECRET_WEBAUTHN_PRF              — secret name for WebAuthn PRF secret
- *   AZ_KV_SECRET_AUDIT_ANCHOR_SIGNING      — secret name for audit anchor signing key
- *   AZ_KV_SECRET_AUDIT_ANCHOR_TAG_SECRET   — secret name for audit anchor tag secret
  */
 
 import type { KeyName } from "./types";
@@ -77,8 +75,6 @@ export class AzureKvKeyProvider extends BaseCloudKeyProvider {
     "verifier-pepper": "AZ_KV_SECRET_VERIFIER_PEPPER",
     "directory-sync": "AZ_KV_SECRET_DIRECTORY_SYNC",
     "webauthn-prf": "AZ_KV_SECRET_WEBAUTHN_PRF",
-    "audit-anchor-signing": "AZ_KV_SECRET_AUDIT_ANCHOR_SIGNING",
-    "audit-anchor-tag-secret": "AZ_KV_SECRET_AUDIT_ANCHOR_TAG_SECRET",
   };
 
   protected readonly defaultSecretNames: Record<KeyName, string> = {
@@ -86,8 +82,6 @@ export class AzureKvKeyProvider extends BaseCloudKeyProvider {
     "verifier-pepper": "verifier-pepper-key",
     "directory-sync": "directory-sync-key",
     "webauthn-prf": "webauthn-prf-secret",
-    "audit-anchor-signing": "audit-anchor-signing-key",
-    "audit-anchor-tag-secret": "audit-anchor-tag-secret",
   };
 
   constructor(config: AzureKvConfig) {

@@ -40,6 +40,11 @@ on:
       - 'src/lib/access-request/**'
       # C7: the offline operator CLI, tested from src/__tests__/db-integration/.
       - 'scripts/**'
+      # A dependency bump (the pg driver, Prisma, the S3 client) changes what
+      # these tests exercise; a change to this workflow changes how they run.
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ci-integration.yml'
 
 permissions:
   # Round 4 S23 fix: principle of least privilege — only content read needed.
@@ -208,6 +213,33 @@ jobs:
         run: node scripts/bootstrap-rds-roles.mjs --denied-only
         env:
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
+
+      # MinIO stands in for S3 (audit-anchor-s3-destination.integration.test.ts,
+      # which fails rather than skips without it). A step, not a service
+      # container: a service cannot pass the `server /data` command. Same image
+      # as docker-compose.override.yml, pinned by digest (minio/minio left Docker
+      # Hub); /data is a tmpfs owned by the image's non-root user. The KMS key enables
+      # SSE-S3 — without one MinIO answers 501 to the AES256 header the anchor
+      # destination always sends; it is generated per run, so nothing is stored.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:uid=65532,gid=65532 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            -e MINIO_KMS_SECRET_KEY="ci-anchor-key:$(openssl rand -base64 32)" \
+            cgr.dev/chainguard/minio@sha256:73297936408b731668ca0e835ac9add1a35cb6026a125c2f0cd476d9ef48222c \
+            server /data
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:9000/minio/health/ready; then
+              echo "ANCHOR_TEST_S3_ENDPOINT=http://127.0.0.1:9000" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs minio
+          echo "MinIO did not become ready within 30s" >&2
+          exit 1
 
       - name: Run integration tests
         env:

@@ -150,6 +150,8 @@ describe("rls.bypass_not_granted line vs its metric filter", () => {
       app: "aws_cloudwatch_log_group.app.name",
       audit_outbox_worker: "aws_cloudwatch_log_group.audit_outbox_worker.name",
       retention_gc_worker: "aws_cloudwatch_log_group.retention_gc_worker.name",
+      audit_anchor_publisher: "aws_cloudwatch_log_group.audit_anchor_publisher.name",
+      audit_chain_verify_worker: "aws_cloudwatch_log_group.audit_chain_verify_worker.name",
     });
   });
 });

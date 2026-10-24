@@ -22,7 +22,7 @@ Configuration precedence: `.env` (canonical base) → `.env.local` (per-develope
 
 - **Immutable tags required**: Use git SHA (`git-abc1234`) or digest (`repo@sha256:...`)
 - **`:latest` is prohibited** — migrate and app task definitions must reference the exact same image
-- `terraform apply` sets `var.app_image` for the `app`, `migrate`, and both worker task definitions, guaranteeing they run the same image
+- `terraform apply` sets `var.app_image` for the `app`, `migrate`, and all four worker task definitions, guaranteeing they run the same image
 - `deploy.sh` resolves the tag to a **digest** and passes that to Terraform, so the bytes it signature-verified are exactly the bytes that run
 
 ## Image Signing (cosign + KMS)
@@ -86,8 +86,8 @@ output — use it when the signing key lives outside this Terraform state.
 service has `ignore_changes = [task_definition]`, so `terraform apply` registers a
 new task-definition revision but does NOT move the running services. The script
 enforces migration-first ordering explicitly: apply (task defs only) → run the DB
-migration as a one-off ECS task → only then advance app + jackson + both workers
-to the new revision. New code never runs against an un-migrated schema.
+migration as a one-off ECS task → only then advance app + jackson + the four
+workers to the new revision. New code never runs against an un-migrated schema.
 
 ```
 1. reject dirty/untracked worktree  →  deployed SHA == committed code
@@ -227,6 +227,183 @@ below). For any RDS deployment where an earlier bootstrap ran:
   ambiguous case: check which of the two passwords a role accepts before
   choosing.
 
+### Audit anchor publisher on ECS
+
+`*-audit-anchor-publisher` signs one manifest per daily cadence boundary (00:05
+UTC) and writes it to the anchors bucket; `*-audit-chain-verify-worker` verifies
+every tenant's chain hourly. The Terraform side — variables, the prefix rule, the
+bucket policy, the task roles — is `infra/terraform/README.md` "Audit anchor
+publisher"; the alarms are in `docs/operations/alerts.md`. This section is what
+an operator does.
+
+#### `DEPLOYMENT_ID`
+
+Every manifest names its deployment by `DEPLOYMENT_ID` (an app-secret key mapped
+into the publisher task only). The publisher stores it in `system_settings`
+(`audit_anchor_deployment_id`) on its first boot and refuses to boot when the
+value it is given differs (`DeploymentIdMismatchError`, one
+`AUDIT_ANCHOR_PUBLISH_FAILED` row with `DEPLOYMENT_ID_MISMATCH`).
+
+- **New deployment**: generate one, once: `node -e
+  'console.log(crypto.randomUUID())'`.
+- **Reuse a stored value only for a successor of the same deployment whose
+  predecessor is gone** — the same database moved to new infrastructure, or a
+  restore that replaces a deployment no longer running. Its database already
+  holds the value, so the successor must be given the same one.
+- **A clone, or a restored copy while the original still runs**, is a second
+  deployment: generate a new value and follow "DEPLOYMENT_ID change recovery" in
+  `docs/operations/audit-anchor-rotation-runbook.md`. The copy also inherits the
+  original's manifest pointer and boundary marker (`system_settings`), so its
+  first manifest's `previousManifest` names the original's last manifest, which
+  is not in the copy's bucket.
+
+To add it to the app secret of an existing deployment (read-merge-write, as in
+`infra/terraform/README.md` "Adding a key to an existing app secret"; run from
+`infra/terraform`):
+
+```bash
+(
+  set -euo pipefail
+  umask 077
+  MERGED=$(mktemp "${TMPDIR:-/tmp}/app-secrets.XXXXXX")
+  trap 'rm -f "$MERGED"' EXIT
+
+  NEW_DEPLOYMENT_ID=$(node -e 'console.log(crypto.randomUUID())')
+  export NEW_DEPLOYMENT_ID
+
+  aws secretsmanager get-secret-value --region <region> \
+    --secret-id "$(terraform output -raw app_secrets_arn)" \
+    --query SecretString --output text \
+    | jq 'if (has("DATABASE_URL") | not) then error("app secret has no DATABASE_URL — refusing to replace it")
+          elif has("DEPLOYMENT_ID") then error("app secret already has DEPLOYMENT_ID — keep it (see the reuse rule)")
+          elif (has("AUDIT_ANCHOR_SIGNING_KEY") and has("AUDIT_ANCHOR_TAG_SECRET") and has("AUDIT_ANCHOR_PUBLISHER_DATABASE_URL")) | not
+            then error("app secret lacks a publisher key — add it before DEPLOYMENT_ID")
+          else . + {DEPLOYMENT_ID: env.NEW_DEPLOYMENT_ID} end' > "$MERGED"
+  [ -s "$MERGED" ] || { echo "merged secret is empty — refusing to write it" >&2; exit 1; }
+
+  ../../scripts/put-terraform-secrets.sh --name-prefix passwd-sso-prod \
+    --region <region> --app-file "$MERGED"
+)
+```
+
+The filter refuses to overwrite a `DEPLOYMENT_ID` already present, and refuses to
+run while a publisher key is missing: an ECS task whose secret names a missing
+key does not start. A deployment created before this release has
+`AUDIT_ANCHOR_SIGNING_KEY` and `AUDIT_ANCHOR_TAG_SECRET` already (the app task
+used to receive them); `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` is added as in the
+README.
+
+#### Existing anchors bucket without Object Lock
+
+The anchors bucket now always has Object Lock. The aws provider marks the
+bucket's `object_lock_enabled` ForceNew, so on a bucket created without it
+(`enable_s3_object_lock = false` before this release) the next plan would
+REPLACE the bucket. `prevent_destroy` on the bucket makes such a plan fail
+(`Instance cannot be destroyed`) rather than apply. Never answer that by
+removing `prevent_destroy`, emptying the bucket or recreating it — it holds
+versions, and the anchors are the evidence. Enable Object Lock in place first,
+so the refreshed state already reads it as enabled:
+
+```bash
+B=$(terraform output -raw audit_anchors_bucket_name)
+
+# 1. Is it already on? "ObjectLockEnabled": "Enabled" means nothing to do;
+#    ObjectLockConfigurationNotFoundError means it is off.
+aws s3api get-object-lock-configuration --bucket "$B" --region <region>
+
+# 2. Object Lock can be enabled only on a versioned bucket: expect "Status": "Enabled".
+aws s3api get-bucket-versioning --bucket "$B" --region <region>
+
+# 3. Enable it in place. Irreversible. No Rule here: Terraform's
+#    aws_s3_bucket_object_lock_configuration sets the COMPLIANCE default on apply.
+aws s3api put-object-lock-configuration --bucket "$B" --region <region> \
+  --object-lock-configuration '{"ObjectLockEnabled":"Enabled"}'
+
+# 4. Plan. aws_s3_bucket.audit_anchors must show no replacement (no "-/+",
+#    no "must be replaced"); the object-lock configuration, policy and
+#    encryption resources are created or updated in place.
+terraform plan -var-file=envs/prod/terraform.tfvars
+```
+
+If step 4 still plans a replacement, stop and diagnose; do not apply. Objects
+written before step 3 keep no retention: Object Lock applies to versions written
+after it. Whether the provider version in use reads the enabled state back on
+refresh is checked in the manual test
+(`docs/archive/review/aws-anchor-publisher-verify-worker-manual-test.md`).
+
+#### CloudTrail prerequisite
+
+Five EventBridge rules — `<name_prefix>-ecs-execute-command`,
+`<name_prefix>-audit-anchor-bucket-config-change`,
+`<name_prefix>-audit-anchor-publisher-role-override`,
+`<name_prefix>-audit-anchor-publisher-role-task-definition` and
+`<name_prefix>-audit-anchor-publisher-family-run-task` — match "AWS API Call via
+CloudTrail" events, which EventBridge receives only from an account with a trail
+logging management events. (`<name_prefix>-audit-anchor-publisher-family-task-outside-service`
+matches the native "ECS Task State Change" event and needs no trail.) Terraform
+defines no trail. Before relying on those rules, have one in the region (an
+organisation trail counts) that:
+
+- logs **management events** (write events at least: `ExecuteCommand`,
+  `PutBucketPolicy`, `PutObjectLockConfiguration`, `RunTask`, … are writes), and
+- has a **data-event selector on the anchors bucket** (`AWS::S3::Object`, ARN
+  prefix `arn:aws:s3:::<bucket>/`): it records the break-glass role's Step 4–5
+  writes and any refused write attempt, which no rule here alarms on.
+
+```bash
+aws cloudtrail describe-trails --region <region>
+aws cloudtrail get-trail-status --name <trail> --region <region>       # IsLogging: true
+aws cloudtrail get-event-selectors --trail-name <trail> --region <region>
+```
+
+`put-event-selectors` REPLACES every selector on the trail, so read the current
+ones first and send them back with the anchors-bucket selector added; never send
+the bucket selector alone. With advanced selectors the addition is:
+
+```json
+{
+  "Name": "Audit anchors bucket object writes",
+  "FieldSelectors": [
+    { "Field": "eventCategory", "Equals": ["Data"] },
+    { "Field": "resources.type", "Equals": ["AWS::S3::Object"] },
+    { "Field": "readOnly", "Equals": ["false"] },
+    { "Field": "resources.ARN", "StartsWith": ["arn:aws:s3:::<bucket>/"] }
+  ]
+}
+```
+
+```bash
+aws cloudtrail put-event-selectors --trail-name <trail> --region <region> \
+  --advanced-event-selectors file://selectors.json   # the existing ones + the above
+```
+
+The manual test checks both: an exec session produces the SNS notification, and
+a bucket-configuration change produces one.
+
+#### First publish
+
+- **No chain-enabled tenant**: every boundary reports `skipped_no_tenants` with
+  `everChainEnabled: false`. That is healthy, and it is what keeps the
+  cadence-absent alarm OK; nothing is written to the bucket and no attempt is
+  counted.
+- **Once a tenant enables the chain**, the next boundary (or the next boot run)
+  publishes, and reports `MISSING_PRIOR_CADENCE_PUBLICATION` once — a warn line
+  `audit-anchor-publisher.missing_prior_cadence` and one
+  `AUDIT_ANCHOR_PUBLISH_FAILED` row — because no earlier manifest exists. It is
+  expected exactly once; a later one means a boundary was never committed.
+- A deploy across a boundary: the old task drains and stops before the new one
+  starts; the new task's boot run publishes the boundary if it is unpublished,
+  otherwise reports `skipped_already_published`.
+- The verify worker's `audit-chain-verify-heartbeat` appears hourly from its
+  first tick.
+
+Check the publisher's lines:
+
+```bash
+aws logs tail /ecs/passwd-sso-prod/audit-anchor-publisher --since 2d --region <region> \
+  --filter-pattern '{ $._logType = "audit-anchor-publisher.cadence" }'
+```
+
 ## Deploy Flow (Local / Docker Compose)
 
 ### Run migration only
@@ -254,7 +431,10 @@ and `retention-gc-worker` (enforces retention / hard-deletes). On AWS they are
 dedicated Terraform-managed ECS services (`infra/terraform/ecs.tf`); on Docker
 Compose they are in `docker-compose.workers.yml` (production) /
 `docker-compose.override.yml` (dev tsx). Without them, audit events accumulate as
-`PENDING` and retention is never enforced.
+`PENDING` and retention is never enforced. On AWS two more run as ECS services,
+`audit-anchor-publisher` and `audit-chain-verify-worker` ("Audit anchor publisher
+on ECS" above); the compose files do not define them yet (SC1) — run them with
+`npm run worker:audit-anchor-publisher` and `npm run worker:audit-chain-verify`.
 
 ## Migration Compatibility Rules
 
@@ -442,7 +622,7 @@ The application uses these database roles with separated privileges:
 | Role | Privileges | Purpose |
 |------|-----------|---------|
 | `passwd_user` (or equivalent) | DDL-capable (`rds_superuser`-class on RDS) | Table owner, migrations (`prisma migrate deploy`), one-shot data migrations |
-| `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced |
+| `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced. Also the audit-chain verify worker's role on ECS, which needs only reads of `tenants`, `audit_chain_anchors` and `audit_logs` but can read every table the app reads and holds every write the app has; a dedicated read-only role is a follow-up (SC3) |
 | `passwd_outbox_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` | Audit outbox drain worker (least privilege) |
 | `passwd_retention_gc_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; scoped DELETE/SELECT on the retention-swept tables | Retention GC worker (least privilege) |
 | `passwd_anchor_publisher` | NOSUPERUSER NOBYPASSRLS; SELECT + column-scoped UPDATE on `audit_chain_anchors`, INSERT on `audit_outbox`, SELECT/INSERT/UPDATE on `system_settings`, SELECT on `tenants` | Audit-anchor publisher (least privilege) |

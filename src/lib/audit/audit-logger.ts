@@ -92,8 +92,10 @@ export const auditLogger = createAuditLogger();
  *
  * Always enabled (unlike auditLogger which depends on AUDIT_LOG_FORWARD).
  * External alerting should monitor for `_logType: "audit-dead-letter"`.
+ * The options are exported so a test can render the real line into its own
+ * stream (the publisher's CloudWatch filter is matched against it).
  */
-export const deadLetterLogger = pino({
+export const deadLetterLoggerOptions: pino.LoggerOptions = {
   name: DEFAULT_APP_NAME,
   level: "warn",
   enabled: true,
@@ -118,7 +120,9 @@ export const deadLetterLogger = pino({
       return { level: label };
     },
   },
-});
+};
+
+export const deadLetterLogger = pino(deadLetterLoggerOptions);
 
 /**
  * Audit emits refused because an RLS context was open.

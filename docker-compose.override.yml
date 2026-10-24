@@ -169,15 +169,27 @@ services:
       - mail
 
   minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    # minio/minio left Docker Hub (the repository returns 404); Chainguard's
+    # image publishes only `latest`, so it is pinned by digest. Measured release:
+    # RELEASE.2026-10-23T20-06-51Z.
+    image: cgr.dev/chainguard/minio@sha256:73297936408b731668ca0e835ac9add1a35cb6026a125c2f0cd476d9ef48222c
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
+    # SSE-S3 (`x-amz-server-side-encryption: AES256`, which the audit-anchor
+    # upload always sends) is refused with 501 unless MinIO has a KMS key. The
+    # storage is ephemeral, so a key generated at each start is enough and
+    # nothing is stored in the repository.
+    entrypoint: ["sh", "-c", "MINIO_KMS_SECRET_KEY=\"dev-anchor-key:$$(head -c 32 /dev/urandom | base64)\" exec minio server /data --console-address :9001"]
+    # tmpfs makes the storage as ephemeral as the key above: every start is an
+    # empty bucket store, never objects encrypted under a key that no longer
+    # exists. Owned by the image's non-root user (65532), which cannot create
+    # /data itself.
+    tmpfs:
+      - /data:uid=65532,gid=65532
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
-    # No persistent volume: ephemeral storage for dev/test only
     logging: *default-logging
     networks:
       - internal

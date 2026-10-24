@@ -404,11 +404,13 @@ npm run dev -- -p 3001      # the serve target is 3001, not the default 3000
       isolation is the one thing a `-Fc` restore does not carry by itself
 
 Integration tests additionally require the Compose workers to be stopped —
-they claim rows `FOR UPDATE SKIP LOCKED` across the whole table:
+they claim rows `FOR UPDATE SKIP LOCKED` across the whole table — and MinIO
+running for the audit-anchor S3 suites:
 
 ```bash
+docker compose up -d minio
 docker compose stop audit-outbox-worker retention-gc-worker
-npm run test:integration
+ANCHOR_TEST_S3_ENDPOINT=http://127.0.0.1:9000 npm run test:integration
 docker compose start audit-outbox-worker retention-gc-worker
 ```
 

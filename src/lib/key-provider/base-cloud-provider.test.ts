@@ -32,8 +32,6 @@ class TestProvider extends BaseCloudKeyProvider {
     "verifier-pepper": "TEST_SECRET_VERIFIER_PEPPER",
     "directory-sync": "TEST_SECRET_DIRECTORY_SYNC",
     "webauthn-prf": "TEST_SECRET_WEBAUTHN_PRF",
-    "audit-anchor-signing": "TEST_SECRET_AUDIT_ANCHOR_SIGNING",
-    "audit-anchor-tag-secret": "TEST_SECRET_AUDIT_ANCHOR_TAG_SECRET",
   };
 
   protected readonly defaultSecretNames: Record<KeyName, string> = {
@@ -41,8 +39,6 @@ class TestProvider extends BaseCloudKeyProvider {
     "verifier-pepper": "test/verifier-pepper",
     "directory-sync": "test/directory-sync",
     "webauthn-prf": "test/webauthn-prf",
-    "audit-anchor-signing": "test/audit-anchor-signing",
-    "audit-anchor-tag-secret": "test/audit-anchor-tag-secret",
   };
 
   protected validateConfig(): void {
@@ -330,24 +326,15 @@ describe("BaseCloudKeyProvider", () => {
       );
     });
 
-    it("includes audit-anchor-signing + audit-anchor-tag-secret when publisher enabled", async () => {
+    it("warms only the app's keys when the publisher flag is on (the publisher reads its own env)", async () => {
       vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "1");
       vi.stubEnv("AUDIT_ANCHOR_PUBLISHER_ENABLED", "true");
       const provider = makeProvider();
       await provider.validateKeys();
-      const names = provider.fetchCalls.map((c) => c.name);
-      expect(names).toContain("audit-anchor-signing");
-      expect(names).toContain("audit-anchor-tag-secret");
-    });
-
-    it("does NOT include audit-anchor keys when publisher flag is unset (default)", async () => {
-      vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "1");
-      vi.stubEnv("AUDIT_ANCHOR_PUBLISHER_ENABLED", "");
-      const provider = makeProvider();
-      await provider.validateKeys();
-      const names = provider.fetchCalls.map((c) => c.name);
-      expect(names).not.toContain("audit-anchor-signing");
-      expect(names).not.toContain("audit-anchor-tag-secret");
+      const names = provider.fetchCalls.map((c) => c.name).sort();
+      expect(names).toEqual(
+        ["directory-sync", "share-master", "verifier-pepper", "webauthn-prf"].sort(),
+      );
     });
 
     it("rejects SHARE_MASTER_KEY_CURRENT_VERSION = 0", async () => {

@@ -6,10 +6,10 @@
  * which the assertions read back.
  *
  * Coverage:
- *   T1 — a mid-loop `update-service` failure (the 2nd of 4) still triggers the
- *        compensating rollback for EVERY service, including the ones that were
- *        never updated. Regression test: the rollback used to be defined after
- *        the update loop, so `set -e` exited before it could run.
+ *   T1 — a mid-loop `update-service` failure (the 2nd, 5th or 6th of 6) still
+ *        triggers the compensating rollback for EVERY service, including the
+ *        ones that were never updated. Regression test: the rollback used to be
+ *        defined after the update loop, so `set -e` exited before it could run.
  *   T2 — a circuit-breaker rollback (service settles COMPLETED but on the OLD
  *        task def) is detected as a failure, not reported as success.
  *   T3 — the happy path issues no rollback and exits 0.
@@ -17,6 +17,9 @@
  *        says manual intervention is required.
  *   T5 — --rollback-to pointing at a foreign registry is rejected before any
  *        AWS/terraform call.
+ *   T6 — every output the script asks terraform for is declared in
+ *        infra/terraform/outputs.tf (the stub refuses an unknown name, as
+ *        terraform does).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -37,12 +40,16 @@ const SERVICE_NAMES = {
   ecs_jackson_service_name: "passwd-sso-prod-jackson",
   ecs_audit_outbox_worker_service_name: "passwd-sso-prod-audit-outbox-worker",
   ecs_retention_gc_worker_service_name: "passwd-sso-prod-retention-gc-worker",
+  ecs_audit_anchor_publisher_service_name: "passwd-sso-prod-audit-anchor-publisher",
+  ecs_audit_chain_verify_worker_service_name: "passwd-sso-prod-audit-chain-verify-worker",
 };
 const NEW_TD = {
   app_task_definition_arn: "arn:aws:ecs:td/app:2",
   jackson_task_definition_arn: "arn:aws:ecs:td/jackson:2",
   audit_outbox_worker_task_definition_arn: "arn:aws:ecs:td/outbox:2",
   retention_gc_worker_task_definition_arn: "arn:aws:ecs:td/gc:2",
+  audit_anchor_publisher_task_definition_arn: "arn:aws:ecs:td/publisher:2",
+  audit_chain_verify_worker_task_definition_arn: "arn:aws:ecs:td/verify:2",
   migrate_task_definition_arn: "arn:aws:ecs:td/migrate:2",
 };
 /** Pre-deploy revisions the stub reports before any update-service. */
@@ -51,6 +58,8 @@ const OLD_TD_FOR_SERVICE = {
   [SERVICE_NAMES.ecs_jackson_service_name]: "arn:aws:ecs:td/jackson:1",
   [SERVICE_NAMES.ecs_audit_outbox_worker_service_name]: "arn:aws:ecs:td/outbox:1",
   [SERVICE_NAMES.ecs_retention_gc_worker_service_name]: "arn:aws:ecs:td/gc:1",
+  [SERVICE_NAMES.ecs_audit_anchor_publisher_service_name]: "arn:aws:ecs:td/publisher:1",
+  [SERVICE_NAMES.ecs_audit_chain_verify_worker_service_name]: "arn:aws:ecs:td/verify:1",
 };
 const NEW_TD_FOR_SERVICE = {
   [SERVICE_NAMES.ecs_app_service_name]: NEW_TD.app_task_definition_arn,
@@ -59,6 +68,10 @@ const NEW_TD_FOR_SERVICE = {
     NEW_TD.audit_outbox_worker_task_definition_arn,
   [SERVICE_NAMES.ecs_retention_gc_worker_service_name]:
     NEW_TD.retention_gc_worker_task_definition_arn,
+  [SERVICE_NAMES.ecs_audit_anchor_publisher_service_name]:
+    NEW_TD.audit_anchor_publisher_task_definition_arn,
+  [SERVICE_NAMES.ecs_audit_chain_verify_worker_service_name]:
+    NEW_TD.audit_chain_verify_worker_task_definition_arn,
 };
 
 let tmpDir;
@@ -143,7 +156,8 @@ if [ "\${MODE:-}" = output ]; then
     private_subnet_ids) echo '["subnet-a","subnet-b"]';;
     ecs_security_group_id) echo "sg-123";;
 ${tfOutputCases}
-    *) echo "";;
+    # terraform refuses an output the configuration does not declare.
+    *) echo "Error: Output \"$NAME\" not found" >&2; exit 1;;
   esac
 fi
 exit 0`,
@@ -346,8 +360,8 @@ afterEach(() => {
 });
 
 describe("deploy.sh compensating rollback", () => {
-  it("rolls every service back when the 2nd update-service fails mid-loop", () => {
-    installStubs({ failUpdateAtCall: 2 });
+  it.each([2, 5, 6])("rolls every service back when update-service #%i of 6 fails", (failUpdateAtCall) => {
+    installStubs({ failUpdateAtCall });
 
     const result = runDeploy();
 
@@ -357,7 +371,8 @@ describe("deploy.sh compensating rollback", () => {
     expect(result.stderr).toContain("Compensating rollback");
 
     // EVERY service must be restored to its pre-deploy revision — including the
-    // ones the forward loop never reached (services 3 and 4).
+    // ones the forward loop never reached.
+    expect(Object.keys(OLD_TD_FOR_SERVICE)).toHaveLength(6);
     const rollbackCalls = logLines("ecs update-service").filter((l) => l.includes(":1"));
     for (const [svc, oldTd] of Object.entries(OLD_TD_FOR_SERVICE)) {
       expect(
@@ -394,6 +409,29 @@ describe("deploy.sh compensating rollback", () => {
     expect(result.stderr).not.toContain("Compensating rollback");
     // No update-service call may target an old (:1) revision.
     expect(logLines("ecs update-service").filter((l) => l.includes(":1"))).toHaveLength(0);
+  });
+
+  it("advances all six services and asks terraform only for declared outputs", () => {
+    installStubs();
+
+    const result = runDeploy();
+
+    expect(result.status).toBe(0);
+    const forward = logLines("ecs update-service").filter((l) => l.includes(":2"));
+    for (const [svc, td] of Object.entries(NEW_TD_FOR_SERVICE)) {
+      expect(forward.some((l) => l.includes(`--service ${svc} `) && l.includes(td)), svc).toBe(true);
+    }
+    const asked = new Set(
+      logLines("terraform")
+        .filter((l) => / output /.test(l))
+        .map((l) => l.trim().split(/\s+/).at(-1)),
+    );
+    const declared = new Set(
+      [...readFileSync(resolve(REPO_ROOT, "infra/terraform/outputs.tf"), "utf8").matchAll(/^output "(\w+)"/gm)].map((m) => m[1]),
+    );
+    expect(asked.size).toBeGreaterThan(0);
+    for (const name of asked) expect(declared, name).toContain(name);
+    for (const name of Object.keys(SERVICE_NAMES)) expect(asked, name).toContain(name);
   });
 
   it("reports MANUAL INTERVENTION when the compensating rollback does not land", () => {

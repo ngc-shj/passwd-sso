@@ -24,6 +24,7 @@ jobs:
       ci: ${{ steps.filter.outputs.ci }}
       env: ${{ steps.filter.outputs.env }}
       ios: ${{ steps.filter.outputs.ios }}
+      terraform: ${{ steps.filter.outputs.terraform }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -73,10 +74,15 @@ jobs:
               # these two entries a docs-only PR skips those assertions, which is
               # exactly the change they exist to catch.
               - "docs/operations/**"
-              # Read by src/lib/db/pool-factory.metric-filter.test.ts, which
-              # pins the RLS bypass report filters and their log groups: an
-              # infra-only PR changing them must still run that test.
-              - "infra/terraform/monitoring.tf"
+              # Read by vitest: the metric-filter tests pin monitoring.tf's
+              # patterns to the lines the code emits, src/__tests__/infra/
+              # evaluates the anchors bucket policy and the ECS wiring, and
+              # pins the secret keys to both READMEs' tables and the prefix
+              # vectors to the module's .tftest.hcl. An infra-only PR changing
+              # any of them must still run those tests.
+              - "infra/terraform/*.tf"
+              - "infra/terraform/README*.md"
+              - "infra/terraform/modules/anchor-prefix/**"
               - "CLAUDE.md"
             extension:
               - "extension/**"
@@ -87,6 +93,9 @@ jobs:
               - "extension/test/fixtures/**"
             e2e:
               - "e2e/**"
+            terraform:
+              - "infra/terraform/**"
+              - "scripts/checks/check-terraform-test-count.mjs"
             ci:
               - ".github/workflows/ci.yml"
               - "scripts/checks/check-licenses.mjs"
@@ -763,6 +772,19 @@ jobs:
       - name: Build Docker image
         run: docker build --build-arg DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy -t passwd-sso:scan .
 
+      # The smoke's host runner (static-checks) boots bundles it builds itself;
+      # this is the only check that boots what the runner stage ships: each
+      # worker bundle in the image, as its ECS command, with its task env and
+      # no network. The gate needs node but not the repo's dependencies.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Boot the worker bundles inside the image
+        run: bash scripts/checks/check-worker-bundle-smoke.sh
+        env:
+          WORKER_BUNDLE_SMOKE_RUNNER: "docker:passwd-sso:scan"
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -892,3 +914,57 @@ jobs:
       - run: npm run licenses:check:strict
       - run: npm run licenses:check:ext:strict
       - run: npm run licenses:check:cli:strict
+
+  # ─── Terraform: fmt → validate → prefix-module tests ──────
+  # No AWS account runs here: nothing is planned or applied, and init skips the
+  # backend. The anchor-prefix module is provider-less, so its variable
+  # validation is exercised for real by `terraform test`.
+  terraform:
+    name: "Terraform: fmt, validate, module tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.terraform == 'true' || needs.changes.outputs.ci == 'true')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # >= 1.6 for `terraform test`; the root's required_version is older and
+      # unchanged. No wrapper: it rewrites stdout and the exit status, and this
+      # job reads both.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: terraform fmt -check
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive
+
+      - name: terraform validate (root)
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          terraform init -backend=false -input=false
+          terraform validate
+
+      # Exit status checked on its own, then the count: a test file that runs
+      # nothing (or one run fewer) exits 0 too.
+      - name: terraform test (modules/anchor-prefix)
+        working-directory: infra/terraform/modules/anchor-prefix
+        run: |
+          set -euo pipefail
+          terraform init -backend=false -input=false
+          status=0
+          terraform test -json > "$RUNNER_TEMP/anchor-prefix-test.json" || status=$?
+          grep -F '"type":"test_summary"' "$RUNNER_TEMP/anchor-prefix-test.json" || true
+          if [ "$status" -ne 0 ]; then
+            echo "::error::terraform test exited $status"
+            exit "$status"
+          fi
+
+      - name: Check the module test count against the prefix vectors
+        run: node scripts/checks/check-terraform-test-count.mjs "$RUNNER_TEMP/anchor-prefix-test.json" infra/terraform/modules/anchor-prefix/prefix-vectors.json
