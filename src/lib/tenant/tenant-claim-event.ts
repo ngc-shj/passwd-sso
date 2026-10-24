@@ -70,6 +70,24 @@ export const SIGNIN_ACTOR_LABEL = "signin";
  */
 export const DEREGISTER_ACTOR_LABEL = "db-delete";
 
+/**
+ * The `created_by` the `20260729110000_add_tenant_claims` backfill wrote on the
+ * claim rows it derived from every pre-existing tenant's `external_id`. SQL is
+ * its only writer; the constant names it for the readers.
+ */
+export const BACKFILL_CREATED_BY_LABEL = "backfill";
+
+/**
+ * Every label the engine — not a person — writes as a claim row's `created_by`
+ * or an event's `actor_label`. `tenant-domain` refuses each as `--by`, so a
+ * routing change typed by an operator cannot read as engine-written.
+ */
+export const ENGINE_WRITTEN_LABELS = [
+  SIGNIN_ACTOR_LABEL,
+  BACKFILL_CREATED_BY_LABEL,
+  DEREGISTER_ACTOR_LABEL,
+] as const;
+
 export type TenantClaimEventInput = {
   claim: string;
   operation: TenantClaimEventOperation;

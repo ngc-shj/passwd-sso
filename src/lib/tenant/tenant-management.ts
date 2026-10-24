@@ -11,13 +11,15 @@ import {
   SIGNIN_ACTOR_LABEL,
   TENANT_CLAIM_EVENT_OPERATION,
 } from "@/lib/tenant/tenant-claim-event";
-import { CLAIM_BINDING_MODE, type ClaimBindingMode } from "@/lib/auth/jackson-providers";
+import type { ClaimBindingMode } from "@/lib/auth/jackson-providers";
+import { adjudicateClaimBinding, type ClaimRow } from "@/lib/tenant/claim-binding";
 import { providerRefOf } from "@/lib/audit/identifier-pepper";
 import type { ProviderBindingAudit } from "@/lib/audit/auth-failure";
 import { getLogger } from "@/lib/logger";
 
-/** The `tenant_claims` columns every claim decision reads. */
-export type ClaimRow = { tenantId: string; revokedAt: Date | null; provider: string | null };
+// Moved to a prisma-free module so the tenant-domain CLI decides with the
+// same predicate; re-exported for the callers that already import them here.
+export { adjudicateClaimBinding, type ClaimBindingVerdict, type ClaimRow } from "@/lib/tenant/claim-binding";
 
 /**
  * The single `tenantClaim.findUnique` call site in the codebase — every
@@ -34,46 +36,6 @@ async function findClaimRow(db: TxOrPrisma, claim: string): Promise<ClaimRow | n
     where: { claim },
     select: { tenantId: true, revokedAt: true, provider: true },
   });
-}
-
-/**
- * What an existing claim row means for a sign-in through `signInProvider` —
- * the ONE binding adjudicator (plan sso-claim-connection-binding, C4). Both
- * `resolveTenantByClaim` and `findOrCreateTenantForClaim` decide through it, so
- * the resolver and the creator cannot disagree about a bound row.
- *
- * Arm order: revoked first (unchanged — a revoked row needs an operator
- * whatever its binding), then, in strict mode only, a row with no provider and
- * a row bound to another provider. The provider id is the one attestation of
- * which connection authenticated the user: Jackson's token endpoint completed a
- * no-PKCE exchange with that provider's own credentials (C1).
- *
- * Off mode leaves resolution as it was. `unenforcedMismatch` names a bound
- * row's provider when it differs from the sign-in's, which the caller logs;
- * with one claim provider that is only a row bound to a provider no longer
- * configured.
- */
-export type ClaimBindingVerdict =
-  | { kind: "tenant"; id: string; unenforcedMismatch: string | null }
-  | { kind: "revoked"; tenantId: string }
-  | { kind: "unbound"; tenantId: string }
-  | { kind: "provider_mismatch"; tenantId: string; boundProvider: string };
-
-export function adjudicateClaimBinding(
-  row: ClaimRow,
-  signInProvider: string,
-  mode: ClaimBindingMode,
-): ClaimBindingVerdict {
-  if (row.revokedAt !== null) return { kind: "revoked", tenantId: row.tenantId };
-  if (mode === CLAIM_BINDING_MODE.STRICT) {
-    if (row.provider === null) return { kind: "unbound", tenantId: row.tenantId };
-    if (row.provider !== signInProvider) {
-      return { kind: "provider_mismatch", tenantId: row.tenantId, boundProvider: row.provider };
-    }
-    return { kind: "tenant", id: row.tenantId, unenforcedMismatch: null };
-  }
-  const mismatch = row.provider !== null && row.provider !== signInProvider ? row.provider : null;
-  return { kind: "tenant", id: row.tenantId, unenforcedMismatch: mismatch };
 }
 
 /**

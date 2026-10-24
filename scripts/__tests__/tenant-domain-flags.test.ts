@@ -200,8 +200,13 @@ describe("tenant-domain flag parsing", () => {
     // rather than something that slips in with an unrelated change. "after"
     // (20260731170000) is `history`'s pagination cursor; "user" (round 7,
     // F-R7-2) names `realign`'s user; "limit" and "apply" (C4/#838) are
-    // `backfill-owning-column`'s candidate cap and its apply/dry-run switch.
-    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "after", "user", "limit", "yes", "apply"]);
+    // `backfill-owning-column`'s candidate cap and its apply/dry-run switch;
+    // "provider", "claim", "out", "unbound", "accept-unused-provider" and
+    // "from-members" are the claim-binding writers' (sso-claim-connection-binding C3).
+    expect([...declared]).toEqual([
+      "tenant", "domain", "by", "from", "days", "after", "user", "limit", "provider", "claim", "out",
+      "yes", "apply", "unbound", "accept-unused-provider", "from-members",
+    ]);
     expect(read.size).toBeGreaterThan(0);
   });
 
@@ -220,6 +225,26 @@ describe("tenant-domain flag parsing", () => {
 
   it("refuses a repeated --yes", () => {
     expect(errorOf(["--yes", "--yes"])).toContain("--yes was given more than once");
+  });
+
+  describe("--apply under bind takes the reviewed file (C3)", () => {
+    it("reads the value after --apply as bind's file", () => {
+      const parsed = parseFlags(["--apply", "/tmp/bind.tsv", "--by", "ops"], "bind");
+      expect(parsed.ok && getStringFlag(parsed.flags, "apply")).toBe("/tmp/bind.tsv");
+    });
+
+    it("reports a bare bind --apply as a missing file, not a switch", () => {
+      const parsed = parseFlags(["--apply", "--by", "ops"], "bind");
+      if (!parsed.ok) throw new Error(parsed.error);
+      expect(findValuelessFlag(parsed.flags, "bind")).toBe("apply");
+      expect(valuelessError("apply", "bind")).toContain("the reviewed bind file");
+    });
+
+    it("still refuses a value on --apply outside bind (the adjacent allow keeps it a switch there)", () => {
+      expect(errorOf(["--apply", "/tmp/bind.tsv"])).toContain('Unexpected argument "/tmp/bind.tsv"');
+      const parsed = parseFlags(["--apply", "/tmp/bind.tsv"], "backfill-owning-column");
+      expect(parsed.ok).toBe(false);
+    });
   });
 
   it("parses the boolean --apply", () => {

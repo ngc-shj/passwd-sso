@@ -4,13 +4,13 @@
  * append a routing-history event in the same function, and
  * `tenant_claim_events` must have exactly one producer.
  *
- * WHY AST AND NOT GREP. Two of the six writers create their claim row through a
+ * WHY AST AND NOT GREP. Two of the seven writers create their claim row through a
  * NESTED relation write inside `tenant.create({ data: { claims: { create … } } })`
  * — a `tenantClaim.create` grep returns neither, and those two are the sign-in
  * auto-registration path, i.e. the writer an incident responder most needs.
  * A grep also cannot tell a mutation from a read.
  *
- * WHY IT SCANS `scripts/` TOO. Four of the six writers live in
+ * WHY IT SCANS `scripts/` TOO. Five of the seven writers live in
  * `scripts/tenant-domain.ts`. `check-critical-audit-atomic.mjs` — the sibling
  * this gate's shape borrows from — has `SEARCH_DIRS = ["src/app/api", "src/lib"]`
  * and would see none of them. The scan root is parameterised from the start so
@@ -42,6 +42,12 @@
  *       TENANT_CLAIM_EVENT_OPERATION, read from the const-object itself. This is
  *       what consumes the operation-set derivation: without it a typo'd literal
  *       is invisible here and surfaces only as a CHECK violation at run time.
+ *       A `TENANT_CLAIM_EVENT_OPERATION.<KEY>` reference is resolved to its
+ *       VALUE through the same const-object, so (1)'s distinct-operation count
+ *       compares values: an arm naming `TENANT_CLAIM_EVENT_OPERATION.REBIND` and
+ *       another naming `"rebind"` record one operation, not two — the
+ *       `tenant-domain bind` writers (plan sso-claim-connection-binding, C3)
+ *       are the first to name an operation only through the constant.
  *
  *   (2) Function-scoped presence — writers present, no producer. Subsumed by (1)
  *       arithmetically; kept because it is what produces the useful message.
@@ -194,13 +200,16 @@ function deriveOperations() {
   }
   const block = /TENANT_CLAIM_EVENT_OPERATION\s*=\s*\{([\s\S]*?)\}\s*as const/.exec(src);
   if (!block) fail(`no TENANT_CLAIM_EVENT_OPERATION const-object in ${PRODUCER_MODULE}`);
-  const ops = new Set([...block[1].matchAll(/:\s*"([^"]+)"/g)].map((m) => m[1]));
-  if (ops.size === 0) fail("TENANT_CLAIM_EVENT_OPERATION is empty");
-  return ops;
+  const byKey = new Map([...block[1].matchAll(/(\w+)\s*:\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]));
+  if (byKey.size === 0) fail("TENANT_CLAIM_EVENT_OPERATION is empty");
+  return byKey;
 }
 
 const RELATION_FIELD = deriveRelationField();
-const OPERATIONS = deriveOperations();
+/** Const-object key → operation value. */
+const OPERATION_BY_KEY = deriveOperations();
+const OPERATIONS = new Set(OPERATION_BY_KEY.values());
+const OPERATION_CONST = "TENANT_CLAIM_EVENT_OPERATION";
 
 /**
  * C1's forbidden patterns, and this gate is their declared runner. A forbidden
@@ -537,7 +546,23 @@ for (const { rel, sf } of sourceFilesFrom(project, SEARCH_DIRS, SCAN_ROOT)) {
       const named = arg?.getDescendantsOfKind(SyntaxKind.PropertyAssignment)
         .find((p) => p.getName() === "operation");
       const lit = named?.getInitializer();
+      const viaConst =
+        lit?.isKind(SyntaxKind.PropertyAccessExpression) && lit.getExpression().getText() === OPERATION_CONST
+          ? lit.getName()
+          : null;
       if (lit?.isKind(SyntaxKind.StringLiteral)) e.ops.add(lit.getLiteralValue());
+      else if (viaConst !== null) {
+        const value = OPERATION_BY_KEY.get(viaConst);
+        if (value === undefined) {
+          violations.push(
+            `${rel}:${call.getStartLineNumber()}: ${OPERATION_CONST}.${viaConst} is not a key of ` +
+              `${OPERATION_CONST} in ${PRODUCER_MODULE}.`,
+          );
+          e.ops.add(`<unknown ${viaConst}>`);
+        } else {
+          e.ops.add(value);
+        }
+      }
       // ONE synthetic key for every non-static operation, not one per call.
       // A per-call key made N unreadable producers count as N distinct
       // operations, silently degrading this predicate back to the call count it
@@ -587,7 +612,7 @@ for (const { rel, sf } of sourceFilesFrom(project, SEARCH_DIRS, SCAN_ROOT)) {
       //
       // LIMIT, enumerated rather than discovered: a function that legitimately
       // emits N events of the SAME operation for N writers would false-deny.
-      // No such site exists — the four CLI arms carry four distinct operations
+      // No such site exists — the five CLI arms carry five distinct operations
       // and the retry pair collapses to one effective writer — and the remedy
       // if one appears is to split the function, not to loosen this back to a
       // count.

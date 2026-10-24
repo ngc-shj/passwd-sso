@@ -221,6 +221,60 @@ describe("check-tenant-claim-event-coverage", () => {
     expect(r.stderr).toMatch(/operation "reasign" is not a member of TENANT_CLAIM_EVENT_OPERATION/);
   });
 
+  // ─── `tenant-domain bind`'s rebind writer (sso-claim-connection-binding C3) ──
+
+  /** A rebind: an active row's provider changed, nothing else. */
+  const REBIND_WRITE =
+    `await tx.tenantClaim.updateMany({ where: { id, provider: old, revokedAt: null }, data: { provider } });`;
+  const EVENT_VIA_CONST = (key) =>
+    `await recordTenantClaimEvent(tx, {\n` +
+    `  claim, operation: TENANT_CLAIM_EVENT_OPERATION.${key}, oldTenantId: t, newTenantId: t,\n` +
+    `  oldRevokedAt: null, newRevokedAt: null, actorLabel: "x",\n` +
+    `});`;
+
+  it("passes a rebind writer that records its event through the operation constant", () => {
+    write(
+      "scripts/rebind.ts",
+      `export async function rebind(tx, id, claim, t, old, provider) {\n  ${REBIND_WRITE}\n  ${EVENT_VIA_CONST("REBIND")}\n}\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("fails a rebind writer that records no event", () => {
+    write(
+      "scripts/rebind.ts",
+      `export async function rebind(tx, id, claim, t, old, provider) {\n  ${REBIND_WRITE}\n}\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/scripts\/rebind\.ts:2: writes tenant_claims but calls no/);
+  });
+
+  it("resolves the constant to its value: REBIND and \"rebind\" on two arms are ONE operation", () => {
+    // Compared by spelling, these were two distinct operations and the second
+    // arm's missing event was invisible.
+    write(
+      "scripts/rebind-two-arms.ts",
+      `export async function bind(tx, id, claim, t, old, provider) {\n` +
+        `  if (a) {\n    ${REBIND_WRITE}\n    ${EVENT_VIA_CONST("REBIND")}\n` +
+        `  } else {\n    ${DELEGATE_WRITE}\n    ${EVENT("rebind")}\n  }\n}\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/2 tenant_claims writer\(s\) but only 1 distinct operation\(s\) recorded \(rebind\)/);
+  });
+
+  it("fails a constant reference to a key the const-object does not have", () => {
+    write(
+      "scripts/rebind-typo.ts",
+      `export async function rebind(tx, id, claim, t, old, provider) {\n  ${REBIND_WRITE}\n  ${EVENT_VIA_CONST("REBND")}\n}\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/TENANT_CLAIM_EVENT_OPERATION\.REBND is not a key of TENANT_CLAIM_EVENT_OPERATION/);
+  });
+
   it("fails a second producer — a tenantClaimEvent write outside the producer module", () => {
     write(
       "scripts/second-producer.ts",

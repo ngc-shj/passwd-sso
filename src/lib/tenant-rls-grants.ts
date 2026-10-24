@@ -202,6 +202,8 @@ export const BYPASS_GRANT = Object.freeze({
   TEAM_PENDING_KEY_DISTRIBUTION: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["teamMember", "user", "team"]),
   TEAM_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["team", "tenant"]),
   TEAM_WEBHOOK_DISPATCH: defineGrant(BYPASS_PURPOSE.WEBHOOK_DISPATCH, ["teamWebhook"]),
+  TENANT_CLAIM_BINDING_READ: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember"]),
+  TENANT_CLAIM_BINDING_WRITE: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "tenant", "tenantClaim", "tenantClaimEvent", "tenantMember"]),
   TENANT_CLAIM_HISTORY: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "tenantClaim", "tenantClaimEvent"]),
   TENANT_CLAIM_LIST: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "tenantClaim"]),
   TENANT_CLAIM_REGISTER: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenant", "tenantClaim", "tenantMember"]),
