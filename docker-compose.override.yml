@@ -173,7 +173,11 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
+    # SSE-S3 (`x-amz-server-side-encryption: AES256`, which the audit-anchor
+    # upload always sends) is refused with 501 unless MinIO has a KMS key. The
+    # storage is ephemeral, so a key generated at each start is enough and
+    # nothing is stored in the repository.
+    entrypoint: ["sh", "-c", "MINIO_KMS_SECRET_KEY=\"dev-anchor-key:$$(head -c 32 /dev/urandom | base64)\" exec minio server /data --console-address :9001"]
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"

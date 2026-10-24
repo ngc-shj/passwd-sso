@@ -29,7 +29,7 @@ import { type BootDiagnostic } from "@/lib/boot-events";
 export declare function bootStderr(diagnostic: BootDiagnostic): void;
 
 // -- src/lib/key-provider/types.d.ts --
-export type KeyName = "share-master" | "verifier-pepper" | "directory-sync" | "webauthn-prf" | "audit-anchor-signing" | "audit-anchor-tag-secret";
+export type KeyName = "share-master" | "verifier-pepper" | "directory-sync" | "webauthn-prf";
 export interface KeyProvider {
     getKey(name: KeyName, version?: number): Promise<Buffer>;
     getKeySync(name: KeyName, version?: number): Buffer;

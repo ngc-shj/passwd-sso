@@ -105,7 +105,8 @@
     "audit-anchor-publisher": {
       "entrypoint": "scripts/audit-anchor-publisher.ts",
       "modules": [
-        "src/workers/audit-anchor-publisher.ts"
+        "src/workers/audit-anchor-publisher.ts",
+        "src/workers/audit-anchor-scheduler.ts"
       ],
       "dbRole": "passwd_anchor_publisher",
       "tenantScoped": {

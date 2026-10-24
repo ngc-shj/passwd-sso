@@ -209,6 +209,31 @@ jobs:
         env:
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
 
+      # MinIO stands in for S3 (audit-anchor-s3-destination.integration.test.ts,
+      # which fails rather than skips without it). A step, not a service
+      # container: a service cannot pass the `server /data` command. Same release
+      # as docker-compose.override.yml, pinned by digest. The KMS key enables
+      # SSE-S3 — without one MinIO answers 501 to the AES256 header the anchor
+      # destination always sends; it is generated per run, so nothing is stored.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            -e MINIO_KMS_SECRET_KEY="ci-anchor-key:$(openssl rand -base64 32)" \
+            minio/minio@sha256:9535594ad4122b7a78c6632788a989b96d9199b483d3bd71a5ceae73a922cdfa \
+            server /data
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:9000/minio/health/ready; then
+              echo "ANCHOR_TEST_S3_ENDPOINT=http://127.0.0.1:9000" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs minio
+          echo "MinIO did not become ready within 30s" >&2
+          exit 1
+
       - name: Run integration tests
         env:
           # The superuser, for the test harness: helpers.ts seeds and cleans up

@@ -960,6 +960,5 @@ export const AUDIT_ANCHOR_PUBLISH_OFFSET_MS = 5 * MS_PER_MINUTE;
 export const AUDIT_ANCHOR_RETENTION_YEARS = 7;
 export const AUDIT_ANCHOR_MANIFEST_VERSION = 1;
 export const AUDIT_ANCHOR_TYP = "passwd-sso.audit-anchor.v1";
-export const AUDIT_ANCHOR_PAUSE_CAP_FACTOR = 3;                     // sliding pause window cap
 export const AUDIT_ANCHOR_TAG_DOMAIN = "audit-anchor-tag-v1";       // HMAC domain separation label
 export const AUDIT_ANCHOR_KID_PREFIX = "audit-anchor-";

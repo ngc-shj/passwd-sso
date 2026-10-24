@@ -43,6 +43,8 @@ const CODE_ROOTS: Record<string, string[]> = {
     "src/lib/prisma.ts",
     // Where the database driver adapter is constructed (every pool goes through it).
     "src/lib/db/pool-factory.ts",
+    // Signs the audit-anchor uploads (SigV4, task-role credentials).
+    "src/lib/audit/anchor-destinations/s3-destination.ts",
     "src/lib/email",
     "src/auth.ts",
     "src/auth.config.ts",

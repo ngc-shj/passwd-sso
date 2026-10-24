@@ -274,5 +274,15 @@ describe("EnvKeyProvider", () => {
         "VERIFIER_PEPPER_KEY is required in production"
       );
     });
+
+    it("resolves with the publisher flag on and no anchor keys (the app task's env)", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("SHARE_MASTER_KEY_V1", VALID_HEX);
+      vi.stubEnv("VERIFIER_PEPPER_KEY", VALID_HEX_B);
+      vi.stubEnv("AUDIT_ANCHOR_PUBLISHER_ENABLED", "true");
+      vi.stubEnv("AUDIT_ANCHOR_SIGNING_KEY", "");
+      vi.stubEnv("AUDIT_ANCHOR_TAG_SECRET", "");
+      await expect(provider.validateKeys()).resolves.toBeUndefined();
+    });
   });
 });

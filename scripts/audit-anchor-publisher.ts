@@ -7,12 +7,12 @@ import { createPrivateKey } from "node:crypto";
 // Import from env-schema (side-effect-free) — not @/lib/env, which would run
 // parseEnv() on the full schema at module load and fail the worker boot when
 // non-worker vars (auth providers, WebAuthn, etc.) are absent.
-import { envObject } from "@/lib/env-schema";
+import { auditAnchorPublisherEnvSchema } from "@/lib/env-schema";
 import {
   createPublisher,
-  currentCadenceBoundary,
   type PublisherConfig,
 } from "@/workers/audit-anchor-publisher";
+import { createAnchorScheduler } from "@/workers/audit-anchor-scheduler";
 import { S3Destination } from "@/lib/audit/anchor-destinations/s3-destination";
 import { GitHubReleaseDestination } from "@/lib/audit/anchor-destinations/github-release-destination";
 import { FilesystemDestination } from "@/lib/audit/anchor-destinations/filesystem-destination";
@@ -22,35 +22,9 @@ import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   AUDIT_ANCHOR_CADENCE_MS,
   AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
-  AUDIT_ANCHOR_PAUSE_CAP_FACTOR,
 } from "@/lib/constants/audit/audit";
 
-// Pick only the fields the worker reads. envObject (not envSchema) because
-// Zod 4 throws on .pick() of a refined schema (F16).
-const workerEnvSchema = envObject.pick({
-  DATABASE_URL: true,
-  AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: true,
-  DEPLOYMENT_ID: true,
-  AUDIT_ANCHOR_SIGNING_KEY: true,
-  AUDIT_ANCHOR_TAG_SECRET: true,
-  AUDIT_ANCHOR_PUBLISHER_ENABLED: true,
-  AUDIT_ANCHOR_DESTINATION_S3_BUCKET: true,
-  AUDIT_ANCHOR_DESTINATION_S3_PREFIX: true,
-  AUDIT_ANCHOR_DESTINATION_GH_REPO: true,
-  AUDIT_ANCHOR_DESTINATION_GH_TOKEN: true,
-  AUDIT_ANCHOR_DESTINATION_FS_PATH: true,
-  NODE_ENV: true,
-  DB_POOL_MAX: true,
-  DB_POOL_CONNECTION_TIMEOUT_MS: true,
-  DB_POOL_IDLE_TIMEOUT_MS: true,
-  DB_POOL_MAX_LIFETIME_SECONDS: true,
-  DB_POOL_STATEMENT_TIMEOUT_MS: true,
-  LOG_LEVEL: true,
-  AUDIT_LOG_FORWARD: true,
-  AUDIT_LOG_APP_NAME: true,
-});
-
-const parseResult = workerEnvSchema.safeParse(process.env);
+const parseResult = auditAnchorPublisherEnvSchema.safeParse(process.env);
 if (!parseResult.success) {
   // F30 + S22: never echo rejected value. Emit path + code only.
   for (const issue of parseResult.error.issues) {
@@ -66,9 +40,9 @@ if (!parseResult.success) {
   process.exit(1);
 }
 const workerEnv = parseResult.data;
+const validateEnvOnly = process.argv.includes("--validate-env-only");
 
-// --validate-env-only flag exits 0 after parsing, without touching DB.
-if (process.argv.includes("--validate-env-only")) {
+function envValidationPassed(): never {
   console.log(
     JSON.stringify({ level: "info", msg: "env validation passed" }),
   );
@@ -76,6 +50,7 @@ if (process.argv.includes("--validate-env-only")) {
 }
 
 if (!workerEnv.AUDIT_ANCHOR_PUBLISHER_ENABLED) {
+  if (validateEnvOnly) envValidationPassed();
   console.log(
     JSON.stringify({
       level: "info",
@@ -86,17 +61,14 @@ if (!workerEnv.AUDIT_ANCHOR_PUBLISHER_ENABLED) {
   process.exit(0);
 }
 
-// Required fields when publisher is enabled
-if (!workerEnv.DEPLOYMENT_ID) {
-  console.error(JSON.stringify({ level: "fatal", msg: "DEPLOYMENT_ID is required when publisher is enabled" }));
-  process.exit(1);
-}
-if (!workerEnv.AUDIT_ANCHOR_SIGNING_KEY) {
-  console.error(JSON.stringify({ level: "fatal", msg: "AUDIT_ANCHOR_SIGNING_KEY is required when publisher is enabled" }));
-  process.exit(1);
-}
-if (!workerEnv.AUDIT_ANCHOR_TAG_SECRET) {
-  console.error(JSON.stringify({ level: "fatal", msg: "AUDIT_ANCHOR_TAG_SECRET is required when publisher is enabled" }));
+// The schema requires these whenever the publisher is enabled; narrow the
+// types and fail closed if that invariant is ever broken.
+const deploymentId = workerEnv.DEPLOYMENT_ID;
+const signingKeyHex = workerEnv.AUDIT_ANCHOR_SIGNING_KEY;
+const tagSecretHex = workerEnv.AUDIT_ANCHOR_TAG_SECRET;
+const databaseUrl = workerEnv.AUDIT_ANCHOR_PUBLISHER_DATABASE_URL ?? workerEnv.DATABASE_URL;
+if (!deploymentId || !signingKeyHex || !tagSecretHex || !databaseUrl) {
+  console.error(JSON.stringify({ level: "fatal", msg: "env validation failed", code: "custom" }));
   process.exit(1);
 }
 
@@ -106,7 +78,6 @@ if (!workerEnv.AUDIT_ANCHOR_TAG_SECRET) {
 // SubjectPublicKeyInfo prefix → 32-byte raw public key → first 8 bytes hex.
 const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 const ED25519_SPKI_PREFIX_LEN = 12;
-const signingKeyHex = workerEnv.AUDIT_ANCHOR_SIGNING_KEY;
 const signingKey = Buffer.from(signingKeyHex, "hex").subarray(0, 32);
 const _privateKeyObj = createPrivateKey({
   key: Buffer.concat([ED25519_PKCS8_PREFIX, signingKey]),
@@ -119,7 +90,7 @@ const _publicKeySpki = derivePublicKey(_privateKeyObj).export({
 }) as Buffer;
 const _publicKeyRaw = _publicKeySpki.subarray(ED25519_SPKI_PREFIX_LEN);
 const signingKeyKid = `audit-anchor-${_publicKeyRaw.subarray(0, 8).toString("hex")}`;
-const tagSecret = Buffer.from(workerEnv.AUDIT_ANCHOR_TAG_SECRET, "hex").subarray(0, 32);
+const tagSecret = Buffer.from(tagSecretHex, "hex").subarray(0, 32);
 
 // Build destinations
 const destinations: AnchorDestination[] = [];
@@ -170,51 +141,36 @@ if (destinations.length === 0) {
   process.exit(1);
 }
 
-const databaseUrl = workerEnv.AUDIT_ANCHOR_PUBLISHER_DATABASE_URL ?? workerEnv.DATABASE_URL;
+// Positive boot marker: every destination module loaded and constructed.
+console.log(
+  JSON.stringify({
+    level: "info",
+    msg: "destinations ready",
+    destinations: destinations.map((d) => d.name),
+  }),
+);
+
+// --validate-env-only exits 0 here, without touching the database.
+if (validateEnvOnly) envValidationPassed();
 
 const publisherConfig: PublisherConfig = {
   databaseUrl,
-  deploymentId: workerEnv.DEPLOYMENT_ID,
+  deploymentId,
   signingKey,
   signingKeyKid,
   tagSecret,
   destinations,
   cadenceMs: AUDIT_ANCHOR_CADENCE_MS,
   publishOffsetMs: AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
-  pauseCapFactor: AUDIT_ANCHOR_PAUSE_CAP_FACTOR,
 };
 
 const { publisher, shutdown } = createPublisher(publisherConfig);
 
-// Compute next cadence boundary for alignment
-const now = new Date();
-const nextBoundary = new Date(
-  currentCadenceBoundary(now, AUDIT_ANCHOR_CADENCE_MS, AUDIT_ANCHOR_PUBLISH_OFFSET_MS).getTime() +
-  AUDIT_ANCHOR_CADENCE_MS,
-);
-
-let running = true;
-let cadenceTimer: ReturnType<typeof setInterval> | null = null;
-
-async function runOnce(): Promise<void> {
-  try {
-    const result = await publisher.runCadence(new Date());
-    console.log(JSON.stringify({ level: "info", msg: "audit-anchor-publisher.cadence", result }));
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        msg: "audit-anchor-publisher.cadence_error",
-        // errorLogFields, not a top-level `code` read: a Prisma raw-query
-        // failure carries the driver's SQLSTATE nested underneath a P2010, and
-        // undici puts the errno on `cause`. Reading the top level reported
-        // "P2010" for every SQL fault and "unknown" for every network one —
-        // the two things this line exists to tell apart.
-        error: errorLogFields(err),
-      }),
-    );
-  }
-}
+const scheduler = createAnchorScheduler({
+  runCadence: (boundary) => publisher.runCadence(boundary),
+  cadenceMs: AUDIT_ANCHOR_CADENCE_MS,
+  publishOffsetMs: AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
+});
 
 async function boot(): Promise<void> {
   // Boot-time deployment ID check
@@ -224,47 +180,38 @@ async function boot(): Promise<void> {
     JSON.stringify({
       level: "info",
       msg: "audit-anchor-publisher: cadence=24h",
-      next_publish: nextBoundary.toISOString(),
       key: signingKeyKid,
     }),
   );
 
-  // Align first run to next cadence boundary
-  const msUntilNext = nextBoundary.getTime() - Date.now();
-  const alignTimer = setTimeout(async () => {
-    if (!running) return;
-    await runOnce();
-
-    // After alignment, fire on regular cadence
-    cadenceTimer = setInterval(async () => {
-      if (!running) return;
-      await runOnce();
-    }, AUDIT_ANCHOR_CADENCE_MS);
-  }, msUntilNext);
-
-  // Ensure alignment timer is also clearable on shutdown
-  process.once("_publisher_shutdown_clear_align", () => clearTimeout(alignTimer));
+  // One run for the current boundary, then the schedule stays armed.
+  await scheduler.start();
 }
 
+let shuttingDown = false;
+
 function handleSignal(signal: string): void {
-  running = false;
-  if (cadenceTimer) clearInterval(cadenceTimer);
-  process.emit("_publisher_shutdown_clear_align" as never);
+  if (shuttingDown) return;
+  shuttingDown = true;
 
   console.log(JSON.stringify({ level: "info", msg: "audit-anchor-publisher.shutdown", signal }));
 
-  shutdown().then(() => {
-    process.exit(0);
-  }).catch((err: unknown) => {
-    console.error(
-      JSON.stringify({
-        level: "fatal",
-        msg: "audit-anchor-publisher.shutdown_error",
-        code: (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown",
-      }),
-    );
-    process.exit(1);
-  });
+  // Stop arming and let an in-flight run finish before disconnecting.
+  scheduler.stop()
+    .then(() => shutdown())
+    .then(() => {
+      process.exit(0);
+    })
+    .catch((err: unknown) => {
+      console.error(
+        JSON.stringify({
+          level: "fatal",
+          msg: "audit-anchor-publisher.shutdown_error",
+          error: errorLogFields(err),
+        }),
+      );
+      process.exit(1);
+    });
 }
 
 process.on("SIGTERM", () => handleSignal("SIGTERM"));
@@ -275,8 +222,10 @@ boot().catch((err: unknown) => {
     JSON.stringify({
       level: "fatal",
       msg: "audit-anchor-publisher.boot_failed",
-      code: (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown",
-      message: err instanceof Error ? err.message : String(err),
+      // errorLogFields, not a top-level `code` read or the message: a Prisma
+      // raw-query failure carries the driver's SQLSTATE nested underneath a
+      // P2010, and a message can carry a connection target.
+      error: errorLogFields(err),
     }),
   );
   process.exit(1);

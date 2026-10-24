@@ -25,7 +25,7 @@ import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 // ─── Role connection strings ────────────────────────────────────
 
-type TestRole = "superuser" | "app" | "worker" | "retention-gc-worker";
+type TestRole = "superuser" | "app" | "worker" | "retention-gc-worker" | "anchor-publisher";
 
 function getConnectionString(role: TestRole): string {
   const base = process.env.DATABASE_URL;
@@ -57,6 +57,14 @@ function getConnectionString(role: TestRole): string {
         base.replace(
           /\/\/[^:]+:[^@]+@/,
           "//passwd_retention_gc_worker:passwd_retention_gc_pass@",
+        )
+      );
+    case "anchor-publisher":
+      return (
+        process.env.AUDIT_ANCHOR_PUBLISHER_DATABASE_URL ??
+        base.replace(
+          /\/\/[^:]+:[^@]+@/,
+          "//passwd_anchor_publisher:passwd_anchor_publisher_pass@",
         )
       );
   }

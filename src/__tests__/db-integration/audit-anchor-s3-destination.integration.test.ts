@@ -1,247 +1,161 @@
 /**
- * Integration tests for S3Destination against a local MinIO instance.
+ * S3Destination against MinIO, the S3 stand-in locally and in CI.
  *
- * Tests skip automatically when MinIO is unavailable on localhost:9000.
- * Wire MinIO into docker-compose.override.yml (service name: minio) to run
- * these tests in CI.
- *
- * T7 contract checks:
- *   1. Real PutObjectCommand against MinIO — asserts the object lands at the
- *      expected key with the correct Content-Type.
- *   2. Object Lock COMPLIANCE header contract — asserts the SDK call includes
- *      ObjectLockMode: "COMPLIANCE" and ObjectLockRetainUntilDate.
- *      (Real MinIO enforces Object Lock only on versioning-enabled buckets;
- *      this test uses a unit-level spy for the header assertion so it runs
- *      without requiring Object Lock to succeed on the MinIO test bucket.)
+ * MinIO is required: set ANCHOR_TEST_S3_ENDPOINT (e.g. http://127.0.0.1:9000)
+ * to a MinIO started with the root credentials minioadmin/minioadmin and a KMS
+ * key (MINIO_KMS_SECRET_KEY) — without one MinIO answers 501 to the SSE-S3
+ * header the destination always sends. A missing or unready endpoint fails the
+ * suite; it never skips.
  */
 
-import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
-import net from "node:net";
+import { describe, it, expect, beforeAll } from "vitest";
 import { randomUUID } from "node:crypto";
-import { S3Destination } from "@/lib/audit/anchor-destinations/s3-destination";
+import {
+  CreateBucketCommand,
+  GetObjectCommand,
+  GetObjectRetentionCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  S3ServiceException,
+} from "@aws-sdk/client-s3";
+import {
+  S3Destination,
+  joinS3Key,
+  type S3DestinationClientOptions,
+} from "@/lib/audit/anchor-destinations/s3-destination";
+import { AUDIT_ANCHOR_RETENTION_YEARS } from "@/lib/constants/audit/audit";
+import { MS_PER_DAY, MS_PER_SECOND } from "@/lib/constants/time";
 
-// ── MinIO availability probe ─────────────────────────────────────────────────
+const ENDPOINT_ENV = "ANCHOR_TEST_S3_ENDPOINT";
+const LOCKED_BUCKET = "anchor-test-object-lock";
+const UNLOCKED_BUCKET = "anchor-test-no-object-lock";
+const PREFIX = "audit-anchors";
+const CONTENT_TYPE = "application/jose";
+const RETENTION_MS = AUDIT_ANCHOR_RETENTION_YEARS * 365 * MS_PER_DAY;
 
-async function isMinioAvailable(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve(false);
-    }, timeoutMs);
-    socket.connect(port, host, () => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on("error", () => {
-      clearTimeout(timer);
-      resolve(false);
-    });
-  });
+let clientOptions: S3DestinationClientOptions;
+let admin: S3Client;
+
+async function ensureBucket(bucket: string, objectLock: boolean): Promise<void> {
+  try {
+    await admin.send(new HeadBucketCommand({ Bucket: bucket }));
+  } catch {
+    await admin.send(
+      new CreateBucketCommand({ Bucket: bucket, ObjectLockEnabledForBucket: objectLock }),
+    );
+  }
 }
 
-// @aws-sdk/client-s3 is an optional, uninstalled peer dependency loaded at
-// runtime via require(). It is not a dev dependency, so `typeof import(...)`
-// cannot resolve its types. Mirror the production S3Module pattern
-// (src/lib/audit/anchor-destinations/s3-destination.ts) and describe the
-// subset of the SDK these helpers actually use.
-type S3CommandInput = Record<string, unknown>;
-type S3Client = {
-  send: (command: unknown) => Promise<{
-    ContentType?: string;
-    Body?: AsyncIterable<Buffer | Uint8Array>;
-  }>;
-};
-type S3ClientOptions = {
-  region?: string;
-  endpoint?: string;
-  forcePathStyle?: boolean;
-  credentials?: { accessKeyId: string; secretAccessKey: string };
-};
-type S3ClientS3Module = {
-  S3Client: new (options: S3ClientOptions) => S3Client;
-  CreateBucketCommand: new (input: S3CommandInput) => unknown;
-  HeadBucketCommand: new (input: S3CommandInput) => unknown;
-  GetObjectCommand: new (input: S3CommandInput) => unknown;
-  PutObjectCommand: new (input: S3CommandInput) => unknown;
-};
-
-const MINIO_HOST = "localhost";
-const MINIO_PORT = 9000;
-const MINIO_ENDPOINT = `http://${MINIO_HOST}:${MINIO_PORT}`;
-const MINIO_BUCKET = "test-audit-anchors";
-
-let minioAvailable = false;
+function artifactKey(): string {
+  return `${randomUUID()}.kid-audit-anchor-test.jws`;
+}
 
 beforeAll(async () => {
-  minioAvailable = await isMinioAvailable(MINIO_HOST, MINIO_PORT);
+  const endpoint = process.env[ENDPOINT_ENV];
+  if (!endpoint) {
+    throw new Error(
+      `${ENDPOINT_ENV} is not set. Start MinIO (with MINIO_KMS_SECRET_KEY) and export ` +
+        `${ENDPOINT_ENV}=http://127.0.0.1:9000 to run the S3 destination tests.`,
+    );
+  }
+  const ready = await fetch(new URL("/minio/health/ready", endpoint)).then(
+    (res) => res.status,
+    (error: unknown) => `unreachable (${String(error)})`,
+  );
+  if (ready !== 200) {
+    throw new Error(`MinIO at ${endpoint} is not ready: /minio/health/ready answered ${ready}.`);
+  }
+
+  clientOptions = {
+    endpoint,
+    forcePathStyle: true,
+    region: "us-east-1",
+    credentials: { accessKeyId: "minioadmin", secretAccessKey: "minioadmin" },
+  };
+  admin = new S3Client(clientOptions);
+  await ensureBucket(LOCKED_BUCKET, true);
+  await ensureBucket(UNLOCKED_BUCKET, false);
 });
 
-// ── Helper: ensure test bucket exists via MinIO S3 API ──────────────────────
-
-async function ensureBucket(): Promise<void> {
-  // Use the @aws-sdk/client-s3 package if available (the app already depends on it).
-  // If unavailable, the test skips at the it.skipIf gate.
-  const { S3Client, CreateBucketCommand, HeadBucketCommand } =
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("@aws-sdk/client-s3") as S3ClientS3Module;
-
-  const client = new S3Client({
-    region: "us-east-1",
-    endpoint: MINIO_ENDPOINT,
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: "minioadmin",
-      secretAccessKey: "minioadmin",
-    },
-  });
-
-  try {
-    await client.send(new HeadBucketCommand({ Bucket: MINIO_BUCKET }));
-  } catch {
-    // Bucket does not exist — create it
-    await client.send(new CreateBucketCommand({ Bucket: MINIO_BUCKET }));
-  }
-}
-
-// ── Helper: fetch object from MinIO to verify upload ────────────────────────
-
-async function getObject(key: string): Promise<{ contentType: string; body: Buffer }> {
-  const { S3Client, GetObjectCommand } =
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("@aws-sdk/client-s3") as S3ClientS3Module;
-
-  const client = new S3Client({
-    region: "us-east-1",
-    endpoint: MINIO_ENDPOINT,
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: "minioadmin",
-      secretAccessKey: "minioadmin",
-    },
-  });
-
-  const resp = await client.send(
-    new GetObjectCommand({ Bucket: MINIO_BUCKET, Key: key }),
-  );
-
-  const chunks: Buffer[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for await (const chunk of resp.Body as any) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-
-  return {
-    contentType: resp.ContentType ?? "",
-    body: Buffer.concat(chunks),
-  };
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
 describe("S3Destination — MinIO integration", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
+  // E2 probe, run with the raw SDK so a gap is reported apart from the
+  // destination's own behaviour: does this MinIO release honour the Object
+  // Lock retention headers at all?
+  it("MinIO honours COMPLIANCE retention headers on an Object Lock bucket (E2 probe)", async () => {
+    const key = artifactKey();
+    const retainUntil = new Date(Date.now() + MS_PER_DAY);
+
+    await admin.send(
+      new PutObjectCommand({
+        Bucket: LOCKED_BUCKET,
+        Key: key,
+        Body: Buffer.from("probe"),
+        ObjectLockMode: "COMPLIANCE",
+        ObjectLockRetainUntilDate: retainUntil,
+      }),
+    );
+
+    const { Retention } = await admin.send(
+      new GetObjectRetentionCommand({ Bucket: LOCKED_BUCKET, Key: key }),
+    );
+    expect(Retention?.Mode).toBe("COMPLIANCE");
+    expect(Retention?.RetainUntilDate?.getTime()).toBe(retainUntil.getTime());
   });
 
-  it.skipIf(!minioAvailable)(
-    "uploads object to MinIO at expected key with correct Content-Type",
-    async () => {
-      await ensureBucket();
+  it("upload stores the artifact under COMPLIANCE retention at the default retention date, SSE-S3 encrypted", async () => {
+    const dest = new S3Destination({ bucket: LOCKED_BUCKET, prefix: PREFIX, clientOptions });
+    const key = artifactKey();
+    const body = Buffer.from(`signed-manifest-${randomUUID()}`);
 
-      // We test against real MinIO via requireOptionalModule → @aws-sdk/client-s3
-      // Override the endpoint via environment variable that AWS SDK respects.
-      // MinIO uses path-style addressing; the SDK default is virtual-hosted-style.
-      // Since S3Destination uses requireOptionalModule with no endpoint override,
-      // we bypass it here by directly constructing an upload via the AWS SDK
-      // with a custom endpoint to validate the object lands at the expected key.
+    const before = Date.now();
+    await dest.upload({ artifactBytes: body, artifactKey: key, contentType: CONTENT_TYPE });
+    const after = Date.now();
 
-      const artifactKey = `test-${randomUUID()}.kid-audit-anchor-test.jws`;
-      const artifactBytes = Buffer.from("fake-jws-payload-for-minio-test", "utf-8");
-      const contentType = "application/jose";
+    const storedKey = joinS3Key(PREFIX, key);
+    const { Retention } = await admin.send(
+      new GetObjectRetentionCommand({ Bucket: LOCKED_BUCKET, Key: storedKey }),
+    );
+    expect(Retention?.Mode).toBe("COMPLIANCE");
+    const retainUntil = Retention?.RetainUntilDate?.getTime() ?? Number.NaN;
+    // S3 may store the date at second precision.
+    expect(retainUntil).toBeGreaterThanOrEqual(
+      Math.floor((before + RETENTION_MS) / MS_PER_SECOND) * MS_PER_SECOND,
+    );
+    expect(retainUntil).toBeLessThanOrEqual(after + RETENTION_MS);
 
-      const { S3Client, PutObjectCommand } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require("@aws-sdk/client-s3") as S3ClientS3Module;
+    const head = await admin.send(new HeadObjectCommand({ Bucket: LOCKED_BUCKET, Key: storedKey }));
+    expect(head.ServerSideEncryption).toBe("AES256");
+    expect(head.ContentType).toBe(CONTENT_TYPE);
 
-      const client = new S3Client({
-        region: "us-east-1",
-        endpoint: MINIO_ENDPOINT,
-        forcePathStyle: true,
-        credentials: {
-          accessKeyId: "minioadmin",
-          secretAccessKey: "minioadmin",
-        },
-      });
+    const got = await admin.send(new GetObjectCommand({ Bucket: LOCKED_BUCKET, Key: storedKey }));
+    expect(Buffer.from(await got.Body!.transformToByteArray())).toEqual(body);
+  });
 
-      await client.send(
-        new PutObjectCommand({
-          Bucket: MINIO_BUCKET,
-          Key: artifactKey,
-          Body: artifactBytes,
-          ContentType: contentType,
-        }),
+  it("the same upload to a bucket without Object Lock is refused", async () => {
+    const dest = new S3Destination({ bucket: UNLOCKED_BUCKET, prefix: PREFIX, clientOptions });
+    const key = artifactKey();
+
+    const refusal = await dest
+      .upload({ artifactBytes: Buffer.from("jws"), artifactKey: key, contentType: CONTENT_TYPE })
+      .then(
+        () => null,
+        (error: unknown) => error,
       );
 
-      // Verify the object landed at the expected key with the right Content-Type
-      const retrieved = await getObject(artifactKey);
-      expect(retrieved.body.toString("utf-8")).toBe("fake-jws-payload-for-minio-test");
-      expect(retrieved.contentType).toBe(contentType);
-    },
-  );
+    // The refusal must be the missing lock configuration, not some other
+    // rejection (an SSE or credentials error would pass a bare rejects check).
+    expect(refusal).toBeInstanceOf(S3ServiceException);
+    expect((refusal as S3ServiceException).$metadata.httpStatusCode).toBe(400);
+    expect((refusal as S3ServiceException).message).toMatch(/ObjectLockConfiguration/);
 
-  // Contract test: assert the exact ObjectLockMode: "COMPLIANCE" and
-  // ObjectLockRetainUntilDate are included in the PutObjectCommand.
-  // Uses a mock so this runs even without a versioning-enabled MinIO bucket.
-  it(
-    "PutObjectCommand includes ObjectLockMode COMPLIANCE header (contract test)",
-    async () => {
-      // We mock requireOptionalModule to capture the PutObjectCommand input.
-      let capturedInput: Record<string, unknown> | null = null;
-
-      const sendSpy = vi.fn().mockResolvedValue({});
-      const PutObjectCommandSpy = vi.fn().mockImplementation(function (
-        this: Record<string, unknown>,
-        input: Record<string, unknown>,
-      ) {
-        capturedInput = input;
-      });
-
-      function MockS3Client(this: Record<string, unknown>) {
-        this["send"] = sendSpy;
-      }
-
-      const runtimeModule = await import("@/lib/blob-store/runtime-module");
-      vi.spyOn(runtimeModule, "requireOptionalModule").mockReturnValue({
-        S3Client: MockS3Client,
-        PutObjectCommand: PutObjectCommandSpy,
-      } as unknown as ReturnType<typeof runtimeModule.requireOptionalModule>);
-
-      const dest = new S3Destination({
-        bucket: MINIO_BUCKET,
-        prefix: "anchors",
-        retentionYears: 7,
-      });
-
-      await dest.upload({
-        artifactBytes: Buffer.from("jws-bytes"),
-        artifactKey: "2026-05-02.kid-audit-anchor-abc.jws",
-        contentType: "application/jose",
-      });
-
-      expect(capturedInput).not.toBeNull();
-      // R2 RT2-3: assert exact Key concatenation so prefix-handling regressions
-      // (e.g., empty prefix or double slash) are caught.
-      expect(capturedInput!["Bucket"]).toBe(MINIO_BUCKET);
-      expect(capturedInput!["Key"]).toBe("anchors/2026-05-02.kid-audit-anchor-abc.jws");
-      expect(capturedInput!["ContentType"]).toBe("application/jose");
-      expect(capturedInput!["ObjectLockMode"]).toBe("COMPLIANCE");
-      expect(capturedInput!["ObjectLockRetainUntilDate"]).toBeInstanceOf(Date);
-
-      const retainUntil = capturedInput!["ObjectLockRetainUntilDate"] as Date;
-      const sevenYearsMs = 7 * 365 * 24 * 60 * 60 * 1000;
-      expect(retainUntil.getTime()).toBeGreaterThan(Date.now() + sevenYearsMs - 5000);
-    },
-  );
+    const stored = await admin
+      .send(new HeadObjectCommand({ Bucket: UNLOCKED_BUCKET, Key: joinS3Key(PREFIX, key) }))
+      .then(
+        () => true,
+        () => false,
+      );
+    expect(stored).toBe(false);
+  });
 });

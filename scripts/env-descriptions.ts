@@ -942,7 +942,8 @@ export const descriptions: Record<
     description:
       "Ed25519 signing seed for audit-anchor manifests (32-byte hex = 64 chars).\n" +
       "Generate via: npm run generate:audit-anchor-signing-key\n" +
-      "Required when AUDIT_ANCHOR_PUBLISHER_ENABLED=true.",
+      "Read by the publisher worker only (not the app), which requires it\n" +
+      "when AUDIT_ANCHOR_PUBLISHER_ENABLED=true.",
     secret: true,
   },
   AUDIT_ANCHOR_TAG_SECRET: {
@@ -953,20 +954,22 @@ export const descriptions: Record<
       "Distributed to tenant administrators via dashboard kit + MFA challenge\n" +
       "so customers can compute their own tenantTag from their tenant UUID.\n" +
       "Generate via: npm run generate:audit-anchor-tag-secret\n" +
-      "Required when AUDIT_ANCHOR_PUBLISHER_ENABLED=true.",
+      "Read by the publisher worker only (not the app), which requires it\n" +
+      "when AUDIT_ANCHOR_PUBLISHER_ENABLED=true.",
     secret: true,
   },
   AUDIT_ANCHOR_PUBLISHER_ENABLED: {
     group: "Audit anchor publisher",
     order: 4,
     description:
-      "Master switch for the audit-anchor publisher worker. Default: false.\n" +
-      "When true, the worker boots and publishes daily manifests; when false,\n" +
-      "the worker process is a no-op (signing/tag keys not validated).\n" +
-      "REQUIRED in production (NODE_ENV=production fails startup if unset)\n" +
-      "— without external anchor publish, audit chain tampering is only\n" +
+      "Master switch for the audit-anchor publisher worker: exactly \"true\" or\n" +
+      "\"false\". Default: false. When true, the worker boots and publishes daily\n" +
+      "manifests; when false, the worker process is a no-op (signing/tag keys not\n" +
+      "validated). REQUIRED in production (NODE_ENV=production fails startup if\n" +
+      "unset) — without external anchor publish, audit chain tampering is only\n" +
       "detectable within the database boundary. Pair with at least one\n" +
-      "destination (S3 / GitHub / FS) plus signing key + tag secret.",
+      "destination (S3 / GitHub / FS); the publisher also needs the signing key\n" +
+      "and tag secret.",
     example: "false",
   },
   AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: {
@@ -977,7 +980,8 @@ export const descriptions: Record<
       "(passwd_anchor_publisher). Least privilege: SELECT on audit_chain_anchors\n" +
       "+ tenants, UPDATE on (publish_paused_until, last_published_at) only,\n" +
       "INSERT on audit_outbox, SELECT/INSERT/UPDATE on system_settings.\n" +
-      "Optional — falls back to DATABASE_URL if unset.",
+      "Required by the publisher in production (no DATABASE_URL fallback);\n" +
+      "outside production it falls back to DATABASE_URL if unset.",
     example: "postgresql://passwd_anchor_publisher:pass@localhost:5432/passwd_sso",
   },
   AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL: {
@@ -1002,7 +1006,9 @@ export const descriptions: Record<
     order: 8,
     description:
       "S3 key prefix under which manifests are stored.\n" +
-      "Final key: <prefix>/<date>.kid-<kid>.jws",
+      "Final key: <prefix>/<date>.kid-<kid>.jws. Unset or empty writes at the\n" +
+      "bucket root; otherwise one or more '/'-separated segments of\n" +
+      "[A-Za-z0-9._-], none '.' or '..' (no leading, trailing or doubled '/').",
     example: "audit-anchors",
   },
   AUDIT_ANCHOR_DESTINATION_GH_REPO: {

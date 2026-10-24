@@ -48,6 +48,23 @@ const hex64 = z
       .regex(HEX64_RE, "Must be a 64-character hex string (256 bits)"),
   );
 
+const ANCHOR_S3_PREFIX_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * The anchors S3 prefix rule: one or more `/`-separated segments of
+ * `[A-Za-z0-9._-]`, none `.` or `..`. No `*` or `?` (they would widen every
+ * bucket-policy statement built on the prefix) and no leading, trailing or
+ * doubled `/` (the documented keys would differ from the key builder's). The
+ * Terraform variable validation states the same rule in RE2; the empty string
+ * is not a prefix and fails here.
+ */
+export function isValidAnchorS3Prefix(prefix: string): boolean {
+  if (prefix.length === 0) return false;
+  return prefix
+    .split("/")
+    .every((segment) => ANCHOR_S3_PREFIX_SEGMENT_RE.test(segment) && segment !== "." && segment !== "..");
+}
+
 // ─── Schema ─────────────────────────────────────────────────
 
 export const envObject = z.object({
@@ -496,10 +513,23 @@ export const envObject = z.object({
   DEPLOYMENT_ID: z.string().uuid().optional(),
   AUDIT_ANCHOR_SIGNING_KEY: hex64.optional(),
   AUDIT_ANCHOR_TAG_SECRET: hex64.optional(),
-  AUDIT_ANCHOR_PUBLISHER_ENABLED: z.coerce.boolean().default(false),
+  // An enum, not z.coerce.boolean(): coercion is Boolean(value), which reads
+  // the string "false" as true.
+  AUDIT_ANCHOR_PUBLISHER_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
   AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL: z.string().url().optional(),
   AUDIT_ANCHOR_DESTINATION_S3_BUCKET: z.string().optional(),
-  AUDIT_ANCHOR_DESTINATION_S3_PREFIX: z.string().optional(),
+  // Unset or empty writes at the bucket root (non-Terraform deployments);
+  // a non-empty prefix must satisfy the segment rule.
+  AUDIT_ANCHOR_DESTINATION_S3_PREFIX: z
+    .string()
+    .refine((p) => p === "" || isValidAnchorS3Prefix(p), {
+      message:
+        "AUDIT_ANCHOR_DESTINATION_S3_PREFIX must be '/'-separated segments of [A-Za-z0-9._-], none '.' or '..'",
+    })
+    .optional(),
   AUDIT_ANCHOR_DESTINATION_GH_REPO: z.string().optional(),
   AUDIT_ANCHOR_DESTINATION_GH_TOKEN: z.string().optional(),
   AUDIT_ANCHOR_DESTINATION_FS_PATH: z.string().optional(),
@@ -637,27 +667,10 @@ export const envSchema = envObject.superRefine((data, ctx) => {
           "for destination options.",
       });
     } else {
-      // When enabled, the signing key + tag secret + at least one destination
-      // must also be configured. Otherwise the publisher boots but produces
-      // no externally-anchored output.
-      if (!data.AUDIT_ANCHOR_SIGNING_KEY) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AUDIT_ANCHOR_SIGNING_KEY"],
-          message:
-            "AUDIT_ANCHOR_SIGNING_KEY is required when " +
-            "AUDIT_ANCHOR_PUBLISHER_ENABLED=true in production",
-        });
-      }
-      if (!data.AUDIT_ANCHOR_TAG_SECRET) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AUDIT_ANCHOR_TAG_SECRET"],
-          message:
-            "AUDIT_ANCHOR_TAG_SECRET is required when " +
-            "AUDIT_ANCHOR_PUBLISHER_ENABLED=true in production",
-        });
-      }
+      // When enabled, at least one destination must be configured. The
+      // signing key and tag secret are the publisher's alone: it validates
+      // them in auditAnchorPublisherEnvSchema, and the app neither reads nor
+      // receives them.
       const hasS3 = !!data.AUDIT_ANCHOR_DESTINATION_S3_BUCKET;
       const hasGh = !!(
         data.AUDIT_ANCHOR_DESTINATION_GH_REPO &&
@@ -761,6 +774,83 @@ export const envSchema = envObject.superRefine((data, ctx) => {
   //   - src/lib/blob-store/config.ts (blob backend)
   //   - src/lib/key-provider/*.ts (key provider)
 });
+
+// ─── Audit anchor publisher worker ──────────────────────────
+
+/**
+ * The publisher process's own schema (scripts/audit-anchor-publisher.ts). It
+ * owns the requirements the app schema does not carry: the signing key, the
+ * tag secret and the deployment id whenever the publisher is enabled, and in
+ * production the dedicated role URL with no DATABASE_URL fallback.
+ * DATABASE_URL is optional here so a deployment need not inject the broad app
+ * credential into the publisher task.
+ */
+export const auditAnchorPublisherEnvSchema = envObject
+  .pick({
+    AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: true,
+    DEPLOYMENT_ID: true,
+    AUDIT_ANCHOR_SIGNING_KEY: true,
+    AUDIT_ANCHOR_TAG_SECRET: true,
+    AUDIT_ANCHOR_PUBLISHER_ENABLED: true,
+    AUDIT_ANCHOR_DESTINATION_S3_BUCKET: true,
+    AUDIT_ANCHOR_DESTINATION_S3_PREFIX: true,
+    AUDIT_ANCHOR_DESTINATION_GH_REPO: true,
+    AUDIT_ANCHOR_DESTINATION_GH_TOKEN: true,
+    AUDIT_ANCHOR_DESTINATION_FS_PATH: true,
+    NODE_ENV: true,
+    DB_POOL_MAX: true,
+    DB_POOL_CONNECTION_TIMEOUT_MS: true,
+    DB_POOL_IDLE_TIMEOUT_MS: true,
+    DB_POOL_MAX_LIFETIME_SECONDS: true,
+    DB_POOL_STATEMENT_TIMEOUT_MS: true,
+    LOG_LEVEL: true,
+    AUDIT_LOG_FORWARD: true,
+    AUDIT_LOG_APP_NAME: true,
+  })
+  .extend({
+    // Empty/whitespace is normalized to "unset" so the refinement below is the
+    // single arbiter of the at-least-one-URL rule.
+    DATABASE_URL: z
+      .string()
+      .transform((s) => s.trim())
+      .transform((s) => (s.length === 0 ? undefined : s))
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.AUDIT_ANCHOR_PUBLISHER_ENABLED) return;
+
+    const required = [
+      ["DEPLOYMENT_ID", data.DEPLOYMENT_ID],
+      ["AUDIT_ANCHOR_SIGNING_KEY", data.AUDIT_ANCHOR_SIGNING_KEY],
+      ["AUDIT_ANCHOR_TAG_SECRET", data.AUDIT_ANCHOR_TAG_SECRET],
+    ] as const;
+    for (const [name, value] of required) {
+      if (!value) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [name],
+          message: `${name} is required when AUDIT_ANCHOR_PUBLISHER_ENABLED=true`,
+        });
+      }
+    }
+
+    if (data.NODE_ENV === "production") {
+      if (!data.AUDIT_ANCHOR_PUBLISHER_DATABASE_URL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AUDIT_ANCHOR_PUBLISHER_DATABASE_URL"],
+          message:
+            "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL is required in production (no DATABASE_URL fallback).",
+        });
+      }
+    } else if (!data.AUDIT_ANCHOR_PUBLISHER_DATABASE_URL && !data.DATABASE_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["DATABASE_URL"],
+        message: "Either AUDIT_ANCHOR_PUBLISHER_DATABASE_URL or DATABASE_URL must be set.",
+      });
+    }
+  });
 
 // ─── Type export ────────────────────────────────────────────
 

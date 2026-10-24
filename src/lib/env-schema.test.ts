@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { envObject, envSchema, getSchemaShape } from "./env-schema";
+import {
+  auditAnchorPublisherEnvSchema,
+  envObject,
+  envSchema,
+  getSchemaShape,
+  isValidAnchorS3Prefix,
+} from "./env-schema";
 
 const VALID_HEX_64 = "a".repeat(64);
 const SHORT_HEX = "a".repeat(63);
@@ -304,42 +310,29 @@ describe("envSchema (with superRefine cross-field rules)", () => {
       }
     });
 
-    it("rejects when ENABLED=true but signing key is missing", () => {
+    it("rejects production when AUDIT_ANCHOR_PUBLISHER_ENABLED is the string \"false\"", () => {
       const result = envSchema.safeParse(
-        baseEnv({
-          ...validProdBase,
-          AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
-          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
-          AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
-        }),
+        baseEnv({ ...validProdBase, AUDIT_ANCHOR_PUBLISHER_ENABLED: "false" }),
       );
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(
           result.error.issues.some(
-            (i) => i.path[0] === "AUDIT_ANCHOR_SIGNING_KEY",
+            (i) => i.path[0] === "AUDIT_ANCHOR_PUBLISHER_ENABLED",
           ),
         ).toBe(true);
       }
     });
 
-    it("rejects when ENABLED=true but tag secret is missing", () => {
+    it("accepts production with the publisher enabled and neither anchor key (they are the publisher's)", () => {
       const result = envSchema.safeParse(
         baseEnv({
           ...validProdBase,
           AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
-          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
           AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
         }),
       );
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(
-          result.error.issues.some(
-            (i) => i.path[0] === "AUDIT_ANCHOR_TAG_SECRET",
-          ),
-        ).toBe(true);
-      }
+      expect(result.success).toBe(true);
     });
 
     it("rejects when ENABLED=true but no destination is configured", () => {
@@ -347,8 +340,6 @@ describe("envSchema (with superRefine cross-field rules)", () => {
         baseEnv({
           ...validProdBase,
           AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
-          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
-          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
         }),
       );
       expect(result.success).toBe(false);
@@ -366,8 +357,6 @@ describe("envSchema (with superRefine cross-field rules)", () => {
         baseEnv({
           ...validProdBase,
           AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
-          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
-          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
           AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
         }),
       );
@@ -379,8 +368,6 @@ describe("envSchema (with superRefine cross-field rules)", () => {
         baseEnv({
           ...validProdBase,
           AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
-          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
-          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
           AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "my-bucket",
         }),
       );
@@ -392,8 +379,6 @@ describe("envSchema (with superRefine cross-field rules)", () => {
         baseEnv({
           ...validProdBase,
           AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
-          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
-          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
           AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo",
           AUDIT_ANCHOR_DESTINATION_GH_TOKEN: "ghp_xxx",
         }),
@@ -671,12 +656,107 @@ describe("C9 undeclared env vars", () => {
         AUTH_GOOGLE_ID: "id",
         AUTH_GOOGLE_SECRET: "secret",
         AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
-        AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
-        AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
         AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
       }),
     );
     expect(result.success).toBe(true);
+  });
+});
+
+describe("AUDIT_ANCHOR_PUBLISHER_ENABLED parsing", () => {
+  it.each([
+    ["true", true],
+    ["false", false],
+    [undefined, false],
+  ])("parses %s as %s", (value, expected) => {
+    const result = envObject.safeParse(baseEnv({ AUDIT_ANCHOR_PUBLISHER_ENABLED: value }));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.AUDIT_ANCHOR_PUBLISHER_ENABLED).toBe(expected);
+  });
+
+  it("rejects a value that is neither true nor false", () => {
+    const result = envObject.safeParse(baseEnv({ AUDIT_ANCHOR_PUBLISHER_ENABLED: "yes" }));
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("AUDIT_ANCHOR_DESTINATION_S3_PREFIX", () => {
+  it.each(["a", "a/b", "a.b", ".a", "audit-anchors", "x_y/z-1"])("accepts %j", (prefix) => {
+    expect(isValidAnchorS3Prefix(prefix)).toBe(true);
+    expect(envObject.safeParse(baseEnv({ AUDIT_ANCHOR_DESTINATION_S3_PREFIX: prefix })).success).toBe(true);
+  });
+
+  it.each(["*", "?", "/a", "a/", "a//b", ".", "..", "a/../b", "a/./b", "a b"])("refuses %j", (prefix) => {
+    expect(isValidAnchorS3Prefix(prefix)).toBe(false);
+    expect(envObject.safeParse(baseEnv({ AUDIT_ANCHOR_DESTINATION_S3_PREFIX: prefix })).success).toBe(false);
+  });
+
+  it("accepts unset and empty (writes at the bucket root)", () => {
+    expect(envObject.safeParse(baseEnv()).success).toBe(true);
+    expect(envObject.safeParse(baseEnv({ AUDIT_ANCHOR_DESTINATION_S3_PREFIX: "" })).success).toBe(true);
+  });
+
+  it("the predicate itself refuses the empty string, which the schema admits before it", () => {
+    expect(isValidAnchorS3Prefix("")).toBe(false);
+  });
+});
+
+describe("auditAnchorPublisherEnvSchema", () => {
+  const DEPLOYMENT_ID = "550e8400-e29b-41d4-a716-446655440000";
+  const PUBLISHER_URL = "postgresql://passwd_anchor_publisher:p@db:5432/passwd_sso";
+  const enabled = {
+    AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+    DEPLOYMENT_ID,
+    AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
+    AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
+  };
+
+  function issuePaths(env: Record<string, unknown>): string[] {
+    const result = auditAnchorPublisherEnvSchema.safeParse(env);
+    return result.success ? [] : result.error.issues.map((i) => i.path.join("."));
+  }
+
+  it("accepts production with the publisher URL and no DATABASE_URL", () => {
+    expect(issuePaths({ NODE_ENV: "production", ...enabled, AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: PUBLISHER_URL })).toEqual([]);
+  });
+
+  it("requires the publisher URL in production, with no DATABASE_URL fallback", () => {
+    expect(
+      issuePaths({ NODE_ENV: "production", ...enabled, DATABASE_URL: "postgresql://app:p@db:5432/passwd_sso" }),
+    ).toEqual(["AUDIT_ANCHOR_PUBLISHER_DATABASE_URL"]);
+  });
+
+  it.each(["DEPLOYMENT_ID", "AUDIT_ANCHOR_SIGNING_KEY", "AUDIT_ANCHOR_TAG_SECRET"])(
+    "requires %s when enabled",
+    (name) => {
+      const env: Record<string, unknown> = {
+        NODE_ENV: "production",
+        ...enabled,
+        AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: PUBLISHER_URL,
+      };
+      delete env[name];
+      expect(issuePaths(env)).toEqual([name]);
+    },
+  );
+
+  it("falls back to DATABASE_URL outside production, and requires one of the two", () => {
+    expect(issuePaths({ NODE_ENV: "development", ...enabled, DATABASE_URL: "postgresql://localhost/x" })).toEqual([]);
+    expect(issuePaths({ NODE_ENV: "development", ...enabled, DATABASE_URL: "  " })).toEqual(["DATABASE_URL"]);
+  });
+
+  it("requires nothing when the publisher is disabled", () => {
+    expect(issuePaths({ NODE_ENV: "production", AUDIT_ANCHOR_PUBLISHER_ENABLED: "false" })).toEqual([]);
+  });
+
+  it("applies the prefix rule", () => {
+    expect(
+      issuePaths({
+        NODE_ENV: "production",
+        ...enabled,
+        AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: PUBLISHER_URL,
+        AUDIT_ANCHOR_DESTINATION_S3_PREFIX: "a//b",
+      }),
+    ).toEqual(["AUDIT_ANCHOR_DESTINATION_S3_PREFIX"]);
   });
 });
 

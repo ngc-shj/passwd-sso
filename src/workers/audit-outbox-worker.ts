@@ -387,8 +387,9 @@ export async function deliverRowWithChain(
 
     // If publish_paused_until is set and in the future, skip chain advancement.
     // The outbox row remains PENDING (reset below) so the next poll will retry.
-    // Do NOT emit an audit event here — the publisher already emits
-    // AUDIT_ANCHOR_PUBLISH_PAUSED per cron tick and we must not double-emit.
+    // No audit event here: the pause is the publisher's record of an upload
+    // failure, which already wrote its AUDIT_ANCHOR_PUBLISH_FAILED row, and an
+    // emit per skipped row would repeat on every poll until the pause ends.
     if (anchor.publish_paused_until && anchor.publish_paused_until > new Date()) {
       getLogger().debug(
         { outboxId: row.id, tenantId: row.tenant_id, publishPausedUntil: anchor.publish_paused_until },
