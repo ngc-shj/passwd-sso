@@ -86,3 +86,8 @@ Revision 7: TSV contract with versioned header, machine columns incl. an evidenc
 Security: R7-1 Minor (file mode/exclusive create). Functionality: H1 Minor (canonical evidence form). Testing: R7-1 Major (unescaped `created_by` in `#` lines can inject a data line), R7-2 Minor (= H1, plus round-trip allow cell), R7-3 Minor (= security R7-1).
 
 Revision 8: exclusive create, mode 0600; one shared canonical evidence formatter; every free-text value escaped with `escapeUnsafeDisplayChars`; cells for round trip, row-order independence, injection, mode and existing path.
+
+## Round 8 (plan revision 8)
+Functionality: No findings. Security: No findings. Testing: R8-1 Minor design (worktree refusal must compare resolved paths) — applied directly: `realpath` of the target's parent vs the repository top level, with symlinked-parent and `..` cells.
+
+Plan review complete: no Critical or Major finding open; every contract locked; no carried-forward findings.

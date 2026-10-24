@@ -1,6 +1,6 @@
 # Plan: sso-claim-connection-binding
 
-Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 8.
+Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 8 — plan review complete after 8 rounds.
 
 ## Project context
 
@@ -121,7 +121,8 @@ completed through one Jackson connection's client with another connection's IdP.
   self-test and the operation-check test follow). The upgrade path is two steps; the heuristic
   suggests, the operator's reviewed file decides.
   - `bind --from-members --out <file>` writes nothing to the DB and refuses without the app env or
-    with a path inside the git worktree. The file is created exclusively with mode 0600 (an
+    with a path inside the git worktree (the `realpath` of the target's parent compared against
+    the `realpath` of `git rev-parse --show-toplevel`, so a symlinked parent or `..` cannot evade it). The file is created exclusively with mode 0600 (an
     existing path is refused, never overwritten). It is TSV with a header line naming its format
     version; machine columns `claim`, `tenant_id`, `provider`, `evidence` — one pure function,
     shared by `--out` and `--apply`, writes it canonically (`<provider>=<n>` sorted by provider id,
@@ -263,7 +264,8 @@ updated with M1–M11.
   change binds every eligible line, and the evidence string is identical for one membership read in
   two row orders; a `created_by` holding `\n<valid TSV line>`, a tab or a bidi character yields
   exactly one data line per NULL row (red: escape removed); the file is mode 0600 and an existing
-  path is refused; refusal without the app env;
+  path is refused; a worktree path reached through a symlinked parent or `..` is refused, a path
+  outside the repository allowed; refusal without the app env;
   `--by backfill` and `--by db-delete` refused like `signin`); evidence majority at exactly
   half (refused), half plus one (allowed), zero members (proceeds, "no evidence"); derived mode
   `strict` with two or more providers and the variable unset or `off` (and boot still refused),
@@ -299,9 +301,9 @@ updated with M1–M11.
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Jackson providers bound to one connection each | pending |
-| C2 | binding mode derived from claim-presenting providers | pending |
-| C3 | provenance columns, grants, writers, CLI | pending |
-| C4 | binding adjudicator, reasons, buckets | pending |
-| C5 | provider through the sign-in hand-off | pending |
-| C6 | docs and issue update | pending |
+| C1 | Jackson providers bound to one connection each | locked |
+| C2 | binding mode derived from claim-presenting providers | locked |
+| C3 | provenance columns, grants, writers, CLI | locked |
+| C4 | binding adjudicator, reasons, buckets | locked |
+| C5 | provider through the sign-in hand-off | locked |
+| C6 | docs and issue update | locked |
