@@ -412,8 +412,9 @@ userinfo of that URL — the secret is its only copy.
 | `AUTH_SECRET` | Auth.js session encryption key |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth Client Secret |
-| `AUTH_JACKSON_ID` | Jackson OIDC Client ID |
-| `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret |
+| `AUTH_JACKSON_ID` | Client ID of one Jackson connection (provider `saml-jackson`) — that connection's own `clientID`, never `dummy` or a `tenant=…&product=…` id. Empty string when SAML is unused. |
+| `AUTH_JACKSON_SECRET` | That connection's own `clientSecret` |
+| `AUTH_JACKSON_CONNECTIONS` | Further Jackson connections, as a JSON array string `[{"id","name","clientId","clientSecret"}]` — one provider `saml-jackson-<id>` each. Read only when `enable_jackson_connections = true`. With two or more SSO providers set `auth_claim_binding = "strict"` (the app refuses to start otherwise) after the root README's "SSO tenant claim binding upgrade". |
 | `SHARE_MASTER_KEY` | Share links/sends encryption master key (256-bit hex) |
 | `SESSION_TOKEN_HMAC_KEY` | Session-token HMAC key (256-bit hex). **Required in production** (env validation + runtime fail closed). Decouples session auth from master-key rotation. Mapped into the app ECS task. Generate with `npm run generate:key`. |
 | `REDIS_URL` | Redis connection string |

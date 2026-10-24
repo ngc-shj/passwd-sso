@@ -283,6 +283,23 @@ variable "enable_google_auth" {
   description = "Pass AUTH_GOOGLE_ID/SECRET to the app. The sign-in page treats Google (or SAML) as 'SSO configured' and HIDES the email and passkey options whenever either is present — see src/app/[locale]/auth/signin/page.tsx. So this is not additive: turning Google on removes magic-link sign-in from the UI."
 }
 
+variable "enable_jackson_connections" {
+  type        = bool
+  default     = false
+  description = "Pass AUTH_JACKSON_CONNECTIONS (the app secret's JSON array of further Jackson connections, one provider saml-jackson-<id> each) to the app. Off by default because ECS refuses to launch a task whose secret lacks a key it reads."
+}
+
+variable "auth_claim_binding" {
+  type        = string
+  default     = ""
+  description = "AUTH_CLAIM_BINDING for the app: \"off\", \"strict\", or \"\" to leave it unset. The app refuses to start unless it is \"strict\" when two or more SSO providers (Google, each Jackson connection) are configured; bind the existing tenant claims first (README: SSO tenant claim binding upgrade)."
+
+  validation {
+    condition     = contains(["", "off", "strict"], var.auth_claim_binding)
+    error_message = "auth_claim_binding must be \"\", \"off\" or \"strict\"."
+  }
+}
+
 # ── Magic-link (email) sign-in ────────────────────────────────────────────────
 # Wiring these is what makes EMAIL_PROVIDER=smtp reachable from the app task.
 # Leave smtp_host empty to leave the provider unconfigured; the app then needs

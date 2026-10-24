@@ -206,7 +206,9 @@ Key variables:
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Google OAuth credentials |
 | `JACKSON_URL` | SAML Jackson URL (default: `http://localhost:5225`) |
-| `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` | Jackson OIDC credentials |
+| `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` | One Jackson connection's own client ID / secret (provider `saml-jackson`) |
+| `AUTH_JACKSON_CONNECTIONS` | More Jackson connections, one provider each (`saml-jackson-<id>`) — see [SAML sign-in](#saml-sign-in--bind-the-tenant-to-the-connection) |
+| `AUTH_CLAIM_BINDING` | `off` / `strict` — must be `strict` with two or more SSO providers (see [SSO tenant claim binding upgrade](#sso-tenant-claim-binding-upgrade)) |
 | `SHARE_MASTER_KEY` | `openssl rand -hex 32` — for server-encrypted share links |
 | `VERIFIER_PEPPER_KEY` | `openssl rand -hex 32` — passphrase verifier pepper (**required in prod**) |
 | `REDIS_URL` | Redis URL for rate limiting (**required in prod**) |
@@ -229,9 +231,11 @@ Key variables:
 | `GOOGLE_WORKSPACE_DOMAINS` | (Optional) Restrict to Google Workspace domain(s), comma-separated |
 | `AUTH_TENANT_CLAIM_KEYS` | (Optional) Comma-separated IdP claim keys for tenant resolution, tried in order. **Leaving it unset is not "no configuration"** — it selects `tenant_id, tenantId, organization, org, company, company_id`, all of which are IdP-asserted, and all of which are tried *before* Google's attested `hd`. `AUTH_TENANT_CLAIM_KEYS=hd` is the attested-only configuration **for Google sign-in only**: `hd` is honoured for the `google` provider alone, so on a SAML deployment it resolves no claim at all and new users land in personal bootstrap tenants as OWNER. Read the guidance under [IdP domain changed / tenant locked out](#idp-domain-changed--tenant-locked-out) before setting it |
 | `JACKSON_URL` | SAML Jackson URL (default: `http://localhost:5225`) |
-| `AUTH_JACKSON_ID` | Jackson OIDC client ID |
-| `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
-| `SAML_PROVIDER_NAME` | Sign-in page display name (e.g., "HENNGE") |
+| `AUTH_JACKSON_ID` | Client ID of one Jackson connection (provider `saml-jackson`) — the connection's own `clientID`, never `dummy` or a `tenant=…&product=…` id |
+| `AUTH_JACKSON_SECRET` | That connection's own `clientSecret` |
+| `AUTH_JACKSON_CONNECTIONS` | (Optional) JSON array `[{"id","name","clientId","clientSecret"}]`, one provider `saml-jackson-<id>` per Jackson connection. `id` matches `^[a-z0-9-]{1,32}$` and is immutable. May coexist with `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` |
+| `AUTH_CLAIM_BINDING` | (Optional) `off` (default) or `strict`. Strict: a tenant claim resolves only through the SSO provider it is bound to. With two or more SSO providers (Google and each Jackson connection) the app refuses to start unless this is `strict` |
+| `SAML_PROVIDER_NAME` | Sign-in button label for the `AUTH_JACKSON_ID` provider (e.g., "HENNGE"); `AUTH_JACKSON_CONNECTIONS` entries carry their own `name` |
 | `SHARE_MASTER_KEY` | `openssl rand -hex 32` — for server-encrypted share links/sends |
 | `VERIFIER_PEPPER_KEY` | `openssl rand -hex 32` — passphrase verifier pepper (**required in prod**) |
 | `DIRECTORY_SYNC_MASTER_KEY` | `openssl rand -hex 32` — directory sync credential encryption (**required in prod**) |
@@ -300,6 +304,47 @@ Four variables that were previously read loosely are now validated when the envi
 
 There is no supported way to keep the old hashes correlating; treat the upgrade as the start of a new correlation window and keep the cutover timestamp with your audit records. See [Audit Log Schema](docs/security/audit-log-schema.md).
 
+### SSO tenant claim binding upgrade
+
+**Breaking upgrade.** It binds each tenant claim to the SSO provider that may present it, and binds each Jackson provider to one Jackson connection. The background is in [SAML sign-in — bind the tenant to the connection](#saml-sign-in--bind-the-tenant-to-the-connection). Two things change:
+
+- **The legacy Jackson provider is hardened.** `saml-jackson` exchanges its code without PKCE and authenticates with `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET`. These must be the connection's own client credentials. The app refuses to start on Jackson's `dummy` client, a `tenant=…&product=…`-encoded client ID, a `fed_` federation ID, or Jackson credentials without `JACKSON_URL`. A stale `AUTH_JACKSON_SECRET` is not caught at boot, because the PKCE path never checked it. The first callback then fails: Jackson answers 401, and Auth.js logs it as `OperationProcessingError`. Copy the connection's current `clientID` / `clientSecret` from Jackson before you upgrade.
+- **Two or more SSO providers require strict binding.** Google counts as one when `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` are both set, and each Jackson provider counts as one. With two or more, the app refuses to start until `AUTH_CLAIM_BINDING=strict` is set. Strict mode refuses a sign-in on any claim row without a provider, and the migration leaves every existing row without one. So bind the rows before you set the variable:
+
+1. Stop the old app, or let it drain. While it runs, it keeps registering claims without a provider.
+2. Run the migration (`20261025000000_tenant_claim_provider`). It adds `tenant_claims.provider` and the event columns. On ECS, run the migrate task on its own, not through `scripts/deploy.sh`, which rolls the services right after it (see [Deployment](docs/operations/deployment.md)).
+3. **Review past exposure first** if the deployment ran with `AUTH_REDIRECT_PROXY_URL` set and its Jackson held two or more connections. Such a deployment signed in to Jackson over PKCE, so an IdP behind any of those connections could sign in through the app's client. Look for claims registered by sign-in (`createdBy=signin` in `list`), for their routing history (`history`), and for tenants whose members hold accounts at an unexpected provider (the `members=` column of `list --unbound`).
+4. Write the review file. It goes outside the repository: the CLI refuses a path inside the git worktree and never overwrites a file. The file is created with mode 0600.
+5. Edit the `provider` column. Set each line to the connection that tenant's IdP sits behind, or leave it empty to skip the line. A suggestion is filled in only when every active member holds an account at exactly one SSO provider. Do not edit `evidence`.
+6. Apply the file. It prints a summary, asks once (`--yes` skips the prompt), and binds each line in its own transaction. It refuses a line whose row or evidence changed, a tenant with no members, and a provider that a majority of the active members do not use. The exit status is non-zero when any line was refused. A rerun reports bound lines as already bound.
+7. Resolve the remaining claims one at a time. Bind a claim with `bind --claim`. Add `--accept-unused-provider` only after you have confirmed the connection. A claim squatted by another customer's tenant is not bound: re-point it to the rightful tenant with `add --from … --provider <theirs>`. **Never bind the rightful provider into the squatter's tenant.**
+8. Delete the file. It lists every tenant's claims.
+9. Once the old version is gone, rerun `list --unbound`. It must list no claim.
+10. Set `AUTH_CLAIM_BINDING=strict`, then start the app.
+
+Every command needs `MIGRATION_DATABASE_URL`. `bind` also needs the SSO provider env the app will start with (`AUTH_GOOGLE_*`, `AUTH_JACKSON_*`, `JACKSON_URL`). Without that env, `list --unbound` shows only rows with no provider, and it says so.
+
+```bash
+# 3. Exposure review
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --unbound
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim>
+
+# 4.–6. Write, review, apply
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind --from-members --out <file outside the repo>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind --apply <file> --by <operator-label>
+
+# 7. One claim at a time
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind --claim <claim> --provider <provider-id> --by <operator-label>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <rightful-tenant-ref> --domain <claim> \
+  --from <squatting-tenant-uuid> --provider <rightful-provider-id> --by <operator-label>
+
+# 9. Must list no claim
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --unbound
+```
+
+A deployment with a single SSO provider is not forced into strict mode. To opt in, follow the same steps.
+
 ### Admin / maintenance scripts
 
 Maintenance scripts (`scripts/purge-history.sh`, `scripts/purge-audit-logs.sh`, `scripts/rotate-master-key.sh`) require a per-operator `op_*` Bearer token — the old shared `ADMIN_API_TOKEN` environment variable is removed. Operators mint tokens at `/<locale>/admin/tenant/operator-tokens` and pass them at script invocation time:
@@ -314,7 +359,7 @@ See [Admin Token Setup](docs/operations/admin-tokens.md) for token minting and r
 
 ### IdP domain changed / tenant locked out
 
-Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in, visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. There are **five** causes, and only the first two are fixed with this tool:
+Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in, visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. There are **seven** causes. This tool fixes the first two and the last two:
 
 | `metadata.reason` | claim fields (`metadata.claim` / `metadata.claimRefusal`) | Cause | Remedy |
 |---|---|---|---|
@@ -323,8 +368,10 @@ Symptom: after an IdP starts asserting a different tenant claim (a Google Worksp
 | `tenant_mismatch` | `claimRefusal` set (`claim` absent) | the IdP's asserted value was **refused at ingest** — an unpaired surrogate, a control/bidi/zero-width character, over 255 characters, or whitespace the storage layer cannot round-trip | **fix it at the IdP.** `add` cannot register the value, so the tool cannot repair this one; `claimRefusal` names the rule the value broke |
 | `tenant_mismatch` | `claimRefusal` set **and** `claim` present | the asserted value passed ingest but **cannot be stored** — it is not printable ASCII, which the registry's `CHECK` constraint rejects | **fix it at the IdP**, or register an ASCII claim for the tenant. `add` refuses this value on the same predicate |
 | `tenant_claim_system_tenant` | the claim | the claim **is** registered — to the sentinel tenant (`__system__`), which encodes "no owning tenant" and must hold no accounts, so a `CHECK` refuses the sign-in's write. No operator command creates this state: `add` refuses a sentinel target, so such a row was written out of band | re-point the claim at a real tenant. `unmapped` lists it under *Unregistered claims*; run the `tenant-domain add --tenant <ref> --domain <claim> --by <label>` it names, and `add` will refuse and print back the exact `--from <current-owner>` command to repeat with |
+| `tenant_claim_unbound` | the claim, plus `boundProvider` (null) and `signInProviderRef` | strict binding: the claim's row records no provider, so no sign-in can prove it presents the claim through the right connection. This is every row that predates the binding upgrade | `tenant-domain bind` — see [SSO tenant claim binding upgrade](#sso-tenant-claim-binding-upgrade) |
+| `tenant_claim_provider_mismatch` | the claim, plus `boundProvider` and `signInProviderRef` | strict binding: the claim is bound to a different provider than the one this sign-in came through. **This is the signature of the attack**: one connection's IdP asserting another customer's claim | **investigate first.** If the bound tenant was created by a sign-in through another customer's provider, re-point the claim to the rightful tenant with `add --from … --provider <theirs>`. Never `bind` the rightful provider into the squatter's tenant |
 
-Key the two `claimRefusal` cases on the **field**, not on the text: `claimRefusal` is written only by this deployment's own refusal adjudicators, whereas anything inside `claim` was supplied by the IdP and can be made to look like whatever the reader is told to trust. `unmapped` reports the five causes under three headings — the two `claimRefusal` cases share one because they share a remedy, and the sentinel case joins the unregistered heading because `tenant-domain` is likewise where its remedy is. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
+Key the two `claimRefusal` cases on the **field**, not on the text: `claimRefusal` is written only by this deployment's own refusal adjudicators, whereas anything inside `claim` was supplied by the IdP and can be made to look like whatever the reader is told to trust. `unmapped` reports the seven causes under four headings. The two `claimRefusal` cases share one because they share a remedy. The sentinel case joins the unregistered heading because `tenant-domain` is likewise where its remedy is. The two provider-binding causes share the fourth heading, which says to investigate first; their rows show `boundProvider` and the sign-in provider. The audit row stores the sign-in provider only as `signInProviderRef`, a keyed hash, because the owning tenant's admins can read the row. `unmapped` maps that ref back to a provider ID using the configured providers and the identifier pepper (`AUDIT_IDENTIFIER_PEPPER`, else derived from `AUTH_SECRET`). Without the pepper it prints the ref as unmappable. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
 
 ```bash
 # See which unregistered claims were denied recently (default window: 30 days)
@@ -332,14 +379,16 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped --days 180
 
 # Register the new claim for the existing tenant (idempotent — safe to re-run)
-MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label> --provider <provider-id>
 ```
+
+`add` states the claim's binding on every write. `--provider <provider-id>` names the full SSO provider ID: `google`, `saml-jackson` or `saml-jackson-<connection id>`. In strict mode it is required. Outside strict mode, an explicit `--unbound` is the alternative, and that row is then refused once strict is on. `add` and `bind` print how many of the tenant's active members hold an account at that provider. They refuse when those members are not a majority, unless you pass `--accept-unused-provider`. A tenant with no members yet is reported as "no evidence" and proceeds.
 
 `<ref>` is the tenant's UUID or one of its already-registered claims. `slug` is deliberately **not** accepted: a sign-in-created tenant's slug is derived from the IdP claim with `[^a-z0-9]+` collapsed, so it is many-to-one and can be pre-empted by whoever causes the first tenant to take it.
 
 `unmapped`'s window is a *query* window, not this deployment's retention: it defaults to the configurable retention floor (30 days) and says so in its output. Widen it with `--days <n>` before concluding that nothing was denied.
 
-`list`, `remove`, and `history` are also available; run the command with no subcommand for the full usage banner. **Breaking change:** `remove` now requires `--by <operator-label>` too (`... remove --tenant <ref> --domain <claim> --by <operator-label>`) — a revocation, like a registration, now writes an attributed row to the routing history below, and an unattributed one would leave that record with no operator behind it.
+`list` (`--unbound` lists the claims strict mode refuses), `bind` (`--claim`, `--from-members --out`, `--apply`), `remove`, and `history` are also available; run the command with no subcommand for the full usage banner. **Breaking change:** `remove` now requires `--by <operator-label>` too (`... remove --tenant <ref> --domain <claim> --by <operator-label>`) — a revocation, like a registration, now writes an attributed row to the routing history below, and an unattributed one would leave that record with no operator behind it.
 
 **`tenant_mismatch`: the claim is registered to the wrong tenant.** This is reachable with no operator action at all — a single sign-in presenting a mistyped or squatted claim registers it (`created_by = 'signin'`) against whatever tenant that sign-in created. `remove` will *not* free it: it soft-deletes the row (sets `revoked_at`) and leaves the owner unchanged, so a following `add` refuses again. Move the claim with `add --from`, naming the current owner:
 
@@ -350,7 +399,7 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domai
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --tenant <claim>
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
   --tenant <gaining-tenant-ref> --domain <claim> --by <operator-label> \
-  --from <current-owner-uuid>
+  --from <current-owner-uuid> --provider <provider-id>
 
 # Reconstruct what happened to a claim's routing — every registration,
 # revocation and reassignment, each with its operator label and the Postgres
@@ -391,11 +440,40 @@ AUTH_TENANT_CLAIM_KEYS=hd
 - `tenant-domain unmapped` shows none of it, because it lists claims that were presented and refused, and here none was presented;
 - it also arms the absorption path described under *Incident: a claim was registered that should not have been* — the moment a claim does resolve for those users, each personal estate is migrated into the tenant in place.
 
-**SAML sign-in — bind the tenant to the connection, not to a claim the customer's IdP chooses.** There is no deployment-wide claim key that is attested for SAML the way `hd` is for Google: every SAML attribute that reaches this app is asserted by the customer's own IdP, and `saml-jackson` is a single deployment-wide OIDC client, so nothing binds the claim namespace to the connection that asserted it. Consequently:
+<a id="saml-sign-in--bind-the-tenant-to-the-connection"></a>
+**SAML sign-in — bind the tenant to the connection, not to a claim the customer's IdP chooses.** No claim key is attested for SAML the way `hd` is for Google: every SAML attribute that reaches this app is asserted by the customer's own IdP. What the app *can* attest is which Jackson connection completed the sign-in. So each connection is its own Auth.js provider, and in strict mode a tenant claim resolves only through the provider it is bound to. Another connection's IdP can still assert the same claim string, but the claim does not resolve through that IdP's provider. This rests on the following:
 
-- pointing the variable at an attribute your IdP asserts through SAML (e.g. `organization`) is safe **only** while this deployment provisions exactly **one** SSO connection — then the single customer's IdP is the only one that can assert through it;
-- with **two or more** provisioned SSO connections, one customer's IdP administrator can assert another customer's registered claim string and select their tenant. The operator controls whether a connection exists; the customer's own IdP controls what it asserts through it — the exploit needs only the second;
-- the answer for a multi-customer SAML estate is therefore **per-connection tenant binding**: the tenant is decided by which SSO connection the sign-in arrived on, not by an attribute inside the assertion. This deployment shape does not provide that binding today, so until it does, keep one provisioned SSO connection per deployment (a separate deployment, with its own Jackson OIDC client, per customer) and review registered claims with `tenant-domain list`.
+- **One provider per connection.** `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` configure the provider `saml-jackson`. It keeps that ID so existing accounts stay linked. `AUTH_JACKSON_CONNECTIONS` adds one provider `saml-jackson-<id>` per entry. Both may be set together:
+
+  ```bash
+  JACKSON_URL=https://sso.example.com
+  AUTH_JACKSON_ID=<connection A clientID>
+  AUTH_JACKSON_SECRET=<connection A clientSecret>
+  AUTH_JACKSON_CONNECTIONS='[{"id":"acme","name":"Acme SSO","clientId":"<connection B clientID>","clientSecret":"<connection B clientSecret>"}]'
+  ```
+
+  Each provider uses the `clientID` / `clientSecret` that Jackson issued for that one connection. The app refuses to start, in every `NODE_ENV`, on any of these:
+  - Jackson's global `dummy` client
+  - a `tenant=…&product=…`-encoded client ID
+  - a `fed_` federation app ID
+  - one client ID behind two providers
+  - a repeated `id`, or an `id` outside `^[a-z0-9-]{1,32}$`
+
+  Each connection's `redirectUrl` must allow `<app URL>/api/auth/callback/<provider id>`. `allowDangerousEmailAccountLinking` is never set on a Jackson provider.
+- **The `id` is immutable.** `Account` rows and claim bindings record the provider ID. Renaming an entry orphans every account and binding under it. Pointing an existing `id` at a different connection hands that connection's IdP every account and claim bound to the `id`. A replacement connection gets a new `id`.
+- **PKCE is off for Jackson, deliberately.** On Jackson's PKCE path, the token endpoint does not authenticate the client. An IdP behind connection A can append `idp_hint=<A's clientID>` to an authorize URL that the app built for connection B. The code it gets back is then redeemed for B (measured: M1). Without PKCE, the exchange carries B's own credentials (`client_secret_basic`), and Jackson refuses A's code with a 401. Any `code_verifier` on the wire reopens the hole: if the attacker adds a `code_challenge`, a matching verifier skips the client check again (M9). So the Jackson providers never send one. `state` is their login-CSRF control (Jackson also refuses an authorize request without it), and `nonce` is the control against code injection. Google keeps PKCE.
+- **Preconditions the app cannot check.**
+  - Jackson's `FLATTEN_RAW_CLAIMS` must stay `false` (Jackson's default). With `true`, an IdP can override the id_token's `nonce` and `requested` fields and userinfo's `aud`/`clientID` (M7).
+  - The IdPs of different SAML connections must have distinct entityIds and signing keys, because Jackson picks candidate connections by the response's Issuer.
+  - The Jackson version must be one the probe passes.
+- **Measured Jackson versions: 1.52.2 and 1.42.0.** `scripts/probes/jackson-connection-binding.mjs` asserts the refusals above and their positive controls. The `jackson-probe` job in `.github/workflows/ci-integration.yml` runs it, pinned by digest, on the images the repo references: `1.52.2` (docker-compose and the setup docs) and `1.42.0` (the Terraform example's ECR re-tag `v1.42.0`). **A Jackson bump needs a probe run on the new image first**, in this repo or in your deployment: add the image to the job's matrix by digest. `scripts/__tests__/jackson-probe-images.test.mjs` fails when a version the repo references is missing from that matrix.
+- **Strict binding.** The claim-presenting providers are Google and every Jackson provider.
+  - With two or more, the mode is strict whatever `AUTH_CLAIM_BINDING` says. The app also refuses to start unless `AUTH_CLAIM_BINDING=strict` is set explicitly, so an upgrade stops at deploy time instead of refusing every claim sign-in on rows without a provider.
+  - With one, strict is opt-in; the default is `off`.
+  - Any value other than `off` or `strict`, including a miscased one, is refused.
+  - In strict mode, a row without a provider denies with `tenant_claim_unbound`. A row bound to another provider denies with `tenant_claim_provider_mismatch`. A claim that a sign-in registers is bound to the provider that presented it, so a claim squatted through one connection cannot be used through another until an operator acts.
+  - In `off` mode, resolution is unchanged, and a sign-in through a provider other than the row's binding logs `auth.tenant_claim.provider_mismatch` ([alerts](docs/operations/alerts.md)). With one claim provider, that happens only for rows bound to a provider that is no longer configured.
+- **Exposure before this change.** Before this change, the legacy provider sent no `state`, and Jackson refuses an authorize request without one. Auth.js adds `state` when `AUTH_REDIRECT_PROXY_URL` is set, so only such deployments could sign in, and they did so over PKCE. On that path `AUTH_JACKSON_SECRET` was never checked. If the deployment's Jackson held two or more connections, an IdP behind any of them could sign in through the app's client. Step 3 of [SSO tenant claim binding upgrade](#sso-tenant-claim-binding-upgrade) covers the review.
 
 None of this fires on Google-`hd`-only deployments, which is the shape of the incident this section exists for.
 

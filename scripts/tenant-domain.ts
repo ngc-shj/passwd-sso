@@ -1330,7 +1330,9 @@ export async function cmdAdd(args: {
             message:
               `Claim "${escapeUnsafeDisplayChars(claim)}" is ${state} tenant ${existing.tenantId}, not ${tenant.id}. ` +
               "Refusing to reassign implicitly. To move it, name the current owner: " +
-              `add --tenant ${tenant.id} --domain ${escapeUnsafeDisplayChars(claim)} --by <label> --from ${existing.tenantId}. ` +
+              `add --tenant ${tenant.id} --domain ${escapeUnsafeDisplayChars(claim)} ` +
+              `${newProvider === null ? "--unbound" : `--provider ${escapeUnsafeDisplayChars(newProvider)}`} ` +
+              `--by <label> --from ${existing.tenantId}. ` +
               '("remove" does not free a claim — it soft-deletes, leaving the owner unchanged.)',
           };
         }

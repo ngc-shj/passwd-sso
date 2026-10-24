@@ -205,7 +205,9 @@ npm run docker:down
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Google OAuth 資格情報 |
 | `JACKSON_URL` | SAML Jackson URL（デフォルト: `http://localhost:5225`） |
-| `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` | Jackson OIDC 資格情報 |
+| `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` | Jackson 接続 1 つの専用クライアント ID / シークレット（プロバイダー `saml-jackson`） |
+| `AUTH_JACKSON_CONNECTIONS` | 追加の Jackson 接続。接続ごとに 1 プロバイダー（`saml-jackson-<id>`）— [SAML サインイン](#saml-sign-in--bind-the-tenant-to-the-connection) 参照 |
+| `AUTH_CLAIM_BINDING` | `off` / `strict` — SSO プロバイダーが 2 つ以上なら `strict` 必須（[SSO tenant claim binding upgrade](#sso-tenant-claim-binding-upgrade) 参照） |
 | `SHARE_MASTER_KEY` | `openssl rand -hex 32` — 共有リンクのサーバー暗号化用 |
 | `VERIFIER_PEPPER_KEY` | `openssl rand -hex 32` — パスフレーズ検証 pepper（**本番必須**） |
 | `REDIS_URL` | レート制限用 Redis URL（**本番必須**） |
@@ -228,9 +230,11 @@ npm run docker:down
 | `GOOGLE_WORKSPACE_DOMAINS` | （任意）Google Workspace ドメインに制限（カンマ区切りで複数可） |
 | `AUTH_TENANT_CLAIM_KEYS` | （任意）tenant 解決に使う IdP クレームキーをカンマ区切りで指定し、記載順に評価します。**未設定は「設定なし」ではありません** — `tenant_id, tenantId, organization, org, company, company_id` が選択され、いずれも IdP がアサートする属性であり、Google の検証済み `hd` より**先に**評価されます。`AUTH_TENANT_CLAIM_KEYS=hd` は**Google サインインに限った**検証済みクレームのみの構成です: `hd` は `google` プロバイダーの場合にのみ採用されるため、SAML デプロイでは一切クレームが解決されず、新規ユーザーは個人のブートストラップテナントに OWNER として作成されます。設定する前に [IdP のドメインが変わった / テナントがロックアウトされた](#idp-のドメインが変わった--テナントがロックアウトされた) の項を必ず参照してください |
 | `JACKSON_URL` | SAML Jackson URL（デフォルト: `http://localhost:5225`） |
-| `AUTH_JACKSON_ID` | Jackson OIDC クライアント ID |
-| `AUTH_JACKSON_SECRET` | Jackson OIDC クライアントシークレット |
-| `SAML_PROVIDER_NAME` | サインインページの表示名（例: "HENNGE"） |
+| `AUTH_JACKSON_ID` | Jackson 接続 1 つのクライアント ID（プロバイダー `saml-jackson`）— その接続自身の `clientID`。`dummy` や `tenant=…&product=…` 形式は不可 |
+| `AUTH_JACKSON_SECRET` | その接続自身の `clientSecret` |
+| `AUTH_JACKSON_CONNECTIONS` | （任意）JSON 配列 `[{"id","name","clientId","clientSecret"}]`。Jackson 接続ごとにプロバイダー `saml-jackson-<id>` を 1 つ登録。`id` は `^[a-z0-9-]{1,32}$` に一致し、変更不可。`AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` と併用可 |
+| `AUTH_CLAIM_BINDING` | （任意）`off`（デフォルト）または `strict`。strict ではテナントクレームは紐づけられた SSO プロバイダー経由でのみ解決される。SSO プロバイダー（Google と各 Jackson 接続）が 2 つ以上ある場合、`strict` でなければアプリは起動しない |
+| `SAML_PROVIDER_NAME` | `AUTH_JACKSON_ID` プロバイダーのサインインボタン表示名（例: "HENNGE"）。`AUTH_JACKSON_CONNECTIONS` の各エントリは自身の `name` を持つ |
 | `SHARE_MASTER_KEY` | `openssl rand -hex 32` — 共有リンク / Send 用マスターキー |
 | `VERIFIER_PEPPER_KEY` | `openssl rand -hex 32` — パスフレーズ検証 pepper（**本番必須**） |
 | `DIRECTORY_SYNC_MASTER_KEY` | `openssl rand -hex 32` — ディレクトリ同期資格情報の暗号化（**本番必須**） |
@@ -299,6 +303,48 @@ npm run docker:down
 
 既存ハッシュとの相関を維持する方法は提供していません。アップグレードを新しい相関期間の起点とみなし、切り替え時刻を監査記録と一緒に残してください。詳細は [Audit Log Schema](docs/security/audit-log-schema.md) を参照。
 
+<a id="sso-tenant-claim-binding-upgrade"></a>
+### SSO tenant claim binding upgrade（テナントクレームのプロバイダー紐づけ）
+
+**破壊的なアップグレードです。** 各テナントクレームを、それを提示してよい SSO プロバイダーに紐づけ、各 Jackson プロバイダーを 1 つの Jackson 接続に紐づけます。背景は [SAML サインイン — テナントは接続そのものに紐づける](#saml-sign-in--bind-the-tenant-to-the-connection) を参照してください。変わる点は 2 つです:
+
+- **従来の Jackson プロバイダーが強化されます。** `saml-jackson` は PKCE を使わずにコードを交換し、`AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` で認証します。この 2 つは、その接続自身のクライアント資格情報でなければなりません。Jackson の `dummy` クライアント、`tenant=…&product=…` 形式のクライアント ID、`fed_` で始まるフェデレーション ID、`JACKSON_URL` のない Jackson 資格情報のいずれかがあると、アプリは起動しません。古い `AUTH_JACKSON_SECRET` は起動時には検出されません。PKCE 経路ではシークレットが一度も検査されていなかったためです。その場合は最初のコールバックで失敗し、Jackson が 401 を返して、Auth.js が `OperationProcessingError` を記録します。アップグレード前に、その接続の現在の `clientID` / `clientSecret` を Jackson から写してください。
+- **SSO プロバイダーが 2 つ以上なら strict が必須です。** Google は `AUTH_GOOGLE_ID` と `AUTH_GOOGLE_SECRET` が両方設定されていれば 1 つと数え、Jackson プロバイダーはそれぞれ 1 つと数えます。2 つ以上ある場合、`AUTH_CLAIM_BINDING=strict` を設定するまでアプリは起動しません。strict はプロバイダーのないクレーム行でのサインインをすべて拒否し、マイグレーション直後は既存の行がすべてその状態です。そのため、変数を設定する前に行を紐づけます:
+
+1. 旧バージョンのアプリを停止するか、処理中のリクエストを捌き切らせます。動いている間は、プロバイダーのないクレームが登録され続けます。
+2. マイグレーション（`20261025000000_tenant_claim_provider`）を実行します。`tenant_claims.provider` とイベント列が追加されます。ECS では migrate タスクを単独で実行してください。`scripts/deploy.sh` は直後にサービスを入れ替えるため使いません（[Deployment](docs/operations/deployment.md) 参照）。
+3. デプロイが `AUTH_REDIRECT_PROXY_URL` を設定した状態で動いていて、その Jackson が 2 つ以上の接続を持っていた場合は、**先に過去の露出を確認します**。そうしたデプロイは PKCE で Jackson にサインインしていたため、どの接続の背後の IdP でもアプリのクライアント経由でサインインできました。確認するのは次の 3 点です: サインインで登録されたクレーム（`list` の `createdBy=signin`）、その経路変更履歴（`history`）、メンバーが想定外のプロバイダーのアカウントを持つテナント（`list --unbound` の `members=` 列）。
+4. レビュー用ファイルを書き出します。書き出し先はリポジトリの外です。CLI は git worktree 内のパスを拒否し、既存ファイルを上書きしません。ファイルはモード 0600 で作成されます。
+5. `provider` 列を編集します。各行を、そのテナントの IdP が背後にいる接続にするか、空のままにしてその行を飛ばします。候補が自動で入るのは、アクティブメンバー全員がただ 1 つの SSO プロバイダーにアカウントを持つ場合だけです。`evidence` は編集しないでください。
+6. ファイルを適用します。要約を表示して確認を 1 回だけ求め（`--yes` で省略）、行ごとに別トランザクションで紐づけます。次の行は拒否されます: 行または evidence が変わった行、メンバーのいないテナント、アクティブメンバーの過半数が使っていないプロバイダー。拒否された行が 1 つでもあれば終了コードは 0 以外になります。再実行すると、紐づけ済みの行は already bound と報告されます。
+7. 残りのクレームを 1 つずつ解決します。紐づけは `bind --claim` で行います。`--accept-unused-provider` は接続を確認してからだけ付けてください。別のカスタマーのテナントに先取りされたクレームは紐づけません。`add --from … --provider <正当な側のプロバイダー>` で正当なテナントに付け替えます。**正当なプロバイダーを先取りした側のテナントに `bind` しないでください。**
+8. ファイルを削除します。全テナントのクレームが載っています。
+9. 旧バージョンが完全に止まったら、もう一度 `list --unbound` を実行します。クレームが 1 件も出なければ完了です。
+10. `AUTH_CLAIM_BINDING=strict` を設定してから、アプリを起動します。
+
+どのコマンドにも `MIGRATION_DATABASE_URL` が必要です。`bind` には、さらにアプリが起動時に使う SSO プロバイダーの環境変数（`AUTH_GOOGLE_*`、`AUTH_JACKSON_*`、`JACKSON_URL`）が必要です。それがない場合、`list --unbound` はプロバイダーのない行だけを表示し、その旨を出力します。
+
+```bash
+# 3. 露出の確認
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --unbound
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim>
+
+# 4.〜6. 書き出し・レビュー・適用
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind --from-members --out <リポジトリ外のファイル>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind --apply <file> --by <operator-label>
+
+# 7. 1 件ずつ
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind --claim <claim> --provider <provider-id> --by <operator-label>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <rightful-tenant-ref> --domain <claim> \
+  --from <squatting-tenant-uuid> --provider <rightful-provider-id> --by <operator-label>
+
+# 9. クレームが 1 件も出ないこと
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --unbound
+```
+
+SSO プロバイダーが 1 つだけのデプロイは strict を強制されません。オプトインする場合も同じ手順に従ってください。
+
 ### 管理 / メンテナンススクリプト
 
 メンテナンススクリプト（`scripts/purge-history.sh`、`scripts/purge-audit-logs.sh`、`scripts/rotate-master-key.sh`）には、オペレーター単位の `op_*` Bearer トークンが必要です。旧来の共有 `ADMIN_API_TOKEN` 環境変数は廃止されました。オペレーターは `/<locale>/admin/tenant/operator-tokens` でトークンを発行し、スクリプト実行時に渡します:
@@ -313,7 +359,7 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 
 ### IdP のドメインが変わった / テナントがロックアウトされた
 
-**症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。原因は **5 つ**あり、この CLI で直せるのは最初の 2 つだけです:
+**症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。原因は **7 つ**あります。この CLI で直せるのは最初の 2 つと最後の 2 つです:
 
 | `metadata.reason` | クレーム関連フィールド（`metadata.claim` / `metadata.claimRefusal`） | 原因 | 対処 |
 |---|---|---|---|
@@ -322,8 +368,10 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 | `tenant_mismatch` | `claimRefusal` あり（`claim` は無し） | IdP が送った値が**取り込み時点で拒否**された — 対になっていないサロゲート、制御文字・双方向制御文字・ゼロ幅文字、255 文字超、またはストレージ層が往復できない空白 | **IdP 側を修正してください。** その値は `add` で登録できないため、この CLI では復旧できません。`claimRefusal` が違反したルールを示します |
 | `tenant_mismatch` | `claimRefusal` あり、かつ `claim` あり | 値は取り込みを通ったが**保存できない** — 印字可能 ASCII ではなく、レジストリの `CHECK` 制約が拒否する | **IdP 側を修正**するか、そのテナントに ASCII のクレームを登録してください。`add` は同じ述語でこの値を拒否します |
 | `tenant_claim_system_tenant` | クレーム値 | クレームは**登録済み**だが、登録先が sentinel テナント（`__system__`）— 「所有テナント無し」を表す予約テナントで、アカウントを持ってはいけないため、サインイン時の書き込みを `CHECK` が拒否する。この状態を作る運用コマンドは存在しない（`add` は sentinel を登録先として拒否するので、帯域外で書き込まれた行） | クレームを実在テナントに付け替える。`unmapped` では *Unregistered claims* の見出しに出るので、そこが示す `tenant-domain add --tenant <ref> --domain <claim> --by <label>` を実行すると、`add` が拒否したうえで付け直すべき `--from <現在の所有者>` 付きコマンドをそのまま提示します |
+| `tenant_claim_unbound` | クレーム値と `boundProvider`（null）、`signInProviderRef` | strict 紐づけ: クレーム行にプロバイダーが記録されていないため、正しい接続から提示されたことをどのサインインも証明できない。紐づけアップグレード以前の行はすべてこの状態 | `tenant-domain bind` — [SSO tenant claim binding upgrade](#sso-tenant-claim-binding-upgrade) 参照 |
+| `tenant_claim_provider_mismatch` | クレーム値と `boundProvider`、`signInProviderRef` | strict 紐づけ: クレームが、このサインインとは別のプロバイダーに紐づいている。**攻撃の痕跡そのもの**で、ある接続の IdP が別カスタマーのクレームをアサートした形 | **まず調査してください。** 紐づけ先のテナントが別カスタマーのプロバイダー経由のサインインで作られていた場合は、`add --from … --provider <正当な側>` で正当なテナントに付け替えます。正当なプロバイダーを先取りした側のテナントに `bind` してはいけません |
 
-`claimRefusal` を持つ 2 つは文言ではなく**フィールドの有無**で判別してください。`claimRefusal` はこのデプロイ自身の拒否判定だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 5 つの原因を 3 つの見出しで報告します — `claimRefusal` を持つ 2 つは対処が同じなので同じ見出しにまとめており、sentinel の行も対処が `tenant-domain` である点で未登録の見出しに入ります。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
+`claimRefusal` を持つ 2 つは文言ではなく**フィールドの有無**で判別してください。`claimRefusal` はこのデプロイ自身の拒否判定だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 7 つの原因を 4 つの見出しで報告します。`claimRefusal` を持つ 2 つは、対処が同じなので 1 つの見出しにまとめています。sentinel の行も、対処が `tenant-domain` である点で未登録の見出しに入ります。プロバイダー紐づけの 2 つは 4 つ目の見出しにまとめており、その見出しは「まず調査」と指示します。これらの行には `boundProvider` とサインイン時のプロバイダーが表示されます。監査行は所有テナントの管理者が読めるため、サインイン時のプロバイダーを鍵付きハッシュ `signInProviderRef` としてのみ保存します。`unmapped` は、設定済みのプロバイダー一覧と識別子 pepper（`AUDIT_IDENTIFIER_PEPPER`、なければ `AUTH_SECRET` から導出）を使って、その ref をプロバイダー ID に戻します。pepper がない場合は対応付けできない旨を表示します。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
 
 ```bash
 # 最近拒否された未登録クレームを確認（既定の期間: 30 日）
@@ -331,14 +379,16 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped --days 180
 
 # 新しいクレームを既存テナントに登録（冪等 — 再実行しても安全）
-MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label> --provider <provider-id>
 ```
+
+`add` は書き込みのたびにクレームの紐づけを明示させます。`--provider <provider-id>` には SSO プロバイダー ID をそのまま指定します: `google`、`saml-jackson`、`saml-jackson-<接続 id>`。strict では必須です。strict 以外では明示的な `--unbound` を代わりに指定でき、その行は strict を有効にした時点で拒否されます。`add` と `bind` は、テナントのアクティブメンバーのうち何人がそのプロバイダーにアカウントを持つかを表示します。過半数に満たない場合は、`--accept-unused-provider` を付けない限り拒否されます。メンバーがまだいないテナントは「no evidence」と表示して続行します。
 
 `<ref>` にはテナントの UUID、または登録済みクレームのいずれかを指定できます。`slug` は意図的に**受け付けません**。サインインで作成されたテナントの slug は IdP クレームから `[^a-z0-9]+` を潰して生成されるため多対一であり、そのslugを最初に取得したテナントを作らせた者に先取りされうるからです。
 
 `unmapped` が対象とするのは「問い合わせた期間」であり、このデプロイの保持期間ではありません。既定値は設定可能な保持期間の下限（30 日）で、出力にもその期間が明記されます。「何も拒否されていない」と判断する前に `--days <n>` で期間を広げてください。
 
-`list`・`remove`・`history` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。**破壊的変更:** `remove` にも `--by <operator-label>` が必須になりました（`... remove --tenant <ref> --domain <claim> --by <operator-label>`）。登録と同様、revoke も後述の履歴に帰属情報付きの行を書き込むようになったためで、帰属のない revoke はその記録に実行者を残しません。
+`list`（`--unbound` で strict が拒否するクレームを一覧）・`bind`（`--claim`、`--from-members --out`、`--apply`）・`remove`・`history` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。**破壊的変更:** `remove` にも `--by <operator-label>` が必須になりました（`... remove --tenant <ref> --domain <claim> --by <operator-label>`）。登録と同様、revoke も後述の履歴に帰属情報付きの行を書き込むようになったためで、帰属のない revoke はその記録に実行者を残しません。
 
 **`tenant_mismatch`: クレームが誤ったテナントに登録されている場合**。この状態はオペレーターが何もしなくても発生します — 打ち間違えた、あるいは他者に先取りされたクレームを提示するサインインが 1 回あるだけで、そのサインインが作成したテナントに対してクレームが登録されます（`created_by = 'signin'`）。`remove` ではクレームは解放されません — 行を論理削除して `revoked_at` を設定するだけで所有テナントは変わらないため、続けて `add` を実行しても再び拒否されます。現在の所有テナントを明示する `add --from` でクレームを移動してください:
 
@@ -349,7 +399,7 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domai
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --tenant <claim>
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
   --tenant <gaining-tenant-ref> --domain <claim> --by <operator-label> \
-  --from <current-owner-uuid>
+  --from <current-owner-uuid> --provider <provider-id>
 
 # クレームの経路変更履歴を復元する — 登録・revoke・再割り当てのすべてを、
 # 操作者ラベルとそれを実行した Postgres プリンシパルとともに表示します。
@@ -389,11 +439,40 @@ AUTH_TENANT_CLAIM_KEYS=hd
 - `tenant-domain unmapped` にも何も出ません。このコマンドは「提示されて拒否されたクレーム」を一覧するものであり、ここではそもそも何も提示されていないからです。
 - さらに、後述の *インシデント対応: 登録すべきでなかったクレームが登録されてしまった場合* にある吸収の経路を準備してしまいます — これらのユーザーにクレームが解決した瞬間、各人の個人データ一式がテナントへその場で移行されます。
 
-**SAML サインイン — テナントはアサーション内の属性ではなく、接続そのものに紐づけてください。** SAML には、Google の `hd` に相当する「デプロイ全体で使える検証済みクレームキー」は存在しません。このアプリに届く SAML 属性はすべてカスタマー自身の IdP がアサートした値であり、`saml-jackson` はデプロイ全体で共有される単一の OIDC クライアントであるため、クレームの名前空間をアサートした接続に紐づける仕組みがありません。したがって:
+<a id="saml-sign-in--bind-the-tenant-to-the-connection"></a>
+**SAML サインイン — テナントはアサーション内の属性ではなく、接続そのものに紐づけてください。** SAML には、Google の `hd` に相当する検証済みクレームキーがありません。このアプリに届く SAML 属性は、すべてカスタマー自身の IdP がアサートした値です。アプリが検証できるのは、どの Jackson 接続がサインインを完了したかです。そこで接続ごとに Auth.js プロバイダーを 1 つ割り当て、strict モードではテナントクレームを、紐づけられたプロバイダー経由でのみ解決します。別の接続の IdP が同じクレーム文字列をアサートしても、その IdP のプロバイダー経由ではクレームは解決されません。この仕組みは次の前提の上に成り立っています:
 
-- IdP が SAML 経由でアサートする属性（例: `organization`）を指定してよいのは、このデプロイが SSO 接続を **1 つ**しかプロビジョニングしていない場合**に限り**ます。その場合、その接続を通じてアサートできるのは当該カスタマーの IdP だけです。
-- SSO 接続が **2 つ以上**プロビジョニングされていると、あるカスタマーの IdP 管理者が別のカスタマーの登録済みクレーム文字列をアサートし、そのテナントを選択できてしまいます。接続を作るかどうかはオペレーターが制御できますが、その接続を通じて何がアサートされるかはカスタマー自身の IdP が制御します — この攻撃が成立するには後者だけで十分です。
-- 複数カスタマーを SAML で収容する場合の答えは**接続単位のテナント紐づけ**です — アサーション内の属性ではなく、どの SSO 接続から届いたサインインかでテナントを決める方式です。現在のデプロイ構成はこの紐づけを提供していないため、それが利用できるようになるまでは、SSO 接続はデプロイあたり 1 つに保ち（カスタマーごとに Jackson OIDC クライアントを分けた別デプロイにし）、登録済みクレームは `tenant-domain list` で確認してください。
+- **接続ごとに 1 プロバイダー。** `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` はプロバイダー `saml-jackson` を構成します。既存アカウントの紐づけを保つため、この ID は変えていません。`AUTH_JACKSON_CONNECTIONS` はエントリごとにプロバイダー `saml-jackson-<id>` を追加します。両方を同時に設定できます:
+
+  ```bash
+  JACKSON_URL=https://sso.example.com
+  AUTH_JACKSON_ID=<接続 A の clientID>
+  AUTH_JACKSON_SECRET=<接続 A の clientSecret>
+  AUTH_JACKSON_CONNECTIONS='[{"id":"acme","name":"Acme SSO","clientId":"<接続 B の clientID>","clientSecret":"<接続 B の clientSecret>"}]'
+  ```
+
+  各プロバイダーは、Jackson がその接続 1 つのために発行した `clientID` / `clientSecret` を使います。次のいずれかがあると、`NODE_ENV` を問わずアプリは起動しません:
+  - Jackson のグローバル `dummy` クライアント
+  - `tenant=…&product=…` 形式のクライアント ID
+  - `fed_` で始まるフェデレーションアプリ ID
+  - 2 つのプロバイダーで共有されたクライアント ID
+  - 重複した `id`、または `^[a-z0-9-]{1,32}$` に一致しない `id`
+
+  各接続の `redirectUrl` は `<アプリ URL>/api/auth/callback/<プロバイダー id>` を許可している必要があります。Jackson プロバイダーに `allowDangerousEmailAccountLinking` を設定することはありません。
+- **`id` は変更できません。** `Account` 行とクレームの紐づけはプロバイダー ID を記録しています。エントリの `id` を変えると、その下のアカウントと紐づけがすべて宙に浮きます。既存の `id` を別の接続に向け直すと、その `id` に紐づくアカウントとクレームのすべてを、新しい接続の IdP に渡すことになります。接続を置き換える場合は新しい `id` を付けてください。
+- **Jackson では PKCE を意図的に無効にしています。** Jackson の PKCE 経路では、トークンエンドポイントがクライアントを認証しません。接続 A の背後の IdP は、アプリが接続 B 用に作った authorize URL に `idp_hint=<A の clientID>` を付け足せます。そうして得たコードは B のコードとして引き換えられます（実測: M1）。PKCE なしでは、交換は B 自身の資格情報（`client_secret_basic`）を伴い、Jackson は A のコードを 401 で拒否します。`code_verifier` が 1 つでも送られると、この穴は再び開きます。攻撃者が `code_challenge` を付け足した場合、一致する verifier があるとクライアント検査が再び飛ばされるためです（M9）。そのため Jackson プロバイダーは verifier を一切送りません。ログイン CSRF への対策は `state`（Jackson も `state` のない authorize リクエストを拒否します）、コードインジェクションへの対策は `nonce` が担います。Google は PKCE を使い続けます。
+- **アプリでは検査できない前提条件。**
+  - Jackson の `FLATTEN_RAW_CLAIMS` は `false`（Jackson のデフォルト）のままにしてください。`true` にすると、IdP が id_token の `nonce` と `requested`、userinfo の `aud`/`clientID` を上書きできます（M7）。
+  - SAML 接続ごとに、IdP の entityId と署名鍵を別にしてください。Jackson はレスポンスの Issuer で候補の接続を選ぶためです。
+  - Jackson のバージョンは、プローブが通るものでなければなりません。
+- **実測した Jackson バージョン: 1.52.2 と 1.42.0。** `scripts/probes/jackson-connection-binding.mjs` は、上記の拒否とその陽性対照を検証します。`.github/workflows/ci-integration.yml` の `jackson-probe` ジョブが、リポジトリが参照するイメージに対してダイジェスト固定で実行します: `1.52.2`（docker-compose とセットアップ文書）と `1.42.0`（Terraform 例の ECR 再タグ `v1.42.0`）。**Jackson を更新する場合は、先に新しいイメージでプローブを実行してください。** このリポジトリでも、自分のデプロイでも同じです。そのイメージをダイジェストでジョブの matrix に追加します。リポジトリが参照するバージョンが matrix にないと、`scripts/__tests__/jackson-probe-images.test.mjs` が失敗します。
+- **strict 紐づけ。** クレームを提示するプロバイダーは、Google とすべての Jackson プロバイダーです。
+  - 2 つ以上ある場合、`AUTH_CLAIM_BINDING` の値にかかわらずモードは strict です。さらに `AUTH_CLAIM_BINDING=strict` を明示しない限りアプリは起動しません。こうしてアップグレードは、プロバイダーのない行でクレームサインインをすべて拒否する前に、デプロイの時点で止まります。
+  - 1 つの場合、strict はオプトインで、デフォルトは `off` です。
+  - `off` と `strict` 以外の値は、大文字小文字の違いも含めて拒否されます。
+  - strict では、プロバイダーのない行は `tenant_claim_unbound`、別のプロバイダーに紐づく行は `tenant_claim_provider_mismatch` で拒否されます。サインインが登録したクレームは提示したプロバイダーに紐づくため、ある接続経由で先取りされたクレームは、オペレーターが対処するまで別の接続からは使えません。
+  - `off` では解決の挙動は変わりません。行の紐づけと異なるプロバイダーからのサインインは、`auth.tenant_claim.provider_mismatch` をログに出力します（[alerts](docs/operations/alerts.md)）。クレームを提示するプロバイダーが 1 つなら、これが起きるのは、もう設定されていないプロバイダーに紐づく行だけです。
+- **この変更以前の露出。** 以前の従来プロバイダーは `state` を送らず、Jackson は `state` のない authorize リクエストを拒否します。Auth.js が `state` を付けるのは `AUTH_REDIRECT_PROXY_URL` を設定したときだけなので、サインインできたのはそうしたデプロイだけで、しかも PKCE 経由でした。その経路では `AUTH_JACKSON_SECRET` は一度も検査されていません。そのデプロイの Jackson が 2 つ以上の接続を持っていた場合、どの接続の背後の IdP でもアプリのクライアント経由でサインインできました。確認方法は [SSO tenant claim binding upgrade](#sso-tenant-claim-binding-upgrade) の手順 3 にあります。
 
 以上はいずれも、Google の `hd` のみに依存するデプロイ（本節が想定するインシデントの形）では発生しません。
 

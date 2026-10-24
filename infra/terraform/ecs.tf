@@ -104,7 +104,19 @@ resource "aws_ecs_task_definition" "app" {
           # correctly. Setting it here wins because task-definition environment
           # overrides the image's ENV.
           { name = "HOSTNAME", value = "0.0.0.0" },
+          # The issuer of every Jackson provider: Jackson's EXTERNAL_URL, which
+          # the jackson secret holds as https://<jackson_domain>. Without it the
+          # app refuses Jackson credentials at boot instead of registering no
+          # provider; with empty AUTH_JACKSON_ID/SECRET it is unused.
+          { name = "JACKSON_URL", value = "https://${var.jackson_domain}" },
         ],
+        # Required as "strict" once two or more SSO providers are configured;
+        # the app refuses to start otherwise. Left unset by default so that an
+        # upgrade binds the existing tenant claims before strict is turned on
+        # (README: SSO tenant claim binding upgrade).
+        var.auth_claim_binding != "" ? [
+          { name = "AUTH_CLAIM_BINDING", value = var.auth_claim_binding },
+        ] : [],
         # Production env validation (src/lib/env-schema.ts) REFUSES to boot
         # without external audit anchoring enabled and a destination named.
         # These were absent, so every app task crash-looped on "Invalid
@@ -159,6 +171,11 @@ resource "aws_ecs_task_definition" "app" {
         var.enable_google_auth ? [
           { name = "AUTH_GOOGLE_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_ID::" },
           { name = "AUTH_GOOGLE_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_GOOGLE_SECRET::" },
+        ] : [],
+        # Further Jackson connections beyond AUTH_JACKSON_ID/SECRET, each with
+        # that connection's own client credentials. A secret: it holds them.
+        var.enable_jackson_connections ? [
+          { name = "AUTH_JACKSON_CONNECTIONS", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_CONNECTIONS::" },
         ] : []
       )
       # Exit EXPLICITLY on both paths. The previous probe armed a bare
@@ -243,6 +260,10 @@ resource "aws_ecs_task_definition" "jackson" {
         { name = "DB_ENGINE", value = "sql" },
         { name = "DB_TYPE", value = "postgres" },
         { name = "NEXTAUTH_ACL", value = "*" },
+        # Jackson's default, pinned: with true an IdP can override the
+        # id_token's nonce and `requested` fields, which the app's SAML
+        # connection binding relies on.
+        { name = "FLATTEN_RAW_CLAIMS", value = "false" },
       ]
     }
   ])

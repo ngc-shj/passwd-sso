@@ -228,8 +228,9 @@ ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、
 | `AUTH_SECRET` | Auth.js セッション暗号化キー |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth Client Secret |
-| `AUTH_JACKSON_ID` | Jackson OIDC Client ID |
-| `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret |
+| `AUTH_JACKSON_ID` | Jackson 接続 1 つのクライアント ID（プロバイダー `saml-jackson`）— その接続自身の `clientID`。`dummy` や `tenant=…&product=…` 形式は不可。SAML を使わない場合は空文字列。 |
+| `AUTH_JACKSON_SECRET` | その接続自身の `clientSecret` |
+| `AUTH_JACKSON_CONNECTIONS` | 追加の Jackson 接続。JSON 配列の文字列 `[{"id","name","clientId","clientSecret"}]` で、エントリごとにプロバイダー `saml-jackson-<id>` を 1 つ登録。`enable_jackson_connections = true` のときのみ参照。SSO プロバイダーが 2 つ以上なら、ルート README の "SSO tenant claim binding upgrade" を済ませてから `auth_claim_binding = "strict"` を設定（未設定だとアプリは起動しない）。 |
 | `SHARE_MASTER_KEY` | 組織暗号化マスターキー (256-bit hex) |
 | `SESSION_TOKEN_HMAC_KEY` | セッショントークン HMAC キー (256-bit hex)。**本番必須**（env 検証 + 実行時 fail-closed）。セッション認証をマスターキーローテーションから分離。app ECS タスクにマッピング。`npm run generate:key` で生成。 |
 | `REDIS_URL` | Redis 接続文字列 |

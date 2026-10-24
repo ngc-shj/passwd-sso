@@ -249,6 +249,10 @@ describe("tenant-domain CLI (C7)", () => {
       // leaves tenant_id unchanged, so the next `add` lands here again.
       expect(result.message).toContain("--from");
       expect(result.message).not.toMatch(/run "remove" on the owning tenant first/);
+      // The printed command must be runnable as given: since provider binding,
+      // `add` refuses without --provider or --unbound, so the hint carries the
+      // binding this invocation stated.
+      expect(result.message).toContain(`--domain ${claim} --unbound --by <label> --from ${ownerTenant}`);
 
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
       expect(row?.tenantId).toBe(ownerTenant);

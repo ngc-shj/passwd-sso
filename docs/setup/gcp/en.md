@@ -56,6 +56,12 @@ BoxyHQ SAML Jackson must run as a separate service (Docker container). It is not
   - `NEXTAUTH_URL` and `EXTERNAL_URL` (public or internal URL of Jackson)
   - `NEXTAUTH_SECRET` (same value as `AUTH_SECRET`)
   - `NEXTAUTH_ACL=*`
+  - `FLATTEN_RAW_CLAIMS` unset or `false` (Jackson's default). With `true`, an IdP can override the id_token's `nonce` and `requested` fields, which the SAML connection binding relies on
+
+App-side Jackson configuration (the `app` service):
+- `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET`: one connection's own client credentials (provider `saml-jackson`). Never Jackson's `dummy` client or a `tenant=…&product=…` id; the app refuses to start on them.
+- `AUTH_JACKSON_CONNECTIONS` (optional): further connections, one provider `saml-jackson-<id>` each. See the README's [SAML sign-in](../../../README.md#saml-sign-in--bind-the-tenant-to-the-connection) section.
+- `AUTH_CLAIM_BINDING=strict`: required when two or more SSO providers are configured (Google and each Jackson connection count). On an existing deployment, run the [SSO tenant claim binding upgrade](../../../README.md#sso-tenant-claim-binding-upgrade) first.
 
 ## Admin / Maintenance Scripts
 

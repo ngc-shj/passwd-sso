@@ -35,7 +35,9 @@ jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-de
 #   #   "AUTH_URL": "https://app.example.com",
 #   #   "AUTH_SECRET": "<REPLACE>",
 #   #   "AUTH_GOOGLE_ID": "<REPLACE>", "AUTH_GOOGLE_SECRET": "<REPLACE>",
-#   #   "AUTH_JACKSON_ID": "<REPLACE>", "AUTH_JACKSON_SECRET": "<REPLACE>",
+#   #   "AUTH_JACKSON_ID": "<REPLACE>", "AUTH_JACKSON_SECRET": "<REPLACE>",  // one connection's own clientID/clientSecret; "" when SAML is unused
+#   #   // Only with enable_jackson_connections = true — further connections, a JSON array as a string:
+#   #   "AUTH_JACKSON_CONNECTIONS": "[{\"id\":\"acme\",\"name\":\"Acme SSO\",\"clientId\":\"<REPLACE>\",\"clientSecret\":\"<REPLACE>\"}]",
 #   #   "SHARE_MASTER_KEY": "<REPLACE>",   // npm run generate:key
 #   #   "SESSION_TOKEN_HMAC_KEY": "<REPLACE>",  // npm run generate:key (decouples session HMAC from master-key rotation)
 #   #   "REDIS_URL": "redis://HOST:6379",
@@ -90,3 +92,11 @@ cloudfront_certificate_arn = ""
 # audit_anchor_s3_prefix            = "audit-anchors"
 # audit_anchor_break_glass_role_arn = ""  # empty = nobody may write the operator paths
 # audit_anchor_object_lock_days     = 2557
+
+# SSO providers (README "SAML sign-in — bind the tenant to the connection").
+# enable_jackson_connections passes AUTH_JACKSON_CONNECTIONS from the app secret.
+# auth_claim_binding must be "strict" once two or more SSO providers (Google,
+# each Jackson connection) are configured — the app refuses to start otherwise.
+# On an existing deployment, run README "SSO tenant claim binding upgrade" first.
+# enable_jackson_connections = false
+# auth_claim_binding         = "strict"

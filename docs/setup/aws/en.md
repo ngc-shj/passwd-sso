@@ -68,8 +68,8 @@ Store these in Secrets Manager:
 - `AUTH_SECRET`
 - `AUTH_GOOGLE_ID`
 - `AUTH_GOOGLE_SECRET`
-- `AUTH_JACKSON_ID`
-- `AUTH_JACKSON_SECRET`
+- `AUTH_JACKSON_ID` (the Jackson connection's own `clientID`; empty string when SAML is unused)
+- `AUTH_JACKSON_SECRET` (that connection's own `clientSecret`)
 - `SHARE_MASTER_KEY`
 - `REDIS_URL` (REQUIRED in production — see [Redis](#app-service))
 - `BLOB_BACKEND`
@@ -81,6 +81,7 @@ Store these in Secrets Manager:
 - `PASSWD_ANCHOR_PUBLISHER_PASSWORD` is not stored on its own: it is an input to `scripts/bootstrap-rds-roles.mjs` only, taken from the userinfo of `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` (a second stored copy could drift from the URL)
 
 Optional:
+- `AUTH_JACKSON_CONNECTIONS` (further Jackson connections, one provider `saml-jackson-<id>` each; Terraform reads it only with `enable_jackson_connections = true`)
 - `GOOGLE_WORKSPACE_DOMAINS`
 - `SAML_PROVIDER_NAME`
 - `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` (when `BLOB_BACKEND=s3`)
@@ -172,9 +173,10 @@ Env vars:
 - `AUTH_GOOGLE_ID`
 - `AUTH_GOOGLE_SECRET`
 - `GOOGLE_WORKSPACE_DOMAINS` (optional)
-- `JACKSON_URL` (internal or public URL)
-- `AUTH_JACKSON_ID`
-- `AUTH_JACKSON_SECRET`
+- `JACKSON_URL` (Jackson's public URL, the same as its `EXTERNAL_URL`; Terraform sets `https://<jackson_domain>`)
+- `AUTH_JACKSON_ID`, `AUTH_JACKSON_SECRET` (one connection's own client credentials — provider `saml-jackson`)
+- `AUTH_JACKSON_CONNECTIONS` (optional — further connections)
+- `AUTH_CLAIM_BINDING` (`strict` when two or more SSO providers are configured — the app refuses to start otherwise; Terraform variable `auth_claim_binding`. On an existing deployment, run the README's [SSO tenant claim binding upgrade](../../../README.md#sso-tenant-claim-binding-upgrade) first)
 - `SAML_PROVIDER_NAME`
 - `SHARE_MASTER_KEY`
 - `REDIS_URL` (REQUIRED in production — Zod schema enforces this for `NODE_ENV=production`; backs session cache with tombstone-based revocation propagation (PR #407) and shared rate limiting)
@@ -194,6 +196,7 @@ Env vars (example):
 - `EXTERNAL_URL` (public URL of jackson)
 - `NEXTAUTH_SECRET` (same as AUTH_SECRET)
 - `NEXTAUTH_ACL=*`
+- `FLATTEN_RAW_CLAIMS=false` (Terraform sets it. With `true`, an IdP can override the id_token's `nonce` and `requested` fields, which the SAML connection binding relies on)
 
 ### Background worker services (Terraform-managed)
 

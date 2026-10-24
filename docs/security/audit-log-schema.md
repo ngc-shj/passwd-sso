@@ -11,11 +11,30 @@ here rather than left to convention.
 
 | Field | Type | Set when | Notes |
 |---|---|---|---|
-| `provider` | `AuthProvider` | always | `"google" \| "nodemailer" \| "saml" \| "passkey" \| "credentials" \| "unknown"` |
-| `reason` | `AuthLoginFailureReason` | always | `"unknown_email" \| "tenant_mismatch" \| "provider_error" \| "magic_link_expired" \| "credential_mismatch" \| "tenant_claim_unmapped"` |
+| `provider` | `AuthProvider` | always | `"google" \| "nodemailer" \| "saml" \| "passkey" \| "credentials" \| "unknown"` — every configured Jackson provider (`saml-jackson`, `saml-jackson-<id>`) maps to `"saml"` |
+| `reason` | `AuthLoginFailureReason` | always | `"unknown_email" \| "tenant_mismatch" \| "provider_error" \| "magic_link_expired" \| "credential_mismatch" \| "tenant_claim_unmapped" \| "tenant_claim_system_tenant" \| "tenant_claim_unbound" \| "tenant_claim_provider_mismatch"` — the last three are described [below](#tenant-claim-reasons-and-provider-binding-fields) |
 | `identifierHash` | `string \| null` | see below | HMAC-SHA256(pepper, `email.toLowerCase() + ":" + tenantId`), first 16 hex chars (64 bits) |
 | `identifierHashScope` | `"tenant" \| "global" \| "unkeyed" \| null` | see below | which binding produced `identifierHash`, or why none was produced |
 | `claim` | `string` | only when the caller passed one | the raw tenant claim value extracted from the IdP response, truncated to `MAX_TENANT_CLAIM_LENGTH` |
+| `boundProvider` | `string \| null` | `tenant_claim_unbound` and `tenant_claim_provider_mismatch` only | the provider ID the claim's row is bound to (`null` for an unbound row) — the owning tenant's own binding |
+| `signInProviderRef` | `string` | the same two reasons, and only when a pepper is configured | truncated keyed hash of the provider ID the sign-in came through — never the ID itself |
+
+## Tenant-claim reasons and provider-binding fields
+
+- `tenant_claim_system_tenant`: the claim is registered, but to `SYSTEM_TENANT_ID`, the sentinel that encodes "no owning tenant". A `CHECK` refuses the sign-in's write, so the sign-in is denied. No operator command creates this state (`tenant-domain add` refuses a sentinel target). This reason exists for observability; it is not a control.
+- `tenant_claim_unbound`: strict binding is on (`AUTH_CLAIM_BINDING`, see the README's *SSO tenant claim binding upgrade*), and the claim's `tenant_claims.provider` is `NULL`. No sign-in can show that it presents the claim through the connection the claim belongs to.
+- `tenant_claim_provider_mismatch`: strict binding is on, and the claim is bound to a provider other than the one this sign-in came through. This is the signature of one SSO connection's IdP asserting another customer's claim.
+
+The two binding reasons are filed under the tenant that owns the claim, so that tenant's admins can read the row. This decides which provider fields the row carries:
+
+- `boundProvider` is stored raw. It is the owning tenant's own binding.
+- The presenting provider is stored only as `signInProviderRef`, because it may be another customer's connection, named after that customer. The ref is `HMAC-SHA256(HKDF-SHA256(pepper, info "audit-provider-ref-v1"), providerId)`, truncated to its first 16 hex characters (64 bits). The pepper is the same identifier pepper as `identifierHash` (resolution order below). The HKDF info separates the two keys. The helper is `providerRef` in `src/lib/audit/identifier-pepper.ts`, a prisma-free module that the `tenant-domain` CLI shares.
+- **Without a pepper, no ref is stored.** The key is absent from the row, not `null`, because an unkeyed hash of a small, guessable ID set is a lookup table.
+- At boot the app refuses a configuration where two configured providers produce the same ref.
+
+`tenant-domain unmapped` maps a ref back to a provider ID: it recomputes the refs of the configured providers under the pepper from the env it loaded. A ref that matches none of them is printed as unknown, for example a provider since removed. With no pepper the CLI prints refs as unmappable, and a row with no ref as "no ref stored". The operator-only structured log line `auth.tenant_claim.binding_refused` (`docs/operations/alerts.md`) carries both raw IDs.
+
+Neither key is in `EXTERNAL_DELIVERY_METADATA_BLOCKLIST`. Both reach external sinks unchanged: `boundProvider` is the receiving tenant's own value, and `signInProviderRef` is keyed.
 
 ## `identifierHash` / `identifierHashScope`
 

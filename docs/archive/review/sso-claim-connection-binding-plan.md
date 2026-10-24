@@ -222,10 +222,11 @@ updated with M1–M11.
 - C1 probe (`scripts/probes/jackson-connection-binding.mjs`, committed, keys generated at run
   time, asserts and exits non-zero): every attack case first asserts that IdP A's signed response
   produced a code, then the 401 and its credential-check body (M8b, M5a, M9 without verifier);
-  M8a/M8c 200; positive controls M1 (PKCE) 200 and M9 with the attacker's verifier 200. As
-  measured, it runs on the pinned Jackson image (`--entrypoint node`, so `@boxyhq/saml20` resolves
-  in its own module tree) with the repo's `node_modules` mounted read-only for the oauth4webapi copy
-  `@auth/core` resolves (version asserted). `ci-integration.yml` runs it as a matrix over the Jackson
+  M8a/M8c 200; positive controls M1 (PKCE) 200 and M9 with the attacker's verifier 200. Its
+  driver runs on one fixed Jackson image (`PROBE_DRIVER_IMAGE`, the compose 1.52.2 digest, with
+  `--entrypoint node`, so `@boxyhq/saml20` resolves in that image's own module tree), not on each
+  server image under test, with the repo's `node_modules` mounted read-only for the oauth4webapi
+  copy `@auth/core` resolves (version asserted) (D1). `ci-integration.yml` runs it as a matrix over the Jackson
   versions the repo references, pinned by digest (a drift test maps `docker-compose.yml`'s tag and
   the `terraform.tfvars.example` ECR re-tags, `v<x>` → upstream `<x>`, onto the list),
   with teardown registered first; its path filter gains the compose file, `infra/terraform/**`,

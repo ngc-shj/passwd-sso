@@ -6,14 +6,15 @@
  * the publisher's task and no other.
  *
  * Task definitions are evaluated with every conditional secret switched on
- * (SMTP with credentials, Google), so a key behind a toggle is listed too.
+ * (SMTP with credentials, Google, extra Jackson connections), so a key behind a
+ * toggle is listed too.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TerraformConfig, TERRAFORM_DIR, plain } from "../helpers/hcl-subset";
 
-const ALL_ON = { vars: { smtp_host: "smtp.example.com", smtp_auth_enabled: true, enable_google_auth: true, email_from: "a@example.com" } };
+const ALL_ON = { vars: { smtp_host: "smtp.example.com", smtp_auth_enabled: true, enable_google_auth: true, enable_jackson_connections: true, email_from: "a@example.com" } };
 const SECRET_REF = /^<ref:aws_secretsmanager_secret\.(\w+)\.arn>:([A-Z0-9_]+)::$/;
 const PUBLISHER_ONLY = ["AUDIT_ANCHOR_SIGNING_KEY", "AUDIT_ANCHOR_TAG_SECRET"];
 
