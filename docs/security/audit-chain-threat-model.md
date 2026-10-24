@@ -61,7 +61,8 @@ until the **next cadence boundary** — at most one cadence (24 h), no longer th
 the chain run ahead of what the next manifest commits to. It no longer holds
 publishing: every chain-enabled tenant is published on each run, and a success
 clears it, so in practice it lasts until the scheduler's next same-boundary retry
-(every 15 min until 30 min before the next boundary) succeeds.
+(every 15 min, at most three times per process, until 30 min before the next
+boundary) succeeds.
 
 **Attempt cap**: each run that passes the marker and tenant checks is counted per
 boundary in `system_settings.audit_anchor_upload_attempts`, in its own transaction
@@ -69,7 +70,10 @@ committed before the publish transaction opens, so neither a rollback nor a cras
 after the PUT resets it. Above 3 the run uploads nothing and logs
 `audit-anchor-publisher.upload_cap_reached`, alarmed on AWS
 (`<name_prefix>-audit-anchor-publisher-upload-cap-reached`), and the first such run
-writes one `AUDIT_ANCHOR_PUBLISH_FAILED` row (`UPLOAD_ATTEMPT_CAP_REACHED`). The cap
+writes one `AUDIT_ANCHOR_PUBLISH_FAILED` row (`UPLOAD_ATTEMPT_CAP_REACHED`). A
+stored count that does not parse is treated as past the cap for that boundary
+(overwritten with the first count past it; `UPLOAD_ATTEMPT_COUNT_UNREADABLE`),
+so damaging the row costs one boundary, as planting a count does. The cap
 bounds how many versions of one day's key a crash loop or a retry storm can lock
 into the COMPLIANCE bucket. Because the count is a database row, a database writer
 can plant it to suppress a day's publish; the alarm makes that visible the same day

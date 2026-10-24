@@ -5,6 +5,10 @@
  * and matched the way S3 matches a policy resource (`?` one character, `*` any
  * sequence including `/`) against buildManifestArtifactKey's output for a real
  * kid, joined to the configured prefix by S3Destination's joinS3Key.
+ *
+ * Also the retention contract: the publisher's retain-until, from
+ * AUDIT_ANCHOR_RETENTION_YEARS as S3Destination computes it, against the
+ * bucket's default retention, its validation floor and the policy's cap.
  */
 import { describe, it, expect } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
@@ -12,7 +16,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildManifestArtifactKey } from "@/workers/audit-anchor-publisher";
 import { joinS3Key } from "@/lib/audit/anchor-destinations/s3-destination";
-import { TerraformConfig, TERRAFORM_DIR, plain } from "../helpers/hcl-subset";
+import { AUDIT_ANCHOR_RETENTION_YEARS } from "@/lib/constants/audit/audit";
+import { TerraformConfig, TERRAFORM_DIR, nested, plain } from "../helpers/hcl-subset";
 
 const BUCKET_ARN = "<ref:aws_s3_bucket.audit_anchors[0].arn>";
 
@@ -162,5 +167,67 @@ describe("manifest key contract", () => {
       'audit_anchor_manifest_pattern = "${local.audit_anchor_prefix}/*.jws"',
     );
     expect(keyContractViolations(tf).join("\n")).toMatch(/matches the break-glass key/);
+  });
+});
+
+/**
+ * S3Destination locks every anchor until `now + retentionYears * 365 *
+ * MS_PER_DAY`, so its retain-until is `years * 365` days ahead. A retain-until
+ * computed from a 366-day year must still pass the policy's cap.
+ */
+function retentionContractViolations(tf: TerraformConfig, years: number): string[] {
+  const out: string[] = [];
+  const publisherDays = years * 365;
+  const variable = tf.variable("audit_anchor_object_lock_days");
+  const defaultDays = Number(tf.eval(variable.body.attrs.default));
+  if (!(publisherDays <= defaultDays)) {
+    out.push(`default retention ${defaultDays} days is below the publisher's ${publisherDays}`);
+  }
+  const validation = nested(variable, "validation")[0];
+  if (!validation) return [...out, "audit_anchor_object_lock_days: no validation"];
+  const admits = (days: number) => tf.attr(validation, "condition", { vars: { audit_anchor_object_lock_days: days } });
+  if (admits(publisherDays - 1) !== false) {
+    out.push(`validation admits ${publisherDays - 1} days, below the publisher's ${publisherDays}`);
+  }
+  if (admits(defaultDays) !== true) out.push(`validation refuses the default ${defaultDays}`);
+  const capDays = Number(tf.local("audit_anchor_retention_cap_days"));
+  if (!(years * 366 <= capDays)) {
+    out.push(`retention cap ${capDays} days refuses a ${years} × 366-day retain-until`);
+  }
+  return out;
+}
+
+describe("retention contract", () => {
+  const variables = readFileSync(join(TERRAFORM_DIR, "variables.tf"), "utf8");
+  const withVariables = (from: string, to: string) => {
+    expect(variables.split(from).length - 1, `fixture edit must match once: ${from}`).toBe(1);
+    return new TerraformConfig(TERRAFORM_DIR, { "variables.tf": variables.replace(from, to) });
+  };
+
+  it("holds for the committed configuration and AUDIT_ANCHOR_RETENTION_YEARS", () => {
+    expect(retentionContractViolations(new TerraformConfig(TERRAFORM_DIR), AUDIT_ANCHOR_RETENTION_YEARS)).toEqual([]);
+  });
+
+  it("catches a publisher retention raised past the bucket's", () => {
+    expect(retentionContractViolations(new TerraformConfig(TERRAFORM_DIR), AUDIT_ANCHOR_RETENTION_YEARS + 1).join("\n"))
+      .toMatch(/is below the publisher's/);
+  });
+
+  it("catches a validation floor below the publisher's retention", () => {
+    const tf = withVariables(
+      "condition     = var.audit_anchor_object_lock_days >= 2557",
+      "condition     = var.audit_anchor_object_lock_days >= 365",
+    );
+    expect(retentionContractViolations(tf, AUDIT_ANCHOR_RETENTION_YEARS).join("\n")).toMatch(/validation admits/);
+  });
+
+  it("catches a cap margin too small for a 366-day year", () => {
+    const tf = new TerraformConfig(TERRAFORM_DIR, {
+      "storage.tf": readFileSync(join(TERRAFORM_DIR, "storage.tf"), "utf8").replace(
+        "var.audit_anchor_object_lock_days + 31",
+        "var.audit_anchor_object_lock_days + 1",
+      ),
+    });
+    expect(retentionContractViolations(tf, AUDIT_ANCHOR_RETENTION_YEARS).join("\n")).toMatch(/retention cap/);
   });
 });

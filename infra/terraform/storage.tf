@@ -159,8 +159,9 @@ resource "aws_s3_bucket_policy" "attachments" {
 #
 # Kept separate from the attachments bucket rather than sharing it under a
 # prefix: the two have opposite access shapes. Attachments are read/write/delete
-# by the app; anchors are evidence, written only by the publisher's own task
-# role (iam.tf) and never deleted.
+# by the app; anchors are evidence, which the bucket policy below lets only the
+# publisher's own task role (iam.tf) and the break-glass operator write, and
+# nobody delete.
 #
 # The filesystem destination is not a usable alternative here: a Fargate task's
 # filesystem is ephemeral, so anchors written there vanish with the task and the
@@ -271,6 +272,11 @@ resource "aws_s3_bucket_public_access_block" "audit_anchors" {
 # never a NotPrincipal — NotPrincipal names the role, not the assumed-role
 # session a task actually signs with, so it would deny the publisher too.
 #
+# The write statements name s3:PutObject; a replica is written under
+# s3:ReplicateObject / ReplicateDelete / ReplicateTags instead, which they do
+# not cover. This bucket is never a replication destination, so those are
+# denied to everyone outright (DenyReplicationWrite).
+#
 # This holds only while nobody replaces the policy, and the account root always
 # can. Changes to it, the lifecycle, Object Lock or versioning are alarmed
 # (monitoring.tf, audit_anchor_bucket_config_change); a Terraform apply is the
@@ -351,6 +357,16 @@ resource "aws_s3_bucket_policy" "audit_anchors" {
         Effect    = "Deny"
         Principal = "*"
         Action    = ["s3:DeleteObject", "s3:DeleteObjectVersion"]
+        Resource  = "${aws_s3_bucket.audit_anchors[0].arn}/*"
+      },
+      {
+        # A replication role writes objects, delete markers and tags under
+        # these actions, not s3:PutObject, so no statement above refuses it.
+        # The bucket is never a replication destination. No exception.
+        Sid       = "DenyReplicationWrite"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]
         Resource  = "${aws_s3_bucket.audit_anchors[0].arn}/*"
       },
       {

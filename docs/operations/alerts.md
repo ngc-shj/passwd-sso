@@ -628,10 +628,12 @@ The publisher (`src/workers/audit-anchor-publisher.ts`, scheduled by
 `kind` is the outcome: `published`, `skipped_already_published`,
 `skipped_no_tenants`, `lock_held`, `upload_cap_reached` or `failed` (with
 `reason` and `stage`). Every line carries `boundary` and
-`chainEnabledTenantCount`. A run that failed at the upload or after it is
-retried for the same boundary every 15 minutes until 30 minutes before the next
-boundary (23:35 UTC); a failure before the upload, `lock_held` and
-`upload_cap_reached` wait for the next boundary or the next boot run.
+`chainEnabledTenantCount`. A failed run, at any stage, is retried for the same
+boundary every 15 minutes, at most three times per process and never later than
+30 minutes before the next boundary (23:35 UTC); when the three are used up the
+scheduler logs `audit-anchor-publisher.retries_exhausted` (warn, with
+`boundary` and `retries`) and waits. `lock_held` and `upload_cap_reached` are
+not retried. All of these wait for the next boundary or the next boot run.
 
 On AWS every filter below reads `/ecs/<name_prefix>/audit-anchor-publisher`, and
 every alarm notifies the SNS alarm topic (`infra/terraform/monitoring.tf`).
@@ -659,7 +661,9 @@ ROLLBACK;
 
 `audit_anchor_last_published_boundary` is the boundary marker,
 `audit_anchor_previous_manifest` the pointer the next manifest chains to, and
-`audit_anchor_upload_attempts` the attempt count (`{boundary, count}`).
+`audit_anchor_upload_attempts` the attempt count (`{boundary, count}`). A count
+row that does not parse is replaced by the next run with the first count past
+the cap for that run's boundary (see `upload_cap_reached`).
 
 ## `audit-anchor-publisher.cadence_healthy`
 
@@ -724,11 +728,20 @@ upload — so this run uploaded nothing. The first run past the cap writes one
 `AUDIT_ANCHOR_PUBLISH_FAILED` row (`failureReason: UPLOAD_ATTEMPT_CAP_REACHED`);
 later runs for the same boundary log only. The cap exists so that a crash loop
 or a retry storm cannot lock more versions of the day's key.
+
+The line also fires, with `countUnreadable: true`, when the stored
+`audit_anchor_upload_attempts` value does not parse (not JSON, or not
+`{boundary, count}` with a positive integer count). Such a value cannot say how
+many runs reached the upload, so the run treats the boundary as past the cap:
+it overwrites the value with `{boundary: <this boundary>, count: 4}`, uploads
+nothing, and writes the one row with `failureReason:
+UPLOAD_ATTEMPT_COUNT_UNREADABLE` instead.
 **Recovery**: read the boundary's earlier `cadence_failed` lines for the cause
-(and ECS task-stop events, for a crash loop). A count nobody's runs explain is a
-planted row — a database-write incident. The count resets on its own: the next
-boundary's first run counts 1 and publishes. The missed boundary is then
-reported once as `MISSING_PRIOR_CADENCE_PUBLICATION`.
+(and ECS task-stop events, for a crash loop). A count nobody's runs explain —
+or an unreadable one, which no publisher writes — is a planted or damaged row:
+a database-write incident. The count resets on its own: the next boundary's
+first run counts 1 and publishes. The missed boundary is then reported once as
+`MISSING_PRIOR_CADENCE_PUBLICATION`.
 
 ## `audit-anchor-publisher.commit_failed_after_upload`
 
@@ -756,11 +769,17 @@ boundary, that version stays unreferenced and the next publish reports
 **What it means**: `cadence_failed` is every failed run, with `reason` (a token,
 also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
 
-- `before_upload` — the run failed before uploading: the database unreachable,
-  the signing step, or an `audit_anchor_previous_manifest` that does not parse.
-  It cost an attempt and is retried every 15 minutes, so a transient database
-  outage at the boundary does not cost the day; a deterministic failure reaches
-  `upload_cap_reached` after three runs. Fix it and delete the
+- `before_upload` — the run failed before uploading. Either before the attempt
+  count was written — the database unreachable, the tenants read failing — in
+  which case it cost no attempt; or after it — the signing step, or an
+  `audit_anchor_previous_manifest` that does not parse — in which case it cost
+  one. Both are retried every 15 minutes (at most three times per process), so
+  a transient database outage at the boundary does not cost the day; a
+  deterministic failure after the count reaches `upload_cap_reached` after
+  three runs, and one before it stops at `retries_exhausted`. (An
+  `audit_anchor_upload_attempts` value that does not parse is not a failure
+  here: it reports `upload_cap_reached` with `countUnreadable: true`, and the
+  next boundary recovers by itself.) Fix it and delete the
   `audit_anchor_upload_attempts` row if the boundary must still be published.
 - `upload` — a destination refused or the 60 s upload bound fired
   (`UPLOAD_TIMEOUT`). `upload_failed` names the destination and carries
@@ -770,7 +789,12 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   15-minute retry that publishes clears it.
 - `after_upload` — see `commit_failed_after_upload` above.
 
-At most three failure rows per boundary, plus the one cap row.
+Rows per boundary: the persisted count admits at most three counted runs across
+restarts, each writing at most one failure row, plus the one cap row (either
+reason). A failure before the count is written is not counted, so the count
+does not bound it; the scheduler does: each process runs a boundary at most
+four times (the first run and at most three retries), and so writes at most
+that many failure rows for it per process start, counted runs included.
 
 ## `audit-anchor-publisher.pause_persist_failed`
 

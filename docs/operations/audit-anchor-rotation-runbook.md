@@ -368,8 +368,9 @@ instances: it only stops a publisher configured for another deployment from boot
 - The run pauses the manifest's tenants until the next boundary: the outbox worker stops
   advancing their `chain_seq`. The pause no longer holds publishing, and it ends at the next
   boundary whatever happens.
-- The scheduler retries the boundary every 15 minutes until 30 minutes before the next one. At
-  most three runs per boundary reach the upload; the fourth reports `upload_cap_reached`
+- The scheduler retries the boundary every 15 minutes, at most three times per process and not
+  later than 30 minutes before the next one. At most three runs per boundary reach the upload,
+  across restarts; the fourth reports `upload_cap_reached`
   (alarmed) and writes one `UPLOAD_ATTEMPT_CAP_REACHED` row. A successful retry clears the
   pause. See `docs/operations/alerts.md` "Audit anchor publisher".
 - S3 Object Lock integrity is unaffected by a GitHub Release outage (artifacts are independent).
@@ -380,6 +381,11 @@ instances: it only stops a publisher configured for another deployment from boot
   does not parse) fails the run before the upload: `failureReason: "CADENCE_FAILED:<code>"`,
   stage `before_upload`. It costs an attempt and is retried every 15 minutes like any failure, so
   a deterministic one reaches the cap (`upload_cap_reached`) after three runs.
+- A `before_upload` failure before the attempt count is written (the database unreachable, the
+  tenants read failing) costs no attempt; the scheduler's three-retry bound per process is what
+  stops it. An `audit_anchor_upload_attempts` value that does not parse is treated as past the
+  cap for that boundary (`upload_cap_reached` with `countUnreadable: true`, one
+  `UPLOAD_ATTEMPT_COUNT_UNREADABLE` row); the next boundary counts 1 again and publishes.
 - Escalate to engineering. Roll back the publisher worker to the prior release if a release
   introduced it.
 

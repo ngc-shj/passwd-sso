@@ -183,7 +183,7 @@ function makeFakeTx(db: FakeDb, txIndex: number) {
     }),
     $queryRaw: vi.fn(async (template: TemplateStringsArray, ...values: unknown[]) => {
       const sql = template.raw.join("$");
-      if (sql.includes("system_settings WHERE key = 'audit_anchor_deployment_id'")) {
+      if (sql.includes("SELECT value FROM system_settings WHERE key =") && values[0] === "audit_anchor_deployment_id") {
         return db.storedDeploymentId !== null ? [{ value: db.storedDeploymentId }] : [];
       }
       if (sql.includes("MAX(last_published_at)")) {
@@ -409,15 +409,47 @@ describe("AuditAnchorPublisher.runCadence — persisted attempt cap", () => {
     expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: next.toISOString(), count: 1 });
   });
 
-  it("fails before the upload, without resetting the count, when the stored count does not parse", async () => {
+  it.each([
+    ["is not JSON", "{not json"],
+    ["does not match the schema", JSON.stringify({ boundary: BOUNDARY.toISOString(), count: 0 })],
+  ])("treats the boundary as past the cap when the stored count %s, overwriting it", async (_label, stored) => {
     const db = makeDb();
-    db.settings.set(ATTEMPTS_KEY, "{not json");
+    db.settings.set(ATTEMPTS_KEY, stored);
     const upload = vi.fn().mockResolvedValue(undefined);
     const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
 
-    expect(outcome).toMatchObject({ kind: "failed", stage: "before_upload" });
+    expect(outcome).toEqual({
+      kind: "upload_cap_reached",
+      reason: "UPLOAD_ATTEMPT_CAP_REACHED",
+      attempts: 4,
+      chainEnabledTenantCount: 2,
+    });
     expect(upload).not.toHaveBeenCalled();
-    expect(db.settings.get(ATTEMPTS_KEY)).toBe("{not json");
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: BOUNDARY.toISOString(), count: 4 });
+    expect(failureReasons(db)).toEqual(["UPLOAD_ATTEMPT_COUNT_UNREADABLE"]);
+    const capLines = mockLoggerError.mock.calls
+      .map(([fields]) => fields as Record<string, unknown>)
+      .filter((f) => f._logType === "audit-anchor-publisher.upload_cap_reached");
+    expect(capLines).toEqual([expect.objectContaining({ countUnreadable: true, attempts: 4 })]);
+  });
+
+  it("after an unreadable count, writes no second row for the boundary and counts the next boundary from 1", async () => {
+    const db = makeDb();
+    db.settings.set(ATTEMPTS_KEY, "{not json");
+    const upload = vi.fn().mockResolvedValue(undefined);
+    const publisher = publisherFor(db, { destinations: [makeDestination("s3", upload)] });
+
+    await publisher.runCadence(BOUNDARY);
+    const again = await publisher.runCadence(BOUNDARY);
+    expect(again).toMatchObject({ kind: "upload_cap_reached", attempts: 5 });
+    expect(failureReasons(db)).toEqual(["UPLOAD_ATTEMPT_COUNT_UNREADABLE"]);
+    expect(upload).not.toHaveBeenCalled();
+
+    const next = new Date(BOUNDARY.getTime() + CADENCE_MS);
+    const recovered = await publisher.runCadence(next);
+    expect(recovered.kind).toBe("published");
+    expect(JSON.parse(db.settings.get(ATTEMPTS_KEY) ?? "null")).toEqual({ boundary: next.toISOString(), count: 1 });
+    expect(upload).toHaveBeenCalledTimes(1);
   });
 
   it("past the cap uploads nothing, logs upload_cap_reached, and writes one failure row per boundary", async () => {

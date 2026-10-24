@@ -15,7 +15,8 @@
  * the run, which keeps every audit row and artifact this file writes its own.
  *
  * MinIO-backed cases (S3 object versions) live in
- * audit-anchor-publisher-s3.integration.test.ts.
+ * audit-anchor-publisher-s3.integration.test.ts. The FR7 / FR8 /
+ * DESTINATION_DIVERGENCE stubs at the bottom are TODO markers for later work.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
@@ -346,15 +347,18 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
   it("overlap: a run waits in pg_locks behind one mid-upload, then skips the boundary it published", async () => {
     const boundary = nextBoundary();
     const second = createPrismaForRole("anchor-publisher");
+    // Released in `finally` too: a failed assertion must not leave run A
+    // holding the lock and its transaction open past the test.
+    let releaseA: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const runs: Promise<unknown>[] = [];
     try {
       let pidA: number | null = null;
       let enteredUpload: () => void = () => {};
       const uploading = new Promise<void>((resolve) => {
         enteredUpload = resolve;
-      });
-      let releaseA: () => void = () => {};
-      const gate = new Promise<void>((resolve) => {
-        releaseA = resolve;
       });
       const blocking: AnchorDestination = {
         name: "filesystem",
@@ -376,9 +380,11 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
       const configB = makePublisherConfig([fsDestination()], { lockTimeoutMs: 20_000 });
 
       const runA = publisher(configA).runCadence(boundary);
+      runs.push(runA);
       await uploading;
       expect(pidA).not.toBeNull();
       const runB = publisher(configB, second).runCadence(boundary);
+      runs.push(runB);
 
       const deadline = Date.now() + 10_000;
       let waiting = false;
@@ -397,6 +403,8 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
       const outcomes = await Promise.all([runA, runB]);
       expect(outcomes.map((o) => o.kind)).toEqual(["published", "skipped_already_published"]);
     } finally {
+      releaseA();
+      await Promise.allSettled(runs);
       await second.prisma.$disconnect();
       await second.pool.end();
     }
@@ -443,4 +451,20 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     });
     expect(rows[0]?.n).toBe(1);
   });
+
+  // FR7 stub — key rotation overlap test
+  // TODO: implement FR7 (key rotation): generate new key, publish overlap manifest under both
+  //       keys, retire old key. Requires multi-cadence test fixtures.
+  it.todo("FR7: key rotation overlap — manifest published under both old and new key");
+
+  // FR8 stub — regression detection test
+  // TODO: implement FR8 (regression detection): verify that lower chain_seq in subsequent
+  //       publication is detected as a tamper signal by the verifier.
+  it.todo("FR8: chain_seq regression detection — lower seq in later manifest is a tamper signal");
+
+  // DESTINATION_DIVERGENCE stub — the follow-up audit-anchor-github-release-destination
+  // .integration.test.ts points at.
+  // TODO: upload manifest A to one destination and a tampered B to another, run the verifier's
+  //       cross-destination check, and assert it reports DESTINATION_DIVERGENCE.
+  it.todo("DESTINATION_DIVERGENCE: the verifier detects destinations holding different bytes for one key");
 });

@@ -107,3 +107,39 @@ Exit status 0 for each, run on HEAD before push: `npm run licenses:check:strict`
 `terraform fmt -check -recursive`, root `validate`, the module's `terraform test -json` and
 `check-terraform-test-count.mjs` (15/15). `scripts/pre-pr.sh`: 85 passed. CLAUDE.md gained the
 two `worker:*` lines with the user's approval.
+
+### D11: Phase 2 self-check fixes (F1, S1, S2, T1–T6)
+
+- **F1 — failures before the attempt count were never capped.** Was: a throw in `claimAttempt`
+  before the count upsert returned `failed`/`before_upload` uncounted, and the scheduler (any
+  `failed` is retryable) re-ran it every 15 min (~94 rows a day); an `audit_anchor_upload_attempts`
+  value that did not parse failed every run and was left in place, wedging every boundary.
+  Now: (a) an unparseable stored count (JSON or schema, `parseUploadAttempts`) is overwritten in
+  the same claim transaction with `{boundary: <this boundary>, count: AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP + 1}`
+  and the run returns `upload_cap_reached`; its `upload_cap_reached` line carries
+  `countUnreadable: true` and its one row `failureReason: UPLOAD_ATTEMPT_COUNT_UNREADABLE`. The
+  next boundary counts 1 and recovers by itself. (b) The scheduler retries a boundary at most
+  `ANCHOR_MAX_RETRIES_PER_BOUNDARY` (3) times per process whatever the stage, then logs
+  `audit-anchor-publisher.retries_exhausted` (warn). The documented bound is now: at most 3
+  counted runs per boundary across restarts plus the one cap row; uncounted failures add at most
+  1 + 3 runs' rows per boundary per process start (alerts.md, worker-policy-manifest.json, the
+  runbook, the verification and threat-model docs). This supersedes D8's "until 30 min before
+  the next boundary" as the only retry bound.
+- **S1 — replication actions bypassed the bucket policy.** The write Denies name `s3:PutObject`;
+  a replica is written under `s3:ReplicateObject`/`ReplicateDelete`/`ReplicateTags`. Added
+  `DenyReplicationWrite` (unconditional, `bucket/*`; the bucket is never a replication
+  destination), pinned in `audit-anchor-wiring.test.ts` with three red fixtures (removed, tags
+  left open, a principal exception). The storage.tf and iam.tf comments now claim only what the
+  policy enforces; the Terraform READMEs list the statement and M3 gained a replication probe.
+- **S2 — retention constant not tied to Terraform.** `audit-anchor-key-contract.test.ts` now
+  checks `AUDIT_ANCHOR_RETENTION_YEARS × 365` (S3Destination's retain-until formula) against
+  the `audit_anchor_object_lock_days` default, its validation (which must refuse one day less),
+  and `local.audit_anchor_retention_cap_days` (which must admit a 366-day-year retain-until).
+- **T4** — main's FR7 (key rotation overlap) and FR8 (chain_seq regression) `it.todo` stubs are
+  restored at the bottom of `audit-anchor-publisher.integration.test.ts`, with a
+  DESTINATION_DIVERGENCE `it.todo` that the GitHub Release destination test's pointer now names.
+- T1 (overlap test releases run A in `finally`; the SIGTERM test's child is killed in
+  `afterEach`), T2 (`versionsOf` picks the latest by `IsLatest`), T3 (`..a`, `a..b`, `a/..b`
+  allow vectors; module test 18/18), T5 (duplicate env case removed), T6 (publisher `SETTING_*`
+  keys exported, including the new `SETTING_DEPLOYMENT_ID` used in its SQL, and imported by the
+  integration fixtures).

@@ -14,7 +14,13 @@
 import { randomBytes, randomInt } from "node:crypto";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
-import type { PublisherConfig } from "@/workers/audit-anchor-publisher";
+import {
+  SETTING_DEPLOYMENT_ID,
+  SETTING_LAST_PUBLISHED_BOUNDARY,
+  SETTING_PREVIOUS_MANIFEST,
+  SETTING_UPLOAD_ATTEMPTS,
+  type PublisherConfig,
+} from "@/workers/audit-anchor-publisher";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import { setBypassRlsGucs, type PrismaWithPool } from "./helpers";
 
@@ -22,10 +28,10 @@ export const CADENCE_MS = MS_PER_DAY;
 export const OFFSET_MS = 5 * MS_PER_MINUTE;
 
 export const SETTING = {
-  DEPLOYMENT_ID: "audit_anchor_deployment_id",
-  PREVIOUS_MANIFEST: "audit_anchor_previous_manifest",
-  LAST_PUBLISHED_BOUNDARY: "audit_anchor_last_published_boundary",
-  UPLOAD_ATTEMPTS: "audit_anchor_upload_attempts",
+  DEPLOYMENT_ID: SETTING_DEPLOYMENT_ID,
+  PREVIOUS_MANIFEST: SETTING_PREVIOUS_MANIFEST,
+  LAST_PUBLISHED_BOUNDARY: SETTING_LAST_PUBLISHED_BOUNDARY,
+  UPLOAD_ATTEMPTS: SETTING_UPLOAD_ATTEMPTS,
 } as const;
 
 const ALL_SETTINGS = Object.values(SETTING);

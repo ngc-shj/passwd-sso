@@ -311,7 +311,9 @@ heartbeat をログに出します。どちらも app イメージで動きま�
 | それ以外 | — | 誰も書けない（publisher も含む） |
 
 加えて、`s3:DeleteObject` と `s3:DeleteObjectVersion` は全員に拒否、
-`s3:PutObjectRetention` は上記 2 ロール以外に拒否、`s3:PutLifecycleConfiguration`
+`s3:ReplicateObject`・`s3:ReplicateDelete`・`s3:ReplicateTags` も全員に拒否
+（レプリカはこれらのアクションで書き込まれ `s3:PutObject` ではない。このバケットは
+レプリケーション先にならない）、`s3:PutObjectRetention` は上記 2 ロール以外に拒否、`s3:PutLifecycleConfiguration`
 はバケットに対して拒否、`x-amz-object-lock-mode: COMPLIANCE` のない（ヘッダ欠落を
 含む）`PutObject`、上限を超える保持、`AES256` 以外の SSE は拒否されます。バケット
 は Object Lock（`enable_s3_object_lock` に関係なく常に有効）、バージョニング、

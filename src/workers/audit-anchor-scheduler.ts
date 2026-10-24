@@ -5,10 +5,12 @@
  * so a timer that fires early still publishes the boundary it was armed for.
  * The next timer is computed from the wall clock after each run (no
  * setInterval, which drifts and keeps firing on the old phase across a long
- * run). A failed run is retried for the same boundary until shortly before
- * the next one — a database outage at the boundary must not cost the day; the
- * publisher's persisted attempt count bounds how many of those reach the
- * destination.
+ * run). A failed run is retried for the same boundary, at most
+ * ANCHOR_MAX_RETRIES_PER_BOUNDARY times and never closer than shortly before
+ * the next one — a database outage at the boundary must not cost the day. The
+ * publisher's persisted attempt count bounds how many runs reach the
+ * destination across restarts; this in-process bound covers the failures that
+ * stop before the count is written, which the persisted count never sees.
  */
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
@@ -18,6 +20,8 @@ import { currentCadenceBoundary, type CadenceOutcome } from "@/workers/audit-anc
 export const ANCHOR_RETRY_INTERVAL_MS = 15 * MS_PER_MINUTE;
 /** No same-boundary retry is armed closer than this to the next boundary. */
 export const ANCHOR_RETRY_STOP_BEFORE_NEXT_MS = 30 * MS_PER_MINUTE;
+/** Same-boundary retries after the first run, whatever the failure stage. */
+export const ANCHOR_MAX_RETRIES_PER_BOUNDARY = 3;
 
 export type TimerHandle = unknown;
 
@@ -73,15 +77,16 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
     }
   }
 
-  function arm(at: number, boundary: Date): void {
+  function arm(at: number, boundary: Date, retries: number): void {
     if (stopped) return;
     timer = setTimer(() => {
       timer = null;
-      inFlight = runAndArm(boundary);
+      inFlight = runAndArm(boundary, retries);
     }, Math.max(0, at - now()));
   }
 
-  async function runAndArm(boundary: Date): Promise<void> {
+  /** `retries`: the same-boundary retries already run before this one. */
+  async function runAndArm(boundary: Date, retries: number): Promise<void> {
     if (stopped) return;
     const outcome = await runOnce(boundary);
     if (stopped) return;
@@ -90,7 +95,8 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
     const boundaryMs = boundary.getTime();
     const nextOfBoundary = boundaryMs + deps.cadenceMs;
     const retryAt = now() + retryIntervalMs;
-    if (isRetryable(outcome) && retryAt <= nextOfBoundary - retryStopBeforeNextMs) {
+    const retryable = isRetryable(outcome) && retryAt <= nextOfBoundary - retryStopBeforeNextMs;
+    if (retryable && retries < ANCHOR_MAX_RETRIES_PER_BOUNDARY) {
       log.info(
         {
           boundary: boundary.toISOString(),
@@ -99,8 +105,18 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
         },
         "audit-anchor-publisher.retry_scheduled",
       );
-      arm(retryAt, boundary);
+      arm(retryAt, boundary, retries + 1);
       return;
+    }
+    if (retryable) {
+      log.warn(
+        {
+          boundary: boundary.toISOString(),
+          retries,
+          _logType: "audit-anchor-publisher.retries_exhausted",
+        },
+        "audit-anchor-publisher.retries_exhausted",
+      );
     }
 
     // The boundary after the one just run, or after the wall clock's current
@@ -112,13 +128,13 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
       { boundary: next.toISOString(), _logType: "audit-anchor-publisher.next_scheduled" },
       "audit-anchor-publisher.next_scheduled",
     );
-    arm(next.getTime(), next);
+    arm(next.getTime(), next, 0);
   }
 
   return {
     async start() {
       const boundary = currentCadenceBoundary(new Date(now()), deps.cadenceMs, deps.publishOffsetMs);
-      inFlight = runAndArm(boundary);
+      inFlight = runAndArm(boundary, 0);
       await inFlight;
     },
     async stop() {

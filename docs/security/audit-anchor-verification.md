@@ -179,8 +179,9 @@ When an upload fails, the publisher pauses chain advancement for the manifest's 
 until the **next cadence boundary** at most — no longer the 72 hours (3× cadence) this
 section used to state. During the pause new events wait in `audit_outbox` and are chained
 into `audit_logs` once it ends, so a pause never lets the chain run ahead of a manifest. The
-pause no longer holds publishing: the publisher retries the same boundary every 15 minutes
-until 30 minutes before the next one (at most three attempts reach the upload), and a
+pause no longer holds publishing: the publisher retries the same boundary every 15 minutes,
+at most three times per process and not later than 30 minutes before the next boundary (at
+most three attempts per boundary reach the upload, across restarts), and a
 successful publish clears the pause. When every attempt fails, the pause still ends at the
 next boundary, the chain advances, and those events are covered only by the next manifest
 that publishes.

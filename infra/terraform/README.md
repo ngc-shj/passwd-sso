@@ -496,7 +496,9 @@ aws:PrincipalArn` condition):
 | anything else | — | nobody, the publisher included |
 
 On top of that: `s3:DeleteObject` and `s3:DeleteObjectVersion` are refused to
-everyone; `s3:PutObjectRetention` is refused to all but those two roles;
+everyone; so are `s3:ReplicateObject`, `s3:ReplicateDelete` and
+`s3:ReplicateTags` (a replica is written under those, not `s3:PutObject`, and
+this bucket is never a replication destination); `s3:PutObjectRetention` is refused to all but those two roles;
 `s3:PutLifecycleConfiguration` is refused on the bucket; a `PutObject` without
 `x-amz-object-lock-mode: COMPLIANCE` (header absent included), with a retention
 past the cap, or with SSE other than `AES256` is refused. The bucket has Object

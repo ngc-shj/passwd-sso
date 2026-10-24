@@ -78,6 +78,45 @@ run "allow_dota" {
   }
 }
 
+run "allow_dotdota" {
+  command = plan
+
+  variables {
+    prefix = "..a"
+  }
+
+  assert {
+    condition     = output.prefix == "..a"
+    error_message = "an allowed prefix must pass through unchanged"
+  }
+}
+
+run "allow_adotdotb" {
+  command = plan
+
+  variables {
+    prefix = "a..b"
+  }
+
+  assert {
+    condition     = output.prefix == "a..b"
+    error_message = "an allowed prefix must pass through unchanged"
+  }
+}
+
+run "allow_a_slash_dotdotb" {
+  command = plan
+
+  variables {
+    prefix = "a/..b"
+  }
+
+  assert {
+    condition     = output.prefix == "a/..b"
+    error_message = "an allowed prefix must pass through unchanged"
+  }
+}
+
 run "deny_star" {
   command = plan
 

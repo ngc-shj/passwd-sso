@@ -60,6 +60,8 @@ function expectedStatements(prefix: string, breakGlass: string): Record<string, 
       condition: principalNot(breakGlass ? [PUBLISHER_ROLE_ARN, breakGlass] : [PUBLISHER_ROLE_ARN]),
     },
     DenyDelete: { action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], resource: objects },
+    // Unconditional: the bucket is never a replication destination.
+    DenyReplicationWrite: { action: ["s3:ReplicateDelete", "s3:ReplicateObject", "s3:ReplicateTags"], resource: objects },
     DenyLifecycleConfiguration: { action: ["s3:PutLifecycleConfiguration"], resource: [BUCKET_ARN] },
     DenyNonComplianceLockMode: {
       action: ["s3:PutObject"],
@@ -445,6 +447,37 @@ const RED_FIXTURES: RedFixture[] = [
     from: 'Action    = ["s3:DeleteObject", "s3:DeleteObjectVersion"]',
     to: 'Action    = ["s3:DeleteObject"]',
     violation: "DenyDelete: Action",
+  },
+  {
+    name: "a missing replication Deny",
+    file: "storage.tf",
+    from: `      {
+        # A replication role writes objects, delete markers and tags under
+        # these actions, not s3:PutObject, so no statement above refuses it.
+        # The bucket is never a replication destination. No exception.
+        Sid       = "DenyReplicationWrite"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]
+        Resource  = "\${aws_s3_bucket.audit_anchors[0].arn}/*"
+      },
+`,
+    to: "",
+    violation: "statements:",
+  },
+  {
+    name: "a replication Deny that leaves tag replication open",
+    file: "storage.tf",
+    from: 'Action    = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]',
+    to: 'Action    = ["s3:ReplicateObject", "s3:ReplicateDelete"]',
+    violation: "DenyReplicationWrite: Action",
+  },
+  {
+    name: "a principal exception on the replication Deny",
+    file: "storage.tf",
+    from: 'Action    = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]',
+    to: `Action    = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]\n        Condition = { ${EXCEPTION} }`,
+    violation: "DenyReplicationWrite: Condition",
   },
   {
     name: "a principal exception on the lock-mode Deny",

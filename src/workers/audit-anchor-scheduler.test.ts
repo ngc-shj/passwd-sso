@@ -5,7 +5,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createAnchorScheduler, ANCHOR_RETRY_INTERVAL_MS } from "./audit-anchor-scheduler";
+import {
+  createAnchorScheduler,
+  ANCHOR_MAX_RETRIES_PER_BOUNDARY,
+  ANCHOR_RETRY_INTERVAL_MS,
+} from "./audit-anchor-scheduler";
 import type { CadenceOutcome } from "./audit-anchor-publisher";
 
 vi.mock("@/lib/logger", () => ({
@@ -130,25 +134,42 @@ describe("createAnchorScheduler", () => {
     expect(h.pending().at).toBe(B1 + CADENCE_MS);
   });
 
-  it("retries the same boundary every 15 min after an upload failure, stopping 30 min before the next boundary", async () => {
+  it("retries the same boundary every 15 min after an upload failure, at most three times", async () => {
     h.setNow(B0);
     h.setOutcome((boundaryMs) => (boundaryMs === B0 ? UPLOAD_FAILED : PUBLISHED));
     await h.scheduler.start();
 
+    const armedAt: number[] = [];
     while (h.pending().at < B1) {
-      const timer = h.pending();
-      expect(timer.at).toBeLessThanOrEqual(B1 - 30 * MINUTE);
+      armedAt.push(h.pending().at);
       await h.fire();
     }
 
-    const retries = h.runs.filter((b) => b === B0);
-    // Boot at B0, then B0+15m … the last retry armed no later than B1-30m.
-    expect(retries).toHaveLength(1 + Math.floor((CADENCE_MS - 30 * MINUTE) / ANCHOR_RETRY_INTERVAL_MS));
+    expect(ANCHOR_MAX_RETRIES_PER_BOUNDARY).toBe(3);
+    expect(armedAt).toEqual([1, 2, 3].map((n) => B0 + n * ANCHOR_RETRY_INTERVAL_MS));
+    expect(h.runs).toEqual([B0, B0, B0, B0]);
     expect(h.pending().at).toBe(B1);
 
     // The day after a failure, an early timer still publishes its boundary.
     await h.fire(B1 - 1);
     expect(h.runs.at(-1)).toBe(B1);
+  });
+
+  it("stops after three retries for a boundary when every run fails before the upload", async () => {
+    // Such a failure never reaches the persisted attempt count, so this bound
+    // is the only one on it.
+    h.setOutcome(() => SIGNING_FAILED);
+    await h.scheduler.start();
+
+    while (h.pending().at < B1) await h.fire();
+
+    expect(h.runs).toEqual([B0, B0, B0, B0]);
+    expect(h.pending().at).toBe(B1);
+
+    // The bound is per boundary: the next one gets its own three.
+    await h.fire();
+    while (h.pending().at < B1 + CADENCE_MS) await h.fire();
+    expect(h.runs.filter((b) => b === B1)).toHaveLength(4);
   });
 
   it("retries the same boundary after a commit failure", async () => {

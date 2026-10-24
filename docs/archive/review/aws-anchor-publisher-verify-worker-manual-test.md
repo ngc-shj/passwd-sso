@@ -181,6 +181,34 @@ everyone); they lie outside the manifest pattern, so no verifier reads them as a
 that was wrongly allowed is a finding: record its key and version, and fix the policy before
 going on.
 
+**Probe a replication write.** A replica lands under `s3:ReplicateObject` (and `ReplicateDelete`,
+`ReplicateTags`), not `s3:PutObject`, so none of the statements above refuse it;
+`DenyReplicationWrite` does, for everyone. From the operator host, with a scratch source bucket
+and a scratch replication role (trusted by `s3.amazonaws.com`; `s3:GetReplicationConfiguration`
+and `s3:ListBucket` on the source, `s3:GetObjectVersionForReplication`, `s3:GetObjectVersionAcl`,
+`s3:GetObjectVersionTagging` and `s3:GetObjectRetention` on its objects, and `s3:ReplicateObject`,
+`s3:ReplicateDelete`, `s3:ReplicateTags` on `arn:aws:s3:::$B/*` — the grant a replication
+setup would give it):
+
+```bash
+SRC=<name_prefix>-anchor-replication-probe-src
+KEY="$P/1999-01-06.kid-audit-anchor-probe00000000.jws"
+aws s3api create-bucket --bucket "$SRC" --region "$REGION" --create-bucket-configuration LocationConstraint="$REGION"
+aws s3api put-bucket-versioning --bucket "$SRC" --region "$REGION" --versioning-configuration Status=Enabled
+aws s3api put-bucket-replication --bucket "$SRC" --region "$REGION" --replication-configuration \
+  "{\"Role\":\"$REPL_ROLE\",\"Rules\":[{\"ID\":\"probe\",\"Status\":\"Enabled\",\"Priority\":1,\"Filter\":{},\"DeleteMarkerReplication\":{\"Status\":\"Disabled\"},\"Destination\":{\"Bucket\":\"arn:aws:s3:::$B\"}}]}"
+echo probe > x
+aws s3api put-object --bucket "$SRC" --region "$REGION" --key "$KEY" --body x
+# a few minutes later:
+aws s3api head-object --bucket "$SRC" --region "$REGION" --key "$KEY" --query ReplicationStatus
+aws s3api head-object --bucket "$B" --region "$REGION" --key "$KEY"
+```
+
+Expected: `"FAILED"` on the source, and `404` on the anchors bucket — the replica was refused.
+`COMPLETED`, or an object at `$KEY` in `$B`, is a finding: record its version and fix the policy.
+Rollback: `aws s3api delete-bucket-replication --bucket "$SRC"`, delete the source's object
+versions and the bucket, and the scratch role.
+
 ## M4 — Object Lock retention on real S3 (blocked-deferred, E1/E2)
 
 Steps:

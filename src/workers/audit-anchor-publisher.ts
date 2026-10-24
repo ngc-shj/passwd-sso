@@ -54,9 +54,10 @@ class UploadTimeoutError extends Error {
 const ADVISORY_LOCK_KEY = "audit-anchor-publish";
 const SQLSTATE_LOCK_NOT_AVAILABLE = "55P03";
 
-const SETTING_PREVIOUS_MANIFEST = "audit_anchor_previous_manifest";
-const SETTING_LAST_PUBLISHED_BOUNDARY = "audit_anchor_last_published_boundary";
-const SETTING_UPLOAD_ATTEMPTS = "audit_anchor_upload_attempts";
+export const SETTING_DEPLOYMENT_ID = "audit_anchor_deployment_id";
+export const SETTING_PREVIOUS_MANIFEST = "audit_anchor_previous_manifest";
+export const SETTING_LAST_PUBLISHED_BOUNDARY = "audit_anchor_last_published_boundary";
+export const SETTING_UPLOAD_ATTEMPTS = "audit_anchor_upload_attempts";
 
 /** Runs per boundary that may reach the upload; the next one reports the cap. */
 export const AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP = 3;
@@ -150,12 +151,25 @@ const uploadAttemptsSchema = z.object({
   count: z.number().int().positive(),
 });
 
+const UNREADABLE = Symbol("unreadable");
+
+function parseUploadAttempts(raw: string): z.infer<typeof uploadAttemptsSchema> | typeof UNREADABLE {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return UNREADABLE;
+  }
+  const parsed = uploadAttemptsSchema.safeParse(json);
+  return parsed.success ? parsed.data : UNREADABLE;
+}
+
 type PendingEmit = { action: AuditAction; metadata: Record<string, unknown> };
 
 type AttemptGate =
   | { kind: "already_published"; chainEnabledTenantCount: number }
   | { kind: "no_tenants"; everChainEnabled: boolean }
-  | { kind: "counted"; attempts: number; chainEnabledTenantCount: number };
+  | { kind: "counted"; attempts: number; countUnreadable: boolean; chainEnabledTenantCount: number };
 
 class LockHeldSignal {
   constructor(readonly chainEnabledTenantCount: number | null) {}
@@ -315,12 +329,12 @@ export class AuditAnchorPublisher {
       // Insert if not exists
       await tx.$executeRaw`
         INSERT INTO system_settings (key, value, updated_at)
-        VALUES ('audit_anchor_deployment_id', ${deploymentId}, now())
+        VALUES (${SETTING_DEPLOYMENT_ID}, ${deploymentId}, now())
         ON CONFLICT (key) DO NOTHING
       `;
 
       const rows = await tx.$queryRaw<{ value: string }[]>`
-        SELECT value FROM system_settings WHERE key = 'audit_anchor_deployment_id'
+        SELECT value FROM system_settings WHERE key = ${SETTING_DEPLOYMENT_ID}
       `;
       return rows[0]?.value;
     });
@@ -360,19 +374,27 @@ export class AuditAnchorPublisher {
         }
 
         // Read-then-write is safe under the advisory lock every publisher
-        // takes. A stored value that does not parse fails the run rather than
-        // restarting the count.
+        // takes. A stored value that does not parse cannot say how many runs
+        // reached the upload, so this boundary is treated as past the cap:
+        // the value is overwritten with the first count past it, and the next
+        // boundary starts again at 1. Failing the run instead would leave the
+        // value in place and wedge every boundary, uncounted.
         const boundaryIso = boundary.toISOString();
         const storedRow = await tx.systemSetting.findUnique({ where: { key: SETTING_UPLOAD_ATTEMPTS } });
-        const previous = storedRow ? uploadAttemptsSchema.parse(JSON.parse(storedRow.value)) : null;
-        const count = previous?.boundary === boundaryIso ? previous.count + 1 : 1;
+        const previous = storedRow ? parseUploadAttempts(storedRow.value) : null;
+        const countUnreadable = previous === UNREADABLE;
+        const count = countUnreadable
+          ? AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP + 1
+          : previous?.boundary === boundaryIso
+            ? previous.count + 1
+            : 1;
         const value = JSON.stringify({ boundary: boundaryIso, count });
         await tx.systemSetting.upsert({
           where: { key: SETTING_UPLOAD_ATTEMPTS },
           update: { value },
           create: { key: SETTING_UPLOAD_ATTEMPTS, value },
         });
-        return { kind: "counted", attempts: count, chainEnabledTenantCount: tenantIds.length };
+        return { kind: "counted", attempts: count, countUnreadable, chainEnabledTenantCount: tenantIds.length };
       }, this.txOptions);
     } catch (err) {
       if (isLockNotAvailable(err)) throw new LockHeldSignal(tenantCount);
@@ -448,6 +470,7 @@ export class AuditAnchorPublisher {
         {
           boundary: boundaryIso,
           attempts: gate.attempts,
+          countUnreadable: gate.countUnreadable,
           _logType: "audit-anchor-publisher.upload_cap_reached",
         },
         "audit-anchor-publisher.upload_cap_reached",
@@ -455,7 +478,7 @@ export class AuditAnchorPublisher {
       // One row per boundary: only the first run past the cap writes it.
       if (gate.attempts === AUDIT_ANCHOR_UPLOAD_ATTEMPT_CAP + 1) {
         await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_FAILED, {
-          failureReason: "UPLOAD_ATTEMPT_CAP_REACHED",
+          failureReason: gate.countUnreadable ? "UPLOAD_ATTEMPT_COUNT_UNREADABLE" : "UPLOAD_ATTEMPT_CAP_REACHED",
           attempts: gate.attempts,
           anchoredAt: boundaryIso,
         });

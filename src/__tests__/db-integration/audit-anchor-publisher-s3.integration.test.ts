@@ -68,17 +68,33 @@ function previousManifestOf(jws: string): { sha256: string } | null {
 }
 
 /** Every version of `key`, oldest first, with its body. */
-async function versionsOf(key: string): Promise<Array<{ versionId: string; body: string }>> {
+/**
+ * Every stored version of `key`. The latest is the one S3 marks `IsLatest`,
+ * not the newest `LastModified`: two PUTs within one second tie on it.
+ */
+async function versionsOf(key: string): Promise<Array<{ versionId: string; body: string; isLatest: boolean }>> {
   const listed = await admin.send(new ListObjectVersionsCommand({ Bucket: BUCKET, Prefix: key }));
-  const versions = (listed.Versions ?? [])
-    .filter((v) => v.Key === key)
-    .sort((a, b) => (a.LastModified?.getTime() ?? 0) - (b.LastModified?.getTime() ?? 0));
-  const out: Array<{ versionId: string; body: string }> = [];
-  for (const v of versions) {
+  const out: Array<{ versionId: string; body: string; isLatest: boolean }> = [];
+  for (const v of (listed.Versions ?? []).filter((v) => v.Key === key)) {
     const res = await admin.send(new GetObjectCommand({ Bucket: BUCKET, Key: key, VersionId: v.VersionId }));
-    out.push({ versionId: v.VersionId ?? "", body: (await res.Body?.transformToString("utf-8")) ?? "" });
+    out.push({
+      versionId: v.VersionId ?? "",
+      body: (await res.Body?.transformToString("utf-8")) ?? "",
+      isLatest: v.IsLatest === true,
+    });
   }
   return out;
+}
+
+/** The latest version's manifest digest and the other versions', of `key`. */
+async function latestAndEarlierSha(key: string): Promise<{ latest: string; earlier: string[] }> {
+  const versions = await versionsOf(key);
+  const latest = versions.filter((v) => v.isLatest);
+  expect(latest).toHaveLength(1);
+  return {
+    latest: manifestSha256(latest[0]?.body ?? ""),
+    earlier: versions.filter((v) => !v.isLatest).map((v) => manifestSha256(v.body)),
+  };
 }
 
 describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
@@ -187,16 +203,15 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
     const retry = await publisher(config).runCadence(boundary);
     expect(retry.kind).toBe("published");
 
-    const versions = await versionsOf(key);
-    expect(versions).toHaveLength(2);
-    const [earlier, latest] = versions.map((v) => manifestSha256(v.body));
-    expect(earlier).not.toBe(latest);
+    const { latest, earlier } = await latestAndEarlierSha(key);
+    expect(earlier).toHaveLength(1);
+    expect(earlier[0]).not.toBe(latest);
     expect(await pointerSha()).toBe(latest);
 
     const next = new Date(boundary.getTime() + CADENCE_MS);
     expect((await publisher(config).runCadence(next)).kind).toBe("published");
     const nextKey = joinS3Key(prefix, buildManifestArtifactKey(next, config.signingKeyKid));
-    const [nextVersion] = await versionsOf(nextKey);
+    const nextVersion = (await versionsOf(nextKey)).find((v) => v.isLatest);
     expect(previousManifestOf(nextVersion?.body ?? "")?.sha256).toBe(latest);
   });
 
@@ -227,10 +242,9 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
     const retry = await publisher(config).runCadence(boundary);
     expect(retry.kind).toBe("published");
 
-    const versions = await versionsOf(key);
-    expect(versions).toHaveLength(2);
-    const [earlier, latest] = versions.map((v) => manifestSha256(v.body));
-    expect(earlier).not.toBe(latest);
+    const { latest, earlier } = await latestAndEarlierSha(key);
+    expect(earlier).toHaveLength(1);
+    expect(earlier[0]).not.toBe(latest);
     expect(await pointerSha()).toBe(latest);
     expect((await anchorState(ctx.su, [tenantA, tenantB])).map((s) => s.publish_paused_until)).toEqual([null, null]);
   });

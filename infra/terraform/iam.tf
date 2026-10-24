@@ -102,9 +102,11 @@ resource "aws_iam_role_policy" "ecs_migrate_exec_ssm" {
 
 ################################################################################
 # Audit-anchor publisher task role. Its OWN role, not the shared ecs_task one:
-# the anchors bucket policy (storage.tf) admits manifest writes from this role's
-# ARN alone, so a compromised app or worker task — which runs as ecs_task —
-# cannot write an anchor. The verify worker has no task role at all.
+# the anchors bucket policy (storage.tf) denies s3:PutObject on the manifest key
+# shape to every principal but this role's ARN, and the replication write
+# actions to every principal, so a compromised app or worker task — which runs
+# as ecs_task — cannot write a manifest by either route. The verify worker has
+# no task role at all.
 ################################################################################
 
 resource "aws_iam_role" "ecs_audit_anchor_publisher_task" {

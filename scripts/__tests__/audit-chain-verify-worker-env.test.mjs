@@ -11,7 +11,7 @@
  * default tick — the window a SIGTERM must cut short.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -128,12 +128,22 @@ describe("audit-chain-verify-worker --validate-env-only: AUDIT_CHAIN_VERIFY_MAX_
 });
 
 describe("audit-chain-verify-worker shutdown", () => {
+  // Every spawned child, killed after its case whatever the case did: a failed
+  // assertion before the SIGTERM must not leave the worker sleeping.
+  const children = [];
+  afterEach(() => {
+    for (const child of children.splice(0)) {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+  });
+
   it("exits promptly on SIGTERM during the sleep between ticks", async () => {
     const child = spawn(TSX, TSX_ARGS, {
       env: { PATH: process.env.PATH, AUDIT_CHAIN_VERIFY_DATABASE_URL: REFUSED_URL },
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    children.push(child);
     let stdout = "";
     let stderr = "";
     child.stderr.on("data", (d) => (stderr += d));

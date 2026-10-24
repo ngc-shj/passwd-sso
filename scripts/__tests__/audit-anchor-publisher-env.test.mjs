@@ -23,7 +23,7 @@ const HEX_B = "b".repeat(64);
 const DEPLOYMENT_ID = "550e8400-e29b-41d4-a716-446655440000";
 const PUBLISHER_URL = "postgresql://passwd_anchor_publisher:p@db:5432/passwd_sso";
 
-/** The publisher task's env, as production gives it. */
+/** The publisher task's env, as production gives it: no DATABASE_URL, the publisher URL is its own. */
 const TASK_ENV = {
   NODE_ENV: "production",
   AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
@@ -81,11 +81,6 @@ describe("audit-anchor-publisher --validate-env-only", () => {
       msg: "destinations ready",
       destinations: ["s3-object-lock"],
     });
-  });
-
-  it("exits 0 without DATABASE_URL in production (the publisher URL is its own)", () => {
-    const result = spawnPublisher(TASK_ENV);
-    expect(result.status).toBe(0);
   });
 
   it("exits 1 in production with only DATABASE_URL (no fallback)", () => {
