@@ -259,6 +259,11 @@ Steps:
    write either way):
    `aws ecs run-task --cluster "$CLUSTER" --task-definition anchor-policy-probe --launch-type FARGATE --overrides "{\"taskRoleArn\":\"$PUB_ROLE\"}" --network-configuration "<as in M3>" --region "$REGION"`.
 6. The trust condition: `aws iam get-role --role-name "${PUB_ROLE##*/}" --query 'Role.AssumeRolePolicyDocument'`.
+7. A task of the publisher's own family started outside its service, its command replaced so it
+   exits at once and publishes nothing (a container override, not a role override):
+   `aws ecs run-task --cluster "$CLUSTER" --task-definition "$NP-audit-anchor-publisher" --launch-type FARGATE --overrides '{"containerOverrides":[{"name":"audit-anchor-publisher","command":["node","-e","0"]}]}' --network-configuration "<as in M3>" --region "$REGION"`;
+   then the same with `--group "service:$NP-audit-anchor-publisher"`; then a publisher deploy
+   (`aws ecs update-service --cluster "$CLUSTER" --service "$NP-audit-anchor-publisher" --force-new-deployment --region "$REGION"`).
 
 Expected: 1. `IsLogging: true`; management events included; a data-event selector for
 `arn:aws:s3:::$B/`. 2. within minutes, an SNS email for `<NP>-ecs-execute-command` with
@@ -270,13 +275,22 @@ from M3's `register-task-definition` of family `anchor-policy-probe` with the pu
 email for `<NP>-audit-anchor-publisher-role-task-definition` with `eventName:
 RegisterTaskDefinition`. A publisher deploy (its own family, `<NP>-audit-anchor-publisher`) raises
 neither. 6. one statement with `Condition.StringEquals."aws:SourceAccount"` this account's id.
+7. the first run: SNS emails for `<NP>-audit-anchor-publisher-family-task-outside-service` (one per
+state change, `detail.group` `family:<NP>-audit-anchor-publisher`, `detail.taskDefinitionArn` the
+family's ARN with its revision) and one for `<NP>-audit-anchor-publisher-family-run-task`
+(`eventName: RunTask`); the second run: the run-task email only (its state changes carry the
+claimed group); the deploy: neither — its tasks' state changes carry
+`group: service:<NP>-audit-anchor-publisher` and the trail records no `RunTask` / `StartTask` for
+them. If the deploy raises the run-task rule, the service scheduler's launches are recorded as such
+calls: record it, the rule is then a false positive on every deploy.
 
 Not covered, by design (the residual in `docs/operations/alerts.md` "Publisher task role passed
 to another task"): IAM events on the publisher role (`UpdateAssumeRolePolicy`, `PutRolePolicy`,
 `AttachRolePolicy`, `DeleteRole` + `CreateRole`) reach EventBridge only in `us-east-1`, where this
-stack has no provider; a `RegisterTaskDefinition` of the publisher's own family naming the role
-raises no notification either (every deploy does one). Confirm the operator's own rule (organisation trail or `us-east-1`) exists if one is
-claimed; otherwise record the residual as accepted.
+stack has no provider; and the deploy path itself — an `UpdateService` / `CreateService` pointing
+the publisher service at a revision of its family registered outside a deploy runs as the
+service's own task and raises nothing. Confirm the operator's own rule (organisation trail or
+`us-east-1`) exists if one is claimed; otherwise record the residual as accepted.
 
 Rollback: none (step 3 changes nothing). Stop the migrate task if it is still running:
 `aws ecs stop-task --cluster "$CLUSTER" --task <task> --region "$REGION"`.

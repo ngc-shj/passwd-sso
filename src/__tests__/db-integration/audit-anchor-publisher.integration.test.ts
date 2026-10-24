@@ -448,10 +448,12 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     try {
       await holder.prisma.$executeRaw`SELECT pg_advisory_lock(hashtext(${ADVISORY_LOCK_KEY}::text))`;
       // Decoys a weaker holder query would also return: the next bigint key
-      // (same classid and objsubid, another objid), and the two-int4 form over
-      // the same two halves (objsubid 2).
+      // (same classid and objsubid, another objid), the two-int4 form over
+      // the same two halves (objsubid 2), and the bigint key with the same
+      // objid and objsubid but classid 1.
       await holder.prisma.$executeRaw`SELECT pg_advisory_lock(hashtext(${ADVISORY_LOCK_KEY}::text)::bigint + 1)`;
       await holder.prisma.$executeRaw`SELECT pg_advisory_lock(0, hashtext(${ADVISORY_LOCK_KEY}::text))`;
+      await holder.prisma.$executeRaw`SELECT pg_advisory_lock((1::bigint << 32) + hashtext(${ADVISORY_LOCK_KEY}::text)::bigint)`;
       try {
         // The holder query docs/operations/alerts.md gives under lock_held,
         // run verbatim, finds this session's publish lock and only it:
@@ -472,6 +474,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
         await holder.prisma.$executeRaw`SELECT pg_advisory_unlock(hashtext(${ADVISORY_LOCK_KEY}::text))`;
         await holder.prisma.$executeRaw`SELECT pg_advisory_unlock(hashtext(${ADVISORY_LOCK_KEY}::text)::bigint + 1)`;
         await holder.prisma.$executeRaw`SELECT pg_advisory_unlock(0, hashtext(${ADVISORY_LOCK_KEY}::text))`;
+        await holder.prisma.$executeRaw`SELECT pg_advisory_unlock((1::bigint << 32) + hashtext(${ADVISORY_LOCK_KEY}::text)::bigint)`;
       }
     } finally {
       await holder.prisma.$disconnect();
@@ -484,7 +487,8 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     const config = makePublisherConfig([fsDestination()], { now: wallClockAt(boundary) });
     await publisher(config).runCadence(boundary);
     const next = new Date(boundary.getTime() + CADENCE_MS);
-    const outcome = await publisher(config).runCadence(next);
+    // The second run's clock is at its own boundary, as on ECS.
+    const outcome = await publisher({ ...config, now: wallClockAt(next) }).runCadence(next);
 
     expect(outcome.kind).toBe("published");
     expect(await readSetting(ctx.su, SETTING.LAST_PUBLISHED_BOUNDARY)).toBe(next.toISOString());

@@ -722,14 +722,28 @@ clock, not the row.
 `boundary` and `marker`; the run is a `skipped_already_published`.
 **What it means**: a run for a boundary found the marker past it but not past
 the wall clock's current boundary. The run skips rather than write the marker
-back. A late retry does not cause it — a boundary's retries stop 30 minutes
-before the next — so on ECS a legitimate one needs the wall clock to have gone
-back over a boundary it already published. Otherwise the marker was written by
-something other than a publish of this deployment.
-**Recovery**: compare `marker` with the `published` lines (below). If a
-`published` line names that boundary, the clock went back: check the task's
-time source. If none does, treat it as a skip with no `published` line — a
-database-write incident (see `cadence_healthy`).
+back. On ECS this has no legitimate cause: a boundary's retries stop 30 minutes
+before the next, and a timer never runs before its boundary, so this process
+never runs a boundary after it published a later one. Another writer moved the
+marker — a second publisher against this database, or a database write. It is
+never a clock that went back: that clock's current boundary is earlier too, so
+the marker reads as ahead of it and the run fails closed with
+`CADENCE_FAILED:BOUNDARY_MARKER_AHEAD` (see the boundary-marker notes above).
+**Recovery**: look for a second publisher first. Run the holder query under
+`audit-anchor-publisher.lock_held` (below), and list every session the
+publisher's pool would open:
+
+```sql
+SELECT pid, usename, client_addr, backend_start, state
+FROM pg_stat_activity
+WHERE application_name = 'passwd-sso-audit-anchor-publisher';
+```
+
+More than the one task's connections, or a `client_addr` that is not the
+service's task, is a second publisher: stop it, then compare `marker` with the
+`published` lines (below) — a boundary it published is in the bucket under its
+key. If there is none, treat the marker as a database-write incident (see
+`cadence_healthy`): restore it to the last boundary a `published` line names.
 
 ## `audit-anchor-publisher.cadence_healthy`
 
@@ -1021,19 +1035,67 @@ day's key against the `published` cadence lines
 (`docs/security/audit-anchor-verification.md`): a version no publish explains is
 a forged manifest.
 
+A task of the publisher's **own** family needs neither an override nor a new
+family; that route has its own section, "Publisher-family task outside the
+publisher service" (below). Together the three cover every way a task gets the
+role: (a) an override names it — the first rule; (b1) a task definition of
+another family names it — the second rule, at registration; (b2) a task
+definition of the publisher's family names it, which is legitimate only for a
+task the publisher service launched — the next section.
+
 **Not alarmed by this stack.** Changes to the role itself —
 `UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, a `DeleteRole`
 followed by a `CreateRole` of the same name — are IAM events, which EventBridge
 delivers only in `us-east-1`. This configuration has no provider there, so they
-reach CloudTrail and are not alarmed here; nor is a `RegisterTaskDefinition`
-of the publisher's own family, which every publisher deploy does — a revision
-of that family with another image or command, registered outside a deploy,
-runs as the publisher the next time the service deploys it (`terraform plan`
-shows the service's task definition drifted). Alarming them is the
-operator's: an organisation trail's rules, or an EventBridge rule in `us-east-1`
-matching `eventSource: iam.amazonaws.com` with `requestParameters.roleName` set
-to the publisher role's name. `terraform plan` reports a drifted trust or inline
-policy.
+reach CloudTrail and are not alarmed here. Nor is the deploy path itself: an
+`UpdateService` (or a `CreateService` replacing the service) that points the
+publisher service at a revision of its family registered outside a deploy —
+another image or command — runs that revision as the publisher's own task,
+which no rule can tell from a deploy (`terraform plan` shows the service's task
+definition drifted; `aws ecs describe-services` names the revision). Alarming
+the IAM events is the operator's: an organisation trail's rules, or an
+EventBridge rule in `us-east-1` matching `eventSource: iam.amazonaws.com` with
+`requestParameters.roleName` set to the publisher role's name. `terraform plan`
+reports a drifted trust or inline policy.
+
+## Publisher-family task outside the publisher service
+
+**Severity**: high
+**Trigger**: either of two EventBridge rules.
+
+- `<name_prefix>-audit-anchor-publisher-family-task-outside-service` — the
+  native ECS "ECS Task State Change" event (no trail needed) for a task whose
+  `taskDefinitionArn` is a revision of the publisher's family (the family's ARN
+  followed by `:`, so a family whose name only starts with it does not match)
+  and that is either outside this stack's cluster or in it with a `group` other
+  than `service:<name_prefix>-audit-anchor-publisher`. ECS sets `group` to
+  `service:<service name>` for a task a service launched and to
+  `family:<family>` by default for one started otherwise. A task emits several
+  state changes, so one task can notify more than once.
+- `<name_prefix>-audit-anchor-publisher-family-run-task` — CloudTrail `RunTask`
+  or `StartTask` naming the publisher's family in `taskDefinition` (`family`,
+  `family:revision` or the full ARN), in any cluster (needs the trail). `group`
+  is a parameter of both calls, so a caller can claim the publisher service's
+  group and pass the first rule; this one sees the call whatever it claims. The
+  service's scheduler starts its tasks without either call, so a deploy raises
+  neither rule.
+
+**What it means**: a task is running the publisher's task definition — so its
+task role, the only principal the anchors bucket policy lets write a manifest —
+without the publisher service having launched it: a `RunTask` / `StartTask`, a
+service other than the publisher's, or a service of the publisher's name in
+another cluster. Such a task can write a manifest, and a revision registered
+outside a deploy can carry any image and command. There is no expected false
+positive.
+**Recovery**: the event names the task, its cluster, its group and the
+revision (the CloudTrail one also names the principal). Stop the task
+(`aws ecs stop-task --cluster <cluster> --task <task>`); if a service launched
+it, delete that service. Compare the revision with the one the publisher
+service runs (`aws ecs describe-services`) and deregister any revision no
+deploy registered. Remove `ecs:RunTask` / `ecs:StartTask` (or `iam:PassRole` on
+the publisher role) from the principal that started it. Then compare the
+bucket's versions for the day's key against the `published` cadence lines
+(`docs/security/audit-anchor-verification.md`), as for the rules above.
 
 ## `rls.bypass_not_granted`
 

@@ -97,3 +97,23 @@ each red-proved (16 mutations). Details in D13.
   marker as ahead and alarm. The ECS service runs one task with stop-before-start deploys, and the
   scheduler arms the next run from the boundary, so no second run exists in that window — worst
   case one false alarm, no data effect.
+
+### Round 3
+Findings: security R3-1 (a publisher-family revision started directly, no override, unalarmed),
+functionality N2 (`stale_boundary` docs name a cause that now raises `BOUNDARY_MARKER_AHEAD`), N3
+(the accepted early-timer residual also writes `lastPublishedAt` before the boundary, so the next
+day falsely reports a missing prior cadence), testing R-1 (`config.now` as the publish clock
+unpinned), R-2 (two cases publish the next boundary under a clock a day behind), R-3 (decoys miss
+`classid`). All Minor; fixed in "review(3)", red-proved. Details in D14.
+- R3-1, closed by re-deriving the class rather than adding a route (R42 ①b: the member set had
+  grown twice): a task holds the publisher role iff (a) an override names it — `role_override`;
+  (b1) another family's task definition names it — `role_task_definition`; (b2) the publisher's
+  own family runs outside the publisher service — native ECS Task State Change rule (cluster or
+  `group` differs) plus a CloudTrail RunTask/StartTask rule naming the family, because `group` is a
+  caller-supplied RunTask parameter and can be forged. A static test enumerates (a)/(b1)/(b2) plus
+  the forged-group RunTask and requires each to be matched by exactly one rule and legitimate events
+  by none (14 red fixtures). Residual: `UpdateService`/`CreateService` pointing the publisher service
+  at a revision registered outside a deploy, and IAM mutations of the role.
+- N3: the scheduler re-arms for the remainder when a timer fires before its deadline, so no run
+  happens before its boundary; the round-2 accepted residual no longer exists.
+- N2, R-1, R-2, R-3 as specified.

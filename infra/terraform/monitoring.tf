@@ -423,9 +423,11 @@ resource "aws_cloudwatch_metric_alarm" "audit_anchor_chain_enabled_fell_to_zero"
 # names the failure. lock_held is here though it is not a failure of the run:
 # on ECS the service runs one task and stops the old one before starting the
 # new, so a held lock means a second publisher against this database.
-# stale_boundary is a skip, not a failure, but a legitimate one needs the wall
-# clock to have gone back past a boundary it already published; otherwise the
-# marker was written by something other than a publish.
+# stale_boundary is a skip, not a failure, but on ECS it has no legitimate
+# cause: the marker is past the run's boundary yet not past the wall clock's,
+# so another writer moved it — a second publisher, or a database write. A clock
+# that went back reads the marker as ahead instead (BOUNDARY_MARKER_AHEAD,
+# under cadence_failed).
 locals {
   audit_anchor_publisher_failure_log_types = {
     cadence_failed             = "audit-anchor-publisher.cadence_failed"
@@ -737,6 +739,91 @@ resource "aws_cloudwatch_event_target" "audit_anchor_publisher_role_task_definit
   arn       = aws_sns_topic.alarms[0].arn
 }
 
+# A task runs with the publisher's role when an override names it (the
+# override rule) or its task definition does. For a definition of another
+# family, the task-definition rule fires at registration. For the publisher's
+# own family, which every deploy registers, a task is legitimate only when the
+# publisher service launched it: anything else that starts one — RunTask,
+# StartTask, another service, a service of the same name in another cluster —
+# runs as the publisher with no override and no new registration. The two
+# rules below close that route.
+#
+# This one needs no trail: ECS emits "ECS Task State Change" natively, and
+# each event's detail carries `clusterArn`, `taskDefinitionArn` (with its
+# revision) and `group`, which is "service:<service name>" for a task a service
+# launched and "family:<family>" by default otherwise. It matches every task of
+# the publisher's family except one in this cluster whose group is the
+# publisher service's. The ARN prefix ends in ":" so a family that merely
+# starts with this one's name does not match. `group` is a RunTask/StartTask
+# parameter as well, so a caller can claim "service:<publisher>" for a task it
+# started itself; the CloudTrail rule after this one is what catches that. A
+# task emits several state changes (PROVISIONING … STOPPED), so one such task
+# can notify more than once.
+resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_task_outside_service" {
+  count       = var.enable_monitoring ? 1 : 0
+  name        = "${local.name_prefix}-audit-anchor-publisher-family-task-outside-service"
+  description = "A task of the audit-anchor publisher's family ran outside the publisher service"
+
+  event_pattern = jsonencode({
+    source      = ["aws.ecs"]
+    detail-type = ["ECS Task State Change"]
+    detail = {
+      taskDefinitionArn = [{ prefix = "${aws_ecs_task_definition.audit_anchor_publisher.arn_without_revision}:" }]
+      "$or" = [
+        { clusterArn = [{ anything-but = aws_ecs_cluster.main.arn }] },
+        { group = [{ anything-but = "service:${aws_ecs_service.audit_anchor_publisher.name}" }] },
+      ]
+    }
+  })
+
+  tags = local.tags
+}
+
+resource "aws_cloudwatch_event_target" "audit_anchor_publisher_family_task_outside_service_sns" {
+  count     = var.enable_monitoring ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_family_task_outside_service[0].name
+  target_id = "send-to-sns"
+  arn       = aws_sns_topic.alarms[0].arn
+}
+
+# A RunTask / StartTask of the publisher's family, whatever `group` it claims
+# and in whichever cluster: the publisher service's scheduler starts its tasks
+# without either call (a deploy raises neither: the manual test checks it), so
+# every one is a task started by someone else. Needs the trail. It
+# matches the family as RunTask takes it — "family", "family:revision" or the
+# full ARN — with the ":" terminator on the prefixes, as above.
+resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_run_task" {
+  count       = var.enable_monitoring ? 1 : 0
+  name        = "${local.name_prefix}-audit-anchor-publisher-family-run-task"
+  description = "A task of the audit-anchor publisher's family was started with RunTask or StartTask"
+
+  event_pattern = jsonencode({
+    source      = ["aws.ecs"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail = {
+      eventSource = ["ecs.amazonaws.com"]
+      eventName   = ["RunTask", "StartTask"]
+      requestParameters = {
+        taskDefinition = [
+          aws_ecs_task_definition.audit_anchor_publisher.family,
+          { prefix = "${aws_ecs_task_definition.audit_anchor_publisher.family}:" },
+          aws_ecs_task_definition.audit_anchor_publisher.arn_without_revision,
+          { prefix = "${aws_ecs_task_definition.audit_anchor_publisher.arn_without_revision}:" },
+        ]
+      }
+    }
+  })
+
+  tags = local.tags
+}
+
+resource "aws_cloudwatch_event_target" "audit_anchor_publisher_family_run_task_sns" {
+  count     = var.enable_monitoring ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_family_run_task[0].name
+  target_id = "send-to-sns"
+  arn       = aws_sns_topic.alarms[0].arn
+}
+
 # The anchors bucket policy (storage.tf) holds only while nobody replaces it,
 # and the account root always can. Any change to the policy, the lifecycle,
 # Object Lock or versioning is surfaced; a Terraform apply that touches them is
@@ -800,6 +887,8 @@ resource "aws_sns_topic_policy" "alarms" {
                 aws_cloudwatch_event_rule.ecs_execute_command[0].arn,
                 aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0].arn,
                 aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition[0].arn,
+                aws_cloudwatch_event_rule.audit_anchor_publisher_family_task_outside_service[0].arn,
+                aws_cloudwatch_event_rule.audit_anchor_publisher_family_run_task[0].arn,
               ],
               aws_cloudwatch_event_rule.audit_anchor_bucket_config_change[*].arn,
             )

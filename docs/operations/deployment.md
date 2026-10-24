@@ -333,12 +333,16 @@ refresh is checked in the manual test
 
 #### CloudTrail prerequisite
 
-Three EventBridge rules — `<name_prefix>-ecs-execute-command`,
-`<name_prefix>-audit-anchor-bucket-config-change` and
-`<name_prefix>-audit-anchor-publisher-role-override` — match "AWS API Call via
+Five EventBridge rules — `<name_prefix>-ecs-execute-command`,
+`<name_prefix>-audit-anchor-bucket-config-change`,
+`<name_prefix>-audit-anchor-publisher-role-override`,
+`<name_prefix>-audit-anchor-publisher-role-task-definition` and
+`<name_prefix>-audit-anchor-publisher-family-run-task` — match "AWS API Call via
 CloudTrail" events, which EventBridge receives only from an account with a trail
-logging management events. Terraform defines no trail. Before relying on those
-rules, have one in the region (an organisation trail counts) that:
+logging management events. (`<name_prefix>-audit-anchor-publisher-family-task-outside-service`
+matches the native "ECS Task State Change" event and needs no trail.) Terraform
+defines no trail. Before relying on those rules, have one in the region (an
+organisation trail counts) that:
 
 - logs **management events** (write events at least: `ExecuteCommand`,
   `PutBucketPolicy`, `PutObjectLockConfiguration`, `RunTask`, … are writes), and

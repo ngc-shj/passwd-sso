@@ -126,19 +126,27 @@ runs at most one task and a deploy stops the old one before starting the new.
 **Publisher task role reuse** — the anchors bucket policy lets only the publisher's
 task role write a manifest key, and the role's trust policy admits ECS tasks of this
 account only (`aws:SourceAccount`). Within the account, a principal allowed
-`iam:PassRole` on it can still run a task of its own choosing as that role. SURFACED,
-not prevented: a `RunTask` / `StartTask` naming the role as a `taskRoleArn` override is
-alarmed (EventBridge `<name_prefix>-audit-anchor-publisher-role-override`), and so is a
+`iam:PassRole` on it can still run a task of its own choosing as that role. A task runs
+with the role iff (a) an override names it, or its task definition does — (b1) one of
+another family, or (b2) one of the publisher's own family, legitimate only for a task the
+publisher service launched. SURFACED, not prevented, route by route: (a) a `RunTask` /
+`StartTask` naming the role as a `taskRoleArn` override
+(EventBridge `<name_prefix>-audit-anchor-publisher-role-override`); (b1) a
 `RegisterTaskDefinition` of any other family naming it
-(`<name_prefix>-audit-anchor-publisher-role-task-definition`); both match the role's
-full ARN and its bare name. RESIDUAL: a revision of the publisher's own family
-(`RegisterTaskDefinition`, which every deploy does, so it is not alarmed — a revision
-registered outside a deploy runs as the publisher once the service is pointed at it)
-and changes to the role itself (`UpdateAssumeRolePolicy`, `PutRolePolicy`,
-`AttachRolePolicy`, `DeleteRole` + `CreateRole`) reach CloudTrail but are not alarmed
-by this stack — IAM events reach EventBridge only in `us-east-1`, where it has no
-provider; that alarm is the operator's (`docs/operations/alerts.md` "Publisher task role
-passed to another task"). The publisher's secrets reach only its container, but the
+(`<name_prefix>-audit-anchor-publisher-role-task-definition`) — both match the role's
+full ARN and its bare name; (b2) a task of the publisher's family that is not the
+publisher service's — outside its cluster or with another `group` — from the native ECS
+task state change (`<name_prefix>-audit-anchor-publisher-family-task-outside-service`, no
+trail needed), and any `RunTask` / `StartTask` of that family whatever `group` it claims
+(`<name_prefix>-audit-anchor-publisher-family-run-task`). RESIDUAL: the deploy path
+itself — an `UpdateService` / `CreateService` pointing the publisher service at a revision
+of its family registered outside a deploy runs it as the publisher's own task, which no
+rule tells from a deploy — and changes to the role itself (`UpdateAssumeRolePolicy`,
+`PutRolePolicy`, `AttachRolePolicy`, `DeleteRole` + `CreateRole`), which reach CloudTrail
+but are not alarmed by this stack — IAM events reach EventBridge only in `us-east-1`,
+where it has no provider; that alarm is the operator's (`docs/operations/alerts.md`
+"Publisher task role passed to another task"). Without a trail, (b2) is surfaced only for
+a task that does not claim the publisher service's `group`. The publisher's secrets reach only its container, but the
 shared task execution role can read the whole app secret.
 
 **Tag-secret boundary** — the tag secret (used to derive `tenantTag` so the public

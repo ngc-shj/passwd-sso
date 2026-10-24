@@ -635,6 +635,19 @@ describe("AuditAnchorPublisher.runCadence — publish", () => {
     expect(published?.payload.metadata).toMatchObject({ artifactKey: expectedKey, anchoredAt: BOUNDARY.toISOString() });
   });
 
+  it("reads lastPublishedAt from config.now, not the process Date", async () => {
+    // Two days past the faked Date: the publish must follow the injected clock.
+    const configNow = WALL_CLOCK.getTime() + 2 * CADENCE_MS;
+    const db = makeDb();
+    const outcome = await publisherFor(db, { now: () => configNow }).runCadence(BOUNDARY);
+
+    expect(outcome.kind).toBe("published");
+    expect(db.updateManyCalls).toContainEqual({
+      where: { tenantId: { in: [TENANT_ID_1, TENANT_ID_2] } },
+      data: { lastPublishedAt: new Date(configNow), publishPausedUntil: null },
+    });
+  });
+
   it("passes an abort signal to every destination", async () => {
     const db = makeDb();
     const upload = vi.fn().mockResolvedValue(undefined);
@@ -722,6 +735,21 @@ describe("AuditAnchorPublisher.runCadence — failures", () => {
       error: { name: "Error", code: "unknown" },
       _logType: "audit-anchor-publisher.upload_failed",
     });
+  });
+
+  it("an upload failure pauses until the boundary after config.now's, not the process Date's", async () => {
+    const configNow = WALL_CLOCK.getTime() + 2 * CADENCE_MS;
+    const db = makeDb();
+    const failing = makeDestination("s3", vi.fn().mockRejectedValue(new Error("S3 unavailable")));
+    const outcome = await publisherFor(db, { destinations: [failing], now: () => configNow }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "upload" });
+    const pauses = pauseWrites(db);
+    expect(pauses).toHaveLength(1);
+    expect(pauses[0]?.data.publishPausedUntil).toEqual(
+      new Date(currentCadenceBoundary(new Date(configNow), CADENCE_MS, OFFSET_MS).getTime() + CADENCE_MS),
+    );
+    expect(pauses[0]?.data.publishPausedUntil).toEqual(new Date("2026-01-18T00:05:00.000Z"));
   });
 
   it("a commit lost after the upload fails at stage after_upload, writes no pause, and logs commit_failed_after_upload", async () => {

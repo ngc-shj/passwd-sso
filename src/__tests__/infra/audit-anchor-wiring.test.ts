@@ -21,6 +21,12 @@ const PUBLISHER_ROLE_NAME = "<ref:aws_iam_role.ecs_audit_anchor_publisher_task.n
 const PUBLISHER_FAMILY = "<ref:aws_ecs_task_definition.audit_anchor_publisher.family>";
 const ROLE_OVERRIDE_RULE = "aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0]";
 const ROLE_TASK_DEFINITION_RULE = "aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition[0]";
+const FAMILY_TASK_RULE = "aws_cloudwatch_event_rule.audit_anchor_publisher_family_task_outside_service[0]";
+const FAMILY_RUN_TASK_RULE = "aws_cloudwatch_event_rule.audit_anchor_publisher_family_run_task[0]";
+const PUBLISHER_TASK_DEFINITION = "<ref:aws_ecs_task_definition.audit_anchor_publisher.arn_without_revision>";
+const PUBLISHER_SERVICE_GROUP = "service:<ref:aws_ecs_service.audit_anchor_publisher.name>";
+const CLUSTER_ARN = "<ref:aws_ecs_cluster.main.arn>";
+const OTHER_CLUSTER_ARN = "arn:aws:ecs:ap-northeast-1:111122223333:cluster/other";
 const RETENTION_CAP_MARGIN_DAYS = 31;
 
 type Statement = Record<string, unknown>;
@@ -330,14 +336,19 @@ function statementWithSid(e: HclExpr, sid: string): HclExpr | undefined {
 
 /**
  * An EventBridge pattern against an event, for the matchers these rules use:
- * exact values, `anything-but` (one value or a list) and `suffix`. A field the
- * pattern names must be present in the event; an array field matches when any
- * element does.
+ * exact values, `anything-but` (one value or a list), `prefix`, `suffix`, and
+ * `$or` (a list of patterns over the same object, any of which may match,
+ * ANDed with the object's other fields). A field the pattern names must be
+ * present in the event; an array field matches when any element does.
  */
 function matchesEventPattern(pattern: unknown, event: unknown): boolean {
   if (typeof pattern !== "object" || pattern === null || Array.isArray(pattern)) throw new Error("pattern: not an object");
   if (typeof event !== "object" || event === null) return false;
   return Object.entries(pattern as Record<string, unknown>).every(([key, want]) => {
+    if (key === "$or") {
+      if (!Array.isArray(want) || want.length === 0) throw new Error("pattern: $or is not a non-empty list");
+      return want.some((branch) => matchesEventPattern(branch, event));
+    }
     const got = (event as Record<string, unknown>)[key];
     if (got === undefined) return false;
     if (!Array.isArray(want)) return matchesEventPattern(want, got);
@@ -353,6 +364,7 @@ function matchesValue(matcher: unknown, value: unknown): boolean {
     const excluded = m["anything-but"];
     return !(Array.isArray(excluded) ? excluded : [excluded]).includes(value);
   }
+  if ("prefix" in m) return typeof value === "string" && value.startsWith(String(m.prefix));
   if ("suffix" in m) return typeof value === "string" && value.endsWith(String(m.suffix));
   throw new Error(`pattern: unsupported matcher ${JSON.stringify(matcher)}`);
 }
@@ -459,6 +471,170 @@ function roleTaskDefinitionRuleViolations(tf: TerraformConfig, opts: EvalOptions
   return [...out, ...alarmWiringViolations(tf, "role task-definition rule", ROLE_TASK_DEFINITION_RULE, opts)];
 }
 
+function ecsTaskStateChange(detail: { clusterArn: string; group: string; taskDefinitionArn: string }): Record<string, unknown> {
+  return { source: "aws.ecs", "detail-type": "ECS Task State Change", detail: { ...detail, lastStatus: "RUNNING" } };
+}
+
+/** A task of the publisher's family, revision 7, as its state change carries it. */
+function publisherFamilyTask(clusterArn: string, group: string): Record<string, unknown> {
+  return ecsTaskStateChange({ clusterArn, group, taskDefinitionArn: `${PUBLISHER_TASK_DEFINITION}:7` });
+}
+
+/**
+ * The native rule for a task of the publisher's own family the publisher
+ * service did not launch: every such task matches, the service's own does not,
+ * and neither does a family whose name merely starts with the publisher's.
+ */
+function familyTaskRuleViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
+  const out: string[] = [];
+  let rule;
+  try {
+    rule = tf.resource("aws_cloudwatch_event_rule", "audit_anchor_publisher_family_task_outside_service");
+  } catch {
+    return ["family task rule: missing"];
+  }
+  if (tf.attr(rule, "count", { vars: { enable_monitoring: true } }) !== 1) out.push("family task rule: not created with monitoring on");
+  const want = {
+    source: ["aws.ecs"],
+    "detail-type": ["ECS Task State Change"],
+    detail: {
+      taskDefinitionArn: [{ prefix: `${PUBLISHER_TASK_DEFINITION}:` }],
+      $or: [{ clusterArn: [{ "anything-but": CLUSTER_ARN }] }, { group: [{ "anything-but": PUBLISHER_SERVICE_GROUP }] }],
+    },
+  };
+  const pattern = plain(tf.attr(rule, "event_pattern", opts));
+  if (canonical(pattern) !== canonical(want)) out.push(`family task rule: event_pattern ${JSON.stringify(pattern)}`);
+  if (matchesEventPattern(pattern, publisherFamilyTask(CLUSTER_ARN, PUBLISHER_SERVICE_GROUP))) {
+    out.push("family task rule: matches the publisher service's own task");
+  }
+  const shadow = ecsTaskStateChange({
+    clusterArn: CLUSTER_ARN,
+    group: "family:x",
+    taskDefinitionArn: `${PUBLISHER_TASK_DEFINITION}-shadow:1`,
+  });
+  if (matchesEventPattern(pattern, shadow)) out.push("family task rule: matches a family that only starts with the publisher's");
+  return [...out, ...alarmWiringViolations(tf, "family task rule", FAMILY_TASK_RULE, opts)];
+}
+
+/**
+ * The CloudTrail rule for a RunTask / StartTask of the publisher's family:
+ * every spelling RunTask takes, whatever `group` the caller claims.
+ */
+function familyRunTaskRuleViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
+  const out: string[] = [];
+  let rule;
+  try {
+    rule = tf.resource("aws_cloudwatch_event_rule", "audit_anchor_publisher_family_run_task");
+  } catch {
+    return ["family run-task rule: missing"];
+  }
+  if (tf.attr(rule, "count", { vars: { enable_monitoring: true } }) !== 1) out.push("family run-task rule: not created with monitoring on");
+  const want = {
+    source: ["aws.ecs"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    detail: {
+      eventSource: ["ecs.amazonaws.com"],
+      eventName: ["RunTask", "StartTask"],
+      requestParameters: {
+        taskDefinition: [
+          PUBLISHER_FAMILY,
+          { prefix: `${PUBLISHER_FAMILY}:` },
+          PUBLISHER_TASK_DEFINITION,
+          { prefix: `${PUBLISHER_TASK_DEFINITION}:` },
+        ],
+      },
+    },
+  };
+  const pattern = plain(tf.attr(rule, "event_pattern", opts));
+  if (canonical(pattern) !== canonical(want)) out.push(`family run-task rule: event_pattern ${JSON.stringify(pattern)}`);
+  for (const shadow of [`${PUBLISHER_FAMILY}-shadow`, `${PUBLISHER_FAMILY}-shadow:1`, `${PUBLISHER_TASK_DEFINITION}-shadow:1`]) {
+    if (matchesEventPattern(pattern, cloudTrailEcsEvent("RunTask", { taskDefinition: shadow }))) {
+      out.push(`family run-task rule: matches a family that only starts with the publisher's (${shadow})`);
+    }
+  }
+  return [...out, ...alarmWiringViolations(tf, "family run-task rule", FAMILY_RUN_TASK_RULE, opts)];
+}
+
+/**
+ * A task runs with the publisher's role iff (a) an override names it, or its
+ * task definition does: (b1) one of another family, or (b2) one of the
+ * publisher's own family, legitimate only when the publisher service launched
+ * it. Each route's events must be matched by exactly the rule that covers it,
+ * and the legitimate events by none. The rule set is the four rules by
+ * resource name; a missing one matches nothing.
+ */
+const ROLE_ALARM_RULES: Record<string, string> = {
+  [ROLE_OVERRIDE_RULE]: "audit_anchor_publisher_role_override",
+  [ROLE_TASK_DEFINITION_RULE]: "audit_anchor_publisher_role_task_definition",
+  [FAMILY_TASK_RULE]: "audit_anchor_publisher_family_task_outside_service",
+  [FAMILY_RUN_TASK_RULE]: "audit_anchor_publisher_family_run_task",
+};
+
+type RoleRoute = { route: string; event: Record<string, unknown>; rule: string | null };
+
+const ROLE_ROUTES: RoleRoute[] = [
+  ...[PUBLISHER_ROLE_ARN, PUBLISHER_ROLE_NAME].flatMap((role) =>
+    ["RunTask", "StartTask"].map((eventName) => ({
+      route: `(a) ${eventName} override naming the role as ${role}`,
+      event: cloudTrailEcsEvent(eventName, { taskDefinition: "foo:1", overrides: { taskRoleArn: role } }),
+      rule: ROLE_OVERRIDE_RULE,
+    })),
+  ),
+  ...[PUBLISHER_ROLE_ARN, PUBLISHER_ROLE_NAME].map((role) => ({
+    route: `(b1) family foo registered naming the role as ${role}`,
+    event: cloudTrailEcsEvent("RegisterTaskDefinition", { family: "foo", taskRoleArn: role }),
+    rule: ROLE_TASK_DEFINITION_RULE,
+  })),
+  { route: "(b2) a RunTask task in this cluster", event: publisherFamilyTask(CLUSTER_ARN, `family:${PUBLISHER_FAMILY}`), rule: FAMILY_TASK_RULE },
+  { route: "(b2) another service's task in this cluster", event: publisherFamilyTask(CLUSTER_ARN, "service:other"), rule: FAMILY_TASK_RULE },
+  {
+    route: "(b2) a same-named service's task in another cluster",
+    event: publisherFamilyTask(OTHER_CLUSTER_ARN, PUBLISHER_SERVICE_GROUP),
+    rule: FAMILY_TASK_RULE,
+  },
+  ...[PUBLISHER_FAMILY, `${PUBLISHER_FAMILY}:7`, PUBLISHER_TASK_DEFINITION, `${PUBLISHER_TASK_DEFINITION}:7`].flatMap((taskDefinition) =>
+    ["RunTask", "StartTask"].map((eventName) => ({
+      route: `(b2) ${eventName} of ${taskDefinition} claiming the publisher service's group`,
+      event: cloudTrailEcsEvent(eventName, { taskDefinition, group: PUBLISHER_SERVICE_GROUP }),
+      rule: FAMILY_RUN_TASK_RULE,
+    })),
+  ),
+  // Legitimate: the publisher service's task (indistinguishable, as a state
+  // change, from a RunTask that claims its group — the CloudTrail rule above
+  // is what sees that one), a publisher deploy's registration, an unrelated
+  // task.
+  { route: "the publisher service's task", event: publisherFamilyTask(CLUSTER_ARN, PUBLISHER_SERVICE_GROUP), rule: null },
+  ...[PUBLISHER_ROLE_ARN, PUBLISHER_ROLE_NAME].map((role) => ({
+    route: `a publisher deploy's registration naming the role as ${role}`,
+    event: cloudTrailEcsEvent("RegisterTaskDefinition", { family: PUBLISHER_FAMILY, taskRoleArn: role }),
+    rule: null,
+  })),
+  { route: "an unrelated RunTask", event: cloudTrailEcsEvent("RunTask", { taskDefinition: "foo:1" }), rule: null },
+  {
+    route: "an unrelated task",
+    event: ecsTaskStateChange({ clusterArn: CLUSTER_ARN, group: "family:foo", taskDefinitionArn: "arn:aws:ecs:ap-northeast-1:111122223333:task-definition/foo:1" }),
+    rule: null,
+  },
+];
+
+function roleRouteViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
+  const patterns: Array<[string, unknown]> = [];
+  for (const [ref, name] of Object.entries(ROLE_ALARM_RULES)) {
+    try {
+      patterns.push([ref, plain(tf.attr(tf.resource("aws_cloudwatch_event_rule", name), "event_pattern", opts))]);
+    } catch {
+      // A missing rule matches nothing; its own check names it.
+    }
+  }
+  const out: string[] = [];
+  for (const { route, event, rule } of ROLE_ROUTES) {
+    const matched = patterns.filter(([, pattern]) => matchesEventPattern(pattern, event)).map(([ref]) => ref);
+    const want = rule === null ? [] : [rule];
+    if (canonical(matched) !== canonical(want)) out.push(`role routes: ${route} matched by ${JSON.stringify(matched)}`);
+  }
+  return out;
+}
+
 function verifyWorkerViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
   const out: string[] = [];
   const task = tf.resource("aws_ecs_task_definition", "audit_chain_verify_worker");
@@ -524,6 +700,9 @@ function allViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
     ...trustViolations(tf, opts),
     ...roleOverrideRuleViolations(tf, opts),
     ...roleTaskDefinitionRuleViolations(tf, opts),
+    ...familyTaskRuleViolations(tf, opts),
+    ...familyRunTaskRuleViolations(tf, opts),
+    ...roleRouteViolations(tf, opts),
     ...verifyWorkerViolations(tf, opts),
     ...clusterViolations(tf),
     ...prefixPlumbingViolations(tf),
@@ -896,8 +1075,8 @@ resource "aws_iam_role_policy" "ecs_s3_access" {`,
   {
     name: "the role override rule leaving StartTask unwatched",
     file: "monitoring.tf",
-    from: 'eventName   = ["RunTask", "StartTask"]',
-    to: 'eventName   = ["RunTask"]',
+    from: 'eventName   = ["RunTask", "StartTask"]\n      requestParameters = {\n        overrides',
+    to: 'eventName   = ["RunTask"]\n      requestParameters = {\n        overrides',
     violation: "role override rule: event_pattern",
   },
   {
@@ -913,6 +1092,110 @@ resource "aws_iam_role_policy" "ecs_s3_access" {`,
     from: "                aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0].arn,\n",
     to: "",
     violation: "role override rule: the alarm topic policy does not admit it",
+  },
+  {
+    name: "the family task rule removed",
+    file: "monitoring.tf",
+    from: 'resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_task_outside_service" {',
+    to: 'resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_task_outside_service_gone" {',
+    violation: "role routes: (b2) a RunTask task in this cluster matched by []",
+  },
+  {
+    name: "the family task rule without its service exclusion",
+    file: "monitoring.tf",
+    from: `      "$or" = [
+        { clusterArn = [{ anything-but = aws_ecs_cluster.main.arn }] },
+        { group = [{ anything-but = "service:\${aws_ecs_service.audit_anchor_publisher.name}" }] },
+      ]
+`,
+    to: "",
+    violation: "family task rule: matches the publisher service's own task",
+  },
+  {
+    name: "the family task rule excluding the service in any cluster",
+    file: "monitoring.tf",
+    from: "        { clusterArn = [{ anything-but = aws_ecs_cluster.main.arn }] },\n",
+    to: "",
+    violation: "role routes: (b2) a same-named service's task in another cluster matched by []",
+  },
+  {
+    name: "the family task rule's prefix without the : terminator",
+    file: "monitoring.tf",
+    from: 'taskDefinitionArn = [{ prefix = "${aws_ecs_task_definition.audit_anchor_publisher.arn_without_revision}:" }]',
+    to: 'taskDefinitionArn = [{ prefix = aws_ecs_task_definition.audit_anchor_publisher.arn_without_revision }]',
+    violation: "family task rule: matches a family that only starts with the publisher's",
+  },
+  {
+    name: "the family task rule's prefix with a re-typed family",
+    file: "monitoring.tf",
+    from: 'taskDefinitionArn = [{ prefix = "${aws_ecs_task_definition.audit_anchor_publisher.arn_without_revision}:" }]',
+    to: 'taskDefinitionArn = [{ prefix = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name_prefix}-audit-anchor-publisher:" }]',
+    violation: "family task rule: event_pattern",
+  },
+  {
+    name: "the family task rule excluding a re-typed service name",
+    file: "monitoring.tf",
+    from: 'anything-but = "service:${aws_ecs_service.audit_anchor_publisher.name}"',
+    to: 'anything-but = "service:${local.name_prefix}-audit-anchor-publisher"',
+    violation: "family task rule: event_pattern",
+  },
+  {
+    name: "the family task rule's target sent elsewhere",
+    file: "monitoring.tf",
+    from: "rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_family_task_outside_service[0].name",
+    to: "rule      = aws_cloudwatch_event_rule.ecs_execute_command[0].name",
+    violation: "family task rule: not targeted at the alarm topic",
+  },
+  {
+    name: "the family task rule left out of the alarm topic policy",
+    file: "monitoring.tf",
+    from: "                aws_cloudwatch_event_rule.audit_anchor_publisher_family_task_outside_service[0].arn,\n",
+    to: "",
+    violation: "family task rule: the alarm topic policy does not admit it",
+  },
+  {
+    name: "the family run-task rule removed",
+    file: "monitoring.tf",
+    from: 'resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_run_task" {',
+    to: 'resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_family_run_task_gone" {',
+    violation: "role routes: (b2) RunTask of <ref:aws_ecs_task_definition.audit_anchor_publisher.family> claiming the publisher service's group matched by []",
+  },
+  {
+    name: "the family run-task rule's prefix without the : terminator",
+    file: "monitoring.tf",
+    from: '{ prefix = "${aws_ecs_task_definition.audit_anchor_publisher.family}:" },',
+    to: "{ prefix = aws_ecs_task_definition.audit_anchor_publisher.family },",
+    violation: "family run-task rule: matches a family that only starts with the publisher's",
+  },
+  {
+    name: "the family run-task rule matching the ARN form only",
+    file: "monitoring.tf",
+    from: `          aws_ecs_task_definition.audit_anchor_publisher.family,
+          { prefix = "\${aws_ecs_task_definition.audit_anchor_publisher.family}:" },
+`,
+    to: "",
+    violation: "role routes: (b2) RunTask of <ref:aws_ecs_task_definition.audit_anchor_publisher.family>:7 claiming",
+  },
+  {
+    name: "the family run-task rule with a re-typed family",
+    file: "monitoring.tf",
+    from: "          aws_ecs_task_definition.audit_anchor_publisher.family,\n",
+    to: '          "${local.name_prefix}-audit-anchor-publisher",\n',
+    violation: "family run-task rule: event_pattern",
+  },
+  {
+    name: "the family run-task rule's target sent elsewhere",
+    file: "monitoring.tf",
+    from: "rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_family_run_task[0].name",
+    to: "rule      = aws_cloudwatch_event_rule.ecs_execute_command[0].name",
+    violation: "family run-task rule: not targeted at the alarm topic",
+  },
+  {
+    name: "the family run-task rule left out of the alarm topic policy",
+    file: "monitoring.tf",
+    from: "                aws_cloudwatch_event_rule.audit_anchor_publisher_family_run_task[0].arn,\n",
+    to: "",
+    violation: "family run-task rule: the alarm topic policy does not admit it",
   },
   {
     name: "a task role on the verify worker",
@@ -950,6 +1233,30 @@ resource "aws_iam_role_policy" "ecs_s3_access" {`,
     violation: "enable_s3_audit_anchors: validation does not require true",
   },
 ];
+
+describe("the EventBridge matcher", () => {
+  it("prefix matches a string that starts with it, and nothing else", () => {
+    const pattern = { a: [{ prefix: "fam:" }] };
+    expect(matchesEventPattern(pattern, { a: "fam:3" })).toBe(true);
+    expect(matchesEventPattern(pattern, { a: "fam-x:3" })).toBe(false);
+    expect(matchesEventPattern(pattern, { a: "xfam:3" })).toBe(false);
+    expect(matchesEventPattern(pattern, { a: 3 })).toBe(false);
+    expect(matchesEventPattern(pattern, {})).toBe(false);
+  });
+
+  it("$or matches when any branch does, ANDed with the other fields", () => {
+    const pattern = { k: ["x"], $or: [{ a: ["1"] }, { b: [{ "anything-but": "2" }] }] };
+    expect(matchesEventPattern(pattern, { k: "x", a: "1", b: "2" })).toBe(true);
+    expect(matchesEventPattern(pattern, { k: "x", a: "0", b: "3" })).toBe(true);
+    expect(matchesEventPattern(pattern, { k: "x", a: "0", b: "2" })).toBe(false);
+    expect(matchesEventPattern(pattern, { k: "y", a: "1", b: "3" })).toBe(false);
+  });
+
+  it("refuses an empty $or and an unknown matcher", () => {
+    expect(() => matchesEventPattern({ $or: [] }, {})).toThrow(/\$or/);
+    expect(() => matchesEventPattern({ a: [{ wildcard: "*" }] }, { a: "x" })).toThrow(/unsupported matcher/);
+  });
+});
 
 describe("anchors wiring red fixtures", () => {
   it.each(RED_FIXTURES)("catches $name", ({ file, from, to, opts, violation }) => {

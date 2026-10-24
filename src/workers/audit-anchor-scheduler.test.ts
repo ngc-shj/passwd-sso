@@ -141,12 +141,42 @@ describe("createAnchorScheduler", () => {
     expect(h.pending().at).toBe(B1);
   });
 
-  it("a timer firing 1 ms early still publishes the boundary it was armed for", async () => {
+  it("a timer firing 1 ms early does not run, and re-arms for the remainder", async () => {
     await h.scheduler.start();
     await h.fire(B1 - 1);
 
+    expect(h.runs).toEqual([B0]);
+    const rearmed = h.pending();
+    expect(rearmed.at).toBe(B1);
+
+    // The same boundary when the re-armed timer fires on time.
+    await h.fire();
     expect(h.runs).toEqual([B0, B1]);
     expect(h.pending().at).toBe(B1 + CADENCE_MS);
+  });
+
+  it("a timer firing exactly at its deadline runs once", async () => {
+    await h.scheduler.start();
+    await h.fire(B1);
+
+    expect(h.runs).toEqual([B0, B1]);
+    expect(h.pending().at).toBe(B1 + CADENCE_MS);
+  });
+
+  it("an early-fired retry re-arms with the same boundary and retry count", async () => {
+    h.setNow(B0);
+    h.setOutcome(() => UPLOAD_FAILED);
+    await h.scheduler.start();
+
+    const firstRetry = h.pending().at;
+    await h.fire(firstRetry - 1);
+    expect(h.runs).toEqual([B0]);
+    expect(h.pending().at).toBe(firstRetry);
+
+    // Three retries in all, early fire or not: the re-arm did not use one.
+    while (h.pending().at < B1) await h.fire();
+    expect(h.runs).toEqual([B0, B0, B0, B0]);
+    expect(linesOf(mockWarn, EXHAUSTED)).toEqual([expect.objectContaining({ boundary: new Date(B0).toISOString(), retries: 3 })]);
   });
 
   it("re-arms from the wall clock when a run ends past the next boundary", async () => {
@@ -175,8 +205,8 @@ describe("createAnchorScheduler", () => {
     expect(h.runs).toEqual([B0, B0, B0, B0]);
     expect(h.pending().at).toBe(B1);
 
-    // The day after a failure, an early timer still publishes its boundary.
-    await h.fire(B1 - 1);
+    // The day after a failure, the next boundary runs on time.
+    await h.fire();
     expect(h.runs.at(-1)).toBe(B1);
   });
 

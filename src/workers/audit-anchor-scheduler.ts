@@ -1,8 +1,11 @@
 /**
  * The audit-anchor publisher's scheduler: which boundary to publish, and when.
  *
- * The boundary is fixed when a timer is armed, not recomputed when it fires,
- * so a timer that fires early still publishes the boundary it was armed for.
+ * The boundary is fixed when a timer is armed, not recomputed when it fires.
+ * A timer that fires before its deadline re-arms for the remainder instead of
+ * running: a run for a boundary the wall clock has not reached would write a
+ * marker ahead of the clock, which the next run fails closed on
+ * (BOUNDARY_MARKER_AHEAD).
  * The next timer is computed from the wall clock after each run (no
  * setInterval, which drifts and keeps firing on the old phase across a long
  * run). A failed run, or one that found the publish lock held, is retried for
@@ -83,6 +86,10 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
     if (stopped) return;
     timer = setTimer(() => {
       timer = null;
+      if (now() < at) {
+        arm(at, boundary, retries);
+        return;
+      }
       inFlight = runAndArm(boundary, retries);
     }, Math.max(0, at - now()));
   }

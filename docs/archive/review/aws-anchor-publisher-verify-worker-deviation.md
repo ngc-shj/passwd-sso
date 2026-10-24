@@ -245,3 +245,57 @@ two `worker:*` lines with the user's approval.
 - **M5** — scheduler case: start at B1 − 75 min with every run failing; retries at −60, −45,
   −30; the third uses up the count as the window closes → `retries_exhausted`
   `{ retries: 3, reason: "count" }`. The window-only cases stay.
+
+### D14: Phase 3 round-3 fixes (P1…P6)
+
+- **P1 — the publisher-role alarm class, derived from the primitive.** The member set had
+  grown by accretion (override, then another family's registration). Re-derived: a task runs
+  with the publisher's role iff (a) an override names it — `audit_anchor_publisher_role_override`;
+  or its task definition names it — (b1) another family: `audit_anchor_publisher_role_task_definition`
+  at registration; (b2) the publisher's own family, legitimate only for a task the publisher
+  service launched. (b2) is closed by two rules. `audit_anchor_publisher_family_task_outside_service`
+  matches the native "ECS Task State Change" event (no trail): `taskDefinitionArn` prefix
+  `"${aws_ecs_task_definition.audit_anchor_publisher.arn_without_revision}:"` (a resource
+  reference — region, account and family as the provider renders them — with the `:` terminator)
+  and `$or` [`clusterArn` anything-but `aws_ecs_cluster.main.arn`, `group` anything-but
+  `"service:${aws_ecs_service.audit_anchor_publisher.name}"`]. The cluster branch is part of the
+  derivation, not an extra route: "the publisher service" is a cluster and a name, and a service
+  of the same name in another cluster runs the role too. The event carries `clusterArn`,
+  `taskDefinitionArn` and `group` (`service:<name>` for a service's task, `family:<family>` by
+  default otherwise). **Deviation from the requested single rule:** `group` is a RunTask /
+  StartTask request parameter, documented as free-form, so a caller can start a task claiming
+  `service:<publisher>` and pass the native rule. `audit_anchor_publisher_family_run_task` closes
+  that: CloudTrail `RunTask` / `StartTask` whose `taskDefinition` is the family, `family:`-prefixed,
+  the ARN without revision, or `arn_without_revision:`-prefixed, whatever group it claims, in any
+  cluster. That the service scheduler's launches raise neither rule is a manual-test check (M6
+  step 7). Both rules target the alarm topic and are in its policy. The wiring test's matcher
+  gained `prefix` and `$or` (with unit cases); `roleRouteViolations` enumerates (a), (b1), (b2)
+  — including the group-forged RunTask — and the legitimate events (the service's own task, a
+  deploy's registration, unrelated tasks), and requires each to be matched by exactly its rule
+  (none for the legitimate ones). Red fixtures: each new rule removed, the service exclusion
+  removed, the cluster branch removed, the prefix without `:`, a re-typed family / service name,
+  targets sent elsewhere, topic-policy entries removed, the bare-family spellings dropped. The
+  "StartTask unwatched" fixture's `from` was widened (the new run-task rule repeats the line).
+  **Residual** (alerts.md, threat model, manual test): `UpdateService` / `CreateService` pointing
+  the publisher service at a revision registered outside a deploy (the deploy path itself), and
+  IAM mutations of the role (EventBridge delivers IAM events only in `us-east-1`). Without a
+  trail, (b2) is surfaced only for a task that does not claim the publisher service's group.
+  deployment.md's CloudTrail prerequisite now lists all five trail-dependent rules (it listed
+  three).
+- **P2 — `stale_boundary` has no legitimate cause on ECS.** Corrected the D13 claim that a
+  legitimate one needs a clock that went back: such a clock's current boundary moves back too, so
+  the marker reads as ahead (`BOUNDARY_MARKER_AHEAD`). alerts.md's section and the
+  `audit_anchor_publisher_failure_log_types` comment now say another writer (a second publisher
+  or a database write); recovery starts from the `lock_held` holder query and
+  `pg_stat_activity` by `application_name = 'passwd-sso-audit-anchor-publisher'`.
+- **P3 — an early timer re-arms.** The scheduler's timer callback re-arms for the remainder (same
+  boundary, same retry count) when `now() < at`; `now() >= at` runs. Was: an early timer ran the
+  boundary it was armed for, which would write a marker ahead of the clock. The plan's C2 line
+  ("a timer 1 ms early still publishes") is superseded; its test now asserts no run and a re-arm
+  at the deadline, plus an exact-deadline run and an early-fired retry keeping its count.
+- **P4** — unit cases with `config.now` two days past the faked `Date`: `lastPublishedAt` is
+  `new Date(config.now())`, and an upload failure's pause is the boundary after `config.now`'s.
+- **P5** — the UPDATE-path case and the MinIO lost-commit case run `runCadence(next)` with
+  `now: wallClockAt(next)` (same keys and destinations).
+- **P6** — the `lock_held` case takes a third decoy, `(1::bigint << 32) + hashtext(...)::bigint`
+  (classid 1, same objid, objsubid 1), released in `finally`; the exact-pid assertion stays.

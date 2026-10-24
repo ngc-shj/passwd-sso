@@ -210,7 +210,7 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
     expect(await pointerSha()).toBe(latest);
 
     const next = new Date(boundary.getTime() + CADENCE_MS);
-    expect((await publisher(config).runCadence(next)).kind).toBe("published");
+    expect((await publisher({ ...config, now: wallClockAt(next) }).runCadence(next)).kind).toBe("published");
     const nextKey = joinS3Key(prefix, buildManifestArtifactKey(next, config.signingKeyKid));
     const nextVersion = (await versionsOf(nextKey)).find((v) => v.isLatest);
     expect(previousManifestOf(nextVersion?.body ?? "")?.sha256).toBe(latest);
