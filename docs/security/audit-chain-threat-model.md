@@ -39,19 +39,41 @@ canonicalBytes)`. `prevHash` is 1 byte (`0x00`) for the genesis link and 32 byte
 5. Only if the insert actually happened (no conflict) does the anchor row advance
    to `chain_seq = newSeq, prev_hash = eventHash`.
 
-**Anchor publishing**: `src/workers/audit-anchor-publisher.ts` runs on a cadence,
-acquiring `pg_try_advisory_xact_lock(hashtext('audit-anchor-publish'))` before each
-cycle so overlapping cron/process instances never both attempt a publish
-(`lock_held` outcome for the loser). A `DEPLOYMENT_ID` value is pinned in
+**Anchor publishing**: `src/workers/audit-anchor-publisher.ts` publishes once per
+daily cadence boundary, which `src/workers/audit-anchor-scheduler.ts` computes and
+passes in (`runCadence(boundary)`); the boundary fixes the idempotency marker, the
+artifact key and `anchoredAt`. Each run sets `lock_timeout` (10 s) and takes the
+blocking `pg_advisory_xact_lock(hashtext('audit-anchor-publish'))`; a wait past the
+timeout is the `lock_held` outcome, not a failure. Under the lock the run reads the
+marker `system_settings.audit_anchor_last_published_boundary`, and a boundary already
+published is `skipped_already_published`; a publish writes the marker in the same
+commit as the manifest pointer. A `DEPLOYMENT_ID` value is pinned in
 `system_settings` at boot (`ensureDeploymentIdMatch`); a mismatch throws
-`DeploymentIdMismatchError` and emits `AUDIT_ANCHOR_PUBLISH_FAILED` — this prevents
-two differently-configured publisher deployments from racing over the same anchor
-state. On a publish failure the publisher sets `publish_paused_until` on the
-non-paused, not-yet-updated anchor rows (capped at `pauseCapFactor × cadenceMs`,
-documented as up to 72h in the customer-facing doc) — this is the same
-`publish_paused_until` column `deliverRowWithChain` reads to gate chain advancement,
-so a failed publish cannot silently let the chain run ahead of what will eventually
-be committed to a manifest.
+`DeploymentIdMismatchError` and emits `AUDIT_ANCHOR_PUBLISH_FAILED` — this stops a
+publisher configured for another deployment from writing this one's anchor state.
+It does not serialize two instances of the same deployment; the lock and the marker
+do.
+
+**Pause**: an upload failure sets `publish_paused_until` on the manifest's tenants
+until the **next cadence boundary** — at most one cadence (24 h), no longer the 72 h
+(3× cadence) cap this document used to give. It is the same column
+`deliverRowWithChain` reads to gate chain advancement, so a failed upload cannot let
+the chain run ahead of what the next manifest commits to. It no longer holds
+publishing: every chain-enabled tenant is published on each run, and a success
+clears it, so in practice it lasts until the scheduler's next same-boundary retry
+(every 15 min until 30 min before the next boundary) succeeds.
+
+**Attempt cap**: each run that passes the marker and tenant checks is counted per
+boundary in `system_settings.audit_anchor_upload_attempts`, in its own transaction
+committed before the publish transaction opens, so neither a rollback nor a crash
+after the PUT resets it. Above 3 the run uploads nothing and logs
+`audit-anchor-publisher.upload_cap_reached`, alarmed on AWS
+(`<name_prefix>-audit-anchor-publisher-upload-cap-reached`), and the first such run
+writes one `AUDIT_ANCHOR_PUBLISH_FAILED` row (`UPLOAD_ATTEMPT_CAP_REACHED`). The cap
+bounds how many versions of one day's key a crash loop or a retry storm can lock
+into the COMPLIANCE bucket. Because the count is a database row, a database writer
+can plant it to suppress a day's publish; the alarm makes that visible the same day
+rather than at the ~25 h cadence-absent alarm.
 
 **Genesis**: `Buffer.from([0x00])` — a single zero byte, distinct from a 32-byte
 `event_hash`, so genesis is unambiguous in the hash computation.
@@ -89,9 +111,9 @@ tracks `prevSeq` and flags the first place `seq !== prevSeq + 1` as
 publisher instances both trying to publish) — PREVENTED structurally, not just
 detected. Row-level: `deliverRowWithChain`'s `SELECT ... FOR UPDATE` on the anchor row
 serializes concurrent delivery attempts for the same tenant. Publisher-level: the
-`pg_try_advisory_xact_lock` + `DEPLOYMENT_ID` single-owner check (see "Chain
-construction" above) means only one publisher instance can hold the publish slot at a
-time.
+blocking advisory lock plus the boundary marker (see "Chain construction" above) let
+one run per boundary publish and make every other run skip; on ECS the service also
+runs at most one task and a deploy stops the old one before starting the new.
 
 **Tag-secret boundary** — the tag secret (used to derive `tenantTag` so the public
 manifest does not expose raw tenant UUIDs) has its own threat-model section; see
@@ -198,3 +220,12 @@ misreporting tamper.
 - **v1 trust-zone / signing-key co-location** and **tag-secret distribution
   boundary**: both already documented in `audit-anchor-verification.md` (linked
   above); not restated here to avoid drift between two copies of the same claim.
+- **Database-written publisher state**: the publisher trusts `system_settings` for
+  the manifest pointer, the boundary marker and the attempt count. A database writer
+  can make runs skip (marker), stop uploading (attempt count) or chain to a pointer
+  of its choosing. No alarm treats a skip as healthy, and the cap is alarmed, so
+  suppression is visible within a day; making the published objects the source of
+  truth is the protocol-hardening follow-up (SC5 of
+  `docs/archive/review/aws-anchor-publisher-verify-worker-plan.md`), as is a
+  compromised publisher writing a new version of the same day's key (see
+  [`audit-anchor-verification.md` § Object versions](audit-anchor-verification.md#object-versions)).

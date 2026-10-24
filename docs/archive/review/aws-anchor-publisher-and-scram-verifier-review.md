@@ -14,7 +14,7 @@ below before a second round. User decisions taken during the round: the verify w
 included and connects as `passwd_app`; `@aws-sdk/client-s3` becomes a dependency, statically
 imported by `s3-destination.ts` so esbuild bundles it into the publisher.
 
-## Findings carried into the #940 re-plan
+## Findings carried into the `#940` re-plan
 
 | ID | Source | Sev | Summary |
 |----|--------|-----|---------|
@@ -27,7 +27,7 @@ imported by `s3-destination.ts` so esbuild bundles it into the publisher.
 | T-T8 / F-F8 | Testing, Functionality | Major | No terraform fmt/validate anywhere in CI; deploy-rollback stub is self-referential for output names; secret keys undocumented today (5 app keys, ja README, `DEPLOYMENT_ID`) |
 | F-F9, F-F10, F-F11, S-F7, A1 | — | Minor | `DEPLOYMENT_ID` on restored data; verify worker sleeps through SIGTERM; prose; `passwd_app` surplus stated plainly; KMS permissions when `s3_kms_key_arn` is set |
 
-## Findings moved to the #941 plan
+## Findings moved to the `#941` plan
 
 S-F1 / F-F5 (member set over every spelling; initdb `\getenv` paths are operator secrets; three
 bootstrap statements), S-F3 (server `scram_iterations`), S-F4 (what a verifier exposes), S-F5 /

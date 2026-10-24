@@ -7,7 +7,7 @@
   GHSA-vfj7-8cjw-p6xm (braces) suppression is deleted.
 - **Reason**: `node scripts/checks/check-npm-audit.mjs` (CI's dev-scope gate) failed on the
   pre-change lockfile too: GHSA-27r3-jxmh-p828 (body-parser <2.4.0, high, dev chain
-  shadcn → @modelcontextprotocol/sdk → express) has a fixed release, and the braces entry
+  shadcn → `@modelcontextprotocol/sdk` → express) has a fixed release, and the braces entry
   matches no current advisory, which the gate refuses. A defect found mid-task, fixed in a
   separate commit. Gate exit 0 afterwards; its self-test passes.
 - **Impact**: dev-scope tree only (body-parser is reached through shadcn's MCP SDK).
