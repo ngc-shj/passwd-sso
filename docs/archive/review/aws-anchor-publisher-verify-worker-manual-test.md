@@ -293,7 +293,7 @@ service's own task and raises nothing; the same ECS calls in another region; ano
 launching ECS tasks with the role (e.g. a Batch job definition's `jobRoleArn`). Check who holds
 `iam:PassRole` on the publisher role (`aws iam simulate-principal-policy` for each operator role,
 or the organisation's SCPs) — the control for the task-launch routes — and, separately, who holds
-`iam:UpdateAssumeRolePolicy`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:DeleteRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePermissionsBoundary`, `iam:DeleteRole`, and `iam:CreateRole` scoped to its name on it (the same simulation with those action names and the role ARN as the
+`iam:UpdateAssumeRolePolicy`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:DeleteRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePermissionsBoundary`, `iam:DeleteRolePermissionsBoundary`, `iam:DeleteRole`, and `iam:CreateRole` scoped to its name (and, for any customer-managed policy attached to it, `iam:CreatePolicyVersion` / `iam:SetDefaultPolicyVersion` on that policy; Terraform gives it an inline policy only) on it (the same simulation with those action names and the role ARN as the
 resource) — the control for the role-change routes, which need no `iam:PassRole`. Expected: only
 the Terraform apply principal is allowed either set. Optionally try binding the
 role's trust policy to this cluster (`aws:SourceArn` `ArnLike`

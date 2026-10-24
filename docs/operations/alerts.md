@@ -1046,7 +1046,7 @@ task the publisher service launched — the next section.
 **Not alarmed by this stack.** Every task-launch route needs `iam:PassRole` on
 the publisher role, so restricting who holds it (an SCP or permission boundary) is
 the control for those; these rules only detect part of them. The role-change routes
-below need no `iam:PassRole`: their control is who holds `iam:UpdateAssumeRolePolicy`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:DeleteRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePermissionsBoundary`, `iam:DeleteRole`, and `iam:CreateRole` scoped to its name on the
+below need no `iam:PassRole`: their control is who holds `iam:UpdateAssumeRolePolicy`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:DeleteRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePermissionsBoundary`, `iam:DeleteRolePermissionsBoundary`, `iam:DeleteRole`, and `iam:CreateRole` scoped to its name (and, for any customer-managed policy attached to it, `iam:CreatePolicyVersion` / `iam:SetDefaultPolicyVersion` on that policy; Terraform gives it an inline policy only) on the
 publisher role. Outside their reach: the
 same ECS calls in any other region — the role is global, the rules and the
 events they match are regional — and another AWS service that launches ECS tasks

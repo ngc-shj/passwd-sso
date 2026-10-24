@@ -140,3 +140,9 @@ against the imported constant, so an off-by-one cap passes). All Minor.
   `iam:PassRole` on the role (task-launch routes) and who holds IAM write actions on it
   (role-change routes) — and the manual test simulates both.
 - S-1: `MAX_TIMER_DELAY_MS` pinned to `2 ** 31 - 1`.
+
+### Round 6
+Functionality: No findings. Testing: No findings. Security R6-1 (Minor): the role-write list
+lacked `iam:DeleteRolePermissionsBoundary` and the managed-policy version route. Added in all three
+docs; the role carries an inline policy only (`aws_iam_role_policy.ecs_audit_anchor_publisher_s3`),
+stated alongside. Docs-only; confirmed by a security-only round 7.

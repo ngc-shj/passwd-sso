@@ -130,7 +130,7 @@ account only (`aws:SourceAccount`). Within the account, a principal allowed
 with IAM write access to the role can make it trusted by anything. The controls for that
 whole class are operator-owned, outside this stack (an SCP or permission boundary): who holds
 `iam:PassRole` on the publisher role — every task-launch route below needs it — and who holds
-`iam:UpdateAssumeRolePolicy`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:DeleteRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePermissionsBoundary`, `iam:DeleteRole`, and `iam:CreateRole` scoped to its name — the role-change routes need no `iam:PassRole` at all. The alarms below are
+`iam:UpdateAssumeRolePolicy`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:DeleteRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePermissionsBoundary`, `iam:DeleteRolePermissionsBoundary`, `iam:DeleteRole`, and `iam:CreateRole` scoped to its name (and, for any customer-managed policy attached to it, `iam:CreatePolicyVersion` / `iam:SetDefaultPolicyVersion` on that policy; Terraform gives it an inline policy only) — the role-change routes need no `iam:PassRole` at all. The alarms below are
 detective and cover a bounded part of the launch routes. Through direct ECS calls in this stack's region, a task runs
 with the role iff (a) an override names it, or its task definition does — (b1) one of
 another family, or (b2) one of the publisher's own family, legitimate only for a task the
