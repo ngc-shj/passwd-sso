@@ -1,0 +1,44 @@
+{
+  "$note": "Read by scripts/checks/check-worker-bundle-smoke.sh. One entry per ECS task definition (infra/terraform/ecs.tf) whose command runs a bundle under dist/. `env` holds exactly the names the task's container definition gives it (environment + secrets), with dummy values that pass the worker's validation; a value Terraform gives literally is that value. Pinned to ecs.tf by src/__tests__/infra/worker-bundle-smoke-map.test.ts. `markers` are the `msg` values of the JSON lines a --validate-env-only boot must print. `forbiddenInputs` are repo-relative source files the bundle's esbuild metafile must not list.",
+  "tasks": {
+    "audit_outbox_worker": {
+      "bundle": "dist/audit-outbox-worker.js",
+      "env": {
+        "OUTBOX_WORKER_DATABASE_URL": "postgresql://passwd_outbox_worker:smoke@127.0.0.1:5432/passwd_sso"
+      },
+      "markers": ["env validation passed"],
+      "forbiddenInputs": []
+    },
+    "retention_gc_worker": {
+      "bundle": "dist/retention-gc-worker.js",
+      "env": {
+        "RETENTION_GC_DATABASE_URL": "postgresql://passwd_retention_gc_worker:smoke@127.0.0.1:5432/passwd_sso"
+      },
+      "markers": ["env validation passed"],
+      "forbiddenInputs": []
+    },
+    "audit_anchor_publisher": {
+      "bundle": "dist/audit-anchor-publisher.js",
+      "env": {
+        "AUDIT_ANCHOR_PUBLISHER_ENABLED": "true",
+        "AUDIT_ANCHOR_DESTINATION_S3_BUCKET": "smoke-audit-anchors",
+        "AUDIT_ANCHOR_DESTINATION_S3_PREFIX": "audit-anchors",
+        "AWS_REGION": "us-east-1",
+        "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL": "postgresql://passwd_anchor_publisher:smoke@127.0.0.1:5432/passwd_sso",
+        "AUDIT_ANCHOR_SIGNING_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "AUDIT_ANCHOR_TAG_SECRET": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "DEPLOYMENT_ID": "550e8400-e29b-41d4-a716-446655440000"
+      },
+      "markers": ["destinations ready", "env validation passed"],
+      "forbiddenInputs": ["src/lib/prisma.ts"]
+    },
+    "audit_chain_verify_worker": {
+      "bundle": "dist/audit-chain-verify-worker.js",
+      "env": {
+        "AUDIT_CHAIN_VERIFY_DATABASE_URL": "postgresql://passwd_app:smoke@127.0.0.1:5432/passwd_sso"
+      },
+      "markers": ["env validation passed"],
+      "forbiddenInputs": []
+    }
+  }
+}

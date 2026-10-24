@@ -499,13 +499,73 @@ export async function runTick(
   );
 }
 
+export interface EnvIssue {
+  path: string;
+  code: "missing" | "invalid_url" | "not_positive_finite" | "not_positive_integer";
+}
+
+/**
+ * The checks --validate-env-only runs, and main() runs before connecting. An
+ * issue names the variable and what is wrong, never the value: the URL carries
+ * a password.
+ */
+export function validateWorkerEnv(env: NodeJS.ProcessEnv): EnvIssue[] {
+  const issues: EnvIssue[] = [];
+  const urlName = env.AUDIT_CHAIN_VERIFY_DATABASE_URL !== undefined ? "AUDIT_CHAIN_VERIFY_DATABASE_URL" : "DATABASE_URL";
+  const url = env[urlName];
+  if (!url) {
+    issues.push({ path: "AUDIT_CHAIN_VERIFY_DATABASE_URL", code: "missing" });
+  } else if (!URL.canParse(url)) {
+    issues.push({ path: urlName, code: "invalid_url" });
+  }
+  // Each value as the module-level constants read it. A NaN tick sleeps 0 ms
+  // and spins; a zero or negative one does the same.
+  const settings: Array<[string, number]> = [
+    ["AUDIT_CHAIN_VERIFY_TICK_INTERVAL_MS", TICK_INTERVAL_MS],
+    ["AUDIT_CHAIN_VERIFY_REALERT_MS", HYSTERESIS_REALERT_MS],
+    ["AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS", CHAIN_VERIFY_TX_TIMEOUT_MS],
+  ];
+  for (const [path, value] of settings) {
+    if (!Number.isFinite(value) || value <= 0) issues.push({ path, code: "not_positive_finite" });
+  }
+  // A row count is a SQL LIMIT, which refuses a fraction on every tick.
+  if (!Number.isSafeInteger(MAX_ROWS_PER_TENANT) || MAX_ROWS_PER_TENANT <= 0) {
+    issues.push({ path: "AUDIT_CHAIN_VERIFY_MAX_ROWS", code: "not_positive_integer" });
+  }
+  return issues;
+}
+
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+export function interruptibleSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
 async function main(): Promise<void> {
-  const databaseUrl =
-    process.env.AUDIT_CHAIN_VERIFY_DATABASE_URL ?? process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.error("AUDIT_CHAIN_VERIFY_DATABASE_URL or DATABASE_URL required");
+  const issues = validateWorkerEnv(process.env);
+  if (issues.length > 0) {
+    for (const issue of issues) {
+      console.error(JSON.stringify({ level: "error", msg: "env validation failed", ...issue }));
+    }
     process.exit(1);
   }
+  if (process.argv.includes("--validate-env-only")) {
+    console.log(JSON.stringify({ level: "info", msg: "env validation passed" }));
+    process.exit(0);
+  }
+  const databaseUrl = process.env.AUDIT_CHAIN_VERIFY_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!databaseUrl) process.exit(1); // refused by validateWorkerEnv above
 
   registerBypassNoticeSink(stderrBypassNoticeSink);
   const pool = createPool({ connectionString: databaseUrl });
@@ -513,11 +573,16 @@ async function main(): Promise<void> {
 
   const states = new Map<string, TenantState>();
   const stop = { value: false };
+  // Aborted on a signal so the hour-long sleep between ticks ends at once:
+  // ECS sends SIGTERM and SIGKILLs 30 s later.
+  const wake = new AbortController();
   process.on("SIGTERM", () => {
     stop.value = true;
+    wake.abort();
   });
   process.on("SIGINT", () => {
     stop.value = true;
+    wake.abort();
   });
 
   console.log(
@@ -530,7 +595,7 @@ async function main(): Promise<void> {
     } catch (err) {
       console.error("audit-chain-verify-worker: tick threw:", err);
     }
-    await new Promise((r) => setTimeout(r, TICK_INTERVAL_MS));
+    await interruptibleSleep(TICK_INTERVAL_MS, wake.signal);
   }
 
   await prisma.$disconnect();

@@ -772,6 +772,19 @@ jobs:
       - name: Build Docker image
         run: docker build --build-arg DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy -t passwd-sso:scan .
 
+      # The smoke's host runner (static-checks) boots bundles it builds itself;
+      # this is the only check that boots what the runner stage ships: each
+      # worker bundle in the image, as its ECS command, with its task env and
+      # no network. The gate needs node but not the repo's dependencies.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Boot the worker bundles inside the image
+        run: bash scripts/checks/check-worker-bundle-smoke.sh
+        env:
+          WORKER_BUNDLE_SMOKE_RUNNER: "docker:passwd-sso:scan"
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

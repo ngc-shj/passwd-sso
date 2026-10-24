@@ -9,138 +9,23 @@
 # --validate-env-only unit tests run the tsx SOURCE (ESM, import.meta.url
 # defined) and never exercised the shipped bundle, so the crash shipped green.
 #
-# This check bundles each worker with the EXACT esbuild command extracted from
-# the Dockerfile (so it can never drift from what is actually shipped), then
-# boots the bundle with --validate-env-only. That flag exits 0 after module
-# load + env parse but before any DB connection — exercising the createRequire
-# code path without external services. A non-zero exit means the shipped
-# artifact does not boot.
+# This gate requires the workers ECS runs, the worker-policy manifest's
+# entrypoints, the Dockerfile's esbuild invocations and its dist/ COPYs to be
+# one set, then boots each bundle — built with the EXACT esbuild arguments
+# extracted from the Dockerfile, or, with WORKER_BUNDLE_SMOKE_RUNNER=docker:<image>,
+# the one inside a built image — with --validate-env-only and only the env its
+# ECS task gives it, and requires its positive markers. The logic, and every
+# override variable, is documented in scripts/checks/lib/worker-bundle-smoke.mjs.
+#
+# It needs only node, so the container-scan job can run the docker runner
+# without installing the repo's dependencies; the host runner also needs
+# node_modules (esbuild, and the packages the bundles keep external).
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd))"
 cd "$REPO_ROOT"
 
-DOCKERFILE="Dockerfile"
-echo "check-worker-bundle-smoke: REPO_ROOT=$REPO_ROOT"
-
-[ -f "$DOCKERFILE" ] || { echo "OK ($DOCKERFILE not present)"; exit 0; }
-
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
-
-# Extract every `npx esbuild scripts/<name>-worker.ts ... --outfile=dist/<name>.js`
-# invocation from the Dockerfile, joining its backslash-continued lines into one.
-# Using the Dockerfile as the source of truth means a change to the bundle format
-# (e.g. adding --format=esm) is re-smoke-tested automatically.
-# Collected with `while read` rather than `mapfile`: macOS ships bash 3.2, where
-# mapfile/readarray do not exist, and this gate runs from the local pre-PR hook as
-# well as from CI. An esbuild invocation cannot contain a newline (it is one
-# logical line, already joined by the awk below), so IFS= read -r round-trips it
-# without loss.
-ESBUILD_CMDS=()
-while IFS= read -r _cmd; do
-  [ -z "$_cmd" ] && continue
-  ESBUILD_CMDS+=("$_cmd")
-done < <(
-  awk '
-    /npx esbuild scripts\/.*-worker\.ts/ { collecting=1; line="" }
-    collecting {
-      cont = ($0 ~ /\\[[:space:]]*$/)   # detect continuation BEFORE stripping
-      stripped = $0
-      sub(/\\[[:space:]]*$/, "", stripped)
-      line = line " " stripped
-      if (!cont) { print line; collecting=0 }
-    }
-  ' "$DOCKERFILE"
-)
-
-if [ "${#ESBUILD_CMDS[@]}" -eq 0 ]; then
-  echo "ERROR: no 'npx esbuild scripts/*-worker.ts' invocations found in $DOCKERFILE"
-  echo "This gate expects the worker bundles to be built by esbuild — re-verify the Dockerfile."
-  exit 1
-fi
-
-# A worker bundle passes smoke when booting it with --validate-env-only exits 0.
-# Each worker accepts a dedicated *_DATABASE_URL or falls back to DATABASE_URL;
-# supply a syntactically-valid URL so the at-least-one-URL refine passes without
-# opening a connection.
-FAKE_DB_URL="postgresql://app:app@127.0.0.1:5432/passwd_sso"
-
-# `timeout` is GNU coreutils and is NOT present on stock macOS; Homebrew installs
-# it as `gtimeout` (and as `timeout` when coreutils is linked). Resolve it, and
-# refuse if neither exists rather than letting the boot run unbounded — or, worse,
-# letting a missing binary surface as exit 127, which this gate would report as
-# "the shipped artifact does not boot". A missing tool is a gate that could not
-# run, not a failing subject.
-TIMEOUT_BIN=""
-for candidate in timeout gtimeout; do
-  if command -v "$candidate" >/dev/null 2>&1; then TIMEOUT_BIN="$candidate"; break; fi
-done
-if [ -z "$TIMEOUT_BIN" ]; then
-  echo "ERROR: neither 'timeout' nor 'gtimeout' is on PATH."
-  echo "This gate bounds each worker boot so a hang cannot stall the run."
-  echo "Install GNU coreutils (macOS: brew install coreutils) and re-run."
-  exit 1
-fi
-
-fail=0
-for raw in "${ESBUILD_CMDS[@]}"; do
-  # Normalise whitespace and strip the leading `npx ` so we invoke the repo-local
-  # esbuild binary directly (hermetic — no network fetch of a floating esbuild).
-  cmd="$(echo "$raw" | tr -s ' ')"
-  src="$(echo "$cmd" | grep -oE 'scripts/[a-zA-Z0-9_-]+-worker\.ts' | head -1)"
-  outfile="$(echo "$cmd" | grep -oE 'dist/[a-zA-Z0-9_-]+\.js' | head -1)"
-  if [ -z "$src" ] || [ -z "$outfile" ]; then
-    echo "ERROR: could not parse src/outfile from esbuild line: $cmd"
-    exit 1
-  fi
-
-  bundle="$TMP_DIR/$(basename "$outfile")"
-  # Rebuild the esbuild argument list from the Dockerfile line, redirecting the
-  # output into the temp dir. Drop the leading `npx` / `esbuild` tokens.
-  args="$(echo "$cmd" | sed -E 's#^ *(RUN +)?npx +esbuild +##; s#--outfile=dist/[a-zA-Z0-9_-]+\.js#--outfile='"$bundle"'#')"
-
-  # Test-only hook (RT7 red-proof): the self-test sets
-  # WORKER_BUNDLE_SMOKE_ALIAS_OVERRIDE=<module>=<path> to alias a module into the
-  # bundle — e.g. swap in a runtime-module that crashes on load — so the gate's
-  # ability to go RED is verified in CI. Unset in production (never affects the
-  # real bundle). Only a single --alias:<from>=<to> is appended.
-  extra_alias=""
-  if [ -n "${WORKER_BUNDLE_SMOKE_ALIAS_OVERRIDE:-}" ]; then
-    extra_alias="--alias:${WORKER_BUNDLE_SMOKE_ALIAS_OVERRIDE}"
-  fi
-
-  echo "  bundling $src -> $(basename "$bundle")"
-  # shellcheck disable=SC2086
-  node_modules/.bin/esbuild $args $extra_alias >/dev/null
-
-  # Boot the bundle with NODE_PATH pointed at the repo node_modules so the
-  # `--external` packages (pg, @prisma/client, @prisma/adapter-pg) resolve —
-  # Node resolves a bundle's requires relative to the bundle file's own dir, and
-  # the temp dir has no node_modules. In the production image these packages are
-  # COPYed alongside the bundle; NODE_PATH reproduces that reachability here.
-  echo "  booting $(basename "$bundle") --validate-env-only"
-  set +e
-  out="$("$TIMEOUT_BIN" 30 env \
-    NODE_ENV=production \
-    NODE_PATH="$REPO_ROOT/node_modules" \
-    RETENTION_GC_DATABASE_URL="$FAKE_DB_URL" \
-    OUTBOX_WORKER_DATABASE_URL="$FAKE_DB_URL" \
-    DATABASE_URL="$FAKE_DB_URL" \
-    node "$bundle" --validate-env-only 2>&1)"
-  status=$?
-  set -e
-
-  if [ "$status" -ne 0 ]; then
-    echo "ERROR: $(basename "$bundle") failed --validate-env-only boot (exit $status)"
-    echo "$out" | sed 's/^/    /'
-    fail=1
-  fi
-done
-
-if [ "$fail" -ne 0 ]; then
-  echo "FAIL: one or more worker bundles do not boot as shipped (R32)."
-  exit 1
-fi
-
-echo "OK (all worker bundles boot with --validate-env-only)"
+exec node --input-type=module -e '
+  import { main } from "./scripts/checks/lib/worker-bundle-smoke.mjs";
+  process.exitCode = main(process.cwd());
+'
