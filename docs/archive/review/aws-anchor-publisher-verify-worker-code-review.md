@@ -146,3 +146,7 @@ Functionality: No findings. Testing: No findings. Security R6-1 (Minor): the rol
 lacked `iam:DeleteRolePermissionsBoundary` and the managed-policy version route. Added in all three
 docs; the role carries an inline policy only (`aws_iam_role_policy.ecs_audit_anchor_publisher_s3`),
 stated alongside. Docs-only; confirmed by a security-only round 7.
+
+### Round 7
+Security: No findings (R6-1 resolved). Functionality and testing: No findings since round 6.
+Review complete after 7 rounds; citation gate (`verify-references.sh --strict`) clean.
