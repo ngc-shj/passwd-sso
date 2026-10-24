@@ -8,9 +8,13 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { getSessionToken } from "@/app/api/sessions/helpers";
 import { canRecoverSessionWithPasskey } from "@/lib/auth/session/recent-current-auth-method";
+import { GOOGLE_PROVIDER_ID, isJacksonProviderId } from "@/lib/auth/jackson-providers";
 
-// Providers that do NOT support passkey-based sign-in
-const OIDC_SAML_PROVIDERS = new Set(["google", "saml-jackson"]);
+// Providers that do NOT support passkey-based sign-in: Google and every
+// configured Jackson provider.
+function isOidcSamlProvider(provider: string): boolean {
+  return provider === GOOGLE_PROVIDER_ID || isJacksonProviderId(provider);
+}
 
 // GET /api/user/auth-provider — Check if user can use passkey sign-in / reauth
 async function handleGET(req: NextRequest) {
@@ -33,7 +37,7 @@ async function handleGET(req: NextRequest) {
     // - They have at least one non-OIDC/SAML provider (e.g., nodemailer)
     const canPasskeySignIn =
       accounts.length === 0 ||
-      accounts.some((a) => !OIDC_SAML_PROVIDERS.has(a.provider));
+      accounts.some((a) => !isOidcSamlProvider(a.provider));
 
     // C5 member 2: computed for THIS request's own session, not any session
     // of the user — a stale-session probe must answer for the session that

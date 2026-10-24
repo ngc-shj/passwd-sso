@@ -15,6 +15,7 @@ import type {
   AuthLoginFailureReason,
   AuthProvider,
 } from "@/lib/audit/auth-failure";
+import { isJacksonProviderId } from "@/lib/auth/jackson-providers";
 
 /** The refusal arms of `findOrCreateTenantForClaim` — everything but a tenant. */
 export type ClaimResolutionRefusalKind = Exclude<ClaimTenantResolution["kind"], "tenant">;
@@ -153,6 +154,10 @@ export function toAuditProvider(
   provider: string | null | undefined,
 ): AuthProvider {
   if (!provider) return "unknown";
+  // Every configured Jackson connection is its own provider id
+  // (`saml-jackson-<id>`); the table keeps the legacy and documented SAML
+  // spellings so rows for a provider no longer configured still map.
+  if (isJacksonProviderId(provider)) return "saml";
   // hasOwnProperty, not a bare index (round-3 S3-3). An object literal
   // inherits from Object.prototype, so `AUDIT_PROVIDER_BY_ID["constructor"]`
   // — and `toString`, `valueOf`, `__proto__` — resolve to inherited FUNCTIONS,

@@ -553,8 +553,8 @@ export async function run(opts: RunOptions): Promise<number> {
 
     const exampleHint = sidecar.example;
 
-    // For secret fields: offer to generate.
-    if (isSecret) {
+    // For secret fields: offer to generate (unless the value is structured).
+    if (isSecret && sidecar.generate !== false) {
       const generate = await prompter.askYesNo(
         `Generate a random value for ${key}?`,
         true,
@@ -747,7 +747,7 @@ export async function run(opts: RunOptions): Promise<number> {
         }
 
         let answer: string;
-        if (isSecret) {
+        if (isSecret && sidecar.generate !== false) {
           const gen = await prompter.askYesNo(
             `Generate a new value for ${fieldPath}?`,
             true,
@@ -758,7 +758,7 @@ export async function run(opts: RunOptions): Promise<number> {
             answer = await prompter.ask(`Re-enter ${fieldPath}`, { secret: true });
           }
         } else {
-          answer = await prompter.ask(`Re-enter ${fieldPath}`);
+          answer = await prompter.ask(`Re-enter ${fieldPath}`, isSecret ? { secret: true } : undefined);
         }
 
         if (!validateInputValue(answer)) {

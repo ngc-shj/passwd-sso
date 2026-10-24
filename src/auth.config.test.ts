@@ -65,8 +65,9 @@ describe("auth.config session cookie attributes", () => {
   // sameSite=lax is the explicit policy choice — guards against silent
   // regression to `strict` (which would suppress the session cookie on the
   // OAuth callback redirect chain, bouncing users to /auth/signin on
-  // first hit after sign-in). Login CSRF is defended by Auth.js's `state`
-  // cookie + PKCE on OAuth and by the proxy CSRF gate on POST/PUT/PATCH/DELETE.
+  // first hit after sign-in). Login CSRF on OAuth is defended by PKCE for
+  // Google and by Auth.js's `state` cookie for the Jackson providers (which
+  // run without PKCE), and by the proxy CSRF gate on POST/PUT/PATCH/DELETE.
   it("sets sameSite=lax on the session cookie", async () => {
     const config = (await import("@/auth.config")).default;
     expect(config.cookies?.sessionToken?.options?.sameSite).toBe("lax");
@@ -237,6 +238,133 @@ describe("auth.config Google domain validation", () => {
         profile: {},
       }),
     ).toBe(true);
+  });
+});
+
+describe("auth.config Jackson providers", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function stubJackson() {
+    vi.stubEnv("JACKSON_URL", "http://jackson.test:5225");
+    vi.stubEnv("AUTH_JACKSON_ID", "legacy-client");
+    vi.stubEnv("AUTH_JACKSON_SECRET", "legacy-secret");
+    vi.stubEnv(
+      "AUTH_JACKSON_CONNECTIONS",
+      JSON.stringify([{ id: "acme", name: "Acme SSO", clientId: "acme-client", clientSecret: "acme-secret" }]),
+    );
+    vi.stubEnv("AUTH_CLAIM_BINDING", "strict");
+  }
+
+  async function jacksonProviders() {
+    const config = (await import("@/auth.config")).default;
+    return config.providers.filter((p) => p.id.startsWith("saml-jackson")) as unknown as Array<
+      Record<string, unknown>
+    >;
+  }
+
+  it("builds one OIDC provider per connection with its own credentials, state + nonce, and no PKCE", async () => {
+    stubJackson();
+    const providers = await jacksonProviders();
+
+    expect(
+      providers.map(({ id, name, type, issuer, clientId, clientSecret, checks }) => ({
+        id,
+        name,
+        type,
+        issuer,
+        clientId,
+        clientSecret,
+        checks,
+      })),
+    ).toEqual([
+      {
+        id: "saml-jackson",
+        name: "SSO",
+        type: "oidc",
+        issuer: "http://jackson.test:5225",
+        clientId: "legacy-client",
+        clientSecret: "legacy-secret",
+        checks: ["state", "nonce"],
+      },
+      {
+        id: "saml-jackson-acme",
+        name: "Acme SSO",
+        type: "oidc",
+        issuer: "http://jackson.test:5225",
+        clientId: "acme-client",
+        clientSecret: "acme-secret",
+        checks: ["state", "nonce"],
+      },
+    ]);
+  });
+
+  it("keeps Auth.js's default client authentication and never links accounts by email", async () => {
+    stubJackson();
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", "example.com");
+    for (const provider of await jacksonProviders()) {
+      expect(provider).not.toHaveProperty("client");
+      expect(provider).not.toHaveProperty("allowDangerousEmailAccountLinking");
+    }
+  });
+
+  it("maps the Jackson profile onto the user", async () => {
+    stubJackson();
+    const [provider] = await jacksonProviders();
+    const profile = provider.profile as (p: Record<string, unknown>) => unknown;
+
+    expect(profile({ sub: "s1", email: "u@example.com" })).toEqual({
+      id: "s1",
+      name: "u@example.com",
+      email: "u@example.com",
+      image: null,
+    });
+    expect(profile({ sub: "s1", email: "u@example.com", name: "U", picture: "https://img" })).toEqual({
+      id: "s1",
+      name: "U",
+      email: "u@example.com",
+      image: "https://img",
+    });
+  });
+
+  // auth.config.ts runs the parser and the boot check itself, so the refusals
+  // hold in processes (and NODE_ENVs) where envSchema's production rules do
+  // not run.
+  describe.each(["production", "development", "test"])("NODE_ENV=%s", (nodeEnv) => {
+    beforeEach(() => {
+      vi.stubEnv("NODE_ENV", nodeEnv);
+    });
+
+    it("refuses to load with Jackson's placeholder client id", async () => {
+      stubJackson();
+      vi.stubEnv("AUTH_JACKSON_ID", "dummy");
+      await expect(import("@/auth.config")).rejects.toThrow("AUTH_JACKSON_ID");
+    });
+
+    it("loads with a real client id (adjacent allow)", async () => {
+      stubJackson();
+      vi.stubEnv("AUTH_JACKSON_ID", "dummy-client");
+      await expect(import("@/auth.config")).resolves.toBeDefined();
+    });
+
+    it("refuses to load with two claim providers and AUTH_CLAIM_BINDING unset", async () => {
+      stubJackson();
+      vi.stubEnv("AUTH_CLAIM_BINDING", "");
+      await expect(import("@/auth.config")).rejects.toThrow("AUTH_CLAIM_BINDING");
+    });
+
+    it("loads with one claim provider and AUTH_CLAIM_BINDING unset (adjacent allow)", async () => {
+      vi.stubEnv("JACKSON_URL", "http://jackson.test:5225");
+      vi.stubEnv("AUTH_JACKSON_ID", "legacy-client");
+      vi.stubEnv("AUTH_JACKSON_SECRET", "legacy-secret");
+      await expect(import("@/auth.config")).resolves.toBeDefined();
+    });
   });
 });
 

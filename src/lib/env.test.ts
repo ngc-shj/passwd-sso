@@ -121,6 +121,30 @@ describe("env validation", () => {
     expect(env.NODE_ENV).toBe("production");
   });
 
+  it("accepts valid production config with only AUTH_JACKSON_CONNECTIONS", async () => {
+    process.env = buildMinimalEnv({
+      NODE_ENV: "production",
+      AUTH_SECRET: "a".repeat(32),
+      AUTH_URL: "https://app.example.com",
+      VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
+      REDIS_URL: "redis://localhost:6379",
+      JACKSON_URL: "http://jackson:5225",
+      AUTH_JACKSON_CONNECTIONS: JSON.stringify([
+        { id: "acme", name: "Acme", clientId: "acme-client", clientSecret: "acme-secret" },
+      ]),
+      AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+      AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
+    });
+    const { env } = await import("./env");
+    expect(env.NODE_ENV).toBe("production");
+  });
+
+  it("refuses an invalid AUTH_CLAIM_BINDING in development", async () => {
+    process.env = buildMinimalEnv({ AUTH_CLAIM_BINDING: "on" });
+    await expect(import("./env")).rejects.toThrow("AUTH_CLAIM_BINDING");
+  });
+
   // Blob backend validation is handled by each store's validateConfig()
   // in src/lib/blob-store/config.ts — not by env.ts superRefine.
   // See src/lib/blob-store/*.test.ts for those checks.

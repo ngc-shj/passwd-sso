@@ -1,6 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import Nodemailer from "next-auth/providers/nodemailer";
+import type { OIDCConfig } from "next-auth/providers";
 import { API_PATH } from "@/lib/constants";
 import { parseAllowedGoogleDomains } from "@/lib/url/google-domain";
 import { sendEmail } from "@/lib/email";
@@ -9,6 +10,11 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { MAGIC_LINK_TTL_SEC } from "@/lib/constants/auth/magic-link";
 import { getLogger } from "@/lib/logger";
+import {
+  assertClaimBindingBootConfig,
+  isGoogleProviderConfigured,
+  parseJacksonProviders,
+} from "@/lib/auth/jackson-providers";
 import {
   getSessionCookieName,
   isSecureCookieFromAuthUrl,
@@ -26,13 +32,26 @@ const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
 const useSecureCookies = isSecureCookieFromAuthUrl();
 
+// Both throw on a refused configuration, so a process whose provider set is
+// misconfigured fails at startup in every NODE_ENV — not only where
+// envSchema's production rules run.
+const jacksonProviders = parseJacksonProviders();
+assertClaimBindingBootConfig();
+
+type JacksonProfile = {
+  sub: string;
+  name?: string;
+  email: string;
+  picture?: string;
+};
+
 export default {
   providers: [
     // Only register providers whose credentials are fully configured.
-    // Partial config (e.g. ID without SECRET) → broken OAuth at runtime;
-    // missing issuer (JACKSON_URL) → Auth.js throws InvalidEndpoints.
-    // Conditions mirror env.ts superRefine checks (L139-144).
-    ...(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
+    // Partial config (e.g. ID without SECRET) → broken OAuth at runtime.
+    // The predicates live in jackson-providers.ts, which env-schema.ts and
+    // the sign-in page read too.
+    ...(isGoogleProviderConfigured()
       ? [
           Google({
             clientId: process.env.AUTH_GOOGLE_ID,
@@ -57,38 +76,40 @@ export default {
           }),
         ]
       : []),
-    ...(process.env.JACKSON_URL &&
-    process.env.AUTH_JACKSON_ID &&
-    process.env.AUTH_JACKSON_SECRET
-      ? [
-          {
-            id: "saml-jackson" as const,
-            name: process.env.SAML_PROVIDER_NAME ?? "SSO",
-            type: "oidc" as const,
-            issuer: process.env.JACKSON_URL,
-            clientId: process.env.AUTH_JACKSON_ID ?? "dummy",
-            clientSecret: process.env.AUTH_JACKSON_SECRET ?? "dummy",
-            authorization: {
-              params: {
-                scope: "openid email profile",
-              },
-            },
-            profile(profile: {
-              sub: string;
-              name?: string;
-              email: string;
-              picture?: string;
-            }) {
-              return {
-                id: profile.sub,
-                name: profile.name ?? profile.email,
-                email: profile.email,
-                image: profile.picture ?? null,
-              };
-            },
+    // One provider per Jackson connection, each with that connection's own
+    // client id and secret. PKCE is deliberately off: Jackson's PKCE branch
+    // skips client authentication at the token endpoint, so a PKCE exchange
+    // attests nothing about which connection authenticated the user, and any
+    // code_verifier on the wire lets a code minted for another connection's
+    // IdP be redeemed here. `state` (login CSRF; Jackson also requires it) and
+    // `nonce` (code injection) carry the checks instead. Token-endpoint auth
+    // stays Auth.js's default, client_secret_basic. Never set
+    // allowDangerousEmailAccountLinking on these: an IdP behind one connection
+    // must not take over an account created through another.
+    ...jacksonProviders.map(
+      (connection): OIDCConfig<JacksonProfile> => ({
+        id: connection.id,
+        name: connection.name,
+        type: "oidc",
+        issuer: connection.issuer,
+        clientId: connection.clientId,
+        clientSecret: connection.clientSecret,
+        checks: ["state", "nonce"],
+        authorization: {
+          params: {
+            scope: "openid email profile",
           },
-        ]
-      : []),
+        },
+        profile(profile) {
+          return {
+            id: profile.sub,
+            name: profile.name ?? profile.email,
+            email: profile.email,
+            image: profile.picture ?? null,
+          };
+        },
+      }),
+    ),
     // Magic Link (Email authentication)
     ...(process.env.EMAIL_PROVIDER
       ? [
@@ -156,10 +177,12 @@ export default {
         // lax: the OAuth callback redirect chain is treated by browsers
         // as cross-site-initiated, so strict suppresses the just-issued
         // cookie on the first hit to the post-callback destination and
-        // bounces users back to /auth/signin. Login CSRF is defended by
-        // Auth.js's `state` cookie + PKCE on OAuth and by the proxy CSRF
-        // gate (Origin-header check on POST/PUT/PATCH/DELETE for
-        // cookie-bearing mutating requests, src/lib/proxy/csrf-gate.ts).
+        // bounces users back to /auth/signin. Login CSRF on OAuth is
+        // defended by PKCE for Google and by Auth.js's `state` cookie for
+        // the Jackson providers, which run without PKCE (see the provider
+        // comment above), and by the proxy CSRF gate (Origin-header check
+        // on POST/PUT/PATCH/DELETE for cookie-bearing mutating requests,
+        // src/lib/proxy/csrf-gate.ts).
         sameSite: "lax" as const,
         secure: useSecureCookies,
         // A07-6 (CHIPS): partitioned cookies are isolated per top-level

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AUDIT_PROVIDER_BY_ID, CLAIM_REFUSAL_REASON, toAuditProvider } from "./auth-failure-mapping";
 
 describe("toAuditProvider", () => {
@@ -21,6 +21,29 @@ describe("toAuditProvider", () => {
       "nodemailer",
       "saml-jackson",
     ]);
+  });
+
+  describe("configured Jackson connections", () => {
+    beforeEach(() => {
+      vi.stubEnv("JACKSON_URL", "http://jackson.test:5225");
+      vi.stubEnv(
+        "AUTH_JACKSON_CONNECTIONS",
+        JSON.stringify([
+          { id: "acme", name: "Acme", clientId: "acme-client", clientSecret: "acme-secret" },
+          { id: "beta", name: "Beta", clientId: "beta-client", clientSecret: "beta-secret" },
+        ]),
+      );
+    });
+
+    it.each(["saml-jackson-acme", "saml-jackson-beta"])("maps %s to saml", (id) => {
+      expect(toAuditProvider(id)).toBe("saml");
+    });
+
+    // Membership, not a prefix: an id the deployment never configured is not
+    // attributed to SAML.
+    it.each(["saml-jackson-other", "saml-jackson-", "saml-jacksonx"])("maps the unconfigured %s to unknown", (id) => {
+      expect(toAuditProvider(id)).toBe("unknown");
+    });
   });
 
   it.each([null, undefined, "", "passkey", "totally-unknown"])(

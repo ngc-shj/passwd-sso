@@ -448,6 +448,94 @@ describe("envSchema (with superRefine cross-field rules)", () => {
   });
 });
 
+describe("envSchema: SSO provider set (jackson-providers parser)", () => {
+  const PROD_BASE = {
+    NODE_ENV: "production",
+    AUTH_SECRET: "x".repeat(32),
+    AUTH_URL: "https://app.example.com",
+    VERIFIER_PEPPER_KEY: VALID_HEX_64,
+    SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
+    REDIS_URL: "redis://localhost:6379",
+    AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+    AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
+  };
+  const SECRET = "conn-secret-S3CR3T-77";
+  const CONNECTIONS = JSON.stringify([
+    { id: "acme", name: "Acme SSO", clientId: "acme-client", clientSecret: SECRET },
+  ]);
+
+  function issuesOf(env: Record<string, unknown>) {
+    const result = envSchema.safeParse(env);
+    return result.success ? [] : result.error.issues;
+  }
+
+  it("counts AUTH_JACKSON_CONNECTIONS alone as a production auth provider", () => {
+    const issues = issuesOf(
+      baseEnv({ ...PROD_BASE, JACKSON_URL: "http://jackson:5225", AUTH_JACKSON_CONNECTIONS: CONNECTIONS }),
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("still requires a provider in production without it (adjacent refusal)", () => {
+    const issues = issuesOf(baseEnv(PROD_BASE));
+    expect(issues.map((i) => i.message).join("\n")).toContain("At least one auth provider");
+  });
+
+  it("reports a refused Jackson config on its variable only, not also as 'no provider'", () => {
+    const issues = issuesOf(
+      baseEnv({ ...PROD_BASE, AUTH_JACKSON_CONNECTIONS: CONNECTIONS }),
+    );
+    expect(issues.map((i) => i.path[0])).toEqual(["JACKSON_URL"]);
+  });
+
+  describe.each(["production", "development", "test"])("NODE_ENV=%s", (nodeEnv) => {
+    const base = nodeEnv === "production" ? { ...PROD_BASE } : { NODE_ENV: nodeEnv };
+    const jackson = { JACKSON_URL: "http://jackson:5225", AUTH_JACKSON_CONNECTIONS: CONNECTIONS };
+
+    it.each<[string, Record<string, string>, Record<string, string>, string]>([
+      [
+        "a placeholder entry client id",
+        { AUTH_JACKSON_CONNECTIONS: CONNECTIONS.replace("acme-client", "dummy") },
+        {},
+        "AUTH_JACKSON_CONNECTIONS",
+      ],
+      [
+        "an encoded legacy client id",
+        { AUTH_JACKSON_ID: "tenant=a&product=b", AUTH_JACKSON_SECRET: SECRET, AUTH_JACKSON_CONNECTIONS: "" },
+        { AUTH_JACKSON_ID: "tenant-a-product-b", AUTH_JACKSON_SECRET: SECRET, AUTH_JACKSON_CONNECTIONS: "" },
+        "AUTH_JACKSON_ID",
+      ],
+      [
+        "invalid connections JSON",
+        { AUTH_JACKSON_CONNECTIONS: CONNECTIONS.slice(0, -1) },
+        {},
+        "AUTH_JACKSON_CONNECTIONS",
+      ],
+      [
+        "a miscased binding mode",
+        { AUTH_CLAIM_BINDING: "Strict" },
+        { AUTH_CLAIM_BINDING: "strict" },
+        "AUTH_CLAIM_BINDING",
+      ],
+      [
+        "two claim providers without strict",
+        { AUTH_GOOGLE_ID: "gid", AUTH_GOOGLE_SECRET: "gsecret" },
+        { AUTH_GOOGLE_ID: "gid", AUTH_GOOGLE_SECRET: "gsecret", AUTH_CLAIM_BINDING: "strict" },
+        "AUTH_CLAIM_BINDING",
+      ],
+    ])("refuses %s, allows the adjacent config", (_label, refused, allowed, variable) => {
+      const refusedIssues = issuesOf(baseEnv({ ...base, ...jackson, ...refused }));
+      expect(refusedIssues.map((i) => i.path[0])).toEqual([variable]);
+      for (const issue of refusedIssues) {
+        expect(issue.message).not.toContain(SECRET);
+        expect(issue.message).not.toContain(CONNECTIONS.slice(0, 20));
+      }
+
+      expect(issuesOf(baseEnv({ ...base, ...jackson, ...allowed }))).toEqual([]);
+    });
+  });
+});
+
 describe("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS (C1)", () => {
   const VALID_ID = "abcdefghijklmnopabcdefghijklmnop"; // 32 chars in [a-p]
   const VALID_ID_2 = "ponmlkjihgfedcbaponmlkjihgfedcba"; // also 32 in [a-p]
