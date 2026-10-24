@@ -41,7 +41,7 @@ import "@/auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { sessionMetaStorage, type SessionMeta } from "@/lib/auth/session/session-meta";
-import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
+import { findOrCreateTenantForClaim, type ClaimTenantResolution } from "@/lib/tenant/tenant-management";
 import {
   CLAIM_BINDING_MODE,
   PROVIDER_ID_PATTERN,
@@ -481,29 +481,51 @@ describe("tenant claim binding (C3/C4/C5)", () => {
 
     it("one tenant, one binding; the loser gets claim_provider_mismatch", async () => {
       const ITERATIONS = 50;
-      const register = (provider: string, claim: string) => (c: PrismaClient) =>
-        withBypassRls(
-          c,
-          (tx) => findOrCreateTenantForClaim(claim, provider, CLAIM_BINDING_MODE.STRICT, tx),
-          BYPASS_GRANT.AUTH_CREATE_USER,
-        );
+      // Settled rather than raced bare: a side that rejects would otherwise
+      // drop the other side's committed tenant before it is tracked.
+      const register =
+        (provider: string, claim: string) =>
+        (c: PrismaClient): Promise<PromiseSettledResult<ClaimTenantResolution>> =>
+          withBypassRls(
+            c,
+            (tx) => findOrCreateTenantForClaim(claim, provider, CLAIM_BINDING_MODE.STRICT, tx),
+            BYPASS_GRANT.AUTH_CREATE_USER,
+          ).then(
+            (value) => ({ status: "fulfilled", value }),
+            (reason: unknown) => ({ status: "rejected", reason }),
+          );
+      const wins = { [SIGN_IN_PROVIDER]: 0, [OTHER_PROVIDER]: 0 };
 
       for (let i = 0; i < ITERATIONS; i++) {
         const claim = freshClaim(`race-${i}`);
-        const [a, b] = await raceTwoClients(
-          ctx.app.prisma,
-          second.prisma,
-          register(SIGN_IN_PROVIDER, claim),
-          register(OTHER_PROVIDER, claim),
-        );
-        const winner = a.kind === "tenant" ? a : b.kind === "tenant" ? b : null;
-        if (!winner || winner.kind !== "tenant") {
-          throw new Error(`iteration ${i}: no registration won (${a.kind}, ${b.kind})`);
-        }
-        ctx.trackTenant(winner.id);
+        const created = new Set<string>();
         try {
+          const settled = await raceTwoClients(
+            ctx.app.prisma,
+            second.prisma,
+            register(SIGN_IN_PROVIDER, claim),
+            register(OTHER_PROVIDER, claim),
+          );
+          for (const side of settled) {
+            if (side.status === "fulfilled" && side.value.kind === "tenant") created.add(side.value.id);
+          }
+          const rejected = settled.find((side) => side.status === "rejected");
+          if (rejected) {
+            // The side that failed may still have committed before throwing.
+            const rows = await ctx.su.prisma.tenantClaim.findMany({ where: { claim }, select: { tenantId: true } });
+            for (const row of rows) created.add(row.tenantId);
+          }
+          for (const id of created) ctx.trackTenant(id);
+          if (rejected) throw rejected.reason;
+
+          const [a, b] = settled.map((side) => (side as PromiseFulfilledResult<ClaimTenantResolution>).value);
+          const winner = a.kind === "tenant" ? a : b.kind === "tenant" ? b : null;
+          if (!winner || winner.kind !== "tenant") {
+            throw new Error(`iteration ${i}: no registration won (${a.kind}, ${b.kind})`);
+          }
           const loser = winner === a ? b : a;
           const winnerProvider = winner === a ? SIGN_IN_PROVIDER : OTHER_PROVIDER;
+          wins[winnerProvider]++;
           expect(loser).toEqual({
             kind: "claim_provider_mismatch",
             tenantId: winner.id,
@@ -515,9 +537,14 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           expect(await ctx.su.prisma.tenant.count({ where: { name: claim } })).toBe(1);
           expect(await ctx.su.prisma.tenantClaimEvent.count({ where: { claim } })).toBe(1);
         } finally {
-          await ctx.deleteTestData(winner.id);
+          for (const id of created) await ctx.deleteTestData(id);
         }
       }
+
+      // Both providers won at least once: a run in which one side always wins
+      // is a serial run, and the end-state checks above hold for that too.
+      expect(wins[SIGN_IN_PROVIDER]).toBeGreaterThan(0);
+      expect(wins[OTHER_PROVIDER]).toBeGreaterThan(0);
     });
   });
 

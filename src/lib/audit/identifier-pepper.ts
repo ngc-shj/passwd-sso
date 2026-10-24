@@ -117,14 +117,17 @@ export function findProviderRefCollision(
 /**
  * Boot refusal over the configured claim-provider set: every id's ref must be
  * distinct. Nothing to check without a pepper, because no ref is stored then.
+ * `refOf` is a test seam: a real 64-bit collision cannot be constructed, so a
+ * test forces one to drive the refusal.
  */
 export function assertDistinctProviderRefs(
   providerIds: readonly string[],
   pepper: Buffer | null,
+  refOf: (providerId: string, pepper: Buffer) => string = providerRef,
 ): void {
   if (pepper === null) return;
   const collision = findProviderRefCollision(
-    providerIds.map((id) => ({ id, ref: providerRef(id, pepper) })),
+    providerIds.map((id) => ({ id, ref: refOf(id, pepper) })),
   );
   if (collision) {
     throw new Error(

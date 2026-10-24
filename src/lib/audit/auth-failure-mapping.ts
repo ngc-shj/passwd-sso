@@ -15,7 +15,7 @@ import type {
   AuthLoginFailureReason,
   AuthProvider,
 } from "@/lib/audit/auth-failure";
-import { isJacksonProviderId } from "@/lib/auth/jackson-providers";
+import { GOOGLE_PROVIDER_ID, isJacksonProviderId, JACKSON_LEGACY_PROVIDER_ID } from "@/lib/auth/jackson-providers";
 
 /** The refusal arms of `findOrCreateTenantForClaim` — everything but a tenant. */
 export type ClaimResolutionRefusalKind = Exclude<ClaimTenantResolution["kind"], "tenant">;
@@ -172,10 +172,10 @@ export const CLAIM_REFUSAL_REASON = {
 // own list was silently untested, which is the same per-sample-versus-derived
 // split T9 fixed for the unsafe-character ranges.
 export const AUDIT_PROVIDER_BY_ID = {
-  google: "google",
+  [GOOGLE_PROVIDER_ID]: "google",
   nodemailer: "nodemailer",
   "boxyhq-saml": "saml",
-  "saml-jackson": "saml",
+  [JACKSON_LEGACY_PROVIDER_ID]: "saml",
   credentials: "credentials",
 } as const satisfies Record<string, AuthProvider>;
 

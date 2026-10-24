@@ -19,7 +19,7 @@
  * copy's rows. Bind files are written under `os.tmpdir()`, never the worktree,
  * except the refusal cells, which assert that nothing was created.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -834,6 +834,9 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
     ])("refuses %s, creating nothing", async (_label, target) => {
       stubProviders(TWO_CONNECTIONS);
       const file = target();
+      // Every target resolves into the real repository: registered before the
+      // call, so a regression that writes the file cannot leave it there.
+      onTestFinished(() => rmSync(file, { force: true }));
       const result = await cmdBindFromMembers({ out: file });
       expect(result).toMatchObject({ ok: false });
       expect(result.message).toContain("inside the git worktree");

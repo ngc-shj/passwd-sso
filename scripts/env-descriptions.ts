@@ -1,4 +1,5 @@
 import type { envObject } from "@/lib/env-schema";
+import { CONNECTION_ID_PATTERN } from "@/lib/auth/jackson-providers";
 import type { z } from "zod";
 
 // T22: enumerated groups — typos become compile errors.
@@ -203,7 +204,7 @@ export const descriptions: Record<
       '[{"id":"acme","name":"Acme SSO","clientId":"...","clientSecret":"..."}].\n' +
       "Each entry signs in as provider 'saml-jackson-<id>' with that connection's\n" +
       "own client id and secret; the connection's redirectUrl must allow\n" +
-      "/api/auth/callback/saml-jackson-<id>. id: ^[a-z0-9-]{1,32}$, unique, and\n" +
+      `/api/auth/callback/saml-jackson-<id>. id: ${CONNECTION_ID_PATTERN}, unique, and\n` +
       "immutable (renaming it orphans the accounts signed in through it).\n" +
       "May coexist with AUTH_JACKSON_ID/AUTH_JACKSON_SECRET (provider 'saml-jackson').\n" +
       "Refused: the 'dummy' client, tenant/product-encoded client ids, 'fed_' ids,\n" +

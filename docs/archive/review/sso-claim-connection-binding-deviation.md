@@ -46,3 +46,63 @@
 - `src/__tests__/infra/ecs-secrets.test.ts` turns `enable_jackson_connections` on in its all-toggles-on evaluation, so the new key is held to the `infra/terraform` README secret tables. Both tables gained the row.
 - Exposure review (runbook step 3) uses `list`, `list --unbound` (its `members=` column is the members' account providers) and `history`, not raw SQL. Those are the commands the CLI already offers for it.
 - The probe is documented by pointing at the `jackson-probe` CI job and its matrix, not as a docker command line, because this batch may not start containers to verify one.
+
+### D7 — Red proofs
+Each mutation ran on a scratch copy (D5's layout), never on the real tree, and the mutated file was restored after its run. A mutation counts only when the listed tests passed unmutated in the same copy first. B2 and B3 are copied from their batch reports. B1, B4 and the Phase 2 R-check fixes were run for this record.
+
+**B2** (the B2 report does not name the unmutated run per mutation, so none is recorded here)
+
+| Mutation | Tests that went red |
+|----------|---------------------|
+| M1 mismatch allowed | unit 3 (adjudicator arm, resolver, creator); integration 4 (strict bound-other ×2 paths, no-pepper cell, race) |
+| M2 NULL matched in strict | unit 3; integration 3 (strict unbound ×2 paths, forced-strict fresh-module cell) |
+| M3 provider dropped in `createUser` | integration missing-provider cell. Unit initially survived through a leftover session-meta mock; both C5 unit tests were tightened to pin the refusing arm, and unit fails too after that |
+| M3b producer drops `store.provider` | unit "stores tenant claim…" |
+| M4 provider replaced by a constant | unit 3; integration 7 (strict bound-same, both registration cells, warn cells, C5 allows) |
+| M5 ref replaced by raw id | unit 4; integration 5 |
+| M6 prefix compare instead of distinctness | unit shared-prefix allow test |
+| M7 HKDF info changed | golden vectors 4 |
+| M7b floor changed | golden vectors 4 |
+
+**B3** (unmutated: `scripts/__tests__/tenant-domain-binding.test.ts` and `tenant-claim-cli-binding.integration.test.ts`, the two files its mutation script ran)
+
+| Mutation | Tests that went red |
+|----------|---------------------|
+| M1 escape removed from TSV writer | unit 3 (newline/tab/bidi `created_by`); integration 3, the same `--out` cells |
+| M2 majority `>=` half | unit `isMajority` 1/2 and 2/4; integration "exactly half is refused; half plus one is allowed" |
+| M3a rebind CAS without provider | integration "a concurrent rebind while the operator reads is a CAS refusal" |
+| M3b re-point CAS without provider | integration "re-point: a concurrent change of the provider alone is a refusal" |
+| M3c unrevoke CAS without provider | integration "unrevoke: a concurrent change of the provider alone is a refusal" |
+| M4 worktree check by string prefix | unit symlinked-parent and missing-parent cells; integration "refuses a symlinked parent, creating nothing" |
+| M5 `--apply` skips evidence comparison | integration partial-failure cell |
+| M6 ref mapping keyed by raw id | unit "maps the ref the app stores back…"; integration unmapped "…app and CLI refs agree" |
+| post-B5: implicit-reassign hint without the binding flag (on the B3 copy) | integration "refuses a domain already owned by a different tenant…" |
+
+**B1** (unmutated: `src/auth.config.jackson-wire.test.ts` 11/11, `src/lib/auth/jackson-providers.test.ts` 136/136)
+
+| Mutation | Tests that went red |
+|----------|---------------------|
+| `pkce` added to the Jackson providers' `checks` | wire 9/11: all three cells (no `code_challenge`; own Basic credentials and no `code_verifier`; no `code_verifier` with a Google PKCE cookie) × `saml-jackson`, `saml-jackson-a`, `saml-jackson-b` |
+| the two `AUTH_JACKSON_CONNECTIONS` entries' client secrets swapped in the provider build | wire 4/11: own-credentials and Google-cookie cells for `saml-jackson-a` and `saml-jackson-b` (the legacy provider keeps its own secret, so its cells stay green) |
+| provider puts a `code_verifier` on the token request (a `customFetch` that sets one) | wire 6/11: own-credentials and Google-cookie cells × all three providers |
+| `isJacksonProviderId` as a prefix predicate | jackson-providers 5: rejects `"saml-jackson-"`, `"saml-jackson-a "`, `"saml-jackson-b"`, `"saml-jacksonx"`, and the legacy id when only entries are configured |
+| `deriveClaimBindingMode` returns `configured ?? OFF` without the ≥2 → strict arm | jackson-providers 3: "derives strict" for Google + Jackson off, Google + Jackson unset, two Jackson entries unset |
+| boot check accepts `off` with ≥2 providers | jackson-providers 1: Google + Jackson, off — "refuses to boot on AUTH_CLAIM_BINDING" |
+
+**B4** (unmutated: `scripts/__tests__/jackson-probe-images.test.mjs` 6/6)
+
+| Mutation | Tests that went red |
+|----------|---------------------|
+| matrix entry bumped to `1.52.3` (version and image tag), so it no longer matches the compose tag | "matrix versions equal the versions the compose file and tfvars examples reference"; "the probe driver image is the matrix entry for the docker-compose.yml version" |
+| matrix image tag `1.42.0` on the `1.52.2` entry | "each matrix image is boxyhq/jackson:<its version>@sha256:<digest>, digests distinct"; the probe driver image cell |
+| the `1.52.2` entry carries the `1.42.0` digest | the image/digest-distinct cell; the probe driver image cell |
+
+**Phase 2 R-check fixes** (unmutated: the race cell of `tenant-claim-binding.integration.test.ts`, 1 passed; `src/lib/audit/identifier-pepper.test.ts` 15/15)
+
+| Mutation | Tests that went red |
+|----------|---------------------|
+| `advisoryXactLock` removed from `findOrCreateTenantForClaim` | integration "one tenant, one binding; the loser gets claim_provider_mismatch" (the losing side hit `tenant_claims_claim_key`; no `bind-race-*` tenant or claim row was left in the dev DB) |
+| collision throw removed from `assertDistinctProviderRefs` | unit "refuses at boot when a pepper is configured, naming both providers" |
+| `pepper === null` early return removed | unit "is not checked without a pepper, because no ref is stored then"; unit "the boot assertion passes for real refs of distinct ids, and is skipped without a pepper" |
+
+Unmutated, the race cell won 37/13, 31/19, 24/26, 14/36 and 24/26 (`saml-jackson-alpha`/`saml-jackson-bravo`) over five runs, so its at-least-one-win-each assertion is not flaky.

@@ -397,7 +397,7 @@ export async function findOrCreateTenantForClaim(
       data: {
         name: tenantClaim,
         slug: tenantSlug,
-        claims: { create: { claim, createdBy: "signin", provider: signInProvider } },
+        claims: { create: { claim, createdBy: SIGNIN_ACTOR_LABEL, provider: signInProvider } },
       },
       select: { id: true },
     });
@@ -416,7 +416,7 @@ export async function findOrCreateTenantForClaim(
       data: {
         name: tenantClaim,
         slug: `${tenantSlug.slice(0, SLUG_MAX_LENGTH - suffix.length - 1)}-${suffix}`,
-        claims: { create: { claim, createdBy: "signin", provider: signInProvider } },
+        claims: { create: { claim, createdBy: SIGNIN_ACTOR_LABEL, provider: signInProvider } },
       },
       select: { id: true },
     });

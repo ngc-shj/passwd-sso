@@ -133,4 +133,19 @@ describe("provider ref distinctness", () => {
     expect(() => assertDistinctProviderRefs(ids, Buffer.from(GOLDEN_PEPPER, "utf8"))).not.toThrow();
     expect(() => assertDistinctProviderRefs(ids, null)).not.toThrow();
   });
+
+  describe("with a forced ref collision", () => {
+    const ids = ["saml-jackson-a", "saml-jackson-b"];
+    const collidingRef = () => "aaaa0000aaaa0000";
+
+    it("refuses at boot when a pepper is configured, naming both providers", () => {
+      expect(() => assertDistinctProviderRefs(ids, Buffer.from(GOLDEN_PEPPER, "utf8"), collidingRef)).toThrow(
+        /"saml-jackson-a" and "saml-jackson-b" have the same audit reference/,
+      );
+    });
+
+    it("is not checked without a pepper, because no ref is stored then", () => {
+      expect(() => assertDistinctProviderRefs(ids, null, collidingRef)).not.toThrow();
+    });
+  });
 });

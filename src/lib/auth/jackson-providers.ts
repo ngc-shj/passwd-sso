@@ -40,7 +40,9 @@ export function isProviderIdShape(id: string): boolean {
   return PROVIDER_ID_RE.test(id);
 }
 
-const CONNECTION_ID_RE = /^[a-z0-9-]{1,32}$/;
+/** Shape of an AUTH_JACKSON_CONNECTIONS entry id; env-descriptions.ts quotes it. */
+export const CONNECTION_ID_PATTERN = "^[a-z0-9-]{1,32}$";
+const CONNECTION_ID_RE = new RegExp(CONNECTION_ID_PATTERN);
 const CONNECTION_NAME_MAX_LENGTH = 64;
 const CONNECTION_ENTRY_KEYS = ["id", "name", "clientId", "clientSecret"] as const;
 
@@ -220,7 +222,7 @@ export function parseJacksonProviders(env: ProviderEnv = process.env): JacksonPr
     parseConnectionEntries(rawConnections).forEach((entry, index) => {
       const at = `AUTH_JACKSON_CONNECTIONS[${index}]`;
       if (!CONNECTION_ID_RE.test(entry.id)) {
-        throw new ProviderConfigError(at, "id must match ^[a-z0-9-]{1,32}$");
+        throw new ProviderConfigError(at, `id must match ${CONNECTION_ID_PATTERN}`);
       }
       if (seenIds.has(entry.id)) {
         throw new ProviderConfigError(at, `id "${entry.id}" is used by an earlier entry`);

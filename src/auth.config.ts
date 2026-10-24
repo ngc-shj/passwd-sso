@@ -12,6 +12,7 @@ import { MAGIC_LINK_TTL_SEC } from "@/lib/constants/auth/magic-link";
 import { getLogger } from "@/lib/logger";
 import {
   assertClaimBindingBootConfig,
+  GOOGLE_PROVIDER_ID,
   isGoogleProviderConfigured,
   listClaimProviderIds,
   parseJacksonProviders,
@@ -233,7 +234,7 @@ export default {
 
     // Validate domain claim against allowed Google Workspace domains
     async signIn({ account, profile }) {
-      if (account?.provider === "google" && allowedGoogleDomains.length > 0) {
+      if (account?.provider === GOOGLE_PROVIDER_ID && allowedGoogleDomains.length > 0) {
         // Type guard, not a cast (round-4 F7). A cast asserts a shape rather
         // than checking it: a non-string `hd` makes `.toLowerCase()` throw
         // inside the signIn callback instead of denying cleanly. Same class

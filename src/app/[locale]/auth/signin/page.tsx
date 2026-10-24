@@ -28,6 +28,7 @@ import { AppIcon } from "@/components/ui/app-icon";
 import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
 import { parseAllowedGoogleDomains } from "@/lib/url/google-domain";
 import {
+  GOOGLE_PROVIDER_ID,
   isGoogleProviderConfigured,
   parseJacksonProviders,
 } from "@/lib/auth/jackson-providers";
@@ -143,7 +144,7 @@ export default async function SignInPage({
           {hasGoogle && (
             <>
               <SignInButton
-                provider="google"
+                provider={GOOGLE_PROVIDER_ID}
                 label={t("signInWithGoogle")}
                 icon={
                   <svg className="h-5 w-5" viewBox="0 0 24 24">

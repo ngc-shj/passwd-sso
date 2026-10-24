@@ -1,6 +1,7 @@
 import type { Account } from "next-auth";
 import { createHash } from "node:crypto";
 import { claimRefusal, type ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
+import { GOOGLE_PROVIDER_ID } from "@/lib/auth/jackson-providers";
 import { UNSAFE_DISPLAY_CHARS_RE } from "@/lib/security/unsafe-display-chars";
 import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 import { MAX_TENANT_CLAIM_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
@@ -291,7 +292,7 @@ function readClaimKey(
   // on a value. A SAML profile that happens to carry a field named `hd` has
   // asserted nothing this deployment consults, and classifying it as malformed
   // would deny every sign-in from such a profile.
-  if (key.toLowerCase() === GOOGLE_HOSTED_DOMAIN_KEY && account?.provider !== "google") {
+  if (key.toLowerCase() === GOOGLE_HOSTED_DOMAIN_KEY && account?.provider !== GOOGLE_PROVIDER_ID) {
     return ABSENT;
   }
   return sanitizeTenantClaimValue(profile[key]);
