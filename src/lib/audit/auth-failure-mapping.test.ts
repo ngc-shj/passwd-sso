@@ -98,6 +98,14 @@ describe("CLAIM_REFUSAL_REASON", () => {
       // so the operator re-points the `tenant_claims` row rather than creating
       // it.
       claim_system_tenant: "tenant_claim_system_tenant",
+      // C5: the presenting provider was lost or contradicted between the two
+      // callbacks — a deployment fault, like store_unavailable.
+      provider_unavailable: "provider_error",
+      provider_disagreement: "provider_error",
+      // C4: each binding refusal its own reason — `bucketOf` reads the reason,
+      // and both remedies differ from every claim reason above.
+      claim_unbound: "tenant_claim_unbound",
+      claim_provider_mismatch: "tenant_claim_provider_mismatch",
     });
   });
 

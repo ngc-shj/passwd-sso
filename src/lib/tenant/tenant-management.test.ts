@@ -30,7 +30,14 @@ vi.mock("@/lib/tenant-rls", () => ({
   advisoryXactLock: mockAdvisoryXactLock,
 }));
 
-import { findOrCreateTenantForClaim } from "./tenant-management";
+import { findOrCreateTenantForClaim, type ClaimRow } from "./tenant-management";
+import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
+
+const SIGN_IN_PROVIDER = "saml-jackson-a";
+
+function claimRow(row: ClaimRow): ClaimRow {
+  return row;
+}
 
 // findOrCreateTenantForClaim's `db` parameter is REQUIRED (no `= prisma`
 // default — see the doc comment: a default would let the advisory lock run
@@ -48,17 +55,16 @@ describe("findOrCreateTenantForClaim", () => {
   });
 
   it("resolves an already-registered claim via the claim registry, without creating", async () => {
-    mockPrisma.tenantClaim.findUnique.mockResolvedValue({
-      tenantId: "tenant-1",
-      revokedAt: null,
-    });
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(
+      claimRow({ tenantId: "tenant-1", revokedAt: null, provider: SIGN_IN_PROVIDER }),
+    );
 
-    const result = await findOrCreateTenantForClaim("acme.com", db);
+    const result = await findOrCreateTenantForClaim("acme.com", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, db);
 
     expect(result).toEqual({ kind: "tenant", id: "tenant-1" });
     expect(mockPrisma.tenantClaim.findUnique).toHaveBeenCalledWith({
       where: { claim: "acme.com" },
-      select: { tenantId: true, revokedAt: true },
+      select: { tenantId: true, revokedAt: true, provider: true },
     });
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
   });
@@ -67,14 +73,14 @@ describe("findOrCreateTenantForClaim", () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
     mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-new" });
 
-    const result = await findOrCreateTenantForClaim("acme.com", db);
+    const result = await findOrCreateTenantForClaim("acme.com", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, db);
 
     expect(result).toEqual({ kind: "tenant", id: "tenant-new" });
     expect(mockPrisma.tenant.create).toHaveBeenCalledWith({
       data: {
         name: "acme.com",
         slug: "acme-com",
-        claims: { create: { claim: "acme.com", createdBy: "signin" } },
+        claims: { create: { claim: "acme.com", createdBy: "signin", provider: SIGN_IN_PROVIDER } },
       },
       select: { id: true },
     });
@@ -99,14 +105,14 @@ describe("findOrCreateTenantForClaim", () => {
       )
       .mockResolvedValueOnce({ id: "tenant-fallback" });
 
-    const result = await findOrCreateTenantForClaim("acme.com", db);
+    const result = await findOrCreateTenantForClaim("acme.com", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, db);
 
     expect(result).toEqual({ kind: "tenant", id: "tenant-fallback" });
     expect(mockPrisma.tenant.create).toHaveBeenCalledTimes(2);
     const secondCreate = mockPrisma.tenant.create.mock.calls[1][0];
     expect(secondCreate.data.slug).toMatch(/^acme-com-[0-9a-f]{8}$/);
     expect(secondCreate.data.claims).toEqual({
-      create: { claim: "acme.com", createdBy: "signin" },
+      create: { claim: "acme.com", createdBy: "signin", provider: SIGN_IN_PROVIDER },
     });
     // SAVEPOINT, then ROLLBACK TO SAVEPOINT (on the P2002), then RELEASE
     // SAVEPOINT (after the retry succeeds). Asserted by SQL text and by
@@ -146,7 +152,7 @@ describe("findOrCreateTenantForClaim", () => {
     // `if (!tenantClaim)`, so an empty string never reaches this function.
     // A whitespace-only string is truthy but normalises to "", which
     // storableClaimSchema rejects (min length 1).
-    const result = await findOrCreateTenantForClaim(" ", db);
+    const result = await findOrCreateTenantForClaim(" ", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, db);
 
     // Distinct from claim_taken (round-1 M1/M2): this arm is the SC9
     // narrowing, and src/auth.ts maps it to tenant_mismatch, not to
@@ -177,7 +183,7 @@ describe("findOrCreateTenantForClaim", () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
     mockPrisma.tenant.create.mockRejectedValueOnce(new Error("DB down"));
 
-    await expect(findOrCreateTenantForClaim("acme.com", db)).rejects.toThrow(
+    await expect(findOrCreateTenantForClaim("acme.com", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, db)).rejects.toThrow(
       "DB down",
     );
   });
@@ -187,26 +193,25 @@ describe("findOrCreateTenantForClaim", () => {
     mockSlugifyTenant.mockReturnValue("acmecorp");
     mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-nf2" });
 
-    const result = await findOrCreateTenantForClaim("acmecorp", db);
+    const result = await findOrCreateTenantForClaim("acmecorp", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, db);
 
     expect(result).toEqual({ kind: "tenant", id: "tenant-nf2" });
     expect(mockPrisma.tenant.create).toHaveBeenCalledWith({
       data: {
         name: "acmecorp",
         slug: "acmecorp",
-        claims: { create: { claim: "acmecorp", createdBy: "signin" } },
+        claims: { create: { claim: "acmecorp", createdBy: "signin", provider: SIGN_IN_PROVIDER } },
       },
       select: { id: true },
     });
   });
 
   it("calls advisoryXactLock before resolving, keyed on the normalised claim", async () => {
-    mockPrisma.tenantClaim.findUnique.mockResolvedValue({
-      tenantId: "tenant-1",
-      revokedAt: null,
-    });
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(
+      claimRow({ tenantId: "tenant-1", revokedAt: null, provider: SIGN_IN_PROVIDER }),
+    );
 
-    await findOrCreateTenantForClaim("Alias.Example", db);
+    await findOrCreateTenantForClaim("Alias.Example", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, db);
 
     expect(mockAdvisoryXactLock).toHaveBeenCalledWith(db, "tenant-claim:alias.example");
     const lockOrder = mockAdvisoryXactLock.mock.invocationCallOrder[0];
@@ -215,12 +220,11 @@ describe("findOrCreateTenantForClaim", () => {
   });
 
   it("returns claim_taken for a revoked claim row and does not create (D2)", async () => {
-    mockPrisma.tenantClaim.findUnique.mockResolvedValue({
-      tenantId: "tenant-owner",
-      revokedAt: new Date("2026-01-01T00:00:00Z"),
-    });
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(
+      claimRow({ tenantId: "tenant-owner", revokedAt: new Date("2026-01-01T00:00:00Z"), provider: SIGN_IN_PROVIDER }),
+    );
 
-    const result = await findOrCreateTenantForClaim("alias.example", db);
+    const result = await findOrCreateTenantForClaim("alias.example", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, db);
 
     // claim_taken, NOT claim_invalid: src/auth.ts maps this one to
     // tenant_claim_unmapped so `tenant-domain unmapped` can see the lockout.
@@ -232,6 +236,55 @@ describe("findOrCreateTenantForClaim", () => {
     // under the tenant that owns the contested claim.
     expect(result).toEqual({ kind: "claim_taken", tenantId: "tenant-owner" });
     // A revoked row is taken, not "not found" — no create either.
+    expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
+  });
+
+  it("records the presenting provider on the register event", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-new" });
+
+    await findOrCreateTenantForClaim("acme.com", SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.STRICT, db);
+
+    // The event INSERT's bound values: the last two are old/new provider.
+    const eventCall = mockPrisma.$executeRaw.mock.calls.find((c) =>
+      String(c[0][0]).includes("INSERT INTO tenant_claim_events"),
+    );
+    expect(eventCall?.slice(-2)).toEqual([null, SIGN_IN_PROVIDER]);
+  });
+
+  it("strict: returns claim_provider_mismatch for a row bound elsewhere, with no create", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(
+      claimRow({ tenantId: "tenant-owner", revokedAt: null, provider: "saml-jackson-b" }),
+    );
+
+    const result = await findOrCreateTenantForClaim(
+      "acme.com",
+      SIGN_IN_PROVIDER,
+      CLAIM_BINDING_MODE.STRICT,
+      db,
+    );
+
+    expect(result).toEqual({
+      kind: "claim_provider_mismatch",
+      tenantId: "tenant-owner",
+      boundProvider: "saml-jackson-b",
+    });
+    expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
+  });
+
+  it("strict: returns claim_unbound for a NULL row, with no create", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(
+      claimRow({ tenantId: "tenant-owner", revokedAt: null, provider: null }),
+    );
+
+    const result = await findOrCreateTenantForClaim(
+      "acme.com",
+      SIGN_IN_PROVIDER,
+      CLAIM_BINDING_MODE.STRICT,
+      db,
+    );
+
+    expect(result).toEqual({ kind: "claim_unbound", tenantId: "tenant-owner", boundProvider: null });
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
   });
 });

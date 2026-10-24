@@ -13,6 +13,7 @@ import {
   findOrCreateTenantForClaim,
   refusalFromLookup,
   claimRefusalOf,
+  providerBindingOf,
   type ClaimTenantResolution,
   type ClaimLookup,
 } from "@/lib/tenant/tenant-management";
@@ -31,7 +32,9 @@ import { realignmentBySignIn, realignToMembershipInTx } from "@/lib/tenant/tenan
 import {
   emitAuthLoginFailure,
   type AuthLoginFailureReason,
+  type ProviderBindingAudit,
 } from "@/lib/audit/auth-failure";
+import { deriveClaimBindingMode, type ClaimBindingMode } from "@/lib/auth/jackson-providers";
 // Shared with the adapter's first-ever-sign-in refusal site, which classifies
 // the same refusal arms (see that module's header for why it is not hosted in
 // either of the two files that use it).
@@ -74,14 +77,21 @@ export async function assertBootstrapSingleMember(
 // shape. The reason is instead carried out of withBypassRls (it is generic
 // over the callback's return, src/lib/tenant-rls.ts:54) and
 // emitAuthLoginFailure stays at the signIn callback, post-transaction.
+type SignInRefusalReason = Extract<
+  AuthLoginFailureReason,
+  | "tenant_mismatch"
+  | "tenant_claim_unmapped"
+  | "tenant_claim_system_tenant"
+  | "tenant_claim_unbound"
+  | "tenant_claim_provider_mismatch"
+  | "provider_error"
+>;
+
 export type SignInTenantResult =
   | { ok: true }
   | {
       ok: false;
-      reason: Extract<
-        AuthLoginFailureReason,
-        "tenant_mismatch" | "tenant_claim_unmapped" | "tenant_claim_system_tenant"
-      >;
+      reason: SignInRefusalReason;
       tenantId: string | null;
       /** The value the IdP asserted, or null when it asserted nothing usable. */
       claim: string | null;
@@ -106,6 +116,12 @@ export type SignInTenantResult =
        * a comment (SEC-R6-3).
        */
       claimRefusal: ClaimRefusalDiagnosis | null;
+      /**
+       * The binding refusals' `boundProvider` and `signInProviderRef`
+       * (`providerBindingOf`); null on every other arm. Required, so each arm
+       * states which it is.
+       */
+      providerBinding: ProviderBindingAudit | null;
     };
 
 /**
@@ -178,10 +194,7 @@ function lookupOwnerId(lookup: ClaimLookup): string | null {
  */
 function lookupRefusalReason(
   lookup: Exclude<ClaimLookup, { kind: "tenant" }>,
-): Extract<
-  AuthLoginFailureReason,
-  "tenant_mismatch" | "tenant_claim_unmapped" | "tenant_claim_system_tenant"
-> {
+): SignInRefusalReason {
   // The reported production bug: the IdP is sending a claim this deployment has
   // not registered, and registering it IS the remedy. Every other arm reads the
   // shared table through the shared mapping.
@@ -201,6 +214,15 @@ function lookupRefusalDiagnosis(
   return claimRefusalOf(refusalFromLookup(lookup));
 }
 
+/** The binding audit fields a refusing lookup carries, where its arm has them. */
+function lookupProviderBinding(
+  lookup: Exclude<ClaimLookup, { kind: "tenant" }>,
+  signInProvider: string,
+): ProviderBindingAudit | null {
+  if (lookup.kind === "unregistered") return null;
+  return providerBindingOf(refusalFromLookup(lookup), signInProvider);
+}
+
 /**
  * Rows 4/8 and 6/9a: the tenant this sign-in should join, or the refusal that
  * stops it.
@@ -214,17 +236,27 @@ function lookupRefusalDiagnosis(
 async function resolveTargetTenant(
   lookup: ClaimLookup,
   tenantClaim: string,
+  signInProvider: string,
+  mode: ClaimBindingMode,
   db: TxOrPrisma,
 ): Promise<ClaimTenantResolution> {
   if (lookup.kind === "tenant") return { kind: "tenant", id: lookup.id };
-  if (lookup.kind === "unregistered") return findOrCreateTenantForClaim(tenantClaim, db);
+  if (lookup.kind === "unregistered") {
+    return findOrCreateTenantForClaim(tenantClaim, signInProvider, mode, db);
+  }
   return refusalFromLookup(lookup);
 }
 
+/**
+ * `account` is required (C5): its `provider` is the presenting provider the
+ * claim binding is decided against. `null` stays expressible because Auth.js
+ * types the callback's account that way; a claim arriving with no account is
+ * refused, never resolved as if unbound.
+ */
 export async function ensureTenantMembershipForSignIn(
   userId: string,
-  account?: Account | null,
-  profile?: Record<string, unknown> | null,
+  account: Account | null,
+  profile: Record<string, unknown> | null,
 ): Promise<SignInTenantResult> {
   const extraction = extractTenantClaimValue(account, profile);
   if (extraction.kind !== "claim") {
@@ -263,6 +295,7 @@ export async function ensureTenantMembershipForSignIn(
           tenantId: null,
           claim: null,
           claimRefusal: diagnosis,
+          providerBinding: null,
         };
       }
       throw error;
@@ -279,6 +312,7 @@ export async function ensureTenantMembershipForSignIn(
         // imitate it (round-5 S2).
         claim: null,
         claimRefusal: diagnosis,
+        providerBinding: null,
       };
     }
 
@@ -288,8 +322,28 @@ export async function ensureTenantMembershipForSignIn(
   }
   const tenantClaim = extraction.value;
 
+  const signInProvider = account?.provider;
+  if (!signInProvider) {
+    getLogger().error({ userId }, "auth.signin.claim_without_provider");
+    return {
+      ok: false,
+      reason: CLAIM_REFUSAL_REASON.provider_unavailable,
+      tenantId: null,
+      claim: tenantClaim,
+      claimRefusal: null,
+      providerBinding: null,
+    };
+  }
+
   try {
-    return await claimedTenantMembership(userId, tenantClaim);
+    // Derived per sign-in, not cached: the mode follows the env the process
+    // was started with, and tests select it by stubbing that env.
+    return await claimedTenantMembership(
+      userId,
+      tenantClaim,
+      signInProvider,
+      deriveClaimBindingMode(),
+    );
   } catch (error) {
     // The claim resolved to SYSTEM_TENANT_ID and a CHECK refused the write
     // (CF13). Two writers below can reach it: the `tenantMember.upsert` on the
@@ -336,6 +390,7 @@ export async function ensureTenantMembershipForSignIn(
       // while every unit assertion passed.
       claim: tenantClaim,
       claimRefusal: null,
+      providerBinding: null,
     };
   }
 }
@@ -343,6 +398,8 @@ export async function ensureTenantMembershipForSignIn(
 async function claimedTenantMembership(
   userId: string,
   tenantClaim: string,
+  signInProvider: string,
+  mode: ClaimBindingMode,
 ): Promise<SignInTenantResult> {
   return withBypassRls(prisma, async (tx) => {
     // Both lookups run inside this single withBypassRls callback, in this
@@ -363,7 +420,7 @@ async function claimedTenantMembership(
     // with no app.tenant_id set: tenantMember.findMany would return zero
     // rows and every deny below would silently become an allow — a
     // cross-tenant fail-open.
-    const lookup = await resolveTenantByClaim(tenantClaim, tx);
+    const lookup = await resolveTenantByClaim(tenantClaim, signInProvider, mode, tx);
     const existingTenantId = await resolveUserTenantIdFromClient(prisma, userId);
     // The claim's owner where the lookup knows one (`revoked`) — derived from
     // the arms through refusalFromLookup, not from whichever arm a finding
@@ -374,7 +431,7 @@ async function claimedTenantMembership(
     if (existingTenantId === null) {
       // Rows 4 / 8: no existing membership. Join the claimed tenant,
       // creating it first if this is the first sign-in to see this claim.
-      const target = await resolveTargetTenant(lookup, tenantClaim, tx);
+      const target = await resolveTargetTenant(lookup, tenantClaim, signInProvider, mode, tx);
       if (target.kind !== "tenant") {
         // Row 8b: the claim is unusable, so there is no tenant to join. The
         // reason distinguishes the refusals (see CLAIM_REFUSAL_REASON) —
@@ -387,6 +444,7 @@ async function claimedTenantMembership(
           tenantId: refusalTenantId(target, null),
           claim: tenantClaim,
           claimRefusal: claimRefusalOf(target),
+          providerBinding: providerBindingOf(target, signInProvider),
         };
       }
 
@@ -475,6 +533,8 @@ async function claimedTenantMembership(
         tenantId: refusalTenantId({ tenantId: claimOwnerId }, existingTenantId),
         claim: tenantClaim,
         claimRefusal: lookup.kind === "tenant" ? null : lookupRefusalDiagnosis(lookup),
+        providerBinding:
+          lookup.kind === "tenant" ? null : lookupProviderBinding(lookup, signInProvider),
       };
     }
 
@@ -485,7 +545,7 @@ async function claimedTenantMembership(
     // the claim is unresolved would regress the primary bootstrap->SSO
     // onboarding path (a magic-link user's first Google sign-in) into a hard
     // denial of the same NF2 shape as the bug this PR fixes.
-    const target = await resolveTargetTenant(lookup, tenantClaim, tx);
+    const target = await resolveTargetTenant(lookup, tenantClaim, signInProvider, mode, tx);
     if (target.kind !== "tenant") {
       // Same refusal dispatch as row 8b, reached via the bootstrap branch.
       return {
@@ -494,6 +554,7 @@ async function claimedTenantMembership(
         tenantId: refusalTenantId(target, existingTenantId),
         claim: tenantClaim,
         claimRefusal: claimRefusalOf(target),
+        providerBinding: providerBindingOf(target, signInProvider),
       };
     }
 
@@ -821,7 +882,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             });
             return false;
           }
+          // Set together (C5): createUser decides the binding against this
+          // provider, and refuses a claim that arrives without one.
           store.tenantClaim = extraction.value;
+          store.provider = provider ?? null;
         }
         return true;
       }
@@ -829,7 +893,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       try {
         const result = await ensureTenantMembershipForSignIn(
           userId,
-          params.account,
+          params.account ?? null,
           (params.profile ?? null) as Record<string, unknown> | null,
         );
         if (!result.ok) {
@@ -841,6 +905,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             userId,
             claim: result.claim,
             claimRefusal: result.claimRefusal,
+            providerBinding: result.providerBinding,
           });
         }
         return result.ok;

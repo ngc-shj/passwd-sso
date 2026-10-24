@@ -281,9 +281,16 @@ export function isJacksonProviderId(id: string, env: ProviderEnv = process.env):
   return parseJacksonProviders(env).some((provider) => provider.id === id);
 }
 
-/** Providers whose sign-ins can present a tenant claim: Google and every Jackson provider. */
+/** Provider ids whose sign-ins can present a tenant claim: Google and every Jackson provider. */
+export function listClaimProviderIds(env: ProviderEnv = process.env): string[] {
+  return [
+    ...(isGoogleProviderConfigured(env) ? [GOOGLE_PROVIDER_ID] : []),
+    ...parseJacksonProviders(env).map((provider) => provider.id),
+  ];
+}
+
 export function countClaimProviders(env: ProviderEnv = process.env): number {
-  return (isGoogleProviderConfigured(env) ? 1 : 0) + parseJacksonProviders(env).length;
+  return listClaimProviderIds(env).length;
 }
 
 function configuredClaimBindingMode(env: ProviderEnv): ClaimBindingMode | undefined {

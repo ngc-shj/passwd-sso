@@ -2188,7 +2188,7 @@ describe("tenant-domain CLI (C7)", () => {
           expect(result.message).toContain(`in the last ${DEFAULT_UNMAPPED_WINDOW_DAYS} days`);
           // All three counts, and the two new populations are non-zero — a
           // summary that merged them would not distinguish these numbers.
-          expect(result.message).toMatch(/[1-9]\d* unmapped-claim, [1-9]\d* other-tenant and [1-9]\d* refused-claim/);
+          expect(result.message).toMatch(/[1-9]\d* unmapped-claim, [1-9]\d* other-tenant, [1-9]\d* refused-claim and \d+ provider-binding/);
 
           // ─── Round-6 T3: the print GROUPS ────────────────────────────────
           //
@@ -2495,7 +2495,7 @@ describe("tenant-domain CLI (C7)", () => {
 
     it("formatUnmappedMessage summarises a non-empty result and names the requested window", () => {
       const message = formatUnmappedMessage([unmappedRow({ cnt: 3 })], 90);
-      expect(message).toContain("1 unmapped-claim, 0 other-tenant and 0 refused-claim");
+      expect(message).toContain("1 unmapped-claim, 0 other-tenant, 0 refused-claim and 0 provider-binding");
       expect(message).toContain("in the last 90 days");
       expect(message).not.toContain("No unmapped-claim denials");
       // Nothing undelivered — the degraded-delivery sentence must not appear,
@@ -2526,12 +2526,25 @@ describe("tenant-domain CLI (C7)", () => {
         ],
         30,
       );
-      expect(message).toContain("1 unmapped-claim, 2 other-tenant and 2 refused-claim");
+      expect(message).toContain("1 unmapped-claim, 2 other-tenant, 2 refused-claim and 0 provider-binding");
     });
 
     it("formatUnmappedMessage says zero refused groups rather than omitting the count", () => {
       const message = formatUnmappedMessage([unmappedRow({})], 30);
-      expect(message).toContain("0 other-tenant and 0 refused-claim denial group(s)");
+      expect(message).toContain(
+        "0 other-tenant, 0 refused-claim and 0 provider-binding denial group(s)",
+      );
+    });
+
+    it("formatUnmappedMessage counts provider-binding denials under their own heading", () => {
+      const message = formatUnmappedMessage(
+        [
+          unmappedRow({ claim: "alias.example", reason: "tenant_claim_unbound" }),
+          unmappedRow({ claim: "beta.example", reason: "tenant_claim_provider_mismatch" }),
+        ],
+        30,
+      );
+      expect(message).toContain("0 unmapped-claim, 0 other-tenant, 0 refused-claim and 2 provider-binding");
     });
 
     it("formatUnmappedMessage reports undelivered outbox events as degraded delivery", () => {
@@ -2542,7 +2555,7 @@ describe("tenant-domain CLI (C7)", () => {
         ],
         30,
       );
-      expect(message).toContain("2 unmapped-claim, 0 other-tenant and 0 refused-claim");
+      expect(message).toContain("2 unmapped-claim, 0 other-tenant, 0 refused-claim and 0 provider-binding");
       expect(message).toContain("in the last 30 days");
       // Summed across groups, not per-row: the operator is being told how
       // many denial events will never reach audit_logs on their own.

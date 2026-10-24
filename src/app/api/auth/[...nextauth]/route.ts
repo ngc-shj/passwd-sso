@@ -49,7 +49,7 @@ function withSessionMeta<H extends RouteHandler>(handler: H): H {
   const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
     const meta = extractRequestMeta(request);
     return sessionMetaStorage.run(meta, () =>
-      tenantClaimStorage.run({ tenantClaim: null }, () =>
+      tenantClaimStorage.run({ tenantClaim: null, provider: null }, () =>
         handler(request, ...rest),
       ),
     );

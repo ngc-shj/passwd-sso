@@ -1,5 +1,5 @@
 /**
- * `tenant-domain unmapped`'s three populations, and the mapping from a sign-in
+ * `tenant-domain unmapped`'s four populations, and the mapping from a sign-in
  * refusal ARM onto the population it lands in.
  *
  * In its own module for the same reason as `tenant-domain-flags.ts`: it is pure,
@@ -42,6 +42,11 @@ export const UNMAPPED_BUCKET = {
   OTHER_TENANT: "other_tenant",
   /** This deployment refused the value; `add` cannot register it. */
   REFUSED: "refused",
+  /**
+   * Strict binding refused the presenting provider: the claim's row is unbound,
+   * or bound to another provider (plan sso-claim-connection-binding, C4).
+   */
+  PROVIDER_BINDING: "provider_binding",
 } as const;
 
 export type UnmappedBucket = (typeof UNMAPPED_BUCKET)[keyof typeof UNMAPPED_BUCKET];
@@ -56,7 +61,29 @@ export const UNMAPPED_SELECTED_REASONS = [
   "tenant_claim_unmapped",
   "tenant_mismatch",
   "tenant_claim_system_tenant",
+  "tenant_claim_unbound",
+  "tenant_claim_provider_mismatch",
 ] as const;
+
+export type UnmappedSelectedReason = (typeof UNMAPPED_SELECTED_REASONS)[number];
+
+/**
+ * The bucket of a selected row that carries NO refusal diagnosis, per reason —
+ * a full table over the selected reasons rather than a membership test with an
+ * else-branch, so a reason added to the selection cannot compile without its
+ * heading. A row WITH a diagnosis is REFUSED whatever its reason (`bucketOf`).
+ *
+ * `tenant_mismatch` is OTHER_TENANT here because its diagnosis-carrying arms
+ * (`claim_invalid`, `claim_malformed`) never reach this table; the check below
+ * holds every other declared arm to it.
+ */
+export const REASON_BUCKET = {
+  tenant_claim_unmapped: UNMAPPED_BUCKET.UNREGISTERED,
+  tenant_mismatch: UNMAPPED_BUCKET.OTHER_TENANT,
+  tenant_claim_system_tenant: UNMAPPED_BUCKET.UNREGISTERED,
+  tenant_claim_unbound: UNMAPPED_BUCKET.PROVIDER_BINDING,
+  tenant_claim_provider_mismatch: UNMAPPED_BUCKET.PROVIDER_BINDING,
+} as const satisfies Record<UnmappedSelectedReason, UnmappedBucket>;
 
 /** The three fields of an audit row that decide its bucket. */
 export type BucketInput = {
@@ -68,40 +95,36 @@ export type BucketInput = {
 /**
  * Derived from the row rather than from `reason` alone.
  *
+ * A reason outside the selection throws: the query binds
+ * `UNMAPPED_SELECTED_REASONS`, so one arriving here means the two have come
+ * apart, and filing it under some default heading would name a remedy for a
+ * population nobody classified.
+ *
  * `claim_refusal` is the discriminator because it is the one field an IdP cannot
  * forge: it is written only by this deployment's own refusal adjudicators, while
  * anything inside `claim` was supplied by the IdP and can be made to look like
  * whatever a runbook tells the reader to trust (round-5 S2 / D-41).
  *
- * The second branch is a membership test over `REFUSAL_BUCKET`, not a comparison
- * against one arm's reason. Two things follow, and both were defects at some
- * point in this branch's history:
- *
- *   - `REFUSAL_BUCKET` stops being decorative. It was referenced only by its own
- *     test, so a declaration there decided nothing and CF13's arm could have
- *     been added to it while `bucketOf` kept returning `OTHER_TENANT`.
- *   - the membership is over `bucket === UNREGISTERED`, NOT over
- *     `REFUSAL_BUCKET[kind] !== null`. The looser form pulls in `claim_invalid`
- *     and `claim_malformed`, whose reason is `tenant_mismatch` — the reason the
- *     resolved-elsewhere population also carries — and would move every genuine
- *     "registered to a different tenant" denial under the wrong heading. That is
- *     round-5 F1/S3, and it is reachable only from the else-branch because those
- *     two arms always carry a `claim_refusal` and never get here.
+ * Before the table, the second branch was a membership test derived from
+ * `REFUSAL_BUCKET`, with OTHER_TENANT as its else-branch: correct for the
+ * reasons it knew, and a silent OTHER_TENANT for any reason added later.
  */
 export function bucketOf(row: BucketInput): UnmappedBucket {
   if (row.claim_refusal !== null) return UNMAPPED_BUCKET.REFUSED;
-  return UNREGISTERED_REASONS.has(row.reason)
-    ? UNMAPPED_BUCKET.UNREGISTERED
-    : RESOLVED_ELSEWHERE_BUCKET;
+  if (!Object.prototype.hasOwnProperty.call(REASON_BUCKET, row.reason)) {
+    throw new Error(`tenant-domain-buckets: reason "${row.reason}" is not one the report selects`);
+  }
+  return REASON_BUCKET[row.reason as UnmappedSelectedReason];
 }
 
 /**
  * Which population each refusal arm lands in, or `null` for an arm this report
  * does not cover.
  *
- * `store_unavailable` is `null` deliberately: it emits `provider_error`, which
- * is a deployment fault rather than a claim problem, so it is outside both the
- * query's reason list and the READMEs' cause table. Stating that as a member of
+ * `store_unavailable` and the two C5 provider-propagation arms are `null`
+ * deliberately: they emit `provider_error`, which is a deployment fault rather
+ * than a claim problem, so it is outside both the query's reason list and the
+ * READMEs' cause table. Stating that as a member of
  * this table — rather than leaving it out — is what makes "not reported" a
  * decision the compiler forced someone to take.
  */
@@ -110,6 +133,10 @@ export const REFUSAL_BUCKET = {
   claim_invalid: UNMAPPED_BUCKET.REFUSED,
   claim_malformed: UNMAPPED_BUCKET.REFUSED,
   store_unavailable: null,
+  provider_unavailable: null,
+  provider_disagreement: null,
+  claim_unbound: UNMAPPED_BUCKET.PROVIDER_BINDING,
+  claim_provider_mismatch: UNMAPPED_BUCKET.PROVIDER_BINDING,
   // The claim IS registered — to the tenant that encodes "no owning tenant".
   // UNREGISTERED because that heading's remedy is `tenant-domain`, which is
   // where the operator has to go: the `tenant_claims` row must be re-pointed at
@@ -172,15 +199,37 @@ export function buildReasonBucketMap(
  * without mutating this module — a guard nobody has watched fail is a guard
  * nobody knows the shape of.
  */
-const REASON_BUCKET = buildReasonBucketMap(REFUSAL_BUCKET, CLAIM_REFUSAL_REASON);
+const REASON_BUCKET_MAP = buildReasonBucketMap(REFUSAL_BUCKET, CLAIM_REFUSAL_REASON);
 
 /**
- * The reasons `bucketOf` files under UNREGISTERED. Derived, so an arm added to
- * `REFUSAL_BUCKET` reaches the report without a second edit here — the missing
- * second edit being what round-4 F3 was.
+ * Holds `REFUSAL_BUCKET` to `REASON_BUCKET`, so the arm table decides something:
+ * every reported arm that carries no diagnosis must land, through its reason,
+ * where it declares, and an arm declared unreported must not have a selected
+ * reason. REFUSED arms are exempt — they always carry a diagnosis and never
+ * reach the table. Parameter-taking for the same reason as the builder above.
  */
-const UNREGISTERED_REASONS: ReadonlySet<string> = new Set(
-  [...REASON_BUCKET.entries()]
-    .filter(([, bucket]) => bucket === UNMAPPED_BUCKET.UNREGISTERED)
-    .map(([reason]) => reason),
-);
+export function assertReasonTableAgrees(
+  reasonBucketMap: ReadonlyMap<string, UnmappedBucket>,
+  refusalBucket: Readonly<Record<string, UnmappedBucket | null>>,
+  reasonOf: Readonly<Record<string, string>>,
+  reasonTable: Readonly<Record<string, UnmappedBucket>>,
+): void {
+  for (const [reason, bucket] of reasonBucketMap) {
+    if (bucket === UNMAPPED_BUCKET.REFUSED) continue;
+    if (reasonTable[reason] !== bucket) {
+      throw new Error(
+        `tenant-domain-buckets: reason "${reason}" is declared "${bucket}" by REFUSAL_BUCKET ` +
+          `but "${reasonTable[reason] ?? "unselected"}" by REASON_BUCKET`,
+      );
+    }
+  }
+  for (const [kind, bucket] of Object.entries(refusalBucket)) {
+    if (bucket === null && Object.prototype.hasOwnProperty.call(reasonTable, reasonOf[kind])) {
+      throw new Error(
+        `tenant-domain-buckets: ${kind} is declared unreported but its reason "${reasonOf[kind]}" is selected`,
+      );
+    }
+  }
+}
+
+assertReasonTableAgrees(REASON_BUCKET_MAP, REFUSAL_BUCKET, CLAIM_REFUSAL_REASON, REASON_BUCKET);

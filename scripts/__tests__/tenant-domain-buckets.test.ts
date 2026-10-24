@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  REASON_BUCKET,
   REFUSAL_BUCKET,
   RESOLVED_ELSEWHERE_BUCKET,
+  assertReasonTableAgrees,
   UNMAPPED_BUCKET,
   UNMAPPED_SELECTED_REASONS,
   bucketOf,
@@ -35,10 +37,16 @@ const CLAIM = "alias.example";
 const UNSTORABLE_REFUSAL = claimRefusal("claim must be printable ASCII");
 
 /** The `ClaimLookup` refusal arms, each with the audit reason it produces. */
-const LOOKUP_ARMS: ReadonlyArray<Exclude<ClaimLookup, { kind: "tenant" } | { kind: "unregistered" }>> = [
-  { kind: "revoked", tenantId: "00000000-0000-4000-a000-000000000001" },
-  { kind: "unstorable", refusal: UNSTORABLE_REFUSAL },
-];
+const OWNER = "00000000-0000-4000-a000-000000000001";
+const LOOKUP_ARMS = {
+  revoked: { kind: "revoked", tenantId: OWNER },
+  unstorable: { kind: "unstorable", refusal: UNSTORABLE_REFUSAL },
+  unbound: { kind: "unbound", tenantId: OWNER },
+  provider_mismatch: { kind: "provider_mismatch", tenantId: OWNER, boundProvider: "saml-jackson-b" },
+} satisfies Record<
+  Exclude<ClaimLookup, { kind: "tenant" } | { kind: "unregistered" }>["kind"],
+  Exclude<ClaimLookup, { kind: "tenant" } | { kind: "unregistered" }>
+>;
 
 describe("tenant-domain unmapped buckets", () => {
   it("declares a bucket for every refusal arm, and no extras", () => {
@@ -52,6 +60,13 @@ describe("tenant-domain unmapped buckets", () => {
       // Not reported: `provider_error` is a deployment fault, outside both the
       // query's reason list and the READMEs' cause table.
       store_unavailable: null,
+      // C5's two provider-propagation faults: `provider_error`, like the above.
+      provider_unavailable: null,
+      provider_disagreement: null,
+      // C4: one heading for both binding refusals — investigate, then bind or
+      // re-point. Neither carries a diagnosis, so this declaration decides it.
+      claim_unbound: UNMAPPED_BUCKET.PROVIDER_BINDING,
+      claim_provider_mismatch: UNMAPPED_BUCKET.PROVIDER_BINDING,
       // CF13. A table key only — never passed as a `claimRefusal` VALUE, since
       // its adjudicator is a PostgreSQL CHECK and a CHECK produces no
       // diagnosis. So `bucketOf`'s first branch cannot fire for it and THIS
@@ -85,7 +100,7 @@ describe("tenant-domain unmapped buckets", () => {
    * through the real `CLAIM_REFUSAL_REASON`, and its diagnosis through the real
    * `claimRefusalOf` — so an arm that loses its diagnosis reds here.
    */
-  it.each(LOOKUP_ARMS.map((arm) => [arm.kind, arm] as const))(
+  it.each(Object.values(LOOKUP_ARMS).map((arm) => [arm.kind, arm] as const))(
     "a %s lookup buckets where REFUSAL_BUCKET declares",
     (_label, arm) => {
       const refusal = refusalFromLookup(arm);
@@ -201,5 +216,53 @@ describe("tenant-domain unmapped buckets", () => {
       UNMAPPED_BUCKET.REFUSED,
     );
     expect(bucketOf({ ...shared, claim_refusal: null })).toBe(UNMAPPED_BUCKET.OTHER_TENANT);
+  });
+
+  it("REASON_BUCKET covers exactly the selected reasons", () => {
+    expect(Object.keys(REASON_BUCKET).sort()).toEqual([...UNMAPPED_SELECTED_REASONS].sort());
+  });
+
+  it.each([
+    ["tenant_claim_unbound", UNMAPPED_BUCKET.PROVIDER_BINDING],
+    ["tenant_claim_provider_mismatch", UNMAPPED_BUCKET.PROVIDER_BINDING],
+    ["tenant_claim_unmapped", UNMAPPED_BUCKET.UNREGISTERED],
+    ["tenant_claim_system_tenant", UNMAPPED_BUCKET.UNREGISTERED],
+    ["tenant_mismatch", UNMAPPED_BUCKET.OTHER_TENANT],
+  ] as const)("a diagnosis-free %s row buckets as %s", (reason, bucket) => {
+    expect(bucketOf({ reason, claim: CLAIM, claim_refusal: null })).toBe(bucket);
+  });
+
+  it("refuses a reason the report does not select, rather than defaulting a heading", () => {
+    expect(() => bucketOf({ reason: "provider_error", claim: CLAIM, claim_refusal: null })).toThrow(
+      /not one the report selects/,
+    );
+  });
+
+  it("refuses an arm table that disagrees with the reason table", () => {
+    // Synthetic: the real tables agree, which the module-load call proves.
+    expect(() =>
+      assertReasonTableAgrees(
+        new Map([["tenant_claim_unbound", UNMAPPED_BUCKET.UNREGISTERED]]),
+        { claim_unbound: UNMAPPED_BUCKET.UNREGISTERED },
+        { claim_unbound: "tenant_claim_unbound" },
+        REASON_BUCKET,
+      ),
+    ).toThrow(/declared "unregistered" by REFUSAL_BUCKET/);
+    expect(() =>
+      assertReasonTableAgrees(
+        new Map(),
+        { provider_unavailable: null },
+        { provider_unavailable: "tenant_claim_unbound" },
+        REASON_BUCKET,
+      ),
+    ).toThrow(/declared unreported/);
+    expect(() =>
+      assertReasonTableAgrees(
+        buildReasonBucketMap(REFUSAL_BUCKET, CLAIM_REFUSAL_REASON),
+        REFUSAL_BUCKET,
+        CLAIM_REFUSAL_REASON,
+        REASON_BUCKET,
+      ),
+    ).not.toThrow();
   });
 });

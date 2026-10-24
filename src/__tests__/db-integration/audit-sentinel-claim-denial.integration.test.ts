@@ -222,7 +222,7 @@ describe("C3: a sentinel-pointing tenant_claims row denies sign-in reportably", 
     async () => {
       const claim = freshClaim("first");
       await ctx.su.prisma.tenantClaim.create({
-        data: { tenantId: SYSTEM_TENANT_ID, claim, createdBy: "c3-integration-test" },
+        data: { tenantId: SYSTEM_TENANT_ID, claim, createdBy: "c3-integration-test", provider: "google" },
       });
       const email = `c3-first-${randomUUID()}@example.invalid`;
       const adapter = createCustomAdapter();
@@ -240,7 +240,7 @@ describe("C3: a sentinel-pointing tenant_claims row denies sign-in reportably", 
         // regardless of which arm it classifies, so the call below MUST
         // reject; a resolved promise here means the fixture never reached the
         // write this case exists to exercise.
-        await tenantClaimStorage.run({ tenantClaim: claim }, async () => {
+        await tenantClaimStorage.run({ tenantClaim: claim, provider: "google" }, async () => {
           try {
             // `id` is discarded by the real implementation (it reads only
             // name/email/image/emailVerified and mints its own id via
@@ -316,7 +316,7 @@ describe("C3: a sentinel-pointing tenant_claims row denies sign-in reportably", 
 
       const claim = freshClaim("returning");
       await ctx.su.prisma.tenantClaim.create({
-        data: { tenantId: SYSTEM_TENANT_ID, claim, createdBy: "c3-integration-test" },
+        data: { tenantId: SYSTEM_TENANT_ID, claim, createdBy: "c3-integration-test", provider: "google" },
       });
 
       // Observation-only spy on the REAL classifier: no .mockImplementation
@@ -342,6 +342,7 @@ describe("C3: a sentinel-pointing tenant_claims row denies sign-in reportably", 
           tenantId: null,
           claim,
           claimRefusal: null,
+          providerBinding: null,
         });
 
         expect(classifySpy).toHaveBeenCalledTimes(1);
@@ -393,7 +394,7 @@ describe("C3: a sentinel-pointing tenant_claims row denies sign-in reportably", 
       // above needs: without it, a version of ensureTenantMembershipForSignIn
       // that denied unconditionally would satisfy every assertion above.
       await ctx.su.prisma.tenantClaim.create({
-        data: { tenantId, claim, createdBy: "c3-integration-test" },
+        data: { tenantId, claim, createdBy: "c3-integration-test", provider: "google" },
       });
 
       try {

@@ -12,24 +12,18 @@
  * IDENTIFIER_HASH_SCOPE below. The field never claims a binding for a hash
  * that does not exist: it is null when there was no email to hash at all.
  *
- * Pepper resolution (C8):
- *   1. AUDIT_IDENTIFIER_PEPPER (>= 32 chars) — explicit override
- *   2. AUTH_SECRET (>= 32 chars)             — HKDF-derived, domain-separated
- *   3. neither                               — no hash is computed
- * Unlike src/lib/auth/session/session-cache.ts, there is no dev fallback to
- * another real secret: that fallback exists to preserve digest compatibility
- * with pre-existing rows, a requirement this module does not have. Emitting
- * an unkeyed record is the honest branch.
+ * The pepper and its resolution order live in `@/lib/audit/identifier-pepper`,
+ * shared with the provider references below and with the tenant-domain CLI.
  */
 
-import { createHmac, hkdfSync } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { MAX_TENANT_CLAIM_LENGTH } from "@/lib/validations/common.server";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
-import { getLogger } from "@/lib/logger";
+import { getIdentifierPepper } from "@/lib/audit/identifier-pepper";
 
 export type AuthLoginFailureReason =
   | "unknown_email"
@@ -50,7 +44,31 @@ export type AuthLoginFailureReason =
    * only out of band — `tenant-domain add` refuses a sentinel target on the
    * resolved id — which is why this member is observability, not a control.
    */
-  | "tenant_claim_system_tenant";
+  | "tenant_claim_system_tenant"
+  /**
+   * Strict binding (plan sso-claim-connection-binding C4): the claim's row
+   * records no provider, so no sign-in can prove it is the one the claim
+   * belongs to until an operator binds it.
+   */
+  | "tenant_claim_unbound"
+  /**
+   * Strict binding: the claim is bound to a provider other than the one this
+   * sign-in came through — the signature of one connection's IdP asserting
+   * another customer's claim.
+   */
+  | "tenant_claim_provider_mismatch";
+
+/**
+ * What a binding refusal adds to the audit row. The row is readable by the
+ * owning tenant's admins, so the presenting provider is stored as a keyed ref
+ * (`providerRefOf`), never as its id; `boundProvider` is the row's own binding,
+ * which is that tenant's. `signInProviderRef` is null when no pepper is
+ * configured, and then no ref is stored at all.
+ */
+export type ProviderBindingAudit = {
+  boundProvider: string | null;
+  signInProviderRef: string | null;
+};
 
 export type AuthProvider =
   | "google"
@@ -78,50 +96,6 @@ export const IDENTIFIER_HASH_SCOPE = {
 
 export type IdentifierHashScope =
   (typeof IDENTIFIER_HASH_SCOPE)[keyof typeof IDENTIFIER_HASH_SCOPE];
-
-const IDENTIFIER_PEPPER_INFO = "audit-identifier-pepper-v1";
-// Matches envSchema's production floor for AUTH_SECRET (superRefine, prod-only —
-// the field itself is .optional()), checked again here because this module
-// runs regardless of NODE_ENV. The same floor applies to the explicit override:
-// envSchema narrows AUDIT_IDENTIFIER_PEPPER further (hex64), but this module
-// reads process.env directly rather than the validated singleton, so an
-// override that never passed the schema still has to be rejected here. A
-// one-byte HMAC key is worse than the honest unkeyed branch, because the
-// record then claims key material it does not have (round-1 Sec F5).
-const MIN_KEY_MATERIAL_LENGTH = 32;
-
-// Memoised pepper, derived on first use rather than at module load so the
-// "no pepper configured" warning reflects the branch actually taken.
-// undefined = not yet derived; null = derived, no key material available.
-let identifierPepper: Buffer | null | undefined;
-let warnedNoPepper = false;
-
-function getIdentifierPepper(): Buffer | null {
-  if (identifierPepper !== undefined) return identifierPepper;
-
-  const explicit = process.env.AUDIT_IDENTIFIER_PEPPER;
-  if (explicit && explicit.length >= MIN_KEY_MATERIAL_LENGTH) {
-    identifierPepper = Buffer.from(explicit, "utf8");
-    return identifierPepper;
-  }
-
-  const authSecret = process.env.AUTH_SECRET;
-  if (authSecret && authSecret.length >= MIN_KEY_MATERIAL_LENGTH) {
-    // HKDF-domain-separate so AUTH_SECRET is never used verbatim as the HMAC key.
-    const okm = hkdfSync("sha256", authSecret, "", IDENTIFIER_PEPPER_INFO, 32);
-    identifierPepper = Buffer.from(okm);
-    return identifierPepper;
-  }
-
-  if (!warnedNoPepper) {
-    warnedNoPepper = true;
-    getLogger().warn(
-      "AUDIT_IDENTIFIER_PEPPER and AUTH_SECRET are both unavailable or too short; auth-failure identifier hashes are unkeyed",
-    );
-  }
-  identifierPepper = null;
-  return null;
-}
 
 function hashIdentifier(email: string, tenantId: string, pepper: Buffer): string {
   return createHmac("sha256", pepper)
@@ -157,6 +131,8 @@ export async function emitAuthLoginFailure(args: {
    * a compile error rather than a convention.
    */
   claimRefusal?: ClaimRefusalDiagnosis | null;
+  /** Set on the two binding refusals only. */
+  providerBinding?: ProviderBindingAudit | null;
 }): Promise<void> {
   let identifierHash: string | null = null;
   let identifierHashScope: IdentifierHashScope | null = null;
@@ -199,6 +175,12 @@ export async function emitAuthLoginFailure(args: {
     // takes untrusted input, and the whole point of separating it from `claim`
     // is that it does not.
     metadata.claimRefusal = args.claimRefusal;
+  }
+  if (args.providerBinding != null) {
+    metadata.boundProvider = args.providerBinding.boundProvider;
+    if (args.providerBinding.signInProviderRef !== null) {
+      metadata.signInProviderRef = args.providerBinding.signInProviderRef;
+    }
   }
 
   await logAuditAsync({

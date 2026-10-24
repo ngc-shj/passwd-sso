@@ -13,8 +13,10 @@ import { getLogger } from "@/lib/logger";
 import {
   assertClaimBindingBootConfig,
   isGoogleProviderConfigured,
+  listClaimProviderIds,
   parseJacksonProviders,
 } from "@/lib/auth/jackson-providers";
+import { assertDistinctProviderRefs, deriveIdentifierPepper } from "@/lib/audit/identifier-pepper";
 import {
   getSessionCookieName,
   isSecureCookieFromAuthUrl,
@@ -37,6 +39,9 @@ const useSecureCookies = isSecureCookieFromAuthUrl();
 // envSchema's production rules run.
 const jacksonProviders = parseJacksonProviders();
 assertClaimBindingBootConfig();
+// Binding refusals store the presenting provider as a ref; two providers with
+// one ref would make the operator's mapping name the wrong connection.
+assertDistinctProviderRefs(listClaimProviderIds(), deriveIdentifierPepper(process.env));
 
 type JacksonProfile = {
   sub: string;

@@ -447,3 +447,81 @@ describe("emitAuthLoginFailure — tenant binding reaches logAuditAsync", () => 
     expect(lastAuditParams().tenantId).toBeUndefined();
   });
 });
+
+/**
+ * Golden vectors for the identifier pepper and the email hash, recorded before
+ * the pepper derivation moved into `@/lib/audit/identifier-pepper` and required
+ * to hold after it. The literals are the contract: a stored `identifierHash` is
+ * compared across releases, so a changed HKDF info, floor or source precedence
+ * silently splits one email's failures into two populations.
+ */
+describe("emitAuthLoginFailure — golden vectors", () => {
+  const GOLDEN_PEPPER = "golden-explicit-pepper-0123456789abcdef";
+  const GOLDEN_AUTH_SECRET = "golden-auth-secret-0123456789abcdef-xyz";
+  // HKDF-SHA256(AUTH_SECRET, salt "", info "audit-identifier-pepper-v1", 32).
+  const GOLDEN_DERIVED_PEPPER_HEX =
+    "6913dee096fe9fda88ae802b9eb9799e32e219c65a00d96f06b795d3d56ed4f2";
+
+  beforeEach(() => {
+    mockLogAudit.mockClear();
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "");
+    vi.stubEnv("AUTH_SECRET", "");
+  });
+
+  it("explicit pepper: the hash is the recorded vector", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", GOLDEN_PEPPER);
+    vi.stubEnv("AUTH_SECRET", GOLDEN_AUTH_SECRET);
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "Golden@Example.COM",
+      tenantId: "t-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    expect(lastMetadata().identifierHash).toBe("90584801d29320a0");
+  });
+
+  it("AUTH_SECRET fallback: the derived pepper and the hash are the recorded vectors", async () => {
+    vi.stubEnv("AUTH_SECRET", GOLDEN_AUTH_SECRET);
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "Golden@Example.COM",
+      tenantId: "t-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+    expect(lastMetadata().identifierHash).toBe("aedeb5974c11d299");
+    // Ties the hash to the pepper vector, so the pepper literal is pinned too.
+    const viaPepper = createHmac("sha256", Buffer.from(GOLDEN_DERIVED_PEPPER_HEX, "hex"))
+      .update("golden@example.com:t-1")
+      .digest("hex")
+      .slice(0, 16);
+    expect(viaPepper).toBe("aedeb5974c11d299");
+
+    await emitAuthLoginFailure({
+      email: "golden@example.com",
+      provider: "google",
+      reason: "unknown_email",
+    });
+    expect(lastMetadata().identifierHash).toBe("f722234215ae8582");
+  });
+
+  it("below-floor pepper and secret: no hash, unkeyed", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", GOLDEN_PEPPER.slice(0, 31));
+    vi.stubEnv("AUTH_SECRET", GOLDEN_AUTH_SECRET.slice(0, 31));
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "Golden@Example.COM",
+      tenantId: "t-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    expect(lastMetadata().identifierHash).toBeNull();
+    expect(lastMetadata().identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.UNKEYED);
+  });
+});

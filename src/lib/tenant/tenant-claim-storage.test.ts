@@ -12,7 +12,7 @@ describe("tenantClaimStorage", () => {
   });
 
   it("propagates the tenantClaim within a run() context", () => {
-    const store = { tenantClaim: "example.com" };
+    const store = { tenantClaim: "example.com", provider: "google" };
     const observed = tenantClaimStorage.run(store, () =>
       tenantClaimStorage.getStore(),
     );
@@ -21,7 +21,7 @@ describe("tenantClaimStorage", () => {
   });
 
   it("propagates the store across awaits in the same async context", async () => {
-    const store = { tenantClaim: "team.example" };
+    const store = { tenantClaim: "team.example", provider: "google" };
 
     const observed = await tenantClaimStorage.run(store, async () => {
       await Promise.resolve();
@@ -33,8 +33,8 @@ describe("tenantClaimStorage", () => {
   });
 
   it("isolates stores between independent run() calls", async () => {
-    const a = { tenantClaim: "a.example" };
-    const b = { tenantClaim: "b.example" };
+    const a = { tenantClaim: "a.example", provider: "saml-jackson-a" };
+    const b = { tenantClaim: "b.example", provider: "saml-jackson-b" };
 
     const [aObs, bObs] = await Promise.all([
       tenantClaimStorage.run(a, async () => tenantClaimStorage.getStore()),
@@ -43,12 +43,15 @@ describe("tenantClaimStorage", () => {
 
     expect(aObs?.tenantClaim).toBe("a.example");
     expect(bObs?.tenantClaim).toBe("b.example");
+    expect(aObs?.provider).toBe("saml-jackson-a");
+    expect(bObs?.provider).toBe("saml-jackson-b");
   });
 
-  it("supports a null tenantClaim value", () => {
-    const observed = tenantClaimStorage.run({ tenantClaim: null }, () =>
+  it("supports a null tenantClaim and provider, the route's initial store", () => {
+    const observed = tenantClaimStorage.run({ tenantClaim: null, provider: null }, () =>
       tenantClaimStorage.getStore(),
     );
     expect(observed?.tenantClaim).toBeNull();
+    expect(observed?.provider).toBeNull();
   });
 });

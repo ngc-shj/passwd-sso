@@ -461,7 +461,7 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
     // an operator using this to rule out the README's third cause would
     // otherwise get a message that never mentions it.
     return (
-      `No claim-bearing sign-in denials — unregistered, other-tenant or refused — in the ` +
+      `No claim-bearing sign-in denials — unregistered, other-tenant, refused or provider-binding — in the ` +
       `last ${days} days. That is the window this query covered, NOT this deployment's ` +
       `retention: a denial older than ${days} days is outside it whether or not the row ` +
       "still exists. Re-run with --days <n> to widen. An empty result does NOT by itself " +
@@ -476,8 +476,9 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
   // of them (round-5 F1/S3).
   const base =
     `${count(UNMAPPED_BUCKET.UNREGISTERED)} unmapped-claim, ` +
-    `${count(UNMAPPED_BUCKET.OTHER_TENANT)} other-tenant and ` +
-    `${count(UNMAPPED_BUCKET.REFUSED)} refused-claim denial group(s) in the last ${days} days.`;
+    `${count(UNMAPPED_BUCKET.OTHER_TENANT)} other-tenant, ` +
+    `${count(UNMAPPED_BUCKET.REFUSED)} refused-claim and ` +
+    `${count(UNMAPPED_BUCKET.PROVIDER_BINDING)} provider-binding denial group(s) in the last ${days} days.`;
   if (undelivered === 0) return base;
   // Round-2 F-B: the operator must see that outbox delivery itself is degraded,
   // because these rows are the ones that would have been INVISIBLE while the
@@ -640,6 +641,18 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         printGroup(
           "Claims this deployment REFUSED (at ingest, or as unstorable) — `add` cannot register them; the remedy is at the IdP:",
           UNMAPPED_BUCKET.REFUSED,
+        );
+        // Plan sso-claim-connection-binding, C4. `--provider` and `bind` land
+        // with the CLI's binding writers; the heading names them already.
+        printGroup(
+          "Claims strict binding REFUSED for the presenting provider (unbound, or bound to another provider) — " +
+            "investigate first: a mismatch is the signature of one connection's IdP asserting another customer's claim. " +
+            "A claim registered by sign-in is bound to the provider that first presented it, so a claim squatted " +
+            "through one connection is unusable through another until an operator acts. If the bound tenant was " +
+            "created by sign-in through another customer's provider, re-point the claim to the rightful tenant with " +
+            "`add --tenant <rightful> --domain <claim> --from <bound-tenant-uuid> --provider <theirs> --by <label>`; never `bind` the rightful " +
+            "provider into it. An unbound claim whose tenant is the rightful owner is bound with `tenant-domain bind`:",
+          UNMAPPED_BUCKET.PROVIDER_BINDING,
         );
 
         // S12: an empty result says so explicitly, with the window it
@@ -867,7 +880,7 @@ export async function cmdAdd(args: {
         // revoked rows to null so sign-in cannot resurrect them silently).
         const existing = await tx.tenantClaim.findUnique({
           where: { claim },
-          select: { id: true, tenantId: true, revokedAt: true, createdBy: true, createdAt: true },
+          select: { id: true, tenantId: true, revokedAt: true, createdBy: true, createdAt: true, provider: true },
         });
 
         if (args.from !== undefined && !existing) {
@@ -1014,6 +1027,8 @@ export async function cmdAdd(args: {
             oldRevokedAt: existing.revokedAt,
             newRevokedAt: null,
             actorLabel: args.by,
+            oldProvider: existing.provider,
+            newProvider: existing.provider,
           });
         } else if (existing) {
           // M2 / SC8: `createdBy` is NOT overwritten with `--by`. SC8 defers
@@ -1047,6 +1062,8 @@ export async function cmdAdd(args: {
             oldRevokedAt: existing.revokedAt,
             newRevokedAt: null,
             actorLabel: args.by,
+            oldProvider: existing.provider,
+            newProvider: existing.provider,
           });
         } else {
           try {
@@ -1069,6 +1086,8 @@ export async function cmdAdd(args: {
             oldRevokedAt: null,
             newRevokedAt: null,
             actorLabel: args.by,
+            oldProvider: null,
+            newProvider: null,
           });
         }
 
@@ -1182,7 +1201,7 @@ export async function cmdRemove(args: {
 
         const existing = await tx.tenantClaim.findUnique({
           where: { claim },
-          select: { id: true, tenantId: true, revokedAt: true, createdAt: true },
+          select: { id: true, tenantId: true, revokedAt: true, createdAt: true, provider: true },
         });
         if (!existing) {
           return { ok: false, code: 1, message: `No claim "${escapeUnsafeDisplayChars(claim)}" is registered to any tenant.` };
@@ -1250,6 +1269,8 @@ export async function cmdRemove(args: {
           oldRevokedAt: null,
           newRevokedAt: revokedAt,
           actorLabel: args.by,
+          oldProvider: existing.provider,
+          newProvider: existing.provider,
         });
 
         console.log(`Revoked claim "${escapeUnsafeDisplayChars(claim)}" for tenant ${tenant.id}.`);

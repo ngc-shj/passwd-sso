@@ -43,7 +43,21 @@ export type ClaimIngestRefusalKind = "claim_malformed";
  * definition is "the claim fails `storableClaimSchema`", and on this path no
  * resolution runs at all.
  */
-export type ClaimPropagationFailureKind = "store_unavailable";
+export type ClaimPropagationFailureKind =
+  | "store_unavailable"
+  /**
+   * The claim reached `createUser` without the provider that presented it
+   * (plan sso-claim-connection-binding, C5). The binding decision needs that
+   * provider, and there is no fallback to "unbound": a NULL here would register
+   * the claim with no provenance under strict.
+   */
+  | "provider_unavailable"
+  /**
+   * The claim store's provider and `sessionMetaStorage`'s disagree in
+   * `createUser` — two carriers of one fact naming different providers. Neither
+   * is trusted over the other.
+   */
+  | "provider_disagreement";
 
 /**
  * The claim resolved to a tenant that must not own accounts: `SYSTEM_TENANT_ID`.
@@ -100,6 +114,15 @@ export type ClaimRefusalKind =
  *                   this deployment already uses for "the sign-in machinery
  *                   failed", and the producer side was already emitting it —
  *                   round-6 F3/SEC-R6-1 was that the CONSUMER was not.
+ *   provider_unavailable / provider_disagreement — the provider that presented
+ *                   the claim was lost or contradicted between the two
+ *                   callbacks (C5). A deployment fault like store_unavailable,
+ *                   and reported the same way: provider_error.
+ *   claim_unbound / claim_provider_mismatch — strict binding (C4): the owning
+ *                   row records no provider, or another one. Each its own
+ *                   reason: the remedies differ from every claim reason above
+ *                   (bind the row; or, for a mismatch, investigate first — it
+ *                   is the cross-connection attack's signature).
  *   claim_system_tenant — the claim resolved to SYSTEM_TENANT_ID and a CHECK
  *                   refused the write (CF13). Its OWN reason, not
  *                   tenant_claim_unmapped's: `bucketOf` decides the heading from
@@ -121,7 +144,11 @@ export const CLAIM_REFUSAL_REASON = {
   claim_invalid: "tenant_mismatch",
   claim_malformed: "tenant_mismatch",
   store_unavailable: "provider_error",
+  provider_unavailable: "provider_error",
+  provider_disagreement: "provider_error",
   claim_system_tenant: "tenant_claim_system_tenant",
+  claim_unbound: "tenant_claim_unbound",
+  claim_provider_mismatch: "tenant_claim_provider_mismatch",
 } as const satisfies Record<
   ClaimRefusalKind,
   Extract<
@@ -130,6 +157,8 @@ export const CLAIM_REFUSAL_REASON = {
     | "tenant_claim_unmapped"
     | "provider_error"
     | "tenant_claim_system_tenant"
+    | "tenant_claim_unbound"
+    | "tenant_claim_provider_mismatch"
   >
 >;
 

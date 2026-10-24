@@ -64,7 +64,8 @@ vi.mock("@/lib/auth/session/session-meta", () => ({
 vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
   tenantClaimStorage: { getStore: mockTenantClaimStoreGetStore },
 }));
-vi.mock("@/lib/tenant/tenant-management", () => ({
+vi.mock("@/lib/tenant/tenant-management", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tenant/tenant-management")>()),
   findOrCreateTenantForClaim: mockFindOrCreateTenantForClaim,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -104,6 +105,16 @@ vi.mock("@/lib/auth/session/session-cache", () => ({
 }));
 
 import { createCustomAdapter } from "./auth-adapter";
+import type { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
+import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
+import type { ClaimTenantResolution } from "@/lib/tenant/tenant-management";
+
+/** Typed against the real store, so a field added to it fails here first. */
+function claimStore(store: Parameters<typeof tenantClaimStorage.run>[0]) {
+  return store;
+}
+
+const CLAIM_PROVIDER = "saml-jackson-a";
 // Real producer — `ClaimRefusalDiagnosis` is branded (round-6 SEC-R6-3).
 import { claimRefusal } from "@/lib/tenant/claim-refusal";
 import {
@@ -132,7 +143,7 @@ describe("createCustomAdapter", () => {
     // the file's mock lifecycle, not of that test.
     mockEmitAuthLoginFailure.mockImplementation(async () => {});
     // Default: no pending tenant claim
-    mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
+    mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: null, provider: null }));
     // Resolvable by default; the refusal arms (claim_taken / claim_invalid)
     // are opted into per test, since they now fail the sign-in closed rather
     // than degrading to a bootstrap tenant.
@@ -215,7 +226,7 @@ describe("createCustomAdapter", () => {
     });
 
     it("places user in SSO tenant when tenant claim is pending", async () => {
-      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "acme.com" });
+      mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: "acme.com", provider: CLAIM_PROVIDER }));
       mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "tenant", id: "sso-tenant-1" });
       mockPrismaUser.create.mockResolvedValue({
         id: "user-2",
@@ -237,7 +248,12 @@ describe("createCustomAdapter", () => {
 
       // Bootstrap tenant.create should NOT be called
       expect(mockPrismaTenant.create).not.toHaveBeenCalled();
-      expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith("acme.com", expect.anything());
+      expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith(
+        "acme.com",
+        CLAIM_PROVIDER,
+        CLAIM_BINDING_MODE.OFF,
+        expect.anything(),
+      );
       // User should be created with SSO tenant ID
       expect(mockPrismaUser.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -265,7 +281,7 @@ describe("createCustomAdapter", () => {
       ["claim_taken", "a revoked tenant_claims row owns the claim (D2)"],
       ["claim_invalid", "the claim fails storableClaimSchema (SC9)"],
     ])("throws TENANT_CLAIM_UNUSABLE without a bootstrap tenant when %s — %s", async (kind) => {
-      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
+      mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: "alias.example", provider: CLAIM_PROVIDER }));
       mockFindOrCreateTenantForClaim.mockResolvedValue({ kind });
 
       const adapter = createCustomAdapter();
@@ -326,7 +342,9 @@ describe("createCustomAdapter", () => {
         emittedInsideTx = txOpen;
       });
       mockSessionMetaGetStore.mockReturnValue({ provider: "saml-jackson" });
-      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
+      mockTenantClaimStoreGetStore.mockReturnValue(
+        claimStore({ tenantClaim: "alias.example", provider: "saml-jackson" }),
+      );
       mockFindOrCreateTenantForClaim.mockResolvedValue(
         refusal === null ? { kind, tenantId } : { kind, tenantId, refusal },
       );
@@ -356,6 +374,7 @@ describe("createCustomAdapter", () => {
         reason,
         claim: "alias.example",
         claimRefusal: refusal,
+        providerBinding: null,
         tenantId,
       });
       expect(emittedInsideTx).toBe(false);
@@ -367,7 +386,9 @@ describe("createCustomAdapter", () => {
       ["claim_taken", "tenant-owner"],
     ])("binds the audit row to the owning tenant for %s", async (kind, owner) => {
       mockSessionMetaGetStore.mockReturnValue({ provider: "google" });
-      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
+      mockTenantClaimStoreGetStore.mockReturnValue(
+        claimStore({ tenantClaim: "alias.example", provider: "google" }),
+      );
       mockFindOrCreateTenantForClaim.mockResolvedValue({ kind, tenantId: owner });
 
       const adapter = createCustomAdapter();
@@ -428,15 +449,113 @@ describe("createCustomAdapter", () => {
         reason: "provider_error",
         claim: null,
         claimRefusal: null,
+        providerBinding: null,
         tenantId: null,
       });
+    });
+
+    /**
+     * C5: the provider travels with the claim. Each refusal fails the whole
+     * transaction before the resolver runs, and is reported as the deployment
+     * fault it is (`provider_error`), each with the adjacent allow.
+     */
+    it("refuses a pending claim that carries no provider, without resolving it", async () => {
+      // No session meta, so the disagreement arm cannot be what refuses.
+      mockSessionMetaGetStore.mockReturnValue(undefined);
+      mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: "acme.com", provider: null }));
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createUser!({ id: "", name: "U", email: "user@acme.com", image: null, emailVerified: null }),
+      ).rejects.toMatchObject({ message: "TENANT_CLAIM_UNUSABLE", kind: "provider_unavailable" });
+
+      expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
+      expect(mockPrismaUser.create).not.toHaveBeenCalled();
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "provider_error", claim: "acme.com", tenantId: null }),
+      );
+    });
+
+    it("refuses when the session meta names a different provider than the claim store", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ provider: "saml-jackson-b" });
+      mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: "acme.com", provider: CLAIM_PROVIDER }));
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createUser!({ id: "", name: "U", email: "user@acme.com", image: null, emailVerified: null }),
+      ).rejects.toMatchObject({ message: "TENANT_CLAIM_UNUSABLE", kind: "provider_disagreement" });
+
+      expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
+      expect(mockPrismaUser.create).not.toHaveBeenCalled();
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "provider_error", claim: "acme.com" }),
+      );
+    });
+
+    it.each([
+      ["agrees", { provider: CLAIM_PROVIDER }],
+      ["is absent", undefined],
+    ] as const)("resolves when the session meta %s", async (_label, meta) => {
+      mockSessionMetaGetStore.mockReturnValue(meta);
+      mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: "acme.com", provider: CLAIM_PROVIDER }));
+      mockPrismaUser.create.mockResolvedValue({
+        id: "user-5",
+        name: "U",
+        email: "user@acme.com",
+        image: null,
+        emailVerified: null,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createUser!({ id: "", name: "U", email: "user@acme.com", image: null, emailVerified: null });
+
+      expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith(
+        "acme.com",
+        CLAIM_PROVIDER,
+        CLAIM_BINDING_MODE.OFF,
+        expect.anything(),
+      );
+    });
+
+    it.each([
+      [
+        "claim_provider_mismatch",
+        { kind: "claim_provider_mismatch", tenantId: "tenant-owner", boundProvider: "saml-jackson-b" },
+        "tenant_claim_provider_mismatch",
+      ],
+      [
+        "claim_unbound",
+        { kind: "claim_unbound", tenantId: "tenant-owner", boundProvider: null },
+        "tenant_claim_unbound",
+      ],
+    ] as const satisfies ReadonlyArray<
+      readonly [string, Exclude<ClaimTenantResolution, { kind: "tenant" }>, string]
+    >)("emits %s with its owner and binding fields", async (_label, resolution, reason) => {
+      vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "");
+      vi.stubEnv("AUTH_SECRET", "");
+      mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: "acme.com", provider: CLAIM_PROVIDER }));
+      mockFindOrCreateTenantForClaim.mockResolvedValue(resolution);
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createUser!({ id: "", name: "U", email: "user@acme.com", image: null, emailVerified: null }),
+      ).rejects.toThrow("TENANT_CLAIM_UNUSABLE");
+
+      expect(mockPrismaUser.create).not.toHaveBeenCalled();
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason,
+          tenantId: "tenant-owner",
+          providerBinding: { boundProvider: resolution.boundProvider, signInProviderRef: null },
+        }),
+      );
     });
 
     it("creates a bootstrap tenant with OWNER when the store exists and holds no claim", async () => {
       // The allow side of the same guard: a store that is present and empty
       // IS "the IdP asserted no claim", which is the ordinary first-ever
       // magic-link sign-in and must keep working.
-      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
+      mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: null, provider: null }));
       mockPrismaTenant.create.mockResolvedValue({ id: "bootstrap-2" });
       mockPrismaUser.create.mockResolvedValue({
         id: "user-4",
@@ -467,7 +586,7 @@ describe("createCustomAdapter", () => {
     });
 
     it("propagates error when findOrCreateTenantForClaim throws", async () => {
-      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "acme.com" });
+      mockTenantClaimStoreGetStore.mockReturnValue(claimStore({ tenantClaim: "acme.com", provider: CLAIM_PROVIDER }));
       mockFindOrCreateTenantForClaim.mockRejectedValue(new Error("DB down"));
 
       const adapter = createCustomAdapter();
