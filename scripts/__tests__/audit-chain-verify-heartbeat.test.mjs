@@ -17,6 +17,7 @@
  * the GUCs the wrappers wrote and answers `current_setting` reads from them.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { format } from "node:util";
 import { runTick, verifyChainUnderSentinelGrant } from "../audit-chain-verify-worker.ts";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
@@ -35,7 +36,11 @@ function errLineIncludes(errLines, text) {
   return errLines.some((args) => args.some((a) => String(a).includes(text)));
 }
 
-/** The `verify threw` line for `tenantId`, or undefined. */
+/**
+ * The `verify threw` line for `tenantId`, or undefined: [fmt, tenantId,
+ * errorLogFields, detail], where detail is the worker's own precondition
+ * message or null.
+ */
 function threwFor(errLines, tenantId) {
   return errLines.find(
     ([fmt, id]) => String(fmt).includes("verify threw") && id === tenantId,
@@ -73,6 +78,8 @@ function parseGucWrites(strings, values) {
  * @param opts.fixtures { [tenantId]: { anchors?, rows?, chainedRows? } } — what
  *   the anchor read, walk and chained-row count return for the tenant bound as
  *   $1. A tenant without an entry has no anchor and no chained rows.
+ * @param opts.openErrors { [tenantId]: Error } — what that tenant's transaction
+ *   throws at the open, as a driver error would reach runTick
  * @param opts.reads { [tenantId]: { tenantIdSetting?, bypassState? } } — what
  *   that tenant's transaction reports instead of what it wrote:
  *   `tenantIdSetting` replaces current_setting('app.tenant_id') on the tenant
@@ -84,6 +91,7 @@ function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
     enumerationRejects = false,
     fixtures = {},
     reads = {},
+    openErrors = {},
   } = opts;
   /** One record per $transaction call, in call order. */
   const transactions = [];
@@ -99,6 +107,7 @@ function makeStubPrisma(tenantIds, failFor = [], opts = {}) {
       if (label !== ENUMERATION && failFor.includes(label)) {
         throw new Error(`RLS_CONTEXT_MISSING: app.tenant_id is null, expected ${label}`);
       }
+      if (label in openErrors) throw openErrors[label];
       const read = reads[label] ?? {};
       const tx = {
         // setBypassGucs / setTenantGucs write through the tagged form.
@@ -304,12 +313,35 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
 
     const threw = threwFor(errLines, t);
     expect(threw).toBeDefined();
-    expect(String(threw[2])).toMatch(/RLS_CONTEXT_MISSING/);
+    expect(threw[2]).toEqual({ name: "ChainVerifyPreconditionError", code: "RLS_CONTEXT_MISSING" });
+    expect(String(threw[3])).toMatch(/RLS_CONTEXT_MISSING/);
     // No read ran on a context that failed its precondition.
     expect(txOf(prisma, t).queried).toEqual([]);
     // And it counts as a coverage shortfall rather than a silent pass.
     const beat = heartbeatOf(logLines);
     expect(beat.erroredTenantCount).toBe(1);
+  });
+
+  it("prints any other thrown error as its name and code, never its message", async () => {
+    // A driver or Prisma message can carry a connection target or a query
+    // with its bound parameters; only the worker's own preconditions print one.
+    const t = "66666666-6666-4666-8666-666666666666";
+    const leak = "postgresql://verify_role:s3cr3t@db.internal:5432/passwd_sso";
+    const err = Object.assign(new Error(`connect failed: ${leak}`), { code: "ECONNREFUSED" });
+    const prisma = makeStubPrisma([SYSTEM_TENANT_ID, t], [], { openErrors: { [t]: err } });
+    trackTenantOrder(prisma, [SYSTEM_TENANT_ID, t]);
+
+    await runTick(prisma, new Map());
+
+    const threw = threwFor(errLines, t);
+    expect(threw).toBeDefined();
+    expect(threw[2]).toEqual({ name: "Error", code: "ECONNREFUSED" });
+    expect(threw[3]).toBeNull();
+    // As console.error prints it.
+    const printed = errLines.map((args) => format(...args)).join("\n");
+    expect(printed).toContain(`tenant=${t} verify threw: error={"name":"Error","code":"ECONNREFUSED"}`);
+    expect(printed).not.toContain(leak);
+    expect(heartbeatOf(logLines).erroredTenantCount).toBe(1);
   });
 
   it("forwards an explicit transaction budget, not Prisma's 5s default", async () => {
@@ -501,7 +533,8 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
     function missingContextMessage(prisma) {
       const threw = threwFor(errLines, SYSTEM_TENANT_ID);
       expect(threw).toBeDefined();
-      const message = String(threw[2]);
+      expect(threw[2]).toEqual({ name: "ChainVerifyPreconditionError", code: "BYPASS_CONTEXT_MISSING" });
+      const message = String(threw[3]);
       expect(message).toContain("BYPASS_CONTEXT_MISSING");
       expect(txOf(prisma, SYSTEM_TENANT_ID).queried).toEqual([]);
       const beat = heartbeatOf(logLines);
@@ -559,7 +592,8 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
       const beat = heartbeatOf(logLines);
       expect(beat.erroredTenantCount).toBe(1);
       expect(beat.verifiedTenantCount).toBe(0);
-      return String(threw[2]);
+      expect(threw[2]).toEqual({ name: "ChainVerifyPreconditionError", code: "BYPASS_SCOPE_VIOLATION" });
+      return String(threw[3]);
     }
 
     it("throws on a foreign anchor row", async () => {

@@ -40,6 +40,20 @@ export class DeploymentIdMismatchError extends Error {
   }
 }
 
+/**
+ * The boundary marker holds no timestamp in the form a publish writes. It
+ * cannot say which boundaries are published, so the run fails closed rather
+ * than reading it as published or as absent. Its `code` is what the failure
+ * reason carries.
+ */
+class BoundaryMarkerUnreadableError extends Error {
+  readonly code = "BOUNDARY_MARKER_UNREADABLE";
+  constructor() {
+    super("audit anchor boundary marker is not an ISO-8601 timestamp");
+    this.name = "BoundaryMarkerUnreadableError";
+  }
+}
+
 /** The upload bound fired. Its `code` is what the failure reason carries. */
 class UploadTimeoutError extends Error {
   readonly code = "UPLOAD_TIMEOUT";
@@ -51,7 +65,8 @@ class UploadTimeoutError extends Error {
 
 // --- Constants ---
 
-const ADVISORY_LOCK_KEY = "audit-anchor-publish";
+/** The publish lock's key, hashed by `advisoryXactLock`. */
+export const ADVISORY_LOCK_KEY = "audit-anchor-publish";
 const SQLSTATE_LOCK_NOT_AVAILABLE = "55P03";
 
 export const SETTING_DEPLOYMENT_ID = "audit_anchor_deployment_id";
@@ -206,10 +221,22 @@ async function chainEnabledTenantIds(tx: Prisma.TransactionClient): Promise<stri
   return tenants.map((t) => t.id);
 }
 
+/** `value` as the epoch ms a publish wrote it from, or null when it is not one. */
+function parseMarker(value: string): number | null {
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms) || new Date(ms).toISOString() !== value) return null;
+  return ms;
+}
+
 /**
- * Whether `boundary` is already published. The marker decides; an install that
- * predates it has none, and there the anchors' `last_published_at` stands in,
- * so an upgrade does not republish the boundary it already published.
+ * Whether `boundary` is already published. The marker decides, and it is
+ * monotonic: a marker at or past the boundary means published, so a marker a
+ * later boundary wrote never lets an earlier one publish (and write the marker
+ * backwards). One past the boundary is reported as `stale_boundary`. A marker
+ * that does not parse throws BoundaryMarkerUnreadableError. An install that
+ * predates the marker has none, and there the anchors' `last_published_at`
+ * stands in, so an upgrade does not republish the boundary it already
+ * published.
  */
 async function isBoundaryPublished(
   tx: Prisma.TransactionClient,
@@ -219,7 +246,21 @@ async function isBoundaryPublished(
   const marker = await tx.systemSetting.findUnique({
     where: { key: SETTING_LAST_PUBLISHED_BOUNDARY },
   });
-  if (marker) return marker.value === boundary.toISOString();
+  if (marker) {
+    const markerMs = parseMarker(marker.value);
+    if (markerMs === null) throw new BoundaryMarkerUnreadableError();
+    if (markerMs > boundary.getTime()) {
+      getLogger().warn(
+        {
+          boundary: boundary.toISOString(),
+          marker: marker.value,
+          _logType: "audit-anchor-publisher.stale_boundary",
+        },
+        "audit-anchor-publisher.stale_boundary",
+      );
+    }
+    return markerMs >= boundary.getTime();
+  }
   if (tenantIds.length === 0) return false;
   const rows = await tx.$queryRaw<{ max_published: Date | null }[]>`
     SELECT MAX(last_published_at) AS max_published
@@ -655,6 +696,8 @@ export class AuditAnchorPublisher {
           update: { value: manifestPtr },
           create: { key: SETTING_PREVIOUS_MANIFEST, value: manifestPtr },
         });
+        // Forward only: the re-check above, under the lock, found the marker
+        // absent or before this boundary.
         await tx.systemSetting.upsert({
           where: { key: SETTING_LAST_PUBLISHED_BOUNDARY },
           update: { value: boundaryIso },
@@ -670,10 +713,11 @@ export class AuditAnchorPublisher {
         };
       }, this.txOptions);
 
-      await this.flushEmits(pendingEmits);
-
-      // Success audit event AFTER the transaction commits
+      // Success audit event AFTER the transaction commits. The missing-prior
+      // row goes out only with a publish: a failed run would otherwise write
+      // it on every retry, and the run that publishes reports it once.
       if (outcome.kind === "published") {
+        await this.flushEmits(pendingEmits);
         await this.emitAudit(AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED, {
           manifestSha256: outcome.manifestSha256,
           destinations: outcome.destinations,
@@ -685,8 +729,6 @@ export class AuditAnchorPublisher {
 
       return outcome;
     } catch (err) {
-      await this.flushEmits(pendingEmits);
-
       if (!uploaded && isLockNotAvailable(err)) {
         return this.lockHeld(boundary, chainEnabledTenantCount);
       }

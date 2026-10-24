@@ -44,10 +44,14 @@ daily cadence boundary, which `src/workers/audit-anchor-scheduler.ts` computes a
 passes in (`runCadence(boundary)`); the boundary fixes the idempotency marker, the
 artifact key and `anchoredAt`. Each run sets `lock_timeout` (10 s) and takes the
 blocking `pg_advisory_xact_lock(hashtext('audit-anchor-publish'))`; a wait past the
-timeout is the `lock_held` outcome, not a failure. Under the lock the run reads the
-marker `system_settings.audit_anchor_last_published_boundary`, and a boundary already
-published is `skipped_already_published`; a publish writes the marker in the same
-commit as the manifest pointer. A `DEPLOYMENT_ID` value is pinned in
+timeout is the `lock_held` outcome, retried for the same boundary like a failure (any
+role that can connect can hold the key, so the holder is not assumed to publish; alarmed
+on AWS). Under the lock the run reads the marker
+`system_settings.audit_anchor_last_published_boundary`, which is monotonic: a boundary
+at or before it is `skipped_already_published` (before it also logs `stale_boundary`),
+and a marker that does not parse fails the run closed rather than reading as published
+or absent. A publish writes the marker — only forward — in the same commit as the
+manifest pointer. A `DEPLOYMENT_ID` value is pinned in
 `system_settings` at boot (`ensureDeploymentIdMatch`); a mismatch throws
 `DeploymentIdMismatchError` and emits `AUDIT_ANCHOR_PUBLISH_FAILED` — this stops a
 publisher configured for another deployment from writing this one's anchor state.
@@ -118,6 +122,20 @@ serializes concurrent delivery attempts for the same tenant. Publisher-level: th
 blocking advisory lock plus the boundary marker (see "Chain construction" above) let
 one run per boundary publish and make every other run skip; on ECS the service also
 runs at most one task and a deploy stops the old one before starting the new.
+
+**Publisher task role reuse** — the anchors bucket policy lets only the publisher's
+task role write a manifest key, and the role's trust policy admits ECS tasks of this
+account only (`aws:SourceAccount`). Within the account, a principal allowed
+`iam:PassRole` on it can still run a task of its own choosing as that role. SURFACED,
+not prevented: a `RunTask` / `StartTask` naming the role as a `taskRoleArn` override is
+alarmed (EventBridge `<name_prefix>-audit-anchor-publisher-role-override`). RESIDUAL:
+a new task definition naming the role (`RegisterTaskDefinition`, which every deploy
+also does) and changes to the role itself (`UpdateAssumeRolePolicy`, `PutRolePolicy`,
+`AttachRolePolicy`, `DeleteRole` + `CreateRole`) reach CloudTrail but are not alarmed
+by this stack — IAM events reach EventBridge only in `us-east-1`, where it has no
+provider; that alarm is the operator's (`docs/operations/alerts.md` "Publisher task role
+passed to another task"). The publisher's secrets reach only its container, but the
+shared task execution role can read the whole app secret.
 
 **Tag-secret boundary** — the tag secret (used to derive `tenantTag` so the public
 manifest does not expose raw tenant UUIDs) has its own threat-model section; see

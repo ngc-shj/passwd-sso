@@ -9,12 +9,15 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isValidAnchorS3Prefix } from "@/lib/env-schema";
-import { TerraformConfig, TERRAFORM_DIR, nested, plain, type EvalOptions } from "../helpers/hcl-subset";
+import { TerraformConfig, TERRAFORM_DIR, nested, plain, type EvalOptions, type HclExpr } from "../helpers/hcl-subset";
 
 const BUCKET_ARN = "<ref:aws_s3_bucket.audit_anchors[0].arn>";
 const BUCKET_ID = "<ref:aws_s3_bucket.audit_anchors[0].id>";
 const PUBLISHER_ROLE_ARN = "<ref:aws_iam_role.ecs_audit_anchor_publisher_task.arn>";
 const BREAK_GLASS_ARN = "arn:aws:iam::111122223333:role/anchor-break-glass";
+const ACCOUNT_ID = "<ref:data.aws_caller_identity.current.account_id>";
+const ALARM_TOPIC_ARN = "<ref:aws_sns_topic.alarms[0].arn>";
+const ROLE_OVERRIDE_RULE = "aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0]";
 const RETENTION_CAP_MARGIN_DAYS = 31;
 
 type Statement = Record<string, unknown>;
@@ -239,6 +242,130 @@ function roleViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
   return out;
 }
 
+/** `v` as JSON with every object's keys sorted, so key order does not count. */
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  if (typeof v === "object" && v !== null) {
+    const entries = Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+    return `{${entries.map(([k, x]) => `${JSON.stringify(k)}:${canonical(x)}`).join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+function trustViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
+  const out: string[] = [];
+  if (!tf.blocks("data").some((b) => b.labels[0] === "aws_caller_identity" && b.labels[1] === "current")) {
+    out.push("publisher trust: no data.aws_caller_identity.current");
+  }
+  const policy = plain(tf.attr(tf.resource("aws_iam_role", "ecs_audit_anchor_publisher_task"), "assume_role_policy", opts)) as { Statement: Statement[] };
+  const want = [
+    {
+      Effect: "Allow",
+      Principal: { Service: "ecs-tasks.amazonaws.com" },
+      Action: "sts:AssumeRole",
+      Condition: { StringEquals: { "aws:SourceAccount": ACCOUNT_ID } },
+    },
+  ];
+  if (canonical(policy.Statement) !== canonical(want)) out.push(`publisher trust: statements ${JSON.stringify(policy.Statement)}`);
+  return out;
+}
+
+function keyText(key: HclExpr): string | undefined {
+  if (key.t === "lit") return String(key.v);
+  if (key.t === "name") return key.name;
+  if (key.t === "tmpl" && key.parts.length === 1 && typeof key.parts[0] === "string") return key.parts[0];
+  return undefined;
+}
+
+/** Every reference (`trav`) anywhere under `e`, by its source text. */
+function referencesIn(e: HclExpr, out: string[] = []): string[] {
+  switch (e.t) {
+    case "trav":
+      out.push(e.src);
+      break;
+    case "tmpl":
+      for (const p of e.parts) if (typeof p !== "string") referencesIn(p, out);
+      break;
+    case "call":
+      for (const a of e.args) referencesIn(a, out);
+      break;
+    case "list":
+      for (const i of e.items) referencesIn(i, out);
+      break;
+    case "obj":
+      for (const { value } of e.items) referencesIn(value, out);
+      break;
+    case "cond":
+      [e.c, e.a, e.b].forEach((x) => referencesIn(x, out));
+      break;
+    case "bin":
+      [e.l, e.r].forEach((x) => referencesIn(x, out));
+      break;
+    case "un":
+      referencesIn(e.e, out);
+      break;
+    case "for":
+      [e.coll, e.val, ...(e.key ? [e.key] : []), ...(e.cond ? [e.cond] : [])].forEach((x) => referencesIn(x, out));
+      break;
+  }
+  return out;
+}
+
+/** The object literal under `e` whose `Sid` is `sid`. */
+function statementWithSid(e: HclExpr, sid: string): HclExpr | undefined {
+  const children: HclExpr[] =
+    e.t === "call" ? e.args : e.t === "list" ? e.items : e.t === "obj" ? e.items.map((i) => i.value) : [];
+  if (e.t === "obj" && e.items.some(({ key, value }) => keyText(key) === "Sid" && value.t === "tmpl" && value.parts.join("") === sid)) {
+    return e;
+  }
+  for (const c of children) {
+    const found = statementWithSid(c, sid);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
+ * The rule that surfaces a task run with the publisher's role as an override.
+ * The topic policy is read as references, not evaluated: its source ARN list
+ * concatenates a splat, which the evaluator does not model.
+ */
+function roleOverrideRuleViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
+  const out: string[] = [];
+  let rule;
+  try {
+    rule = tf.resource("aws_cloudwatch_event_rule", "audit_anchor_publisher_role_override");
+  } catch {
+    return ["role override rule: missing"];
+  }
+  if (tf.attr(rule, "count", { vars: { enable_monitoring: true } }) !== 1) out.push("role override rule: not created with monitoring on");
+  const want = {
+    source: ["aws.ecs"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    detail: {
+      eventSource: ["ecs.amazonaws.com"],
+      eventName: ["RunTask", "StartTask"],
+      requestParameters: { overrides: { taskRoleArn: [PUBLISHER_ROLE_ARN] } },
+    },
+  };
+  const pattern = plain(tf.attr(rule, "event_pattern", opts));
+  if (canonical(pattern) !== canonical(want)) out.push(`role override rule: event_pattern ${JSON.stringify(pattern)}`);
+
+  const targets = tf
+    .resources("aws_cloudwatch_event_target")
+    .filter((t) => String(tf.attr(t, "rule", opts)) === `<ref:${ROLE_OVERRIDE_RULE}.name>`);
+  if (targets.length !== 1 || String(tf.attr(targets[0], "arn", opts)) !== ALARM_TOPIC_ARN) {
+    out.push("role override rule: not targeted at the alarm topic");
+  }
+
+  const policy = tf.resource("aws_sns_topic_policy", "alarms").body.attrs.policy;
+  const statement = policy && statementWithSid(policy, "AllowEventBridgePublish");
+  if (!statement || !referencesIn(statement).includes(`${ROLE_OVERRIDE_RULE}.arn`)) {
+    out.push("role override rule: the alarm topic policy does not admit it");
+  }
+  return out;
+}
+
 function verifyWorkerViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
   const out: string[] = [];
   const task = tf.resource("aws_ecs_task_definition", "audit_chain_verify_worker");
@@ -301,6 +428,8 @@ function allViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
     ...bucketViolations(tf, opts),
     ...publisherViolations(tf, opts),
     ...roleViolations(tf, opts),
+    ...trustViolations(tf, opts),
+    ...roleOverrideRuleViolations(tf, opts),
     ...verifyWorkerViolations(tf, opts),
     ...clusterViolations(tf),
     ...prefixPlumbingViolations(tf),
@@ -585,6 +714,48 @@ const RED_FIXTURES: RedFixture[] = [
 
 resource "aws_iam_role_policy" "ecs_s3_access" {`,
     violation: "shared role: ecs_audit_anchor_s3 grants on the anchors bucket",
+  },
+  {
+    name: "a publisher role any account's ECS tasks may assume",
+    file: "iam.tf",
+    from: '      Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }\n',
+    to: "",
+    violation: "publisher trust: statements",
+  },
+  {
+    name: "a publisher trust condition on a key ECS does not bind to the account",
+    file: "iam.tf",
+    from: 'Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }',
+    to: 'Condition = { ArnLike = { "aws:SourceArn" = "arn:aws:ecs:*:*:*" } }',
+    violation: "publisher trust: statements",
+  },
+  {
+    name: "the role override rule watching the shared task role",
+    file: "monitoring.tf",
+    from: "taskRoleArn = [aws_iam_role.ecs_audit_anchor_publisher_task.arn]",
+    to: "taskRoleArn = [aws_iam_role.ecs_task.arn]",
+    violation: "role override rule: event_pattern",
+  },
+  {
+    name: "the role override rule leaving StartTask unwatched",
+    file: "monitoring.tf",
+    from: 'eventName   = ["RunTask", "StartTask"]',
+    to: 'eventName   = ["RunTask"]',
+    violation: "role override rule: event_pattern",
+  },
+  {
+    name: "the role override rule's target sent elsewhere",
+    file: "monitoring.tf",
+    from: "rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0].name",
+    to: "rule      = aws_cloudwatch_event_rule.ecs_execute_command[0].name",
+    violation: "role override rule: not targeted at the alarm topic",
+  },
+  {
+    name: "the role override rule left out of the alarm topic policy",
+    file: "monitoring.tf",
+    from: "                aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0].arn,\n",
+    to: "",
+    violation: "role override rule: the alarm topic policy does not admit it",
   },
   {
     name: "a task role on the verify worker",

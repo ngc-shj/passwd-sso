@@ -143,3 +143,60 @@ two `worker:*` lines with the user's approval.
   allow vectors; module test 18/18), T5 (duplicate env case removed), T6 (publisher `SETTING_*`
   keys exported, including the new `SETTING_DEPLOYMENT_ID` used in its SQL, and imported by the
   integration fixtures).
+
+### D12: Phase 3 round-1 fixes (SF-1…SF-12, ST-5…ST-10)
+
+- **SF-1 — `lock_held` is retried and alarmed.** Was: not retried, info only, "the other run
+  publishes". Any role that can connect can hold `hashtext('audit-anchor-publish')`, so the
+  holder is not assumed to publish. Now `isRetryable` admits `lock_held` under the same 15-min
+  interval, 30-min stop window and per-process bound; the marker re-check turns the retry into
+  `skipped_already_published` when the holder did publish. `audit-anchor-publisher.lock_held`
+  joined the alarmed failure log types (on ECS it never occurs legitimately). The holder query
+  in alerts.md was run against the dev database: the one-argument lock is the `bigint` overload
+  (`hashtext` is `int4`, widened), stored with `objsubid = 1`, `classid` = the key's high 32 bits
+  (0 here: `hashtext('audit-anchor-publish') = 1242793212`) and `objid` its low 32 bits. The
+  documented query pins all three; the db-integration lock_held case runs it against a holder.
+- **SF-2 — the marker is monotonic.** Published when the marker is at or past the boundary;
+  past it also logs `audit-anchor-publisher.stale_boundary` (warn) and is a
+  `skipped_already_published` (no healthy line). A marker that is not the ISO-8601 form a
+  publish writes (`Date.parse` round-tripping through `toISOString`) throws
+  `BoundaryMarkerUnreadableError` → `failed`/`before_upload`,
+  `CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`, uncounted. The marker write is forward only by
+  construction (the re-check under the lock found it absent or earlier).
+- **SF-3** — `retries_exhausted` carries `reason`: `count` when the three retries are used,
+  `window_closed` when the next retry would land inside the stop window (count wins when both).
+- **SF-4** — the `MISSING_PRIOR_CADENCE_PUBLICATION` row is flushed only on `published`; a
+  failed run writes its failure row only. The fail-closed and MinIO integration cases now
+  assert the failure row alone (they asserted both).
+- **SF-5** — boot/signal wiring moved to `src/workers/audit-anchor-publisher-lifecycle.ts`
+  (`createPublisherLifecycle`), used by `scripts/audit-anchor-publisher.ts` with the same lines.
+  A signal during boot waits for the boot to settle; the boot then starts nothing and the
+  process exits 0 — a boot failure while shutting down is not `boot_failed`. The module joined
+  the publisher's `worker-policy-manifest.json` entry.
+- **SF-6** — the verify worker's `verify threw` line is `error=%j` (`errorLogFields`) plus
+  `detail`, which carries a message only for the worker's own precondition errors
+  (`ChainVerifyPreconditionError`: `RLS_CONTEXT_MISSING`, `BYPASS_CONTEXT_MISSING`,
+  `BYPASS_SCOPE_VIOLATION`, built from tenant ids and GUC values) — kept because those
+  messages are the diagnosis the heartbeat tests pin, and their codes now also reach
+  `error.code`. `tick threw` and the fatal `main()` line print `errorLogFields` only.
+- **SF-7** — the publisher role's trust policy requires `aws:SourceAccount` (a new
+  `data.aws_caller_identity.current`; none existed). EventBridge rule
+  `audit_anchor_publisher_role_override` matches `RunTask` **and** `StartTask` (both accept
+  `overrides.taskRoleArn`) naming the role, targets the alarm topic and is admitted by the
+  topic policy. The stack has no `us-east-1` provider, so none was added. **Residual**: IAM
+  `UpdateAssumeRolePolicy` / `PutRolePolicy` / `AttachRolePolicy` / `DeleteRole` + `CreateRole`
+  on the role, and a `RegisterTaskDefinition` naming it, reach CloudTrail but are not alarmed
+  by this stack (alerts.md, the threat model, the manual test). "Only one that reads these"
+  narrowed to "the only container that receives these" (the shared execution role can read
+  the secret); the READMEs already said "no other task receives".
+- **SF-8** — filter and alarm `audit_anchor_publisher_dead_letter` (`audit-dead-letter` on the
+  publisher's log group). `deadLetterLoggerOptions` is exported from `audit-logger.ts` so the
+  metric-filter test matches the publisher's real dead-letter line.
+- **SF-9** — tfvars `DEPLOYMENT_ID` wording. **SF-10** — `ci-integration.yml` paths add
+  `package.json`, `package-lock.json` and the workflow itself (it has no push trigger).
+  **SF-11** — compose `minio` mounts `/data` as tmpfs. **SF-12** — pre-pr's integration step
+  probes MinIO's readiness and refuses the step by name when it is not ready (a failure, since
+  the S3 suites fail rather than skip without it); docs/setup/docker/en.md and
+  dev-host-migration.md document MinIO and `ANCHOR_TEST_S3_ENDPOINT`.
+- ST-5…ST-10 as listed in the code review. ST-8's former "fifth worker task" case is renamed
+  for what it tests (a changed bundle), and a real fifth task definition is the new case.

@@ -420,11 +420,13 @@ resource "aws_cloudwatch_metric_alarm" "audit_anchor_chain_enabled_fell_to_zero"
 }
 
 # The publisher's failure lines, one filter and one alarm each so the page
-# names the failure. lock_held is not here: another run holding the lock is not
-# a failure.
+# names the failure. lock_held is here though it is not a failure of the run:
+# on ECS the service runs one task and stops the old one before starting the
+# new, so a held lock means a second publisher against this database.
 locals {
   audit_anchor_publisher_failure_log_types = {
     cadence_failed             = "audit-anchor-publisher.cadence_failed"
+    lock_held                  = "audit-anchor-publisher.lock_held"
     upload_failed              = "audit-anchor-publisher.upload_failed"
     upload_cap_reached         = "audit-anchor-publisher.upload_cap_reached"
     commit_failed_after_upload = "audit-anchor-publisher.commit_failed_after_upload"
@@ -459,6 +461,41 @@ resource "aws_cloudwatch_metric_alarm" "audit_anchor_publisher_failure" {
   statistic           = "Sum"
   threshold           = 1
   alarm_description   = "The audit-anchor publisher logged ${each.value}; see docs/operations/alerts.md"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alarms[0].arn]
+  ok_actions    = [aws_sns_topic.alarms[0].arn]
+  tags          = local.tags
+}
+
+# The publisher's own audit write failed (reason anchor_publisher_emit_failed):
+# that AUDIT_ANCHOR_* row never reaches audit_logs, and this line is the record
+# of which emit it was.
+resource "aws_cloudwatch_log_metric_filter" "audit_anchor_publisher_dead_letter" {
+  count          = var.enable_monitoring ? 1 : 0
+  name           = "${local.name_prefix}-audit-anchor-publisher-dead-letter"
+  log_group_name = aws_cloudwatch_log_group.audit_anchor_publisher.name
+  pattern        = "{ $._logType = \"audit-dead-letter\" }"
+
+  metric_transformation {
+    name          = "AuditAnchorPublisher_dead_letter"
+    namespace     = "${local.name_prefix}/AuditAnchor"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "audit_anchor_publisher_dead_letter" {
+  count               = var.enable_monitoring ? 1 : 0
+  alarm_name          = "${local.name_prefix}-audit-anchor-publisher-dead-letter"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AuditAnchorPublisher_dead_letter"
+  namespace           = "${local.name_prefix}/AuditAnchor"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  alarm_description   = "The audit-anchor publisher dead-lettered one of its own audit rows; see docs/operations/alerts.md"
   treat_missing_data  = "notBreaching"
 
   alarm_actions = [aws_sns_topic.alarms[0].arn]
@@ -581,7 +618,7 @@ resource "aws_cloudwatch_event_target" "ecs_task_stopped_sns" {
 # EventBridge: CloudTrail events nothing else would surface
 ################################################################################
 #
-# Both rules match "AWS API Call via CloudTrail" events, which EventBridge
+# These rules match "AWS API Call via CloudTrail" events, which EventBridge
 # receives only from an account with a trail logging management events.
 # Terraform defines no trail: one (or an organisation trail) is a deployment
 # prerequisite, checked in the manual test.
@@ -608,6 +645,43 @@ resource "aws_cloudwatch_event_rule" "ecs_execute_command" {
 resource "aws_cloudwatch_event_target" "ecs_execute_command_sns" {
   count     = var.enable_monitoring ? 1 : 0
   rule      = aws_cloudwatch_event_rule.ecs_execute_command[0].name
+  target_id = "send-to-sns"
+  arn       = aws_sns_topic.alarms[0].arn
+}
+
+# The publisher's task role is the only principal the anchors bucket policy
+# lets write a manifest. A task run with that role as an override — any image,
+# any command — could write one, so every such RunTask / StartTask is surfaced.
+# The publisher's own service never sends an override. Changes to the role
+# itself (UpdateAssumeRolePolicy, PutRolePolicy, AttachRolePolicy, a delete and
+# re-create) are IAM events, which EventBridge delivers only in us-east-1; this
+# stack has no provider there, so those reach CloudTrail but are not alarmed
+# here (docs/operations/alerts.md).
+resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_role_override" {
+  count       = var.enable_monitoring ? 1 : 0
+  name        = "${local.name_prefix}-audit-anchor-publisher-role-override"
+  description = "An ECS task was run with the audit-anchor publisher's task role as a taskRoleArn override"
+
+  event_pattern = jsonencode({
+    source      = ["aws.ecs"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail = {
+      eventSource = ["ecs.amazonaws.com"]
+      eventName   = ["RunTask", "StartTask"]
+      requestParameters = {
+        overrides = {
+          taskRoleArn = [aws_iam_role.ecs_audit_anchor_publisher_task.arn]
+        }
+      }
+    }
+  })
+
+  tags = local.tags
+}
+
+resource "aws_cloudwatch_event_target" "audit_anchor_publisher_role_override_sns" {
+  count     = var.enable_monitoring ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0].name
   target_id = "send-to-sns"
   arn       = aws_sns_topic.alarms[0].arn
 }
@@ -673,6 +747,7 @@ resource "aws_sns_topic_policy" "alarms" {
               [
                 aws_cloudwatch_event_rule.ecs_task_stopped[0].arn,
                 aws_cloudwatch_event_rule.ecs_execute_command[0].arn,
+                aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0].arn,
               ],
               aws_cloudwatch_event_rule.audit_anchor_bucket_config_change[*].arn,
             )

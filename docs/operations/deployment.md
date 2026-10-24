@@ -333,14 +333,15 @@ refresh is checked in the manual test
 
 #### CloudTrail prerequisite
 
-Two EventBridge rules — `<name_prefix>-ecs-execute-command` and
-`<name_prefix>-audit-anchor-bucket-config-change` — match "AWS API Call via
+Three EventBridge rules — `<name_prefix>-ecs-execute-command`,
+`<name_prefix>-audit-anchor-bucket-config-change` and
+`<name_prefix>-audit-anchor-publisher-role-override` — match "AWS API Call via
 CloudTrail" events, which EventBridge receives only from an account with a trail
 logging management events. Terraform defines no trail. Before relying on those
 rules, have one in the region (an organisation trail counts) that:
 
 - logs **management events** (write events at least: `ExecuteCommand`,
-  `PutBucketPolicy`, `PutObjectLockConfiguration`, … are writes), and
+  `PutBucketPolicy`, `PutObjectLockConfiguration`, `RunTask`, … are writes), and
 - has a **data-event selector on the anchors bucket** (`AWS::S3::Object`, ARN
   prefix `arn:aws:s3:::<bucket>/`): it records the break-glass role's Step 4–5
   writes and any refused write attempt, which no rule here alarms on.

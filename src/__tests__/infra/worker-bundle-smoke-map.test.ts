@@ -168,9 +168,27 @@ describe("worker-bundle-smoke.json vs the ECS task definitions", () => {
     expect(mapDrift(drifted, map)).toEqual(["audit_anchor_publisher: AUDIT_ANCHOR_PUBLISHER_ENABLED != false"]);
   });
 
-  it("catches a fifth worker task the map does not have", () => {
+  it("catches a task whose bundle differs from the map's", () => {
     const drifted = withEcs((t) => t.replace('command   = ["node", "dist/retention-gc-worker.js"]', 'command   = ["node", "dist/other-worker.js"]'));
     expect(mapDrift(drifted, map)).toEqual(["retention_gc_worker: bundle dist/retention-gc-worker.js != dist/other-worker.js"]);
+  });
+
+  it("catches a fifth worker task the map does not have", () => {
+    const fifth = `
+resource "aws_ecs_task_definition" "other_worker" {
+  family = "other-worker"
+  container_definitions = jsonencode([
+    {
+      name    = "other-worker"
+      image   = "x"
+      command = ["node", "dist/other-worker.js"]
+    }
+  ])
+}
+`;
+    const drifted = withEcs((t) => `${t}${fifth}`);
+    expect(Object.keys(workerTasks(drifted))).toContain("other_worker");
+    expect(mapDrift(drifted, map)).toEqual(["other_worker: missing from the map"]);
   });
 
   it("refuses a worker command wrapped in a shell", () => {

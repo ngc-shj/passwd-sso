@@ -13,12 +13,12 @@ import {
   type PublisherConfig,
 } from "@/workers/audit-anchor-publisher";
 import { createAnchorScheduler } from "@/workers/audit-anchor-scheduler";
+import { createPublisherLifecycle } from "@/workers/audit-anchor-publisher-lifecycle";
 import { S3Destination } from "@/lib/audit/anchor-destinations/s3-destination";
 import { GitHubReleaseDestination } from "@/lib/audit/anchor-destinations/github-release-destination";
 import { FilesystemDestination } from "@/lib/audit/anchor-destinations/filesystem-destination";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import { derivePublicKey } from "@/lib/audit/anchor-manifest";
-import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   AUDIT_ANCHOR_CADENCE_MS,
   AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
@@ -172,61 +172,19 @@ const scheduler = createAnchorScheduler({
   publishOffsetMs: AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
 });
 
-async function boot(): Promise<void> {
-  // Boot-time deployment ID check
-  await publisher.ensureDeploymentIdMatch();
-
-  console.log(
-    JSON.stringify({
-      level: "info",
-      msg: "audit-anchor-publisher: cadence=24h",
-      key: signingKeyKid,
-    }),
-  );
-
-  // One run for the current boundary, then the schedule stays armed.
-  await scheduler.start();
-}
-
-let shuttingDown = false;
-
-function handleSignal(signal: string): void {
-  if (shuttingDown) return;
-  shuttingDown = true;
-
-  console.log(JSON.stringify({ level: "info", msg: "audit-anchor-publisher.shutdown", signal }));
-
-  // Stop arming and let an in-flight run finish before disconnecting.
-  scheduler.stop()
-    .then(() => shutdown())
-    .then(() => {
-      process.exit(0);
-    })
-    .catch((err: unknown) => {
-      console.error(
-        JSON.stringify({
-          level: "fatal",
-          msg: "audit-anchor-publisher.shutdown_error",
-          error: errorLogFields(err),
-        }),
-      );
-      process.exit(1);
-    });
-}
-
-process.on("SIGTERM", () => handleSignal("SIGTERM"));
-process.on("SIGINT", () => handleSignal("SIGINT"));
-
-boot().catch((err: unknown) => {
-  console.error(
-    JSON.stringify({
-      level: "fatal",
-      msg: "audit-anchor-publisher.boot_failed",
-      // errorLogFields, not a top-level `code` read or the message: a Prisma
-      // raw-query failure carries the driver's SQLSTATE nested underneath a
-      // P2010, and a message can carry a connection target.
-      error: errorLogFields(err),
-    }),
-  );
-  process.exit(1);
+const lifecycle = createPublisherLifecycle({
+  ensureDeploymentIdMatch: () => publisher.ensureDeploymentIdMatch(),
+  scheduler,
+  shutdown,
+  exit: (code) => process.exit(code),
+  log: {
+    info: (line) => console.log(JSON.stringify(line)),
+    error: (line) => console.error(JSON.stringify(line)),
+  },
+  bootLine: { level: "info", msg: "audit-anchor-publisher: cadence=24h", key: signingKeyKid },
 });
+
+process.on("SIGTERM", () => lifecycle.handleSignal("SIGTERM"));
+process.on("SIGINT", () => lifecycle.handleSignal("SIGINT"));
+
+void lifecycle.boot();

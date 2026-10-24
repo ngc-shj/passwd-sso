@@ -48,7 +48,12 @@ import {
   snapshotPublisherSettings,
   type SettingsSnapshot,
 } from "./anchor-publisher-fixtures";
-import { AuditAnchorPublisher, buildManifestArtifactKey, type PublisherConfig } from "@/workers/audit-anchor-publisher";
+import {
+  ADVISORY_LOCK_KEY,
+  AuditAnchorPublisher,
+  buildManifestArtifactKey,
+  type PublisherConfig,
+} from "@/workers/audit-anchor-publisher";
 import { FilesystemDestination } from "@/lib/audit/anchor-destinations/filesystem-destination";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import {
@@ -414,8 +419,22 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     const boundary = nextBoundary();
     const holder = createPrismaForRole("superuser", { max: 1 });
     try {
-      await holder.prisma.$executeRaw`SELECT pg_advisory_lock(hashtext('audit-anchor-publish'))`;
+      await holder.prisma.$executeRaw`SELECT pg_advisory_lock(hashtext(${ADVISORY_LOCK_KEY}::text))`;
       try {
+        // The holder query docs/operations/alerts.md gives under lock_held
+        // finds this session: hashtext is int4, widened to the bigint key, so
+        // classid is its high 32 bits and objid its low 32.
+        const [{ pid: holderPid }] = await holder.prisma.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+        const holders = await ctx.su.prisma.$queryRawUnsafe<{ pid: number }[]>(
+          `SELECT l.pid, a.usename, a.application_name, a.backend_start, a.xact_start
+             FROM pg_locks l JOIN pg_stat_activity a USING (pid)
+            WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+              AND l.classid = ((hashtext($1::text)::bigint >> 32) & 4294967295)::oid
+              AND l.objid = (hashtext($1::text)::bigint & 4294967295)::oid`,
+          ADVISORY_LOCK_KEY,
+        );
+        expect(holders.map((h) => h.pid)).toEqual([holderPid]);
+
         const outcome = await publisher(makePublisherConfig([fsDestination()], { lockTimeoutMs: 200 })).runCadence(boundary);
 
         expect(outcome).toMatchObject({ kind: "lock_held", reason: "LOCK_HELD_BY_OTHER_INSTANCE" });
@@ -424,7 +443,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
         expect(state.map((s) => s.publish_paused_until)).toEqual([null, null]);
         expect(await attemptsRow()).toBeNull();
       } finally {
-        await holder.prisma.$executeRaw`SELECT pg_advisory_unlock(hashtext('audit-anchor-publish'))`;
+        await holder.prisma.$executeRaw`SELECT pg_advisory_unlock(hashtext(${ADVISORY_LOCK_KEY}::text))`;
       }
     } finally {
       await holder.prisma.$disconnect();

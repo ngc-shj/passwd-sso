@@ -29,10 +29,18 @@ vi.mock("@/lib/logger", async (importOriginal) => {
   return { ...actual, default: logger, getLogger: () => logger };
 });
 
-// The audit stream is not what these filters read; keep it off stdout.
+// The audit stream is not what these filters read; keep it off stdout. The
+// dead-letter stream is (the publisher's dead-letter filter): its real options,
+// into the same sink.
 vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit/audit-logger")>();
-  return { ...actual, auditLogger: { info: vi.fn() }, deadLetterLogger: { warn: vi.fn() } };
+  const sink = new Writable({
+    write(chunk, _encoding, cb) {
+      chunks.push(chunk.toString());
+      cb();
+    },
+  });
+  return { ...actual, auditLogger: { info: vi.fn() }, deadLetterLogger: pino(actual.deadLetterLoggerOptions, sink) };
 });
 
 // createPublisher's pool, so its error listener can be driven.
@@ -49,7 +57,14 @@ vi.mock("@/lib/db/pool-factory", async () => {
   };
 });
 
-import { AuditAnchorPublisher, createPublisher, type PublisherConfig } from "./audit-anchor-publisher";
+import {
+  AuditAnchorPublisher,
+  PUBLISHER_AUDIT_DEAD_LETTER_REASON,
+  SETTING_LAST_PUBLISHED_BOUNDARY,
+  SETTING_UPLOAD_ATTEMPTS,
+  createPublisher,
+  type PublisherConfig,
+} from "./audit-anchor-publisher";
 import { createAnchorScheduler } from "./audit-anchor-scheduler";
 
 const BOUNDARY = new Date("2026-01-15T00:05:00.000Z");
@@ -63,6 +78,7 @@ type Db = {
   settings: Map<string, string>;
   lockTimeoutOnCall?: number;
   failPauseWrite?: boolean;
+  failOutbox?: boolean;
   lockCalls: number;
 };
 
@@ -107,7 +123,12 @@ function fakePrisma(db: Db): PrismaClient {
         return {};
       },
     },
-    auditOutbox: { createMany: async () => ({ count: 1 }) },
+    auditOutbox: {
+      createMany: async () => {
+        if (db.failOutbox) throw Object.assign(new Error("permission denied for table audit_outbox"), { code: "42501" });
+        return { count: 1 };
+      },
+    },
   };
   const prisma = { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) };
   return prisma as unknown as PrismaClient;
@@ -138,8 +159,9 @@ async function cadence(db: Db, overrides: Partial<PublisherConfig> = {}): Promis
   return linesOf(() => new AuditAnchorPublisher({ prisma: fakePrisma(db), config: config(overrides) }).runCadence(BOUNDARY));
 }
 
-const ATTEMPTS = "audit_anchor_upload_attempts";
-const MARKER = "audit_anchor_last_published_boundary";
+const ATTEMPTS = SETTING_UPLOAD_ATTEMPTS;
+const MARKER = SETTING_LAST_PUBLISHED_BOUNDARY;
+const CADENCE = 24 * 60 * 60 * 1000;
 
 const failingUpload = { destinations: [{ name: "s3-object-lock", upload: async () => Promise.reject(Object.assign(new Error("denied"), { code: "AccessDenied" })) }] };
 
@@ -151,6 +173,7 @@ beforeAll(async () => {
   lines.never_enabled = await cadence(makeDb({ enabled: [], anchors: [] }));
   lines.disabled_after_enabled = await cadence(makeDb({ enabled: [], anchors: [TENANT] }));
   lines.already_published = await cadence(makeDb({ settings: new Map([[MARKER, BOUNDARY.toISOString()]]) }));
+  lines.stale_marker = await cadence(makeDb({ settings: new Map([[MARKER, new Date(BOUNDARY.getTime() + CADENCE).toISOString()]]) }));
   lines.upload_failed = await cadence(makeDb(), failingUpload);
   lines.cap_reached = await cadence(makeDb({ settings: new Map([[ATTEMPTS, JSON.stringify({ boundary: BOUNDARY.toISOString(), count: 3 })]]) }));
   lines.lock_held = await cadence(makeDb({ lockTimeoutOnCall: 1 }));
@@ -162,6 +185,12 @@ beforeAll(async () => {
     },
   });
   lines.pause_persist_failed = await cadence(makeDb({ failPauseWrite: true }), failingUpload);
+  // The publisher's own audit write refused: a deployment-id mismatch's row,
+  // which is the only line that path logs.
+  lines.dead_letter = await linesOf(async () => {
+    const publisher = new AuditAnchorPublisher({ prisma: fakePrisma(makeDb({ failOutbox: true })), config: config() });
+    await publisher.ensureDeploymentIdMatch().catch(() => undefined);
+  });
   lines.pool_error = await linesOf(async () => {
     createPublisher(config());
     pools[pools.length - 1].emit("error", Object.assign(new Error("terminated"), { code: "57P01" }));
@@ -221,6 +250,8 @@ describe("publisher log lines vs their metric filters", () => {
     expect(kinds("never_enabled")).toEqual(["skipped_no_tenants"]);
     expect(kinds("disabled_after_enabled")).toEqual(["skipped_no_tenants"]);
     expect(kinds("already_published")).toEqual(["skipped_already_published"]);
+    expect(kinds("stale_marker")).toEqual(["skipped_already_published"]);
+    expect(lines.stale_marker.map((l) => l._logType)).toContain("audit-anchor-publisher.stale_boundary");
     expect(kinds("upload_failed")).toEqual(["failed"]);
     expect(kinds("cap_reached")).toEqual(["upload_cap_reached"]);
     expect(kinds("lock_held")).toEqual(["lock_held"]);
@@ -255,6 +286,7 @@ describe("publisher log lines vs their metric filters", () => {
 
   const expectedScenarios: Record<string, string[]> = {
     cadence_failed: ["commit_failed", "pause_persist_failed", "upload_failed"],
+    lock_held: ["lock_held"],
     upload_failed: ["pause_persist_failed", "upload_failed"],
     upload_cap_reached: ["cap_reached"],
     commit_failed_after_upload: ["commit_failed"],
@@ -270,6 +302,20 @@ describe("publisher log lines vs their metric filters", () => {
   it.each(Object.keys(expectedScenarios))("matches the %s filter to the line its path emits, and no other", (key) => {
     const p = pattern("audit_anchor_publisher_failure", { key, value: FAILURE_LOG_TYPES[key] });
     expect(matchingScenarios(p)).toEqual(expectedScenarios[key]);
+  });
+
+  it("matches the publisher's dead-letter filter to its real dead-letter line, and no other", () => {
+    const p = pattern("audit_anchor_publisher_dead_letter");
+    expect(matchingScenarios(p)).toEqual(["dead_letter"]);
+    expect(lines.dead_letter.filter((l) => matchesFilterPattern(p, l))).toEqual([
+      expect.objectContaining({
+        _logType: "audit-dead-letter",
+        reason: PUBLISHER_AUDIT_DEAD_LETTER_REASON,
+        action: "AUDIT_ANCHOR_PUBLISH_FAILED",
+        error: { name: "Error", code: "42501" },
+      }),
+    ]);
+    expect(metricOf("audit_anchor_publisher_dead_letter")).toEqual(alarmMetric("audit_anchor_publisher_dead_letter"));
   });
 
   it("publishes each failure filter to the metric its alarm watches", () => {
@@ -300,7 +346,12 @@ describe("publisher log lines vs their metric filters", () => {
   });
 
   it("binds every publisher filter to the publisher's log group", () => {
-    for (const name of ["audit_anchor_cadence_healthy", "audit_anchor_chain_enabled_fell_to_zero", "audit_anchor_publisher_failure"]) {
+    for (const name of [
+      "audit_anchor_cadence_healthy",
+      "audit_anchor_chain_enabled_fell_to_zero",
+      "audit_anchor_publisher_failure",
+      "audit_anchor_publisher_dead_letter",
+    ]) {
       const filter = tf.resource("aws_cloudwatch_log_metric_filter", name);
       expect(String(tf.attr(filter, "log_group_name", { each: { key: "x", value: "y" } }))).toBe("<ref:aws_cloudwatch_log_group.audit_anchor_publisher.name>");
     }

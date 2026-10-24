@@ -234,9 +234,10 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
     expect(aborted).toMatchObject({ kind: "failed", stage: "upload", reason: "s3-object-lock_UPLOAD_FAILED:UPLOAD_TIMEOUT" });
     const paused = await anchorState(ctx.su, [tenantA, tenantB]);
     expect(paused.every((s) => s.publish_paused_until !== null)).toBe(true);
-    expect((await publisherOutboxRows(ctx.su, [boundary])).map((r) => r.failureReason)).toEqual(
-      expect.arrayContaining(["MISSING_PRIOR_CADENCE_PUBLICATION", "s3-object-lock_UPLOAD_FAILED:UPLOAD_TIMEOUT"]),
-    );
+    // The failure row only: the missing-prior row goes out with a publish.
+    expect((await publisherOutboxRows(ctx.su, [boundary])).map((r) => r.failureReason)).toEqual([
+      "s3-object-lock_UPLOAD_FAILED:UPLOAD_TIMEOUT",
+    ]);
 
     await advanceChain(ctx.su, tenantA);
     const retry = await publisher(config).runCadence(boundary);

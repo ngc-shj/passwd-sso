@@ -40,6 +40,11 @@ on:
       - 'src/lib/access-request/**'
       # C7: the offline operator CLI, tested from src/__tests__/db-integration/.
       - 'scripts/**'
+      # A dependency bump (the pg driver, Prisma, the S3 client) changes what
+      # these tests exercise; a change to this workflow changes how they run.
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ci-integration.yml'
 
 permissions:
   # Round 4 S23 fix: principle of least privilege — only content read needed.

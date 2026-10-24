@@ -5,9 +5,11 @@
  * so a timer that fires early still publishes the boundary it was armed for.
  * The next timer is computed from the wall clock after each run (no
  * setInterval, which drifts and keeps firing on the old phase across a long
- * run). A failed run is retried for the same boundary, at most
- * ANCHOR_MAX_RETRIES_PER_BOUNDARY times and never closer than shortly before
- * the next one — a database outage at the boundary must not cost the day. The
+ * run). A failed run, or one that found the publish lock held, is retried for
+ * the same boundary, at most ANCHOR_MAX_RETRIES_PER_BOUNDARY times and never
+ * closer than shortly before the next one — a database outage at the boundary
+ * must not cost the day, and a lock holder that never publishes must not
+ * either (when it does publish, the retry's marker re-check skips). The
  * publisher's persisted attempt count bounds how many runs reach the
  * destination across restarts; this in-process bound covers the failures that
  * stop before the count is written, which the persisted count never sees.
@@ -44,9 +46,9 @@ export type AnchorScheduler = {
   stop: () => Promise<void>;
 };
 
-/** A failure the same boundary should be retried for, at any stage. */
+/** An outcome the same boundary should be retried for: a failure at any stage, or the lock held. */
 function isRetryable(outcome: CadenceOutcome | null): boolean {
-  return outcome === null || outcome.kind === "failed";
+  return outcome === null || outcome.kind === "failed" || outcome.kind === "lock_held";
 }
 
 export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorScheduler {
@@ -95,8 +97,9 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
     const boundaryMs = boundary.getTime();
     const nextOfBoundary = boundaryMs + deps.cadenceMs;
     const retryAt = now() + retryIntervalMs;
-    const retryable = isRetryable(outcome) && retryAt <= nextOfBoundary - retryStopBeforeNextMs;
-    if (retryable && retries < ANCHOR_MAX_RETRIES_PER_BOUNDARY) {
+    const retryable = isRetryable(outcome);
+    const windowOpen = retryAt <= nextOfBoundary - retryStopBeforeNextMs;
+    if (retryable && windowOpen && retries < ANCHOR_MAX_RETRIES_PER_BOUNDARY) {
       log.info(
         {
           boundary: boundary.toISOString(),
@@ -113,6 +116,9 @@ export function createAnchorScheduler(deps: AnchorSchedulerDeps): AnchorSchedule
         {
           boundary: boundary.toISOString(),
           retries,
+          // The bound that stopped it: three retries used, or the next one
+          // would land within the stop window before the next boundary.
+          reason: retries >= ANCHOR_MAX_RETRIES_PER_BOUNDARY ? "count" : "window_closed",
           _logType: "audit-anchor-publisher.retries_exhausted",
         },
         "audit-anchor-publisher.retries_exhausted",

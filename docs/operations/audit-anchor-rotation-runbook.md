@@ -340,10 +340,16 @@ Two publisher instances racing (accidental double-start; on ECS the service runs
 one task and a deploy stops the old one first) are safe by design. Every run sets
 `lock_timeout` (10 s) and takes the blocking `pg_advisory_xact_lock(hashtext('audit-anchor-publish'))`,
 then reads the boundary marker `audit_anchor_last_published_boundary` under it: a run for a
-boundary already published reports `skipped_already_published`. A run that waits past the
-timeout stands down with `lock_held` (`LOCK_HELD_BY_OTHER_INSTANCE`). Neither is a failure,
-and neither produces an `AUDIT_ANCHOR_PUBLISH_FAILED` row. `DEPLOYMENT_ID` does not serialize
-instances: it only stops a publisher configured for another deployment from booting.
+boundary at or before the marker reports `skipped_already_published` (the marker only moves
+forward). A run that waits past the timeout stands down with `lock_held`
+(`LOCK_HELD_BY_OTHER_INSTANCE`). Neither produces an `AUDIT_ANCHOR_PUBLISH_FAILED` row. A
+`lock_held` run is retried for the same boundary like a failure (every 15 minutes, at most
+three times per process); when the holder did publish, the retry's marker re-check skips. The
+holder is not guaranteed to publish — any role that can connect can take the advisory lock —
+so on AWS `lock_held` is alarmed (`<name_prefix>-audit-anchor-publisher-lock-held`); find the
+holder with the `pg_locks` query under `audit-anchor-publisher.lock_held` in
+`docs/operations/alerts.md`. `DEPLOYMENT_ID` does not serialize instances: it only stops a
+publisher configured for another deployment from booting.
 
 ---
 

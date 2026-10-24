@@ -138,9 +138,8 @@ describe("AuditAnchorPublisher — FR6 fail-closed", () => {
     );
     expect(nextBoundaries).toContain(pausedUntil);
 
-    expect((await publisherOutboxRows(ctx.su, [boundary])).map((r) => r.failureReason)).toEqual(
-      expect.arrayContaining(["MISSING_PRIOR_CADENCE_PUBLICATION", outcome.reason]),
-    );
+    // The failure row only: the missing-prior row goes out with a publish.
+    expect((await publisherOutboxRows(ctx.su, [boundary])).map((r) => r.failureReason)).toEqual([outcome.reason]);
   });
 
   it("the injected upload bound fails a destination that never settles, within the test budget", async () => {

@@ -254,12 +254,26 @@ Steps:
 3. A no-op bucket-configuration change: `aws s3api put-bucket-versioning --bucket "$B" --versioning-configuration Status=Enabled --region "$REGION"`.
 4. After M3's break-glass probe: look up its data event in the trail's S3 log (or CloudTrail Lake /
    Athena over the trail bucket) for `PutObject` on `$P/key-rotation-probe-*`.
+5. The publisher role as a task-role override: after M3, run the probe task definition with the
+   shared role registered and the publisher role passed as an override (probe.sh refuses every
+   write either way):
+   `aws ecs run-task --cluster "$CLUSTER" --task-definition anchor-policy-probe --launch-type FARGATE --overrides "{\"taskRoleArn\":\"$PUB_ROLE\"}" --network-configuration "<as in M3>" --region "$REGION"`.
+6. The trust condition: `aws iam get-role --role-name "${PUB_ROLE##*/}" --query 'Role.AssumeRolePolicyDocument'`.
 
 Expected: 1. `IsLogging: true`; management events included; a data-event selector for
 `arn:aws:s3:::$B/`. 2. within minutes, an SNS email for `<NP>-ecs-execute-command` with
 `detail.eventName: ExecuteCommand`, the principal and the task. 3. an SNS email for
 `<NP>-audit-anchor-bucket-config-change` with `eventName: PutBucketVersioning`. 4. the data event
-names the break-glass role's session.
+names the break-glass role's session. 5. an SNS email for `<NP>-audit-anchor-publisher-role-override`
+with `eventName: RunTask` and `requestParameters.overrides.taskRoleArn` the publisher role. 6. one
+statement with `Condition.StringEquals."aws:SourceAccount"` this account's id.
+
+Not covered, by design (the residual in `docs/operations/alerts.md` "Publisher task role passed
+to another task"): IAM events on the publisher role (`UpdateAssumeRolePolicy`, `PutRolePolicy`,
+`AttachRolePolicy`, `DeleteRole` + `CreateRole`) reach EventBridge only in `us-east-1`, where this
+stack has no provider; M3's `RegisterTaskDefinition` naming the role raises no notification
+either. Confirm the operator's own rule (organisation trail or `us-east-1`) exists if one is
+claimed; otherwise record the residual as accepted.
 
 Rollback: none (step 3 changes nothing). Stop the migrate task if it is still running:
 `aws ecs stop-task --cluster "$CLUSTER" --task <task> --region "$REGION"`.

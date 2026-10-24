@@ -516,7 +516,11 @@ created without Object Lock needs an in-place step before the next plan — see
 
 - Publisher: its own task role (`*-ecs-audit-anchor-publisher-task`, only
   `s3:PutObject` and `s3:PutObjectRetention` on `<bucket>/<prefix>/*` — no read,
-  list or delete); env `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`, the bucket, the
+  list or delete; assumable by this account's ECS tasks only, `aws:SourceAccount`,
+  and any `RunTask`/`StartTask` passing it as a task-role override fires the
+  EventBridge rule `<name_prefix>-audit-anchor-publisher-role-override`; IAM
+  changes to the role are not alarmed by this stack, see
+  `docs/operations/alerts.md`); env `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`, the bucket, the
   prefix and `AWS_REGION`; secrets `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`,
   `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET` and `DEPLOYMENT_ID` (no
   other task receives the last three). `desired_count = min(1,

@@ -178,10 +178,15 @@ services:
     # storage is ephemeral, so a key generated at each start is enough and
     # nothing is stored in the repository.
     entrypoint: ["sh", "-c", "MINIO_KMS_SECRET_KEY=\"dev-anchor-key:$$(head -c 32 /dev/urandom | base64)\" exec minio server /data --console-address :9001"]
+    # The image declares /data a VOLUME, so without this an anonymous volume
+    # keeps the objects across restarts while the KMS key above is regenerated —
+    # leaving objects encrypted under a key that no longer exists. tmpfs makes
+    # the storage as ephemeral as the key: every start is an empty bucket store.
+    tmpfs:
+      - /data
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
-    # No persistent volume: ephemeral storage for dev/test only
     logging: *default-logging
     networks:
       - internal

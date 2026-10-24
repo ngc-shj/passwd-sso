@@ -220,6 +220,32 @@ without one:
 It is stated here rather than left implied, because the forwarder note below used
 to justify the exclusion on a premise that covers only the other two.
 
+**`anchor_publisher_emit_failed` also fires with a healthy database.** The
+audit-anchor publisher writes its own `AUDIT_ANCHOR_*` rows (scope `TENANT`,
+tenant `__system__`) straight to `audit_outbox` under the
+`AUDIT_WRITE_DIRECT_OUTBOX` bypass grant, which names `auditOutbox` alone, as
+`passwd_anchor_publisher`, which holds `INSERT` on `audit_outbox` (the grant in
+`prisma/migrations/20260502000000_audit_anchor_publisher_phase2`). When that
+write fails, the line carries `action`, `reason: "anchor_publisher_emit_failed"`
+and `error` (`{name, code}`) and the row is lost; the publisher's own
+`audit-anchor-publisher.*` lines still say what the run did. With the database
+up, the cause is drift in one of the two: the grant in
+`src/lib/tenant-rls-grants.ts` no longer naming `auditOutbox` (the bypass then
+refuses the table), or the role's `INSERT` on `audit_outbox` (or its `EXECUTE`
+on `public.rls_bypass_admits`) revoked — `error.code: "42501"`. On AWS it is
+alarmed on its own: filter and alarm
+`<name_prefix>-audit-anchor-publisher-dead-letter` on the publisher's log group
+(the awslogs driver reads the container's stdout, so the forwarder exclusion
+below does not apply there).
+**Recovery**: `node scripts/audit-db-grants.mjs` (as `MIGRATION_DATABASE_URL`)
+names a revoked privilege. Re-grant it as the owner — for the table, the
+migration's own statement, `GRANT INSERT ON TABLE "audit_outbox" TO
+passwd_anchor_publisher;`; on RDS `scripts/bootstrap-rds-roles.mjs` re-grants
+the function `EXECUTE`s. A grant entry that drifted is a code change: restore it
+and redeploy. The lost rows are
+not recoverable — the publisher's `cadence` lines for the same boundaries are
+the record of what they would have said.
+
 A further reason, `emit_inside_rls_context`, exists but does **not** appear under
 this `_logType` — see `audit-refused` below. It ships on its own logger
 precisely because the forwarder filters on `_logType` and does not read `reason`,
@@ -628,11 +654,13 @@ The publisher (`src/workers/audit-anchor-publisher.ts`, scheduled by
 `kind` is the outcome: `published`, `skipped_already_published`,
 `skipped_no_tenants`, `lock_held`, `upload_cap_reached` or `failed` (with
 `reason` and `stage`). Every line carries `boundary` and
-`chainEnabledTenantCount`. A failed run, at any stage, is retried for the same
-boundary every 15 minutes, at most three times per process and never later than
-30 minutes before the next boundary (23:35 UTC); when the three are used up the
-scheduler logs `audit-anchor-publisher.retries_exhausted` (warn, with
-`boundary` and `retries`) and waits. `lock_held` and `upload_cap_reached` are
+`chainEnabledTenantCount`. A failed run, at any stage, and a `lock_held` run are
+retried for the same boundary every 15 minutes, at most three times per process
+and never later than 30 minutes before the next boundary (23:35 UTC). When a
+retryable run gets no retry the scheduler logs
+`audit-anchor-publisher.retries_exhausted` (warn, with `boundary`, `retries` and
+`reason`: `count` when the three are used up, `window_closed` when the next
+retry would land inside the last 30 minutes) and waits. `upload_cap_reached` is
 not retried. All of these wait for the next boundary or the next boot run.
 
 On AWS every filter below reads `/ecs/<name_prefix>/audit-anchor-publisher`, and
@@ -665,13 +693,26 @@ ROLLBACK;
 row that does not parse is replaced by the next run with the first count past
 the cap for that run's boundary (see `upload_cap_reached`).
 
+The marker only moves forward. A run whose boundary is at or before the marker
+is `skipped_already_published`; one strictly before it also logs
+`audit-anchor-publisher.stale_boundary` (warn, not alarmed, with `boundary` and
+`marker`) — a marker no publish of this deployment wrote, or a clock that went
+back, so treat it as you would a skip with no `published` line (below). A marker
+that is not the ISO-8601 timestamp a publish writes (`2026-01-15T00:05:00.000Z`)
+fails every run before the upload with `reason:
+CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`, uncounted: it was damaged or
+planted, a database-write incident. Restore it to the last boundary a
+`published` line names (or delete it, and the anchors' `last_published_at`
+stands in) and restart the service.
+
 ## `audit-anchor-publisher.cadence_healthy`
 
 Logged once per healthy boundary, and only then: a `published` run, or a
 `skipped_no_tenants` run on an install where no tenant has ever enabled the
 chain (`everChainEnabled: false`, decided by the absence of any
 `audit_chain_anchors` row). `skipped_already_published`, `failed`,
-`upload_cap_reached` and `lock_held` never emit it: the boundary marker is a
+`upload_cap_reached` and `lock_held` never emit it (nor does a
+`stale_boundary` skip, which is a `skipped_already_published`): the boundary marker is a
 database row, so a skip must not read as health.
 
 **Severity**: high
@@ -773,7 +814,9 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   count was written — the database unreachable, the tenants read failing — in
   which case it cost no attempt; or after it — the signing step, or an
   `audit_anchor_previous_manifest` that does not parse — in which case it cost
-  one. Both are retried every 15 minutes (at most three times per process), so
+  one. A boundary marker that does not parse fails here too, before the count
+  (`CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`; see "Audit anchor publisher"
+  above). Both are retried every 15 minutes (at most three times per process), so
   a transient database outage at the boundary does not cost the day; a
   deterministic failure after the count reaches `upload_cap_reached` after
   three runs, and one before it stops at `retries_exhausted`. (An
@@ -817,11 +860,12 @@ the boundary as for an upload failure.
 
 ## `audit-anchor-publisher.missing_prior_cadence`
 
-Warn level, not alarmed. A publish found that no chain-enabled tenant's
-`last_published_at` reaches the previous boundary, and wrote one
-`AUDIT_ANCHOR_PUBLISH_FAILED` row (`failureReason:
-MISSING_PRIOR_CADENCE_PUBLICATION`) after its own commit. It never stops the
-publish.
+Warn level, not alarmed. A run found that no chain-enabled tenant's
+`last_published_at` reaches the previous boundary. When that run publishes, it
+writes one `AUDIT_ANCHOR_PUBLISH_FAILED` row (`failureReason:
+MISSING_PRIOR_CADENCE_PUBLICATION`) after its own commit; a run that fails
+writes only its own failure row, so the retries that follow do not repeat it
+and the run that publishes reports the gap once. It never stops the publish.
 
 Expected **once**, on the first publish after a tenant enables the chain. Any
 later occurrence means a boundary was never committed — the publisher was down
@@ -832,11 +876,39 @@ this case.
 
 ## `audit-anchor-publisher.lock_held`
 
-Info level, not alarmed, not a failure: the run waited 10 s (`lock_timeout`) for
-the publish lock another run held, and stood down. It writes no failure row and
-no pause; the other run publishes. On ECS the service runs at most one task, so
-a recurring `lock_held` means a second publisher is running somewhere against
-this database — find it.
+**Severity**: high
+**Trigger**: any occurrence (filter and alarm
+`<name_prefix>-audit-anchor-publisher-lock-held`).
+**What it means**: the run waited 10 s (`lock_timeout`) for the publish lock
+another session held, and stood down. It writes no failure row and no pause. It
+is retried for the same boundary like a failure (every 15 minutes, at most three
+times per process, not inside the last 30 minutes); if the holder published in
+the meantime, the retry's marker re-check makes it `skipped_already_published`.
+Nothing guarantees the holder publishes — any role that can connect can take
+the advisory lock — so after the retries the boundary waits like any other
+failure. On ECS it should never occur: the service runs one task and a deploy
+stops the old one before starting the new, so a held lock means a second
+publisher, or some other session holding the key, against this database.
+**Recovery**: find the holder, as a role that can read every session's
+`pg_stat_activity` row (the RDS master user, or a member of `pg_read_all_stats`):
+
+```sql
+SELECT l.pid, a.usename, a.application_name, a.client_addr, a.backend_start, a.xact_start, a.state
+FROM pg_locks l JOIN pg_stat_activity a USING (pid)
+WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+  AND l.classid = ((hashtext('audit-anchor-publish')::bigint >> 32) & 4294967295)::oid
+  AND l.objid = (hashtext('audit-anchor-publish')::bigint & 4294967295)::oid;
+```
+
+The lock is `pg_advisory_xact_lock(hashtext('audit-anchor-publish'))`:
+`hashtext` returns an `int4`, which the one-argument (`bigint`) form widens, so
+PostgreSQL stores it with `objsubid = 1`, the key's high 32 bits as `classid`
+(0 for this key, whose hash is positive) and its low 32 bits as `objid`. A
+publisher's own session shows `application_name =
+passwd-sso-audit-anchor-publisher`. Stop the process that owns it (a second
+publisher: scale it down; anything else: `SELECT pg_terminate_backend(<pid>)`
+once you know what it is), then restart the service for a boot run if the
+boundary is still unpublished.
 
 ## audit-anchor-publisher down
 
@@ -892,6 +964,36 @@ aws s3api get-object-lock-configuration --bucket <bucket> --region <region>
 aws s3api get-bucket-versioning --bucket <bucket> --region <region>
 terraform plan -var-file=envs/prod/terraform.tfvars
 ```
+
+## Publisher task role passed to another task
+
+**Severity**: high
+**Trigger**: the EventBridge rule `<name_prefix>-audit-anchor-publisher-role-override`
+— CloudTrail `RunTask` or `StartTask` whose `overrides.taskRoleArn` is the
+publisher's task role (`*-ecs-audit-anchor-publisher-task`). Same trail
+prerequisite.
+**What it means**: that role is the only principal the anchors bucket policy
+lets write a manifest, and its trust policy admits any ECS task of this account
+(`aws:SourceAccount`). A task run with it as an override — any image, any
+command — can write one. The publisher's own service never sends an override, so
+there is no expected false positive.
+**Recovery**: the event names the principal, the cluster and the task
+definition. Stop the task (`aws ecs stop-task`), then remove `iam:PassRole` on
+the publisher role from that principal. Compare the bucket's versions for the
+day's key against the `published` cadence lines
+(`docs/security/audit-anchor-verification.md`): a version no publish explains is
+a forged manifest.
+
+**Not alarmed by this stack.** Changes to the role itself —
+`UpdateAssumeRolePolicy`, `PutRolePolicy`, `AttachRolePolicy`, a `DeleteRole`
+followed by a `CreateRole` of the same name — are IAM events, which EventBridge
+delivers only in `us-east-1`. This configuration has no provider there, so they
+reach CloudTrail and are not alarmed here; nor is a `RegisterTaskDefinition`
+that names the role, which every publisher deploy also does. Alarming them is the
+operator's: an organisation trail's rules, or an EventBridge rule in `us-east-1`
+matching `eventSource: iam.amazonaws.com` with `requestParameters.roleName` set
+to the publisher role's name. `terraform plan` reports a drifted trust or inline
+policy.
 
 ## `rls.bypass_not_granted`
 

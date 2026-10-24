@@ -99,6 +99,26 @@ describe("check-terraform-test-count.mjs", () => {
     expect(r.stderr).toContain("found 2");
   });
 
+  it("fails when the vector file has no vectors array", () => {
+    writeFileSync(vectorsPath, JSON.stringify({ entries: VECTORS.vectors }), "utf8");
+    const r = check([summary({})]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`${vectorsPath} has no "vectors" array`);
+  });
+
+  it("fails when no vector has a Terraform verdict", () => {
+    writeFileSync(vectorsPath, JSON.stringify({ vectors: [{ value: null, terraform: "n/a", zod: "allow" }] }), "utf8");
+    const r = check([summary({ passed: 0 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`${vectorsPath} has no entry with a Terraform verdict`);
+  });
+
+  it("fails on a failed run reported under status pass", () => {
+    const r = check([summary({ failed: 1 })]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("failed=1 errored=0");
+  });
+
   it("fails when the output file is missing", () => {
     const r = spawnSync(process.execPath, [CHECK, join(dir, "absent.json"), vectorsPath], { encoding: "utf8" });
     expect(r.status).toBe(1);

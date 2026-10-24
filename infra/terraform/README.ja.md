@@ -331,7 +331,11 @@ Terraform apply は想定内の誤検知）。Object Lock なしで作られた�
 
 - publisher: 専用タスクロール（`*-ecs-audit-anchor-publisher-task`。
   `<bucket>/<prefix>/*` への `s3:PutObject` と `s3:PutObjectRetention` のみで、
-  読み取り・一覧・削除なし）。env は `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`、
+  読み取り・一覧・削除なし。引き受けられるのはこのアカウントの ECS タスクのみ
+  （`aws:SourceAccount`）で、このロールをタスクロールの上書きとして渡す
+  `RunTask`/`StartTask` は EventBridge ルール
+  `<name_prefix>-audit-anchor-publisher-role-override` が通知する。ロール自体への
+  IAM 変更はこのスタックでは通知しない — `docs/operations/alerts.md` を参照）。env は `AUDIT_ANCHOR_PUBLISHER_ENABLED=true`、
   バケット、接頭辞、`AWS_REGION`。secrets は `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`、
   `AUDIT_ANCHOR_SIGNING_KEY`、`AUDIT_ANCHOR_TAG_SECRET`、`DEPLOYMENT_ID`（後ろの 3 つ
   は他のどのタスクにも渡らない）。`desired_count = min(1, worker_desired_count)`、

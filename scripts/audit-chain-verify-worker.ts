@@ -119,6 +119,22 @@ export interface VerifyDeps {
   };
 }
 
+/**
+ * A read-path precondition this worker asserts. Its message is built here from
+ * tenant ids and GUC values only, so it is printed with the `verify threw`
+ * line; any other error is reduced to errorLogFields, since a driver or Prisma
+ * message can carry a connection target or a query with its parameters.
+ */
+class ChainVerifyPreconditionError extends Error {
+  constructor(
+    readonly code: "RLS_CONTEXT_MISSING" | "BYPASS_CONTEXT_MISSING" | "BYPASS_SCOPE_VIOLATION",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ChainVerifyPreconditionError";
+  }
+}
+
 type ChainRead =
   | { kind: "no-anchor"; chainedRows: number }
   | { kind: "walk"; anchorSeq: number; anchorPrevHash: Uint8Array; rows: ChainRowRaw[] };
@@ -141,7 +157,8 @@ async function readChain(tx: Prisma.TransactionClient, tenantId: string, checkSc
     const foreign = anchors.find((a) => a.tenant_id !== tenantId);
     if (foreign) throw scopeViolation(tenantId, foreign.tenant_id, "audit_chain_anchors");
     if (anchors.length > 1) {
-      throw new Error(
+      throw new ChainVerifyPreconditionError(
+        "BYPASS_SCOPE_VIOLATION",
         `BYPASS_SCOPE_VIOLATION: audit_chain_anchors returned ${anchors.length} rows ` +
           `while verifying ${JSON.stringify(tenantId)}, expected at most 1`,
       );
@@ -191,7 +208,8 @@ async function readChain(tx: Prisma.TransactionClient, tenantId: string, checkSc
 
 /** Carries tenant ids only — never a row id or metadata; it reaches stderr. */
 function scopeViolation(expected: string, offending: string, table: string): Error {
-  return new Error(
+  return new ChainVerifyPreconditionError(
+    "BYPASS_SCOPE_VIOLATION",
     `BYPASS_SCOPE_VIOLATION: ${table} returned a row of tenant ${JSON.stringify(offending)} ` +
       `while verifying ${JSON.stringify(expected)}`,
   );
@@ -277,7 +295,8 @@ export async function verifyTenantChain(
         Array<{ tenant_id: string | null }>
       >(`SELECT current_setting('app.tenant_id', true) AS tenant_id`);
       if (guc?.tenant_id !== tenantId) {
-        throw new Error(
+        throw new ChainVerifyPreconditionError(
+          "RLS_CONTEXT_MISSING",
           `RLS_CONTEXT_MISSING: app.tenant_id is ${JSON.stringify(
             guc?.tenant_id ?? null,
           )}, expected ${tenantId} — reads would silently return zero rows`,
@@ -318,7 +337,8 @@ export async function verifyChainUnderSentinelGrant(
         state.purpose !== expected.purpose ||
         state.tables !== expected.tables
       ) {
-        throw new Error(
+        throw new ChainVerifyPreconditionError(
+          "BYPASS_CONTEXT_MISSING",
           `BYPASS_CONTEXT_MISSING: bypass_rls=${JSON.stringify(state?.bypassRls ?? null)} ` +
             `purpose=${JSON.stringify(state?.purpose ?? null)} tables=${JSON.stringify(state?.tables ?? null)}, ` +
             `expected the AUDIT_CHAIN_VERIFY_SENTINEL_READ grant — reads would be inert or mis-scoped`,
@@ -448,9 +468,10 @@ export async function runTick(
       errored++;
       erroredTenantIds.push(tenantId);
       logger.error(
-        "audit-chain-verify-worker: tenant=%s verify threw: %O",
+        "audit-chain-verify-worker: tenant=%s verify threw: error=%j detail=%s",
         tenantId,
-        err,
+        errorLogFields(err),
+        err instanceof ChainVerifyPreconditionError ? err.message : null,
       );
     }
   }
@@ -593,7 +614,7 @@ async function main(): Promise<void> {
     try {
       await runTick(prisma, states);
     } catch (err) {
-      console.error("audit-chain-verify-worker: tick threw:", err);
+      console.error("audit-chain-verify-worker: tick threw: error=%j", errorLogFields(err));
     }
     await interruptibleSleep(TICK_INTERVAL_MS, wake.signal);
   }
@@ -609,7 +630,7 @@ if (
     process.argv[1].endsWith("audit-chain-verify-worker.js"))
 ) {
   main().catch((err) => {
-    console.error(err);
+    console.error("audit-chain-verify-worker: fatal: error=%j", errorLogFields(err));
     process.exit(1);
   });
 }

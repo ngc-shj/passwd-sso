@@ -9,12 +9,28 @@ import {
   createAnchorScheduler,
   ANCHOR_MAX_RETRIES_PER_BOUNDARY,
   ANCHOR_RETRY_INTERVAL_MS,
+  ANCHOR_RETRY_STOP_BEFORE_NEXT_MS,
 } from "./audit-anchor-scheduler";
 import type { CadenceOutcome } from "./audit-anchor-publisher";
 
-vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+const { mockInfo, mockWarn, mockError } = vi.hoisted(() => ({
+  mockInfo: vi.fn(),
+  mockWarn: vi.fn(),
+  mockError: vi.fn(),
 }));
+
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => ({ info: mockInfo, warn: mockWarn, error: mockError, debug: vi.fn() }),
+}));
+
+/** The fields of every line logged at `mock` with `_logType`. */
+function linesOf(mock: ReturnType<typeof vi.fn>, logType: string): Array<Record<string, unknown>> {
+  return mock.mock.calls
+    .map(([fields]) => fields as Record<string, unknown>)
+    .filter((f) => f._logType === logType);
+}
+
+const EXHAUSTED = "audit-anchor-publisher.retries_exhausted";
 
 const MINUTE = 60 * 1000;
 const CADENCE_MS = 24 * 60 * MINUTE;
@@ -46,6 +62,12 @@ const SIGNING_FAILED: CadenceOutcome = {
   kind: "failed",
   reason: "CADENCE_FAILED:unknown",
   stage: "before_upload",
+  chainEnabledTenantCount: 1,
+};
+const LOCK_HELD: CadenceOutcome = { kind: "lock_held", reason: "LOCK_HELD_BY_OTHER_INSTANCE", chainEnabledTenantCount: 1 };
+const ALREADY_PUBLISHED: CadenceOutcome = {
+  kind: "skipped_already_published",
+  reason: "BOUNDARY_ALREADY_PUBLISHED",
   chainEnabledTenantCount: 1,
 };
 
@@ -106,6 +128,9 @@ describe("createAnchorScheduler", () => {
   let h: ReturnType<typeof makeHarness>;
 
   beforeEach(() => {
+    mockInfo.mockClear();
+    mockWarn.mockClear();
+    mockError.mockClear();
     h = makeHarness(B0 + 3 * 60 * MINUTE);
   });
 
@@ -195,22 +220,111 @@ describe("createAnchorScheduler", () => {
     expect(h.pending().at).toBe(B1);
   });
 
-  it.each<CadenceOutcome>([
-    { kind: "lock_held", reason: "LOCK_HELD_BY_OTHER_INSTANCE", chainEnabledTenantCount: 1 },
-    { kind: "upload_cap_reached", reason: "UPLOAD_ATTEMPT_CAP_REACHED", attempts: 4, chainEnabledTenantCount: 1 },
-  ])("does not retry $kind", async (outcome) => {
-    h.setOutcome(() => outcome);
+  it("does not retry upload_cap_reached", async () => {
+    h.setOutcome(() => ({ kind: "upload_cap_reached", reason: "UPLOAD_ATTEMPT_CAP_REACHED", attempts: 4, chainEnabledTenantCount: 1 }));
     await h.scheduler.start();
 
     expect(h.pending().at).toBe(B1);
+    expect(linesOf(mockWarn, EXHAUSTED)).toEqual([]);
   });
 
-  it("arms no retry when the next one would land within 30 min of the next boundary", async () => {
+  it("retries lock_held for the same boundary, and the marker re-check ends it when the holder published", async () => {
+    h.setOutcome((_, run) => (run === 1 ? LOCK_HELD : ALREADY_PUBLISHED));
+    await h.scheduler.start();
+
+    expect(h.pending().at).toBe(B0 + 3 * 60 * MINUTE + ANCHOR_RETRY_INTERVAL_MS);
+    await h.fire();
+    expect(h.runs).toEqual([B0, B0]);
+    expect(h.pending().at).toBe(B1);
+  });
+
+  it("bounds lock_held retries by the same per-process count", async () => {
+    h.setOutcome(() => LOCK_HELD);
+    await h.scheduler.start();
+
+    while (h.pending().at < B1) await h.fire();
+    expect(h.runs).toEqual([B0, B0, B0, B0]);
+    expect(linesOf(mockWarn, EXHAUSTED)).toEqual([
+      expect.objectContaining({ boundary: new Date(B0).toISOString(), retries: 3, reason: "count" }),
+    ]);
+  });
+
+  it("arms no retry when the next one would land within 30 min of the next boundary, and says so", async () => {
     h.setNow(B1 - 40 * MINUTE);
     h.setOutcome(() => UPLOAD_FAILED);
     await h.scheduler.start();
 
     expect(h.pending().at).toBe(B1);
+    expect(linesOf(mockWarn, EXHAUSTED)).toEqual([
+      { boundary: new Date(B0).toISOString(), retries: 0, reason: "window_closed", _logType: EXHAUSTED },
+    ]);
+  });
+
+  it("admits a retry landing exactly 30 min before the next boundary, and none after it", async () => {
+    // Started 45 min before B1: the first retry lands at B1 - 30 min, which
+    // the stop window admits (equal); the one after would land at B1 - 15 min.
+    expect(ANCHOR_RETRY_STOP_BEFORE_NEXT_MS).toBe(30 * MINUTE);
+    h.setNow(B1 - 45 * MINUTE);
+    h.setOutcome(() => UPLOAD_FAILED);
+    await h.scheduler.start();
+
+    expect(h.pending().at).toBe(B1 - 30 * MINUTE);
+    await h.fire();
+    expect(h.runs).toEqual([B0, B0]);
+    expect(h.pending().at).toBe(B1);
+    expect(linesOf(mockWarn, EXHAUSTED)).toEqual([expect.objectContaining({ retries: 1, reason: "window_closed" })]);
+  });
+
+  it("arms no retry when started 1 ms later, 44:59.999 before the next boundary", async () => {
+    h.setNow(B1 - 45 * MINUTE + 1);
+    h.setOutcome(() => UPLOAD_FAILED);
+    await h.scheduler.start();
+
+    expect(h.runs).toEqual([B0]);
+    expect(h.pending().at).toBe(B1);
+    expect(linesOf(mockWarn, EXHAUSTED)).toEqual([expect.objectContaining({ retries: 0, reason: "window_closed" })]);
+  });
+
+  it("warns retries_exhausted exactly once, after the third retry, and never on a publishing run", async () => {
+    h.setOutcome((boundaryMs) => (boundaryMs === B0 ? SIGNING_FAILED : PUBLISHED));
+    await h.scheduler.start();
+
+    for (let retry = 1; retry <= ANCHOR_MAX_RETRIES_PER_BOUNDARY; retry++) {
+      expect(linesOf(mockWarn, EXHAUSTED)).toEqual([]);
+      await h.fire();
+    }
+    expect(linesOf(mockWarn, EXHAUSTED)).toEqual([
+      { boundary: new Date(B0).toISOString(), retries: 3, reason: "count", _logType: EXHAUSTED },
+    ]);
+
+    // B1 publishes: no further warn.
+    await h.fire();
+    expect(h.runs.at(-1)).toBe(B1);
+    expect(linesOf(mockWarn, EXHAUSTED)).toHaveLength(1);
+  });
+
+  it("retries a throwing runCadence at +15 min and logs one cadence_error line", async () => {
+    const armed: number[] = [];
+    const throwing = createAnchorScheduler({
+      cadenceMs: CADENCE_MS,
+      publishOffsetMs: OFFSET_MS,
+      now: () => B0 + 3 * 60 * MINUTE,
+      setTimer: (fn, ms) => {
+        armed.push(ms);
+        return null;
+      },
+      clearTimer: () => undefined,
+      runCadence: async () => {
+        throw new Error("unexpected");
+      },
+    });
+    await throwing.start();
+
+    expect(armed).toEqual([ANCHOR_RETRY_INTERVAL_MS]);
+    expect(linesOf(mockError, "audit-anchor-publisher.cadence_error")).toEqual([
+      { boundary: new Date(B0).toISOString(), error: { name: "Error", code: "unknown" }, _logType: "audit-anchor-publisher.cadence_error" },
+    ]);
+    await throwing.stop();
   });
 
   it("stop() waits for the in-flight run and arms nothing after it", async () => {

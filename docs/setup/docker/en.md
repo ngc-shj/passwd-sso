@@ -435,10 +435,28 @@ Configured in proxy:
 | `npm run docker:down` | `docker compose down` |
 | `npm run worker:audit-outbox` | Run the audit-outbox drain worker (requires `OUTBOX_WORKER_DATABASE_URL`) |
 | `npm run test` | Run unit tests (vitest) |
-| `npm run test:integration` | Run real-DB integration tests (requires running Postgres) |
+| `npm run test:integration` | Run real-DB integration tests (requires running Postgres, and MinIO for the anchor S3 suites — see below) |
 | `npm run version:bump` | Suggest next version from git log (interactive) |
 
 For the full authoritative list, see `package.json` or `CLAUDE.md`.
+
+### Integration tests
+
+`npm run test:integration` needs Postgres with the Compose workers stopped (they
+claim the same rows), and the audit-anchor S3 suites
+(`audit-anchor-publisher-s3`, `audit-anchor-s3-destination`) also need MinIO:
+they fail, never skip, without it. The override's `minio` service is ephemeral
+(tmpfs storage, a KMS key generated at each start):
+
+```bash
+docker compose up -d minio
+docker compose stop audit-outbox-worker retention-gc-worker
+ANCHOR_TEST_S3_ENDPOINT=http://127.0.0.1:9000 npm run test:integration
+docker compose start audit-outbox-worker retention-gc-worker
+```
+
+`scripts/pre-pr.sh` probes `${ANCHOR_TEST_S3_ENDPOINT:-http://127.0.0.1:9000}/minio/health/ready`
+before its integration step and refuses that step when MinIO is not ready.
 
 ## Prisma 7 Notes
 
@@ -455,7 +473,7 @@ High-level overview (see `CLAUDE.md` "Architecture" for authoritative details):
 ```
 passwd-sso/
 ├── docker-compose.yml          # Base services (app, db, jackson, redis, migrate)
-├── docker-compose.override.yml # Dev overrides (ports + audit-outbox-worker + mailpit)
+├── docker-compose.override.yml # Dev overrides (ports + audit-outbox-worker + mailpit + minio)
 ├── Dockerfile                  # Multi-stage build
 ├── .env.example                # Environment variable template
 ├── prisma.config.ts            # Prisma 7 configuration

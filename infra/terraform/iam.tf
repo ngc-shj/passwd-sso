@@ -100,6 +100,8 @@ resource "aws_iam_role_policy" "ecs_migrate_exec_ssm" {
   })
 }
 
+data "aws_caller_identity" "current" {}
+
 ################################################################################
 # Audit-anchor publisher task role. Its OWN role, not the shared ecs_task one:
 # the anchors bucket policy (storage.tf) denies s3:PutObject on the manifest key
@@ -109,6 +111,10 @@ resource "aws_iam_role_policy" "ecs_migrate_exec_ssm" {
 # no task role at all.
 ################################################################################
 
+# Assumable only by ECS tasks in this account (the confused-deputy guard). That
+# does not bound which task: a principal allowed iam:PassRole on this role can
+# run any task with it as a taskRoleArn override, which the EventBridge rule
+# audit_anchor_publisher_role_override (monitoring.tf) surfaces.
 resource "aws_iam_role" "ecs_audit_anchor_publisher_task" {
   name = "${local.name_prefix}-ecs-audit-anchor-publisher-task"
   assume_role_policy = jsonencode({
@@ -117,6 +123,7 @@ resource "aws_iam_role" "ecs_audit_anchor_publisher_task" {
       Effect    = "Allow"
       Principal = { Service = "ecs-tasks.amazonaws.com" }
       Action    = "sts:AssumeRole"
+      Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }
     }]
   })
   tags = local.tags

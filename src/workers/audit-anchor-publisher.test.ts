@@ -22,9 +22,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import {
+  ADVISORY_LOCK_KEY,
   AuditAnchorPublisher,
   DeploymentIdMismatchError,
   PUBLISHER_AUDIT_DEAD_LETTER_REASON,
+  SETTING_DEPLOYMENT_ID,
+  SETTING_LAST_PUBLISHED_BOUNDARY,
+  SETTING_PREVIOUS_MANIFEST,
+  SETTING_UPLOAD_ATTEMPTS,
   buildManifestArtifactKey,
   createPublisher,
   currentCadenceBoundary,
@@ -77,9 +82,9 @@ const OFFSET_MS = 5 * 60 * 1000;
 const BOUNDARY = new Date("2026-01-15T00:05:00.000Z");
 const WALL_CLOCK = new Date("2026-01-15T01:00:00.000Z");
 
-const MARKER_KEY = "audit_anchor_last_published_boundary";
-const ATTEMPTS_KEY = "audit_anchor_upload_attempts";
-const POINTER_KEY = "audit_anchor_previous_manifest";
+const MARKER_KEY = SETTING_LAST_PUBLISHED_BOUNDARY;
+const ATTEMPTS_KEY = SETTING_UPLOAD_ATTEMPTS;
+const POINTER_KEY = SETTING_PREVIOUS_MANIFEST;
 
 /** The shape the Prisma pg adapter gives a raw-query 55P03: nested under P2010. */
 function lockTimeoutError(): Error {
@@ -171,9 +176,10 @@ function makeDb(overrides: Partial<FakeDb> = {}): FakeDb {
 
 function makeFakeTx(db: FakeDb, txIndex: number) {
   return {
-    $executeRaw: vi.fn(async (template: TemplateStringsArray) => {
+    $executeRaw: vi.fn(async (template: TemplateStringsArray, ...values: unknown[]) => {
       const sql = template.raw.join("$");
       if (sql.includes("pg_advisory_xact_lock")) {
+        if (values[0] !== ADVISORY_LOCK_KEY) throw new Error(`fake: lock taken on ${String(values[0])}`);
         db.lockCalls++;
         if (db.lockTimeoutOnCall.has(db.lockCalls)) throw lockTimeoutError();
         // The second lock of a run is the publish transaction's.
@@ -183,7 +189,7 @@ function makeFakeTx(db: FakeDb, txIndex: number) {
     }),
     $queryRaw: vi.fn(async (template: TemplateStringsArray, ...values: unknown[]) => {
       const sql = template.raw.join("$");
-      if (sql.includes("SELECT value FROM system_settings WHERE key =") && values[0] === "audit_anchor_deployment_id") {
+      if (sql.includes("SELECT value FROM system_settings WHERE key =") && values[0] === SETTING_DEPLOYMENT_ID) {
         return db.storedDeploymentId !== null ? [{ value: db.storedDeploymentId }] : [];
       }
       if (sql.includes("MAX(last_published_at)")) {
@@ -366,7 +372,50 @@ describe("AuditAnchorPublisher.runCadence — gates", () => {
     expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
   });
 
-  it("publishes when the marker holds a different boundary", async () => {
+  it("skips, uploads nothing and leaves the marker when it holds a later boundary, logging stale_boundary", async () => {
+    // A marker only moves forward: publishing an earlier boundary would write
+    // it back.
+    const db = makeDb();
+    const later = new Date(BOUNDARY.getTime() + CADENCE_MS).toISOString();
+    db.settings.set(MARKER_KEY, later);
+    const upload = vi.fn().mockResolvedValue(undefined);
+    const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "skipped_already_published",
+      reason: "BOUNDARY_ALREADY_PUBLISHED",
+      chainEnabledTenantCount: 2,
+    });
+    expect(upload).not.toHaveBeenCalled();
+    expect(db.settings.get(MARKER_KEY)).toBe(later);
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    const stale = mockLoggerWarn.mock.calls
+      .map(([fields]) => fields as Record<string, unknown>)
+      .filter((f) => f._logType === "audit-anchor-publisher.stale_boundary");
+    expect(stale).toEqual([{ boundary: BOUNDARY.toISOString(), marker: later, _logType: "audit-anchor-publisher.stale_boundary" }]);
+  });
+
+  it.each([
+    ["not a timestamp", "yesterday"],
+    ["a timestamp in another form", "2026-01-15T00:05:00Z"],
+  ])("fails before the upload, uncounted, when the marker is %s", async (_label, stored) => {
+    const db = makeDb();
+    db.settings.set(MARKER_KEY, stored);
+    const upload = vi.fn().mockResolvedValue(undefined);
+    const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE",
+      stage: "before_upload",
+      chainEnabledTenantCount: null,
+    });
+    expect(upload).not.toHaveBeenCalled();
+    expect(db.settings.get(MARKER_KEY)).toBe(stored);
+    expect(failureReasons(db)).toEqual(["CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE"]);
+  });
+
+  it("publishes when the marker holds an earlier boundary", async () => {
     const db = makeDb();
     db.settings.set(MARKER_KEY, new Date(BOUNDARY.getTime() - CADENCE_MS).toISOString());
     const outcome = await publisherFor(db).runCadence(BOUNDARY);
@@ -553,6 +602,20 @@ describe("AuditAnchorPublisher.runCadence — publish", () => {
     expect(db.publishTxIndex).not.toBeNull();
     expect(missing?.txIndex).toBeGreaterThan(db.publishTxIndex ?? Infinity);
   });
+
+  it.each<[string, Partial<PublisherConfig>]>([
+    ["an upload failure", { destinations: [makeDestination("s3", vi.fn().mockRejectedValue(new Error("down")))] }],
+    ["a commit lost after the upload", { hooks: { afterUpload: async () => { throw new Error("connection lost"); } } }],
+  ])("writes no missing-prior row on %s, only the failure row", async (_label, overrides) => {
+    // The run that publishes reports the missed boundary once; a failed run
+    // would write it again on every retry.
+    const db = makeDb();
+    const outcome = await publisherFor(db, overrides).runCadence(BOUNDARY);
+
+    expect(outcome.kind).toBe("failed");
+    expect(logTypes(mockLoggerWarn)).toContain("audit-anchor-publisher.missing_prior_cadence");
+    expect(failureReasons(db)).toEqual([outcome.kind === "failed" ? outcome.reason : ""]);
+  });
 });
 
 // ─── runCadence: failures ───────────────────────────────────────────────────
@@ -613,6 +676,25 @@ describe("AuditAnchorPublisher.runCadence — failures", () => {
 
     expect(outcome).toMatchObject({ kind: "failed", stage: "upload", reason: "s3_UPLOAD_FAILED:UPLOAD_TIMEOUT" });
     expect(signal?.aborted).toBe(true);
+  });
+
+  it.each([
+    ["each 0.6 of the bound fails the upload", 0.6, "failed"],
+    ["each 0.3 of the bound publishes", 0.3, "published"],
+  ])("bounds the upload to every destination as a whole: two destinations %s", async (_label, fraction, kind) => {
+    vi.useRealTimers();
+    const boundMs = 400;
+    const slow = () => vi.fn(() => new Promise<void>((resolve) => setTimeout(resolve, boundMs * fraction)));
+    const db = makeDb();
+    const outcome = await publisherFor(db, {
+      destinations: [makeDestination("filesystem", slow()), makeDestination("s3", slow())],
+      uploadTimeoutMs: boundMs,
+    }).runCadence(BOUNDARY);
+
+    expect(outcome.kind).toBe(kind);
+    if (outcome.kind === "failed") {
+      expect(outcome).toMatchObject({ stage: "upload", reason: "s3_UPLOAD_FAILED:UPLOAD_TIMEOUT" });
+    }
   });
 
   it("a failure before the upload is stage before_upload with a token reason", async () => {
