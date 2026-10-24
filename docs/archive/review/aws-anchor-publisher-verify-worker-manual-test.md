@@ -265,14 +265,17 @@ Expected: 1. `IsLogging: true`; management events included; a data-event selecto
 `detail.eventName: ExecuteCommand`, the principal and the task. 3. an SNS email for
 `<NP>-audit-anchor-bucket-config-change` with `eventName: PutBucketVersioning`. 4. the data event
 names the break-glass role's session. 5. an SNS email for `<NP>-audit-anchor-publisher-role-override`
-with `eventName: RunTask` and `requestParameters.overrides.taskRoleArn` the publisher role. 6. one
-statement with `Condition.StringEquals."aws:SourceAccount"` this account's id.
+with `eventName: RunTask` and `requestParameters.overrides.taskRoleArn` the publisher role; and,
+from M3's `register-task-definition` of family `anchor-policy-probe` with the publisher role, an SNS
+email for `<NP>-audit-anchor-publisher-role-task-definition` with `eventName:
+RegisterTaskDefinition`. A publisher deploy (its own family, `<NP>-audit-anchor-publisher`) raises
+neither. 6. one statement with `Condition.StringEquals."aws:SourceAccount"` this account's id.
 
 Not covered, by design (the residual in `docs/operations/alerts.md` "Publisher task role passed
 to another task"): IAM events on the publisher role (`UpdateAssumeRolePolicy`, `PutRolePolicy`,
 `AttachRolePolicy`, `DeleteRole` + `CreateRole`) reach EventBridge only in `us-east-1`, where this
-stack has no provider; M3's `RegisterTaskDefinition` naming the role raises no notification
-either. Confirm the operator's own rule (organisation trail or `us-east-1`) exists if one is
+stack has no provider; a `RegisterTaskDefinition` of the publisher's own family naming the role
+raises no notification either (every deploy does one). Confirm the operator's own rule (organisation trail or `us-east-1`) exists if one is
 claimed; otherwise record the residual as accepted.
 
 Rollback: none (step 3 changes nothing). Stop the migrate task if it is still running:

@@ -54,6 +54,20 @@ class BoundaryMarkerUnreadableError extends Error {
   }
 }
 
+/**
+ * The boundary marker is past the wall clock's current boundary: no publish
+ * this clock allows wrote it. Read as published, it would skip every boundary
+ * until its date, unalarmed, so the run fails closed. Its `code` is what the
+ * failure reason carries.
+ */
+class BoundaryMarkerAheadError extends Error {
+  readonly code = "BOUNDARY_MARKER_AHEAD";
+  constructor() {
+    super("audit anchor boundary marker is past the current cadence boundary");
+    this.name = "BoundaryMarkerAheadError";
+  }
+}
+
 /** The upload bound fired. Its `code` is what the failure reason carries. */
 class UploadTimeoutError extends Error {
   readonly code = "UPLOAD_TIMEOUT";
@@ -126,6 +140,8 @@ export type PublisherConfig = {
   uploadTimeoutMs?: number;
   /** Bound on each transaction. Default 90 s. */
   txTimeoutMs?: number;
+  /** Wall clock in epoch ms. Default `Date.now`. */
+  now?: () => number;
   hooks?: PublisherHooks;
 };
 
@@ -233,15 +249,18 @@ function parseMarker(value: string): number | null {
  * monotonic: a marker at or past the boundary means published, so a marker a
  * later boundary wrote never lets an earlier one publish (and write the marker
  * backwards). One past the boundary is reported as `stale_boundary`. A marker
- * that does not parse throws BoundaryMarkerUnreadableError. An install that
- * predates the marker has none, and there the anchors' `last_published_at`
- * stands in, so an upgrade does not republish the boundary it already
- * published.
+ * that does not parse throws BoundaryMarkerUnreadableError; one past
+ * `wallBoundaryMs`, the wall clock's current boundary, throws
+ * BoundaryMarkerAheadError — read as published it would skip every boundary
+ * up to its own. An install that predates the marker has none, and there the
+ * anchors' `last_published_at` stands in, so an upgrade does not republish the
+ * boundary it already published.
  */
 async function isBoundaryPublished(
   tx: Prisma.TransactionClient,
   boundary: Date,
   tenantIds: string[],
+  wallBoundaryMs: number,
 ): Promise<boolean> {
   const marker = await tx.systemSetting.findUnique({
     where: { key: SETTING_LAST_PUBLISHED_BOUNDARY },
@@ -249,6 +268,7 @@ async function isBoundaryPublished(
   if (marker) {
     const markerMs = parseMarker(marker.value);
     if (markerMs === null) throw new BoundaryMarkerUnreadableError();
+    if (markerMs > wallBoundaryMs) throw new BoundaryMarkerAheadError();
     if (markerMs > boundary.getTime()) {
       getLogger().warn(
         {
@@ -288,6 +308,15 @@ export class AuditAnchorPublisher {
 
   private get txOptions(): { timeout: number } {
     return { timeout: this.config.txTimeoutMs ?? DEFAULT_TX_TIMEOUT_MS };
+  }
+
+  private wallClock(): Date {
+    return new Date((this.config.now ?? Date.now)());
+  }
+
+  /** The wall clock's current boundary. */
+  private wallClockBoundaryMs(): number {
+    return currentCadenceBoundary(this.wallClock(), this.config.cadenceMs, this.config.publishOffsetMs).getTime();
   }
 
   /**
@@ -406,7 +435,7 @@ export class AuditAnchorPublisher {
         await setLockTimeout(tx, this.lockTimeoutMs);
         await advisoryXactLock(tx, ADVISORY_LOCK_KEY);
 
-        if (await isBoundaryPublished(tx, boundary, tenantIds)) {
+        if (await isBoundaryPublished(tx, boundary, tenantIds, this.wallClockBoundaryMs())) {
           return { kind: "already_published", chainEnabledTenantCount: tenantIds.length };
         }
         if (tenantIds.length === 0) {
@@ -533,7 +562,7 @@ export class AuditAnchorPublisher {
     }
 
     // Step 2: the publish transaction, upload inside.
-    const now = new Date();
+    const now = this.wallClock();
     const prevBoundary = new Date(boundary.getTime() - config.cadenceMs);
     const pendingEmits: PendingEmit[] = [];
     let chainEnabledTenantCount: number | null = gate.chainEnabledTenantCount;
@@ -552,7 +581,7 @@ export class AuditAnchorPublisher {
         await config.hooks?.inTx?.(tx);
 
         // Another run may have published between the two transactions.
-        if (await isBoundaryPublished(tx, boundary, tenantIds)) {
+        if (await isBoundaryPublished(tx, boundary, tenantIds, this.wallClockBoundaryMs())) {
           return {
             kind: "skipped_already_published",
             reason: "BOUNDARY_ALREADY_PUBLISHED",

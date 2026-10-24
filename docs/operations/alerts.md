@@ -695,15 +695,41 @@ the cap for that run's boundary (see `upload_cap_reached`).
 
 The marker only moves forward. A run whose boundary is at or before the marker
 is `skipped_already_published`; one strictly before it also logs
-`audit-anchor-publisher.stale_boundary` (warn, not alarmed, with `boundary` and
-`marker`) — a marker no publish of this deployment wrote, or a clock that went
-back, so treat it as you would a skip with no `published` line (below). A marker
-that is not the ISO-8601 timestamp a publish writes (`2026-01-15T00:05:00.000Z`)
-fails every run before the upload with `reason:
-CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`, uncounted: it was damaged or
-planted, a database-write incident. Restore it to the last boundary a
-`published` line names (or delete it, and the anchors' `last_published_at`
-stands in) and restart the service.
+`audit-anchor-publisher.stale_boundary` (below). Two markers fail every run
+before the upload, uncounted, as a database-write incident (it was damaged or
+planted):
+
+- one that is not the ISO-8601 timestamp a publish writes
+  (`2026-01-15T00:05:00.000Z`): `reason: CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`;
+- one later than the wall clock's current boundary — a boundary no publish has
+  reached yet: `reason: CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`. Read as
+  published, it would skip every boundary up to its date with no alarm but the
+  cadence-absent one a day later. A marker equal to the current boundary is a
+  publish of today and skips as usual.
+
+Either way, restore the marker to the last boundary a `published` line names
+(or delete it, and the anchors' `last_published_at` stands in) and restart the
+service for a boot run. For `BOUNDARY_MARKER_AHEAD`, first confirm the task's
+clock is right (`date -u` against the cadence lines' timestamps): a clock that
+runs behind makes a marker it wrote itself look ahead, and the fix there is the
+clock, not the row.
+
+## `audit-anchor-publisher.stale_boundary`
+
+**Severity**: high
+**Trigger**: any occurrence (filter and alarm
+`<name_prefix>-audit-anchor-publisher-stale-boundary`). Warn level, with
+`boundary` and `marker`; the run is a `skipped_already_published`.
+**What it means**: a run for a boundary found the marker past it but not past
+the wall clock's current boundary. The run skips rather than write the marker
+back. A late retry does not cause it — a boundary's retries stop 30 minutes
+before the next — so on ECS a legitimate one needs the wall clock to have gone
+back over a boundary it already published. Otherwise the marker was written by
+something other than a publish of this deployment.
+**Recovery**: compare `marker` with the `published` lines (below). If a
+`published` line names that boundary, the clock went back: check the task's
+time source. If none does, treat it as a skip with no `published` line — a
+database-write incident (see `cadence_healthy`).
 
 ## `audit-anchor-publisher.cadence_healthy`
 
@@ -814,9 +840,10 @@ also written to the `AUDIT_ANCHOR_PUBLISH_FAILED` row) and `stage`:
   count was written — the database unreachable, the tenants read failing — in
   which case it cost no attempt; or after it — the signing step, or an
   `audit_anchor_previous_manifest` that does not parse — in which case it cost
-  one. A boundary marker that does not parse fails here too, before the count
-  (`CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`; see "Audit anchor publisher"
-  above). Both are retried every 15 minutes (at most three times per process), so
+  one. A boundary marker that does not parse, or one past the wall clock's
+  current boundary, fails here too, before the count
+  (`CADENCE_FAILED:BOUNDARY_MARKER_UNREADABLE`,
+  `CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`; see "Audit anchor publisher" above). Both are retried every 15 minutes (at most three times per process), so
   a transient database outage at the boundary does not cost the day; a
   deterministic failure after the count reaches `upload_cap_reached` after
   three runs, and one before it stops at `retries_exhausted`. (An
@@ -968,18 +995,28 @@ terraform plan -var-file=envs/prod/terraform.tfvars
 ## Publisher task role passed to another task
 
 **Severity**: high
-**Trigger**: the EventBridge rule `<name_prefix>-audit-anchor-publisher-role-override`
-— CloudTrail `RunTask` or `StartTask` whose `overrides.taskRoleArn` is the
-publisher's task role (`*-ecs-audit-anchor-publisher-task`). Same trail
-prerequisite.
+**Trigger**: either EventBridge rule, same trail prerequisite. Both match the
+role by its full ARN and by its bare name (`*-ecs-audit-anchor-publisher-task`),
+since CloudTrail records the request as sent and `RegisterTaskDefinition`
+accepts either spelling:
+
+- `<name_prefix>-audit-anchor-publisher-role-override` — CloudTrail `RunTask`
+  or `StartTask` whose `overrides.taskRoleArn` is the publisher's task role;
+- `<name_prefix>-audit-anchor-publisher-role-task-definition` — CloudTrail
+  `RegisterTaskDefinition` whose `taskRoleArn` is the publisher's task role and
+  whose `family` is anything but the publisher's own
+  (`<name_prefix>-audit-anchor-publisher`). A run of such a definition needs no
+  override, so the first rule never sees it.
+
 **What it means**: that role is the only principal the anchors bucket policy
 lets write a manifest, and its trust policy admits any ECS task of this account
-(`aws:SourceAccount`). A task run with it as an override — any image, any
-command — can write one. The publisher's own service never sends an override, so
-there is no expected false positive.
+(`aws:SourceAccount`). A task run with it — any image, any command — can write
+one. The publisher's own service never sends an override and registers only its
+own family, so there is no expected false positive.
 **Recovery**: the event names the principal, the cluster and the task
-definition. Stop the task (`aws ecs stop-task`), then remove `iam:PassRole` on
-the publisher role from that principal. Compare the bucket's versions for the
+definition. Stop any task running it (`aws ecs stop-task`); for a registered
+definition, deregister it (`aws ecs deregister-task-definition`). Then remove
+`iam:PassRole` on the publisher role from that principal. Compare the bucket's versions for the
 day's key against the `published` cadence lines
 (`docs/security/audit-anchor-verification.md`): a version no publish explains is
 a forged manifest.
@@ -989,7 +1026,10 @@ a forged manifest.
 followed by a `CreateRole` of the same name — are IAM events, which EventBridge
 delivers only in `us-east-1`. This configuration has no provider there, so they
 reach CloudTrail and are not alarmed here; nor is a `RegisterTaskDefinition`
-that names the role, which every publisher deploy also does. Alarming them is the
+of the publisher's own family, which every publisher deploy does — a revision
+of that family with another image or command, registered outside a deploy,
+runs as the publisher the next time the service deploys it (`terraform plan`
+shows the service's task definition drifted). Alarming them is the
 operator's: an organisation trail's rules, or an EventBridge rule in `us-east-1`
 matching `eventSource: iam.amazonaws.com` with `requestParameters.roleName` set
 to the publisher role's name. `terraform plan` reports a drifted trust or inline

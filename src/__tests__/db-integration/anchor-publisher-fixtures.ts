@@ -43,6 +43,16 @@ export function farFutureBoundary(): Date {
   return new Date(Date.parse("2200-01-01T00:05:00.000Z") + randomInt(0, 100_000) * CADENCE_MS);
 }
 
+/**
+ * A wall clock an hour past `boundary`, for a case that runs again after a
+ * publish. The publisher fails a run whose marker is past the clock's current
+ * boundary, and these boundaries are far past the real clock, so on it the
+ * marker the first publish writes reads as ahead.
+ */
+export function wallClockAt(boundary: Date): () => number {
+  return () => boundary.getTime() + 60 * MS_PER_MINUTE;
+}
+
 export function makePublisherConfig(
   destinations: AnchorDestination[],
   overrides: Partial<PublisherConfig> = {},

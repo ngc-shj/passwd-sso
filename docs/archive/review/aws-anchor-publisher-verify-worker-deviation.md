@@ -200,3 +200,48 @@ two `worker:*` lines with the user's approval.
   dev-host-migration.md document MinIO and `ANCHOR_TEST_S3_ENDPOINT`.
 - ST-5…ST-10 as listed in the code review. ST-8's former "fifth worker task" case is renamed
   for what it tests (a changed bundle), and a real fifth task definition is the new case.
+
+### D13: Phase 3 round-2 fixes (M1…M5)
+
+- **M1 — a marker ahead of the wall clock fails closed.** Was: any marker at or past the
+  run's boundary skipped, so a marker planted at a future date suppressed every boundary up
+  to it with no alarm but the day-late cadence-absent one. `isBoundaryPublished` now takes the
+  wall clock's current boundary — from a new `PublisherConfig.now` (epoch ms, default
+  `Date.now`, the scheduler's shape), which the publish's own `now` (`lastPublishedAt`, the
+  pause) now reads too — and throws `BoundaryMarkerAheadError` for a marker strictly past it →
+  `failed`/`before_upload`, `CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`, uncounted, through the
+  alarmed `cadence_failed` path, in both the attempt and the publish transaction. A marker
+  equal to the current boundary still skips quietly when the run is for it; one past the
+  run's boundary but not the clock's stays the `stale_boundary` skip, which joined
+  `audit_anchor_publisher_failure_log_types` (a legitimate one on ECS needs a clock that went
+  back). Forward-only marker writes are unchanged. The db-integration files run far-future
+  boundaries on the real clock, so every case that runs again after a publish read its own
+  marker as ahead (4 failures, `BOUNDARY_MARKER_AHEAD`, observed); those cases now pass
+  `now: wallClockAt(boundary)` (anchor-publisher-fixtures.ts). Single-run cases keep the
+  real clock.
+- **M2 — the role rules cover both spellings and other families.** Both EventBridge rules
+  match `taskRoleArn` against the role's full ARN and its bare name
+  (`local.audit_anchor_publisher_role_spellings`): `RegisterTaskDefinition` documents
+  "the short name or full ARN", and CloudTrail records the request as sent. A second rule,
+  `audit_anchor_publisher_role_task_definition`, matches `RegisterTaskDefinition` naming the
+  role with `family` `anything-but` `aws_ecs_task_definition.audit_anchor_publisher.family`
+  (referenced, not re-typed); a separate rule because the field set differs from the
+  override rule's. Target + topic-policy entry added. The wiring test gained a small
+  EventBridge matcher (exact, `anything-but`, `suffix`) and pins: publisher family not
+  matched, family `foo` matched under either spelling, another role not matched; red
+  fixtures for ARN-only, the exclusion removed, exact-instead-of-anything-but, a re-typed
+  family, the shared role, target, topic policy and the rule removed. **Residual** narrowed:
+  a revision of the publisher's own family is still not alarmed (every deploy registers one).
+- **M3** — the "bounds the upload as a whole" cases run on `vi.useFakeTimers()` +
+  `advanceTimersByTimeAsync`: 0.6+0.6 → `UPLOAD_TIMEOUT`, 0.3+0.3 → `published`, and the edge
+  0.5+0.5 → `UPLOAD_TIMEOUT` (the bound is armed before the first upload, so its timer is
+  queued first and wins a tie). Real timers are restored in the existing `afterEach`.
+- **M4** — the db-integration `lock_held` case reads the one fenced `sql` block under the
+  `audit-anchor-publisher.lock_held` heading of alerts.md (throws when the section or block is
+  missing or there is more than one) and runs it verbatim; the result must be exactly the
+  holder's pid. The holder also takes two decoy locks — the next bigint key (same `classid`,
+  other `objid`) and the two-int4 form over the same halves (`objsubid = 2`) — so a doc query
+  that dropped either filter returns two rows and fails.
+- **M5** — scheduler case: start at B1 − 75 min with every run failing; retries at −60, −45,
+  −30; the third uses up the count as the window closes → `retries_exhausted`
+  `{ retries: 3, reason: "count" }`. The window-only cases stay.

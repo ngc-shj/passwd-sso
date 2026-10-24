@@ -24,6 +24,8 @@ import { createPrivateKey } from "node:crypto";
 import os from "node:os";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   createTestContext,
   createPrismaForRole,
@@ -40,6 +42,7 @@ import {
   clearPublisherSettings,
   farFutureBoundary,
   makePublisherConfig,
+  wallClockAt,
   publisherOutboxRows,
   purgePublisherOutboxRows,
   readSetting,
@@ -75,6 +78,29 @@ function derivePublicKey(seed: Buffer): Buffer {
   });
   const rawDer = derivePublicKeyObject(privKey).export({ type: "spki", format: "der" }) as Buffer;
   return rawDer.subarray(ED25519_SPKI_PREFIX_LEN);
+}
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+/**
+ * The one fenced `sql` block under the `audit-anchor-publisher.lock_held`
+ * heading of docs/operations/alerts.md — the holder query an operator runs.
+ * Throws when the section or its block is missing, or when it has more than
+ * one, so the test cannot run a query the page no longer shows.
+ */
+function lockHeldHolderQueryFromAlertsDoc(): string {
+  const doc = readFileSync(path.join(REPO_ROOT, "docs", "operations", "alerts.md"), "utf8");
+  const heading = "## `audit-anchor-publisher.lock_held`\n";
+  const start = doc.indexOf(heading);
+  if (start === -1 || doc.indexOf(heading, start + 1) !== -1) {
+    throw new Error("alerts.md: expected exactly one lock_held section");
+  }
+  const rest = doc.slice(start + heading.length);
+  const next = rest.search(/^## /m);
+  const section = next === -1 ? rest : rest.slice(0, next);
+  const blocks = [...section.matchAll(/^```sql\n([\s\S]*?)^```$/gm)].map((m) => m[1]);
+  if (blocks.length !== 1) throw new Error(`alerts.md: lock_held section has ${blocks.length} sql blocks, expected 1`);
+  return blocks[0];
 }
 
 describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () => {
@@ -229,7 +255,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
   it("two runs for one boundary publish once", async () => {
     const boundary = nextBoundary();
-    const config = makePublisherConfig([fsDestination()]);
+    const config = makePublisherConfig([fsDestination()], { now: wallClockAt(boundary) });
 
     const first = await publisher(config).runCadence(boundary);
     const second = await publisher(config).runCadence(boundary);
@@ -375,6 +401,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
       };
 
       const configA = makePublisherConfig([blocking], {
+        now: wallClockAt(boundary),
         hooks: {
           inTx: async (tx) => {
             const [row] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
@@ -382,7 +409,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
           },
         },
       });
-      const configB = makePublisherConfig([fsDestination()], { lockTimeoutMs: 20_000 });
+      const configB = makePublisherConfig([fsDestination()], { lockTimeoutMs: 20_000, now: wallClockAt(boundary) });
 
       const runA = publisher(configA).runCadence(boundary);
       runs.push(runA);
@@ -420,19 +447,18 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
     const holder = createPrismaForRole("superuser", { max: 1 });
     try {
       await holder.prisma.$executeRaw`SELECT pg_advisory_lock(hashtext(${ADVISORY_LOCK_KEY}::text))`;
+      // Decoys a weaker holder query would also return: the next bigint key
+      // (same classid and objsubid, another objid), and the two-int4 form over
+      // the same two halves (objsubid 2).
+      await holder.prisma.$executeRaw`SELECT pg_advisory_lock(hashtext(${ADVISORY_LOCK_KEY}::text)::bigint + 1)`;
+      await holder.prisma.$executeRaw`SELECT pg_advisory_lock(0, hashtext(${ADVISORY_LOCK_KEY}::text))`;
       try {
-        // The holder query docs/operations/alerts.md gives under lock_held
-        // finds this session: hashtext is int4, widened to the bigint key, so
-        // classid is its high 32 bits and objid its low 32.
+        // The holder query docs/operations/alerts.md gives under lock_held,
+        // run verbatim, finds this session's publish lock and only it:
+        // hashtext is int4, widened to the bigint key, so classid is its high
+        // 32 bits and objid its low 32.
         const [{ pid: holderPid }] = await holder.prisma.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
-        const holders = await ctx.su.prisma.$queryRawUnsafe<{ pid: number }[]>(
-          `SELECT l.pid, a.usename, a.application_name, a.backend_start, a.xact_start
-             FROM pg_locks l JOIN pg_stat_activity a USING (pid)
-            WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
-              AND l.classid = ((hashtext($1::text)::bigint >> 32) & 4294967295)::oid
-              AND l.objid = (hashtext($1::text)::bigint & 4294967295)::oid`,
-          ADVISORY_LOCK_KEY,
-        );
+        const holders = await ctx.su.prisma.$queryRawUnsafe<{ pid: number }[]>(lockHeldHolderQueryFromAlertsDoc());
         expect(holders.map((h) => h.pid)).toEqual([holderPid]);
 
         const outcome = await publisher(makePublisherConfig([fsDestination()], { lockTimeoutMs: 200 })).runCadence(boundary);
@@ -444,6 +470,8 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
         expect(await attemptsRow()).toBeNull();
       } finally {
         await holder.prisma.$executeRaw`SELECT pg_advisory_unlock(hashtext(${ADVISORY_LOCK_KEY}::text))`;
+        await holder.prisma.$executeRaw`SELECT pg_advisory_unlock(hashtext(${ADVISORY_LOCK_KEY}::text)::bigint + 1)`;
+        await holder.prisma.$executeRaw`SELECT pg_advisory_unlock(0, hashtext(${ADVISORY_LOCK_KEY}::text))`;
       }
     } finally {
       await holder.prisma.$disconnect();
@@ -453,7 +481,7 @@ describe("AuditAnchorPublisher — integration as passwd_anchor_publisher", () =
 
   it("the role writes the marker through Prisma upsert on a second publish (UPDATE path)", async () => {
     const boundary = nextBoundary();
-    const config = makePublisherConfig([fsDestination()]);
+    const config = makePublisherConfig([fsDestination()], { now: wallClockAt(boundary) });
     await publisher(config).runCadence(boundary);
     const next = new Date(boundary.getTime() + CADENCE_MS);
     const outcome = await publisher(config).runCadence(next);

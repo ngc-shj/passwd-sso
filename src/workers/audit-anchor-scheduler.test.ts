@@ -285,6 +285,25 @@ describe("createAnchorScheduler", () => {
     expect(linesOf(mockWarn, EXHAUSTED)).toEqual([expect.objectContaining({ retries: 0, reason: "window_closed" })]);
   });
 
+  it("reports count, not window_closed, when the third retry uses up the count as the window closes", async () => {
+    // Started 75 min before B1: retries at B1 - 60, - 45 and - 30 min. After
+    // the third, both bounds stop a fourth (it would land at B1 - 15 min); the
+    // count is the one named.
+    h.setNow(B1 - 75 * MINUTE);
+    h.setOutcome(() => SIGNING_FAILED);
+    await h.scheduler.start();
+
+    for (const minutesBefore of [60, 45, 30]) {
+      expect(h.pending().at).toBe(B1 - minutesBefore * MINUTE);
+      await h.fire();
+    }
+    expect(h.runs).toEqual([B0, B0, B0, B0]);
+    expect(h.pending().at).toBe(B1);
+    expect(linesOf(mockWarn, EXHAUSTED)).toEqual([
+      { boundary: new Date(B0).toISOString(), retries: 3, reason: "count", _logType: EXHAUSTED },
+    ]);
+  });
+
   it("warns retries_exhausted exactly once, after the third retry, and never on a publishing run", async () => {
     h.setOutcome((boundaryMs) => (boundaryMs === B0 ? SIGNING_FAILED : PUBLISHED));
     await h.scheduler.start();

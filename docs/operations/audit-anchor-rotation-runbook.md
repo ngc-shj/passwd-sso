@@ -341,7 +341,8 @@ one task and a deploy stops the old one first) are safe by design. Every run set
 `lock_timeout` (10 s) and takes the blocking `pg_advisory_xact_lock(hashtext('audit-anchor-publish'))`,
 then reads the boundary marker `audit_anchor_last_published_boundary` under it: a run for a
 boundary at or before the marker reports `skipped_already_published` (the marker only moves
-forward). A run that waits past the timeout stands down with `lock_held`
+forward; one past the wall clock's current boundary fails the run closed instead, with
+`CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`). A run that waits past the timeout stands down with `lock_held`
 (`LOCK_HELD_BY_OTHER_INSTANCE`). Neither produces an `AUDIT_ANCHOR_PUBLISH_FAILED` row. A
 `lock_held` run is retried for the same boundary like a failure (every 15 minutes, at most
 three times per process); when the holder did publish, the retry's marker re-check skips. The

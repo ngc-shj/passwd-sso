@@ -357,7 +357,8 @@ describe("AuditAnchorPublisher.runCadence — gates", () => {
     expect(outcome).toMatchObject({ kind: "skipped_no_tenants", everChainEnabled: true });
   });
 
-  it("returns skipped_already_published when the marker equals the boundary", async () => {
+  it("returns skipped_already_published when the marker equals the boundary and the wall clock's current one", async () => {
+    expect(currentCadenceBoundary(new Date(), CADENCE_MS, OFFSET_MS)).toEqual(BOUNDARY);
     const db = makeDb();
     db.settings.set(MARKER_KEY, BOUNDARY.toISOString());
     const upload = vi.fn().mockResolvedValue(undefined);
@@ -372,9 +373,10 @@ describe("AuditAnchorPublisher.runCadence — gates", () => {
     expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
   });
 
-  it("skips, uploads nothing and leaves the marker when it holds a later boundary, logging stale_boundary", async () => {
+  it("skips, uploads nothing and leaves the marker when it holds a later boundary the wall clock has reached, logging stale_boundary", async () => {
     // A marker only moves forward: publishing an earlier boundary would write
-    // it back.
+    // it back. The wall clock is at D+1, the run for D (a late retry).
+    vi.setSystemTime(new Date(WALL_CLOCK.getTime() + CADENCE_MS));
     const db = makeDb();
     const later = new Date(BOUNDARY.getTime() + CADENCE_MS).toISOString();
     db.settings.set(MARKER_KEY, later);
@@ -393,6 +395,79 @@ describe("AuditAnchorPublisher.runCadence — gates", () => {
       .map(([fields]) => fields as Record<string, unknown>)
       .filter((f) => f._logType === "audit-anchor-publisher.stale_boundary");
     expect(stale).toEqual([{ boundary: BOUNDARY.toISOString(), marker: later, _logType: "audit-anchor-publisher.stale_boundary" }]);
+  });
+
+  it.each([
+    ["the next boundary", CADENCE_MS],
+    ["a year ahead", 365 * CADENCE_MS],
+  ])("fails before the upload, uncounted, when the marker is past the wall clock's current boundary: %s", async (_label, aheadMs) => {
+    // The wall clock's current boundary is BOUNDARY: a marker past it was not
+    // written by any publish this clock allows, and read as published it would
+    // skip every boundary until its date.
+    expect(currentCadenceBoundary(new Date(), CADENCE_MS, OFFSET_MS)).toEqual(BOUNDARY);
+    const db = makeDb();
+    const ahead = new Date(BOUNDARY.getTime() + aheadMs).toISOString();
+    db.settings.set(MARKER_KEY, ahead);
+    const upload = vi.fn().mockResolvedValue(undefined);
+    const outcome = await publisherFor(db, { destinations: [makeDestination("s3", upload)] }).runCadence(BOUNDARY);
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "CADENCE_FAILED:BOUNDARY_MARKER_AHEAD",
+      stage: "before_upload",
+      chainEnabledTenantCount: null,
+    });
+    expect(upload).not.toHaveBeenCalled();
+    expect(db.settings.get(MARKER_KEY)).toBe(ahead);
+    expect(db.settings.has(ATTEMPTS_KEY)).toBe(false);
+    expect(failureReasons(db)).toEqual(["CADENCE_FAILED:BOUNDARY_MARKER_AHEAD"]);
+    expect(logTypes(mockLoggerError)).toContain("audit-anchor-publisher.cadence_failed");
+  });
+
+  it("fails closed on a marker one boundary ahead until the wall clock reaches that boundary, then skips", async () => {
+    const next = new Date(BOUNDARY.getTime() + CADENCE_MS);
+    const db = makeDb();
+    db.settings.set(MARKER_KEY, next.toISOString());
+
+    vi.setSystemTime(new Date(next.getTime() - 1));
+    expect(await publisherFor(db).runCadence(BOUNDARY)).toMatchObject({ kind: "failed", reason: "CADENCE_FAILED:BOUNDARY_MARKER_AHEAD" });
+
+    // At the marker's own boundary, the run for it skips quietly.
+    vi.setSystemTime(next);
+    mockLoggerWarn.mockClear();
+    expect(await publisherFor(db).runCadence(next)).toMatchObject({ kind: "skipped_already_published" });
+    expect(logTypes(mockLoggerWarn)).not.toContain("audit-anchor-publisher.stale_boundary");
+  });
+
+  it("reads the wall clock from config.now when one is given", async () => {
+    // The default clock (faked to WALL_CLOCK) would call this marker ahead;
+    // the injected one is at D+1, where it is a stale_boundary skip.
+    const next = new Date(BOUNDARY.getTime() + CADENCE_MS);
+    const db = makeDb();
+    db.settings.set(MARKER_KEY, next.toISOString());
+    const outcome = await publisherFor(db, { now: () => next.getTime() + 60 * 60 * 1000 }).runCadence(BOUNDARY);
+
+    expect(outcome.kind).toBe("skipped_already_published");
+    expect(logTypes(mockLoggerWarn)).toContain("audit-anchor-publisher.stale_boundary");
+  });
+
+  it("fails the publish transaction's re-check on a marker planted ahead between the two transactions", async () => {
+    const db = makeDb();
+    const ahead = new Date(BOUNDARY.getTime() + CADENCE_MS).toISOString();
+    const upload = vi.fn().mockResolvedValue(undefined);
+    const outcome = await publisherFor(db, {
+      destinations: [makeDestination("s3", upload)],
+      hooks: {
+        inTx: async () => {
+          db.settings.set(MARKER_KEY, ahead);
+        },
+      },
+    }).runCadence(BOUNDARY);
+
+    expect(outcome).toMatchObject({ kind: "failed", reason: "CADENCE_FAILED:BOUNDARY_MARKER_AHEAD", stage: "before_upload" });
+    expect(upload).not.toHaveBeenCalled();
+    expect(db.settings.get(MARKER_KEY)).toBe(ahead);
+    expect(pauseWrites(db)).toEqual([]);
   });
 
   it.each([
@@ -678,18 +753,25 @@ describe("AuditAnchorPublisher.runCadence — failures", () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  // The bound is armed before the first upload starts, so at exactly the
+  // bound (0.5 + 0.5) its timer was queued first and fires first: an upload
+  // that would finish at the same instant fails.
   it.each([
     ["each 0.6 of the bound fails the upload", 0.6, "failed"],
+    ["each 0.5 of the bound, finishing at the bound itself, fails the upload", 0.5, "failed"],
     ["each 0.3 of the bound publishes", 0.3, "published"],
   ])("bounds the upload to every destination as a whole: two destinations %s", async (_label, fraction, kind) => {
-    vi.useRealTimers();
+    vi.useFakeTimers();
+    vi.setSystemTime(WALL_CLOCK);
     const boundMs = 400;
     const slow = () => vi.fn(() => new Promise<void>((resolve) => setTimeout(resolve, boundMs * fraction)));
     const db = makeDb();
-    const outcome = await publisherFor(db, {
+    const run = publisherFor(db, {
       destinations: [makeDestination("filesystem", slow()), makeDestination("s3", slow())],
       uploadTimeoutMs: boundMs,
     }).runCadence(BOUNDARY);
+    await vi.advanceTimersByTimeAsync(2 * boundMs);
+    const outcome = await run;
 
     expect(outcome.kind).toBe(kind);
     if (outcome.kind === "failed") {

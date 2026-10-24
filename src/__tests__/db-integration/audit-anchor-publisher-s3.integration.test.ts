@@ -32,6 +32,7 @@ import {
   clearPublisherSettings,
   farFutureBoundary,
   makePublisherConfig,
+  wallClockAt,
   publisherOutboxRows,
   purgePublisherOutboxRows,
   readSetting,
@@ -189,7 +190,7 @@ describe("AuditAnchorPublisher — MinIO versions across a lost commit", () => {
   it("lost commit: the retry re-PUTs the key; the latest version is the committed one and the next manifest chains to it", async () => {
     const boundary = nextBoundary();
     const s3 = new S3Destination({ bucket: BUCKET, prefix, clientOptions });
-    const config = makePublisherConfig([s3]);
+    const config = makePublisherConfig([s3], { now: wallClockAt(boundary) });
     const key = joinS3Key(prefix, buildManifestArtifactKey(boundary, config.signingKeyKid));
 
     const lost = await publisher({

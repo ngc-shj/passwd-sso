@@ -74,3 +74,26 @@ All 20 findings fixed in one commit ("review(1)"); each behavioural fix red-prov
 - T-3: MinIO `/data` on tmpfs; verified in the container (`/proc/mounts`: tmpfs) and both S3 suites pass across a restart.
 - T-4: pre-pr probes MinIO and exports `ANCHOR_TEST_S3_ENDPOINT`; dev docs list it. CLAUDE.md not edited (needs approval; the pre-pr probe and docs cover it).
 - T-5…T-10: tests added as specified.
+
+### Round 2
+Findings: functionality N1 + security R2-1 (converged: a future marker suppresses every boundary
+until its date), security R2-2 (role-override rule misses `RegisterTaskDefinition` of another
+family and the bare role name), testing N-1 (real-timer upload-bound cases), N-2 (holder query
+copied from alerts.md), N-3 (`count` precedence untested). All Minor; all fixed in "review(2)",
+each red-proved (16 mutations). Details in D13.
+- N1 / R2-1: a marker strictly later than the wall clock's current boundary fails closed
+  (`CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`, before the count, alarmed via `cadence_failed`);
+  `stale_boundary` is alarmed. `PublisherConfig.now` added so the publisher runs on one clock;
+  the integration cases that run again after a far-future publish pin it with `wallClockAt`.
+- R2-2: second EventBridge rule on `RegisterTaskDefinition` naming the role for any family but the
+  publisher's own (family referenced from the task definition); both rules match the ARN and the
+  bare role name.
+- N-1: fake timers; edge 0.5 + 0.5 = bound falls on the timeout side (the bound is armed first).
+- N-2: the integration case runs the `sql` block read from alerts.md, with decoy locks so a
+  weakened query returns extra rows.
+- N-3: retries exhaust exactly as the window closes → `reason: "count"`.
+- Accepted residual: a scheduler timer firing milliseconds early publishes boundary B while the
+  wall clock is still before B; a second concurrent run inside those milliseconds would read the
+  marker as ahead and alarm. The ECS service runs one task with stop-before-start deploys, and the
+  scheduler arms the next run from the boundary, so no second run exists in that window — worst
+  case one false alarm, no data effect.

@@ -174,6 +174,8 @@ beforeAll(async () => {
   lines.disabled_after_enabled = await cadence(makeDb({ enabled: [], anchors: [TENANT] }));
   lines.already_published = await cadence(makeDb({ settings: new Map([[MARKER, BOUNDARY.toISOString()]]) }));
   lines.stale_marker = await cadence(makeDb({ settings: new Map([[MARKER, new Date(BOUNDARY.getTime() + CADENCE).toISOString()]]) }));
+  // Past the wall clock's current boundary (the real clock here): fails closed.
+  lines.marker_ahead = await cadence(makeDb({ settings: new Map([[MARKER, new Date(Date.now() + 2 * CADENCE).toISOString()]]) }));
   lines.upload_failed = await cadence(makeDb(), failingUpload);
   lines.cap_reached = await cadence(makeDb({ settings: new Map([[ATTEMPTS, JSON.stringify({ boundary: BOUNDARY.toISOString(), count: 3 })]]) }));
   lines.lock_held = await cadence(makeDb({ lockTimeoutOnCall: 1 }));
@@ -252,6 +254,8 @@ describe("publisher log lines vs their metric filters", () => {
     expect(kinds("already_published")).toEqual(["skipped_already_published"]);
     expect(kinds("stale_marker")).toEqual(["skipped_already_published"]);
     expect(lines.stale_marker.map((l) => l._logType)).toContain("audit-anchor-publisher.stale_boundary");
+    expect(kinds("marker_ahead")).toEqual(["failed"]);
+    expect(lines.marker_ahead.find((l) => l._logType === "audit-anchor-publisher.cadence")?.reason).toBe("CADENCE_FAILED:BOUNDARY_MARKER_AHEAD");
     expect(kinds("upload_failed")).toEqual(["failed"]);
     expect(kinds("cap_reached")).toEqual(["upload_cap_reached"]);
     expect(kinds("lock_held")).toEqual(["lock_held"]);
@@ -285,8 +289,9 @@ describe("publisher log lines vs their metric filters", () => {
   });
 
   const expectedScenarios: Record<string, string[]> = {
-    cadence_failed: ["commit_failed", "pause_persist_failed", "upload_failed"],
+    cadence_failed: ["commit_failed", "marker_ahead", "pause_persist_failed", "upload_failed"],
     lock_held: ["lock_held"],
+    stale_boundary: ["stale_marker"],
     upload_failed: ["pause_persist_failed", "upload_failed"],
     upload_cap_reached: ["cap_reached"],
     commit_failed_after_upload: ["commit_failed"],

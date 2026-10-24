@@ -17,7 +17,10 @@ const PUBLISHER_ROLE_ARN = "<ref:aws_iam_role.ecs_audit_anchor_publisher_task.ar
 const BREAK_GLASS_ARN = "arn:aws:iam::111122223333:role/anchor-break-glass";
 const ACCOUNT_ID = "<ref:data.aws_caller_identity.current.account_id>";
 const ALARM_TOPIC_ARN = "<ref:aws_sns_topic.alarms[0].arn>";
+const PUBLISHER_ROLE_NAME = "<ref:aws_iam_role.ecs_audit_anchor_publisher_task.name>";
+const PUBLISHER_FAMILY = "<ref:aws_ecs_task_definition.audit_anchor_publisher.family>";
 const ROLE_OVERRIDE_RULE = "aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0]";
+const ROLE_TASK_DEFINITION_RULE = "aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition[0]";
 const RETENTION_CAP_MARGIN_DAYS = 31;
 
 type Statement = Record<string, unknown>;
@@ -326,6 +329,61 @@ function statementWithSid(e: HclExpr, sid: string): HclExpr | undefined {
 }
 
 /**
+ * An EventBridge pattern against an event, for the matchers these rules use:
+ * exact values, `anything-but` (one value or a list) and `suffix`. A field the
+ * pattern names must be present in the event; an array field matches when any
+ * element does.
+ */
+function matchesEventPattern(pattern: unknown, event: unknown): boolean {
+  if (typeof pattern !== "object" || pattern === null || Array.isArray(pattern)) throw new Error("pattern: not an object");
+  if (typeof event !== "object" || event === null) return false;
+  return Object.entries(pattern as Record<string, unknown>).every(([key, want]) => {
+    const got = (event as Record<string, unknown>)[key];
+    if (got === undefined) return false;
+    if (!Array.isArray(want)) return matchesEventPattern(want, got);
+    const values = Array.isArray(got) ? got : [got];
+    return values.some((v) => want.some((m) => matchesValue(m, v)));
+  });
+}
+
+function matchesValue(matcher: unknown, value: unknown): boolean {
+  if (typeof matcher !== "object" || matcher === null) return matcher === value;
+  const m = matcher as Record<string, unknown>;
+  if ("anything-but" in m) {
+    const excluded = m["anything-but"];
+    return !(Array.isArray(excluded) ? excluded : [excluded]).includes(value);
+  }
+  if ("suffix" in m) return typeof value === "string" && value.endsWith(String(m.suffix));
+  throw new Error(`pattern: unsupported matcher ${JSON.stringify(matcher)}`);
+}
+
+function cloudTrailEcsEvent(eventName: string, requestParameters: Record<string, unknown>): Record<string, unknown> {
+  return {
+    source: "aws.ecs",
+    "detail-type": "AWS API Call via CloudTrail",
+    detail: { eventSource: "ecs.amazonaws.com", eventName, requestParameters },
+  };
+}
+
+/** The rule `name` targets the alarm topic, and the topic policy admits it. */
+function alarmWiringViolations(tf: TerraformConfig, label: string, ruleRef: string, opts: EvalOptions): string[] {
+  const out: string[] = [];
+  const targets = tf
+    .resources("aws_cloudwatch_event_target")
+    .filter((t) => String(tf.attr(t, "rule", opts)) === `<ref:${ruleRef}.name>`);
+  if (targets.length !== 1 || String(tf.attr(targets[0], "arn", opts)) !== ALARM_TOPIC_ARN) {
+    out.push(`${label}: not targeted at the alarm topic`);
+  }
+
+  const policy = tf.resource("aws_sns_topic_policy", "alarms").body.attrs.policy;
+  const statement = policy && statementWithSid(policy, "AllowEventBridgePublish");
+  if (!statement || !referencesIn(statement).includes(`${ruleRef}.arn`)) {
+    out.push(`${label}: the alarm topic policy does not admit it`);
+  }
+  return out;
+}
+
+/**
  * The rule that surfaces a task run with the publisher's role as an override.
  * The topic policy is read as references, not evaluated: its source ARN list
  * concatenates a splat, which the evaluator does not model.
@@ -345,25 +403,60 @@ function roleOverrideRuleViolations(tf: TerraformConfig, opts: EvalOptions = {})
     detail: {
       eventSource: ["ecs.amazonaws.com"],
       eventName: ["RunTask", "StartTask"],
-      requestParameters: { overrides: { taskRoleArn: [PUBLISHER_ROLE_ARN] } },
+      requestParameters: { overrides: { taskRoleArn: [PUBLISHER_ROLE_ARN, PUBLISHER_ROLE_NAME] } },
     },
   };
   const pattern = plain(tf.attr(rule, "event_pattern", opts));
   if (canonical(pattern) !== canonical(want)) out.push(`role override rule: event_pattern ${JSON.stringify(pattern)}`);
-
-  const targets = tf
-    .resources("aws_cloudwatch_event_target")
-    .filter((t) => String(tf.attr(t, "rule", opts)) === `<ref:${ROLE_OVERRIDE_RULE}.name>`);
-  if (targets.length !== 1 || String(tf.attr(targets[0], "arn", opts)) !== ALARM_TOPIC_ARN) {
-    out.push("role override rule: not targeted at the alarm topic");
+  for (const role of [PUBLISHER_ROLE_ARN, PUBLISHER_ROLE_NAME]) {
+    if (!matchesEventPattern(pattern, cloudTrailEcsEvent("RunTask", { overrides: { taskRoleArn: role } }))) {
+      out.push(`role override rule: misses an override naming the role as ${role}`);
+    }
   }
+  return [...out, ...alarmWiringViolations(tf, "role override rule", ROLE_OVERRIDE_RULE, opts)];
+}
 
-  const policy = tf.resource("aws_sns_topic_policy", "alarms").body.attrs.policy;
-  const statement = policy && statementWithSid(policy, "AllowEventBridgePublish");
-  if (!statement || !referencesIn(statement).includes(`${ROLE_OVERRIDE_RULE}.arn`)) {
-    out.push("role override rule: the alarm topic policy does not admit it");
+/**
+ * The rule that surfaces a task definition of another family registered with
+ * the publisher's role: a run of it needs no override. The publisher family's
+ * own registrations — every deploy — must not match.
+ */
+function roleTaskDefinitionRuleViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
+  const out: string[] = [];
+  let rule;
+  try {
+    rule = tf.resource("aws_cloudwatch_event_rule", "audit_anchor_publisher_role_task_definition");
+  } catch {
+    return ["role task-definition rule: missing"];
   }
-  return out;
+  if (tf.attr(rule, "count", { vars: { enable_monitoring: true } }) !== 1) out.push("role task-definition rule: not created with monitoring on");
+  const want = {
+    source: ["aws.ecs"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    detail: {
+      eventSource: ["ecs.amazonaws.com"],
+      eventName: ["RegisterTaskDefinition"],
+      requestParameters: {
+        taskRoleArn: [PUBLISHER_ROLE_ARN, PUBLISHER_ROLE_NAME],
+        family: [{ "anything-but": PUBLISHER_FAMILY }],
+      },
+    },
+  };
+  const pattern = plain(tf.attr(rule, "event_pattern", opts));
+  if (canonical(pattern) !== canonical(want)) out.push(`role task-definition rule: event_pattern ${JSON.stringify(pattern)}`);
+  const register = (family: string, taskRoleArn: string) => cloudTrailEcsEvent("RegisterTaskDefinition", { family, taskRoleArn });
+  for (const role of [PUBLISHER_ROLE_ARN, PUBLISHER_ROLE_NAME]) {
+    if (matchesEventPattern(pattern, register(PUBLISHER_FAMILY, role))) {
+      out.push(`role task-definition rule: matches the publisher family's own registration (${role})`);
+    }
+    if (!matchesEventPattern(pattern, register("foo", role))) {
+      out.push(`role task-definition rule: misses family foo naming the role as ${role}`);
+    }
+  }
+  if (matchesEventPattern(pattern, register("foo", "<ref:aws_iam_role.ecs_task.arn>"))) {
+    out.push("role task-definition rule: matches a task definition on another role");
+  }
+  return [...out, ...alarmWiringViolations(tf, "role task-definition rule", ROLE_TASK_DEFINITION_RULE, opts)];
 }
 
 function verifyWorkerViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
@@ -430,6 +523,7 @@ function allViolations(tf: TerraformConfig, opts: EvalOptions = {}): string[] {
     ...roleViolations(tf, opts),
     ...trustViolations(tf, opts),
     ...roleOverrideRuleViolations(tf, opts),
+    ...roleTaskDefinitionRuleViolations(tf, opts),
     ...verifyWorkerViolations(tf, opts),
     ...clusterViolations(tf),
     ...prefixPlumbingViolations(tf),
@@ -732,9 +826,72 @@ resource "aws_iam_role_policy" "ecs_s3_access" {`,
   {
     name: "the role override rule watching the shared task role",
     file: "monitoring.tf",
-    from: "taskRoleArn = [aws_iam_role.ecs_audit_anchor_publisher_task.arn]",
-    to: "taskRoleArn = [aws_iam_role.ecs_task.arn]",
+    from: "taskRoleArn = local.audit_anchor_publisher_role_spellings\n        }",
+    to: "taskRoleArn = [aws_iam_role.ecs_task.arn]\n        }",
     violation: "role override rule: event_pattern",
+  },
+  {
+    name: "the role override rule matching the role's ARN only",
+    file: "monitoring.tf",
+    from: "taskRoleArn = local.audit_anchor_publisher_role_spellings\n        }",
+    to: "taskRoleArn = [aws_iam_role.ecs_audit_anchor_publisher_task.arn]\n        }",
+    violation: "role override rule: misses an override naming the role as <ref:aws_iam_role.ecs_audit_anchor_publisher_task.name>",
+  },
+  {
+    name: "both role rules matching the role's ARN only",
+    file: "monitoring.tf",
+    from: "    aws_iam_role.ecs_audit_anchor_publisher_task.name,\n",
+    to: "",
+    violation: "role task-definition rule: misses family foo naming the role as <ref:aws_iam_role.ecs_audit_anchor_publisher_task.name>",
+  },
+  {
+    name: "the task-definition rule not excluding the publisher family",
+    file: "monitoring.tf",
+    from: "        family      = [{ anything-but = aws_ecs_task_definition.audit_anchor_publisher.family }]\n",
+    to: "",
+    violation: "role task-definition rule: matches the publisher family's own registration",
+  },
+  {
+    name: "the task-definition rule matching only the publisher family",
+    file: "monitoring.tf",
+    from: "family      = [{ anything-but = aws_ecs_task_definition.audit_anchor_publisher.family }]",
+    to: "family      = [aws_ecs_task_definition.audit_anchor_publisher.family]",
+    violation: "role task-definition rule: misses family foo",
+  },
+  {
+    name: "the task-definition rule excluding a re-typed family name",
+    file: "monitoring.tf",
+    from: "anything-but = aws_ecs_task_definition.audit_anchor_publisher.family",
+    to: 'anything-but = "${local.name_prefix}-audit-anchor-publisher"',
+    violation: "role task-definition rule: event_pattern",
+  },
+  {
+    name: "the task-definition rule watching the shared task role",
+    file: "monitoring.tf",
+    from: "taskRoleArn = local.audit_anchor_publisher_role_spellings\n        family",
+    to: "taskRoleArn = [aws_iam_role.ecs_task.arn]\n        family",
+    violation: "role task-definition rule: misses family foo",
+  },
+  {
+    name: "the task-definition rule's target sent elsewhere",
+    file: "monitoring.tf",
+    from: "rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition[0].name",
+    to: "rule      = aws_cloudwatch_event_rule.ecs_execute_command[0].name",
+    violation: "role task-definition rule: not targeted at the alarm topic",
+  },
+  {
+    name: "the task-definition rule left out of the alarm topic policy",
+    file: "monitoring.tf",
+    from: "                aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition[0].arn,\n",
+    to: "",
+    violation: "role task-definition rule: the alarm topic policy does not admit it",
+  },
+  {
+    name: "the task-definition rule removed",
+    file: "monitoring.tf",
+    from: 'resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_role_task_definition" {',
+    to: 'resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_role_task_definition_gone" {',
+    violation: "role task-definition rule: missing",
   },
   {
     name: "the role override rule leaving StartTask unwatched",

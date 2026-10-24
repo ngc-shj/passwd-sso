@@ -48,9 +48,9 @@ timeout is the `lock_held` outcome, retried for the same boundary like a failure
 role that can connect can hold the key, so the holder is not assumed to publish; alarmed
 on AWS). Under the lock the run reads the marker
 `system_settings.audit_anchor_last_published_boundary`, which is monotonic: a boundary
-at or before it is `skipped_already_published` (before it also logs `stale_boundary`),
-and a marker that does not parse fails the run closed rather than reading as published
-or absent. A publish writes the marker — only forward — in the same commit as the
+at or before it is `skipped_already_published` (before it also logs `stale_boundary`,
+alarmed on AWS), and a marker that does not parse, or one past the wall clock's
+current boundary, fails the run closed rather than reading as published or absent. A publish writes the marker — only forward — in the same commit as the
 manifest pointer. A `DEPLOYMENT_ID` value is pinned in
 `system_settings` at boot (`ensureDeploymentIdMatch`); a mismatch throws
 `DeploymentIdMismatchError` and emits `AUDIT_ANCHOR_PUBLISH_FAILED` — this stops a
@@ -128,9 +128,13 @@ task role write a manifest key, and the role's trust policy admits ECS tasks of 
 account only (`aws:SourceAccount`). Within the account, a principal allowed
 `iam:PassRole` on it can still run a task of its own choosing as that role. SURFACED,
 not prevented: a `RunTask` / `StartTask` naming the role as a `taskRoleArn` override is
-alarmed (EventBridge `<name_prefix>-audit-anchor-publisher-role-override`). RESIDUAL:
-a new task definition naming the role (`RegisterTaskDefinition`, which every deploy
-also does) and changes to the role itself (`UpdateAssumeRolePolicy`, `PutRolePolicy`,
+alarmed (EventBridge `<name_prefix>-audit-anchor-publisher-role-override`), and so is a
+`RegisterTaskDefinition` of any other family naming it
+(`<name_prefix>-audit-anchor-publisher-role-task-definition`); both match the role's
+full ARN and its bare name. RESIDUAL: a revision of the publisher's own family
+(`RegisterTaskDefinition`, which every deploy does, so it is not alarmed — a revision
+registered outside a deploy runs as the publisher once the service is pointed at it)
+and changes to the role itself (`UpdateAssumeRolePolicy`, `PutRolePolicy`,
 `AttachRolePolicy`, `DeleteRole` + `CreateRole`) reach CloudTrail but are not alarmed
 by this stack — IAM events reach EventBridge only in `us-east-1`, where it has no
 provider; that alarm is the operator's (`docs/operations/alerts.md` "Publisher task role
@@ -245,8 +249,13 @@ misreporting tamper.
 - **Database-written publisher state**: the publisher trusts `system_settings` for
   the manifest pointer, the boundary marker and the attempt count. A database writer
   can make runs skip (marker), stop uploading (attempt count) or chain to a pointer
-  of its choosing. No alarm treats a skip as healthy, and the cap is alarmed, so
-  suppression is visible within a day; making the published objects the source of
+  of its choosing. A marker past the wall clock's current boundary fails every run
+  closed (`CADENCE_FAILED:BOUNDARY_MARKER_AHEAD`, alarmed as `cadence_failed`), so a
+  future marker cannot suppress the boundaries before its date quietly; one past the
+  run's boundary but not the clock's is alarmed as `stale_boundary`. What remains is a
+  marker set to the current boundary before its publish: that boundary skips, and no
+  alarm treats a skip as healthy, so the cadence-absent alarm sees it within a day.
+  The cap is alarmed too; making the published objects the source of
   truth is the protocol-hardening follow-up (SC5 of
   `docs/archive/review/aws-anchor-publisher-verify-worker-plan.md`), as is a
   compromised publisher writing a new version of the same day's key (see

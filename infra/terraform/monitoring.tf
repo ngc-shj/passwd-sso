@@ -423,10 +423,14 @@ resource "aws_cloudwatch_metric_alarm" "audit_anchor_chain_enabled_fell_to_zero"
 # names the failure. lock_held is here though it is not a failure of the run:
 # on ECS the service runs one task and stops the old one before starting the
 # new, so a held lock means a second publisher against this database.
+# stale_boundary is a skip, not a failure, but a legitimate one needs the wall
+# clock to have gone back past a boundary it already published; otherwise the
+# marker was written by something other than a publish.
 locals {
   audit_anchor_publisher_failure_log_types = {
     cadence_failed             = "audit-anchor-publisher.cadence_failed"
     lock_held                  = "audit-anchor-publisher.lock_held"
+    stale_boundary             = "audit-anchor-publisher.stale_boundary"
     upload_failed              = "audit-anchor-publisher.upload_failed"
     upload_cap_reached         = "audit-anchor-publisher.upload_cap_reached"
     commit_failed_after_upload = "audit-anchor-publisher.commit_failed_after_upload"
@@ -657,6 +661,20 @@ resource "aws_cloudwatch_event_target" "ecs_execute_command_sns" {
 # re-create) are IAM events, which EventBridge delivers only in us-east-1; this
 # stack has no provider there, so those reach CloudTrail but are not alarmed
 # here (docs/operations/alerts.md).
+#
+# Both rules match the role by its full ARN and by its bare name. CloudTrail
+# records the request as sent, and RegisterTaskDefinition's taskRoleArn takes
+# "the short name or full ARN" of the role; RunTask's override is documented as
+# an ARN, but an exact match on one spelling is a bypass the moment the API
+# accepts the other, and the second entry costs nothing. The role has no path,
+# so these two are the only spellings that name it.
+locals {
+  audit_anchor_publisher_role_spellings = [
+    aws_iam_role.ecs_audit_anchor_publisher_task.arn,
+    aws_iam_role.ecs_audit_anchor_publisher_task.name,
+  ]
+}
+
 resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_role_override" {
   count       = var.enable_monitoring ? 1 : 0
   name        = "${local.name_prefix}-audit-anchor-publisher-role-override"
@@ -670,7 +688,7 @@ resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_role_override" {
       eventName   = ["RunTask", "StartTask"]
       requestParameters = {
         overrides = {
-          taskRoleArn = [aws_iam_role.ecs_audit_anchor_publisher_task.arn]
+          taskRoleArn = local.audit_anchor_publisher_role_spellings
         }
       }
     }
@@ -682,6 +700,39 @@ resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_role_override" {
 resource "aws_cloudwatch_event_target" "audit_anchor_publisher_role_override_sns" {
   count     = var.enable_monitoring ? 1 : 0
   rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0].name
+  target_id = "send-to-sns"
+  arn       = aws_sns_topic.alarms[0].arn
+}
+
+# The same role baked into a task definition of another family: a run of that
+# definition needs no override, so the rule above never sees it. The
+# publisher's own family is excluded — every publisher deploy registers a
+# revision naming the role. A separate rule because the field set differs; one
+# pattern ORs only within a field.
+resource "aws_cloudwatch_event_rule" "audit_anchor_publisher_role_task_definition" {
+  count       = var.enable_monitoring ? 1 : 0
+  name        = "${local.name_prefix}-audit-anchor-publisher-role-task-definition"
+  description = "A task definition outside the audit-anchor publisher's family was registered with its task role"
+
+  event_pattern = jsonencode({
+    source      = ["aws.ecs"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail = {
+      eventSource = ["ecs.amazonaws.com"]
+      eventName   = ["RegisterTaskDefinition"]
+      requestParameters = {
+        taskRoleArn = local.audit_anchor_publisher_role_spellings
+        family      = [{ anything-but = aws_ecs_task_definition.audit_anchor_publisher.family }]
+      }
+    }
+  })
+
+  tags = local.tags
+}
+
+resource "aws_cloudwatch_event_target" "audit_anchor_publisher_role_task_definition_sns" {
+  count     = var.enable_monitoring ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition[0].name
   target_id = "send-to-sns"
   arn       = aws_sns_topic.alarms[0].arn
 }
@@ -748,6 +799,7 @@ resource "aws_sns_topic_policy" "alarms" {
                 aws_cloudwatch_event_rule.ecs_task_stopped[0].arn,
                 aws_cloudwatch_event_rule.ecs_execute_command[0].arn,
                 aws_cloudwatch_event_rule.audit_anchor_publisher_role_override[0].arn,
+                aws_cloudwatch_event_rule.audit_anchor_publisher_role_task_definition[0].arn,
               ],
               aws_cloudwatch_event_rule.audit_anchor_bucket_config_change[*].arn,
             )
