@@ -418,7 +418,13 @@ userinfo of that URL — the secret is its only copy.
 | `REDIS_URL` | Redis connection string |
 | `OUTBOX_WORKER_DATABASE_URL` | Least-privilege DB URL for the audit-outbox-worker ECS service (`passwd_outbox_worker` role) |
 | `RETENTION_GC_DATABASE_URL` | Least-privilege DB URL for the retention-gc-worker ECS service (`passwd_retention_gc_worker` role) |
-| `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | Least-privilege DB URL for the audit-anchor publisher (`passwd_anchor_publisher` role). No ECS task consumes it yet — no task definition runs the publisher — but `bootstrap-rds-roles.mjs` gives the role `LOGIN` with this password, so the value is generated and held here. |
+| `VERIFIER_PEPPER_KEY` | Vault-data HMAC pepper (256-bit hex). **Required in production.** Mapped into the app ECS task. Generate with `npm run generate:key`. |
+| `SMTP_USER` | SMTP username for magic-link email. Read only when `smtp_host` is set and `smtp_auth_enabled = true`; an empty string means an unauthenticated relay (ECS refuses a missing key). |
+| `SMTP_PASS` | SMTP password, under the same conditions as `SMTP_USER`. |
+| `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | Least-privilege DB URL for the audit-anchor publisher ECS service (`passwd_anchor_publisher` role). `bootstrap-rds-roles.mjs` gives the role `LOGIN` with this password; the secret is its only copy. |
+| `AUDIT_ANCHOR_SIGNING_KEY` | Ed25519 seed the publisher signs manifests with (32-byte hex). Mapped into the publisher task only. Generate with `npm run generate:audit-anchor-signing-key`. |
+| `AUDIT_ANCHOR_TAG_SECRET` | HMAC secret for tenant tags in manifests (32-byte hex). Mapped into the publisher task only. Generate with `npm run generate:audit-anchor-tag-secret`. |
+| `DEPLOYMENT_ID` | UUID naming this deployment in every manifest; the publisher refuses to boot when it differs from the one stored on its first boot. Generate once per deployment; reuse a stored value only for a successor of the same deployment whose predecessor is gone — a clone or a restored copy gets a new one. Mapped into the publisher task only. |
 
 Both background workers run as dedicated ECS services (`*-audit-outbox-worker`,
 `*-retention-gc-worker`) on the app image (`node dist/<worker>.js`),

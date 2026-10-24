@@ -20,6 +20,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runTick, verifyChainUnderSentinelGrant } from "../audit-chain-verify-worker.ts";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
+import { matchesFilterPattern } from "@/__tests__/helpers/cloudwatch-filter-pattern";
+import { TerraformConfig, TERRAFORM_DIR, plain } from "@/__tests__/helpers/hcl-subset";
 
 const HEARTBEAT = "audit-chain-verify-heartbeat";
 const SENTINEL_GRANT = BYPASS_GRANT.AUDIT_CHAIN_VERIFY_SENTINEL_READ;
@@ -644,5 +646,72 @@ describe("audit-chain-verify liveness vs coverage signals", () => {
       expect(beat.erroredTenantCount).toBe(0);
       expect(beat.failedTenantCount).toBe(1);
     });
+  });
+});
+
+// The heartbeat against the CloudWatch filters that count it
+// (infra/terraform/monitoring.tf), as Terraform renders them: each matches the
+// line a tick of that kind really emits, and not the others.
+describe("audit-chain-verify heartbeat vs its metric filters", () => {
+  const tf = new TerraformConfig(TERRAFORM_DIR);
+  const counts = plain(tf.local("audit_chain_verify_count_alarms"));
+  const countPattern = (key) =>
+    String(tf.attr(tf.resource("aws_cloudwatch_log_metric_filter", "audit_chain_verify_count"), "pattern", { each: { key, value: counts[key] } }));
+  const heartbeatPattern = String(tf.attr(tf.resource("aws_cloudwatch_log_metric_filter", "audit_chain_verify_heartbeat"), "pattern"));
+
+  const healthyT = "11111111-1111-4111-8111-111111111111";
+  const tamperedT = "88888888-8888-4888-8888-888888888888";
+  /** The heartbeat of one tick over `prisma`, as the JSON line it logs. */
+  async function beatOf(prisma, order) {
+    const logged = [];
+    vi.spyOn(console, "log").mockImplementation((...a) => logged.push(a.map(String).join(" ")));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      trackTenantOrder(prisma, order);
+      await runTick(prisma, new Map());
+    } finally {
+      vi.restoreAllMocks();
+      currentTenantId = null;
+    }
+    return heartbeatOf(logged);
+  }
+
+  const ticks = {};
+  beforeEach(async () => {
+    ticks.healthy = await beatOf(makeStubPrisma([SYSTEM_TENANT_ID, healthyT]), [SYSTEM_TENANT_ID, healthyT]);
+    ticks.errored = await beatOf(makeStubPrisma([SYSTEM_TENANT_ID, healthyT], [healthyT]), [SYSTEM_TENANT_ID, healthyT]);
+    ticks.failed = await beatOf(
+      makeStubPrisma([SYSTEM_TENANT_ID, tamperedT], [], { fixtures: { [tamperedT]: { anchors: [anchor(tamperedT, 1)] } } }),
+      [SYSTEM_TENANT_ID, tamperedT],
+    );
+  });
+
+  const matching = (p) => Object.keys(ticks).filter((k) => matchesFilterPattern(p, ticks[k])).sort();
+
+  it("counts every tick's heartbeat for the absence alarm, whatever it found", () => {
+    expect(matching(heartbeatPattern)).toEqual(["errored", "failed", "healthy"]);
+  });
+
+  it("raises the errored filter only for a tick with a tenant that failed to verify", () => {
+    expect(matching(countPattern("errored"))).toEqual(["errored"]);
+  });
+
+  it("raises the failed filter only for a tick with a tampered chain", () => {
+    expect(matching(countPattern("failed"))).toEqual(["failed"]);
+  });
+
+  it("alarms on the heartbeat's absence for 2 h, silence breaching", () => {
+    const alarm = tf.resource("aws_cloudwatch_metric_alarm", "audit_chain_verify_heartbeat_absent");
+    expect(tf.attr(alarm, "treat_missing_data")).toBe("breaching");
+    expect(Number(tf.attr(alarm, "period")) * Number(tf.attr(alarm, "evaluation_periods"))).toBe(2 * 3600);
+  });
+
+  it("binds the filters to the verify worker's log group", () => {
+    for (const name of ["audit_chain_verify_heartbeat", "audit_chain_verify_count"]) {
+      const filter = tf.resource("aws_cloudwatch_log_metric_filter", name);
+      expect(String(tf.attr(filter, "log_group_name", { each: { key: "errored", value: "erroredTenantCount" } }))).toBe(
+        "<ref:aws_cloudwatch_log_group.audit_chain_verify_worker.name>",
+      );
+    }
   });
 });

@@ -235,6 +235,13 @@ ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、
 | `REDIS_URL` | Redis 接続文字列 |
 | `OUTBOX_WORKER_DATABASE_URL` | audit-outbox-worker ECS サービス用の最小権限 DB URL（`passwd_outbox_worker` ロール） |
 | `RETENTION_GC_DATABASE_URL` | retention-gc-worker ECS サービス用の最小権限 DB URL（`passwd_retention_gc_worker` ロール） |
+| `VERIFIER_PEPPER_KEY` | 保管庫データ HMAC 用ペッパー (256-bit hex)。**本番必須**。app ECS タスクにマッピング。`npm run generate:key` で生成。 |
+| `SMTP_USER` | マジックリンクメール用 SMTP ユーザー名。`smtp_host` 設定かつ `smtp_auth_enabled = true` のときのみ参照。認証なしリレーは空文字列で表す（キー欠落は ECS が起動拒否）。 |
+| `SMTP_PASS` | SMTP パスワード。条件は `SMTP_USER` と同じ。 |
+| `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL` | audit-anchor publisher ECS サービス用の最小権限 DB URL（`passwd_anchor_publisher` ロール）。`bootstrap-rds-roles.mjs` がこのパスワードでロールに `LOGIN` を付与するため、このシークレットが唯一の控え。 |
+| `AUDIT_ANCHOR_SIGNING_KEY` | publisher がマニフェスト署名に使う Ed25519 シード (32-byte hex)。publisher タスクにのみマッピング。`npm run generate:audit-anchor-signing-key` で生成。 |
+| `AUDIT_ANCHOR_TAG_SECRET` | マニフェスト内テナントタグ用 HMAC シークレット (32-byte hex)。publisher タスクにのみマッピング。`npm run generate:audit-anchor-tag-secret` で生成。 |
+| `DEPLOYMENT_ID` | 全マニフェストでこのデプロイメントを示す UUID。初回起動時に保存した値と異なると publisher は起動を拒否する。デプロイメントごとに 1 回生成し、保存済みの値を再利用するのは前任が既に存在しない同一デプロイメントの後継のみ — クローンや復元コピーは新しい値を生成する。publisher タスクにのみマッピング。 |
 
 両 worker は app イメージ（`node dist/<worker>.js`）で専用 ECS サービス
 （`*-audit-outbox-worker` / `*-retention-gc-worker`）として起動、`desired_count =

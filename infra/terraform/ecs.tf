@@ -13,6 +13,17 @@ resource "aws_ecs_cluster" "main" {
     value = "enabled"
   }
 
+  # ECS Exec session logging off, explicitly. The bootstrap's operator shell
+  # in the migrate task handles role passwords (README "Creating the DB roles
+  # on RDS"), and a session transcript in CloudWatch or S3 would keep them. The
+  # remaining audit of an exec session is CloudTrail's ExecuteCommand event,
+  # alarmed in monitoring.tf (needs a trail logging management events).
+  configuration {
+    execute_command_configuration {
+      logging = "NONE"
+    }
+  }
+
   tags = local.tags
 }
 
@@ -95,10 +106,12 @@ resource "aws_ecs_task_definition" "app" {
           { name = "HOSTNAME", value = "0.0.0.0" },
         ],
         # Production env validation (src/lib/env-schema.ts) REFUSES to boot
-        # without external audit anchoring, and enabling it pulls in a signing
-        # key, a tag secret and a destination. These were absent, so every app
-        # task crash-looped on "Invalid environment variables" — found only by
-        # reading the task logs after the first successful rollout.
+        # without external audit anchoring enabled and a destination named.
+        # These were absent, so every app task crash-looped on "Invalid
+        # environment variables" — found only by reading the task logs after
+        # the first successful rollout. The signing key and tag secret are the
+        # publisher's alone (its own task below); the app neither reads nor
+        # receives them.
         var.enable_s3_audit_anchors ? [
           { name = "AUDIT_ANCHOR_PUBLISHER_ENABLED", value = "true" },
           { name = "AUDIT_ANCHOR_DESTINATION_S3_BUCKET", value = aws_s3_bucket.audit_anchors[0].id },
@@ -128,10 +141,8 @@ resource "aws_ecs_task_definition" "app" {
           { name = "SESSION_TOKEN_HMAC_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_TOKEN_HMAC_KEY::" },
           { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
           # Also required in production by env-schema.ts — see the environment
-          # block above for how these came to be missing.
+          # block above for how it came to be missing.
           { name = "VERIFIER_PEPPER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:VERIFIER_PEPPER_KEY::" },
-          { name = "AUDIT_ANCHOR_SIGNING_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_SIGNING_KEY::" },
-          { name = "AUDIT_ANCHOR_TAG_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_TAG_SECRET::" },
         ],
         # Credentials stay in Secrets Manager rather than task environment. The
         # app sends AUTH only when both are non-empty, so an unauthenticated
@@ -533,6 +544,176 @@ resource "aws_ecs_service" "retention_gc_worker" {
   name            = "${local.name_prefix}-retention-gc-worker"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.retention_gc_worker.arn
+  desired_count   = var.worker_desired_count
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = aws_subnet.private[*].id
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  tags = local.tags
+}
+
+################################################################################
+# Audit-anchor publisher + audit-chain verify worker
+################################################################################
+#
+# The publisher signs one manifest per cadence boundary and writes it to the
+# anchors bucket (storage.tf) under its own task role (iam.tf) — the only
+# principal the bucket policy lets write a manifest. The verify worker walks
+# every chain-enabled tenant's audit chain hourly and logs a heartbeat
+# (monitoring.tf alarms on its counts and its absence).
+
+# audit-anchor-publisher task
+resource "aws_ecs_task_definition" "audit_anchor_publisher" {
+  family                   = "${local.name_prefix}-audit-anchor-publisher"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+
+  # Keep the PREVIOUS revision registered so deploy.sh's compensating rollback
+  # can target it — see the app task definition.
+  skip_destroy = true
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.worker_cpu
+  memory             = var.worker_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  task_role_arn      = aws_iam_role.ecs_audit_anchor_publisher_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "audit-anchor-publisher"
+      image     = var.app_image
+      essential = true
+      command   = ["node", "dist/audit-anchor-publisher.js"]
+      # The Fargate maximum. SIGTERM stops the scheduler arming and waits for an
+      # in-flight run, whose transaction is bounded at 90 s; the default 30 s
+      # would SIGKILL a run mid-upload.
+      stopTimeout = 120
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.audit_anchor_publisher.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+      environment = [
+        { name = "AUDIT_ANCHOR_PUBLISHER_ENABLED", value = "true" },
+        { name = "AUDIT_ANCHOR_DESTINATION_S3_BUCKET", value = aws_s3_bucket.audit_anchors[0].id },
+        { name = "AUDIT_ANCHOR_DESTINATION_S3_PREFIX", value = local.audit_anchor_prefix },
+        # The S3 client resolves its region from the environment and fails
+        # every PUT without one; stated rather than left to the platform.
+        { name = "AWS_REGION", value = var.aws_region },
+      ]
+      # Least-privilege DB role (passwd_anchor_publisher); production has no
+      # DATABASE_URL fallback. The signing key and tag secret reach this task
+      # and no other.
+      secrets = [
+        { name = "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_PUBLISHER_DATABASE_URL::" },
+        { name = "AUDIT_ANCHOR_SIGNING_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_SIGNING_KEY::" },
+        { name = "AUDIT_ANCHOR_TAG_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUDIT_ANCHOR_TAG_SECRET::" },
+        { name = "DEPLOYMENT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:DEPLOYMENT_ID::" },
+      ]
+    }
+  ])
+  tags = local.tags
+}
+
+# audit-chain-verify-worker task
+resource "aws_ecs_task_definition" "audit_chain_verify_worker" {
+  family                   = "${local.name_prefix}-audit-chain-verify-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+
+  # Keep the PREVIOUS revision registered so deploy.sh's compensating rollback
+  # can target it — see the app task definition.
+  skip_destroy = true
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.task_cpu_architecture
+  }
+  cpu                = var.worker_cpu
+  memory             = var.worker_memory
+  execution_role_arn = aws_iam_role.ecs_task_execution.arn
+  # No task_role_arn: the worker calls no AWS API, and without a role the task
+  # has no credentials to misuse.
+
+  container_definitions = jsonencode([
+    {
+      name      = "audit-chain-verify-worker"
+      image     = var.app_image
+      essential = true
+      command   = ["node", "dist/audit-chain-verify-worker.js"]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.audit_chain_verify_worker.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+      # Connects as passwd_app (the app secret's DATABASE_URL), which reads
+      # every table, not only the chain — a dedicated read-only role is a
+      # follow-up.
+      secrets = [
+        { name = "AUDIT_CHAIN_VERIFY_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
+      ]
+    }
+  ])
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "audit_anchor_publisher" {
+  name            = "${local.name_prefix}-audit-anchor-publisher"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.audit_anchor_publisher.arn
+  # Never more than one: the advisory lock and the boundary marker make a
+  # second publisher harmless, not useful.
+  desired_count = min(1, var.worker_desired_count)
+  launch_type   = "FARGATE"
+
+  # Stop the old task before starting the new one, so two publishers never run
+  # across a deploy. The zero-task gap this leaves is what the down alarm's
+  # window is sized past (monitoring.tf).
+  deployment_maximum_percent         = 100
+  deployment_minimum_healthy_percent = 0
+
+  network_configuration {
+    subnets         = aws_subnet.private[*].id
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "audit_chain_verify_worker" {
+  name            = "${local.name_prefix}-audit-chain-verify-worker"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.audit_chain_verify_worker.arn
   desired_count   = var.worker_desired_count
   launch_type     = "FARGATE"
 

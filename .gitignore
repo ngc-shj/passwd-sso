@@ -105,7 +105,7 @@ saml/
 *.cert
 
 # Terraform
-infra/terraform/.terraform/
+infra/terraform/**/.terraform/
 infra/terraform/**/*.tfstate
 infra/terraform/**/*.tfstate.backup
 # Every tfvars form Terraform auto-loads, at any depth. `redis_auth_token` is a
