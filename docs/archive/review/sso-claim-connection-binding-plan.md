@@ -1,6 +1,6 @@
 # Plan: sso-claim-connection-binding
 
-Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 6.
+Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 7.
 
 ## Project context
 
@@ -111,20 +111,35 @@ completed through one Jackson connection's client with another connection's IdP.
   `backfill` rows), and any operator `reassign`/`unrevoke` events — and the provider of its
   `register` event (`new_provider`; "unknown" for pre-change events and rows with no event). This
   is evidence for the operator, not an attestation: the history predates provenance, so no field
-  of it decides a binding on its own. `--by` reserves `backfill` as well as `signin` (one constant,
-  same normalisation). It refuses when members using
+  of it decides a binding on its own. `--by` reserves every engine-written label, derived from the
+  label constants (`signin`, `backfill`, `db-delete`), with `signin`'s normalisation. It refuses when members using
   `<id>` are not a majority unless `--accept-unused-provider`; a zero-member tenant is reported as
   "no evidence" and proceeds (normal onboarding before anyone signs in). Existing CAS clauses (re-point, unrevoke) gain
   `provider`.
 - `tenant-domain bind --claim <c> --provider <id> --by <label>` changes an active row's binding —
   CAS on `(tenant_id, provider, revoked_at)`, event `rebind` (operation CHECK widened; the gate's
-  self-test and the operation-check test follow). The upgrade path is two steps:
-  `bind --from-members --out <file>` writes one line per NULL row — claim, tenant, the suggested
-  provider (set only when every active member has an account at exactly one claim provider; a
-  single member counts, said in the output), and the evidence above; it writes nothing to the DB
-  and refuses without the app env. `bind --apply <file> --by <label>` binds exactly the lines the
-  operator kept, each through `bind`'s own evidence check and CAS (row still NULL, same tenant).
-  The heuristic suggests; the operator's reviewed file decides.
+  self-test and the operation-check test follow). The upgrade path is two steps; the heuristic
+  suggests, the operator's reviewed file decides.
+  - `bind --from-members --out <file>` writes nothing to the DB and refuses without the app env or
+    with a path inside the git worktree. The file is TSV with a header line naming its format
+    version; machine columns `claim`, `tenant_id`, `provider`, `evidence` (member count per provider
+    and total, as of `--out`); `#` lines are comments. `provider` is filled only when every active
+    member has an account at exactly one claim provider (one member counts; zero members gets no
+    suggestion); otherwise it is empty, and the flags (`created_by`, UUID claim, operator
+    reassign/unrevoke) are on a `#` line above it. Stored claims are printable ASCII, so no column
+    can contain a tab.
+  - `bind --apply <file> --by <label>` refuses without the app env. It validates the whole file
+    first — header version, column count, a provider in the configured set, no duplicate claim,
+    control/bidi characters echoed escaped — and refuses the file on any error. Lines with an empty
+    `provider` are not applied. It prints a summary — lines whose provider differs from the
+    suggestion or that had none are listed apart as operator-chosen — and asks once for
+    confirmation (or `--yes`). Each line then runs in its own transaction: CAS (row still NULL, same
+    tenant); the evidence recomputed and compared with the line's `evidence` (refused if it
+    changed — regenerate, or bind interactively); a majority required (no file-level override;
+    `bind --accept-unused-provider` is the per-row path); a zero-member tenant refused. A per-line
+    result table (bound / CAS lost / evidence changed / evidence refused / already bound) is
+    printed; the exit status is non-zero when any line was refused; a rerun reports bound lines as
+    already bound.
 - `--provider` is validated against the configured provider set when the app env is present;
   without it, against the pattern, with a warning. `list --unbound` without the app env lists NULL
   rows only and says that rows bound to unconfigured providers were not evaluated. Flags in
@@ -144,7 +159,9 @@ completed through one Jackson connection's client with another connection's IdP.
   presenting provider id keyed with the identifier pepper (domain-separated; no ref is stored when
   no pepper is configured), computed by one helper in a prisma-free module shared with the CLI
   (pepper injectable for tests); the pepper derivation itself (`getIdentifierPepper`'s source
-  precedence, floor and HKDF info) moves into that module and `auth-failure.ts` imports it. The CLI takes the pepper from the app env it loads
+  precedence, floor and HKDF info) moves into that module and `auth-failure.ts` imports it;
+  golden vectors for the derived pepper and the email hash (explicit pepper, `AUTH_SECRET`
+  fallback, below-floor), recorded before the move, must hold after it. The CLI takes the pepper from the app env it loads
   (`AUDIT_IDENTIFIER_PEPPER`, else derived from `AUTH_SECRET`, as the app does); without it
   `unmapped` prints refs as "unmappable (no pepper)", distinct from "unknown provider". Refs of the
   configured set are checked distinct by a pure function over the ref list where the set is built, so one customer's connection name is not shown to another; the
@@ -180,7 +197,8 @@ Jackson deployments: stop the old app (or let it drain), run `migrate` (on ECS a
 review for past exposure if the deployment ran with `AUTH_REDIRECT_PROXY_URL` and two or more
 Jackson connections (`tenant-domain list` with `created_by`, `history`, members' account
 providers), run `tenant-domain bind --from-members --out <file>`, review and edit it, run
-`bind --apply <file>`, resolve the rest one by one, rerun
+`bind --apply <file> --by <label>`, resolve the rest one by one (keep the file outside the
+repository and delete it afterwards — it lists every tenant's claims), rerun
 `list --unbound` once the old version is gone, set `AUTH_CLAIM_BINDING=strict`, start the app. README (en/ja) SAML section rewritten (per-connection config, why PKCE is off — M1/M9, nonce as
 the code-injection control, `FLATTEN_RAW_CLAIMS=false` required, distinct IdP entityIds, strict
 rules, measured Jackson versions and that a Jackson bump requires a probe run, the id-immutability
@@ -229,12 +247,16 @@ updated with M1–M11.
   and event row), `bind` CAS and refusal, `list --unbound` with a bound negative control,
   `add --provider X` → strict sign-in through X resolves; `bind` cells (CAS lost, revoked, absent,
   unconfigured provider, override allow pair, evidence listing scoped to this tenant's active
-  members, rebind event values, same-provider no-op, `--from-members` list-by-default and
-  `--out` writes no DB row; suggestions for unanimous tenants (incl. `backfill` rows and rows with no
+  members, rebind event values, same-provider no-op, `--out` writes no DB row and refuses a
+  worktree path; suggestions for unanimous tenants (incl. `backfill` rows and rows with no
   or a pre-change event — the shapes an upgrade holds), none for a minority-intruder tenant;
   UUID-claim, operator-declared and re-pointed/unrevoked rows flagged; `--apply` binds only the kept
-  lines, refuses a line whose row changed (CAS), and runs the evidence check; refusal without the
-  app env; `--by backfill` refused like `signin`); evidence majority at exactly
+  lines, refuses a line whose row changed (CAS) or whose evidence changed, refuses a zero-member
+  tenant and a non-majority line; the file contract (malformed line, duplicate claim, unknown
+  header version, unconfigured provider, escaped control characters — each refusing the whole
+  file, with an allow pair), operator-chosen lines listed apart, a partial failure exits non-zero
+  with the bound lines committed, a rerun reports already bound; refusal without the app env;
+  `--by backfill` and `--by db-delete` refused like `signin`); evidence majority at exactly
   half (refused), half plus one (allowed), zero members (proceeds, "no evidence"); derived mode
   `strict` with two or more providers and the variable unset or `off` (and boot still refused),
   `off` with one and unset; `add` with and without `--provider` in that window; CAS lost on re-point and unrevoke when
