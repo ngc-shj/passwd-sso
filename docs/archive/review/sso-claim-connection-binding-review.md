@@ -81,3 +81,8 @@ Revision 6 — mechanism change, not another predicate. Rounds 3, 4 and 5 each f
 Security: R6-1 Minor (apply re-checks current evidence, not the reviewed one; zero members), R6-2 Minor (edited lines). Testing: R6-1 Major (file contract undefined), R6-2 Minor (golden vectors for the pepper move), R6-3 Minor (stale wording). Functionality: G1 Major (file format, converges with testing R6-1), G2 Minor (transaction/confirmation/per-line results), G3 Minor (reserve `db-delete`, derive from constants), G4 Minor (runbook `--by`, file handling).
 
 Revision 7: TSV contract with versioned header, machine columns incl. an evidence snapshot, whole-file validation, empty provider = not applied, one confirmation then one transaction per line, evidence-changed / zero-member / non-majority refused, operator-chosen lines listed apart, per-line results and exit status, worktree path refused; reserved labels from constants; golden vectors; runbook command and file handling.
+
+## Round 7 (plan revision 7)
+Security: R7-1 Minor (file mode/exclusive create). Functionality: H1 Minor (canonical evidence form). Testing: R7-1 Major (unescaped `created_by` in `#` lines can inject a data line), R7-2 Minor (= H1, plus round-trip allow cell), R7-3 Minor (= security R7-1).
+
+Revision 8: exclusive create, mode 0600; one shared canonical evidence formatter; every free-text value escaped with `escapeUnsafeDisplayChars`; cells for round trip, row-order independence, injection, mode and existing path.

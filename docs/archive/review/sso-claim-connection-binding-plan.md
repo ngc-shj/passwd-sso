@@ -1,6 +1,6 @@
 # Plan: sso-claim-connection-binding
 
-Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 7.
+Issue: `#742`. Branch `feat/sso-claim-connection-binding`, base `main` 907f6fdd4. Revision 8.
 
 ## Project context
 
@@ -121,9 +121,13 @@ completed through one Jackson connection's client with another connection's IdP.
   self-test and the operation-check test follow). The upgrade path is two steps; the heuristic
   suggests, the operator's reviewed file decides.
   - `bind --from-members --out <file>` writes nothing to the DB and refuses without the app env or
-    with a path inside the git worktree. The file is TSV with a header line naming its format
-    version; machine columns `claim`, `tenant_id`, `provider`, `evidence` (member count per provider
-    and total, as of `--out`); `#` lines are comments. `provider` is filled only when every active
+    with a path inside the git worktree. The file is created exclusively with mode 0600 (an
+    existing path is refused, never overwritten). It is TSV with a header line naming its format
+    version; machine columns `claim`, `tenant_id`, `provider`, `evidence` — one pure function,
+    shared by `--out` and `--apply`, writes it canonically (`<provider>=<n>` sorted by provider id,
+    zero counts omitted, then `none=<n>;total=<n>`, joined by `;`); `#` lines are comments. Every
+    free-text value written to the file (`created_by`, any label) goes through
+    `escapeUnsafeDisplayChars`, so no stored value can end a line or a column. `provider` is filled only when every active
     member has an account at exactly one claim provider (one member counts; zero members gets no
     suggestion); otherwise it is empty, and the flags (`created_by`, UUID claim, operator
     reassign/unrevoke) are on a `#` line above it. Stored claims are printable ASCII, so no column
@@ -255,7 +259,11 @@ updated with M1–M11.
   tenant and a non-majority line; the file contract (malformed line, duplicate claim, unknown
   header version, unconfigured provider, escaped control characters — each refusing the whole
   file, with an allow pair), operator-chosen lines listed apart, a partial failure exits non-zero
-  with the bound lines committed, a rerun reports already bound; refusal without the app env;
+  with the bound lines committed, a rerun reports already bound; `--out` then `--apply` with no
+  change binds every eligible line, and the evidence string is identical for one membership read in
+  two row orders; a `created_by` holding `\n<valid TSV line>`, a tab or a bidi character yields
+  exactly one data line per NULL row (red: escape removed); the file is mode 0600 and an existing
+  path is refused; refusal without the app env;
   `--by backfill` and `--by db-delete` refused like `signin`); evidence majority at exactly
   half (refused), half plus one (allowed), zero members (proceeds, "no evidence"); derived mode
   `strict` with two or more providers and the variable unset or `off` (and boot still refused),
