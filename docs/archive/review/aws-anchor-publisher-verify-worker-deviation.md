@@ -42,3 +42,21 @@
 - **Plan**: production requires `AUDIT_ANCHOR_PUBLISHER_DATABASE_URL`.
 - **Actual**: as planned; outside production `DATABASE_URL` remains the fallback. Recorded
   because the old script fell back in every environment.
+
+### D6: batch 3 additions beyond the plan's lists
+
+- `AWS_REGION` in the publisher's task env: the S3 client refuses to send without a region.
+- `lifecycle { prevent_destroy = true }` on the anchors bucket: the aws provider (v6.32.1,
+  `internal/service/s3/bucket.go`) marks `object_lock_enabled` ForceNew, so turning it on for
+  an existing bucket plans a replacement; the guard makes such a plan fail instead. The docs
+  give the in-place procedure (`put-object-lock-configuration` on the versioned bucket first).
+- Variables `audit_anchor_break_glass_role_arn` (validated role ARN, default empty →
+  unconditional Deny) and `audit_anchor_object_lock_days` (default 2557, validated ≥ 2557);
+  outputs `audit_anchors_bucket_name`, `audit_anchor_s3_prefix`,
+  `audit_anchor_publisher_task_role_arn` for the runbook.
+- The publisher role has no `GetObject`/`ListBucket` (the old shared policy had them).
+- `.gitignore`: `infra/terraform/.terraform/` widened to `infra/terraform/**/.terraform/`, since
+  the module's `terraform init` creates one.
+- The app CI path filter also includes `infra/terraform/modules/anchor-prefix/**`, because
+  vitest reads its vector file and `.tftest.hcl`.
+- Not changed: `envs/*/terraform.tfvars.example` — the prefix default suffices.
