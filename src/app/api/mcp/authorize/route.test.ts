@@ -314,10 +314,11 @@ describe("GET /api/mcp/authorize", () => {
     expect(location).toContain("callbackUrl=");
     // The credential-issuance work below the gate never runs on a stale session.
     expect(mockFindFirst).not.toHaveBeenCalled();
-    // Gate called with the request ONLY — a custom maxAgeMs here would diverge
+    // Gate called with the request and the auth() user ONLY — a custom maxAgeMs here would diverge
     // from the sign-in page's freshness evaluation and re-open the loop.
     expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledTimes(1);
-    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(1);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(2);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0][1]).toBe("user-1");
   });
 
   // ── C6 (GET): Passkey enforcement gate ───────────────────────────────────

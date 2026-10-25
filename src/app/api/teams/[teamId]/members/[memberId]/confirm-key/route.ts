@@ -38,7 +38,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:team-confirm-key-post method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   // Verify target member exists, belongs to this team, is active, and has vault ready

@@ -30,11 +30,8 @@ vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: mockResolveUserTenantId,
 }));
 
-import {
-  extractSessionToken,
-  hasSessionCookie,
-  getSessionInfo,
-} from "./auth-gate";
+import { hasSessionCookie, getSessionInfo } from "./auth-gate";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 
 const APP_ORIGIN = "http://localhost:3000";
 
@@ -42,73 +39,29 @@ function makeRequest(headers: Record<string, string> = {}): NextRequest {
   return new NextRequest(`${APP_ORIGIN}/api/passwords`, { headers });
 }
 
-describe("extractSessionToken", () => {
-  it("extracts authjs.session-token value", () => {
-    expect(extractSessionToken("authjs.session-token=tok-1")).toBe("tok-1");
-  });
+/**
+ * The deployment shapes whose configured name is not the first entry of
+ * ALL_KNOWN_SESSION_COOKIE_NAMES: https with a basePath (`__Secure-`), and
+ * http (`authjs.session-token`). `__Host-` comes first in that list, so these
+ * are the shapes where reading "any known name" disagreed with Auth.js.
+ */
+const SECURE_BASEPATH = { AUTH_URL: "https://app.example.test/passwd-sso", NEXT_PUBLIC_BASE_PATH: "/passwd-sso" };
+const PLAIN_HTTP = { AUTH_URL: "http://localhost:3000", NEXT_PUBLIC_BASE_PATH: "" };
 
-  it("prefers __Secure-authjs.session-token when both are present", () => {
-    const cookie =
-      "__Secure-authjs.session-token=secure-1; authjs.session-token=plain-1";
-    expect(extractSessionToken(cookie)).toBe("secure-1");
-  });
+function stubDeployment(env: Record<string, string>) {
+  for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+}
 
-  it("returns empty string for an empty cookie header", () => {
-    expect(extractSessionToken("")).toBe("");
-  });
-
-  it("returns empty string when no recognised cookie is present", () => {
-    expect(extractSessionToken("foo=bar; baz=qux")).toBe("");
-  });
-
-  it("handles token at end of cookie string without trailing semicolon", () => {
-    expect(extractSessionToken("a=b; authjs.session-token=last")).toBe("last");
-  });
-
-  it("ignores suffix-colliding cookie name (evil-authjs.session-token)", () => {
-    expect(
-      extractSessionToken("evil-authjs.session-token=evil-value"),
-    ).toBe("");
-  });
-
-  it("finds legitimate cookie even when a colliding name appears first", () => {
-    const cookie =
-      "evil-authjs.session-token=evil-value; authjs.session-token=real-value";
-    expect(extractSessionToken(cookie)).toBe("real-value");
-  });
-
-  it("handles leading whitespace on a cookie segment", () => {
-    expect(
-      extractSessionToken("foo=bar;  authjs.session-token=spaced"),
-    ).toBe("spaced");
-  });
-
-  it("preserves '=' characters inside cookie value", () => {
-    // Base64-encoded or padded values may contain '='
-    expect(
-      extractSessionToken("authjs.session-token=abc==def="),
-    ).toBe("abc==def=");
-  });
-
-  // S5: Auth.js cookie.parse wraps some values in double quotes;
-  // dequote so cache key is canonical (quoted and unquoted don't alias).
-  it("S5: dequotes a double-quoted token value", () => {
-    expect(
-      extractSessionToken('authjs.session-token="tok-quoted"'),
-    ).toBe("tok-quoted");
-  });
-
-  it("S5: does not strip unmatched or single double-quote", () => {
-    // value that starts with " but doesn't end with it — not a quoted value
-    expect(
-      extractSessionToken('authjs.session-token="tok-no-close'),
-    ).toBe('"tok-no-close');
-  });
-});
+const SESSION_A = "0b6f1c2e-8d4a-4f7e-9a1b-3c5d7e9f0a2b";
+const SESSION_B = "5a7c9e1f-2b4d-4c6e-8f0a-1b3d5f7a9c0e";
 
 describe("hasSessionCookie", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("returns true when cookie header includes a recognised cookie", () => {
-    expect(hasSessionCookie("authjs.session-token=tok-1")).toBe(true);
+    expect(hasSessionCookie(`authjs.session-token=${SESSION_A}`)).toBe(true);
   });
 
   it("returns false when no recognised cookie is present", () => {
@@ -118,12 +71,116 @@ describe("hasSessionCookie", () => {
   it("returns false for empty cookie header", () => {
     expect(hasSessionCookie("")).toBe(false);
   });
+
+  it("still sees any known name, not only the configured one (CSRF stays broad)", () => {
+    stubDeployment(SECURE_BASEPATH);
+    expect(hasSessionCookie("__Host-authjs.session-token=X")).toBe(true);
+  });
+
+  it("sees a chunk-named cookie, which auth() would collect", () => {
+    stubDeployment(PLAIN_HTTP);
+    expect(hasSessionCookie(`authjs.session-token.0=${SESSION_B}`)).toBe(true);
+  });
+});
+
+describe("getSessionInfo binds the cache to the session Auth.js resolves", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch");
+    mockGetCachedSession.mockReset();
+    mockSetCachedSession.mockReset();
+    mockResolveUserTenantId.mockReset();
+    vi.mocked(getLogger().warn).mockClear();
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("looks up and forwards the configured cookie, not an attacker-chosen __Host- key sent first", async () => {
+    stubDeployment(SECURE_BASEPATH);
+    // Step 2 of the attack: a key the attacker bound to another session's
+    // info earlier, sent ahead of the session being authenticated. The cache
+    // must be asked about session B, and the session read must see only B.
+    mockGetCachedSession.mockResolvedValueOnce(null);
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
+
+    await getSessionInfo(
+      makeRequest({
+        cookie: `__Host-authjs.session-token=attacker-key; __Secure-authjs.session-token=${SESSION_B}; other=1`,
+      }),
+    );
+
+    expect(mockGetCachedSession).toHaveBeenCalledWith(SESSION_B);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("cookie")).toBe(`__Secure-authjs.session-token=${SESSION_B}`);
+  });
+
+  it("reads a whitespace-spelled key as Auth.js does and forwards it canonically", async () => {
+    stubDeployment(PLAIN_HTTP);
+    mockGetCachedSession.mockResolvedValueOnce(null);
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
+
+    await getSessionInfo(makeRequest({ cookie: `other=1; authjs.session-token\t= ${SESSION_A}` }));
+
+    expect(mockGetCachedSession).toHaveBeenCalledWith(SESSION_A);
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("cookie")).toBe(`authjs.session-token=${SESSION_A}`);
+  });
+
+  it("is invalid, with no cache lookup and no fetch, when only a non-configured cookie is sent", async () => {
+    stubDeployment(SECURE_BASEPATH);
+    // A well-formed token, so only the name keeps it from the cache lookup.
+    const result = await getSessionInfo(makeRequest({ cookie: `__Host-authjs.session-token=${SESSION_A}` }));
+    expect(result).toEqual({ valid: false });
+    expect(mockGetCachedSession).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // Not configured is "no session", not a refused reading.
+    expect(getLogger().warn).not.toHaveBeenCalled();
+  });
+
+  // `name =B; name=A`: the old exact-key compare skipped the first pair and
+  // decided on A, while Auth.js trims the key and resolves B. Duplicates now
+  // resolve as Auth.js resolves them, the first, and only that is forwarded.
+  it.each([
+    ["a whitespace-spelled duplicate", `authjs.session-token =${SESSION_B}; authjs.session-token=${SESSION_A}`, SESSION_B],
+    ["an exact duplicate", `authjs.session-token=${SESSION_A}; authjs.session-token=${SESSION_B}`, SESSION_A],
+  ])("decides on the first occurrence for %s and forwards it alone", async (_label, cookie, first) => {
+    stubDeployment(PLAIN_HTTP);
+    mockGetCachedSession.mockResolvedValueOnce(null);
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
+
+    await getSessionInfo(makeRequest({ cookie }));
+
+    expect(mockGetCachedSession).toHaveBeenCalledWith(first);
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("cookie")).toBe(`authjs.session-token=${first}`);
+  });
+
+  it.each([
+    ["a chunk-named cookie", `authjs.session-token.0=${SESSION_B}`],
+    ["a %-encoded value", "authjs.session-token=%30b6f"],
+    ["a quoted value", `authjs.session-token="${SESSION_A}"`],
+  ])("is invalid, logged, with no cache lookup and no fetch, for %s", async (_label, cookie) => {
+    stubDeployment(PLAIN_HTTP);
+    const result = await getSessionInfo(makeRequest({ cookie }));
+    expect(result).toEqual({ valid: false });
+    expect(mockGetCachedSession).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(getLogger().warn).toHaveBeenCalledWith({
+      msg: "auth-gate: ambiguous session cookie refused",
+    });
+  });
 });
 
 describe("getSessionInfo", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    stubDeployment(PLAIN_HTTP);
     fetchSpy = vi.spyOn(globalThis, "fetch");
     mockGetCachedSession.mockReset();
     mockSetCachedSession.mockReset();
@@ -132,6 +189,7 @@ describe("getSessionInfo", () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
   });
 
   it("returns invalid (no fetch) when cookie header is missing", async () => {
@@ -155,7 +213,7 @@ describe("getSessionInfo", () => {
     });
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-cached" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result).toEqual({ valid: true, userId: "u-1", tenantId: "t-1" });
@@ -183,7 +241,7 @@ describe("getSessionInfo", () => {
     mockResolveUserTenantId.mockResolvedValueOnce("t-2");
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-miss" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result.valid).toBe(true);
@@ -218,7 +276,7 @@ describe("getSessionInfo", () => {
     mockResolveUserTenantId.mockResolvedValueOnce("t-full");
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-full" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result.valid).toBe(true);
@@ -266,7 +324,7 @@ describe("getSessionInfo", () => {
       mockResolveUserTenantId.mockResolvedValueOnce("t-drift");
 
       const result = await getSessionInfo(
-        makeRequest({ cookie: "authjs.session-token=tok-drift" }),
+        makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
       );
 
       expect(result.valid).toBe(true);
@@ -292,10 +350,12 @@ describe("getSessionInfo", () => {
     fetchSpy.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-throw" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result).toEqual({ valid: false });
+    expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
 
@@ -306,10 +366,12 @@ describe("getSessionInfo", () => {
     );
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-500" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result).toEqual({ valid: false });
+    expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
 
@@ -320,10 +382,12 @@ describe("getSessionInfo", () => {
     );
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-malformed" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result).toEqual({ valid: false });
+    expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
 
@@ -334,11 +398,14 @@ describe("getSessionInfo", () => {
     );
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-no-user" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result.valid).toBe(false);
     expect(result.tenantId).toBeUndefined();
+    // Reached the Auth.js read: the verdict is the null user, not a refused cookie.
+    expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockResolveUserTenantId).not.toHaveBeenCalled();
   });
 
@@ -364,10 +431,13 @@ describe("getSessionInfo", () => {
     mockResolveUserTenantId.mockRejectedValueOnce(new Error("DB down"));
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-tenant-err" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result).toEqual({ valid: false });
+    expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith("u-err");
     expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
 
@@ -394,10 +464,13 @@ describe("getSessionInfo", () => {
     mockResolveUserTenantId.mockResolvedValueOnce(null);
 
     const result = await getSessionInfo(
-      makeRequest({ cookie: "authjs.session-token=tok-nomember" }),
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
     expect(result).toEqual({ valid: false });
+    expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith("u-nomember");
     expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
 });

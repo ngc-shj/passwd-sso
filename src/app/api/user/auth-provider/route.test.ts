@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 
 const { mockAuth, mockPrismaAccount, mockWithBypassRls, mockCanRecoverSessionWithPasskey } =
   vi.hoisted(() => ({
@@ -28,9 +29,20 @@ import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 const ROUTE_URL = "http://localhost:3000/api/user/auth-provider";
 
-function makeRequest(cookie = "authjs.session-token=sess-1") {
+function makeRequest(cookie = "authjs.session-token=5e55-0001") {
   return createRequest("GET", ROUTE_URL, { headers: { cookie } });
 }
+
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("GET /api/user/auth-provider", () => {
   beforeEach(() => {
@@ -154,13 +166,13 @@ describe("GET /api/user/auth-provider", () => {
       mockPrismaAccount.findMany.mockResolvedValue([]);
       mockCanRecoverSessionWithPasskey.mockResolvedValue(true);
 
-      const res = await GET(makeRequest("authjs.session-token=sess-bound"));
+      const res = await GET(makeRequest(`authjs.session-token=${TEST_SESSION_TOKEN}`));
 
       const json = await res.json();
       expect(res.status).toBe(200);
       expect(json.canPasskeyReauth).toBe(true);
       expect(mockCanRecoverSessionWithPasskey).toHaveBeenCalledWith(
-        "sess-bound",
+        TEST_SESSION_TOKEN,
         "user-1",
       );
     });
@@ -169,11 +181,16 @@ describe("GET /api/user/auth-provider", () => {
       mockPrismaAccount.findMany.mockResolvedValue([]);
       mockCanRecoverSessionWithPasskey.mockResolvedValue(false);
 
-      const res = await GET(makeRequest("authjs.session-token=sess-unbound"));
+      const res = await GET(makeRequest(`authjs.session-token=${TEST_SESSION_TOKEN}`));
 
       const json = await res.json();
       expect(res.status).toBe(200);
       expect(json.canPasskeyReauth).toBe(false);
+      // The false is the predicate's answer, not a refused cookie.
+      expect(mockCanRecoverSessionWithPasskey).toHaveBeenCalledWith(
+        TEST_SESSION_TOKEN,
+        "user-1",
+      );
     });
 
     it("returns false without consulting the predicate when no session cookie is present", async () => {

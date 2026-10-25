@@ -66,10 +66,13 @@ async function handlePOST(req: NextRequest) {
   const gate = await withBypassRls(
     prisma,
     async (tx) => {
-      const row = await tx.session.findUnique({
+      const found = await tx.session.findUnique({
         where: { sessionToken: sessionTokenDigest },
-        select: { provider: true, authCredentialId: true },
+        select: { userId: true, provider: true, authCredentialId: true },
       });
+      // A row the digest names but another user owns is not this caller's
+      // session: decide nothing — no audit, no reason — from it.
+      const row = found && found.userId === session.user.id ? found : null;
       if (!row || row.provider !== "webauthn" || row.authCredentialId === null) {
         return { row, credential: null };
       }

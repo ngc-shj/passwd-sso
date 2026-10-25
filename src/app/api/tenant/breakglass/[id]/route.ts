@@ -51,7 +51,7 @@ async function handleDELETE(
   }
 
   // @stepup id:breakglass-id-delete method:DELETE
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   // Only the requester or an OWNER can revoke

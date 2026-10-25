@@ -17,58 +17,46 @@ import {
   type SessionInfo,
 } from "@/lib/auth/session/session-cache";
 import { resolveUserTenantId } from "@/lib/tenant-context";
-import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
+import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
+import {
+  hasAnySessionCookie,
+  readSessionCookie,
+  SESSION_COOKIE_READ,
+} from "@/lib/auth/session/session-cookie";
 import { getLogger } from "@/lib/logger";
 
 export type { SessionInfo } from "@/lib/auth/session/session-cache";
 export { SESSION_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
 
 /**
- * Extract the Auth.js session token value from the cookie header.
- * Returns empty string if no known session token cookie is present.
- * Walks ALL_KNOWN_SESSION_COOKIE_NAMES so any of the three current-issue
- * shapes (__Host- / __Secure- / plain) is recognized regardless of the
- * deployment's useSecureCookies + basePath combination.
- */
-export function extractSessionToken(cookie: string): string {
-  const segments = cookie.split(";");
-  for (const name of ALL_KNOWN_SESSION_COOKIE_NAMES) {
-    for (const segment of segments) {
-      const trimmed = segment.trim();
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx === -1) continue;
-      const cookieName = trimmed.slice(0, eqIdx);
-      if (cookieName === name) {
-        const raw = trimmed.slice(eqIdx + 1);
-        // Auth.js cookie.parse wraps values in double quotes for some cookie
-        // names; dequote so the session cache never aliases quoted/unquoted
-        // variants of the same token (S5).
-        if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) {
-          return raw.slice(1, -1);
-        }
-        return raw;
-      }
-    }
-  }
-  return "";
-}
-
-/**
  * True iff the cookie header carries an Auth.js session token cookie.
  * Used by the CSRF gate to decide whether to run baseline Origin
  * enforcement (CSRF threat is cookie-based; without a cookie there's
- * nothing for an attacker to leverage in cross-site requests).
+ * nothing for an attacker to leverage in cross-site requests), and by the
+ * Bearer-bypass decision in api-route.ts. Prefix-matched over every known
+ * name, as Auth.js's SessionStore collects `<name>.0` chunks too: a narrower
+ * check would let a chunk-named cookie take the Bearer bypass while `auth()`
+ * authenticates it.
  */
 export function hasSessionCookie(cookieHeader: string): boolean {
-  return extractSessionToken(cookieHeader) !== "";
+  return hasAnySessionCookie(cookieHeader);
 }
 
 export async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
-  const cookie = request.headers.get("cookie");
-  if (!cookie) return { valid: false };
-
-  const token = extractSessionToken(cookie);
-  if (!token) return { valid: false };
+  // Decide on the session Auth.js resolves from this same header, and
+  // refuse any header it could read differently (see session-cookie.ts).
+  // The cache used to be keyed on a different reading than the one the
+  // session read forwarded, so a client could bind a key of its choosing to
+  // session A and then present it alongside session B.
+  const read = readSessionCookie(request.headers.get("cookie"));
+  if (read.kind === SESSION_COOKIE_READ.AMBIGUOUS) {
+    getLogger().warn({ msg: "auth-gate: ambiguous session cookie refused" });
+    return { valid: false };
+  }
+  if (read.kind !== SESSION_COOKIE_READ.TOKEN) return { valid: false };
+  const { token } = read;
+  // Forward only the cookie that was decided on, in the one spelling it has.
+  const cookie = `${configuredSessionCookieName()}=${token}`;
 
   const cached = await getCachedSession(token);
   if (cached) return cached;

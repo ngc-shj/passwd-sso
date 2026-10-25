@@ -329,7 +329,7 @@ async function handleDELETE(
       );
     }
     // @stepup id:passwords-id-delete-permanent method:DELETE
-    const stepUp = await requireRecentCurrentAuthMethod(req);
+    const stepUp = await requireRecentCurrentAuthMethod(req, userId);
     if (stepUp) return stepUp;
   }
 

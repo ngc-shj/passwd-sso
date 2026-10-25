@@ -88,7 +88,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:team-policy-put method:PUT
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, upsertTeamPolicySchema);

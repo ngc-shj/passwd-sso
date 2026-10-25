@@ -156,7 +156,7 @@ async function handlePOST(
   // rate-limit block so a stale session is rejected without burning the
   // per-target limiter (a low cap that would otherwise be a griefing lever).
   // @stepup id:reset-vault-approve method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   // Rate limits

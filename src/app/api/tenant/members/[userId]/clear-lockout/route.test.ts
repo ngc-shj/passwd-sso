@@ -233,6 +233,17 @@ describe("POST /api/tenant/members/[userId]/clear-lockout", () => {
     expect(mockPrismaUserUpdate).not.toHaveBeenCalled();
   });
 
+  it("binds the step-up gate to the actor, not the target member", async () => {
+    // The gate binds freshness to the user whose session row it reads, so it
+    // must get the actor `auth()` resolved — never the target id in scope.
+    await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/clear-lockout`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(mockRequireRecentSession).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentSession).toHaveBeenCalledWith(expect.anything(), ACTOR_USER_ID);
+  });
+
   it("returns 429 when admin rate limit is exceeded", async () => {
     mockAdminLimiterCheck.mockResolvedValue({ allowed: false });
     mockTargetLimiterCheck.mockResolvedValue({ allowed: true });

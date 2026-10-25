@@ -538,6 +538,15 @@ Prisma Migrate does not support automatic down migrations. To roll back a schema
 
 When deploying at a sub-path (e.g., `https://example.com/passwd-sso`), set `NEXT_PUBLIC_BASE_PATH=/passwd-sso` **before** building the image. This is a build-time variable baked into the client bundle. Set `AUTH_URL` to the origin only (e.g., `https://example.com`) — do NOT include the basePath. Set `APP_URL` as well when the public origin differs from the app's internal origin behind a reverse proxy/CDN. Cookie-authenticated mutating API routes now fail closed if neither canonical origin is configured. Update OAuth redirect URIs to include the basePath. See `docs/setup/docker/en.md` for details.
 
+**Session cookie hardening.** Without a basePath, over HTTPS, the session cookie is `__Host-authjs.session-token`. The `__Host-` prefix forbids `Domain` and requires `Path=/`, so a sibling subdomain cannot set that name and no copy at a longer path can sort ahead of it. It does not keep out the host itself: any content served from the same host can still set or overwrite the cookie at `Path=/`. Every app on the host is therefore inside the trust boundary, with or without a basePath. A sub-path deployment uses `__Secure-authjs.session-token`, which loses the two guarantees `__Host-` does give:
+
+- Another app on the same host can set that name at a longer path under your basePath.
+- A sibling subdomain can set it with `Domain=` on the parent domain.
+
+Browsers send the cookie with the longer path first, and Auth.js and the app both read the first occurrence. A cookie planted that way can therefore put a user's requests on a session the planter chose (session fixation).
+
+Prefer a dedicated host with no basePath. If you need a sub-path, every subdomain that can set cookies on the parent domain is inside the trust boundary as well.
+
 ## Deploy Checklist
 
 - [ ] All tests pass (`npm test`)

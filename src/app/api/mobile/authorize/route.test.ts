@@ -246,10 +246,11 @@ describe("GET /api/mobile/authorize", () => {
     expect(u.pathname).toBe("/ja/auth/signin");
     expect(u.searchParams.get("callbackUrl")).toContain("/api/mobile/authorize");
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
-    // Gate called with the request ONLY — a custom maxAgeMs here would diverge
+    // Gate called with the request and the auth() user ONLY — a custom maxAgeMs here would diverge
     // from the sign-in page's freshness evaluation and re-open the loop.
     expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledTimes(1);
-    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(1);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(2);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0][1]).toBe("11111111-1111-1111-1111-111111111111");
   });
 
   it("returns 400 when client_kind is missing", async () => {

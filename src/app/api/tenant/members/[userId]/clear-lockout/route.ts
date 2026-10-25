@@ -82,7 +82,7 @@ async function handlePOST(
   }
 
   // @stepup id:clear-lockout-post method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const [adminResult, targetResult] = await Promise.all([

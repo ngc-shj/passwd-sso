@@ -14,6 +14,8 @@
  *   ALLOW_NON_TEST_DBNAME=true    - Override dbname pattern check (e.g. dev DB named "passwd_sso")
  *   VERIFIER_PEPPER_KEY           - 64-char hex for HMAC verifier (or SHARE_MASTER_KEY for dev fallback)
  *   SHARE_MASTER_KEY                - 64-char hex master key (for dev verifier pepper derivation)
+ *   SESSION_TOKEN_HMAC_KEY        - The app's session-token HMAC key (dev falls back to SHARE_MASTER_KEY)
+ *   COOKIE_NAME                   - Session cookie name of the target (see load-test/README.md)
  *   BASE_URL                      - App base URL for smoke check (default: http://localhost:3000)
  *
  * Safety guards (all three must pass):
@@ -23,11 +25,12 @@
  *   3. ALLOW_LOAD_TEST_SEED=true
  */
 
-import { randomBytes, createHash, createHmac, pbkdf2Sync, hkdfSync, createCipheriv } from "node:crypto";
+import { randomBytes, randomUUID, createHash, createHmac, pbkdf2Sync, hkdfSync, createCipheriv } from "node:crypto";
 import { writeSync, unlinkSync, existsSync, openSync, closeSync, constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
+import { tsImport } from "tsx/esm/api";
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -231,11 +234,29 @@ function setupVaultCrypto(passphrase) {
   };
 }
 
+// Sessions are stored as an HMAC DIGEST of the token, never the raw value.
+// Seeding must apply the SAME transform the app uses to look rows up, so load
+// the production function (as e2e/helpers/db.ts imports it) rather than
+// re-implementing it: two copies drift, and every seeded session then fails
+// to authenticate.
+let hashSessionTokenFn;
+async function loadHashSessionToken() {
+  if (!hashSessionTokenFn) {
+    const mod = await tsImport("../../src/lib/auth/session/session-cache.ts", import.meta.url);
+    // Resolve the HMAC key now, so a missing/invalid key fails before the
+    // first row is written rather than midway through the seed.
+    mod.validateSessionTokenHmacKey();
+    hashSessionTokenFn = mod.hashSessionToken;
+  }
+  return hashSessionTokenFn;
+}
+
 // ─── Database Operations ───────────────────────────────────────
 
 async function seedUsers(pool, userCount) {
   const now = new Date().toISOString();
   const credentials = [];
+  const hashSessionToken = await loadHashSessionToken();
 
   console.log(`Generating vault crypto for ${userCount} users (PBKDF2 600k × 2 per user)...`);
   const startTime = Date.now();
@@ -243,7 +264,9 @@ async function seedUsers(pool, userCount) {
   for (let i = 0; i < userCount; i++) {
     const userId = `lt-user-${i}`;
     const email = EMAIL_PATTERN.replace("{i}", String(i));
-    const sessionToken = randomBytes(32).toString("hex");
+    // The shape Auth.js mints, inside the alphabet the app's session-cookie
+    // reader accepts (src/lib/auth/session/session-cookie.ts).
+    const sessionToken = randomUUID();
 
     const crypto = setupVaultCrypto(DEFAULT_PASSPHRASE);
 
@@ -275,14 +298,14 @@ async function seedUsers(pool, userCount) {
       ],
     );
 
-    // Insert session (raw token, same as Auth.js database strategy)
-    // ON CONFLICT (id) handles re-seed: update token + expiry
+    // Insert session (token digest, as the app stores it; the raw token goes
+    // in the cookie). ON CONFLICT (id) handles re-seed: update token + expiry
     const expires = new Date(Date.now() + SESSION_HOURS * 60 * 60 * 1000);
     await pool.query(
       `INSERT INTO sessions (id, session_token, user_id, expires)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (id) DO UPDATE SET session_token = $2, expires = $4`,
-      [`lt-session-${userId}`, sessionToken, userId, expires.toISOString()],
+      [`lt-session-${userId}`, hashSessionToken(sessionToken), userId, expires.toISOString()],
     );
 
     // Insert vault key (verification artifact)

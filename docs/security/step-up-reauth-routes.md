@@ -1,7 +1,7 @@
 # Step-up reauth (recent-auth) — required API routes
 
 Single source of truth for which API routes require a **recent auth ceremony**
-(`requireRecentCurrentAuthMethod(req)`) on top of normal authorization. Keep this
+(`requireRecentCurrentAuthMethod(req, session.user.id)`) on top of normal authorization. Keep this
 in lockstep with the code: when you add a route that performs a mutation in one of
 the **gated classes** below, add the gate AND a row here in the same PR.
 
@@ -21,9 +21,14 @@ counterpart — both are acceptable, existence-first only leaks within-team IDs 
 already-authorized admin).
 
 ```ts
-const stepUpError = await requireRecentCurrentAuthMethod(req);
+const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
 if (stepUpError) return stepUpError;
 ```
+
+The second argument is the user the route's `auth()` resolved — the actor, never
+a route param or body id naming the target of the mutation. The gate refuses
+(401) a session row owned by anyone else, so passing the target id would bind the
+freshness check to the wrong user.
 
 ## Gated classes (require step-up)
 
@@ -126,7 +131,8 @@ ceremony is stronger. Recorded in `scripts/checks/stepup-delete-exempt.txt`.
 ## Maintenance
 
 - **Adding a route**: if its mutation is in a gated class above, add
-  `requireRecentCurrentAuthMethod(req)` after authz/before mutation AND a row here.
+  `requireRecentCurrentAuthMethod(req, session.user.id)` (the actor `auth()`
+  resolved) after authz/before mutation AND a row here.
 - **R19 test obligation**: every gated route's test file (co-located AND any
   centralized `src/__tests__/` test importing the handler) must mock
   `@/lib/auth/session/recent-current-auth-method` with a pass-through default, plus a

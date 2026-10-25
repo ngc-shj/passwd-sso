@@ -21,8 +21,9 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import {
-  getSessionCookieName,
+  configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
+  isSessionCookiePartitioned,
 } from "@/lib/auth/session/cookie-name";
 import { createCappedSession } from "@/lib/auth/session/session-concurrency";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
@@ -34,14 +35,6 @@ const rateLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
   max: 10,
   failClosedOnRedisError: true,
-});
-
-// Cookie name must match auth.config.ts — both paths use the shared
-// getSessionCookieName helper + isSecureCookieFromAuthUrl so the
-// selection cannot drift.
-const SESSION_COOKIE_NAME = getSessionCookieName({
-  useSecureCookies: isSecureCookieFromAuthUrl(),
-  basePath: process.env.NEXT_PUBLIC_BASE_PATH,
 });
 
 // POST /api/auth/passkey/verify
@@ -174,11 +167,16 @@ async function handlePOST(req: NextRequest) {
     ...(user.prf ? { prf: user.prf } : {}),
   });
   response.headers.set("Cache-Control", NO_STORE_HEADERS["Cache-Control"]);
-  response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
+  // Cookie name must match auth.config.ts — both read
+  // configuredSessionCookieName, so the selection cannot drift. Read at call
+  // time, like isSecureCookieFromAuthUrl() and isSessionCookiePartitioned()
+  // below, so the attributes cannot disagree either.
+  response.cookies.set(configuredSessionCookieName(), sessionToken, {
     path: `${basePath}/`,
     httpOnly: true,
     sameSite: "lax",
     secure: isSecureCookieFromAuthUrl(),
+    ...(isSessionCookiePartitioned() ? { partitioned: true } : {}),
     expires,
   });
 

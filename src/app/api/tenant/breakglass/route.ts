@@ -52,7 +52,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // @stepup id:breakglass-post method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   // Rate limit BEFORE body parse so authenticated admins cannot trigger

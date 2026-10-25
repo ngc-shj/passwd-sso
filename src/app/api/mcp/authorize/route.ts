@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
   // (passkey ceremony or re-sign-in) and returns here via callbackUrl.
   // The chooser still fails closed on its unauthorized() paths.
   // @stepup id:mcp-authorize-get method:GET
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) {
     if (stepUpError.status !== 403) return stepUpError;
     // @browser-redirect-recovery

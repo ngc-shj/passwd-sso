@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   // (an unvalidated redirect_uri in the callback would be an open-redirect vector).
   // The unauthorized() paths (no/absent session) still fail closed immediately.
   // @stepup id:mcp-authorize-consent-post method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError && stepUpError.status !== 403) return stepUpError;
   const stepUpStale = stepUpError?.status === 403;
 

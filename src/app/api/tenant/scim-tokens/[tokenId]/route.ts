@@ -46,7 +46,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:scim-token-id-delete method:DELETE
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   if (token.revokedAt) {

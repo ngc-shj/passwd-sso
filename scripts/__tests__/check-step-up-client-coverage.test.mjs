@@ -66,7 +66,7 @@ const REPO_ROOT = resolve(__dirname, "..", "..");
 const GUARD = join(REPO_ROOT, "scripts/checks/check-step-up-client-coverage.sh");
 
 const STEPUP_CALL =
-  "  const stepUp = await requireRecentCurrentAuthMethod(req); if (stepUp) return stepUp;";
+  "  const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id); if (stepUp) return stepUp;";
 // A second gate primitive that also emits SESSION_STEP_UP_REQUIRED — the guard
 // must discover it the same as requireRecentCurrentAuthMethod (anti-drift: the
 // class is "returns the 403 code", not "calls one named function").

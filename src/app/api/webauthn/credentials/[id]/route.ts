@@ -36,7 +36,7 @@ async function handleDELETE(
   // within the last 15 minutes, preventing a password-based session
   // from being used to delete a passkey.
   // @stepup id:webauthn-credential-delete method:DELETE
-  const stepUp = await requireRecentCurrentAuthMethod(req);
+  const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUp) return stepUp;
 
   const existing = await withUserTenantRls(userId, async () =>

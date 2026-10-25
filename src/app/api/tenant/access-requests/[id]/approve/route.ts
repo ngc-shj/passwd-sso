@@ -51,7 +51,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:access-request-approve method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const blocked = await checkRateLimitOrFail({

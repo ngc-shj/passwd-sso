@@ -35,6 +35,7 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 });
 
 import { handlePageRoute } from "./page-route";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 import {
   recordPasskeyAuditEmit,
   PASSKEY_AUDIT_DEDUP_MS,
@@ -74,6 +75,19 @@ function mockValidSession(fetchSpy: ReturnType<typeof vi.spyOn>, user: SessionUs
     ),
   );
 }
+
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+// COOKIE_PARTITIONED likewise changes how many deletions a refusal sends.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+  vi.stubEnv("COOKIE_PARTITIONED", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("handlePageRoute — public share routes (/s/...)", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -135,12 +149,15 @@ describe("handlePageRoute — protected routes auth check", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-deactivated",
+        cookie: `authjs.session-token=${TEST_SESSION_TOKEN}`,
       }),
       dummyOptions,
     );
     expect(res.status).toBe(307);
     expect(res.headers.get("location") ?? "").toContain("/auth/signin");
+    // The redirect is the membership verdict, not a refused cookie.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith("u-deactivated");
   });
 
   it("emits Set-Cookie deletions with full attribute set (Secure on https)", async () => {
@@ -174,6 +191,26 @@ describe("handlePageRoute — protected routes auth check", () => {
     }
   });
 
+  // https without a basePath: the configured name is `__Host-`, and it gets
+  // both variants at Path=/ whatever the flag says.
+  it.each([
+    ["on", "true"],
+    ["off", ""],
+  ])("deletes both variants of __Host-authjs.session-token (COOKIE_PARTITIONED %s)", async (_label, flag) => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("COOKIE_PARTITIONED", flag);
+    const res = await handlePageRoute(makePageRequest("/ja/dashboard/passwords"), dummyOptions);
+    const configured = res.headers
+      .getSetCookie()
+      .filter((h) => h.startsWith("__Host-authjs.session-token="));
+    expect(configured).toHaveLength(2);
+    expect(configured.filter((h) => /;\s*Partitioned/i.test(h))).toHaveLength(1);
+    for (const line of configured) {
+      expect(line).toMatch(/;\s*Path=\/(;|$)/i);
+      expect(line).toMatch(/;\s*Secure/i);
+    }
+  });
+
   it("does NOT add Secure to deletion when AUTH_URL is http (dev)", async () => {
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     const res = await handlePageRoute(
@@ -193,6 +230,225 @@ describe("handlePageRoute — protected routes auth check", () => {
     expect(line).toMatch(/;\s*SameSite=lax/i);
   });
 
+  // A stray `<name>.0` / `<name>X` keeps every request ambiguous until it is
+  // gone; deleting only the known names would refuse the visitor forever.
+  it("on an ambiguous refusal, also deletes each request cookie prefixed with the configured name", async () => {
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords", {
+        cookie: `authjs.session-token=${TEST_SESSION_TOKEN}; authjs.session-token.0=${TEST_SESSION_TOKEN}; authjs.session-tokenX=y; other=1`,
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(307);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const headers = res.headers.getSetCookie();
+    for (const name of ["authjs.session-token.0", "authjs.session-tokenX"]) {
+      const line = headers.find((h) => h.startsWith(`${name}=`));
+      expect(line, `Set-Cookie for ${name} not emitted`).toBeDefined();
+      expect(line).toMatch(/;\s*Path=\/(;|$)/i);
+      expect(line).toMatch(/;\s*HttpOnly/i);
+      expect(line).toMatch(/;\s*SameSite=lax/i);
+      expect(line).not.toMatch(/;\s*Secure/i);
+      expect(line).toMatch(/Max-Age=0|Expires=Thu,\s*01\s*Jan\s*1970/i);
+    }
+    expect(headers.find((h) => h.startsWith("other="))).toBeUndefined();
+  });
+
+  it("deletes only the known names when the refusal is not an ambiguous reading", async () => {
+    mockValidSession(fetchSpy, { id: "u-deactivated" });
+    mockResolveUserTenantId.mockResolvedValueOnce(null);
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords", {
+        cookie: `authjs.session-token=${TEST_SESSION_TOKEN}; other=1`,
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(307);
+    const sessionDeletions = res.headers
+      .getSetCookie()
+      .map((h) => h.split("=")[0])
+      .filter((name) => name.includes("session-token"));
+    expect(sessionDeletions.sort()).toEqual(
+      [
+        "__Host-authjs.session-token",
+        "__Secure-authjs.session-token",
+        "__Secure-next-auth.session-token",
+        "authjs.session-token",
+        "next-auth.session-token",
+      ],
+    );
+  });
+
+  it("deletes nothing on a valid single-cookie session", async () => {
+    mockValidSession(fetchSpy, {
+      hasPasskey: false,
+      requirePasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords", {
+        cookie: `authjs.session-token=${TEST_SESSION_TOKEN}`,
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    // next-intl may set its locale cookie; no session cookie is touched.
+    expect(res.headers.getSetCookie().filter((h) => h.includes("session-token"))).toEqual([]);
+  });
+
+  // The production shape: https under a basePath, where the configured name is
+  // `__Secure-` and a deletion is honored only with Secure at `${basePath}/`.
+  describe("under https + basePath", () => {
+    const BASE_PATH = "/passwd-sso";
+    const SECURE_NAME = "__Secure-authjs.session-token";
+
+    function makeBasePathRequest(cookie: string): NextRequest {
+      return new NextRequest(`https://app.example.test${BASE_PATH}/ja/dashboard/passwords`, {
+        headers: { cookie },
+        nextConfig: { basePath: BASE_PATH },
+      });
+    }
+
+    beforeEach(() => {
+      vi.stubEnv("AUTH_URL", `https://app.example.test${BASE_PATH}`);
+      vi.stubEnv("NEXT_PUBLIC_BASE_PATH", BASE_PATH);
+    });
+
+    it("on an ambiguous refusal, deletes each stray with Secure at the basePath", async () => {
+      const res = await handlePageRoute(
+        makeBasePathRequest(
+          `${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}.0=${TEST_SESSION_TOKEN}; ${SECURE_NAME}X=y; other=1`,
+        ),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      const headers = res.headers.getSetCookie();
+      for (const name of [`${SECURE_NAME}.0`, `${SECURE_NAME}X`]) {
+        const line = headers.find((h) => h.startsWith(`${name}=`));
+        expect(line, `Set-Cookie for ${name} not emitted`).toBeDefined();
+        expect(line).toMatch(/;\s*Path=\/passwd-sso\/(;|$)/i);
+        expect(line).toMatch(/;\s*Secure/i);
+        expect(line).toMatch(/;\s*HttpOnly/i);
+        expect(line).toMatch(/;\s*SameSite=lax/i);
+        expect(line).toMatch(/Max-Age=0|Expires=Thu,\s*01\s*Jan\s*1970/i);
+      }
+      expect(headers.find((h) => h.startsWith("other="))).toBeUndefined();
+    });
+
+    it("deletes only the known names when the refusal is not an ambiguous reading", async () => {
+      mockValidSession(fetchSpy, { id: "u-deactivated" });
+      mockResolveUserTenantId.mockResolvedValueOnce(null);
+      const res = await handlePageRoute(
+        makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; other=1`),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      const headers = res.headers.getSetCookie();
+      const sessionDeletions = headers
+        .map((h) => h.split("=")[0])
+        .filter((name) => name.includes("session-token"));
+      expect(sessionDeletions.sort()).toEqual(
+        [
+          "__Host-authjs.session-token",
+          // The configured name: once partitioned, once not.
+          "__Secure-authjs.session-token",
+          "__Secure-authjs.session-token",
+          "__Secure-next-auth.session-token",
+          "authjs.session-token",
+          "next-auth.session-token",
+        ],
+      );
+      const line = headers.find((h) => h.startsWith(`${SECURE_NAME}=`));
+      expect(line).toMatch(/;\s*Path=\/passwd-sso\/(;|$)/i);
+      expect(line).toMatch(/;\s*Secure/i);
+    });
+
+    // A CHIPS browser keys a partitioned cookie apart from an unpartitioned one
+    // of the same name and sends both, so whenever the deployment is Secure,
+    // whatever COOKIE_PARTITIONED is now, the configured name gets one deletion
+    // of each variant: either may be left by a flag flip or an older passkey
+    // sign-in. Strays and the other known names were never set partitioned and
+    // stay single.
+    // Asserted on the final response, after applySecurityHeaders' own cookie
+    // write, which rewrites Set-Cookie from a name-keyed map.
+    function configuredDeletions(res: Response): string[] {
+      return res.headers.getSetCookie().filter((h) => h.startsWith(`${SECURE_NAME}=`));
+    }
+
+    it.each([
+      ["on", "true"],
+      ["off", ""],
+    ])("deletes both variants of the configured name (COOKIE_PARTITIONED %s)", async (_label, flag) => {
+      vi.stubEnv("COOKIE_PARTITIONED", flag);
+      const res = await handlePageRoute(
+        makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}.0=${TEST_SESSION_TOKEN}`),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      const configured = configuredDeletions(res);
+      expect(configured).toHaveLength(2);
+      expect(configured.filter((h) => /;\s*Partitioned/i.test(h))).toHaveLength(1);
+      for (const line of configured) {
+        expect(line).toMatch(/;\s*Path=\/passwd-sso\/(;|$)/i);
+        expect(line).toMatch(/;\s*Secure/i);
+        expect(line).toMatch(/;\s*HttpOnly/i);
+        expect(line).toMatch(/;\s*SameSite=lax/i);
+        expect(line).toMatch(/Max-Age=0|Expires=Thu,\s*01\s*Jan\s*1970/i);
+      }
+      const others = res.headers.getSetCookie().filter((h) => !h.startsWith(`${SECURE_NAME}=`));
+      for (const line of others) {
+        expect(line).not.toMatch(/;\s*Partitioned/i);
+      }
+      expect(others.some((h) => h.startsWith(`${SECURE_NAME}.0=`))).toBe(true);
+      expect(others.some((h) => h.startsWith("csp-nonce="))).toBe(true);
+    });
+
+    // The case the dual deletion exists for: a stale unpartitioned cookie and
+    // a new partitioned one share the name, the reader takes the first, the
+    // lookup fails, and the refusal is not an ambiguous reading.
+    it.each([
+      ["on", "true"],
+      ["off", ""],
+    ])("deletes both variants on a non-ambiguous refusal of a duplicated name (COOKIE_PARTITIONED %s)", async (_label, flag) => {
+      vi.stubEnv("COOKIE_PARTITIONED", flag);
+      fetchSpy.mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: null }), { status: 200 }),
+      );
+      const res = await handlePageRoute(
+        makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}=bbbb`),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const configured = configuredDeletions(res);
+      expect(configured).toHaveLength(2);
+      expect(configured.filter((h) => /;\s*Partitioned/i.test(h))).toHaveLength(1);
+      expect(res.headers.getSetCookie().some((h) => h.startsWith(`${SECURE_NAME}.`))).toBe(false);
+    });
+
+    // Partitioned requires Secure, so over http no partitioned variant can
+    // exist and one deletion suffices, whatever the flag says.
+    it("deletes the configured name once, unpartitioned, over http", async () => {
+      vi.stubEnv("AUTH_URL", "http://localhost:3000");
+      vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+      vi.stubEnv("COOKIE_PARTITIONED", "true");
+      const res = await handlePageRoute(
+        makePageRequest("/ja/dashboard/passwords", {
+          cookie: `authjs.session-token=${TEST_SESSION_TOKEN}; authjs.session-token.0=${TEST_SESSION_TOKEN}`,
+        }),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      const configured = res.headers
+        .getSetCookie()
+        .filter((h) => h.startsWith("authjs.session-token="));
+      expect(configured).toHaveLength(1);
+      expect(configured[0]).not.toMatch(/;\s*Partitioned/i);
+    });
+  });
+
   it("allows /dashboard with valid session (returns intl response with security headers)", async () => {
     // Full passkey-field shape (all four present, non-enforcing) — C4's
     // bundle-substitution fires only when a field is genuinely absent from
@@ -206,7 +462,7 @@ describe("handlePageRoute — protected routes auth check", () => {
     });
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-1",
+        cookie: "authjs.session-token=5e55-0001",
       }),
       dummyOptions,
     );
@@ -224,7 +480,7 @@ describe("handlePageRoute — protected routes auth check", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-blocked",
+        cookie: "authjs.session-token=5e55-0101",
       }),
       dummyOptions,
     );
@@ -269,7 +525,7 @@ describe("handlePageRoute — passkey enforcement", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-pk",
+        cookie: "authjs.session-token=5e55-0102",
       }),
       dummyOptions,
     );
@@ -288,7 +544,7 @@ describe("handlePageRoute — passkey enforcement", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-pk2",
+        cookie: "authjs.session-token=5e55-0103",
       }),
       dummyOptions,
     );
@@ -306,7 +562,7 @@ describe("handlePageRoute — passkey enforcement", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/settings/auth/passkey", {
-        cookie: "authjs.session-token=sess-pk3",
+        cookie: "authjs.session-token=5e55-0104",
       }),
       dummyOptions,
     );
@@ -399,7 +655,7 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
       passkeyGracePeriodDays: 1,
     });
 
-    const baseHeaders = { cookie: "authjs.session-token=sess-dedup" };
+    const baseHeaders = { cookie: "authjs.session-token=5e55-0105" };
 
     await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", baseHeaders),
@@ -443,7 +699,7 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
     };
     mockValidSession(fetchSpy, sessionUser);
 
-    const headers = { cookie: "authjs.session-token=sess-f18" };
+    const headers = { cookie: "authjs.session-token=5e55-0106" };
 
     // First request to /ja/dashboard/passwords → audit emit fires.
     await handlePageRoute(makePageRequest("/ja/dashboard/passwords", headers), dummyOptions);

@@ -113,6 +113,17 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     expect(mockPrismaTeamMember.findUnique).not.toHaveBeenCalled();
   });
 
+  it("binds the step-up gate to the acting admin, not the member being confirmed", async () => {
+    // The gate binds freshness to the user whose session row it reads, so it
+    // must get the actor `auth()` resolved — never the target id in scope.
+    await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+    expect(mockRequireRecentSession).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentSession).toHaveBeenCalledWith(expect.anything(), "admin-user");
+  });
+
   it("returns 404 when target member not found", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // admin (findFirst)
     mockPrismaTeamMember.findUnique.mockResolvedValueOnce(null); // target member

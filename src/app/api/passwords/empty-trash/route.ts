@@ -24,7 +24,7 @@ async function handlePOST(req: NextRequest) {
   // matching DELETE /api/passwords/[id]?permanent=true. A leaked session cookie
   // alone must not wipe trash.
   // @stepup id:passwords-empty-trash method:POST
-  const stepUp = await requireRecentCurrentAuthMethod(req);
+  const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUp) return stepUp;
 
   // Atomic findMany + deleteMany to prevent TOCTOU race

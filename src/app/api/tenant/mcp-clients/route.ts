@@ -128,7 +128,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // @stepup id:mcp-client-post method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, createSchema);

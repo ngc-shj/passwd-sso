@@ -184,6 +184,7 @@ async function handlePOST(req: NextRequest) {
       const sessionRow = await tx.session.findUnique({
         where: { sessionToken: sessionTokenDigest },
         select: {
+          userId: true,
           provider: true,
           authCredentialId: true,
           // userId comes along so the binding can be checked to belong to this
@@ -197,7 +198,9 @@ async function handlePOST(req: NextRequest) {
         },
       });
 
-      if (!sessionRow) {
+      // A row another user owns is not this caller's session. Refuse before
+      // any audit or verifier call, so the challenge stays unconsumed.
+      if (!sessionRow || sessionRow.userId !== userId) {
         return { kind: "unauthorized" };
       }
 
@@ -251,7 +254,7 @@ async function handlePOST(req: NextRequest) {
 
       if (assertion.ok) {
         await tx.session.update({
-          where: { sessionToken: sessionTokenDigest },
+          where: { sessionToken: sessionTokenDigest, userId },
           data: { passkeyVerifiedAt: verifiedAt },
         });
         return { kind: "success", credentialId: assertion.credentialId };

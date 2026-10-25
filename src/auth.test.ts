@@ -266,6 +266,8 @@ import { claimRefusal } from "@/lib/tenant/claim-refusal";
 // Real production predicate (NOT mocked): the fail-closed test asserts the
 // actual enforcement verdict, not a re-implemented condition (RT5).
 import { passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";
+import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
+import { readSessionCookie, SESSION_COOKIE_READ } from "@/lib/auth/session/session-cookie";
 
 /**
  * Types a refusal fixture against the REAL `ClaimTenantResolution`.
@@ -2169,6 +2171,32 @@ describe("NextAuth basePath", () => {
     expect(config).toHaveProperty("basePath");
     expect(typeof config.basePath).toBe("string");
     expect((config.basePath as string).endsWith("/api/auth")).toBe(true);
+  });
+});
+
+// The session token format is an owned contract: every reader of the session
+// cookie accepts only what this generator emits.
+describe("NextAuth session token generator", () => {
+  const generateSessionToken = (
+    nextAuthInitArgs[0] as { session?: { generateSessionToken?: () => string } }
+  ).session?.generateSessionToken;
+
+  it("is set explicitly, and every token it mints is read as a token by readSessionCookie", () => {
+    expect(generateSessionToken).toBeTypeOf("function");
+    for (let i = 0; i < 200; i++) {
+      const token = generateSessionToken!();
+      expect(readSessionCookie(`${configuredSessionCookieName()}=${token}`)).toEqual({
+        kind: SESSION_COOKIE_READ.TOKEN,
+        token,
+      });
+    }
+  });
+
+  it("control: the reader refuses the same token uppercased", () => {
+    const token = generateSessionToken!().toUpperCase();
+    expect(readSessionCookie(`${configuredSessionCookieName()}=${token}`)).toEqual({
+      kind: SESSION_COOKIE_READ.AMBIGUOUS,
+    });
   });
 });
 

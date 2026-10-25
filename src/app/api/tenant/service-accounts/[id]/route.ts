@@ -114,7 +114,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:service-account-id-put method:PUT
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, serviceAccountUpdateSchema);
@@ -195,7 +195,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:service-account-id-delete method:DELETE
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   // Hard-delete: cascade removes tokens and access requests automatically

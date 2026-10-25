@@ -58,9 +58,8 @@ describe.skipIf(!hasDatabase)(
       await ctx.deleteTestData(tenantId);
     });
 
-    async function insertSession(createdAt: Date): Promise<string> {
+    async function insertSession(createdAt: Date, token = randomUUID()): Promise<string> {
       // H4: the cookie carries the RAW token; the DB column stores its digest.
-      const token = `sess-${randomUUID()}`;
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
@@ -96,7 +95,7 @@ describe.skipIf(!hasDatabase)(
         new Date(Date.now() - STEP_UP_WINDOW_MS + 30_000),
       );
 
-      const result = await requireRecentSession(makeRequest(sessionToken));
+      const result = await requireRecentSession(makeRequest(sessionToken), userId);
 
       expect(result).toBeNull();
     });
@@ -106,7 +105,7 @@ describe.skipIf(!hasDatabase)(
         new Date(Date.now() - STEP_UP_WINDOW_MS - 30_000),
       );
 
-      const result = await requireRecentSession(makeRequest(sessionToken));
+      const result = await requireRecentSession(makeRequest(sessionToken), userId);
 
       expect(result).not.toBeNull();
       expect(result!.status).toBe(403);
@@ -115,17 +114,37 @@ describe.skipIf(!hasDatabase)(
     });
 
     it("returns 401 when the session cookie is missing", async () => {
-      const result = await requireRecentSession(makeRequest());
+      const result = await requireRecentSession(makeRequest(), userId);
 
       expect(result).not.toBeNull();
       expect(result!.status).toBe(401);
     });
 
     it("returns 401 when the session row does not exist", async () => {
-      const result = await requireRecentSession(makeRequest(`missing-${randomUUID()}`));
+      // A well-formed token with no row, so the 401 comes from the row lookup
+      // and not from the cookie reader refusing a malformed value.
+      const sessionToken = randomUUID();
+      const result = await requireRecentSession(makeRequest(sessionToken), userId);
 
       expect(result).not.toBeNull();
       expect(result!.status).toBe(401);
+
+      // The same token is accepted once its row exists: the reader passed it
+      // through, so the 401 above was the lookup's miss.
+      await insertSession(new Date(), sessionToken);
+      await expect(requireRecentSession(makeRequest(sessionToken), userId)).resolves.toBeNull();
+    });
+
+    it("returns 401 when the fresh session row belongs to another user", async () => {
+      const otherUserId = await ctx.createUser(tenantId);
+      const sessionToken = await insertSession(new Date());
+
+      const result = await requireRecentSession(makeRequest(sessionToken), otherUserId);
+
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe(401);
+      // Control: the owner of the row passes on the same request.
+      await expect(requireRecentSession(makeRequest(sessionToken), userId)).resolves.toBeNull();
     });
   },
 );

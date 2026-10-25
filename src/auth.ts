@@ -870,6 +870,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     maxAge: SESSION_ABSOLUTE_TIMEOUT_MAX * 60,
     // Throttle how often `updateSession` runs. Not a scheduled heartbeat.
     updateAge: 30,
+    // Owned, not inherited: every reader of the session cookie accepts only
+    // the alphabet this emits (SESSION_TOKEN_PATTERN in session-cookie.ts).
+    // Auth.js's default is the same today; pinning it here keeps an Auth.js
+    // upgrade from changing the format under that reader.
+    generateSessionToken: () => crypto.randomUUID(),
   },
   ...authConfig,
   callbacks: {

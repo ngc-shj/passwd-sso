@@ -56,6 +56,9 @@ export default defineConfig({
         "src/lib/security/password-policy-validation.ts",
         "src/lib/clipboard/**/*.ts",
         "src/lib/auth/tokens/extension-token.ts",
+        "src/lib/auth/session/session-cookie.ts",
+        "src/lib/proxy/auth-gate.ts",
+        "src/lib/proxy/page-route.ts",
       ],
       exclude: [
         "src/app/api/auth/\\[...nextauth\\]/**",
@@ -85,6 +88,15 @@ export default defineConfig({
         // unnoticed under the global floor alone.
         "src/lib/audit/audit-chain-verify.ts": { lines: 90, branches: 85 },
         "src/app/api/user/mcp-tokens/[id]/route.ts": { lines: 80, branches: 70 },
+        // The one session-cookie reader and the proxy's session decision on
+        // it: a refusal arm losing its test would let the proxy and auth()
+        // read different sessions again. Measured: 100/100 and 100/96.9.
+        "src/lib/auth/session/session-cookie.ts": { lines: 95, branches: 95 },
+        "src/lib/proxy/auth-gate.ts": { lines: 95, branches: 92 },
+        // The page-route session decision and the cookie deletion that must
+        // mirror the set-time attributes (Secure, path, Partitioned) or the
+        // browser keeps the cookie. Measured: 96 lines / 82.9 branches.
+        "src/lib/proxy/page-route.ts": { lines: 93, branches: 79 },
       },
     },
     isolate: true,

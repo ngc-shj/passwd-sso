@@ -25,8 +25,26 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 });
 
 import { handleApiAuth } from "./api-route";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 
 const APP_ORIGIN = "http://localhost:3000";
+
+/**
+ * Cookie fixtures use the plain `authjs.session-token` name, the configured
+ * name only over http. Pin that shape so an AUTH_URL or basePath exported in
+ * the shell cannot flip it; AUTH_URL is stubbed empty so it does not also
+ * become the CSRF gate's configured origin.
+ */
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "");
+  vi.stubEnv("NEXTAUTH_URL", "");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+  vi.stubEnv("NODE_ENV", "test");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function makeRequest(
   path: string,
@@ -120,7 +138,7 @@ describe("handleApiAuth — Bearer-bypass dispatch", () => {
     const res = await handleApiAuth(
       makeRequest("/api/passwords", "GET", {
         Authorization: "Bearer tok",
-        Cookie: "authjs.session-token=sess-1",
+        Cookie: "authjs.session-token=5e55-0001",
       }),
     );
     // Mock returns no user → 401.
@@ -128,11 +146,40 @@ describe("handleApiAuth — Bearer-bypass dispatch", () => {
     expect(fetchSpy).toHaveBeenCalled();
   });
 
+  // auth() collects every cookie whose name starts with the configured one
+  // (`<name>.0` included). A chunk-named session cookie beside a junk Bearer
+  // must not take the bypass: the route would authenticate the cookie's
+  // session with no IP restriction applied.
+  it("Bearer + bypass route + chunk-named session cookie → no bypass", async () => {
+    const res = await handleApiAuth(
+      makeRequest("/api/passwords", "GET", {
+        Authorization: "Bearer junk",
+        Cookie: "authjs.session-token.0=5e55-0004",
+      }),
+    );
+    // getSessionInfo refuses the chunk-named cookie outright: 401, no fetch.
+    expect(res.status).toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // SessionStore skips an empty value, so an empty session cookie carries no
+  // session and must not cost a Bearer client its bypass.
+  it("Bearer + bypass route + empty session cookie → bypass still taken", async () => {
+    const res = await handleApiAuth(
+      makeRequest("/api/passwords", "GET", {
+        Authorization: "Bearer junk",
+        Cookie: "authjs.session-token=",
+      }),
+    );
+    expect(res.status).not.toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("Bearer + non-bypass route + cookie → session check fires (no bypass)", async () => {
     const res = await handleApiAuth(
       makeRequest("/api/tags", "GET", {
         Authorization: "Bearer tok",
-        Cookie: "authjs.session-token=sess-2",
+        Cookie: "authjs.session-token=5e55-0002",
       }),
     );
     expect(res.status).toBe(401);
@@ -141,7 +188,7 @@ describe("handleApiAuth — Bearer-bypass dispatch", () => {
 
   it("Cookie only + non-Bearer route → session check fires", async () => {
     const res = await handleApiAuth(
-      makeRequest("/api/tags", "GET", { Cookie: "authjs.session-token=sess-3" }),
+      makeRequest("/api/tags", "GET", { Cookie: "authjs.session-token=5e55-0003" }),
     );
     expect(res.status).toBe(401);
     expect(fetchSpy).toHaveBeenCalled();
@@ -191,7 +238,7 @@ describe("handleApiAuth — session-required + access restriction", () => {
 
   it("returns 200 when session is valid and access restriction allows", async () => {
     const res = await handleApiAuth(
-      makeRequest("/api/passwords", "GET", { Cookie: "authjs.session-token=sess" }),
+      makeRequest("/api/passwords", "GET", { Cookie: "authjs.session-token=5e55" }),
     );
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("private, no-store");
@@ -200,9 +247,12 @@ describe("handleApiAuth — session-required + access restriction", () => {
   it("returns 401 when the user has no active tenant membership (deactivated)", async () => {
     mockResolveUserTenantId.mockResolvedValueOnce(null);
     const res = await handleApiAuth(
-      makeRequest("/api/passwords", "GET", { Cookie: "authjs.session-token=sess" }),
+      makeRequest("/api/passwords", "GET", { Cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
     expect(res.status).toBe(401);
+    // The 401 is the membership verdict, not a refused cookie.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith("u-1");
   });
 
   it("returns 403 when access restriction denies", async () => {
@@ -213,7 +263,7 @@ describe("handleApiAuth — session-required + access restriction", () => {
     });
     const res = await handleApiAuth(
       makeRequest("/api/passwords", "GET", {
-        Cookie: "authjs.session-token=sess",
+        Cookie: "authjs.session-token=5e55",
       }),
     );
     expect(res.status).toBe(403);
@@ -230,7 +280,7 @@ describe("handleApiAuth — session-required + access restriction", () => {
     });
     const res = await handleApiAuth(
       makeRequest("/api/mcp/authorize", "GET", {
-        Cookie: "authjs.session-token=sess",
+        Cookie: "authjs.session-token=5e55",
       }),
     );
     expect(res.status).toBe(403);
@@ -252,7 +302,7 @@ describe("handleApiAuth — session-required + access restriction", () => {
     });
     const res = await handleApiAuth(
       makeRequest("/api/mcp/authorize/consent", "POST", {
-        Cookie: "authjs.session-token=sess",
+        Cookie: "authjs.session-token=5e55",
         origin: APP_ORIGIN,
       }),
     );
@@ -279,7 +329,7 @@ describe("handleApiAuth — session-required + access restriction", () => {
     });
     const res = await handleApiAuth(
       makeRequest("/api/mobile/authorize", "GET", {
-        Cookie: "authjs.session-token=sess",
+        Cookie: "authjs.session-token=5e55",
       }),
     );
     expect(res.status).not.toBe(401);

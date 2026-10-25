@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 // ── Hoisted mocks ────────────────────────────────────────────
@@ -91,6 +91,8 @@ vi.mock("@/lib/auth/session/session-concurrency", () => ({
 
 import { POST } from "./route";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
+import { readSessionCookie, SESSION_COOKIE_READ } from "@/lib/auth/session/session-cookie";
 
 // The route constructs its rate limiter once at module load
 // (`const rateLimiter = createRateLimiter({...})`). `beforeEach` clears all
@@ -174,6 +176,10 @@ describe("POST /api/auth/passkey/verify", () => {
     mockCreateCappedSession.mockResolvedValue({ userId: "user-1", expires: new Date() });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("returns 200 with session cookie on success", async () => {
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
@@ -189,6 +195,66 @@ describe("POST /api/auth/passkey/verify", () => {
     const setCookie = res.headers.get("set-cookie");
     expect(setCookie).toContain("authjs.session-token=");
     expect(setCookie).toContain("HttpOnly");
+  });
+
+  // The token this route mints must be one every reader of the session
+  // cookie accepts: a token readSessionCookie refuses would sign the user in
+  // and then be treated as no session by the proxy and every step-up gate.
+  it.each([
+    ["http", { AUTH_URL: "http://localhost:3000", NEXT_PUBLIC_BASE_PATH: "" }, "authjs.session-token"],
+    // Stubbed after the route module loaded: the name must be read per call.
+    [
+      "https under a basePath",
+      { AUTH_URL: "https://app.example.test/passwd-sso", NEXT_PUBLIC_BASE_PATH: "/passwd-sso" },
+      "__Secure-authjs.session-token",
+    ],
+  ])("sets the minted token, readable by the session-cookie reader, under the configured name (%s)", async (_label, env, expectedName) => {
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const setCookie = res.headers.getSetCookie();
+    expect(setCookie).toHaveLength(1);
+    const [pair] = setCookie[0].split(";");
+    const eqIdx = pair.indexOf("=");
+    const name = pair.slice(0, eqIdx);
+    const value = pair.slice(eqIdx + 1);
+
+    expect(name).toBe(expectedName);
+    expect(name).toBe(configuredSessionCookieName());
+    const [input] = mockCreateCappedSession.mock.calls[0];
+    expect(value).toBe(input.sessionToken);
+    expect(readSessionCookie(`${configuredSessionCookieName()}=${value}`)).toEqual({
+      kind: SESSION_COOKIE_READ.TOKEN,
+      token: input.sessionToken,
+    });
+  });
+
+  // A CHIPS browser keys a partitioned cookie apart from an unpartitioned one
+  // of the same name, so this writer must agree with auth.config.ts or the
+  // logout/refusal deletion (which follows auth.config.ts) misses it.
+  it.each([
+    ["on", "true", true],
+    ["off", "", false],
+  ])("sets Partitioned exactly when auth.config.ts does (COOKIE_PARTITIONED %s)", async (_label, flag, expected) => {
+    vi.stubEnv("AUTH_URL", "https://app.example.test");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    vi.stubEnv("COOKIE_PARTITIONED", flag);
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const setCookie = res.headers.getSetCookie();
+    expect(setCookie).toHaveLength(1);
+    expect(setCookie[0]).toMatch(/^__Host-authjs\.session-token=/);
+    expect(/;\s*Partitioned/i.test(setCookie[0])).toBe(expected);
   });
 
   it("calls authorizeWebAuthn with correct params", async () => {

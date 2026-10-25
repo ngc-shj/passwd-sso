@@ -144,3 +144,10 @@ export function makeTeamTag(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+/**
+ * A session token in the shape Auth.js mints (`crypto.randomUUID()`). Tests
+ * that must reach the code behind the session-cookie reader use it: a
+ * placeholder the reader refuses would make a fail-closed cell pass without
+ * ever reaching the path it claims to cover.
+ */
+export const TEST_SESSION_TOKEN = "3f2a9c4e-7b1d-4e8a-9c6f-2d4b8e1a5c7f";

@@ -107,10 +107,15 @@ The seed script uses a triple guard to prevent accidental connections to product
 
 ## Authentication
 
-- Auth.js v5 database session strategy (raw token)
-- Session tokens are directly INSERTed into the DB (same pattern as E2E tests)
-- k6 sends requests with the `authjs.session-token` cookie
-- For HTTPS environments, set `COOKIE_NAME=__Secure-authjs.session-token`
+- Auth.js v5 database session strategy
+- Sessions are directly INSERTed into the DB (same pattern as E2E tests): the cookie carries the raw token, `sessions.session_token` stores its HMAC digest, computed with the app's own `hashSessionToken`. The seeder therefore needs the same `SESSION_TOKEN_HMAC_KEY` (or, in dev, `SHARE_MASTER_KEY`) as the app under test
+- k6 sends the token in the cookie Auth.js reads in the target deployment; set `COOKIE_NAME` to match it (default `authjs.session-token`):
+
+  | Target | `COOKIE_NAME` |
+  |--------|---------------|
+  | http | `authjs.session-token` |
+  | https with `NEXT_PUBLIC_BASE_PATH` | `__Secure-authjs.session-token` |
+  | https at the root (no basePath) | `__Host-authjs.session-token` |
 
 ## Baseline Management
 
@@ -137,9 +142,13 @@ BASE_URL=https://staging.example.com k6 run load-test/scenarios/mixed-workload.j
 
 ### Session Auth Errors (401)
 
+Check that `COOKIE_NAME` is the name for the target (see [Authentication](#authentication)), and that the seeder ran with the app's `SESSION_TOKEN_HMAC_KEY` (a different key stores digests no lookup can match):
+
 ```bash
-# Check cookie name
+# https target served under a basePath
 COOKIE_NAME=__Secure-authjs.session-token npm run test:load:seed
+# https target served at the root
+COOKIE_NAME=__Host-authjs.session-token npm run test:load:seed
 ```
 
 ### Rate Limiting (429)

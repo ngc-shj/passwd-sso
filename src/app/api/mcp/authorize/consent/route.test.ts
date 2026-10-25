@@ -290,10 +290,11 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(url.searchParams.get("state")).toBe(VALID_FORM_FIELDS.state);
     // No credential-issuance work runs on a stale session.
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
-    // Gate called with the request ONLY — a custom maxAgeMs here would diverge
+    // Gate called with the request and the auth() user ONLY — a custom maxAgeMs here would diverge
     // from the sign-in page's freshness evaluation and re-open the loop.
     expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledTimes(1);
-    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(1);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(2);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0][1]).toBe(VALID_SESSION.user.id);
   });
 
   it("returns 400 when client_id is missing", async () => {

@@ -66,7 +66,6 @@ function isSessionOpCall(call) {
 const DIGEST_PRODUCERS = new Set([
   "hashSessionToken",
   "getSessionTokenDigest",
-  "getSessionTokenDigestFromCookieStore",
 ]);
 
 // True when a CallExpression node produces a digest.

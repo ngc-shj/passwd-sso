@@ -33,6 +33,34 @@ export function getSessionCookieName(opts: {
 }
 
 /**
+ * The one session-cookie name Auth.js reads in THIS deployment, from the same
+ * inputs `auth.config.ts` gives it. Any code that decides "which session is
+ * this request" must read this name and nothing else: a reader that accepts
+ * another name can be shown one session while Auth.js resolves a different one
+ * from the same Cookie header.
+ */
+export function configuredSessionCookieName(): string {
+  return getSessionCookieName({
+    useSecureCookies: isSecureCookieFromAuthUrl(),
+    basePath: process.env.NEXT_PUBLIC_BASE_PATH,
+  });
+}
+
+/**
+ * Whether the session cookie carries `Partitioned` (CHIPS) in THIS deployment —
+ * the condition `auth.config.ts` sets it under. Every writer of the configured
+ * session cookie must use this too. A deleter must NOT gate on it: a CHIPS
+ * browser keys a partitioned cookie apart from an unpartitioned one of the
+ * same name, and which of them a browser holds depends on every value the
+ * flag has had, so a deleter removes both whenever the deployment is Secure
+ * (see clearAuthSessionCookies in src/lib/proxy/page-route.ts). Evaluated at
+ * call time, like isSecureCookieFromAuthUrl().
+ */
+export function isSessionCookiePartitioned(): boolean {
+  return isSecureCookieFromAuthUrl() && process.env.COOKIE_PARTITIONED === "true";
+}
+
+/**
  * All cookie names the proxy / session-extraction / logout-cleanup paths
  * must recognize. Includes:
  *   - All three current-issue shapes (`authjs.session-token`,

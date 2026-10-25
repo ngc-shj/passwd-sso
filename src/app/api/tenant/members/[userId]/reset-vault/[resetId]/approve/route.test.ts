@@ -325,6 +325,14 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
+  it("binds the step-up gate to the approver, not the target or the initiator", async () => {
+    // The gate binds freshness to the user whose session row it reads, so it
+    // must get the actor `auth()` resolved — never the target id in scope.
+    await POST(buildReq(), buildParams());
+    expect(mockRequireRecentSession).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentSession).toHaveBeenCalledWith(expect.anything(), ACTOR_USER_ID);
+  });
+
   it("does not invoke step-up before authz/eligibility checks (M1 ordering)", async () => {
     // A wrong-role attempt must 403 on eligibility WITHOUT prompting reauth.
     mockIsTenantRoleAbove.mockReturnValue(false);

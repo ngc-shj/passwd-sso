@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
@@ -107,11 +107,22 @@ const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
 
 const ROUTE_URL = "http://localhost:3000/api/auth/passkey/reauth/options";
 
-function makeRequest(cookie = "authjs.session-token=sess-1") {
+function makeRequest(cookie = "authjs.session-token=5e55-0001") {
   return createRequest("POST", ROUTE_URL, {
     headers: { origin: "http://localhost:3000", cookie },
   });
 }
+
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("POST /api/auth/passkey/reauth/options", () => {
   beforeEach(() => {
@@ -123,6 +134,7 @@ describe("POST /api/auth/passkey/reauth/options", () => {
     // the route must reach the verifier's ceremony, not fall through to a
     // fixture shape production can't produce.
     mockSessionFindUnique.mockResolvedValue({
+      userId: "user-1",
       provider: "webauthn",
       authCredentialId: "cred-row-1",
     });
@@ -191,6 +203,38 @@ describe("POST /api/auth/passkey/reauth/options", () => {
     expect(mockRedisSet).not.toHaveBeenCalled();
   });
 
+  // The digest names a row, but the row is another user's: whatever it says
+  // is not this caller's session. Paired with the own-row cells (the allow
+  // cell above, and the provider/no_binding cells below that still audit).
+  it("returns 401 when the session row belongs to another user — no audit, no challenge", async () => {
+    mockSessionFindUnique.mockResolvedValue({
+      userId: "user-2",
+      provider: "webauthn",
+      authCredentialId: "cred-row-1",
+    });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(401);
+    expect(mockCredentialFindFirst).not.toHaveBeenCalled();
+    expect(mockGenerateAuthenticationOpts).not.toHaveBeenCalled();
+    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["non-webauthn", { provider: "nodemailer", authCredentialId: null }],
+    ["unbound webauthn", { provider: "webauthn", authCredentialId: null }],
+  ])("returns 401 for another user's %s row without emitting its unavailable audit", async (_label, row) => {
+    mockSessionFindUnique.mockResolvedValue({ userId: "user-2", ...row });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(401);
+    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
   it("returns 429 when the rate limiter denies the request", async () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 60_000 });
 
@@ -217,6 +261,7 @@ describe("POST /api/auth/passkey/reauth/options", () => {
   describe("C3 binding gate", () => {
     it("denies a non-webauthn session with SESSION_STEP_UP_REQUIRED, no challenge written", async () => {
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "nodemailer",
         authCredentialId: null,
       });
@@ -238,6 +283,7 @@ describe("POST /api/auth/passkey/reauth/options", () => {
 
     it("denies a webauthn session with no binding, no challenge written", async () => {
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "webauthn",
         authCredentialId: null,
       });
@@ -259,6 +305,7 @@ describe("POST /api/auth/passkey/reauth/options", () => {
 
     it("denies when the bound credential row was deleted, no challenge written", async () => {
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "webauthn",
         authCredentialId: "cred-row-deleted",
       });

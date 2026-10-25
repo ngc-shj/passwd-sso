@@ -5,6 +5,7 @@
  *   - Authenticated user → redirect to /dashboard
  *   - auth() throws (DB unavailable) → renders sign-in page (no redirect)
  *   - Unauthenticated → renders sign-in page (no redirect)
+ *   - Cookie header the session-cookie reader refuses → signed out (no redirect)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -21,7 +22,7 @@ const {
   mockNextRedirect,
   mockEvaluateStepUpFreshness,
   mockCanRecoverSessionWithPasskey,
-  mockGetSessionTokenFromCookieStore,
+  mockGetSessionTokenFromCookieHeader,
   mockSignInReauthPanel,
 } = vi.hoisted(() => ({
   // Non-throwing spy: the real next/navigation redirect throws NEXT_REDIRECT,
@@ -29,7 +30,7 @@ const {
   mockNextRedirect: vi.fn(),
   mockEvaluateStepUpFreshness: vi.fn(),
   mockCanRecoverSessionWithPasskey: vi.fn(),
-  mockGetSessionTokenFromCookieStore: vi.fn(),
+  mockGetSessionTokenFromCookieHeader: vi.fn(),
   mockSignInReauthPanel: vi.fn(() => null),
 }));
 
@@ -37,7 +38,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/i18n/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/navigation", () => ({ redirect: mockNextRedirect }));
 vi.mock("next/headers", () => ({
-  cookies: () => Promise.resolve({ get: () => undefined }),
+  headers: () => Promise.resolve(new Headers({ cookie: "authjs.session-token=raw-header" })),
 }));
 vi.mock("next-intl/server", () => ({
   getTranslations: mockGetTranslations,
@@ -53,7 +54,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   STEP_UP_FRESHNESS: { FRESH: "fresh", STALE: "stale", INVALID: "invalid" },
 }));
 vi.mock("@/app/api/sessions/helpers", () => ({
-  getSessionTokenFromCookieStore: mockGetSessionTokenFromCookieStore,
+  getSessionTokenFromCookieHeader: mockGetSessionTokenFromCookieHeader,
 }));
 vi.mock("@/components/auth/signin-reauth-panel", () => ({
   SignInReauthPanel: mockSignInReauthPanel,
@@ -124,7 +125,7 @@ describe("SignInPage", () => {
     mockGetTranslations.mockResolvedValue(fakeT);
     mockSetRequestLocale.mockReturnValue(undefined);
     mockRedirect.mockReturnValue(undefined);
-    mockGetSessionTokenFromCookieStore.mockReturnValue("sess-1");
+    mockGetSessionTokenFromCookieHeader.mockReturnValue("sess-1");
     mockEvaluateStepUpFreshness.mockResolvedValue("fresh");
     mockCanRecoverSessionWithPasskey.mockResolvedValue(false);
     mockSignInReauthPanel.mockReturnValue(null);
@@ -179,6 +180,45 @@ describe("SignInPage", () => {
     expect(result).toBeDefined();
   });
 
+  // The proxy refuses a header the reader cannot read as one session and
+  // sends the visitor here. auth() would accept some of those headers, so a
+  // page that asked auth() would bounce the visitor straight back: a loop.
+  // Each cell sees a session auth() accepts; only the reader's answer differs.
+  describe("shares the proxy's reading of the session cookie", () => {
+    beforeEach(() => {
+      mockAuth.mockResolvedValue({ user: { id: "u1" } });
+    });
+
+    it("control: a cookie the reader accepts redirects to callbackUrl", async () => {
+      await SignInPage({
+        params: makeParams("ja"),
+        searchParams: makeSearchParams("/ja/dashboard?ext_connect=1"),
+      });
+
+      expect(mockGetSessionTokenFromCookieHeader).toHaveBeenCalledWith(
+        "authjs.session-token=raw-header",
+      );
+      expect(mockRedirect).toHaveBeenCalledWith({
+        href: "/dashboard?ext_connect=1",
+        locale: "ja",
+      });
+    });
+
+    it("renders the sign-in form, without redirecting, when the reader refuses the header", async () => {
+      mockGetSessionTokenFromCookieHeader.mockReturnValue(null);
+
+      const result = await SignInPage({
+        params: makeParams("ja"),
+        searchParams: makeSearchParams("/ja/dashboard?ext_connect=1"),
+      });
+
+      expect(mockRedirect).not.toHaveBeenCalled();
+      expect(mockNextRedirect).not.toHaveBeenCalled();
+      expect(mockAuth).not.toHaveBeenCalled();
+      expect(result).toBeDefined();
+    });
+  });
+
   it("redirects to callbackUrl when authenticated and callbackUrl is present", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1" } });
 
@@ -228,8 +268,13 @@ describe("SignInPage", () => {
         "/api/mcp/authorize?client_id=c&x=1",
       );
       expect(mockRedirect).not.toHaveBeenCalled();
-      // Token plumbing: the freshness core receives the cookie-store token.
-      expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1");
+      // Token plumbing: the raw Cookie header (not a cookies() store, which
+      // keeps the last duplicate where Auth.js keeps the first) is parsed,
+      // and the freshness core receives the token parsed from it.
+      expect(mockGetSessionTokenFromCookieHeader).toHaveBeenCalledWith(
+        "authjs.session-token=raw-header",
+      );
+      expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1", "u1");
       // Fresh path must not do the passkey-recovery credential query.
       expect(mockCanRecoverSessionWithPasskey).not.toHaveBeenCalled();
     });
@@ -255,7 +300,7 @@ describe("SignInPage", () => {
         ),
       ).toBe(true);
       // Token plumbing: token + authenticated user id, in that order.
-      expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1");
+      expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1", "u1");
       expect(mockCanRecoverSessionWithPasskey).toHaveBeenCalledWith(
         "sess-1",
         "u1",
@@ -297,8 +342,8 @@ describe("SignInPage", () => {
       expect(result).toBeDefined();
     });
 
-    it("treats a missing session cookie as invalid (form, no freshness query)", async () => {
-      mockGetSessionTokenFromCookieStore.mockReturnValue(null);
+    it("treats a missing session cookie as signed out (form, no freshness query)", async () => {
+      mockGetSessionTokenFromCookieHeader.mockReturnValue(null);
 
       const result = await SignInPage({
         params: makeParams("en"),

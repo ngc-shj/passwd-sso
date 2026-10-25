@@ -102,7 +102,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // @stepup id:scim-token-post method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const blocked = await checkRateLimitOrFail({

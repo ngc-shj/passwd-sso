@@ -19,8 +19,9 @@ import {
 } from "@/lib/auth/jackson-providers";
 import { assertDistinctProviderRefs, deriveIdentifierPepper } from "@/lib/audit/identifier-pepper";
 import {
-  getSessionCookieName,
+  configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
+  isSessionCookiePartitioned,
 } from "@/lib/auth/session/cookie-name";
 
 // Rate limiters for magic link email (per-email address)
@@ -186,10 +187,9 @@ export default {
 
   cookies: {
     sessionToken: {
-      name: getSessionCookieName({
-        useSecureCookies,
-        basePath: process.env.NEXT_PUBLIC_BASE_PATH,
-      }),
+      // The proxy reads exactly this name too (auth-gate.ts), so the session
+      // it decides on is the one Auth.js resolves.
+      name: configuredSessionCookieName(),
       options: {
         path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`,
         httpOnly: true,
@@ -211,7 +211,7 @@ export default {
         // a future embed path is added. Requires Secure (already set
         // when useSecureCookies). Browsers without CHIPS support ignore
         // the flag silently.
-        ...(useSecureCookies && process.env.COOKIE_PARTITIONED === "true"
+        ...(isSessionCookiePartitioned()
           ? { partitioned: true as const }
           : {}),
       },

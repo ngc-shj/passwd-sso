@@ -117,7 +117,7 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
   }
 
   // @stepup id:directory-sync-id-put method:PUT
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const { tenantId, config } = resolved;
@@ -200,7 +200,7 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
   }
 
   // @stepup id:directory-sync-id-delete method:DELETE
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const { tenantId, config } = resolved;

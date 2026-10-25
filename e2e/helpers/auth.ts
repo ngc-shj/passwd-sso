@@ -6,16 +6,9 @@
  */
 import type { BrowserContext } from "@playwright/test";
 import {
-  getSessionCookieName as resolveSessionCookieName,
+  configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "../../src/lib/auth/session/cookie-name";
-
-function getSessionCookieName(): string {
-  return resolveSessionCookieName({
-    useSecureCookies: isSecureCookieFromAuthUrl(),
-    basePath: process.env.NEXT_PUBLIC_BASE_PATH,
-  });
-}
 
 /**
  * Resolve the cookie target URL from the test base URL.
@@ -35,17 +28,21 @@ function getCookieUrl(): string {
  */
 export async function injectSession(
   context: BrowserContext,
-  sessionToken: string
+  sessionToken: string,
 ): Promise<void> {
   await context.addCookies([
     {
-      name: getSessionCookieName(),
+      name: configuredSessionCookieName(),
       value: sessionToken,
       url: getCookieUrl(),
-      // Match the production session cookie attribute set in auth.config.ts.
-      // Diverging from production lets a future cross-site E2E test pass
-      // while production would have dropped the cookie.
-      sameSite: "Strict",
+      // Every attribute set here matches the production session cookie in
+      // auth.config.ts (`sameSite: "lax"`, `httpOnly: true`, `secure` from
+      // the same AUTH_URL derivation). Diverging from production lets a
+      // future E2E test pass where production would have dropped or hidden
+      // the cookie (cross-site, or read from page script), or fail where
+      // production works.
+      sameSite: "Lax",
+      httpOnly: true,
       ...(isSecureCookieFromAuthUrl() && { secure: true }),
     },
   ]);
