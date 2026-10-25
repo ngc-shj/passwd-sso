@@ -52,7 +52,22 @@ export type TokenValidationError =
   | "EXTENSION_TOKEN_INVALID"
   | "EXTENSION_TOKEN_REVOKED"
   | "EXTENSION_TOKEN_EXPIRED"
-  | "EXTENSION_TOKEN_DPOP_INVALID";
+  | "EXTENSION_TOKEN_DPOP_INVALID"
+  | "PASSKEY_REQUIRED";
+
+/**
+ * Self-protection exemption (C5/S12): a caller passes one of these to skip
+ * the per-use passkey gate in `validateExtensionToken` for an action that
+ * only ever revokes the caller's own rows or writes one rate-limited audit
+ * row. Defined here (not in extension-token.ts) so route tests that mock
+ * `extension-token` by factory still see the member values.
+ */
+export const PASSKEY_EXEMPTION = {
+  SELF_REVOCATION: "self_revocation",
+  TAMPER_REPORT: "tamper_report",
+} as const;
+
+export type PasskeyExemption = (typeof PASSKEY_EXEMPTION)[keyof typeof PASSKEY_EXEMPTION];
 
 export type TokenValidationResult =
   | { ok: true; data: ValidatedExtensionToken }

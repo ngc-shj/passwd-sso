@@ -18,6 +18,7 @@ const {
   mockRateLimiterCheck,
   mockVerifyDpop,
   mockQueryRaw,
+  mockPasskeyGateBlocks,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockValidateSaToken: vi.fn(),
@@ -43,6 +44,10 @@ const {
   // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE`
   // — default matches this file's keyVersion: 1 fixtures so the guard passes.
   mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
+  // C5: this file exercises the real validateExtensionToken (and, through
+  // it, the real passkey-gate) — allow by default so the gate itself stays
+  // out of scope for the scope/entry-CRUD cells below.
+  mockPasskeyGateBlocks: vi.fn().mockResolvedValue(false),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/tokens/service-account-token", () => ({ validateServiceAccountToken: mockValidateSaToken, hasSaTokenScope: vi.fn().mockReturnValue(true) }));
@@ -83,6 +88,10 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
+}));
+vi.mock("@/lib/auth/policy/passkey-gate", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  passkeyGateBlocks: mockPasskeyGateBlocks,
 }));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const { mockValidateOperatorToken } = vi.hoisted(() => ({
   mockValidateOperatorToken: vi.fn(),
@@ -23,6 +23,16 @@ function makeRequest(authHeader?: string): NextRequest {
   return new NextRequest("http://localhost:3000/api/admin/test", { headers });
 }
 
+/** Assert a failure result's ready-made response has this status + error code. */
+async function expectFailureBody(
+  result: { ok: false; response: NextResponse },
+  status: number,
+  error: string,
+) {
+  expect(result.response.status).toBe(status);
+  await expect(result.response.json()).resolves.toEqual({ error });
+}
+
 const VALID_AUTH = {
   tokenId: "token-1",
   subjectUserId: "user-1",
@@ -38,72 +48,101 @@ describe("verifyAdminToken", () => {
   describe("MISSING_OR_MALFORMED cases (no DB call)", () => {
     it("returns MISSING_OR_MALFORMED when Authorization header is absent", async () => {
       const result = await verifyAdminToken(makeRequest());
-      expect(result).toEqual({ ok: false, reason: "MISSING_OR_MALFORMED" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe("MISSING_OR_MALFORMED");
+        await expectFailureBody(result, 401, "UNAUTHORIZED");
+      }
       expect(mockValidateOperatorToken).not.toHaveBeenCalled();
     });
 
     it("returns MISSING_OR_MALFORMED for non-Bearer scheme (Basic auth)", async () => {
       const result = await verifyAdminToken(makeRequest("Basic dXNlcjpwYXNz"));
-      expect(result).toEqual({ ok: false, reason: "MISSING_OR_MALFORMED" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("MISSING_OR_MALFORMED");
       expect(mockValidateOperatorToken).not.toHaveBeenCalled();
     });
 
     it("returns MISSING_OR_MALFORMED for empty Bearer value", async () => {
       const result = await verifyAdminToken(makeRequest("Bearer "));
-      expect(result).toEqual({ ok: false, reason: "MISSING_OR_MALFORMED" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("MISSING_OR_MALFORMED");
       expect(mockValidateOperatorToken).not.toHaveBeenCalled();
     });
 
     it("returns MISSING_OR_MALFORMED for legacy 64-hex token (no op_ prefix)", async () => {
       const legacyHex = "a".repeat(64);
       const result = await verifyAdminToken(makeRequest(`Bearer ${legacyHex}`));
-      expect(result).toEqual({ ok: false, reason: "MISSING_OR_MALFORMED" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("MISSING_OR_MALFORMED");
       expect(mockValidateOperatorToken).not.toHaveBeenCalled();
     });
 
     it("returns MISSING_OR_MALFORMED for random non-prefixed string", async () => {
       const result = await verifyAdminToken(makeRequest("Bearer some-random-token"));
-      expect(result).toEqual({ ok: false, reason: "MISSING_OR_MALFORMED" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("MISSING_OR_MALFORMED");
       expect(mockValidateOperatorToken).not.toHaveBeenCalled();
     });
 
     it("returns MISSING_OR_MALFORMED for sa_ prefixed token", async () => {
       const result = await verifyAdminToken(makeRequest("Bearer sa_sometoken"));
-      expect(result).toEqual({ ok: false, reason: "MISSING_OR_MALFORMED" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("MISSING_OR_MALFORMED");
       expect(mockValidateOperatorToken).not.toHaveBeenCalled();
     });
   });
 
   describe("INVALID cases (DB call fires, token fails validation)", () => {
-    it("returns INVALID when validateOperatorToken returns OPERATOR_TOKEN_INVALID", async () => {
+    it("returns INVALID (401) when validateOperatorToken returns OPERATOR_TOKEN_INVALID", async () => {
       mockValidateOperatorToken.mockResolvedValue({
         ok: false,
         error: "OPERATOR_TOKEN_INVALID",
       });
 
       const result = await verifyAdminToken(makeRequest(`Bearer ${VALID_OP_TOKEN}`));
-      expect(result).toEqual({ ok: false, reason: "INVALID" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe("INVALID");
+        await expectFailureBody(result, 401, "UNAUTHORIZED");
+      }
       expect(mockValidateOperatorToken).toHaveBeenCalledOnce();
     });
 
-    it("returns INVALID when validateOperatorToken returns OPERATOR_TOKEN_REVOKED", async () => {
+    it("returns INVALID (401) when validateOperatorToken returns OPERATOR_TOKEN_REVOKED", async () => {
       mockValidateOperatorToken.mockResolvedValue({
         ok: false,
         error: "OPERATOR_TOKEN_REVOKED",
       });
 
       const result = await verifyAdminToken(makeRequest(`Bearer ${VALID_OP_TOKEN}`));
-      expect(result).toEqual({ ok: false, reason: "INVALID" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("INVALID");
     });
 
-    it("returns INVALID when validateOperatorToken returns OPERATOR_TOKEN_EXPIRED", async () => {
+    it("returns INVALID (401) when validateOperatorToken returns OPERATOR_TOKEN_EXPIRED", async () => {
       mockValidateOperatorToken.mockResolvedValue({
         ok: false,
         error: "OPERATOR_TOKEN_EXPIRED",
       });
 
       const result = await verifyAdminToken(makeRequest(`Bearer ${VALID_OP_TOKEN}`));
-      expect(result).toEqual({ ok: false, reason: "INVALID" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("INVALID");
+    });
+
+    it("returns PASSKEY_REQUIRED (403) when validateOperatorToken returns PASSKEY_REQUIRED", async () => {
+      mockValidateOperatorToken.mockResolvedValue({
+        ok: false,
+        error: "PASSKEY_REQUIRED",
+      });
+
+      const result = await verifyAdminToken(makeRequest(`Bearer ${VALID_OP_TOKEN}`));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe("PASSKEY_REQUIRED");
+        await expectFailureBody(result, 403, "PASSKEY_REQUIRED");
+      }
     });
   });
 

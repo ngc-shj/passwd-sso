@@ -22,6 +22,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
+import { PASSKEY_EXEMPTION } from "@/lib/auth/tokens/extension-token-types";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { unauthorized, errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -54,8 +55,12 @@ function safeStringEqual(a: string, b: string): boolean {
 
 async function handlePOST(req: NextRequest) {
   // Authenticate via Bearer + DPoP (validateExtensionToken always requires DPoP
-  // for BROWSER_EXTENSION rows post-migration).
-  const validated = await validateExtensionToken(req);
+  // for BROWSER_EXTENSION rows post-migration). Self-revocation is exempt
+  // from the per-use passkey gate (C5/S12): it only ever revokes the
+  // caller's own key-bound tokens.
+  const validated = await validateExtensionToken(req, {
+    passkeyExemption: PASSKEY_EXEMPTION.SELF_REVOCATION,
+  });
   if (!validated.ok) {
     // Diagnostic: reset failures are silent at the wire (401 only); without
     // the reason field operators cannot tell a stale-token (INVALID/REVOKED)

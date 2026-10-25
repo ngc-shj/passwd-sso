@@ -113,6 +113,16 @@ describe("POST /api/mobile/cache-rollback-report", () => {
     );
   });
 
+  // C5/S12: this report is a self-protection exemption — it only emits one
+  // rate-limited audit row, so it skips the per-use passkey gate.
+  it("validates the token with the TAMPER_REPORT passkey exemption", async () => {
+    await POST(makeReq());
+    expect(mockValidateExtensionToken).toHaveBeenCalledWith(
+      expect.anything(),
+      { passkeyExemption: "tamper_report" },
+    );
+  });
+
   it("emits MOBILE_CACHE_FLAG_FORGED when rejectionKind=flag_forged", async () => {
     const res = await POST(
       makeReq({ ...VALID_BODY, rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED }),

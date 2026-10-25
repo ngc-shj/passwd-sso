@@ -24,7 +24,6 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import {
   errorResponse,
   notFound,
-  unauthorized,
 } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EXECUTE_TTL_MS } from "@/lib/constants/time";
@@ -48,7 +47,7 @@ async function handlePOST(
   { params }: { params: Promise<{ rotationId: string }> },
 ) {
   const authResult = await verifyAdminToken(req);
-  if (!authResult.ok) return unauthorized();
+  if (!authResult.ok) return authResult.response;
   const { auth } = authResult;
 
   const { rotationId } = await params;

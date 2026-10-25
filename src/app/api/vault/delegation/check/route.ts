@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
   if (!authResult) {
     return NextResponse.json({ authorized: false, reason: "unauthorized" }, { status: 401 });
   }
-  if (authResult.type === "scope_insufficient") {
+  if (authResult.type === "scope_insufficient" || authResult.type === "passkey_required") {
     return NextResponse.json({ authorized: false, reason: "unauthorized" }, { status: 403 });
   }
   if (!hasUserId(authResult)) {

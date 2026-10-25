@@ -229,9 +229,6 @@ const ALLOWED_USAGE = new Set([
   "src/lib/audit/audit-user-lookup.ts",
   "src/lib/auth/tokens/scim-token.ts",
   "src/lib/auth/tokens/extension-token.ts",
-  // C5: shared DPoP validate helper for IOS_APP + BROWSER_EXTENSION rows.
-  // Updates lastUsedAt / lastUsedIp / lastUsedUserAgent on the resolved row.
-  "src/lib/auth/dpop/validate-token-dpop.ts",
   // C12: user-initiated key reset revokes the calling user's cnfJkt-bound
   // ExtensionToken rows (after body-cnfJkt-must-match-proof check).
   "src/app/api/extension/key/reset/route.ts",

@@ -107,6 +107,17 @@ describe("POST /api/extension/key/reset (C12)", () => {
     mockTokenUpdateMany.mockResolvedValue({ count: 2 });
   });
 
+  // C5/S12: self-revocation is a self-protection exemption — it only
+  // revokes the caller's own key-bound tokens, so it skips the per-use
+  // passkey gate.
+  it("validates the token with the SELF_REVOCATION passkey exemption", async () => {
+    await POST(makeReq({ cnfJkt: VALID_CNF_JKT }));
+    expect(mockValidateExtensionToken).toHaveBeenCalledWith(
+      expect.anything(),
+      { passkeyExemption: "self_revocation" },
+    );
+  });
+
   it("returns 200 with revoked count when valid Bearer+DPoP+matching cnfJkt", async () => {
     const req = makeReq({ cnfJkt: VALID_CNF_JKT });
 

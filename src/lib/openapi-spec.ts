@@ -40,7 +40,7 @@ export function buildOpenApiSpec(baseUrl: string) {
               content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/PasswordEntry" } } } },
             },
             "401": { $ref: "#/components/responses/Unauthorized" },
-            "403": { $ref: "#/components/responses/Forbidden" },
+            "403": { $ref: "#/components/responses/V1Forbidden" },
             "429": { $ref: "#/components/responses/RateLimited" },
           },
         },
@@ -56,7 +56,7 @@ export function buildOpenApiSpec(baseUrl: string) {
             "201": { description: "Created", content: { "application/json": { schema: { $ref: "#/components/schemas/PasswordEntry" } } } },
             "400": { $ref: "#/components/responses/ValidationError" },
             "401": { $ref: "#/components/responses/Unauthorized" },
-            "403": { $ref: "#/components/responses/Forbidden" },
+            "403": { $ref: "#/components/responses/V1Forbidden" },
             "429": { $ref: "#/components/responses/RateLimited" },
           },
         },
@@ -70,6 +70,7 @@ export function buildOpenApiSpec(baseUrl: string) {
           responses: {
             "200": { description: "Password entry with encrypted blob", content: { "application/json": { schema: { $ref: "#/components/schemas/PasswordEntryDetail" } } } },
             "401": { $ref: "#/components/responses/Unauthorized" },
+            "403": { $ref: "#/components/responses/V1Forbidden" },
             "404": { $ref: "#/components/responses/NotFound" },
             "429": { $ref: "#/components/responses/RateLimited" },
           },
@@ -87,6 +88,7 @@ export function buildOpenApiSpec(baseUrl: string) {
             "200": { description: "Updated", content: { "application/json": { schema: { $ref: "#/components/schemas/PasswordEntry" } } } },
             "400": { $ref: "#/components/responses/ValidationError" },
             "401": { $ref: "#/components/responses/Unauthorized" },
+            "403": { $ref: "#/components/responses/V1Forbidden" },
             "404": { $ref: "#/components/responses/NotFound" },
             "429": { $ref: "#/components/responses/RateLimited" },
           },
@@ -102,6 +104,7 @@ export function buildOpenApiSpec(baseUrl: string) {
           responses: {
             "200": { description: "Deleted", content: { "application/json": { schema: { type: "object", properties: { success: { type: "boolean" } } } } } },
             "401": { $ref: "#/components/responses/Unauthorized" },
+            "403": { $ref: "#/components/responses/V1Forbidden" },
             "404": { $ref: "#/components/responses/NotFound" },
             "429": { $ref: "#/components/responses/RateLimited" },
           },
@@ -118,7 +121,7 @@ export function buildOpenApiSpec(baseUrl: string) {
               content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Tag" } } } },
             },
             "401": { $ref: "#/components/responses/Unauthorized" },
-            "403": { $ref: "#/components/responses/Forbidden" },
+            "403": { $ref: "#/components/responses/V1Forbidden" },
             "429": { $ref: "#/components/responses/RateLimited" },
           },
         },
@@ -247,7 +250,7 @@ export function buildOpenApiSpec(baseUrl: string) {
               },
             },
             "401": { $ref: "#/components/responses/Unauthorized" },
-            "403": { $ref: "#/components/responses/Forbidden" },
+            "403": { $ref: "#/components/responses/V1Forbidden" },
             "429": { $ref: "#/components/responses/RateLimited" },
           },
         },
@@ -432,6 +435,23 @@ export function buildOpenApiSpec(baseUrl: string) {
         Forbidden: {
           description: "Insufficient API key scope",
           content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } },
+        },
+        // v1-specific: every bearer credential reaching a v1 route is gated
+        // per use for the tenant's passkey requirement (PASSKEY_REQUIRED), on
+        // top of the existing scope check. Session routes keep the shared
+        // `Forbidden` response above — this gate does not apply to them.
+        V1Forbidden: {
+          description:
+            "Insufficient API key scope, or the tenant requires a passkey the caller has not registered",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ErrorResponse" },
+              examples: {
+                scopeInsufficient: { value: { error: API_ERROR.API_KEY_SCOPE_INSUFFICIENT } },
+                passkeyRequired: { value: { error: API_ERROR.PASSKEY_REQUIRED } },
+              },
+            },
+          },
         },
         NotFound: {
           description: "Resource not found",

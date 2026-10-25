@@ -109,6 +109,14 @@ describe("GET /api/v1/vault/status", () => {
     expect(json.error).toBeDefined();
   });
 
+  it("returns 403 PASSKEY_REQUIRED when the tenant requires a passkey the caller lacks", async () => {
+    mockValidateApiKeyOnly.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+    const res = await GET(createRequest("GET", "http://localhost/api/v1/vault/status"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+  });
+
   it("returns 401 for revoked API key", async () => {
     mockValidateApiKeyOnly.mockResolvedValue({ ok: false, error: "API_KEY_REVOKED" });
     const res = await GET(createRequest("GET", "http://localhost/api/v1/vault/status"));

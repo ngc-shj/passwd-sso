@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/http/api-error-codes";
 import { validateV1Auth } from "@/lib/auth/session/v1-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
@@ -8,7 +7,6 @@ import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
-import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 
@@ -16,12 +14,7 @@ import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 // GET /api/v1/vault/status — Check vault initialization status (API key or SA token)
 async function handleGET(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.VAULT_STATUS);
-  if (!authResult.ok) {
-    if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT);
-    }
-    return unauthorized();
-  }
+  if (!authResult.ok) return authResult.response;
 
   const { userId, tenantId, rateLimitKey } = authResult.data;
 

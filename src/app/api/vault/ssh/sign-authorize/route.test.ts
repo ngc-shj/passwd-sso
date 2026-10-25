@@ -117,6 +117,18 @@ describe("POST /api/vault/ssh/sign-authorize", () => {
     expect(json.reason).toBe("unauthorized");
   });
 
+  // C8: a passkey refusal routes into the same 403 reason:"unauthorized" arm
+  // as scope_insufficient — API keys and extension tokens cannot carry MCP
+  // scopes anyway, so no legitimate client needs a distinct reason.
+  it("returns 403 when the bearer validator refuses for a missing passkey", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "passkey_required" });
+    const res = await POST(makeRequest({ keyId: VALID_KEY_ID, fingerprint: VALID_FINGERPRINT }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.authorized).toBe(false);
+    expect(json.reason).toBe("unauthorized");
+  });
+
   it("returns 403 when token has no userId (SA token)", async () => {
     mockAuthOrToken.mockResolvedValue({ type: "service_account", serviceAccountId: "sa-1" });
     const res = await POST(makeRequest({ keyId: VALID_KEY_ID, fingerprint: VALID_FINGERPRINT }));

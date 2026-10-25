@@ -18,6 +18,7 @@ const {
   mockCreateRateLimiter,
   mockWarn,
   mockVerifyDpop,
+  mockPasskeyGateBlocks,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
   return {
@@ -36,6 +37,10 @@ const {
     mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
     mockWarn: vi.fn(),
     mockVerifyDpop: vi.fn(),
+    // C5: DELETE is a self-revocation exemption — mocked to BLOCK so a cell
+    // can prove the exemption skips the gate entirely rather than happening
+    // to pass because the gate itself allows.
+    mockPasskeyGateBlocks: vi.fn().mockResolvedValue(true),
   };
 });
 
@@ -45,6 +50,10 @@ vi.mock("@/lib/auth/dpop/verify", () => ({
 }));
 vi.mock("@/lib/auth/dpop/jti-cache", () => ({
   getJtiCache: vi.fn(() => ({ has: vi.fn(() => false), add: vi.fn() })),
+}));
+vi.mock("@/lib/auth/policy/passkey-gate", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  passkeyGateBlocks: mockPasskeyGateBlocks,
 }));
 vi.mock("@/lib/auth/dpop/htu-canonical", () => ({
   canonicalHtu: vi.fn(() => "https://localhost:3000/api/extension/token"),
@@ -111,11 +120,20 @@ import { POST, DELETE } from "./route";
 // executes) so `assertRedisFailClosed`'s factory-attribution check still has
 // the original call/result to inspect after clearAllMocks runs.
 const legacyDeprecatedLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
-// Typed off the factory itself rather than off a separately-destructured mock
-// handle: the handle would then exist only to be read in a `typeof` position,
-// which reads as an unused binding and tells no one that the two are the same
-// object.
-const legacyDeprecatedLimiter = mockCreateRateLimiter.mock.results[0]!
+// Attributed by content, not position: importing validateExtensionToken
+// transitively imports the C5 passkey gate, which constructs its OWN
+// module-level limiter (opted out of the fail-closed option) ahead of this
+// route's own `const legacyDeprecatedLimiter = createRateLimiter(...)`
+// statement — ES module evaluation runs every (transitive) import before
+// the importing module's own body, so the gate's limiter is always call
+// index 0 regardless of import order in this file. Only
+// legacyDeprecatedLimiter among this module's limiters opts into the
+// fail-closed option (the gate counts the literal option text, so this
+// comment deliberately avoids it).
+const legacyDeprecatedLimiterCallIndex = mockCreateRateLimiter.mock.calls.findIndex(
+  (args) => (args[0] as { failClosedOnRedisError?: boolean } | undefined)?.failClosedOnRedisError === true,
+);
+const legacyDeprecatedLimiter = mockCreateRateLimiter.mock.results[legacyDeprecatedLimiterCallIndex]!
   .value as ReturnType<typeof mockCreateRateLimiter>;
 
 // ─── POST ────────────────────────────────────────────────────
@@ -229,6 +247,35 @@ describe("DELETE /api/extension/token", () => {
 
     expect(status).toBe(200);
     expect(json).toEqual({ ok: true });
+  });
+
+  // C5/S12: self-revocation is exempt from the per-use passkey gate. The
+  // gate mock resolves to `true` (block) by default in this file — a
+  // passing 200 here, with the gate never invoked, proves the exemption
+  // skips the gate call itself rather than happening to pass through an
+  // allowing gate.
+  it("succeeds without calling the passkey gate, even though the gate is mocked to block", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: DEFAULT_SESSION.user.id,
+      scope: "passwords:read,vault:unlock-data",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+      cnfJkt: VALID_CNF_JKT,
+      familyId: "fam-1",
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
+    });
+    mockUpdate.mockResolvedValue({});
+
+    const req = createRequest("DELETE", "http://localhost/api/extension/token", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const res = await DELETE(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(mockPasskeyGateBlocks).not.toHaveBeenCalled();
   });
 
   it("returns 404 for non-existent token", async () => {

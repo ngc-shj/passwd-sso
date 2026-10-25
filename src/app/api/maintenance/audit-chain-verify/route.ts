@@ -34,7 +34,7 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, unauthorized, forbidden } from "@/lib/http/api-response";
+import { errorResponse, forbidden } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseQuery } from "@/lib/http/parse-body";
 import {
@@ -117,7 +117,7 @@ interface SeqBoundRow {
 async function handleGET(req: NextRequest) {
   const authResult = await verifyAdminToken(req);
   if (!authResult.ok) {
-    return unauthorized();
+    return authResult.response;
   }
   const { auth } = authResult;
 

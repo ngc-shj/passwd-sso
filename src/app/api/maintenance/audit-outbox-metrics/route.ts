@@ -19,7 +19,6 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { unauthorized } from "@/lib/http/api-response";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 // Keyed per-tenant so one tenant's operator cannot exhaust another tenant's
@@ -42,7 +41,7 @@ interface MetricsRow {
 async function handleGET(req: NextRequest) {
   const authResult = await verifyAdminToken(req);
   if (!authResult.ok) {
-    return unauthorized();
+    return authResult.response;
   }
   const { auth } = authResult;
 

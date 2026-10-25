@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
-import { createRequest } from "@/__tests__/helpers/request-builder";
+import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 // ─── Hoisted mocks ───────────────────────────────────────────────────────────
 
@@ -144,6 +144,29 @@ describe("GET /api/mobile/favicon", () => {
     const res = await GET(faviconRequest("github.com", "32"));
     expect(res.status).toBe(401);
     expect(mockValidateAndFetch).not.toHaveBeenCalled();
+  });
+
+  // C5: the per-use passkey gate lives inside validateExtensionToken; this
+  // route only maps its PASSKEY_REQUIRED refusal to 403 (not the generic 401).
+  it("returns 403 PASSKEY_REQUIRED when the validator refuses on the passkey gate", async () => {
+    mockValidateExtensionToken.mockResolvedValue({
+      ok: false,
+      error: "PASSKEY_REQUIRED",
+    });
+    const res = await GET(faviconRequest("github.com", "32"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+    expect(mockValidateAndFetch).not.toHaveBeenCalled();
+  });
+
+  // T22/N4: the validator fails closed on a derivation error — paired with
+  // the 200 happy-path cell above.
+  it("fails closed: propagates when the validator rejects", async () => {
+    mockValidateExtensionToken.mockRejectedValue(new Error("derivation failed"));
+    await expect(GET(faviconRequest("github.com", "32"))).rejects.toThrow(
+      "derivation failed",
+    );
   });
 
   it("returns 403 when clientKind is not IOS_APP", async () => {

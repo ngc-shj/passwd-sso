@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
-import { DPOP_VERIFY_ERROR } from "@/lib/auth/dpop/verify";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -117,7 +116,6 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
 import {
   issueIosToken,
   issueAutofillToken,
-  validateIosTokenDpop,
   refreshIosToken,
   IOS_ACCESS_TOKEN_TTL_MS,
   IOS_AUTOFILL_TOKEN_TTL_MS,
@@ -573,131 +571,6 @@ describe("issueAutofillToken", () => {
         String(c[0]).includes("pg_advisory_xact_lock"),
       ),
     ).toBe(true);
-  });
-});
-
-// ─── validateIosTokenDpop ────────────────────────────────────
-
-describe("validateIosTokenDpop", () => {
-  const baseRow = {
-    id: "row-1",
-    userId: USER_ID,
-    tenantId: TENANT_ID,
-    cnfJkt: CNF_JKT,
-    scope: "passwords:read,passwords:write,vault:unlock-data",
-    expiresAt: new Date(Date.now() + 60_000),
-    familyId: FAMILY_ID,
-    familyCreatedAt: new Date(),
-  };
-
-  function makeReq() {
-    return createRequest("GET", "https://app.example.com/api/passwords", {
-      headers: {
-        Authorization: "Bearer access_xyz",
-        DPoP: "fake.dpop.proof",
-        "user-agent": "iOS-Test/1.0",
-        "x-forwarded-for": "10.0.0.1",
-      },
-    });
-  }
-
-  it("returns ok with ValidatedExtensionToken shape on valid DPoP", async () => {
-    mockVerifyDpop.mockResolvedValue({
-      ok: true,
-      claims: { jti: "j1", htm: "GET", htu: "x", iat: 1, cnf: { jkt: CNF_JKT } },
-      jkt: CNF_JKT,
-    });
-
-    const result = await validateIosTokenDpop({
-      req: makeReq(),
-      expectedHtm: "GET",
-      expectedHtu: "https://app.example.com/api/passwords",
-      accessToken: "access_xyz",
-      row: baseRow,
-    });
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.data).toEqual({
-        tokenId: "row-1",
-        userId: USER_ID,
-        tenantId: TENANT_ID,
-        scopes: ["passwords:read", "passwords:write", "vault:unlock-data"],
-        expiresAt: baseRow.expiresAt,
-        familyId: FAMILY_ID,
-        familyCreatedAt: baseRow.familyCreatedAt,
-        cnfJkt: CNF_JKT,
-        clientKind: "IOS_APP",
-      });
-    }
-  });
-
-  it("triggers a best-effort lastUsedIp/lastUsedUserAgent update on success", async () => {
-    mockVerifyDpop.mockResolvedValue({
-      ok: true,
-      claims: { jti: "j1", htm: "GET", htu: "x", iat: 1, cnf: { jkt: CNF_JKT } },
-      jkt: CNF_JKT,
-    });
-
-    await validateIosTokenDpop({
-      req: makeReq(),
-      expectedHtm: "GET",
-      expectedHtu: "https://app.example.com/api/passwords",
-      accessToken: "access_xyz",
-      row: baseRow,
-    });
-
-    // Best-effort update is `void`-fired; allow a microtask to settle.
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(mockExtUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "row-1" },
-        data: expect.objectContaining({
-          lastUsedIp: "10.0.0.1",
-          lastUsedUserAgent: "iOS-Test/1.0",
-          lastUsedAt: expect.any(Date),
-        }),
-      }),
-    );
-  });
-
-  it("returns INVALID when row.cnfJkt is missing", async () => {
-    const result = await validateIosTokenDpop({
-      req: makeReq(),
-      expectedHtm: "GET",
-      expectedHtu: "x",
-      accessToken: "a",
-      row: { ...baseRow, cnfJkt: null },
-    });
-    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
-    expect(mockVerifyDpop).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    DPOP_VERIFY_ERROR.HEADER_MISSING,
-    DPOP_VERIFY_ERROR.SIG_INVALID,
-    DPOP_VERIFY_ERROR.HTU_MISMATCH,
-    DPOP_VERIFY_ERROR.IAT_OUT_OF_WINDOW,
-    DPOP_VERIFY_ERROR.JTI_REPLAY,
-    DPOP_VERIFY_ERROR.ATH_MISMATCH,
-    DPOP_VERIFY_ERROR.CNF_JKT_MISMATCH,
-  ])("maps %s -> EXTENSION_TOKEN_DPOP_INVALID with dpopError preserved", async (errCode) => {
-    mockVerifyDpop.mockResolvedValue({ ok: false, error: errCode });
-
-    const result = await validateIosTokenDpop({
-      req: makeReq(),
-      expectedHtm: "GET",
-      expectedHtu: "x",
-      accessToken: "a",
-      row: baseRow,
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      error: "EXTENSION_TOKEN_DPOP_INVALID",
-      dpopError: errCode,
-    });
   });
 });
 

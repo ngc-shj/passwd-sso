@@ -1,4 +1,4 @@
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { validateApiKeyOnly } from "@/lib/auth/tokens/api-key";
 import {
   validateServiceAccountToken,
@@ -6,6 +6,8 @@ import {
 } from "@/lib/auth/tokens/service-account-token";
 import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/auth/service-account";
 import type { ApiKeyScope } from "@/lib/constants/auth/api-key";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
 
 interface V1AuthSuccess {
   ok: true;
@@ -19,8 +21,7 @@ interface V1AuthSuccess {
 
 interface V1AuthFailure {
   ok: false;
-  error: string;
-  status: 401 | 403;
+  response: NextResponse;
 }
 
 export type V1AuthResult = V1AuthSuccess | V1AuthFailure;
@@ -59,25 +60,29 @@ export async function validateV1Auth(
   }
 
   if (apiKeyResult.error === "SCOPE_INSUFFICIENT") {
-    return { ok: false, error: "SCOPE_INSUFFICIENT", status: 403 };
+    return { ok: false, response: errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT) };
+  }
+
+  if (apiKeyResult.error === "PASSKEY_REQUIRED") {
+    return { ok: false, response: errorResponse(API_ERROR.PASSKEY_REQUIRED) };
   }
 
   // If error is not INVALID_TOKEN_TYPE, token was recognized as an api_ key but was invalid
   if (apiKeyResult.error !== "INVALID_TOKEN_TYPE") {
-    return { ok: false, error: apiKeyResult.error, status: 401 };
+    return { ok: false, response: unauthorized() };
   }
 
   // INVALID_TOKEN_TYPE: token is not an api_ key — check if it's an SA token
   const bearer = extractBearer(req);
   if (!bearer || !bearer.startsWith(SA_TOKEN_PREFIX)) {
-    return { ok: false, error: "UNAUTHORIZED", status: 401 };
+    return { ok: false, response: unauthorized() };
   }
 
   const saResult = await validateServiceAccountToken(req);
-  if (!saResult.ok) return { ok: false, error: saResult.error, status: 401 };
+  if (!saResult.ok) return { ok: false, response: unauthorized() };
 
   if (!hasSaTokenScope(saResult.data.scopes, requiredScope as SaTokenScope)) {
-    return { ok: false, error: "SCOPE_INSUFFICIENT", status: 403 };
+    return { ok: false, response: errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT) };
   }
 
   return {

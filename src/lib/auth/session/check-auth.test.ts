@@ -178,6 +178,22 @@ describe("checkAuth", () => {
       }
     });
 
+    it("returns 403 PASSKEY_REQUIRED when the bearer validator refuses for a missing passkey (C8)", async () => {
+      mockAuthOrToken.mockResolvedValue({ type: "passkey_required" });
+
+      const result = await checkAuth(makeRequest(), {
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        const json = await result.response.json();
+        expect(result.response.status).toBe(403);
+        expect(json.error).toBe("PASSKEY_REQUIRED");
+      }
+      expect(mockEnforceAccessRestriction).not.toHaveBeenCalled();
+    });
+
     it("returns 401 when no auth succeeds", async () => {
       mockAuthOrToken.mockResolvedValue(null);
 

@@ -21,7 +21,6 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { unauthorized } from "@/lib/http/api-response";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 // Keyed per-tenant + fail-closed on Redis error for parity with the other
@@ -35,7 +34,7 @@ const rateLimiter = createRateLimiter({
 async function handlePOST(req: NextRequest) {
   const authResult = await verifyAdminToken(req);
   if (!authResult.ok) {
-    return unauthorized();
+    return authResult.response;
   }
   const { auth } = authResult;
 

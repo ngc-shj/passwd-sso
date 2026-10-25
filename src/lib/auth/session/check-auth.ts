@@ -75,6 +75,13 @@ export async function checkAuth(
       };
     }
 
+    if (authResult?.type === "passkey_required") {
+      return {
+        ok: false,
+        response: errorResponse(API_ERROR.PASSKEY_REQUIRED),
+      };
+    }
+
     if (!authResult || !hasUserId(authResult)) {
       return {
         ok: false,

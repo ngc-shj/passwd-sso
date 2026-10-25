@@ -150,6 +150,14 @@ describe("GET /api/v1/passwords", () => {
     expect(json.error).toBeDefined();
   });
 
+  it("returns 403 PASSKEY_REQUIRED when the tenant requires a passkey the caller lacks", async () => {
+    mockValidateApiKeyOnly.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+    const res = await GET(createRequest("GET", "http://localhost/api/v1/passwords"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+  });
+
   it("returns 401 for revoked API key", async () => {
     mockValidateApiKeyOnly.mockResolvedValue({ ok: false, error: "API_KEY_REVOKED" });
     const res = await GET(createRequest("GET", "http://localhost/api/v1/passwords"));
@@ -181,6 +189,17 @@ describe("GET /api/v1/passwords", () => {
       limiterFactory: limiterFactorySnapshot.replay(),
       failure: { allowed: false, redisErrored: true },
     });
+  });
+
+  // Fail-closed (paired with "returns entries with encrypted overview shape"
+  // below, which is the allow cell): a passkey-state derivation error
+  // propagates through validateApiKeyOnly rather than being swallowed into a
+  // refusal. withRequestLog rethrows rather than mapping to a response.
+  it("rejects rather than responding when the auth layer throws (fail-closed)", async () => {
+    mockValidateApiKeyOnly.mockRejectedValue(new Error("derivation failed"));
+    await expect(
+      GET(createRequest("GET", "http://localhost/api/v1/passwords")),
+    ).rejects.toThrow("derivation failed");
   });
 
   it("returns access restriction response when denied", async () => {
@@ -392,6 +411,16 @@ describe("POST /api/v1/passwords", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(403);
     expect(json.error).toBeDefined();
+  });
+
+  it("returns 403 PASSKEY_REQUIRED when the tenant requires a passkey the caller lacks", async () => {
+    mockValidateApiKeyOnly.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/v1/passwords", { body: validBody }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
   });
 
   it("returns 429 when rate limit exceeded", async () => {

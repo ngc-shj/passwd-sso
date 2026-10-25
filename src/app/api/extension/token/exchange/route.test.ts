@@ -121,7 +121,18 @@ import { POST } from "./route";
 // executes) so `assertRedisFailClosed`'s factory-attribution check still has
 // the original call/result to inspect after clearAllMocks runs.
 const exchangeLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
-const exchangeLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+// Attributed by content, not position: importing issueExtensionToken
+// transitively imports the C5 passkey gate, which constructs its OWN
+// module-level limiter (opted out of the fail-closed option) as part of
+// evaluating this file's dependency graph — ES modules evaluate every
+// (transitive) import before the importing module's own body runs, so the
+// gate's limiter is not reliably call index 0. Only exchangeLimiter among
+// this module's limiters opts into the fail-closed option (the gate counts
+// the literal option text, so this comment deliberately avoids it).
+const exchangeLimiterCallIndex = mockCreateRateLimiter.mock.calls.findIndex(
+  (args) => (args[0] as { failClosedOnRedisError?: boolean } | undefined)?.failClosedOnRedisError === true,
+);
+const exchangeLimiter = mockCreateRateLimiter.mock.results[exchangeLimiterCallIndex]!.value as {
   check: typeof mockCheck;
 };
 

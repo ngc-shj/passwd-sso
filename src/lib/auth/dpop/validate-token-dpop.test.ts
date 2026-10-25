@@ -123,7 +123,10 @@ describe("validateExtensionTokenDpop", () => {
       }
     });
 
-    it("updates lastUsedAt but NOT lastUsedIp/UA for BROWSER_EXTENSION", async () => {
+    // C5: the lastUsedAt/IP/UA write moved into validateExtensionToken, this
+    // helper's only caller — the IP/UA-by-clientKind assertions moved to
+    // extension-token.test.ts along with it.
+    it("writes nothing to the DB on success", async () => {
       mockVerifyDpop.mockResolvedValue({
         ok: true,
         claims: { jti: "j1", htm: "GET", htu: "x", iat: 1, cnf: { jkt: CNF_JKT } },
@@ -136,22 +139,15 @@ describe("validateExtensionTokenDpop", () => {
         accessToken: ACCESS_TOKEN,
       });
 
-      // Allow the void promise to settle.
       await new Promise((r) => setTimeout(r, 10));
-
-      expect(mockExtUpdate).toHaveBeenCalledTimes(1);
-      const call = mockExtUpdate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
-      expect(call.data.lastUsedAt).toBeInstanceOf(Date);
-      // IP and UA must NOT be updated for BROWSER_EXTENSION.
-      expect(call.data).not.toHaveProperty("lastUsedIp");
-      expect(call.data).not.toHaveProperty("lastUsedUserAgent");
+      expect(mockExtUpdate).not.toHaveBeenCalled();
     });
   });
 
   describe("success path — IOS_APP", () => {
     const iosRow = { ...baseRow, clientKind: "IOS_APP" as const };
 
-    it("updates lastUsedIp and lastUsedUserAgent for IOS_APP", async () => {
+    it("writes nothing to the DB on success", async () => {
       mockVerifyDpop.mockResolvedValue({
         ok: true,
         claims: { jti: "j1", htm: "GET", htu: "x", iat: 1, cnf: { jkt: CNF_JKT } },
@@ -165,12 +161,7 @@ describe("validateExtensionTokenDpop", () => {
       });
 
       await new Promise((r) => setTimeout(r, 10));
-
-      expect(mockExtUpdate).toHaveBeenCalledTimes(1);
-      const call = mockExtUpdate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
-      expect(call.data.lastUsedAt).toBeInstanceOf(Date);
-      expect(call.data.lastUsedIp).toBe("10.0.0.1");
-      expect(call.data.lastUsedUserAgent).toBe("iOS-Test/1.0");
+      expect(mockExtUpdate).not.toHaveBeenCalled();
     });
   });
 

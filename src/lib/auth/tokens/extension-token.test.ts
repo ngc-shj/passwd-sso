@@ -19,6 +19,7 @@ const {
   mockTransaction,
   mockTxExecuteRaw,
   mockWithUserTenantRls,
+  mockExtensionTokenUpdate,
 } = vi.hoisted(() => ({
   mockFindMany: vi.fn(),
   mockCreate: vi.fn(),
@@ -27,6 +28,13 @@ const {
   mockTransaction: vi.fn(),
   mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  // The lastUsedAt/IP/UA write moved into validateExtensionToken (C5).
+  mockExtensionTokenUpdate: vi.fn().mockResolvedValue({}),
+}));
+
+const { mockPasskeyGateBlocks } = vi.hoisted(() => ({
+  // Allow by default — most cells here exercise unrelated dispatch behavior.
+  mockPasskeyGateBlocks: vi.fn().mockResolvedValue(false),
 }));
 
 const { mockTenantFindUnique } = vi.hoisted(() => ({
@@ -50,6 +58,7 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mockFindMany,
       create: mockCreate,
       updateMany: mockUpdateMany,
+      update: mockExtensionTokenUpdate,
       aggregate: mockAggregate,
     },
     tenant: { findUnique: mockTenantFindUnique },
@@ -75,12 +84,17 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/auth/dpop/validate-token-dpop", () => ({
   validateExtensionTokenDpop: mockValidateTokenDpop,
 }));
+vi.mock("@/lib/auth/policy/passkey-gate", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  passkeyGateBlocks: mockPasskeyGateBlocks,
+}));
 
 import {
   validateExtensionToken,
   parseScopes,
   hasScope,
   issueExtensionToken,
+  PASSKEY_EXEMPTION,
 } from "./extension-token";
 import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -136,6 +150,10 @@ describe("validateExtensionToken", () => {
     vi.clearAllMocks();
     // C13: restore active-membership default after each test clears mocks.
     mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: null });
+    // C5: allow by default — most cells here exercise unrelated dispatch
+    // behavior, not the gate itself.
+    mockPasskeyGateBlocks.mockResolvedValue(false);
+    mockExtensionTokenUpdate.mockResolvedValue({});
   });
 
   it("returns INVALID when no Authorization header", async () => {
@@ -602,6 +620,184 @@ describe("validateExtensionToken", () => {
     });
     const result = await validateExtensionToken(req);
     expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
+  });
+});
+
+// ─── validateExtensionToken — passkey gate (C5) ──────────────
+
+describe("validateExtensionToken — passkey gate (C5)", () => {
+  const browserRow = {
+    id: "gate-t1",
+    userId: "gate-u1",
+    tenantId: "gate-ten1",
+    scope: "passwords:read",
+    expiresAt: new Date("2030-01-01"),
+    revokedAt: null as Date | null,
+    familyId: FAMILY_ID,
+    familyCreatedAt: new Date(),
+    clientKind: "BROWSER_EXTENSION" as const,
+    cnfJkt: VALID_CNF_JKT,
+  };
+  const iosRow = { ...browserRow, id: "gate-t2", clientKind: "IOS_APP" as const };
+
+  function makeReq() {
+    return createRequest("GET", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}`, DPoP: "valid.dpop.proof" },
+    });
+  }
+
+  function dpopSuccess(row: typeof browserRow | typeof iosRow) {
+    return {
+      ok: true as const,
+      data: {
+        tokenId: row.id,
+        userId: row.userId,
+        tenantId: row.tenantId,
+        scopes: ["passwords:read"],
+        expiresAt: row.expiresAt,
+        familyId: row.familyId,
+        familyCreatedAt: row.familyCreatedAt,
+        cnfJkt: row.cnfJkt,
+        clientKind: row.clientKind,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: null });
+    mockExtensionTokenUpdate.mockResolvedValue({});
+  });
+
+  it.each([
+    ["BROWSER_EXTENSION", browserRow],
+    ["IOS_APP", iosRow],
+  ] as const)("I2 deny: gate blocks ⇒ PASSKEY_REQUIRED and lastUsedAt is not updated (%s)", async (_label, row) => {
+    mockFindUnique.mockResolvedValue(row);
+    mockValidateTokenDpop.mockResolvedValue(dpopSuccess(row));
+    mockPasskeyGateBlocks.mockResolvedValue(true);
+
+    const result = await validateExtensionToken(makeReq());
+
+    expect(result).toEqual({ ok: false, error: "PASSKEY_REQUIRED" });
+    expect(mockExtensionTokenUpdate).not.toHaveBeenCalled();
+    expect(mockPasskeyGateBlocks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: row.userId,
+        tenantId: row.tenantId,
+        credential: "extension_token",
+        credentialId: row.id,
+      }),
+    );
+  });
+
+  it.each([
+    ["BROWSER_EXTENSION", browserRow],
+    ["IOS_APP", iosRow],
+  ] as const)("I2 allow: gate allows ⇒ ok, and lastUsedAt IS updated (paired with the deny above) (%s)", async (_label, row) => {
+    mockFindUnique.mockResolvedValue(row);
+    mockValidateTokenDpop.mockResolvedValue(dpopSuccess(row));
+    mockPasskeyGateBlocks.mockResolvedValue(false);
+
+    const result = await validateExtensionToken(makeReq());
+
+    expect(result.ok).toBe(true);
+    expect(mockExtensionTokenUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("DPoP failure on IOS_APP maps to EXTENSION_TOKEN_INVALID without calling the gate or writing", async () => {
+    mockFindUnique.mockResolvedValue(iosRow);
+    mockValidateTokenDpop.mockResolvedValue({
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: "DPOP_SIG_INVALID",
+    });
+    mockPasskeyGateBlocks.mockResolvedValue(true);
+
+    const result = await validateExtensionToken(makeReq());
+
+    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
+    expect(mockPasskeyGateBlocks).not.toHaveBeenCalled();
+    expect(mockExtensionTokenUpdate).not.toHaveBeenCalled();
+  });
+
+  it("DPoP failure on BROWSER_EXTENSION maps to EXTENSION_TOKEN_DPOP_INVALID without calling the gate or writing", async () => {
+    mockFindUnique.mockResolvedValue(browserRow);
+    mockValidateTokenDpop.mockResolvedValue({
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: "DPOP_HEADER_MISSING",
+    });
+    mockPasskeyGateBlocks.mockResolvedValue(true);
+
+    const result = await validateExtensionToken(makeReq());
+
+    expect(result).toEqual({
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: "DPOP_HEADER_MISSING",
+    });
+    expect(mockPasskeyGateBlocks).not.toHaveBeenCalled();
+    expect(mockExtensionTokenUpdate).not.toHaveBeenCalled();
+  });
+
+  it("fail-closed: a derivation error propagates rather than being swallowed", async () => {
+    mockFindUnique.mockResolvedValue(browserRow);
+    mockValidateTokenDpop.mockResolvedValue(dpopSuccess(browserRow));
+    mockPasskeyGateBlocks.mockRejectedValue(new Error("derivation failed"));
+
+    await expect(validateExtensionToken(makeReq())).rejects.toThrow("derivation failed");
+    expect(mockExtensionTokenUpdate).not.toHaveBeenCalled();
+  });
+
+  // ─── Self-protection exemption (S12/F15) ─────────────────────
+
+  describe("passkeyExemption", () => {
+    it("exempt call succeeds without calling the gate, even when the gate would block", async () => {
+      mockFindUnique.mockResolvedValue(browserRow);
+      mockValidateTokenDpop.mockResolvedValue(dpopSuccess(browserRow));
+      mockPasskeyGateBlocks.mockResolvedValue(true);
+
+      const result = await validateExtensionToken(makeReq(), {
+        passkeyExemption: PASSKEY_EXEMPTION.SELF_REVOCATION,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(mockPasskeyGateBlocks).not.toHaveBeenCalled();
+    });
+
+    it("exempt + revoked token ⇒ still REVOKED (exemption skips only the gate)", async () => {
+      mockFindUnique.mockResolvedValue({ ...browserRow, revokedAt: new Date("2025-01-01") });
+      mockPasskeyGateBlocks.mockResolvedValue(true);
+
+      const result = await validateExtensionToken(makeReq(), {
+        passkeyExemption: PASSKEY_EXEMPTION.SELF_REVOCATION,
+      });
+
+      expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_REVOKED" });
+      expect(mockPasskeyGateBlocks).not.toHaveBeenCalled();
+    });
+
+    it("exempt + failing DPoP proof ⇒ still refused (exemption skips only the gate)", async () => {
+      mockFindUnique.mockResolvedValue(browserRow);
+      mockValidateTokenDpop.mockResolvedValue({
+        ok: false,
+        error: "EXTENSION_TOKEN_DPOP_INVALID",
+        dpopError: "DPOP_SIG_INVALID",
+      });
+      mockPasskeyGateBlocks.mockResolvedValue(true);
+
+      const result = await validateExtensionToken(makeReq(), {
+        passkeyExemption: PASSKEY_EXEMPTION.TAMPER_REPORT,
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        error: "EXTENSION_TOKEN_DPOP_INVALID",
+        dpopError: "DPOP_SIG_INVALID",
+      });
+      expect(mockPasskeyGateBlocks).not.toHaveBeenCalled();
+    });
   });
 });
 

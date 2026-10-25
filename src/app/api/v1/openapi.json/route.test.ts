@@ -69,6 +69,19 @@ describe("GET /api/v1/openapi.json", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
+  // C8: authOrToken's passkey_required variant is distinguished from a plain
+  // `null` (unauthenticated) — before this branch the route checked only
+  // `!result`, so the variant would have passed silently as "authenticated".
+  it("returns 403 PASSKEY_REQUIRED when OPENAPI_PUBLIC=false and the bearer validator refuses for a missing passkey", async () => {
+    vi.stubEnv("OPENAPI_PUBLIC", "false");
+    mockAuthOrToken.mockResolvedValue({ type: "passkey_required" });
+    const req = createRequest("GET", "http://localhost:3000/api/v1/openapi.json");
+    const res = await GET(req);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+  });
+
   it("returns spec when OPENAPI_PUBLIC=false and authenticated", async () => {
     vi.stubEnv("OPENAPI_PUBLIC", "false");
     mockAuthOrToken.mockResolvedValue({ userId: "user-1" });

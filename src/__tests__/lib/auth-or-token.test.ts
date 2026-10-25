@@ -180,6 +180,28 @@ describe("authOrToken mcp_token dispatch", () => {
     expect(result).toMatchObject({ type: "service_account" });
     expect(mockValidateMcpToken).not.toHaveBeenCalled();
   });
+
+  // C8: a passkey refusal from the api_ or extension-token validator surfaces
+  // as its own variant, distinct from mcp_token dispatch and from a plain
+  // null (invalid credential).
+  it("returns passkey_required for an api_ key blocked by the passkey gate", async () => {
+    mockValidateApiKey.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+
+    const req = makeRequest("api_blockedkey");
+    const result = await authOrToken(req);
+
+    expect(result).toEqual({ type: "passkey_required" });
+    expect(mockValidateMcpToken).not.toHaveBeenCalled();
+  });
+
+  it("returns passkey_required for an extension token blocked by the passkey gate", async () => {
+    mockValidateExtensionToken.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+
+    const req = makeRequest("ext_blockedtoken");
+    const result = await authOrToken(req);
+
+    expect(result).toEqual({ type: "passkey_required" });
+  });
 });
 
 describe("hasMcpScope", () => {

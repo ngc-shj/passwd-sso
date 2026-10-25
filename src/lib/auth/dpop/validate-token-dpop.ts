@@ -1,10 +1,5 @@
 import type { NextRequest } from "next/server";
 import type { ExtensionTokenClientKind } from "@prisma/client";
-import { EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH } from "@/lib/validations/common.server";
-import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
-import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
-import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { verifyDpopProof, computeAth } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
@@ -49,10 +44,9 @@ export type ValidateTokenDpopResult =
  * already confirmed the row is non-revoked, non-expired, and (for IOS_APP)
  * that cnfJkt is non-null.
  *
- * Behavior differences by clientKind:
- *  - IOS_APP: updates lastUsedIp and lastUsedUserAgent (fire-and-forget).
- *  - BROWSER_EXTENSION: leaves lastUsedIp / lastUsedUserAgent NULL (existing
- *    behavior preserved; browser rows never tracked these).
+ * Writes nothing: the `lastUsedAt`/IP/UA update lives in
+ * `validateExtensionToken`, its only caller, so a DPoP failure or a passkey
+ * gate refusal downstream of this helper writes nothing either (C5).
  */
 export async function validateExtensionTokenDpop(args: {
   req: NextRequest;
@@ -80,29 +74,6 @@ export async function validateExtensionTokenDpop(args: {
       dpopError: result.error,
     };
   }
-
-  // Best-effort lastUsedAt update — always, for both clientKinds.
-  // lastUsedIp / lastUsedUserAgent only for IOS_APP (preserves existing behavior).
-  // One literal (not a mutated record) so check-bypass-rls can read it (`#926`).
-  const updateData = {
-    lastUsedAt: new Date(),
-    ...(row.clientKind === "IOS_APP"
-      ? {
-          lastUsedIp: extractClientIp(req)?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
-          lastUsedUserAgent: req.headers.get("user-agent")?.slice(0, 512) ?? null,
-        }
-      : {}),
-  };
-
-  void withBypassRls(
-    prisma,
-    async (tx) =>
-      tx.extensionToken.update({
-        where: { id: row.id },
-        data: updateData,
-      }),
-    BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE,
-  ).catch(() => {});
 
   return {
     ok: true,

@@ -15,9 +15,17 @@ import {
   EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
 } from "@/lib/validations/common";
+import { EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { validateExtensionTokenDpop } from "@/lib/auth/dpop/validate-token-dpop";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { passkeyGateBlocks, PASSKEY_GATE_CREDENTIAL } from "@/lib/auth/policy/passkey-gate";
+import type {
+  PasskeyExemption,
+  ValidatedExtensionToken,
+  TokenValidationResult,
+} from "@/lib/auth/tokens/extension-token-types";
 
 // ─── Types and helpers (re-exported from the leaf module for source-compat) ──
 
@@ -25,8 +33,9 @@ export type {
   ValidatedExtensionToken,
   TokenValidationError,
   TokenValidationResult,
+  PasskeyExemption,
 } from "@/lib/auth/tokens/extension-token-types";
-export { parseScopes } from "@/lib/auth/tokens/extension-token-types";
+export { parseScopes, PASSKEY_EXEMPTION } from "@/lib/auth/tokens/extension-token-types";
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -50,23 +59,37 @@ export function hasScope(
  * Validate an extension token from the Authorization header.
  * Returns a discriminated union so callers can map errors to HTTP status/codes.
  *
+ * Order: lookup → revoked/expired → membership → DPoP verification → the
+ * per-use passkey gate (`passkeyGateBlocks`, C5) → the `lastUsedAt`/IP/UA
+ * write → one success return.
+ *
  * Dispatch:
  *  - `clientKind === 'IOS_APP'`: defers to `validateExtensionTokenDpop` from
  *    `dpop/validate-token-dpop.ts`, which requires a valid DPoP proof bound
  *    to the row's `cnfJkt`. IOS_APP rows without cnfJkt are rejected early.
- *    IP / user-agent are updated on success.
+ *    A DPoP failure maps to `EXTENSION_TOKEN_INVALID` (legacy callers index
+ *    `API_ERROR[result.error]` and must keep type-checking).
  *  - `clientKind === 'BROWSER_EXTENSION'` (and `'IOS_AUTOFILL'`, which takes
  *    the same else-branch): ALWAYS requires a valid DPoP proof (no bearer-only
  *    fallback — cnfJkt is NOT NULL for all BROWSER_EXTENSION rows
- *    post-migration, and is set at mint for every IOS_AUTOFILL row). IP /
- *    user-agent are NOT updated (browser rows historically left those fields
- *    NULL).
+ *    post-migration, and is set at mint for every IOS_AUTOFILL row). A DPoP
+ *    failure maps to `EXTENSION_TOKEN_DPOP_INVALID` with `dpopError`.
  *
- * On success, updates `lastUsedAt` (best-effort, non-blocking).
+ * Both DPoP branches converge on a validated `data` before the passkey gate
+ * runs — there is one gate, one write, one `ok: true` return (S21/F34).
+ *
+ * `opts.passkeyExemption` (C5/S12) skips the gate for the three routes pinned
+ * in the plan (own-token revoke/reset, tamper-report emission) — nothing
+ * else about validation changes.
+ *
+ * On success, updates `lastUsedAt` (best-effort, non-blocking); IOS_APP rows
+ * also update `lastUsedIp`/`lastUsedUserAgent` (browser rows historically
+ * left those fields NULL).
  */
 export async function validateExtensionToken(
   req: NextRequest,
-): Promise<import("@/lib/auth/tokens/extension-token-types").TokenValidationResult> {
+  opts?: { passkeyExemption?: PasskeyExemption },
+): Promise<TokenValidationResult> {
   const plaintext = extractBearer(req);
   if (!plaintext) {
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
@@ -114,10 +137,13 @@ export async function validateExtensionToken(
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
   }
 
-  // ── iOS-host-app dispatch ──────────────────────────────────
-  // IOS_APP rows without cnfJkt cannot be DPoP-validated; reject early
-  // so ValidatedExtensionToken.cnfJkt is always non-null by construction.
+  // ── DPoP verification ───────────────────────────────────────
+  // Both branches converge on `data` below; neither writes or returns
+  // `ok: true` directly — the gate and the write run once, after dispatch.
+  let data: ValidatedExtensionToken;
   if (token.clientKind === "IOS_APP") {
+    // IOS_APP rows without cnfJkt cannot be DPoP-validated; reject early so
+    // ValidatedExtensionToken.cnfJkt is always non-null by construction.
     if (!token.cnfJkt) {
       return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
     }
@@ -136,47 +162,85 @@ export async function validateExtensionToken(
         clientKind: token.clientKind,
       },
     });
-    if (dpopResult.ok) return { ok: true, data: dpopResult.data };
-    // Map DPoP failures to EXTENSION_TOKEN_INVALID so legacy callers
-    // (which look up API_ERROR[result.error]) keep type-checking. Routes
-    // that need granular DPoP error reporting call validateExtensionTokenDpop
-    // directly with the row + access token.
-    return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
+    if (!dpopResult.ok) {
+      // Map DPoP failures to EXTENSION_TOKEN_INVALID for source-compat with
+      // legacy callers that index API_ERROR[result.error].
+      return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
+    }
+    data = dpopResult.data;
+  } else {
+    // ── BROWSER_EXTENSION / IOS_AUTOFILL: DPoP always required ──
+    // cnfJkt is NOT NULL for all BROWSER_EXTENSION rows post-migration.
+    // The partial CHECK constraint enforces this at the DB layer.
+    const cnfJkt = token.cnfJkt;
+    if (!cnfJkt) {
+      // Should not happen post-migration; defensive guard.
+      return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
+    }
+    const dpopResult = await validateExtensionTokenDpop({
+      req,
+      accessToken: plaintext,
+      row: {
+        id: token.id,
+        userId: token.userId,
+        tenantId: token.tenantId,
+        cnfJkt,
+        scope: token.scope,
+        expiresAt: token.expiresAt,
+        familyId: token.familyId,
+        familyCreatedAt: token.familyCreatedAt,
+        clientKind: token.clientKind,
+      },
+    });
+    if (!dpopResult.ok) {
+      return {
+        ok: false,
+        error: "EXTENSION_TOKEN_DPOP_INVALID",
+        dpopError: dpopResult.dpopError,
+      };
+    }
+    data = dpopResult.data;
   }
 
-  // ── BROWSER_EXTENSION: DPoP always required ────────────────
-  // cnfJkt is NOT NULL for all BROWSER_EXTENSION rows post-migration.
-  // The partial CHECK constraint enforces this at the DB layer.
-  const cnfJkt = token.cnfJkt;
-  if (!cnfJkt) {
-    // Should not happen post-migration; defensive guard.
-    return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
+  // ── Per-use passkey gate (C5) ────────────────────────────────
+  if (!opts?.passkeyExemption) {
+    if (
+      await passkeyGateBlocks({
+        req,
+        userId: token.userId,
+        tenantId: token.tenantId,
+        credential: PASSKEY_GATE_CREDENTIAL.EXTENSION_TOKEN,
+        credentialId: token.id,
+      })
+    ) {
+      return { ok: false, error: "PASSKEY_REQUIRED" };
+    }
   }
 
-  const dpopResult = await validateExtensionTokenDpop({
-    req,
-    accessToken: plaintext,
-    row: {
-      id: token.id,
-      userId: token.userId,
-      tenantId: token.tenantId,
-      cnfJkt,
-      scope: token.scope,
-      expiresAt: token.expiresAt,
-      familyId: token.familyId,
-      familyCreatedAt: token.familyCreatedAt,
-      clientKind: token.clientKind,
-    },
-  });
+  // ── lastUsedAt / IP / UA write ───────────────────────────────
+  // Best-effort, non-blocking. lastUsedIp / lastUsedUserAgent only for
+  // IOS_APP (preserves existing behavior; browser rows never tracked these).
+  // One literal (not a mutated record) so check-bypass-rls can read it (`#926`).
+  const updateData = {
+    lastUsedAt: new Date(),
+    ...(token.clientKind === "IOS_APP"
+      ? {
+          lastUsedIp: extractClientIp(req)?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
+          lastUsedUserAgent: req.headers.get("user-agent")?.slice(0, 512) ?? null,
+        }
+      : {}),
+  };
+  void withBypassRls(
+    prisma,
+    async (tx) =>
+      tx.extensionToken.update({
+        where: { id: token.id },
+        data: updateData,
+      }),
+    BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE,
+  ).catch(() => {});
 
-  if (!dpopResult.ok) {
-    return {
-      ok: false,
-      error: "EXTENSION_TOKEN_DPOP_INVALID",
-      dpopError: dpopResult.dpopError,
-    };
-  }
-  return { ok: true, data: dpopResult.data };
+  return { ok: true, data };
 }
 
 // ─── Family revocation reasons + active-family cap ──────────

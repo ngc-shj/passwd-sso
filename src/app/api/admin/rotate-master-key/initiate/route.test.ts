@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { unauthorized, errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
 
@@ -117,9 +119,25 @@ describe("POST /api/admin/rotate-master-key/initiate", () => {
   });
 
   it("returns 401 when verifyAdminToken rejects", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: false, reason: "MISSING_OR_MALFORMED" });
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: false,
+      reason: "MISSING_OR_MALFORMED",
+      response: unauthorized(),
+    });
     const res = await POST(makeRequest({ targetVersion: 2 }));
     expect(res.status).toBe(401);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 PASSKEY_REQUIRED when verifyAdminToken reports the passkey gate", async () => {
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: false,
+      reason: "PASSKEY_REQUIRED",
+      response: errorResponse(API_ERROR.PASSKEY_REQUIRED),
+    });
+    const res = await POST(makeRequest({ targetVersion: 2 }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "PASSKEY_REQUIRED" });
     expect(mockCreate).not.toHaveBeenCalled();
   });
 

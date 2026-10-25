@@ -110,6 +110,18 @@ describe("GET /api/mobile/favicon-pref", () => {
     expect(status).toBe(401);
   });
 
+  // C5: the per-use passkey gate lives inside validateExtensionToken; this
+  // route maps its PASSKEY_REQUIRED refusal to 403 (not the generic 401).
+  it("returns 403 PASSKEY_REQUIRED when the validator refuses on the passkey gate", async () => {
+    mockValidateExtensionToken.mockResolvedValue({
+      ok: false,
+      error: "PASSKEY_REQUIRED",
+    });
+    const { status, json } = await parseResponse(await GET(makeGetReq()));
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+  });
+
   it("returns 403 when clientKind is not IOS_APP", async () => {
     mockValidateExtensionToken.mockResolvedValue(
       authOk({ clientKind: "BROWSER_EXTENSION" }),
@@ -164,6 +176,21 @@ describe("PUT /api/mobile/favicon-pref", () => {
     });
     const { status } = await parseResponse(await PUT(makePutReq({ fetchFavicons: true })));
     expect(status).toBe(401);
+  });
+
+  // C5: the per-use passkey gate lives inside validateExtensionToken; this
+  // route maps its PASSKEY_REQUIRED refusal to 403 (not the generic 401).
+  it("returns 403 PASSKEY_REQUIRED when the validator refuses on the passkey gate", async () => {
+    mockValidateExtensionToken.mockResolvedValue({
+      ok: false,
+      error: "PASSKEY_REQUIRED",
+    });
+    const { status, json } = await parseResponse(
+      await PUT(makePutReq({ fetchFavicons: true })),
+    );
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 403 when clientKind is not IOS_APP", async () => {

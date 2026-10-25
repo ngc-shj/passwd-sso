@@ -89,6 +89,14 @@ describe("authOrToken", () => {
     expect(result).toBeNull();
   });
 
+  it("returns passkey_required when the extension token validator refuses for a missing passkey (C8)", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateExtensionToken.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+
+    const result = await authOrToken(makeRequest("ext_blocked"));
+    expect(result).toEqual({ type: "passkey_required" });
+  });
+
   it("returns scope_insufficient when token lacks required scope", async () => {
     mockAuth.mockResolvedValue(null);
     mockValidateExtensionToken.mockResolvedValue({
@@ -165,6 +173,15 @@ describe("authOrToken", () => {
 
     const result = await authOrToken(makeRequest("api_invalid"));
     expect(result).toBeNull();
+    expect(mockValidateExtensionToken).not.toHaveBeenCalled();
+  });
+
+  it("returns passkey_required when the API key validator refuses for a missing passkey (C8)", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateApiKey.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+
+    const result = await authOrToken(makeRequest("api_blocked"));
+    expect(result).toEqual({ type: "passkey_required" });
     expect(mockValidateExtensionToken).not.toHaveBeenCalled();
   });
 

@@ -40,6 +40,7 @@ export type AuthResult =
 export type AuthOrTokenResult =
   | AuthResult
   | { type: "scope_insufficient" }
+  | { type: "passkey_required" }
   | null;
 
 /** Auth result types that carry a non-null userId. */
@@ -88,7 +89,10 @@ export async function authOrToken(
   // API key path
   if (bearer.startsWith(API_KEY_PREFIX)) {
     const result = await validateApiKey(req);
-    if (!result.ok) return null;
+    if (!result.ok) {
+      if (result.error === "PASSKEY_REQUIRED") return { type: "passkey_required" };
+      return null;
+    }
 
     if (requiredScope && !hasApiKeyScope(result.data.scopes, requiredScope as ApiKeyScope)) {
       return { type: "scope_insufficient" };
@@ -147,7 +151,10 @@ export async function authOrToken(
 
   // Extension token path (no known prefix → assume extension token)
   const result = await validateExtensionToken(req);
-  if (!result.ok) return null;
+  if (!result.ok) {
+    if (result.error === "PASSKEY_REQUIRED") return { type: "passkey_required" };
+    return null;
+  }
 
   if (requiredScope && !hasScope(result.data.scopes, requiredScope as ExtensionTokenScope)) {
     return { type: "scope_insufficient" };

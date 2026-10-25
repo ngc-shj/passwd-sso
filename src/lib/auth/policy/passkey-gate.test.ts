@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import type { RateLimiterOptions } from "@/lib/security/rate-limit";
 
 const {
   mockWebAuthnCredentialCount,
@@ -19,7 +20,7 @@ const {
     mockWithBypassRls: vi.fn(),
     mockLogAuditAsync: vi.fn(),
     mockLimiterCheck,
-    mockCreateRateLimiter: vi.fn(() => ({ check: mockLimiterCheck, clear: vi.fn() })),
+    mockCreateRateLimiter: vi.fn((_options: RateLimiterOptions) => ({ check: mockLimiterCheck, clear: vi.fn() })),
   };
 });
 

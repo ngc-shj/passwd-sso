@@ -13,7 +13,6 @@ const {
   mockRateLimitCheck,
   mockEnforceAccessRestriction,
   mockRevokeExtensionTokenFamily,
-  mockDerivePasskeyState,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
   mockWithUserTenantRls: vi.fn(),
@@ -25,7 +24,6 @@ const {
   mockRateLimitCheck: vi.fn(),
   mockEnforceAccessRestriction: vi.fn(),
   mockRevokeExtensionTokenFamily: vi.fn(),
-  mockDerivePasskeyState: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
@@ -59,16 +57,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: vi.fn(() => "new-token-plain"),
   hashToken: vi.fn(() => "new-hash"),
 }));
-vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
-  return {
-    ...real,
-    derivePasskeyState: mockDerivePasskeyState,
-  };
-});
-
 import { POST } from "@/app/api/extension/token/refresh/route";
-import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
 
 const VALIDATED_TOKEN = {
   tokenId: "token-id-1",
@@ -84,7 +73,6 @@ const VALIDATED_TOKEN = {
 describe("POST /api/extension/token/refresh — cnfJkt preservation (C10)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    _resetPasskeyAuditForTests();
     // Limiter-layer mock: default allowed:true keeps the production
     // checkRateLimitOrFail mapping in path.
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
@@ -105,13 +93,6 @@ describe("POST /api/extension/token/refresh — cnfJkt preservation (C10)", () =
     mockTenantFindUnique.mockResolvedValue({
       extensionTokenIdleTimeoutMinutes: 60,
       extensionTokenAbsoluteTimeoutMinutes: 1440,
-    });
-    // Default: passkey enforcement off (gate is a no-op for existing tests).
-    mockDerivePasskeyState.mockResolvedValue({
-      requirePasskey: false,
-      hasPasskey: false,
-      requirePasskeyEnabledAt: null,
-      passkeyGracePeriodDays: null,
     });
   });
 
