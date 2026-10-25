@@ -1,7 +1,7 @@
 # Plan: api-key-passkey-requirement
 
 Issue `#956` (follow-up from `#742`, PR `#957`, code review round 6, finding S-R6-2).
-Revision 4. After plan review round 2 the user split the work three ways: the session-cookie
+Revision 5. After plan review round 2 the user split the work three ways: the session-cookie
 reader fix shipped as `#961`; the session gate on `/api/*` (former C4) moved to `#959`; this plan
 covers the bearer credentials only. Findings are cited by ID from the review record.
 
@@ -34,7 +34,7 @@ The class is every user-bound bearer credential that reaches a route.
 | API key `api_` | `validateApiKey` | never | C1, per use |
 | Operator token `op_` | `validateOperatorToken` | never | C2, per use |
 | Extension-row token (`BROWSER_EXTENSION`, `IOS_APP`, `IOS_AUTOFILL`) | `validateExtensionToken` | issue, refresh | C5, per use |
-| iOS AutoFill mint | `issueAutofillToken`, behind `checkAuth` with an `IOS_APP` token | via the host token | covered by C5 (C6 removed) |
+| iOS AutoFill mint and upload | `issueAutofillToken` behind `checkAuth` with an `IOS_APP` token; uploads with the `IOS_AUTOFILL` token | via the host token (C9 of `passkey-enforcement-token-paths-plan.md`) | covered by C5, superseding C9 (C6 removed) |
 | iOS host token refresh | `refreshIosToken` (inline gate) | refresh | unchanged; C7 records the dependency |
 | MCP access token | `validateMcpToken` | authorize, consent, exchange, refresh | unchanged, refresh-bound at 1 h (SC1) |
 | SA, SCIM tokens, share links | — | not user-bound | C7 `exempt` |
@@ -89,10 +89,18 @@ C7 derives the lookup set mechanically (below); the initial manifest is listed t
   - `blockedPath` is a named constant per kind — `"api_key"`, `"operator_token"`,
     `"extension_token"` — never the request path and never starting with `/`, so it cannot
     collide with the proxy's path-keyed entries in the shared dedup map (S5, S17).
-  - Dedup is per credential: the key passed to `recordPasskeyAuditEmit` is
-    `` `${blockedPath}:${credentialId}` ``, so a second credential of the same kind is recorded
-    (S18). Bounded: at most `MAX_API_KEYS_PER_USER` keys and `CLIENT_TOKEN_MAX_ACTIVE_FAMILIES`
-    families per user, inside the map's existing cap.
+  - The write is bounded by a limiter, not by the proxy's dedup map (S18, S24): a module-level
+    `createRateLimiter({ windowMs: PASSKEY_AUDIT_DEDUP_MS, max: 1 })` keyed
+    `` `passkey_gate_audit:${blockedPath}:${credentialId}` ``. One row per credential per
+    window, shared across processes through Redis. The proxy's `recordPasskeyAuditEmit` map is
+    not used, so the two cannot crowd each other out. Without Redis the limiter's in-memory
+    fallback is per process and capped at `RATE_LIMIT_MAP_MAX_SIZE` (10 000) — beyond that,
+    eviction re-emits rather than drops (F37). The refusal itself is not limited: every blocked
+    request is denied, only the durable row is bounded.
+  - Number of distinct keys while a user is blocked: the credentials live at the moment of
+    blocking — at most 10 API keys (`MAX_API_KEYS_PER_USER`), the tenant's operator tokens, 3
+    extension family rows (`CLIENT_TOKEN_MAX_ACTIVE_FAMILIES`) and 1 AutoFill row. Minting and
+    refresh are themselves gated, so the set cannot churn (S23).
   - No token or digest is recorded.
 - No try/catch: a derivation error propagates and the request fails closed.
 - **Precedence, stated and accepted:**
@@ -112,18 +120,23 @@ Moved to `#959` (SC4). The ID is not reused.
 
 ### C5 — extension-row tokens are gated per use
 - Order in `validateExtensionToken`: lookup → revoked/expired → membership → DPoP verification →
-  the C3 gate (`EXTENSION_TOKEN`, `token.id`) → the `lastUsedAt`/IP/UA write, on both success
-  paths (the `IOS_APP` branch and the `BROWSER_EXTENSION`/`IOS_AUTOFILL` branch).
+  the C3 gate (`EXTENSION_TOKEN`, `token.id`) → the `lastUsedAt`/IP/UA write → one success
+  return. The two DPoP branches (`IOS_APP`, and `BROWSER_EXTENSION`/`IOS_AUTOFILL`) keep their
+  own failure mapping (`EXTENSION_TOKEN_INVALID` and `EXTENSION_TOKEN_DPOP_INVALID`
+  respectively) but converge before the gate, so there is one gate, one write and one
+  `ok: true` return (S21/F34).
 - The write moves out of `validateExtensionTokenDpop` into `validateExtensionToken`, its only
   caller, so a DPoP failure or a gate refusal writes nothing, and a DPoP failure is never audited
-  as blocked.
+  as blocked. It stays one object literal (`#926`); `validate-token-dpop.ts` loses its
+  `withBypassRls` import and its `check-bypass-rls` `ALLOWED_USAGE` entry (F36).
 - `validateIosTokenDpop` (`mobile-token.ts`) is deleted with its tests: no production caller
   (`grep -rn 'validateIosTokenDpop' src | grep -v test` lists only its definition), and it is a
   second ungated validator that marks the row used.
 - `TokenValidationError` gains `"PASSKEY_REQUIRED"`.
 - **Self-protection exemption** (S12/F15): `validateExtensionToken(req, { passkeyExemption:
   PASSKEY_EXEMPTION.<member> })`, the option an inline object literal and the value a member of
-  the const object. An exempt call skips the gate and nothing else. Members, pinned by C7:
+  the const object `PASSKEY_EXEMPTION`, defined in the leaf `extension-token-types.ts` so route
+  tests that mock `extension-token` by factory keep working (N2). An exempt call skips the gate and nothing else. Members, pinned by C7:
   - `extension/token/route.ts` DELETE and `extension/key/reset/route.ts` POST — `SELF_REVOCATION`;
   - `mobile/cache-rollback-report/route.ts` POST — `TAMPER_REPORT`.
   Each returns only an acknowledgement or a count and changes nothing beyond revoking the
@@ -132,15 +145,25 @@ Moved to `#959` (SC4). The ID is not reused.
   the direct callers `mobile/favicon` GET, `mobile/favicon-pref` GET/PUT and
   `extension/token/refresh` POST, which today hard-code 401.
 - **Refresh (F27):** the per-use gate in the validator shadows the refresh route's inline gate,
-  which is therefore removed. Outcome change, accepted: a blocked user whose family is past its
+  which is therefore removed. The route still contains `extensionToken.create`, so it gets an
+  entry in `scripts/checks/passkey-mint-gate-exempt.txt` — "gated per use in
+  `validateExtensionToken` (C5), before the mint" — rather than a dead `passkeyEnforcementBlocks`
+  call to satisfy `check-passkey-mint-gate.sh` (F31/N1). That check keeps owning "every mint
+  route is gated"; C7 owns "every validator is gated per use". Outcome change, accepted: a blocked user whose family is past its
   absolute or presence limit now gets `PASSKEY_REQUIRED` instead of the family being revoked with
   `SESSION_EXPIRED`; the rows still die at `expiresAt`. Replay detection is unaffected —
   `REVOKED` is checked before the gate.
 - Clients, unchanged: the extension clears its token on a 403 from refresh, as it does today for
   the refresh-time gate, so the user re-pairs after registering a passkey. iOS: E1/SC5.
-- The AutoFill mint is reached only through `checkAuth` with an `IOS_APP` token, so C5 refuses it
-  before `issueAutofillToken` runs; `IOS_AUTOFILL` rows are consumed only through
-  `validateExtensionToken`, so they are gated on use.
+- **AutoFill (F32, user decision): C9 is superseded.** The mint is reached only through
+  `checkAuth` with an `IOS_APP` token, and `IOS_AUTOFILL` rows are consumed only through
+  `validateExtensionToken`, so C5 refuses both the mint and the upload for a blocked user. C9
+  left the mint ungated so a passkey-less user could save their first passkey with the
+  passwd-sso iOS provider; that only ever lasted the host token's remaining idle window, because
+  the host refresh was already gated. A blocked user registers their first passkey with another
+  authenticator (the platform keychain or a security key) on the browser passkey page. The
+  `autofill-token` entry in `passkey-mint-gate-exempt.txt` gets the reason "gated per use via the
+  `IOS_APP` host token in `validateExtensionToken` (C5; supersedes C9)".
 
 ### C6 — removed
 The AutoFill mint is covered by C5. The ID is not reused.
@@ -153,21 +176,29 @@ The AutoFill mint is covered by C5. The ID is not reused.
   repo. Wired into `scripts/pre-pr.sh` and the static-checks CI job.
 - **Lookups:** every `findUnique`/`findFirst`/`findUniqueOrThrow`/`findFirstOrThrow` call in
   non-test `src/**` whose `where` has a `tokenHash` or `codeHash` key — written as a property,
-  shorthand, or string-literal key. A `where` that is not an object literal, or a computed key,
-  fails the gate (refuse rather than guess).
+  shorthand, or string-literal key. On the delegates of models that declare a `tokenHash` or
+  `codeHash` column — read from `prisma/schema.prisma` through `lib/prisma-relation-reach.mjs`,
+  not hand-listed — a `where` that is not an object literal, a spread inside it, or a computed
+  key fails the gate (refuse rather than guess). Other models are not inspected, so
+  `mcpClient.findFirst({ where: sameNameWhereBase })` passes (F33/N3).
 - **Attribution:** the nearest enclosing named function, method or exported `const`; an anonymous
   callback attributes to its enclosing function. Manifest key: `<repo path>#<name>`.
 - **Classes:** `per-use-gated` — the function calls `passkeyGateBlocks`, resolved scope-aware to
   the `passkey-gate` module (alias, namespace and relative imports accepted; a shadowing local or
-  another module's export of the same name is not), and the awaited result is the condition of an
-  `if` whose consequent returns; `refresh-bound` — names its refresh route, lifetime constant and,
+  another module's export of the same name is not); the awaited call is the whole condition of an
+  `if` whose consequent returns, optionally nested in an `if` whose condition reads only the
+  `passkeyExemption` option; and every `ok: true` return of the function comes after that `if`
+  in the same statement list (S21/F34); `refresh-bound` — names its refresh route, lifetime constant and,
   where it has one, the inline gate it relies on; `exempt` — a reason.
 - **Exemption pin:** every `validateExtensionToken` call (import resolved scope-aware, aliases
   included) whose second argument is present must be an object literal whose `passkeyExemption`
   resolves to a `PASSKEY_EXEMPTION` member; the set of (path#handler, member) pairs must equal
-  the three in C5. A variable, spread or forwarded options argument fails.
-- **Forbidden reads:** `requirePasskey`/`hasPasskey` read under `src/lib/auth/tokens/**` as a
-  property access, element access or destructuring.
+  the three in C5. A variable, spread or forwarded options argument fails, and so does any
+  reference to the imported binding outside callee position (assignment, argument, `.call`,
+  `.apply`) or a re-export of it (S22).
+- **Forbidden reads:** `requirePasskey`/`hasPasskey` read under non-test
+  `src/lib/auth/tokens/**` as a property access, element access or destructuring; an
+  object-literal property assignment is not a read.
 - **Fails** on an unlisted function, a stale entry, a count that differs from the manifest size or
   is zero.
 - **Initial manifest** (21 functions; derivation: the gate's own first run, cross-checked with
@@ -175,15 +206,16 @@ The AutoFill mint is covered by C5. The ID is not reused.
   - `per-use-gated`: `validateApiKey`, `validateOperatorToken`, `validateExtensionToken`.
   - `refresh-bound`: `validateMcpToken` (1 h; refresh gate in `resolveRefreshTokenGate`),
     `resolveRefreshTokenGate`, `exchangeRefreshToken`, `mobile/token/refresh#handlePOST` (inline
-    gate in `refreshIosToken`), `extension/token/refresh#detectRefreshReplay` (replay lookup of a
-    revoked row; the refresh itself goes through `validateExtensionToken`).
+    gate in `refreshIosToken`).
   - `exempt`: `validateServiceAccountToken`, `validateScimToken` (not user-bound);
-    `oauth-server#revokeToken` (revocation only); `vault/admin-reset#handlePOST`,
+    `oauth-server#revokeToken`, `extension/token/refresh#detectRefreshReplay` (revocation only)
+    (F35); `vault/admin-reset#handlePOST`,
     `emergency-access/accept#handlePOST`, `emergency-access/reject#handlePOST` (one-time action
     tokens, not API credentials); `share-links/verify-access#handlePOST`, `s/[token]#SharePage`,
     `s/[token]/download#GET` (share links, not user-bound); `mobile/token#handlePOST`,
-    `extension/token/exchange#handlePOST`, `oauth-server#resolveCodeTenantId`,
-    `oauth-server#exchangeCodeForToken` (one-time codes; the minted token is gated).
+    `extension/token/exchange#handlePOST` (one-time codes; the minted extension-row token is
+    gated per use by C5); `oauth-server#resolveCodeTenantId`, `oauth-server#exchangeCodeForToken`
+    (one-time codes; gated inline at exchange, the minted MCP token refresh-bound, SC1) (S25).
 
 ### C8 — `authOrToken` reports a passkey refusal
 - `AuthOrTokenResult` gains `{ type: "passkey_required" }`, returned when the API-key or
@@ -219,10 +251,12 @@ In a tenant whose grace period has expired, for a member with no passkey:
   401 and no blocked row.
 - A vault API call with an extension token (through `checkAuth`): 403; `mobile/favicon`: 403;
   refresh: 403. `DELETE /api/extension/token`: succeeds.
-- `POST /api/mobile/autofill-token` with an `IOS_APP` token: 403, nothing minted.
+- `POST /api/mobile/autofill-token` with an `IOS_APP` token: 403, nothing minted; `POST
+  /api/passwords` with an `IOS_AUTOFILL` token: 403.
 
 For each credential: one `PASSKEY_ENFORCEMENT_BLOCKED` row per credential (a delta) after the
-first refusal and still one after a second refusal of the same credential; a second credential
+first refusal and still one after a second refusal of the same credential within
+`PASSKEY_AUDIT_DEDUP_MS`; a second credential
 of the same kind adds a row; allowed with a passkey (including one registered under another
 tenant), inside the grace period, or without the requirement; `requirePasskeyEnabledAt = NULL`
 enforces immediately.
@@ -232,30 +266,35 @@ enforces immediately.
 - **Integration (real DB, real validators):** one route per credential (the acceptance routes),
   plus `DELETE /api/extension/token` as the real-path exemption proof. Grace boundary cells (deny
   at `now − (grace+1) d`, allow at `now − (grace−1) d`). Audit deltas counted in `audit_outbox`
-  by `tenant_id` and `payload->>'action'`, with `_resetPasskeyAuditForTests()` in `beforeEach`.
+  by `tenant_id` and `payload->>'action'`; each test seeds its own credentials, so the audit
+  limiter's keys never repeat across tests.
   Existing seeders are reused: operator token (`master-key-rotation-races`), API key
   (`c13-deactivated-user-api-key`), WebAuthn credential (`reauth-credential-binding`), `IOS_APP`
   row (`cache-rollback-report-audit`), digests through the production `hashToken`. Cleanup in
   `afterEach`. I2 is proved at unit level; integration does not assert `last_used_at` (the write
   is fire-and-forget and throttled) (T21).
 - **Unit — the gate and validators:**
-  - `passkey-gate.test.ts` mocks prisma, `withBypassRls` and `logAuditAsync`; it pins the grant
-    (`PASSKEY_ENFORCEMENT_STATE`, no `tx`), the audit fields, the per-credential dedup key, and
-    rejection on a derivation error.
+  - `passkey-gate.test.ts` mocks prisma, `withBypassRls`, `logAuditAsync` and the rate limiter;
+    it pins the grant (`PASSKEY_ENFORCEMENT_STATE`, no `tx`), the audit fields, the limiter key,
+    that a limited refusal still returns `true` without a write, and rejection on a derivation
+    error.
   - Validators mock `passkeyGateBlocks` by its own export (`importOriginal` spread). I2: the
-    update spy is not called on a deny and is called on the paired allow — for C5 on both
-    success branches, with the DPoP helper mocked as a whole (it no longer writes) and
+    update spy is not called on a deny and is called on the paired allow, with `lastUsedAt: null`
+    in both cells so the API-key and operator-token throttles cannot make the deny pass
+    vacuously (N7) — for C5 on both client-kind branches, with the DPoP helper mocked as a whole (it no longer writes) and
     `extensionToken.update` in the prisma mock (T14).
-  - C5 also: a DPoP failure with the gate mocked to block returns `DPOP_INVALID` and never calls
-    the gate; the IP/UA-by-clientKind assertions move from `validate-token-dpop.test.ts` to
+  - C5 also: a DPoP failure with the gate mocked to block returns `EXTENSION_TOKEN_INVALID` on
+    the `IOS_APP` branch and `EXTENSION_TOKEN_DPOP_INVALID` on the other, never calls the gate,
+    and writes nothing — one cell per branch (N5); the IP/UA-by-clientKind assertions move from `validate-token-dpop.test.ts` to
     `extension-token.test.ts`; `validate-token-dpop.test.ts` gains a cell that the helper writes
     nothing on success (T14).
   - Exemption at validator level: with the gate mocked to block, an exempt call succeeds without
     calling the gate; an exempt call with a revoked token is still `REVOKED`; with a failing
     proof, still refused (T15).
   - Fail-closed: the helper rejects, the validator rejects with the same error, and one route per
-    credential (`v1/passwords` GET, `audit-outbox-metrics` GET, `mobile/favicon` GET) answers 500,
-    paired with a 200 (T22).
+    credential (`v1/passwords` GET, `audit-outbox-metrics` GET, `mobile/favicon` GET) rejects
+    with it — `withRequestLog` rethrows, so the cell asserts `rejects.toThrow`, paired with a 200
+    (T22/N4).
 - **Unit — mappers and sites:**
   - `validateApiKeyOnly` 403; `validateV1Auth`: `PASSKEY_REQUIRED` → 403, no SA fall-through,
     `UNAUTHORIZED` and scope bodies unchanged; `verifyAdminToken`: `PASSKEY_REQUIRED` → 403,
@@ -264,8 +303,14 @@ enforces immediately.
     extension callers, `checkAuth` and the three C8 consumers gets a cell that asserts **status
     403 and** the body; the `openapi.json` cell sets `OPENAPI_PUBLIC=false` and pairs with an
     allow cell (T19).
-  - Exempt routes: the route test asserts `validateExtensionToken` was called with
-    `(req, { passkeyExemption: <member> })` (T15).
+  - Exempt routes: `mobile/cache-rollback-report/route.test.ts` and
+    `src/__tests__/api/extension/key/reset.test.ts` assert `validateExtensionToken` was called
+    with `(req, { passkeyExemption: <member> })`; `extension/token/route.test.ts` runs the real
+    validator, so it mocks `passkey-gate` to block and asserts DELETE succeeds without calling the
+    gate (T15/N6).
+  - Refresh outcome change: with the validator refusing `PASSKEY_REQUIRED`, the route answers 403
+    and calls neither `detectRefreshReplay`, the family revocation, nor `extensionToken.create`
+    (N8).
   - `authOrToken`: both test trees.
   - CLI: `run` and `env` — a mocked 403 `PASSKEY_REQUIRED` prints the passkey message; a generic
     403 still prints the status. OpenAPI: every `/api/v1` operation lists 403 with the v1
@@ -280,17 +325,26 @@ enforces immediately.
   - `v1-auth.test.ts`, `admin-token.test.ts`: assertions move from `{error, status}` / `reason`
     to `response`.
   - The ten admin route tests: their 401 mocks return a `response`.
-  - `extension/token/refresh` tests: the inline-gate cells are replaced by validator-refusal
-    cells.
+  - `extension/token/refresh` tests, both trees (`route.test.ts` and
+    `src/__tests__/api/extension/token-refresh-cnfJkt.test.ts`): the inline-gate cells are
+    replaced by the refusal cell above (F40).
+  - `src/app/api/passwords/route.test.ts` runs the real `authOrToken` → `validateExtensionToken`:
+    it mocks `passkey-gate` file-wide (allow by default) (N2).
+  - Static gates: `passkey-mint-gate-exempt.txt` gains the refresh entry and the rewritten
+    AutoFill reason; `check-bypass-rls.mjs` loses the `validate-token-dpop.ts` entry (N1).
   - No integration or E2E test turns `requirePasskey` on today, so none flips.
 - **C7 self-test fixtures:** shorthand, string-literal and computed `tokenHash` keys; `where` as a
   variable; `OrThrow` variants; a lookup inside an anonymous callback; gate import aliased,
   namespaced, relative, shadowed and from another module; a gate call whose result is unused or
   not a returning `if`; an exemption passed as a variable, a spread, through a forwarding
-  wrapper, or with the wrong member; forbidden reads as property, element access and
-  destructuring; a stale manifest entry (T18, S19).
+  wrapper, or with the wrong member; the validator referenced as a value, through `.call`, or
+  re-exported; a non-literal `where` on a token model (fails) and on another model (passes); a
+  gate placed after an `ok: true` return; forbidden reads as property, element access and
+  destructuring, and an object-literal key that is not a read; a stale manifest entry (T18, S19,
+  S21, S22, N3).
 - **Red proofs on a scratch copy:** remove each gate; the helper returns `false`; `lastUsedAt`
-  written before the gate; the write put back into the DPoP helper; a DPoP failure audited; an
+  written before the gate; the write put back into the DPoP helper; an `ok: true` return
+  moved above the gate; a DPoP failure audited; an
   extra exempt call site; an unlisted lookup; a shadowed `passkeyGateBlocks`.
 
 ## Considerations & constraints
@@ -301,10 +355,11 @@ enforces immediately.
 - SC3: the other inline issue/refresh gates (bridge code, mobile authorize, MCP, iOS refresh) are
   not migrated to C3.
 - SC4: sessions on `/api/*`, the exempt page set, and open-tab UX — `#959`.
-- SC5: the iOS app presenting `PASSKEY_REQUIRED` — a follow-up issue, proposed at the end of
-  Phase 1.
+- SC5: the iOS app and the extension presenting `PASSKEY_REQUIRED` promptly — a follow-up
+  issue, proposed at the end of Phase 1.
 - Documentation: `docs/security/policy-enforcement.md` — the `requirePasskey` row lists the
-  per-use bearer validators beside the proxy (F22).
+  per-use bearer validators beside the proxy (F22), and the extension idle/absolute rows note
+  that a blocked user's refresh answers `PASSKEY_REQUIRED` before the family is revoked (F38).
 - Behaviour change: a member without a passkey after the grace period loses API access through
   every bearer credential until they register one.
 
@@ -312,9 +367,12 @@ enforces immediately.
 
 - An admin turns on `requirePasskey` with a 7-day grace period. During it, everything works.
   After it, a passkey-less member's `passwd-sso run`/`env` with an API key and their own API
-  scripts get 403 with the passkey message; operator scripts get 403; the extension stops working
-  at the next call and asks them to reconnect at the next refresh; an OAuth-logged-in CLI keeps
-  working until its 1 h MCP token needs a refresh.
+  scripts get 403 with the passkey message; operator scripts get 403; the extension's calls fail
+  at once but it stays connected until its next scheduled refresh — up to the tenant idle limit
+  (7 d by default, 30 d at most) — and then asks them to reconnect (F39; prompter feedback is
+  SC5); an OAuth-logged-in CLI keeps working until its 1 h MCP token needs a refresh. The
+  passwd-sso iOS provider cannot save a passkey for them; they use the platform keychain or a
+  security key.
 - They register a passkey in the browser. API keys and operator tokens work again without
   reissuing; the extension needs re-pairing if its refresh was refused meanwhile.
 - A blocked user can still revoke their extension token or reset its key.

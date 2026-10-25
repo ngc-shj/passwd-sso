@@ -198,3 +198,59 @@ R1/R52 OK; RS4 OK; RS1/RS2/RS3/RS5/RS6 N/A.
 ### Testing expert
 R3 T13, T16, T20; R29 checked (v1 and C7 counts were unstated); R42 T17; R19/R49/R50 OK; RT1 T13;
 RT2 T15, T19, T22; RT5 OK; RT6 T14; RT7 T14, T15, T18; RT8 T21; RT10 OK; RT11 OK; RT3/RT4/RT9 N/A.
+
+## Round 4 (plan revision 4)
+
+No Critical findings. S16 (precedence over network restriction) was re-judged: the reason holds.
+
+### Functionality (F31–F33 Major, F34–F40 Minor)
+- F31 Major design: removing the refresh route's inline gate fails `check-passkey-mint-gate.sh`.
+- F32 Major design: C5 reverses C9 of `passkey-enforcement-token-paths-plan.md` (AutoFill mint left
+  ungated to avoid a first-passkey-save deadlock) without addressing it.
+- F33 Major design: "non-literal `where` fails" fails on the current repo (`mcpClient`, `webAuthnCredential`).
+- F34 design: the `per-use-gated` predicate rejects the exemption guard and does not prove both
+  branches are gated. F35: `detectRefreshReplay` is revocation only. F36: `check-bypass-rls` stale
+  entry. F37 prose: the dedup cap is global and overflow re-emits. F38 prose: the absolute/idle rows
+  in `policy-enforcement.md`. F39 prose: the extension's broken window. F40 [Adjacent]: a second
+  refresh test file.
+
+### Security (S21–S25, all Minor)
+- S21 design: C7 does not require the gate before every success return.
+- S22 design: the exemption pin escapes through value references, `.call`/`.apply`, re-export.
+- S23 prose: the dedup bound was misstated. S24 design: the durable audit write on the refusal arm is
+  unthrottled once the dedup map overflows. S25 prose: the MCP code exemption reason.
+
+### Testing (N1–N3 Major, N4–N8 Minor)
+- N1 Major: `check-passkey-mint-gate` and `check-bypass-rls` break (= F31, F36).
+- N2 Major: `passwords/route.test.ts` runs the real validator; exempt-route factory mocks; the
+  `PASSKEY_EXEMPTION` module unnamed.
+- N3 Major: as F33.
+- N4: route 500 is unobservable (`withRequestLog` rethrows). N5: per-branch DPoP error codes. N6: the
+  exempt-route assertion shape for `extension/token/route.test.ts`. N7: the `lastUsedAt` throttle can
+  make I2 cells vacuous. N8: the refresh outcome change has no cell.
+
+### User decision
+F32: stop the AutoFill mint and upload for a blocked user (C9 superseded). Its deadlock avoidance
+only ever lasted the host token's idle window; a blocked user registers with another authenticator.
+
+### Revision 5
+- C3: the audit write is bounded by a per-credential `createRateLimiter` (Redis-shared), separate
+  from the proxy map; the bound restated.
+- C5: one gate, one write, one success return; `PASSKEY_EXEMPTION` in the leaf types module; the
+  refresh route and AutoFill reasons in `passkey-mint-gate-exempt.txt`; the `check-bypass-rls`
+  entry removed; C9 superseded.
+- C7: refusal scoped to token models from the schema; the gate-before-every-success-return rule; value
+  references and re-exports refused; `detectRefreshReplay` exempt; the MCP code reason.
+- Testing: N2, N4–N8 applied; both refresh trees; the static gates in the inventory.
+- Docs and scenarios: F38, F39; SC5 covers the extension too.
+
+## Recurring Issue Check (round 4)
+### Functionality expert
+R3 F31, F36, F38; R17 F31; R18 F36; R29 F32, F35, F37, F39 (21 functions, v1 7, admin 10, C8
+reproduced); R42 OK; R43 F32; R47 F33; R48 F31; R49 F34; R52 F33; R10 OK; R1 OK.
+### Security expert
+R1 OK; R3 OK; R29 S23, S25 (21 reproduced); R42 OK; R43 OK; R46/R47 S21, S22; R48 OK (S16 holds);
+R49 OK; R52 OK; RS4 OK; RS6 S24; RS1/RS2/RS3/RS5 N/A.
+### Testing expert
+R3 N1, N2; R29 counts reproduced; R42 N3; R19/R49/R50 OK; RT1 N1, N2, N8; RT2 N4–N7; RT5 N2; RT6 OK;
+RT7 N3, N6; RT8 OK; RT10 OK; RT11 OK; RT3/RT4/RT9 N/A.
