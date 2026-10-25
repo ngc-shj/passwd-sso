@@ -827,7 +827,7 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
     // an operator using this to rule out the README's third cause would
     // otherwise get a message that never mentions it.
     return (
-      `No claim-bearing sign-in denials — unregistered, other-tenant, refused or provider-binding — in the ` +
+      `No claim-bearing sign-in denials — unregistered, other-tenant, deactivated-membership, refused or provider-binding — in the ` +
       `last ${days} days. That is the window this query covered, NOT this deployment's ` +
       `retention: a denial older than ${days} days is outside it whether or not the row ` +
       "still exists. Re-run with --days <n> to widen. An empty result does NOT by itself " +
@@ -837,10 +837,10 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
   const undelivered = rows.reduce((sum, r) => sum + Number(r.undelivered_cnt), 0);
   const count = (bucket: UnmappedBucket, include: (row: UnmappedRow) => boolean = () => true) =>
     rows.filter((r) => bucketOf(r) === bucket && include(r)).length;
-  // All three counts, always — a report that names only the registrable
+  // Every bucket's count, always — a report that names only the registrable
   // population reads as "nothing else is wrong" (round-4 F3), and a report
-  // that merges the other two sends the operator to the wrong remedy for one
-  // of them (round-5 F1/S3).
+  // that merges two of the others sends the operator to the wrong remedy for
+  // one of them (round-5 F1/S3).
   const base =
     `${count(UNMAPPED_BUCKET.UNREGISTERED)} unmapped-claim, ` +
     `${count(UNMAPPED_BUCKET.OTHER_TENANT, OTHER_TENANT_ROWS.differentTenant)} other-tenant, ` +

@@ -2628,6 +2628,10 @@ describe("tenant-domain CLI (C7)", () => {
       expect(message).toContain("No claim-bearing sign-in denials");
       expect(message).toContain("in the last 30 days");
       expect(message).toContain("does NOT by itself mean nothing was denied");
+      // Every class the non-empty report counts, so an empty result rules each one out.
+      for (const bucket of ["unregistered", "other-tenant", "deactivated-membership", "refused", "provider-binding"]) {
+        expect(message).toContain(bucket);
+      }
       // Func F4: the empty message must not claim to have covered retention.
       expect(message).not.toContain("retained window");
     });
@@ -2742,11 +2746,16 @@ describe("tenant-domain CLI (C7)", () => {
      * A user who left `former` for `owning` and was suspended there: active in no
      * tenant, filed under `owning`, with a deactivated membership row in `former`.
      * SCIM and directory sync in `former` may not take them back, and a claimless
-     * `former` has no sign-in that would.
+     * `former` has no sign-in that would. Both tenants, and every user filed
+     * under either, are deleted when the cell ends, however it ends.
      */
     async function seedDeparted() {
       const owning = await ctx.createTenant();
       const former = await ctx.createTenant();
+      onTestFinished(async () => {
+        await ctx.deleteTestData(owning);
+        await ctx.deleteTestData(former);
+      });
       const userId = await ctx.createUser(owning);
       await ctx.su.prisma.$executeRawUnsafe(
         `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
@@ -2794,22 +2803,16 @@ describe("tenant-domain CLI (C7)", () => {
       expect(rows.find((r) => r.tenantId === former)?.payload).toMatchObject({
         metadata: expect.objectContaining({ previousTenantId: owning, movedUserId: userId }),
       });
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("finds the user by email, matched case-insensitively", async () => {
-      const { owning, former, userId } = await seedDeparted();
+      const { former, userId } = await seedDeparted();
       const { email } = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
 
       const result = await cmdRealign({ user: (email as string).toUpperCase(), tenant: former, by: "test-op", yes: true });
 
       expect(result, result.message).toMatchObject({ ok: true });
       expect(await columnOf(userId)).toBe(former);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("refuses a user with an active membership anywhere, writing nothing", async () => {
@@ -2837,7 +2840,7 @@ describe("tenant-domain CLI (C7)", () => {
     });
 
     it.skipIf(SKIP)("refuses a target where the user holds no membership row", async () => {
-      const { owning, former, userId } = await seedDeparted();
+      const { owning, userId } = await seedDeparted();
       const stranger = await ctx.createTenant();
 
       const result = await cmdRealign({ user: userId, tenant: stranger, by: "test-op", yes: true });
@@ -2846,8 +2849,6 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result.message).toContain("holds no membership row");
       expect(await columnOf(userId)).toBe(owning);
 
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
       await ctx.deleteTestData(stranger);
     });
 
@@ -2860,9 +2861,6 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result, result.message).toMatchObject({ ok: true });
       expect(result.message).toContain("nothing to do");
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("refuses a --by label carrying a bidi control, before building a client", async () => {
@@ -2890,9 +2888,6 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result).toMatchObject({ ok: false, message: "Aborted: not confirmed." });
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("matches --user literally: `_` and `%` in the typed address are not wildcards", async () => {
@@ -2909,9 +2904,6 @@ describe("tenant-domain CLI (C7)", () => {
       }
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("refuses an email that names two users differing only in case, moving neither", async () => {
@@ -2927,21 +2919,16 @@ describe("tenant-domain CLI (C7)", () => {
       expect(await columnOf(first.userId)).toBe(first.owning);
       expect(await columnOf(second.userId)).toBe(second.owning);
       expect(await realignRows([first.owning, first.former, second.owning, second.former])).toEqual([]);
-
-      for (const t of [first.owning, first.former, second.owning, second.former]) await ctx.deleteTestData(t);
     });
 
     it.skipIf(SKIP)("refuses the sentinel tenant as the target", async () => {
-      const { owning, former, userId } = await seedDeparted();
+      const { owning, userId } = await seedDeparted();
 
       const result = await cmdRealign({ user: userId, tenant: SYSTEM_TENANT_ID, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       expect(result.message).toContain("sentinel tenant");
       expect(await columnOf(userId)).toBe(owning);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("resolves a target by its claim, and records what stays behind and each row's target", async () => {
@@ -2967,9 +2954,6 @@ describe("tenant-domain CLI (C7)", () => {
         targetId: userId,
         metadata: expect.objectContaining({ leftBehind: { tag: 1 } }),
       });
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     // Round 5 (T28): `operatorToken` is counted by its subject, the user the
@@ -3000,9 +2984,6 @@ describe("tenant-domain CLI (C7)", () => {
       for (const row of rows) {
         expect(row.payload).toMatchObject({ metadata: expect.objectContaining({ leftBehind: { operatorToken: 1 } }) });
       }
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("names a confirmation that outlived the transaction, and writes nothing", async () => {
@@ -3014,21 +2995,15 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result.message).toContain("took longer than this command's transaction allows");
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("commits after a confirmation that took six seconds, past Prisma's default transaction timeout", async () => {
-      const { owning, former, userId } = await seedDeparted();
+      const { former, userId } = await seedDeparted();
 
       const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: confirmAfter(6000) });
 
       expect(result, result.message).toMatchObject({ ok: true });
       expect(await columnOf(userId)).toBe(former);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("rethrows an error that is not an expired confirmation (round 9 T-R9-2)", async () => {
@@ -3039,9 +3014,6 @@ describe("tenant-domain CLI (C7)", () => {
 
       await expect(cmdRealign({ user: userId, tenant: former, by: "test-op", confirm })).rejects.toThrow("boom");
       expect(await columnOf(userId)).toBe(owning);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
   });
 

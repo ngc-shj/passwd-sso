@@ -41,7 +41,6 @@ const { MOVE, REVOKE } = MIGRATION_TREATMENT;
 
 export const MIGRATED_COUNTERS = {
   account: MOVE,
-  apiKey: MOVE,
   attachment: MOVE,
   emergencyAccessGrant: MOVE,
   folder: MOVE,
@@ -59,9 +58,10 @@ export const MIGRATED_COUNTERS = {
   mcpRefreshToken: REVOKE,
   // Authenticates as the user with the bootstrap tenant's maintenance scope.
   operatorToken: REVOKE,
-  // Checked against the passkey requirement only when issued and refreshed, so
-  // a moved token or code would be a target-tenant credential never held to
-  // the target's policy.
+  // Checked against the passkey requirement only when issued and refreshed (an
+  // API key: only when issued), so a moved token, key or code would be a
+  // target-tenant credential never held to the target's policy.
+  apiKey: REVOKE,
   extensionToken: REVOKE,
   extensionBridgeCode: REVOKE,
   mobileBridgeCode: REVOKE,
@@ -78,6 +78,7 @@ export const REVOKED_BY = {
   mcpRefreshToken: "revokedAt",
   operatorToken: "revokedAt",
   extensionToken: "revokedAt",
+  apiKey: "revokedAt",
   mcpAuthorizationCode: "usedAt",
   extensionBridgeCode: "usedAt",
   mobileBridgeCode: "usedAt",

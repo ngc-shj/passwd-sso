@@ -191,8 +191,17 @@ vi.mock("@/lib/auth/session/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
 
+const { mockInvalidateCachedSessions, mockSentryCaptureMessage } = vi.hoisted(() => ({
+  mockInvalidateCachedSessions: vi.fn(),
+  mockSentryCaptureMessage: vi.fn(),
+}));
+
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
-  invalidateCachedSessions: vi.fn(),
+  invalidateCachedSessions: mockInvalidateCachedSessions,
+}));
+
+vi.mock("@sentry/nextjs", () => ({
+  captureMessage: mockSentryCaptureMessage,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -829,8 +838,8 @@ describe("ensureTenantMembershipForSignIn", () => {
     }
     // MCP grants are bound to their client's tenant, and an extension or iOS
     // token would skip the target tenant's passkey requirement until its
-    // refresh: revoked, not moved.
-    for (const model of ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "extensionToken"] as const) {
+    // refresh, an API key for its whole life: revoked, not moved.
+    for (const model of ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "extensionToken", "apiKey"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
         where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, revokedAt: null },
         data: { revokedAt: expect.any(Date) },
@@ -1099,6 +1108,44 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockPrisma.tenantMember.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
       mockPrisma.tenantMember.create.mock.invocationCallOrder[0]!,
     );
+    expect(mockPrisma.apiKey.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  // The migrated sessions' cache tombstones: a write that did not land leaves
+  // the pre-migration SessionInfo cached, raised as invalidateUserSessions raises it.
+  it("row 6: logs and reports the migrated sessions' cache tombstones that did not land", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+    mockPrisma.session.findMany.mockResolvedValue([{ sessionToken: "digest-1" }, { sessionToken: "digest-2" }]);
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 2, failed: 1 });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result.ok).toBe(true);
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["digest-1", "digest-2"]);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1", failures: 1, _logType: "session.cache_tombstone_failures" }),
+      "session.cache_tombstone_failures",
+    );
+    expect(mockSentryCaptureMessage).toHaveBeenCalledWith(
+      expect.stringContaining("tombstone failures"),
+      expect.objectContaining({ level: "error", extra: expect.objectContaining({ userId: "user-1", failures: 1 }) }),
+    );
+  });
+
+  it("row 6: raises nothing when every migrated session's cache tombstone lands", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+    mockPrisma.session.findMany.mockResolvedValue([{ sessionToken: "digest-1" }]);
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 1, failed: 0 });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result.ok).toBe(true);
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["digest-1"]);
+    expect(mockLoggerError).not.toHaveBeenCalled();
+    expect(mockSentryCaptureMessage).not.toHaveBeenCalled();
   });
 
   // Row 9a refusals (round-1 M2): same two arms as row 8b, reached via the

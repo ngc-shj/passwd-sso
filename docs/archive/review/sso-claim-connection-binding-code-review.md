@@ -499,3 +499,63 @@ R50/R3/R42 T24, T25; RT10 T28, T29; R50 ii T27. The rest are clean.
 - T28: operator tokens are seeded with the subject and the creator as different users, and a
   realign `leftBehind` cell counts by subject. Red proofs T28a and T28b.
 - T29: the revoked-claim boundary is covered, and the heading-order assertion is unconditional.
+
+---
+
+# Review round 6
+Date: 2026-10-25
+Scope: `2a9af2a54..HEAD` (d6eec0613).
+
+## Changes from Previous Round
+Every round-5 finding was verified as resolved: N1, N2/F-R5-1, F-R5-2, F-R5-3, F-R5-4 and
+T24–T29. On the migration gate, the testing expert concluded that it now refuses every shape
+that can write inside the callback in this codebase, and that further node-kind refusals would
+bring diminishing returns.
+
+## Findings
+- **Security**
+  - S-R6-1 Minor (R43): `apiKey` still moves. A key minted under the bootstrap tenant's policy
+    stays live in the target tenant for up to 365 days, without the target's passkey check.
+    `invalidateUserSessions` revokes it.
+  - S-R6-2 [Adjacent] Minor: enabling `requirePasskey` never re-checks existing API keys.
+    Pre-existing; follow-up.
+  - S-R6-3 [Adjacent] Minor: after the migration, a failure to tombstone the session cache is
+    discarded silently.
+- **Functionality**
+  - F-R6-1 Minor: a stale count in a comment, and the empty-result message omits the new
+    bucket.
+  - A-R6-1 [Adjacent] Minor: an iOS refresh after the revocation logs a false replay.
+    **Rejected by the orchestrator.** `src/app/api/mobile/token/refresh/route.ts` checks the
+    token tenant's membership before `refreshIosToken`. The bootstrap membership is gone, so the
+    request gets a 401 before the replay branch. The security expert found the same.
+- **Testing**
+  - T30 Minor: the realign cells clean up after their assertions instead of on test finish.
+
+## Recurring Issue Check
+### Security expert
+R42/R43 S-R6-1. The rest are clean.
+### Functionality expert
+R2/R3 F-R6-1. The rest are clean.
+### Testing expert
+Test hygiene T30. The rest are clean.
+
+## Resolution Status (round 6)
+- S-R6-1: API keys are revoked by the migration, not moved. The integration cells call the real
+  `validateApiKey`. A migrated key is refused with `API_KEY_REVOKED`. A key the boundary user
+  holds is still accepted, and so is a key created after the migration, which is the positive
+  control. A key that was already revoked keeps its original `revoked_at`. Red proofs S1a and
+  S1b.
+  - Parity with `invalidateUserSessions`: the migration revokes every credential type that
+    function revokes. Those are extension tokens, API keys, MCP access tokens, MCP refresh
+    tokens, delegation sessions, and operator tokens (matched by subject).
+  - Sessions differ. They move instead of being deleted, because the proxy re-derives the
+    passkey requirement from the tenant of the active membership.
+  - WebAuthn credentials are kept by both paths.
+- S-R6-2: follow-up issue, since the behaviour predates this branch.
+- S-R6-3: tombstone failures are logged and sent to Sentry, the same way
+  `invalidateUserSessions` does. Red proofs S3a and S3b.
+- F-R6-1: the comment no longer states a count, and the empty-result message names all five
+  classes. Red proof F1a.
+- T30: `seedDeparted` registers cleanup with `onTestFinished`, and the redundant trailing
+  deletes are gone. Red proofs T30a and T30b. With the hook removed, an injected failure leaked
+  28 tenants.

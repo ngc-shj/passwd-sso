@@ -56,6 +56,7 @@ import {
 import { providerRef, resetIdentifierPepperForTests } from "@/lib/audit/identifier-pepper";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
+import { validateApiKey } from "@/lib/auth/tokens/api-key";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { DEREGISTER_ACTOR_LABEL, TENANT_CLAIM_EVENT_OPERATION } from "@/lib/tenant/tenant-claim-event";
@@ -525,6 +526,8 @@ describe("tenant claim binding (C3/C4/C5)", () => {
   const TAG = "0".repeat(32);
   /** The plaintext of the extension token `seedOwnedRows` gives `userId`, so a cell can present it. */
   const extensionTokenOf = (userId: string): string => `ext_seed_${userId}`;
+  /** The plaintext of the API key `seedOwnedRows` gives `userId` (`api_` prefix, as `validateApiKey` requires). */
+  const apiKeyOf = (userId: string): string => `api_seed_${userId}`;
   const revocable = (table: string, column: string, userColumn = "user_id") =>
     `SELECT tenant_id::text || CASE WHEN ${column} IS NULL THEN '' ELSE ' revoked' END AS tenant_id
        FROM ${table} WHERE ${userColumn} = $1::uuid`;
@@ -632,12 +635,12 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         ),
     },
     apiKey: {
-      select: `SELECT tenant_id FROM api_keys WHERE user_id = $1::uuid`,
+      select: revocable("api_keys", "revoked_at"),
       seed: (sql, ids) =>
         sql(
           `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at)
            VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', 'key', 'passwords:read', now() + interval '1 day')`,
-          randomUUID(), ids.userId, ids.tenantId, hex(32),
+          randomUUID(), ids.userId, ids.tenantId, hashToken(apiKeyOf(ids.userId)),
         ),
     },
     webAuthnCredential: {
@@ -1072,7 +1075,7 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     /**
      * The placement after a migration from `home` to `tenantId`: every table
      * moved, but the REVOKE rows (MCP grants, operator and extension tokens,
-     * bridge codes), which stay under `home`, revoked or consumed. Without
+     * API keys, bridge codes), which stay under `home`, revoked or consumed. Without
      * `home`, every row of every table under `tenantId`, live — the seeded state.
      */
     function movedTo(tenantId: string, home?: string) {
@@ -1125,6 +1128,40 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           headers: { authorization: `Bearer ${extensionTokenOf(userId)}` },
         }),
       );
+    }
+
+    /** What `validateApiKey` answers for the API key `plaintext`. */
+    async function validateKey(plaintext: string) {
+      return validateApiKey(
+        new NextRequest("http://localhost:3000/api/v1/passwords", {
+          headers: { authorization: `Bearer ${plaintext}` },
+        }),
+      );
+    }
+
+    /** An API key of `userId`'s under `tenantId`; `revokedAt` given, already revoked then. */
+    async function seedApiKey(userId: string, tenantId: string, plaintext: string, revokedAt: Date | null = null) {
+      const id = randomUUID();
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at, revoked_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', 'key', 'passwords:read', now() + interval '1 day', $5::timestamptz)`,
+          id, userId, tenantId, hashToken(plaintext), revokedAt,
+        );
+      });
+      return id;
+    }
+
+    async function apiKeyState(id: string) {
+      return ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        const [row] = await tx.$queryRawUnsafe<{ tenant_id: string; revoked_at: Date | null }[]>(
+          `SELECT tenant_id::text, revoked_at FROM api_keys WHERE id = $1::uuid`,
+          id,
+        );
+        return row;
+      });
     }
 
     /**
@@ -1218,6 +1255,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           // A user with no rows of their own, so the boundary user's placement is untouched.
           const other = await ctx.createUser(boundary.tenantId);
           const operatorTokens = await seedCrossOperatorTokens(member.userId, other, member.home);
+          // Revoked before the sign-in: the migration's revocation must not restamp it.
+          const earlierRevokedAt = new Date("2026-01-02T03:04:05.000Z");
+          const revokedKey = await seedApiKey(member.userId, member.home, `api_revoked_${member.userId}`, earlierRevokedAt);
 
           expect(
             await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
@@ -1237,6 +1277,20 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           });
           expect(await operatorTokenState(operatorTokens.asSubject)).toEqual({ tenant_id: member.home, revoked: true });
           expect(await operatorTokenState(operatorTokens.asCreator)).toEqual({ tenant_id: member.home, revoked: false });
+          // The pre-migration API key is refused as revoked; the boundary user's,
+          // untouched, is accepted, as is a key issued in the target afterwards.
+          expect(await validateKey(apiKeyOf(member.userId))).toEqual({ ok: false, error: "API_KEY_REVOKED" });
+          expect(await validateKey(apiKeyOf(boundary.userId))).toMatchObject({
+            ok: true,
+            data: { userId: boundary.userId, tenantId: boundary.tenantId },
+          });
+          const issuedAfter = `api_after_${member.userId}`;
+          await seedApiKey(member.userId, target.tenantId, issuedAfter);
+          expect(await validateKey(issuedAfter)).toMatchObject({
+            ok: true,
+            data: { userId: member.userId, tenantId: target.tenantId },
+          });
+          expect(await apiKeyState(revokedKey)).toEqual({ tenant_id: member.home, revoked_at: earlierRevokedAt });
         } finally {
           await teardown(member, ...(member ? [member.home] : []), target.tenantId, ...(boundaryTenant ? [boundaryTenant] : []));
         }

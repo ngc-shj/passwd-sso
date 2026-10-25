@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import * as Sentry from "@sentry/nextjs";
 import type { Account } from "next-auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { logAuditAsync } from "@/lib/audit/audit";
@@ -675,10 +676,6 @@ async function claimedTenantMembership(
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
-      await tx.apiKey.updateMany({
-        where: { userId, tenantId: existingTenantId },
-        data: { tenantId: target.id },
-      });
       await tx.webAuthnCredential.updateMany({
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
@@ -714,13 +711,22 @@ async function claimedTenantMembership(
         where: { subjectUserId: userId, tenantId: existingTenantId, revokedAt: null },
         data: { revokedAt },
       });
-      // An extension or iOS token is revoked, not moved: a moved token would be
-      // a live target-tenant credential, never checked against the target's
-      // `requirePasskey` or its token lifetimes until its next refresh. Revoked
-      // as invalidateUserSessions revokes it when a member leaves a tenant.
-      // Sessions above do move: the proxy reads the passkey requirement from
-      // the session's tenant on every request, and their cache is evicted below.
+      // An extension or iOS token, or an API key, is revoked, not moved: a
+      // moved one would be a live target-tenant credential never checked
+      // against the target's `requirePasskey` — an extension token until its
+      // next refresh, an API key for the rest of its life — since each is
+      // validated only against revocation, expiry and an active membership in
+      // its own tenant. Revoked as invalidateUserSessions revokes both when a
+      // member leaves a tenant. Sessions above do move, where
+      // invalidateUserSessions deletes them: the proxy reads the passkey
+      // requirement from the tenant of the user's ACTIVE MEMBERSHIP
+      // (resolveOwningTenantIdFromClient) on every request, and their cache is
+      // evicted below.
       await tx.extensionToken.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.apiKey.updateMany({
         where: { userId, tenantId: existingTenantId, revokedAt: null },
         data: { revokedAt },
       });
@@ -762,7 +768,28 @@ async function claimedTenantMembership(
     // tombstone the migrated tokens so the proxy stops serving the
     // stale (pre-migration) tenantId for up to SESSION_CACHE_TTL_MS.
     if (migratedSessionTokens.length > 0) {
-      await invalidateCachedSessions(migratedSessionTokens);
+      const { failed } = await invalidateCachedSessions(migratedSessionTokens);
+      // Same signal invalidateUserSessions raises: a tombstone that did not
+      // land leaves the pre-migration SessionInfo cached on workers.
+      if (failed > 0) {
+        getLogger().error(
+          {
+            userId,
+            failures: failed,
+            reason: "bootstrap_tenant_migration",
+            _logType: "session.cache_tombstone_failures",
+          },
+          "session.cache_tombstone_failures",
+        );
+        Sentry.captureMessage(
+          "session cache tombstone failures during the bootstrap tenant migration",
+          {
+            level: "error",
+            tags: { reason: "bootstrap_tenant_migration" },
+            extra: { userId, failures: failed, tenantScope: target.id },
+          },
+        );
+      }
     }
 
     return { ok: true };
