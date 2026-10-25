@@ -113,7 +113,8 @@ Check that no refusal message contains a client secret or the raw JSON.
 5. `npm run tenant-domain -- bind --apply "$TMPDIR/claim-bind.tsv" --by manual-test`: the summary lists the line to apply, and the prompt appears once. After confirmation the per-line table shows `bound`, and the emptied line is not applied. Rerun: `already bound`.
 6. Bind the other claim interactively: `npm run tenant-domain -- bind --claim <claim> --provider google --by manual-test`. The evidence is printed before the prompt. `tenant-domain history --domain <claim>` shows a `rebind` row with `oldProvider=-` and `newProvider=google`.
 7. Delete the file. `npm run tenant-domain -- list --unbound` lists nothing.
-8. Set `AUTH_CLAIM_BINDING=strict` and restart: the app boots. Sign in through Google and through A, and both resolve to their tenants.
+8. `npm run tenant-domain -- legacy-accounts` with the env the app will start with: it prints the `saml-jackson` accounts per tenant (`(none)` when no sign-in went through the legacy provider) and exits 0. If the setup signed users in through the legacy provider into both tenants, keep `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` set: it exits 1 and names 2 tenants. Unset the pair and list A in `AUTH_JACKSON_CONNECTIONS`: it exits 0 and says `saml-jackson` is not configured. Run it with every `AUTH_GOOGLE_*` / `AUTH_JACKSON_*` variable empty: it exits 1 and says it needs the app's environment. No run writes an `audit_outbox` row.
+9. Set `AUTH_CLAIM_BINDING=strict` and restart: the app boots. Sign in through Google and through A, and both resolve to their tenants.
 
 ### Test 7: hardened legacy provider, stale secret
 
@@ -160,7 +161,7 @@ gh api repos/:owner/:repo/branches/main/protection/required_status_checks --jq '
 
 ## Rollback
 
-- **App:** redeploy the previous image. The migration is additive: the new columns are nullable, the old code names none of them, and the widened operation CHECK accepts every value the old code writes. Before redeploying, restore the old Jackson configuration (`AUTH_JACKSON_ID` as the old version expected it, no `AUTH_JACKSON_CONNECTIONS`), since the previous version has no per-connection providers and connection B's users cannot sign in on it.
+- **App:** redeploy the previous image. The migration is additive: the new columns are nullable, the old code names none of them, and the widened operation CHECK accepts every value the old code writes. Before redeploying, restore the old Jackson configuration (`AUTH_JACKSON_ID` as the old version expected it, no `AUTH_JACKSON_CONNECTIONS`), since the previous version has no per-connection providers and connection B's users cannot sign in on it. On a deployment of the README's Known-lockout class, the rollback reopens the cross-connection takeover from every connection.
 - **Data:** nothing to undo. Bindings written by `bind` / `add --provider` stay in `tenant_claims.provider`, and the previous version ignores them; they apply again when this version is redeployed. Rows the previous version registers in the meantime have a NULL provider and show up in `list --unbound`.
 - **Do not** drop the migration's columns to roll back: `tenant_claim_events` is the routing history, and dropping `old_provider` / `new_provider` loses it.
 

@@ -2,8 +2,9 @@
  * The pure halves of `tenant-domain`'s claim-binding commands (plan
  * sso-claim-connection-binding, C3/C4): the member evidence and its canonical
  * string, the majority rule, the bind file's format, the worktree check
- * `bind --from-members --out` applies to its target, and the mapping of a
- * stored sign-in provider ref back to a provider id.
+ * `bind --from-members --out` applies to its target, the mapping of a
+ * stored sign-in provider ref back to a provider id, and `legacy-accounts`'
+ * grouping and verdict.
  *
  * In its own module for the same reason as `tenant-domain-flags.ts`: it can be
  * unit-tested without importing the CLI (which pulls in Prisma, the driver
@@ -348,4 +349,62 @@ export function describeSignInProviderRef(ref: string | null, mapping: RefMappin
   if (mapping.kind === "unmappable") return `${mapping.label} (ref ${escapeUnsafeDisplayChars(ref)})`;
   const id = mapping.idByRef.get(ref);
   return id ?? `${SIGN_IN_REF_LABEL.UNKNOWN} (ref ${escapeUnsafeDisplayChars(ref)})`;
+}
+
+// ─── legacy-accounts ─────────────────────────────────────────────
+
+/**
+ * The users holding pre-upgrade `saml-jackson` accounts, grouped by the tenant
+ * of their active membership. `tenantId` null groups the users active nowhere.
+ */
+export type LegacyAccountGroup = {
+  readonly tenantId: string | null;
+  readonly users: number;
+  readonly accounts: number;
+};
+
+/** Groups `accounts` by their user's active tenant, tenants in id order, the no-active group last. */
+export function groupLegacyAccounts(
+  accounts: readonly { readonly userId: string }[],
+  activeTenantOf: ReadonlyMap<string, string>,
+): LegacyAccountGroup[] {
+  const byTenant = new Map<string | null, { users: Set<string>; accounts: number }>();
+  for (const { userId } of accounts) {
+    const tenantId = activeTenantOf.get(userId) ?? null;
+    const group = byTenant.get(tenantId) ?? { users: new Set<string>(), accounts: 0 };
+    group.users.add(userId);
+    group.accounts += 1;
+    byTenant.set(tenantId, group);
+  }
+  return [...byTenant.entries()]
+    .map(([tenantId, group]) => ({ tenantId, users: group.users.size, accounts: group.accounts }))
+    .sort((a, b) => (a.tenantId === null ? 1 : b.tenantId === null ? -1 : a.tenantId.localeCompare(b.tenantId)));
+}
+
+export const LEGACY_ACCOUNT_VERDICT = {
+  /** No account records the legacy provider. */
+  NONE: "none",
+  /** The legacy provider is not configured, so no client resolves those accounts. */
+  UNRESOLVED: "unresolved",
+  /** Configured, and the accounts belong to one group's users. */
+  ONE_GROUP: "one-group",
+  /** Configured, and the accounts span more than one group: refused. */
+  SPANS: "spans",
+} as const;
+
+export type LegacyAccountVerdict = (typeof LEGACY_ACCOUNT_VERDICT)[keyof typeof LEGACY_ACCOUNT_VERDICT];
+
+/**
+ * A tenant stands in for the connection its users came through: the accounts
+ * do not record which connection that was. Users active nowhere count as one
+ * more group, because a sign-in as them still gets a session; with any other
+ * group present, one client resolves the users of two connections.
+ */
+export function legacyAccountVerdict(
+  groups: readonly LegacyAccountGroup[],
+  legacyConfigured: boolean,
+): LegacyAccountVerdict {
+  if (groups.length === 0) return LEGACY_ACCOUNT_VERDICT.NONE;
+  if (!legacyConfigured) return LEGACY_ACCOUNT_VERDICT.UNRESOLVED;
+  return groups.length > 1 ? LEGACY_ACCOUNT_VERDICT.SPANS : LEGACY_ACCOUNT_VERDICT.ONE_GROUP;
 }

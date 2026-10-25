@@ -13,7 +13,7 @@
  * audit row is read from `audit_outbox`, the upstream table.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
 const { nextAuthConfigs } = vi.hoisted(() => ({ nextAuthConfigs: [] as unknown[] }));
@@ -479,15 +479,166 @@ describe("tenant claim binding (C3/C4/C5)", () => {
 
   /**
    * The members the S1 and bootstrap-migration cells sign in as: a departed
-   * member (no active membership) and a bootstrap member, each with a vault
-   * entry, a session and the account they signed up through.
+   * member (no active membership) and a bootstrap member, each with a row in
+   * every table the bootstrap migration moves and the account they signed up
+   * through.
    */
   const VICTIM_STATE = { DEPARTED: "departed member", BOOTSTRAP: "bootstrap member" } as const;
   type VictimState = (typeof VICTIM_STATE)[keyof typeof VICTIM_STATE];
 
   type Victim = { userId: string; email: string; home: string };
 
-  /** The victim and their rows: a vault entry, a session, and the account they signed up through. */
+  /**
+   * The tables the bootstrap migration moves, read off its transaction in
+   * `claimedTenantMembership` (src/auth.ts): the `user.update`, every
+   * `tx.<model>.updateMany`, the `audit_log_tenant_migrate` CALL (audit_logs),
+   * and the membership's `deleteMany` + `create` (checked separately, with its
+   * active flag). Each entry selects the tenant of the user's own rows; the
+   * three the migration scopes by tenant alone (`passwordEntryHistory`,
+   * `emergencyAccessKeyPair`, `shareAccessLog`) are reached through their
+   * parent. A table added to the migration belongs here too.
+   */
+  const MOVED_TABLES = {
+    users: `SELECT tenant_id FROM users WHERE id = $1::uuid`,
+    accounts: `SELECT tenant_id FROM accounts WHERE user_id = $1::uuid`,
+    password_entries: `SELECT tenant_id FROM password_entries WHERE user_id = $1::uuid`,
+    tags: `SELECT tenant_id FROM tags WHERE user_id = $1::uuid`,
+    folders: `SELECT tenant_id FROM folders WHERE user_id = $1::uuid`,
+    sessions: `SELECT tenant_id FROM sessions WHERE user_id = $1::uuid`,
+    extension_tokens: `SELECT tenant_id FROM extension_tokens WHERE user_id = $1::uuid`,
+    password_entry_histories: `SELECT h.tenant_id FROM password_entry_histories h
+                                 JOIN password_entries e ON e.id = h.entry_id WHERE e.user_id = $1::uuid`,
+    vault_keys: `SELECT tenant_id FROM vault_keys WHERE user_id = $1::uuid`,
+    audit_logs: `SELECT tenant_id FROM audit_logs WHERE user_id = $1::uuid`,
+    emergency_access_grants: `SELECT tenant_id FROM emergency_access_grants WHERE owner_id = $1::uuid`,
+    emergency_access_key_pairs: `SELECT k.tenant_id FROM emergency_access_key_pairs k
+                                   JOIN emergency_access_grants g ON g.id = k.grant_id WHERE g.owner_id = $1::uuid`,
+    password_shares: `SELECT tenant_id FROM password_shares WHERE created_by_id = $1::uuid`,
+    share_access_logs: `SELECT l.tenant_id FROM share_access_logs l
+                          JOIN password_shares s ON s.id = l.share_id WHERE s.created_by_id = $1::uuid`,
+    attachments: `SELECT tenant_id FROM attachments WHERE created_by_id = $1::uuid`,
+    notifications: `SELECT tenant_id FROM notifications WHERE user_id = $1::uuid`,
+    api_keys: `SELECT tenant_id FROM api_keys WHERE user_id = $1::uuid`,
+    webauthn_credentials: `SELECT tenant_id FROM webauthn_credentials WHERE user_id = $1::uuid`,
+  } as const;
+  type MovedTable = keyof typeof MOVED_TABLES;
+
+  const hex = (bytes: number): string => randomBytes(bytes).toString("hex");
+
+  /**
+   * One row of `userId`'s in every moved table but `users`/`accounts` (seeded
+   * by `createUser`/`linkAccount`), filed under `tenantId`.
+   */
+  async function seedOwnedRows(userId: string, tenantId: string): Promise<void> {
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      const entryId = randomUUID();
+      const grantId = randomUUID();
+      const shareId = randomUUID();
+      const sql = (text: string, ...values: unknown[]) => tx.$executeRawUnsafe(text, ...values);
+      await sql(
+        `INSERT INTO password_entries (
+           id, user_id, tenant_id,
+           encrypted_blob, blob_iv, blob_auth_tag,
+           encrypted_overview, overview_iv, overview_auth_tag,
+           key_version, aad_version, created_at, updated_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 'overview', $4, $5, 1, 1, now(), now())`,
+        entryId, userId, tenantId, "0".repeat(24), "0".repeat(32),
+      );
+      await sql(
+        `INSERT INTO password_entry_histories (id, entry_id, tenant_id, encrypted_blob, blob_iv, blob_auth_tag, key_version)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 1)`,
+        randomUUID(), entryId, tenantId, "0".repeat(24), "0".repeat(32),
+      );
+      await sql(
+        `INSERT INTO emergency_access_grants (id, tenant_id, owner_id, grantee_email, wait_days, token_hash, token_expires_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'grantee@example.invalid', 7, $4, now() + interval '1 day', now())`,
+        grantId, tenantId, userId, hex(32),
+      );
+      await sql(
+        `INSERT INTO emergency_access_key_pairs (id, grant_id, tenant_id, encrypted_private_key, private_key_iv, private_key_auth_tag)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'key', $4, $5)`,
+        randomUUID(), grantId, tenantId, "0".repeat(24), "0".repeat(32),
+      );
+      await sql(
+        `INSERT INTO password_shares (id, tenant_id, token_hash, encrypted_data, data_iv, data_auth_tag, expires_at, created_by_id, password_entry_id)
+         VALUES ($1::uuid, $2::uuid, $3, 'data', $4, $5, now() + interval '1 day', $6::uuid, $7::uuid)`,
+        shareId, tenantId, hex(32), "0".repeat(24), "0".repeat(32), userId, entryId,
+      );
+      await sql(
+        `INSERT INTO share_access_logs (id, share_id, tenant_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`,
+        randomUUID(), shareId, tenantId,
+      );
+      await sql(
+        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+        randomUUID(), hex(16), userId, tenantId,
+      );
+      await sql(
+        `INSERT INTO tags (id, name, user_id, tenant_id, created_at, updated_at)
+         VALUES ($1::uuid, 'tag', $2::uuid, $3::uuid, now(), now())`,
+        randomUUID(), userId, tenantId,
+      );
+      await sql(
+        `INSERT INTO folders (id, name, user_id, tenant_id, created_at, updated_at)
+         VALUES ($1::uuid, 'folder', $2::uuid, $3::uuid, now(), now())`,
+        randomUUID(), userId, tenantId,
+      );
+      await sql(
+        `INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, expires_at, family_id, cnf_jkt)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'passwords:read', now() + interval '1 day', $5::uuid, $6)`,
+        randomUUID(), userId, tenantId, hex(32), randomUUID(), hex(16),
+      );
+      await sql(
+        `INSERT INTO vault_keys (id, user_id, tenant_id, version, verification_ciphertext, verification_iv, verification_auth_tag)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 'verify', $4, $5)`,
+        randomUUID(), userId, tenantId, "0".repeat(24), "0".repeat(32),
+      );
+      await sql(
+        `INSERT INTO audit_logs (id, scope, action, user_id, tenant_id, actor_type, outbox_id, created_at)
+         VALUES ($1::uuid, 'PERSONAL', 'AUTH_LOGIN', $2::uuid, $3::uuid, 'HUMAN', $4::uuid, now())`,
+        randomUUID(), userId, tenantId, randomUUID(),
+      );
+      await sql(
+        `INSERT INTO attachments (id, filename, content_type, size_bytes, encrypted_data, iv, auth_tag, tenant_id, password_entry_id, created_by_id)
+         VALUES ($1::uuid, 'a.bin', 'application/octet-stream', 1, '\\x00'::bytea, $2, $3, $4::uuid, $5::uuid, $6::uuid)`,
+        randomUUID(), "0".repeat(24), "0".repeat(32), tenantId, entryId, userId,
+      );
+      await sql(
+        `INSERT INTO notifications (id, user_id, tenant_id, type, title, body)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'SECURITY_ALERT', 'title', 'body')`,
+        randomUUID(), userId, tenantId,
+      );
+      await sql(
+        `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', 'key', 'passwords:read', now() + interval '1 day')`,
+        randomUUID(), userId, tenantId, hex(32),
+      );
+      await sql(
+        `INSERT INTO webauthn_credentials (id, user_id, tenant_id, credential_id, public_key, device_type)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'pk', 'singleDevice')`,
+        randomUUID(), userId, tenantId, hex(16),
+      );
+    });
+  }
+
+  /** Per moved table, the distinct tenants `userId`'s rows are filed under (sorted; empty when none). */
+  async function movedTableTenants(userId: string): Promise<Record<MovedTable, string[]>> {
+    const [row] = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      const columns = (Object.entries(MOVED_TABLES) as [MovedTable, string][])
+        .map(([table, select]) =>
+          `'${table}', COALESCE((SELECT json_agg(DISTINCT t.tenant_id ORDER BY t.tenant_id) FROM (${select}) t), '[]'::json)`)
+        .join(",\n");
+      return tx.$queryRawUnsafe<{ rows: Record<MovedTable, string[]> }[]>(
+        `SELECT json_build_object(${columns}) AS rows`,
+        userId,
+      );
+    });
+    return row!.rows;
+  }
+
+  /** The victim and a row of theirs in every table the bootstrap migration moves. */
   async function seedVictim(state: VictimState, accountProvider: string): Promise<Victim> {
     const home = await ctx.createTenant();
     if (state === VICTIM_STATE.BOOTSTRAP) {
@@ -495,30 +646,7 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     }
     const userId = await ctx.createUser(home);
     await linkAccount(userId, home, accountProvider);
-    await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      await tx.$executeRawUnsafe(
-        `INSERT INTO password_entries (
-           id, user_id, tenant_id,
-           encrypted_blob, blob_iv, blob_auth_tag,
-           encrypted_overview, overview_iv, overview_auth_tag,
-           key_version, aad_version, created_at, updated_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 'overview', $4, $5, 1, 1, now(), now())`,
-        randomUUID(),
-        userId,
-        home,
-        "0".repeat(24),
-        "0".repeat(32),
-      );
-      await tx.$executeRawUnsafe(
-        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
-         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
-        randomUUID(),
-        randomUUID().replace(/-/g, ""),
-        userId,
-        home,
-      );
-    });
+    await seedOwnedRows(userId, home);
     if (state === VICTIM_STATE.DEPARTED) await deactivateMemberships(userId);
     return { userId, email: await emailOf(userId), home };
   }
@@ -532,17 +660,13 @@ describe("tenant claim binding (C3/C4/C5)", () => {
            'user', (SELECT json_build_object('tenant', tenant_id, 'email', email) FROM users WHERE id = $1::uuid),
            'members', (SELECT json_agg(json_build_object('tenant', tenant_id, 'active', deactivated_at IS NULL) ORDER BY tenant_id)
                          FROM tenant_members WHERE user_id = $1::uuid),
-           'entries', (SELECT json_agg(json_build_object('id', id, 'tenant', tenant_id) ORDER BY id)
-                         FROM password_entries WHERE user_id = $1::uuid),
-           'sessions', (SELECT json_agg(json_build_object('id', id, 'tenant', tenant_id) ORDER BY id)
-                          FROM sessions WHERE user_id = $1::uuid),
            'accounts', (SELECT json_agg(json_build_object('provider', provider, 'sub', provider_account_id, 'tenant', tenant_id)
                           ORDER BY provider, provider_account_id) FROM accounts WHERE user_id = $1::uuid)
          )::text AS rows`,
         userId,
       );
     });
-    return row!.rows;
+    return `${row!.rows} ${JSON.stringify(await movedTableTenants(userId))}`;
   }
 
   async function activeMembers(tenantId: string): Promise<number> {
@@ -569,8 +693,20 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     return { tenantId, claim };
   }
 
+  /**
+   * The victim's user row goes first: a row-4 join moves the column but leaves
+   * their rows under the old tenant, where `deleteTestData`'s by-tenant user
+   * delete no longer reaches them and their RESTRICT tenant FKs block the
+   * tenant delete. Every moved table but audit_logs cascades from `users`;
+   * audit_logs and the outbox are swept by tenant.
+   */
   async function teardown(victim: Victim | null, ...tenants: string[]): Promise<void> {
-    if (victim) await dropAuthRows(victim.userId);
+    if (victim) {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(`DELETE FROM users WHERE id = $1::uuid`, victim.userId);
+      });
+    }
     for (const tenantId of tenants) await ctx.deleteTestData(tenantId);
   }
 
@@ -662,8 +798,12 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         try {
           victim = await seedVictim(VICTIM_STATE.DEPARTED, OTHER_PROVIDER);
           const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+          const before = await victimRows(victim.userId);
 
           expect(await capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own))).toBe(true);
+          // The positive control for the deny cells' unchanged snapshot: the
+          // same snapshot sees this allowed sign-in's writes.
+          expect(await victimRows(victim.userId)).not.toBe(before);
           expect(await tenantOf(victim.userId)).toBe(target.tenantId);
           expect(
             await ctx.su.prisma.tenantMember.count({
@@ -685,8 +825,12 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         try {
           victim = await seedVictim(VICTIM_STATE.BOOTSTRAP, OTHER_PROVIDER);
           const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+          const before = await victimRows(victim.userId);
 
           expect(await capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own))).toBe(true);
+          // The positive control for the deny cells' unchanged snapshot: the
+          // same snapshot sees this allowed sign-in's writes.
+          expect(await victimRows(victim.userId)).not.toBe(before);
           expect(await tenantOf(victim.userId)).toBe(target.tenantId);
           expect(await ctx.su.prisma.tenantMember.findMany({
             where: { userId: victim.userId },
@@ -744,35 +888,37 @@ describe("tenant claim binding (C3/C4/C5)", () => {
    * which unit tests with a mocked Prisma cannot see.
    */
   describe("rows 6 / 9a: the bootstrap migration", () => {
-    /** Where each of the member's rows is filed, and their memberships. */
+    /** Where each of the member's rows is filed, per moved table, and their memberships. */
     async function placement(userId: string) {
-      const [row] = await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<{ rows: { user: string; entries: string[]; sessions: string[]; accounts: string[] } }[]>(
-          `SELECT json_build_object(
-             'user', (SELECT tenant_id FROM users WHERE id = $1::uuid),
-             'entries', (SELECT json_agg(DISTINCT tenant_id) FROM password_entries WHERE user_id = $1::uuid),
-             'sessions', (SELECT json_agg(DISTINCT tenant_id) FROM sessions WHERE user_id = $1::uuid),
-             'accounts', (SELECT json_agg(DISTINCT tenant_id) FROM accounts WHERE user_id = $1::uuid)
-           ) AS rows`,
-          userId,
-        );
-      });
       const members = await ctx.su.prisma.tenantMember.findMany({
         where: { userId },
         select: { tenantId: true, deactivatedAt: true },
       });
-      return { ...row!.rows, members };
+      return { tables: await movedTableTenants(userId), members };
     }
 
     function movedTo(tenantId: string) {
-      return {
-        user: tenantId,
-        entries: [tenantId],
-        sessions: [tenantId],
-        accounts: [tenantId],
-        members: [{ tenantId, deactivatedAt: null }],
-      };
+      const tables = Object.fromEntries(Object.keys(MOVED_TABLES).map((table) => [table, [tenantId]]));
+      return { tables, members: [{ tenantId, deactivatedAt: null }] };
+    }
+
+    /**
+     * A user of a third tenant with a row in every moved table. The migration
+     * moves `passwordEntryHistory`, `emergencyAccessKeyPair` and
+     * `shareAccessLog` by tenant alone, so these rows show it does not reach
+     * past the bootstrap tenant.
+     */
+    async function seedBoundary(): Promise<{ tenantId: string; userId: string }> {
+      const tenantId = await ctx.createTenant();
+      const userId = await ctx.createUser(tenantId);
+      await linkAccount(userId, tenantId);
+      await seedOwnedRows(userId, tenantId);
+      return { tenantId, userId };
+    }
+
+    /** Every moved table holds the member's rows before the sign-in, so "moved" cannot pass on an empty table. */
+    async function expectSeededEverywhere(userId: string, tenantId: string): Promise<void> {
+      expect((await placement(userId)).tables).toEqual(movedTo(tenantId).tables);
     }
 
     async function seedBootstrapMember(): Promise<Victim & { providerAccountId: string }> {
@@ -794,8 +940,10 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         const claim = freshClaim(`migrate-9a-${mode}`);
         let member: (Victim & { providerAccountId: string }) | null = null;
         let created: string | null = null;
+        const boundary = await seedBoundary();
         try {
           member = await seedBootstrapMember();
+          await expectSeededEverywhere(member.userId, member.home);
 
           expect(
             await capturedSignIn()(signInParams(member.email, claim, SIGN_IN_PROVIDER, member.providerAccountId)),
@@ -807,8 +955,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           expect(row.provider).toBe(SIGN_IN_PROVIDER);
           expect(await placement(member.userId)).toEqual(movedTo(created));
           expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);
+          expect(await placement(boundary.userId)).toEqual(movedTo(boundary.tenantId));
         } finally {
-          await teardown(member, ...(member ? [member.home] : []), ...(created ? [created] : []));
+          await teardown(member, ...(member ? [member.home] : []), ...(created ? [created] : []), boundary.tenantId);
         }
       },
     );
@@ -819,8 +968,10 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         stubModeEnv(mode);
         const target = await claimedTenant(`migrate-6-${mode}`);
         let member: (Victim & { providerAccountId: string }) | null = null;
+        const boundary = await seedBoundary();
         try {
           member = await seedBootstrapMember();
+          await expectSeededEverywhere(member.userId, member.home);
 
           expect(
             await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
@@ -829,8 +980,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           expect(await placement(member.userId)).toEqual(movedTo(target.tenantId));
           expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);
           expect(await outboxRowsForClaim(target.claim)).toHaveLength(0);
+          expect(await placement(boundary.userId)).toEqual(movedTo(boundary.tenantId));
         } finally {
-          await teardown(member, ...(member ? [member.home] : []), target.tenantId);
+          await teardown(member, ...(member ? [member.home] : []), target.tenantId, boundary.tenantId);
         }
       },
     );

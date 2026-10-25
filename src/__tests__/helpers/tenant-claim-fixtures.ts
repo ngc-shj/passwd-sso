@@ -55,9 +55,13 @@ const PROVIDER_ENV: Record<ProviderEnvKey, true> = {
 };
 export const PROVIDER_ENV_KEYS = Object.keys(PROVIDER_ENV) as ProviderEnvKey[];
 
-/** Which claim providers to configure: Google, and Jackson connections by provider id. */
+/**
+ * Which claim providers to configure: Google, the legacy Jackson provider
+ * (`AUTH_JACKSON_ID`/`SECRET`), and Jackson connections by provider id.
+ */
 export type ProviderEnvSpec = {
   google?: boolean;
+  legacy?: boolean;
   connections?: readonly string[];
   mode?: ClaimBindingMode;
 };
@@ -79,8 +83,14 @@ export function stubClaimProviderEnv(spec: ProviderEnvSpec): void {
     vi.stubEnv("AUTH_GOOGLE_ID", "claim-fixture-google-id");
     vi.stubEnv("AUTH_GOOGLE_SECRET", "claim-fixture-google-secret");
   }
-  if (connections.length > 0) {
+  if (spec.legacy) {
+    vi.stubEnv("AUTH_JACKSON_ID", "client-saml-jackson");
+    vi.stubEnv("AUTH_JACKSON_SECRET", "secret-saml-jackson");
+  }
+  if (spec.legacy || connections.length > 0) {
     vi.stubEnv("JACKSON_URL", "http://jackson.invalid");
+  }
+  if (connections.length > 0) {
     vi.stubEnv(
       "AUTH_JACKSON_CONNECTIONS",
       JSON.stringify(
@@ -95,7 +105,7 @@ export function stubClaimProviderEnv(spec: ProviderEnvSpec): void {
   }
   if (spec.mode) vi.stubEnv("AUTH_CLAIM_BINDING", spec.mode);
 
-  const providers = (spec.google ? 1 : 0) + connections.length;
+  const providers = (spec.google ? 1 : 0) + (spec.legacy ? 1 : 0) + connections.length;
   const expected = providers >= 2 ? CLAIM_BINDING_MODE.STRICT : (spec.mode ?? CLAIM_BINDING_MODE.OFF);
   const derived = deriveClaimBindingMode();
   if (derived !== expected) {

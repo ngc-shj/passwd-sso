@@ -9,8 +9,11 @@ import {
   evidenceOf,
   formatBindFile,
   formatEvidence,
+  groupLegacyAccounts,
   isInsideWorktree,
   isMajority,
+  LEGACY_ACCOUNT_VERDICT,
+  legacyAccountVerdict,
   parseBindFile,
   parseEvidence,
   refMappingFor,
@@ -281,5 +284,45 @@ describe("sign-in provider refs", () => {
     expect(describeSignInProviderRef(null, refMappingFor([A], deriveIdentifierPepper(PEPPER_ENV)))).toBe(
       SIGN_IN_REF_LABEL.NO_REF,
     );
+  });
+});
+
+describe("legacy-accounts grouping and verdict", () => {
+  const T1 = "11111111-1111-4111-8111-111111111111";
+  const T2 = "22222222-2222-4222-8222-222222222222";
+  const active = new Map([["u1", T1], ["u2", T1], ["u3", T2]]);
+
+  it("groups accounts by their user's active tenant, counting users once, users active nowhere last", () => {
+    const accounts = [{ userId: "u3" }, { userId: "u1" }, { userId: "u1" }, { userId: "u2" }, { userId: "gone" }];
+    expect(groupLegacyAccounts(accounts, active)).toEqual([
+      { tenantId: T1, users: 2, accounts: 3 },
+      { tenantId: T2, users: 1, accounts: 1 },
+      { tenantId: null, users: 1, accounts: 1 },
+    ]);
+  });
+
+  it("is none without accounts, whether or not the legacy provider is configured", () => {
+    expect(legacyAccountVerdict([], true)).toBe(LEGACY_ACCOUNT_VERDICT.NONE);
+    expect(legacyAccountVerdict([], false)).toBe(LEGACY_ACCOUNT_VERDICT.NONE);
+  });
+
+  it("passes one group and refuses two, with the legacy provider configured", () => {
+    const one = groupLegacyAccounts([{ userId: "u1" }, { userId: "u2" }], active);
+    const two = groupLegacyAccounts([{ userId: "u1" }, { userId: "u3" }], active);
+    expect(legacyAccountVerdict(one, true)).toBe(LEGACY_ACCOUNT_VERDICT.ONE_GROUP);
+    expect(legacyAccountVerdict(two, true)).toBe(LEGACY_ACCOUNT_VERDICT.SPANS);
+  });
+
+  it("counts users active nowhere as a group of their own", () => {
+    const groups = groupLegacyAccounts([{ userId: "u1" }, { userId: "gone" }], active);
+    expect(legacyAccountVerdict(groups, true)).toBe(LEGACY_ACCOUNT_VERDICT.SPANS);
+    expect(legacyAccountVerdict(groupLegacyAccounts([{ userId: "gone" }], active), true)).toBe(
+      LEGACY_ACCOUNT_VERDICT.ONE_GROUP,
+    );
+  });
+
+  it("is unresolved, not refused, when the legacy provider is not configured", () => {
+    const two = groupLegacyAccounts([{ userId: "u1" }, { userId: "u3" }], active);
+    expect(legacyAccountVerdict(two, false)).toBe(LEGACY_ACCOUNT_VERDICT.UNRESOLVED);
   });
 });

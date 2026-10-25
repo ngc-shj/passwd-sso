@@ -566,8 +566,18 @@ async function claimedTenantMembership(
     // `tenant-domain realign` does too. Migrating anyway would delete the
     // bootstrap membership and leave the user active nowhere, so the migration
     // is refused here, before any write, and the user keeps their bootstrap
-    // tenant. Filed under the target, whose admins hold the remedy. Reachable
-    // on row 6 only: a tenant row 9a has just created has no members.
+    // tenant and its data. Filed under the target. Reachable on row 6 only: a
+    // tenant row 9a has just created has no members.
+    //
+    // No producer can reactivate this user today, so the refusal repeats on
+    // every sign-in. Directory sync created the row deactivated because the
+    // bootstrap membership is active, and refuses to reactivate it with
+    // ACTIVE_IN_ANOTHER_TENANT (`usersActiveInAnotherTenant` has no bootstrap
+    // exemption). SCIM reactivation meets `tenant_members_one_active_per_user`
+    // and answers 409. `realign` takes only users active nowhere. What works
+    // today: the target tenant deletes the row (SCIM `DELETE /Users/<userId>`,
+    // `deactivateScimUser`), and the user signs in before the next directory
+    // sync recreates it; the sign-in then finds no row and migrates.
     const priorMembership = await tx.tenantMember.findUnique({
       where: { tenantId_userId: { tenantId: target.id, userId } },
       select: { id: true },
@@ -738,8 +748,14 @@ type OAuthSignInSubject =
  *
  * Not modelled: a sign-in made while another session is active, which Auth.js
  * links to that session's user. The app has no linking flow; such a sign-in is
- * resolved as if no session existed — refused, or, through a provider that
- * links by email, resolved to the user whose email that provider vouches for.
+ * resolved as if no session existed, with three outcomes:
+ * - refused (`not_linked`);
+ * - through a provider that links by email, resolved to the user whose email
+ *   that provider vouches for;
+ * - when the email names no user (any provider), resolved to none: the callback
+ *   allows it with no writes (no `createUser` follows), Auth.js links the IdP
+ *   account to the session's user, and that user's claim gate runs on their
+ *   next sign-in through that account.
  */
 async function resolveOAuthSignInSubject(
   account: Account,

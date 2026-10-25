@@ -94,6 +94,7 @@ export const SUBCOMMAND_FLAGS = {
   history: ["domain", "tenant", "after"],
   realign: ["user", "tenant", "by", "yes"],
   measure: [],
+  "legacy-accounts": [],
   "backfill-owning-column": ["by", "apply", "yes", "limit"],
 } as const satisfies Record<string, readonly (ValueFlag | ScopedValueFlag | BooleanFlag)[]>;
 

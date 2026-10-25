@@ -314,7 +314,11 @@ npm run docker:down
 - `AUTH_REDIRECT_PROXY_URL` が設定されている。設定がなければ従来プロバイダーは Jackson が必須とする `state` を送らず、サインインを完了できなかったため、SAML ユーザーは存在しません。
 - Jackson が、その 1 つの `saml-jackson` プロバイダーの背後に 2 つ以上の接続を持っている。
 
-このようなデプロイでは、SAML ユーザー全員の `Account` 行が、どの接続から来たかにかかわらず `provider = 'saml-jackson'` です。アップグレード後、アプリはこれらのクライアント ID では起動せず、`saml-jackson` が指せるのは高々 1 つの接続自身のクライアントです。それ以外の接続のユーザーは、自分の接続の新しいプロバイダー（`saml-jackson-<id>`）でサインインしますが、そのプロバイダーに紐づくアカウントがないため `account_not_linked` で拒否されます。このリリースには、そのアカウントを移す手段がありません。`UPDATE accounts SET provider = …` を直接実行しても移せません。保存されている OAuth トークンはプロバイダーを AAD に含めて暗号化されている（`src/lib/crypto/account-token-crypto.ts`）ため、書き換えた行は復号できなくなります。また `bind --from-members` は、これらのユーザーのテナントに `saml-jackson` を提案します。アカウントに記録されているのがその値だからです。この提案はそのテナントの IdP が背後にいる接続ではないので、該当行は空欄のままにしてください。再キー化コマンドが提供されるまでは、旧バージョンのまま運用を続けるか、これらのユーザーが既存アカウントにアクセスできなくなり再プロビジョニングが必要になることを受け入れるかのどちらかです。
+このようなデプロイでは、SAML ユーザー全員の `Account` 行が、どの接続から来たかにかかわらず `provider = 'saml-jackson'` です。アップグレード後、アプリはこれらのクライアント ID では起動せず、`saml-jackson` が指せるのは高々 1 つの接続自身のクライアントです。
+
+**アップグレード後は `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` を設定しないでください。** 従来のペアがクライアントを指せたはずの接続も含め、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙します。こうすれば、アップグレード前の `saml-jackson` アカウントを解決するクライアントはなくなります。従来のペアが接続 X のクライアントを指していると、X の背後の IdP は、別の接続から来たユーザーの `providerAccountId` を主張できます。テナントクレームがなければ、そのサインインは既存ユーザーの経路で許可されるため、IdP はそのユーザーとしてサインインできます。`tenant-domain legacy-accounts`（手順 10）はこの構成を拒否します。
+
+すべての接続を列挙すると、これらのユーザーは自分の接続のプロバイダー（`saml-jackson-<id>`）でサインインしますが、そのプロバイダーに紐づくアカウントがないため `account_not_linked` で拒否されます。このリリースには、そのアカウントを移す手段がありません。`UPDATE accounts SET provider = …` を直接実行しても移せません。保存されている OAuth トークンはプロバイダーを AAD に含めて暗号化されている（`src/lib/crypto/account-token-crypto.ts`）ため、書き換えた行は復号できなくなります。`bind --from-members` が数えるのは設定済みのプロバイダーのアカウントだけです。`saml-jackson` を設定しなければ、これらのユーザーは evidence で `none` に数えられ、そのテナントには候補が入りません。テナントの本来の接続を紐づけようとすると、過半数チェックで拒否されることがあります（接続を確認したうえで `bind --claim` に `--accept-unused-provider` を付けます）。紐づけてもこれらのユーザーは解除されません。アカウントに記録されているのは `saml-jackson` のままだからです。再キー化コマンドが提供されるまで、これらのユーザーは既存アカウントにアクセスできず、再プロビジョニングが必要です。旧バージョンのまま運用を続けるのは安全な代替策ではありません。どの接続からも接続をまたいだ乗っ取りが可能なままになります（[SAML サインイン — テナントは接続そのものに紐づける](#saml-sign-in--bind-the-tenant-to-the-connection) の「この変更以前の露出」を参照）。
 
 変わる点は 2 つです:
 
@@ -330,9 +334,10 @@ npm run docker:down
 7. 残りのクレームを 1 つずつ解決します。紐づけは `bind --claim` で行います。`--accept-unused-provider` は接続を確認してからだけ付けてください。別のカスタマーのテナントに先取りされたクレームは紐づけません。`add --from … --provider <正当な側のプロバイダー>` で正当なテナントに付け替えます。**正当なプロバイダーを先取りした側のテナントに `bind` しないでください。**
 8. ファイルを削除します。全テナントのクレームが載っています。
 9. 旧バージョンが完全に止まったら、もう一度 `list --unbound` を実行します。クレームが 1 件も出なければ完了です。
-10. `AUTH_CLAIM_BINDING=strict` を設定してから、アプリを起動します。
+10. アプリが起動時に使う環境変数で `legacy-accounts` を実行します。`saml-jackson` のアカウントを、そのユーザーがアクティブなテナントごとに数えます。書き込みは行いません。`saml-jackson` が設定されていて、それらのアカウントが 2 つ以上のテナントにまたがる場合は 0 以外で終了します。どのテナントでもアクティブでないユーザーは、もう 1 つのテナントとして数えます。そのユーザーとしてのサインインにもセッションが発行されるためです。プロバイダー設定を読めない場合も 0 以外で終了します。0 以外で終了したら、従来のペアを外し、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙してから（上記のロックアウトを参照）再実行してください。
+11. `AUTH_CLAIM_BINDING=strict` を設定してから、アプリを起動します。
 
-どのコマンドにも `MIGRATION_DATABASE_URL` が必要です。`bind` には、さらにアプリが起動時に使う SSO プロバイダーの環境変数（`AUTH_GOOGLE_*`、`AUTH_JACKSON_*`、`JACKSON_URL`）が必要です。それがない場合、`list --unbound` はプロバイダーのない行だけを表示し、その旨を出力します。
+どのコマンドにも `MIGRATION_DATABASE_URL` が必要です。`bind` と `legacy-accounts` には、さらにアプリが起動時に使う SSO プロバイダーの環境変数（`AUTH_GOOGLE_*`、`AUTH_JACKSON_*`、`JACKSON_URL`）が必要です。それがない場合、`list --unbound` はプロバイダーのない行だけを表示し、その旨を出力します。
 
 ```bash
 # 3. 露出の確認
@@ -351,6 +356,9 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <rightful-ten
 
 # 9. クレームが 1 件も出ないこと
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --unbound
+
+# 10. 終了コードが 0 であること
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts
 ```
 
 SSO プロバイダーが 1 つだけのデプロイは strict を強制されません。オプトインする場合も同じ手順に従ってください。

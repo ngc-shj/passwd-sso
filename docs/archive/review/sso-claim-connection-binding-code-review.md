@@ -142,3 +142,108 @@ recorded in D8.
   `audit-tenant-adjudicator-code-review.md`). Real-DB cells cover rows 9a, 6 and 6b and the
   deactivated row. Red proofs R2-M1 to R2-M2c are in D7.
 - Modified file: `src/auth.ts` (`claimedTenantMembership`).
+
+---
+
+# Review round 2
+Date: 2026-10-25
+Scope: `770d7cd66..HEAD` (c83e128a8 round-1 fixes, 3bfca8a88 bootstrap migration + lockout docs).
+
+## Changes from Previous Round
+Every round-1 finding was verified as resolved: S1, F1, F3, F4, S2, T1–T7, and the bootstrap
+migration fix. No fix widened a boundary (R43). New findings are below.
+
+## Security Findings
+- S3 Critical (escalate: true), new. The round-1 lockout text (D9) let the operator keep
+  `AUTH_JACKSON_ID` pointing at one connection's own client. The pre-upgrade
+  `saml-jackson` accounts of the other connections' users then stay resolvable through that
+  client. Its IdP can assert such a user's `providerAccountId` with no claim, which takes the
+  existing-user allow, and sign in as them. The text also offered staying on the previous
+  version as safe, which leaves the same takeover open from every connection.
+- S4 Minor, new. `account_not_linked` is the signature of both the S1 attack and the D9
+  lockout, and no operator surface showed it.
+- S5 Minor, new. The active-session note at `resolveOAuthSignInSubject` and in D8 omitted the
+  allowed case: a non-linking provider whose email names no user, which Auth.js then links to
+  the session user.
+
+## Functionality Findings
+- F-R2-1 Major, new. The deactivated-target-row refusal has no working remedy, so a user who
+  reaches it stays stuck:
+  - directory sync creates the row deactivated and refuses to reactivate it
+    (`ACTIVE_IN_ANOTHER_TENANT`) while the bootstrap membership is active;
+  - SCIM reactivation is refused by `tenant_members_one_active_per_user`;
+  - `realign` takes only users who are active nowhere.
+
+  This is a regression from `main`, where the same case converged by accident.
+- F-R2-2 Minor, new. The valueless-flag check runs before the stray-flag check.
+- F-R2-3 Minor, new. `bind --from-members` suggests `saml-jackson` only while that provider
+  is still configured.
+
+## Testing Findings
+- T8 Major, new. The bootstrap-migration cells seed and assert 5 of about 17 moved tables.
+- T9 Major, new. Sixteen `signIn` unit cells give OIDC accounts no `type`, so after S1 they
+  exercise the email-lookup arm.
+- T10 Minor, new. The no-change snapshot has no positive control in the same file.
+- T11 Minor, new. D7 claimed more for the row-6b cell than it shows, and that claim was never
+  red-proved.
+- T12 Minor, new. The `SUBCOMMAND_FLAGS` derivation is regex-based and does not see a case
+  that passes `flags` straight to a handler.
+
+## Recurring Issue Check
+### Functionality expert
+R2 clean; R3 F-R2-1; R6 N/A; R17 clean; R34 clean; R41 F-R2-1; R42 complete; R43 clean;
+R48 clean; R49 F-R2-3; R51 A1 skipped; R57 boundary stated.
+### Security expert
+R1/R2/R17 clean; R3 clean; R9 clean; R14/R24/R25 clean; R42 S4 (readers of
+`account_not_linked`); R43 no widening; R48 clean; R49 S3, S5; R52 S3; R55/R57 clean;
+RS1/RS3/RS4 clean.
+### Testing expert
+R1/RT3 T9; R3 T8; R42 T8; RT1/RT2/RT4/RT5/RT6/RT8/RT9 pass; RT7 T10, T11; RT10 T10;
+RT11 holds; R50 T12; R29 T11; R16/R33 clean.
+
+## User decisions (round 2)
+- S3: correct the README, and add a read-only `tenant-domain` check. The check refuses when the
+  legacy provider is configured and `saml-jackson` accounts span more than one tenant.
+- F-R2-1: keep the refusal and correct the false remedy claim in the code comment, D8 and the
+  docs. Directory sync and SCIM migrating a bootstrap-only user is a follow-up issue.
+
+## Resolution Status (round 2)
+### S3 Critical — legacy `saml-jackson` rows resolvable through a kept legacy client
+- Action:
+  - README en/ja "Known lockout" is rewritten. In the affected class, do not configure
+    `AUTH_JACKSON_ID`/`SECRET` after the upgrade, and list every connection in
+    `AUTH_JACKSON_CONNECTIONS`. Staying on the previous version keeps the takeover open from
+    every connection.
+  - New read-only `tenant-domain legacy-accounts`. It exits 1 when the legacy provider is
+    configured and `saml-jackson` accounts span more than one group, where "no active tenant"
+    counts as its own group. It also exits 1 when the provider config cannot be read. It exits
+    0 with a statement otherwise.
+  - The runbook runs it before strict is set.
+  - Red proofs L1–L3b are in D7.
+- Modified file: `scripts/tenant-domain.ts`, `scripts/lib/tenant-domain-binding.ts`,
+  `src/lib/tenant-rls-grants.ts` (`TENANT_LEGACY_ACCOUNT_READ`), `README.md`, `README.ja.md`.
+
+### F-R2-1 Major — deactivated-target-row refusal has no remedy
+- Action: per the user's decision, the refusal is kept. The comment in `src/auth.ts` and D8 now
+  state that no producer can reactivate this user today. The one working step is also
+  documented: the target tenant deletes the row through SCIM, and the user signs in before the
+  next directory sync. The follow-up issue is drafted, and producer-side migration goes there.
+
+### T8 Major — migration cells covered 5 of the moved tables
+- Action: `MOVED_TABLES` lists the 18 tables read off the migration transaction, and each one
+  is seeded and asserted, with third-tenant boundary rows. The deny cells use the same
+  snapshot. Red proofs T8a–T8c are in D7. No real defect was found.
+
+### T9 Major — OIDC unit cells had no account type
+- Action: 17 cells now use `type: "oidc"` with a `providerAccountId`, and `type` is required in
+  the helper at compile time and at runtime. The two cells that survived the T9 mutation now
+  assert which user the membership was written for.
+
+### Minor findings
+- S4: `alerts.md` gains an `account_not_linked` entry with a query, which was run read-only.
+- S5: the comment and D8 now name the third active-session case.
+- F-R2-2: the stray-flag check runs before the valueless-flag check.
+- F-R2-3: the README states when `saml-jackson` is suggested.
+- T10: both own-account allow cells assert that the snapshot changed.
+- T11: the 6b cell is red-proved, and D7 is reworded.
+- T12: the derivation test fails on an unrecognised `flags` use and names the case.

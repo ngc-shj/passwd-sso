@@ -1196,6 +1196,60 @@ the old `id` rather than rebinding. Otherwise rebind the claim with
 consider `AUTH_CLAIM_BINDING=strict`, under which this sign-in would have been
 refused.
 
+## `AUTH_LOGIN_FAILURE` with reason `account_not_linked`
+
+An audit row, not a log line: the signIn callback in `src/auth.ts` refused an
+OAuth/OIDC sign-in whose provider account is linked to no user while the email
+it asserts names an existing user, through a provider that does not link by
+email ([Audit Log Schema](../security/audit-log-schema.md#account_not_linked)).
+Nothing was written for that user. The row's `userId` is the user the email
+names and its tenant is that user's. `metadata.provider` is the audit enum
+(`google`, `saml`), so the row does not say which Jackson connection the
+sign-in came through. `tenant-domain unmapped` does not list it: it is not a
+claim denial.
+
+The same row has three causes:
+
+- **Attack**: an IdP asserting another user's email, the case the refusal
+  exists for. Typically one user, with no account at that provider, and few
+  denials.
+- **Upgrade lockout**: after the
+  [binding upgrade](../../README.md#sso-tenant-claim-binding-upgrade), a
+  deployment of the Known-lockout class sees many distinct users of one or
+  more tenants refused through `saml`, starting at the cutover. Run
+  `tenant-domain legacy-accounts` and follow the README's Known lockout.
+- **A user's own mistake**: signing in through a provider other than the one
+  their account was created with.
+
+**Severity**: medium. High for a denial whose user holds no account at that
+provider and is an admin or owner, outside the upgrade window.
+**Trigger**: any occurrence outside the upgrade window; during it, a count
+that keeps rising after the cutover. The normal count is 0.
+**Recovery**: group the denials (query below). Many users of one tenant
+starting at the cutover is the lockout: those users must be re-provisioned.
+For a single user, ask them how they signed in. If they did not, treat it as
+an IdP asserting their email: correlate by time with Jackson's or Google's
+logs to find the connection, and review that connection's IdP. Never link the
+account by hand to make the denial stop.
+
+Run it on a privileged connection (`MIGRATION_DATABASE_URL`; `audit_logs` has
+FORCE ROW LEVEL SECURITY). Widen the interval as needed:
+
+```sql
+SELECT tenant_id,
+       metadata->>'provider'   AS provider,
+       count(*)                AS denials,
+       count(DISTINCT user_id) AS users,
+       min(created_at)         AS first_seen,
+       max(created_at)         AS last_seen
+  FROM audit_logs
+ WHERE action = 'AUTH_LOGIN_FAILURE'
+   AND metadata->>'reason' = 'account_not_linked'
+   AND created_at > now() - interval '7 days'
+ GROUP BY tenant_id, metadata->>'provider'
+ ORDER BY denials DESC;
+```
+
 ## `csp.violation`
 
 Emitted by `/api/csp-report` when the browser reports a CSP

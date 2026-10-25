@@ -210,6 +210,7 @@ export const BYPASS_GRANT = Object.freeze({
   TENANT_DOMAIN_BACKFILL_APPLY: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "apiKey", "attachment", "auditOutbox", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey", "teamPasswordFavorite", "user", "vaultKey", "webAuthnCredential", "tenantMember"]),
   TENANT_DOMAIN_DIVERGENCE_READ: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["tenantMember", "user"]),
   TENANT_DOMAIN_UNMAPPED_REPORT: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["auditLog", "auditOutbox"]),
+  TENANT_LEGACY_ACCOUNT_READ: defineGrant(BYPASS_PURPOSE.SYSTEM_MAINTENANCE, ["account", "tenant", "tenantMember"]),
   TENANT_MEMBERSHIP_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["tenantMember", "user"]),
   TENANT_POLICY_LOOKUP: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["tenant"]),
   TENANT_REALIGN_AFTER_ACTIVATION: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["account", "apiKey", "attachment", "auditOutbox", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey", "teamPasswordFavorite", "tenantMember", "user", "vaultKey", "webAuthnCredential"]),

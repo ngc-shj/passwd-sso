@@ -49,6 +49,7 @@ import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { sessionMetaStorage, type SessionMeta } from "@/lib/auth/session/session-meta";
 import {
   CLAIM_BINDING_MODE,
+  JACKSON_LEGACY_PROVIDER_ID,
   assertClaimBindingBootConfig,
   deriveClaimBindingMode,
 } from "@/lib/auth/jackson-providers";
@@ -66,9 +67,11 @@ import {
   cmdBindApply,
   cmdBindFromMembers,
   cmdHistory,
+  cmdLegacyAccounts,
   cmdList,
   cmdRemove,
   cmdUnmapped,
+  migrationClientFactory,
 } from "../../../scripts/tenant-domain";
 import { BIND_FILE_HEADER, SIGN_IN_REF_LABEL } from "../../../scripts/lib/tenant-domain-binding";
 
@@ -1260,6 +1263,126 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       await cmdUnmapped({ days: 1 });
       expect(lineFor(out.text(), claim)).toContain(`signInProvider="${SIGN_IN_REF_LABEL.NO_PROVIDERS}`);
       await ctx.deleteTestData(tenantId);
+    });
+  });
+
+  // ─── legacy-accounts: the upgrade check for the Known lockout class ────
+
+  /**
+   * The command counts every `saml-jackson` account in the database, so each
+   * cell needs the shared dev database to hold none but its own: checked first,
+   * and a leftover fails the cell by name rather than as a wrong verdict.
+   */
+  describe("legacy-accounts", () => {
+    const LEGACY = JACKSON_LEGACY_PROVIDER_ID;
+    const LEGACY_AND_CONNECTION: ProviderEnvSpec = { legacy: true, connections: [ALPHA], mode: "strict" };
+
+    beforeEach(async () => {
+      const foreign = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.account.count({ where: { provider: LEGACY } });
+      });
+      expect(foreign, `the dev database already holds ${LEGACY} accounts; this check counts them all`).toBe(0);
+    });
+
+    async function auditRowsFor(tenantIds: readonly string[]): Promise<number> {
+      return ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.auditOutbox.count({ where: { tenantId: { in: [...tenantIds] } } });
+      });
+    }
+
+    it("passes with no account at the legacy provider", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      captureOutput();
+      expect(await cmdLegacyAccounts()).toMatchObject({
+        ok: true,
+        code: 0,
+        rows: [],
+        message: expect.stringContaining(`No account records ${LEGACY}`),
+      });
+    });
+
+    it("passes when the accounts belong to one tenant's users", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const tenantId = await tenantWith([LEGACY], [LEGACY, ALPHA]);
+      const out = captureOutput();
+      try {
+        const result = await cmdLegacyAccounts();
+        expect(result).toMatchObject({ ok: true, code: 0, rows: [{ tenantId, users: 2, accounts: 2 }] });
+        expect(out.text()).toContain(`tenant=${tenantId}`);
+      } finally {
+        await ctx.deleteTestData(tenantId);
+      }
+    });
+
+    it("refuses when the accounts span two tenants, writing nothing", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const first = await tenantWith([LEGACY]);
+      const second = await tenantWith([LEGACY]);
+      captureOutput();
+      try {
+        const result = await cmdLegacyAccounts();
+        expect(result).toMatchObject({ ok: false, code: 1, message: expect.stringContaining("users of 2 tenants") });
+        expect(result.message).toContain("Unset AUTH_JACKSON_ID and AUTH_JACKSON_SECRET");
+        expect(await auditRowsFor([first, second])).toBe(0);
+      } finally {
+        await ctx.deleteTestData(first);
+        await ctx.deleteTestData(second);
+      }
+    });
+
+    it("refuses one tenant's users plus a user active nowhere, reporting them as their own group", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const tenantId = await tenantWith([LEGACY]);
+      const departedHome = await ctx.createTenant();
+      await member(departedHome, [LEGACY], { deactivated: true });
+      const out = captureOutput();
+      try {
+        const result = await cmdLegacyAccounts();
+        expect(result).toMatchObject({
+          ok: false,
+          code: 1,
+          rows: [{ tenantId, users: 1, accounts: 1 }, { tenantId: null, users: 1, accounts: 1 }],
+        });
+        expect(out.text()).toContain("(no active tenant)");
+      } finally {
+        await ctx.deleteTestData(tenantId);
+        await ctx.deleteTestData(departedHome);
+      }
+    });
+
+    it("passes, saying no client resolves them, when the legacy provider is not configured", async () => {
+      stubClaimProviderEnv(TWO_CONNECTIONS);
+      const first = await tenantWith([LEGACY]);
+      const second = await tenantWith([LEGACY]);
+      const out = captureOutput();
+      try {
+        const result = await cmdLegacyAccounts();
+        expect(result).toMatchObject({ ok: true, code: 0, message: expect.stringContaining("it is not configured") });
+        expect(out.text()).toContain(`${LEGACY} is not configured in this process`);
+      } finally {
+        await ctx.deleteTestData(first);
+        await ctx.deleteTestData(second);
+      }
+    });
+
+    it.each([
+      ["no SSO provider is configured", () => stubClaimProviderEnv({}), "needs the app's environment"],
+      [
+        "the provider configuration is refused",
+        () => {
+          stubClaimProviderEnv({});
+          vi.stubEnv("AUTH_JACKSON_CONNECTIONS", "not json");
+        },
+        "configuration in this process's env is refused",
+      ],
+    ] as const)("refuses, building no client, when %s", async (_case, stub, text) => {
+      stub();
+      const create = vi.spyOn(migrationClientFactory, "create");
+      const result = await cmdLegacyAccounts();
+      expect(result).toMatchObject({ ok: false, code: 1, message: expect.stringContaining(text) });
+      expect(create).not.toHaveBeenCalled();
     });
   });
 });

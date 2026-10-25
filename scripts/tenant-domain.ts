@@ -43,6 +43,7 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid> [--after <seq>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- realign --user <uuid|email> --tenant <ref> --by <label> [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- measure
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]
 //
 // `measure` prints the three counts docs/archive/review/audit-tenant-adjudicator-design.md's
@@ -180,9 +181,12 @@ import {
   formatBindFile,
   formatEvidence,
   formatFlags,
+  groupLegacyAccounts,
   isBindFileWritable,
   isInsideWorktree,
   isMajority,
+  LEGACY_ACCOUNT_VERDICT,
+  legacyAccountVerdict,
   parseBindFile,
   parseEvidence,
   refMappingFor,
@@ -2729,6 +2733,128 @@ export async function cmdMeasure(): Promise<CmdResult> {
   }
 }
 
+// ─── legacy-accounts ─────────────────────────────────────────────
+
+/**
+ * The upgrade check for the legacy multi-connection deployment (README, "SSO
+ * tenant claim binding upgrade" → "Known lockout"): read-only, no writes, no
+ * audit events. Pre-upgrade SAML users of every connection hold an account at
+ * `saml-jackson`. If the legacy provider is still configured, the IdP behind
+ * the one connection its client names can assert another connection's user's
+ * `providerAccountId` and, with no claim, sign in as that user. Refused (code 1)
+ * when the provider is configured and those accounts span more than one tenant
+ * (`legacyAccountVerdict`); without a readable provider configuration it
+ * refuses rather than pass, since "not configured" is then unknown.
+ */
+export async function cmdLegacyAccounts(): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const app = readAppEnv();
+  if (!app.ok) return app.result;
+  if (!app.env.present) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "legacy-accounts needs the app's environment: whether the result is safe depends on whether " +
+        `${JACKSON_LEGACY_PROVIDER_ID} (AUTH_JACKSON_ID/SECRET) is configured, and no SSO provider is ` +
+        "configured in this process. Run it with the app's .env loaded; it does not pass without it.",
+    };
+  }
+  const legacyConfigured = app.env.claimProviders.includes(JACKSON_LEGACY_PROVIDER_ID);
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        const accounts = await tx.account.findMany({
+          where: { provider: JACKSON_LEGACY_PROVIDER_ID },
+          select: { userId: true },
+        });
+        const userIds = [...new Set(accounts.map((a) => a.userId))];
+        const memberships =
+          userIds.length === 0
+            ? []
+            : await tx.tenantMember.findMany({
+                where: { userId: { in: userIds }, deactivatedAt: null },
+                select: { userId: true, tenantId: true },
+              });
+        const groups = groupLegacyAccounts(accounts, new Map(memberships.map((m) => [m.userId, m.tenantId])));
+        const tenantIds = groups.flatMap((g) => (g.tenantId === null ? [] : [g.tenantId]));
+        const tenants =
+          tenantIds.length === 0
+            ? []
+            : await tx.tenant.findMany({ where: { id: { in: tenantIds } }, select: { id: true, name: true } });
+        const nameOf = new Map(tenants.map((t) => [t.id, t.name]));
+
+        console.log(`Accounts at ${JACKSON_LEGACY_PROVIDER_ID}, by the tenant of their user's active membership:`);
+        if (groups.length === 0) console.log("  (none)");
+        for (const group of groups) {
+          const where =
+            group.tenantId === null
+              ? "tenant=-\t(no active tenant)"
+              : `tenant=${group.tenantId}\tname=${escapeUnsafeDisplayChars(nameOf.get(group.tenantId) ?? "-")}`;
+          console.log(`  ${where}\tusers=${group.users}\taccounts=${group.accounts}`);
+        }
+        console.log(
+          `${JACKSON_LEGACY_PROVIDER_ID} is ${legacyConfigured ? "" : "not "}configured in this process ` +
+            `(claim providers: ${app.env.claimProviders.join(", ")}).`,
+        );
+
+        const total = accounts.length;
+        const verdict = legacyAccountVerdict(groups, legacyConfigured);
+        const rows = groups;
+        switch (verdict) {
+          case LEGACY_ACCOUNT_VERDICT.NONE:
+            return {
+              ok: true,
+              code: 0,
+              rows,
+              message: `No account records ${JACKSON_LEGACY_PROVIDER_ID}: the legacy provider resolves no pre-upgrade account.`,
+            };
+          case LEGACY_ACCOUNT_VERDICT.UNRESOLVED:
+            return {
+              ok: true,
+              code: 0,
+              rows,
+              message:
+                `${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, and it is not configured, so no client ` +
+                "resolves them. Their users are refused with account_not_linked through their connection's own " +
+                'provider until re-provisioned (README, "Known lockout").',
+            };
+          case LEGACY_ACCOUNT_VERDICT.ONE_GROUP:
+            return {
+              ok: true,
+              code: 0,
+              rows,
+              message:
+                `${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, all of one ` +
+                `${groups[0]?.tenantId === null ? "group (users with no active tenant)" : "tenant"}. ` +
+                "Check that AUTH_JACKSON_ID is that tenant's connection's own client.",
+            };
+          case LEGACY_ACCOUNT_VERDICT.SPANS:
+            return {
+              ok: false,
+              code: 1,
+              rows,
+              message:
+                `Refusing: ${total} account(s) at ${JACKSON_LEGACY_PROVIDER_ID} belong to the users of ${groups.length} ` +
+                "tenants (users with no active tenant count as one), and the legacy provider is configured. The IdP " +
+                "behind the connection AUTH_JACKSON_ID names can assert another tenant's user's account id and sign " +
+                "in as them. Unset AUTH_JACKSON_ID and AUTH_JACKSON_SECRET, list every connection, that one included, " +
+                'in AUTH_JACKSON_CONNECTIONS (README, "Known lockout"), and re-run this check.',
+            };
+        }
+      },
+      BYPASS_GRANT.TENANT_LEGACY_ACCOUNT_READ,
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 // ─── backfill-owning-column ────────────────────────────────────────
 
 /**
@@ -3034,6 +3160,7 @@ function printUsage(): void {
       "  tenant-domain history --domain <claim> | --tenant <uuid> [--after <seq>]",
       "  tenant-domain realign --user <uuid|email> --tenant <ref> --by <label> [--yes]",
       "  tenant-domain measure",
+      "  tenant-domain legacy-accounts",
       `  tenant-domain backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]  (default ${DEFAULT_BACKFILL_LIMIT}, max ${MAX_BACKFILL_LIMIT})`,
       "",
       "<ref> is a tenant UUID or one of its registered claims (not its slug).",
@@ -3061,6 +3188,10 @@ function printUsage(): void {
       "divergent users measure counts, each through the same adjudicator realign uses:",
       "the oldest active membership wins over the column, and a multi-active user is",
       "decided, not refused, and flagged multiActive in the listing.",
+      "",
+      "legacy-accounts counts the accounts at saml-jackson by their users' active tenant,",
+      "read-only, and exits non-zero when saml-jackson is configured and they span more",
+      "than one tenant (users with no active tenant count as one). Needs the app's SSO env.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",
@@ -3125,16 +3256,18 @@ async function main(): Promise<void> {
   const flags = parsed.flags;
   const yes = flags.get("yes") === true;
 
-  const valueless = findValuelessFlag(flags, subcommand);
-  if (valueless) {
-    console.error(valuelessError(valueless, subcommand));
+  // Stray flags first: `remove --provider` is a flag remove never reads, and
+  // "requires a value" would send the operator to supply one.
+  const stray = findStrayFlags(flags, subcommand);
+  if (subcommand !== undefined && stray.length > 0) {
+    console.error(strayFlagsError(stray, subcommand));
     process.exitCode = 1;
     return;
   }
 
-  const stray = findStrayFlags(flags, subcommand);
-  if (subcommand !== undefined && stray.length > 0) {
-    console.error(strayFlagsError(stray, subcommand));
+  const valueless = findValuelessFlag(flags, subcommand);
+  if (valueless) {
+    console.error(valuelessError(valueless, subcommand));
     process.exitCode = 1;
     return;
   }
@@ -3229,6 +3362,9 @@ async function main(): Promise<void> {
     }
     case "measure":
       result = await cmdMeasure();
+      break;
+    case "legacy-accounts":
+      result = await cmdLegacyAccounts();
       break;
     case "backfill-owning-column": {
       const by = getStringFlag(flags, "by");

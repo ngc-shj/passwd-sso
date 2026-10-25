@@ -1293,17 +1293,45 @@ describe("ensureTenantMembershipForSignIn — provider binding", () => {
 });
 
 describe("signIn callback", () => {
+  type SignInParams = {
+    user: { id?: string; email?: string };
+    account?: { provider: string; type: string; providerAccountId: string } | null;
+    profile?: Record<string, unknown> | null;
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const signInCallback = (nextAuthInitArgs[0] as any).callbacks.signIn as (
-    params: {
-      user: { id?: string; email?: string };
-      account?: { provider: string; type?: string; providerAccountId?: string } | null;
-      profile?: Record<string, unknown> | null;
-    },
+  const capturedSignIn = (nextAuthInitArgs[0] as any).callbacks.signIn as (
+    params: SignInParams,
   ) => Promise<boolean>;
+  // `type` decides the subject lookup: an oauth/oidc account resolves through
+  // the adapter's account link, anything else by email. A cell that omits it
+  // drives the email arm, which no Google/Jackson sign-in takes, so it is
+  // refused here as well as at compile time.
+  const signInCallback = (params: SignInParams): Promise<boolean> => {
+    if (params.account && !params.account.type) {
+      throw new Error(
+        `signIn cell passed a "${params.account.provider}" account without \`type\`; ` +
+          `Google/Jackson sign-ins arrive as type "oidc"`,
+      );
+    }
+    if (
+      (params.account?.type === "oidc" || params.account?.type === "oauth") &&
+      !params.account.providerAccountId
+    ) {
+      throw new Error(
+        `signIn cell passed an ${params.account.type} account without \`providerAccountId\``,
+      );
+    }
+    return capturedSignIn(params);
+  };
+  const GOOGLE_ACCOUNT = { provider: "google", type: "oidc", providerAccountId: "google-sub-1" };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks keeps implementations, so the subject lookups are reset
+    // here: an earlier cell's linked user must not leak into a first sign-in.
+    mockGetUserByAccount.mockResolvedValue(null);
+    mockGetUserByEmail.mockResolvedValue(null);
+    mockAllowsDangerousEmailAccountLinking.mockReturnValue(false);
     mockTenantClaimStore.tenantClaim = null;
     mockTenantClaimStore.provider = null;
     mockTenantClaimGetStore.mockReturnValue(mockTenantClaimStore);
@@ -1326,12 +1354,8 @@ describe("signIn callback", () => {
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
     mockPrisma.user.update.mockResolvedValue({});
-    mockPrisma.user.findUnique.mockImplementation(
-      async ({ select }: { select?: Record<string, unknown> }) =>
-        select && "tenantId" in select
-          ? { tenantId: TENANT_LEFT }
-          : { id: "real-db-id" },
-    );
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "moved@corp.com" });
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_LEFT });
     for (const handle of STRANDED_MODEL_HANDLES) {
       strandedDelegate(handle).count.mockResolvedValue(0);
     }
@@ -1339,7 +1363,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "moved@corp.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1364,20 +1388,23 @@ describe("signIn callback", () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_JOINED }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
-    mockPrisma.user.findUnique.mockImplementation(
-      async ({ select }: { select?: Record<string, unknown> }) =>
-        select && "tenantId" in select
-          ? { tenantId: TENANT_JOINED }
-          : { id: "real-db-id" },
-    );
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "ordinary@corp.com" });
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_JOINED });
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "ordinary@corp.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
     expect(result).toBe(true);
+    // The join ran, for the account's user: without this a sign-in that
+    // resolved no subject would also return true and emit nothing.
+    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId_userId: { tenantId: TENANT_JOINED, userId: "real-db-id" } },
+      }),
+    );
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
@@ -1386,46 +1413,59 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@example.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
     expect(result).toBe(true);
-    // Should have looked up by email
-    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-      where: { email: "new@example.com" },
-      select: { id: true },
+    // Should have looked up the account link, then the email
+    expect(mockGetUserByAccount).toHaveBeenCalledWith({
+      provider: GOOGLE_ACCOUNT.provider,
+      providerAccountId: GOOGLE_ACCOUNT.providerAccountId,
     });
+    expect(mockGetUserByEmail).toHaveBeenCalledWith("new@example.com");
     // Should NOT have tried to upsert tenant membership
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
 
   it("uses DB id (not pre-generated id) for existing user", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    const TENANT_JOINED = "00000000-0000-4000-a000-000000000001";
+    mockExtractTenantClaimValue.mockReturnValue(
+      extraction({ kind: "claim", value: "tenant-acme" }),
+    );
+    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_JOINED }));
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_JOINED });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "existing@example.com" });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "existing@example.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
     expect(result).toBe(true);
-    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-      where: { email: "existing@example.com" },
-      select: { id: true },
+    expect(mockGetUserByAccount).toHaveBeenCalledWith({
+      provider: GOOGLE_ACCOUNT.provider,
+      providerAccountId: GOOGLE_ACCOUNT.providerAccountId,
     });
+    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId_userId: { tenantId: TENANT_JOINED, userId: "real-db-id" } },
+      }),
+    );
   });
 
   it("returns true when user has no email", async () => {
     const result = await signInCallback({
       user: { id: "some-id" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
     expect(result).toBe(true);
-    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    expect(mockGetUserByEmail).not.toHaveBeenCalled();
   });
 
   it("stores tenant claim in tenantClaimStorage for new user", async () => {
@@ -1434,7 +1474,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1452,7 +1492,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@example.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1481,7 +1521,7 @@ describe("signIn callback", () => {
       // spellings are refusals is pinned in tenant-claim.test.ts against the
       // real function.
       user: { id: "pre-gen-id", email: "new@acme.example" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1510,7 +1550,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1532,7 +1572,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@example.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1543,7 +1583,7 @@ describe("signIn callback", () => {
   });
 
   it("calls ensureTenantMembershipForSignIn with DB id for existing user with tenant claim", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
@@ -1551,7 +1591,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1572,7 +1612,7 @@ describe("signIn callback", () => {
   // trail is wrong. These two tests drive the real signIn callback and
   // assert what actually reaches emitAuthLoginFailure.
   it("emits tenant_claim_unmapped via emitAuthLoginFailure (row 9b, driven through signIn)", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@newco.example" });
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "newco.example" }));
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000003" }]);
@@ -1580,7 +1620,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@newco.example" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "newco.example" },
     });
 
@@ -1599,7 +1639,7 @@ describe("signIn callback", () => {
   });
 
   it("emits tenant_mismatch via emitAuthLoginFailure (row 7, driven through signIn)", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000003" }]);
@@ -1607,7 +1647,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1639,7 +1679,7 @@ describe("signIn callback", () => {
    * operator runs to find them returns nothing at all.
    */
   it("forwards the refusal diagnosis to emitAuthLoginFailure (existing user, driven through signIn)", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
     mockExtractTenantClaimValue.mockReturnValue(
       extraction({ kind: "malformed", diagnosis: claimRefusal("contains U+200B") }),
     );
@@ -1649,7 +1689,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1675,7 +1715,7 @@ describe("signIn callback", () => {
   it.each(["boxyhq-saml", "saml-jackson"])(
     "maps the %s provider id to the saml audit provider",
     async (providerId) => {
-      mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+      mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
       mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
       mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
       mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000003" }]);
@@ -1683,7 +1723,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "user@acme.com" },
-        account: { provider: providerId },
+        account: { provider: providerId, type: "oidc", providerAccountId: "idp-sub-1" },
         profile: {},
       });
 
@@ -1711,7 +1751,7 @@ describe("signIn callback", () => {
     ],
     ["an unnamed check constraint", "リレーションの新しい行はチェック制約に違反しています"],
   ])("routes a 23514 from %s to provider_error", async (_label, message) => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
     mockResolveTenantByClaim.mockResolvedValue(
       lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }),
@@ -1721,7 +1761,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1887,7 +1927,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "newuser@example.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "newuser@example.com" },
         profile: null,
       });
 
@@ -1903,7 +1943,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "bootstrap@example.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "bootstrap@example.com" },
         profile: null,
       });
 
@@ -1916,7 +1956,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "sso-user@corp.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "sso-user@corp.com" },
         profile: null,
       });
 
@@ -1950,7 +1990,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "scim-moved@corp.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "scim-moved@corp.com" },
         profile: null,
       });
 
@@ -1985,7 +2025,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "orphaned@corp.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "orphaned@corp.com" },
         profile: null,
       });
 
@@ -2009,7 +2049,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "bootstrap@example.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "bootstrap@example.com" },
         profile: null,
       });
 

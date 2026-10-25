@@ -314,7 +314,11 @@ There is no supported way to keep the old hashes correlating; treat the upgrade 
 - `AUTH_REDIRECT_PROXY_URL` is set. Without it, the legacy provider sent no `state`, which Jackson requires, so it could not complete a sign-in and the deployment has no SAML users.
 - Jackson holds two or more connections behind that one `saml-jackson` provider.
 
-Every SAML user of such a deployment has an `Account` row with `provider = 'saml-jackson'`, whichever connection they came through. After the upgrade, the app refuses to start on those client IDs, and `saml-jackson` can name at most one connection's own client. The users of every other connection sign in through their connection's new provider (`saml-jackson-<id>`), have no account linked to it, and are refused with `account_not_linked`. This release cannot move their accounts. A raw `UPDATE accounts SET provider = …` does not either: the stored OAuth tokens are encrypted with the provider in their AAD (`src/lib/crypto/account-token-crypto.ts`), so rewritten rows no longer decrypt. `bind --from-members` also suggests `saml-jackson` for those users' tenants, because that is what their accounts record. That suggestion is not the connection their IdP sits behind, so leave those lines empty. Until a re-key command ships, either keep the deployment on the previous version, or accept that those users are locked out of their existing accounts and must be re-provisioned.
+Every SAML user of such a deployment has an `Account` row with `provider = 'saml-jackson'`, whichever connection they came through. After the upgrade, the app refuses to start on those client IDs, and `saml-jackson` can name at most one connection's own client.
+
+**After the upgrade, do not configure `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET`.** List every connection in `AUTH_JACKSON_CONNECTIONS`, including the one whose client the legacy pair could name, so that no client resolves the pre-upgrade `saml-jackson` accounts. If the legacy pair names connection X's client, the IdP behind X can assert the `providerAccountId` of a user who came through another connection. With no tenant claim, that sign-in takes the existing-user path and is allowed, so the IdP signs in as that user. `tenant-domain legacy-accounts` (step 10) refuses this configuration.
+
+With every connection listed, those users sign in through their connection's provider (`saml-jackson-<id>`), have no account linked to it, and are refused with `account_not_linked`. This release cannot move their accounts. A raw `UPDATE accounts SET provider = …` does not either: the stored OAuth tokens are encrypted with the provider in their AAD (`src/lib/crypto/account-token-crypto.ts`), so rewritten rows no longer decrypt. `bind --from-members` counts accounts at configured providers only: with `saml-jackson` unset, these users count as `none` in the evidence, so their tenants get no suggestion, and binding the tenant's real connection can fail the majority check (`bind --claim` takes `--accept-unused-provider` once you have confirmed the connection). Binding it does not unlock these users either, because their accounts still record `saml-jackson`. Until a re-key command ships, they are locked out of their existing accounts and must be re-provisioned. Staying on the previous version is not a safe alternative: it keeps the cross-connection takeover open from every connection (*Exposure before this change* in [SAML sign-in — bind the tenant to the connection](#saml-sign-in--bind-the-tenant-to-the-connection)).
 
 Two things change:
 
@@ -330,9 +334,10 @@ Two things change:
 7. Resolve the remaining claims one at a time. Bind a claim with `bind --claim`. Add `--accept-unused-provider` only after you have confirmed the connection. A claim squatted by another customer's tenant is not bound: re-point it to the rightful tenant with `add --from … --provider <theirs>`. **Never bind the rightful provider into the squatter's tenant.**
 8. Delete the file. It lists every tenant's claims.
 9. Once the old version is gone, rerun `list --unbound`. It must list no claim.
-10. Set `AUTH_CLAIM_BINDING=strict`, then start the app.
+10. Run `legacy-accounts` with the env the app will start with. It counts the accounts at `saml-jackson` by the tenant their users are active in, and writes nothing. It exits non-zero when `saml-jackson` is configured and those accounts span more than one tenant. Users active in no tenant count as one more tenant, because a sign-in as them still gets a session. It also exits non-zero when it cannot read the provider configuration. A non-zero exit means: remove the legacy pair and list every connection in `AUTH_JACKSON_CONNECTIONS` (see the lockout above), then rerun it.
+11. Set `AUTH_CLAIM_BINDING=strict`, then start the app.
 
-Every command needs `MIGRATION_DATABASE_URL`. `bind` also needs the SSO provider env the app will start with (`AUTH_GOOGLE_*`, `AUTH_JACKSON_*`, `JACKSON_URL`). Without that env, `list --unbound` shows only rows with no provider, and it says so.
+Every command needs `MIGRATION_DATABASE_URL`. `bind` and `legacy-accounts` also need the SSO provider env the app will start with (`AUTH_GOOGLE_*`, `AUTH_JACKSON_*`, `JACKSON_URL`). Without that env, `list --unbound` shows only rows with no provider, and it says so.
 
 ```bash
 # 3. Exposure review
@@ -351,6 +356,9 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <rightful-ten
 
 # 9. Must list no claim
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --unbound
+
+# 10. Must exit 0
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts
 ```
 
 A deployment with a single SSO provider is not forced into strict mode. To opt in, follow the same steps.

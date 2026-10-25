@@ -249,6 +249,7 @@ describe("tenant-domain flag parsing", () => {
       ["realign", ["--user", "u", "--tenant", "t", "--by", "ops", "--accept-unused-provider"], ["accept-unused-provider"]],
       ["unmapped", ["--out", "/tmp/x"], ["out"]],
       ["measure", ["--yes"], ["yes"]],
+      ["legacy-accounts", ["--tenant", "t"], ["tenant"]],
     ])("%s refuses %j", (subcommand, argv, stray) => {
       expect(strayOf(subcommand, argv)).toEqual(stray);
     });
@@ -265,6 +266,7 @@ describe("tenant-domain flag parsing", () => {
       ["history", ["--domain", "d", "--tenant", "t", "--after", "3"]],
       ["realign", ["--user", "u", "--tenant", "t", "--by", "ops", "--yes"]],
       ["measure", []],
+      ["legacy-accounts", []],
       ["backfill-owning-column", ["--by", "ops", "--apply", "--yes", "--limit", "5"]],
     ])("%s accepts the documented form %j", (subcommand, argv) => {
       expect(strayOf(subcommand, argv)).toEqual([]);
@@ -300,10 +302,20 @@ describe("tenant-domain flag parsing", () => {
         if (/(?<![-\w])yes(?=\s*[,})])/.test(body)) read.add("yes");
         return [...read].sort();
       };
+      // A case that hands `flags` on whole (`cmdFoo(flags)`) reads flags this
+      // derivation cannot see, so any `flags` reference other than the read
+      // spellings and bind's dispatcher call fails the test, naming the case.
+      const unrecognisedFlagsUse = (chunk: string): boolean => {
+        let residue = chunk.replace("dispatchBind(flags, yes)", "");
+        for (const re of SPELLINGS) residue = residue.replace(re, "");
+        return /\bflags\b/.test(residue);
+      };
       const cases = switchBody.split(/\n    case "/).slice(1).map((chunk) => {
         const name = chunk.slice(0, chunk.indexOf('"'));
+        expect(unrecognisedFlagsUse(chunk), `case "${name}" uses flags other than by a recognised read`).toBe(false);
         return [name, readsOf(name === "bind" ? bindBody : chunk)] as const;
       });
+      expect(unrecognisedFlagsUse('case "foo": return cmdFoo(flags);'), "the residue check against its own sample").toBe(true);
       expect(cases.map(([name]) => name)).toEqual(Object.keys(SUBCOMMAND_FLAGS));
       for (const [name, reads] of cases) {
         expect(reads, name).toEqual([...SUBCOMMAND_FLAGS[name as keyof typeof SUBCOMMAND_FLAGS]].sort());
