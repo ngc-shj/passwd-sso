@@ -22,7 +22,17 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -836,8 +846,15 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       const file = join(scratch, "bind.tsv");
       captureOutput();
       expect(await cmdBindFromMembers({ out: file })).toMatchObject({ ok: true });
-      expect(statSync(file).mode & 0o777).toBe(0o600);
-      expect(readFileSync(file, "utf8").split("\n")[0]).toBe(BIND_FILE_HEADER);
+      // One descriptor for both reads, so the mode and the content are of the
+      // same file.
+      const fd = openSync(file, "r");
+      try {
+        expect(fstatSync(fd).mode & 0o777).toBe(0o600);
+        expect(readFileSync(fd, "utf8").split("\n")[0]).toBe(BIND_FILE_HEADER);
+      } finally {
+        closeSync(fd);
+      }
       expect({ row: await claimRow(claim), events: await events(claim) }).toEqual(before);
       await ctx.deleteTestData(tenantId);
     });

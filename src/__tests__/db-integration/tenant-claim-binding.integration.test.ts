@@ -1123,6 +1123,11 @@ describe("tenant claim binding (C3/C4/C5)", () => {
      * so "revoked" cannot be mistaken for any other refusal.
      */
     async function validateSeededExtensionToken(userId: string) {
+      // The DPoP check builds the expected `htu` from APP_URL at call time and
+      // throws without one; set it here so the cell does not depend on the
+      // developer's .env (CI's integration job sets none). Undone by the
+      // afterEach `vi.unstubAllEnvs()`.
+      vi.stubEnv("APP_URL", "http://localhost:3000");
       return validateExtensionToken(
         new NextRequest("http://localhost:3000/api/passwords", {
           headers: { authorization: `Bearer ${extensionTokenOf(userId)}` },
