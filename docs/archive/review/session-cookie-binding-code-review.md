@@ -89,3 +89,58 @@ findings, and 3 testing Minors. All four seeds were rejected with reasons by the
   - Cost to fix: moderate, and separate from this change.
 - **Orchestrator sign-off**: filed as `#960`. This branch fixed the two cookie-related defects in
   the same file.
+
+## Review round 2
+Scope: `5114f00a9..HEAD` (f5bda5fa6).
+
+### Changes from Previous Round
+- Every round-1 finding was verified as resolved.
+- S2 was checked by provenance at all 51 call sites. Every one passes the authenticated user, and
+  the check also closes a Bearer-plus-another-user's-cookie case.
+- No boundary was widened (R43).
+
+### Findings
+- **Security**
+  - N1 Minor: the passkey reauth routes (options, verify) read the session row by cookie digest
+    without binding `row.userId`.
+- **Functionality**
+  - FN-1 Minor: the cookie deletion omits `partitioned`.
+  - FN-2 Minor: the step-up docs and the gate's remediation text show the old one-argument
+    signature.
+  - FN-3 Minor: the same issue as security N1.
+  - FN-4 Minor: the seeder resolves the HMAC key only after it has started writing.
+  - [Adjacent] passkey sign-in omits `partitioned`.
+- **Testing**
+  - N1 Minor: the step-up userId argument is pinned in 4 of 45 route tests.
+  - N2 Minor: one auth-gate cell lacks a reach assertion.
+  - N3 Minor: the differential feeds the two readers different bytes. This is a regression from
+    the T7 change.
+  - N4 Minor: the F2 deletion is untested under https with a basePath.
+  - N5 Minor: `injectSession` omits `httpOnly`.
+
+### Recurring Issue Check
+- Security: R3/R17/R42 found two S2-class members left (N1). R43 none. RS clean.
+- Functionality: R38 FN-1; R43 FN-3; R29/R3 FN-2.
+- Testing: RT8 N2; RT9 N3; R53 N4 (adjacent). The rest are clean.
+
+### Resolution Status (round 2)
+- N1 / FN-3: the reauth options and verify routes select `userId`. A row owned by another user is
+  refused with 401 before any audit, verifier call or challenge consumption. The verify write is
+  `update({ where: { sessionToken, userId } })`. Red proofs a, b and b2. The integration test
+  `reauth-credential-binding` passes against real Prisma.
+- FN-1 + [Adjacent]: one call-time helper, `isSessionCookiePartitioned()`, used by `auth.config.ts`,
+  passkey sign-in and the cookie deletion. Stray chunk names stay unpartitioned. Red proofs c and
+  c2.
+- FN-2: the step-up docs, the gate's remediation text and two gate self-test fixtures show
+  `requireRecentCurrentAuthMethod(req, session.user.id)`.
+- FN-4: the seeder validates the HMAC key before it writes anything.
+- Test N1: seven routes that hold a target id pin the actor id passed to the gate. Red proof d.
+- Test N2: the reach assertion is added.
+- Test N3: the differential hands both readers the same normalized `Request` header. Run time is
+  2.3 s. Red proof e reverts to the raw string and stays green, as expected; it is recorded, not
+  claimed as a proof.
+- Test N4: the https-with-basePath cells cover Secure, `Path=/passwd-sso/` and Partitioned on and
+  off. `page-route.ts` is added to the coverage set at 93/79. Red proof f.
+- Test N5: `injectSession` sets `httpOnly: true`.
+- Not done: the [Adjacent] sign-in page message for an undeletable stray cookie. It is a UX item,
+  outside the scope of a security fix.

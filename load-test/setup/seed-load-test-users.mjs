@@ -243,6 +243,9 @@ let hashSessionTokenFn;
 async function loadHashSessionToken() {
   if (!hashSessionTokenFn) {
     const mod = await tsImport("../../src/lib/auth/session/session-cache.ts", import.meta.url);
+    // Resolve the HMAC key now, so a missing/invalid key fails before the
+    // first row is written rather than midway through the seed.
+    mod.validateSessionTokenHmacKey();
     hashSessionTokenFn = mod.hashSessionToken;
   }
   return hashSessionTokenFn;

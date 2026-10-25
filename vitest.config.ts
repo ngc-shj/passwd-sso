@@ -58,6 +58,7 @@ export default defineConfig({
         "src/lib/auth/tokens/extension-token.ts",
         "src/lib/auth/session/session-cookie.ts",
         "src/lib/proxy/auth-gate.ts",
+        "src/lib/proxy/page-route.ts",
       ],
       exclude: [
         "src/app/api/auth/\\[...nextauth\\]/**",
@@ -92,6 +93,10 @@ export default defineConfig({
         // read different sessions again. Measured: 100/100 and 100/96.9.
         "src/lib/auth/session/session-cookie.ts": { lines: 95, branches: 95 },
         "src/lib/proxy/auth-gate.ts": { lines: 95, branches: 92 },
+        // The page-route session decision and the cookie deletion that must
+        // mirror the set-time attributes (Secure, path, Partitioned) or the
+        // browser keeps the cookie. Measured: 96 lines / 82.9 branches.
+        "src/lib/proxy/page-route.ts": { lines: 93, branches: 79 },
       },
     },
     isolate: true,

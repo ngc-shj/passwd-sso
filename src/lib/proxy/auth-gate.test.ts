@@ -403,6 +403,9 @@ describe("getSessionInfo", () => {
 
     expect(result.valid).toBe(false);
     expect(result.tenantId).toBeUndefined();
+    // Reached the Auth.js read: the verdict is the null user, not a refused cookie.
+    expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockResolveUserTenantId).not.toHaveBeenCalled();
   });
 

@@ -387,6 +387,19 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     // moving the gate after findUnique would reach this call and regress.
     expect(mockPrismaTeamMember.findUnique).not.toHaveBeenCalled();
   });
+
+  it("binds the step-up gate to the actor, not the member being changed", async () => {
+    // The gate binds freshness to the user whose session row it reads, so it
+    // must get the actor `auth()` resolved — never the target id in scope.
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
+        body: { role: TEAM_ROLE.ADMIN },
+      }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+    expect(mockRequireRecentSession).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentSession).toHaveBeenCalledWith(expect.anything(), "test-user-id");
+  });
 });
 
 describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
@@ -432,6 +445,17 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
     // Pins that step-up fires BEFORE the existence lookup.
     expect(mockPrismaTeamMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("binds the step-up gate to the actor, not the member being removed", async () => {
+    // The gate binds freshness to the user whose session row it reads, so it
+    // must get the actor `auth()` resolved — never the target id in scope.
+    await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+    expect(mockRequireRecentSession).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentSession).toHaveBeenCalledWith(expect.anything(), "test-user-id");
   });
 
   it("returns 403 when ADMIN tries to remove equal-level member", async () => {

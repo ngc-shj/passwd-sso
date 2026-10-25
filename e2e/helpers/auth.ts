@@ -35,11 +35,14 @@ export async function injectSession(
       name: configuredSessionCookieName(),
       value: sessionToken,
       url: getCookieUrl(),
-      // Match the production session cookie attribute set in auth.config.ts
-      // (`sameSite: "lax"`). Diverging from production lets a future
-      // cross-site E2E test pass while production would have dropped the
-      // cookie, or fail where production works.
+      // Every attribute set here matches the production session cookie in
+      // auth.config.ts (`sameSite: "lax"`, `httpOnly: true`, `secure` from
+      // the same AUTH_URL derivation). Diverging from production lets a
+      // future E2E test pass where production would have dropped or hidden
+      // the cookie (cross-site, or read from page script), or fail where
+      // production works.
       sameSite: "Lax",
+      httpOnly: true,
       ...(isSecureCookieFromAuthUrl() && { secure: true }),
     },
   ]);

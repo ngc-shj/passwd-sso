@@ -23,7 +23,7 @@ const GUARD = join(REPO_ROOT, "scripts/checks/check-permanent-delete-stepup.sh")
 
 const DELETE_LINE = "await prisma.passwordEntry.deleteMany({ where: { userId } });";
 const STEPUP_LINE =
-  "const stepUp = await requireRecentCurrentAuthMethod(req); if (stepUp) return stepUp;";
+  "const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id); if (stepUp) return stepUp;";
 
 let root;
 let apiDir;

@@ -158,7 +158,8 @@ done
 
 if [ "$fail" -ne 0 ]; then
   echo
-  echo "Add 'const stepUp = await requireRecentCurrentAuthMethod(req); if (stepUp) return stepUp;'"
+  echo "Add 'const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id); if (stepUp) return stepUp;'"
+  echo "(the second argument is the user the route's auth() resolved — the actor, not the target)"
   echo "BEFORE the delete (for conditional ?permanent=true, gate it inside that branch),"
   echo "OR add the route to scripts/checks/stepup-delete-exempt.txt with a justified reason."
   echo "See docs/archive/review/owasp-rereview-stepup-and-failclosed-plan.md (C1)."

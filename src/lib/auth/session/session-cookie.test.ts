@@ -41,20 +41,34 @@ const NONE = { kind: SESSION_COOKIE_READ.NONE };
 const AMBIGUOUS = { kind: SESSION_COOKIE_READ.AMBIGUOUS };
 
 /**
- * What `auth()` resolves the session token to from this Cookie header.
- * `toInternalRequest` is Auth.js's own conversion (it parses the header with
- * its vendored parser); the `SessionStore` line reproduces the construction in
- * `@auth/core/lib/index.js` (`new SessionStore(options.cookies.sessionToken,
- * request.cookies, options.logger)`), which runs inside `Auth()` and is not
- * reachable on its own.
+ * One request built from a raw Cookie header, and the header as production
+ * code reads it back (`request.headers.get("cookie")`). The Headers object
+ * normalizes the value (it strips leading/trailing whitespace), so both
+ * readers below must be handed what it delivers, not the raw string.
  */
-async function authjsSessionToken(header: string, name: string): Promise<string> {
-  const internal = await toInternalRequest(
-    new Request("http://localhost/api/auth/session", { headers: { cookie: header } }),
-    { basePath: "/api/auth", providers: [] },
-  );
-  if (!internal) throw new Error(`toInternalRequest rejected the request for header ${JSON.stringify(header)}`);
-  return new SessionStore({ name, options: {} }, internal.cookies, console).value;
+function deliver(header: string): { request: Request; delivered: string } {
+  const request = new Request("http://localhost/api/auth/session", { headers: { cookie: header } });
+  return { request, delivered: request.headers.get("cookie") ?? "" };
+}
+
+/**
+ * The cookies `auth()` sees on this request. `toInternalRequest` is Auth.js's
+ * own conversion (it parses the header with its vendored parser).
+ */
+async function authjsCookies(request: Request): Promise<Record<string, string>> {
+  const internal = await toInternalRequest(request, { basePath: "/api/auth", providers: [] });
+  if (!internal) throw new Error(`toInternalRequest rejected the request for header ${JSON.stringify(request.headers.get("cookie"))}`);
+  return internal.cookies;
+}
+
+/**
+ * What `auth()` resolves the session token to under `name`. Reproduces the
+ * construction in `@auth/core/lib/index.js` (`new SessionStore(
+ * options.cookies.sessionToken, request.cookies, options.logger)`), which runs
+ * inside `Auth()` and is not reachable on its own.
+ */
+function authjsSessionToken(cookies: Record<string, string>, name: string): string {
+  return new SessionStore({ name, options: {} }, cookies, console).value;
 }
 
 describe("parseCookiePairs", () => {
@@ -252,14 +266,16 @@ describe("readSessionCookie agrees with Auth.js (differential)", () => {
       let nones = 0;
       let refusals = 0;
       let seenUnderKnownName = 0;
-      for (const header of corpus(name)) {
+      for (const raw of corpus(name)) {
+        const { request, delivered: header } = deliver(raw);
         const read = readSessionCookie(header);
-        const resolved = await authjsSessionToken(header, name);
+        const cookies = await authjsCookies(request);
+        const resolved = authjsSessionToken(cookies, name);
         // The CSRF gate and the Bearer-bypass decision rest on this: any
         // header from which auth() could resolve a session, under any name a
         // deployment might configure, counts as carrying one.
         for (const knownName of ALL_KNOWN_SESSION_COOKIE_NAMES) {
-          if ((await authjsSessionToken(header, knownName)) !== "") {
+          if (authjsSessionToken(cookies, knownName) !== "") {
             seenUnderKnownName++;
             expect({ header, knownName, has: hasAnySessionCookie(header) }).toEqual({
               header,
@@ -295,9 +311,9 @@ describe("readSessionCookie agrees with Auth.js (differential)", () => {
         const segments = others.filter(() => r() < 0.5);
         const pad = r() < 0.5 ? " " : "\t";
         segments.splice(Math.floor(r() * (segments.length + 1)), 0, `${pad}${name}${pad}=${pad}${TOKEN_A}`);
-        const header = segments.join(";");
+        const { request, delivered: header } = deliver(segments.join(";"));
         expect({ header, read: readSessionCookie(header) }).toEqual({ header, read: token(TOKEN_A) });
-        expect(await authjsSessionToken(header, name)).toBe(TOKEN_A);
+        expect(authjsSessionToken(await authjsCookies(request), name)).toBe(TOKEN_A);
       }
     });
   }

@@ -47,6 +47,18 @@ export function configuredSessionCookieName(): string {
 }
 
 /**
+ * Whether the session cookie carries `Partitioned` (CHIPS) in THIS deployment —
+ * the condition `auth.config.ts` sets it under. Every writer and deleter of the
+ * configured session cookie must use this too: a CHIPS browser keys a
+ * partitioned cookie apart from an unpartitioned one of the same name, so a
+ * delete sent without the flag misses the cookie Auth.js set. Evaluated at
+ * call time, like isSecureCookieFromAuthUrl().
+ */
+export function isSessionCookiePartitioned(): boolean {
+  return isSecureCookieFromAuthUrl() && process.env.COOKIE_PARTITIONED === "true";
+}
+
+/**
  * All cookie names the proxy / session-extraction / logout-cleanup paths
  * must recognize. Includes:
  *   - All three current-issue shapes (`authjs.session-token`,

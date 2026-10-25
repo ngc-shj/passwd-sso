@@ -3,6 +3,7 @@ import {
   ALL_KNOWN_SESSION_COOKIE_NAMES,
   getSessionCookieName,
   isSecureCookieFromAuthUrl,
+  isSessionCookiePartitioned,
 } from "./cookie-name";
 
 describe("getSessionCookieName", () => {
@@ -114,5 +115,31 @@ describe("isSecureCookieFromAuthUrl", () => {
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     vi.stubEnv("NEXTAUTH_URL", "https://example.com");
     expect(isSecureCookieFromAuthUrl()).toBe(false);
+  });
+});
+
+describe("isSessionCookiePartitioned", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns true when AUTH_URL is https and COOKIE_PARTITIONED is true", () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("COOKIE_PARTITIONED", "true");
+    expect(isSessionCookiePartitioned()).toBe(true);
+  });
+
+  it("returns false when COOKIE_PARTITIONED is not true", () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("COOKIE_PARTITIONED", "false");
+    expect(isSessionCookiePartitioned()).toBe(false);
+  });
+
+  // Partitioned requires Secure, so an http deployment never sets it even
+  // when the operator opts in.
+  it("returns false when AUTH_URL is http even if COOKIE_PARTITIONED is true", () => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    vi.stubEnv("COOKIE_PARTITIONED", "true");
+    expect(isSessionCookiePartitioned()).toBe(false);
   });
 });

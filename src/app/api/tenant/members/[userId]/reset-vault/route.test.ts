@@ -428,6 +428,17 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
   });
 
+  it("binds the step-up gate to the actor, not the target member", async () => {
+    // The gate binds freshness to the user whose session row it reads, so it
+    // must get the actor `auth()` resolved — never the target id in scope.
+    await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(mockRequireRecentSession).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentSession).toHaveBeenCalledWith(expect.anything(), ACTOR_USER_ID);
+  });
+
   it("returns 200, stores encryptedToken + targetEmailAtInitiate, notifies other admins (NOT target)", async () => {
     const res = await POST(
       createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),

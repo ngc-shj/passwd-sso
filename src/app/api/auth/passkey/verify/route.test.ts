@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 // ── Hoisted mocks ────────────────────────────────────────────
@@ -176,6 +176,10 @@ describe("POST /api/auth/passkey/verify", () => {
     mockCreateCappedSession.mockResolvedValue({ userId: "user-1", expires: new Date() });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("returns 200 with session cookie on success", async () => {
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
@@ -228,6 +232,29 @@ describe("POST /api/auth/passkey/verify", () => {
       kind: SESSION_COOKIE_READ.TOKEN,
       token: input.sessionToken,
     });
+  });
+
+  // A CHIPS browser keys a partitioned cookie apart from an unpartitioned one
+  // of the same name, so this writer must agree with auth.config.ts or the
+  // logout/refusal deletion (which follows auth.config.ts) misses it.
+  it.each([
+    ["on", "true", true],
+    ["off", "", false],
+  ])("sets Partitioned exactly when auth.config.ts does (COOKIE_PARTITIONED %s)", async (_label, flag, expected) => {
+    vi.stubEnv("AUTH_URL", "https://app.example.test");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    vi.stubEnv("COOKIE_PARTITIONED", flag);
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const setCookie = res.headers.getSetCookie();
+    expect(setCookie).toHaveLength(1);
+    expect(setCookie[0]).toMatch(/^__Host-authjs\.session-token=/);
+    expect(/;\s*Partitioned/i.test(setCookie[0])).toBe(expected);
   });
 
   it("calls authorizeWebAuthn with correct params", async () => {

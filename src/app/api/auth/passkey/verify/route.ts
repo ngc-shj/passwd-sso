@@ -23,6 +23,7 @@ import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import {
   configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
+  isSessionCookiePartitioned,
 } from "@/lib/auth/session/cookie-name";
 import { createCappedSession } from "@/lib/auth/session/session-concurrency";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
@@ -168,12 +169,14 @@ async function handlePOST(req: NextRequest) {
   response.headers.set("Cache-Control", NO_STORE_HEADERS["Cache-Control"]);
   // Cookie name must match auth.config.ts — both read
   // configuredSessionCookieName, so the selection cannot drift. Read at call
-  // time, like isSecureCookieFromAuthUrl() below, so the two cannot disagree.
+  // time, like isSecureCookieFromAuthUrl() and isSessionCookiePartitioned()
+  // below, so the attributes cannot disagree either.
   response.cookies.set(configuredSessionCookieName(), sessionToken, {
     path: `${basePath}/`,
     httpOnly: true,
     sameSite: "lax",
     secure: isSecureCookieFromAuthUrl(),
+    ...(isSessionCookiePartitioned() ? { partitioned: true } : {}),
     expires,
   });
 

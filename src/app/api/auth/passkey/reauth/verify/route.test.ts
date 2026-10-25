@@ -140,6 +140,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
     // ALLOW-path fixture: a session bound to the credential the request
     // presents, so tests reach the verifier they exist to exercise.
     mockSessionFindUnique.mockResolvedValue({
+      userId: "user-1",
       provider: "webauthn",
       authCredentialId: "cred-row-1",
       authCredential: { credentialId: "cred-1", userId: "user-1" },
@@ -184,8 +185,10 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       expect.objectContaining({ id: "cred-1" }),
       "webauthn:challenge:reauth:user-1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
+    // Keyed on the owner as well as the digest: the writer is bound to the
+    // caller the same way the read above is.
     expect(mockSessionUpdate).toHaveBeenCalledWith({
-      where: { sessionToken: "hashed:5e55-0001" },
+      where: { sessionToken: "hashed:5e55-0001", userId: "user-1" },
       data: { passkeyVerifiedAt: expect.any(Date) },
     });
     expect(mockLogAudit).toHaveBeenCalledWith(
@@ -240,6 +243,44 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
+  // The digest names a row, but the row is another user's: whatever it says
+  // (here, a fully bound webauthn session that would otherwise verify) is not
+  // this caller's session. Paired with the own-row success cell above.
+  it("returns 401 when the session row belongs to another user — no audit, no verifier, no update", async () => {
+    mockSessionFindUnique.mockResolvedValue({
+      userId: "user-2",
+      provider: "webauthn",
+      authCredentialId: "cred-row-1",
+      authCredential: { credentialId: "cred-1", userId: "user-1" },
+    });
+
+    const res = await POST(makeVerifyRequest());
+
+    expect(res.status).toBe(401);
+    // The verifier owns redis.getdel, so not calling it leaves the challenge
+    // unconsumed.
+    expect(mockVerifyAssertionForCredential).not.toHaveBeenCalled();
+    expect(mockCredentialFindFirst).not.toHaveBeenCalled();
+    expect(mockSessionUpdate).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 for another user's non-webauthn row without emitting the provider audit", async () => {
+    mockSessionFindUnique.mockResolvedValue({
+      userId: "user-2",
+      provider: "nodemailer",
+      authCredentialId: null,
+      authCredential: null,
+    });
+
+    const res = await POST(makeVerifyRequest());
+
+    expect(res.status).toBe(401);
+    expect(mockVerifyAssertionForCredential).not.toHaveBeenCalled();
+    expect(mockSessionUpdate).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
   it("returns 429 when the rate limiter denies the request", async () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 60_000 });
 
@@ -268,6 +309,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
   describe("C4 binding gate", () => {
     it("denies a non-webauthn session with PASSKEY_REAUTH_UNAVAILABLE, verifier not called", async () => {
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "nodemailer",
         authCredentialId: null,
         authCredential: null,
@@ -290,6 +332,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
 
     it("denies an unbound webauthn session, verifier not called (Redis challenge left unconsumed)", async () => {
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "webauthn",
         authCredentialId: null,
         authCredential: null,
@@ -318,6 +361,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       // schema. Without the userId check the relation read would put the other
       // user's credentialId into this user's audit metadata.
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "webauthn",
         authCredentialId: "cred-row-other",
         authCredential: { credentialId: "cred-belonging-to-user-2", userId: "user-2" },
@@ -511,6 +555,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
     it("truncates an oversized boundCredentialId (600 chars) and marks it, without collapsing the row", async () => {
       const longBoundId = "a".repeat(600);
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "webauthn",
         authCredentialId: "cred-row-1",
         authCredential: { credentialId: longBoundId, userId: "user-1" },
@@ -540,6 +585,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
     it("keeps a boundCredentialId of exactly 512 chars whole, with no truncation marker", async () => {
       const exactBoundId = "a".repeat(512);
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "webauthn",
         authCredentialId: "cred-row-1",
         authCredential: { credentialId: exactBoundId, userId: "user-1" },
@@ -617,6 +663,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       // "The client sent nothing" must stay distinguishable from "the client
       // sent something we refused" — the second is the suspicious one.
       mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
         provider: "webauthn",
         authCredentialId: null,
         authCredential: null,

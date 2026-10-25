@@ -21,6 +21,7 @@ import { assertDistinctProviderRefs, deriveIdentifierPepper } from "@/lib/audit/
 import {
   configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
+  isSessionCookiePartitioned,
 } from "@/lib/auth/session/cookie-name";
 
 // Rate limiters for magic link email (per-email address)
@@ -210,7 +211,7 @@ export default {
         // a future embed path is added. Requires Secure (already set
         // when useSecureCookies). Browsers without CHIPS support ignore
         // the flag silently.
-        ...(useSecureCookies && process.env.COOKIE_PARTITIONED === "true"
+        ...(isSessionCookiePartitioned()
           ? { partitioned: true as const }
           : {}),
       },

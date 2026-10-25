@@ -135,6 +135,14 @@ describe("PUT /api/tenant/members/[userId]", () => {
     expect(mockPrismaTenantMember.update).not.toHaveBeenCalled();
   });
 
+  it("binds the step-up gate to the actor, not the target member", async () => {
+    // The gate binds freshness to the user whose session row it reads, so it
+    // must get the actor `auth()` resolved — never the target id in scope.
+    await putRequest(TARGET_USER_ID);
+    expect(mockRequireRecentSession).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentSession).toHaveBeenCalledWith(expect.anything(), ACTOR_USER_ID);
+  });
+
   it("returns 400 when trying to change own role", async () => {
     const res = await putRequest(ACTOR_USER_ID);
     expect(res.status).toBe(400);

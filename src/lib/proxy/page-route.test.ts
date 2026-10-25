@@ -275,6 +275,97 @@ describe("handlePageRoute — protected routes auth check", () => {
     expect(res.headers.getSetCookie().filter((h) => h.includes("session-token"))).toEqual([]);
   });
 
+  // The production shape: https under a basePath, where the configured name is
+  // `__Secure-` and a deletion is honored only with Secure at `${basePath}/`.
+  describe("under https + basePath", () => {
+    const BASE_PATH = "/passwd-sso";
+    const SECURE_NAME = "__Secure-authjs.session-token";
+
+    function makeBasePathRequest(cookie: string): NextRequest {
+      return new NextRequest(`https://app.example.test${BASE_PATH}/ja/dashboard/passwords`, {
+        headers: { cookie },
+        nextConfig: { basePath: BASE_PATH },
+      });
+    }
+
+    beforeEach(() => {
+      vi.stubEnv("AUTH_URL", `https://app.example.test${BASE_PATH}`);
+      vi.stubEnv("NEXT_PUBLIC_BASE_PATH", BASE_PATH);
+    });
+
+    it("on an ambiguous refusal, deletes each stray with Secure at the basePath", async () => {
+      const res = await handlePageRoute(
+        makeBasePathRequest(
+          `${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}.0=${TEST_SESSION_TOKEN}; ${SECURE_NAME}X=y; other=1`,
+        ),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      const headers = res.headers.getSetCookie();
+      for (const name of [`${SECURE_NAME}.0`, `${SECURE_NAME}X`]) {
+        const line = headers.find((h) => h.startsWith(`${name}=`));
+        expect(line, `Set-Cookie for ${name} not emitted`).toBeDefined();
+        expect(line).toMatch(/;\s*Path=\/passwd-sso\/(;|$)/i);
+        expect(line).toMatch(/;\s*Secure/i);
+        expect(line).toMatch(/;\s*HttpOnly/i);
+        expect(line).toMatch(/;\s*SameSite=lax/i);
+        expect(line).toMatch(/Max-Age=0|Expires=Thu,\s*01\s*Jan\s*1970/i);
+      }
+      expect(headers.find((h) => h.startsWith("other="))).toBeUndefined();
+    });
+
+    it("deletes only the known names when the refusal is not an ambiguous reading", async () => {
+      mockValidSession(fetchSpy, { id: "u-deactivated" });
+      mockResolveUserTenantId.mockResolvedValueOnce(null);
+      const res = await handlePageRoute(
+        makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; other=1`),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      const headers = res.headers.getSetCookie();
+      const sessionDeletions = headers
+        .map((h) => h.split("=")[0])
+        .filter((name) => name.includes("session-token"));
+      expect(sessionDeletions.sort()).toEqual(
+        [
+          "__Host-authjs.session-token",
+          "__Secure-authjs.session-token",
+          "__Secure-next-auth.session-token",
+          "authjs.session-token",
+          "next-auth.session-token",
+        ],
+      );
+      const line = headers.find((h) => h.startsWith(`${SECURE_NAME}=`));
+      expect(line).toMatch(/;\s*Path=\/passwd-sso\/(;|$)/i);
+      expect(line).toMatch(/;\s*Secure/i);
+    });
+
+    // A CHIPS browser keys a partitioned cookie apart from an unpartitioned one
+    // of the same name, so the configured name's deletion must carry the same
+    // Partitioned flag auth.config.ts set it with. Strays and the other known
+    // names were never set partitioned by Auth.js and stay unpartitioned.
+    it.each([
+      ["on", "true", true],
+      ["off", "", false],
+    ])("marks only the configured name's deletion Partitioned (COOKIE_PARTITIONED %s)", async (_label, flag, expected) => {
+      vi.stubEnv("COOKIE_PARTITIONED", flag);
+      const res = await handlePageRoute(
+        makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}.0=${TEST_SESSION_TOKEN}`),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      const headers = res.headers.getSetCookie();
+      const configured = headers.find((h) => h.startsWith(`${SECURE_NAME}=`));
+      expect(configured).toBeDefined();
+      expect(/;\s*Partitioned/i.test(configured!)).toBe(expected);
+      for (const line of headers.filter((h) => !h.startsWith(`${SECURE_NAME}=`))) {
+        expect(line).not.toMatch(/;\s*Partitioned/i);
+      }
+      expect(headers.some((h) => h.startsWith(`${SECURE_NAME}.0=`))).toBe(true);
+    });
+  });
+
   it("allows /dashboard with valid session (returns intl response with security headers)", async () => {
     // Full passkey-field shape (all four present, non-enforcing) — C4's
     // bundle-substitution fires only when a field is genuinely absent from

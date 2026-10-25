@@ -13,6 +13,7 @@ import {
   ALL_KNOWN_SESSION_COOKIE_NAMES,
   configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
+  isSessionCookiePartitioned,
 } from "../auth/session/cookie-name";
 import {
   parseCookiePairs,
@@ -78,6 +79,10 @@ function clearAuthSessionCookies(
   // prefixed names and the cookie persists. Call `isSecureCookieFromAuthUrl()`
   // at delete-time (not module-evaluated) so test env stubs are honored.
   const useSecureCookies = isSecureCookieFromAuthUrl();
+  // Only the configured name is ever set partitioned (auth.config.ts); the
+  // other known names and the ambiguity strays are never Auth.js-set here.
+  const configuredName = configuredSessionCookieName();
+  const partitioned = isSessionCookiePartitioned();
   for (const name of [...ALL_KNOWN_SESSION_COOKIE_NAMES, ...extraNames]) {
     response.cookies.delete({
       name,
@@ -85,6 +90,7 @@ function clearAuthSessionCookies(
       secure: useSecureCookies,
       httpOnly: true,
       sameSite: "lax",
+      ...(partitioned && name === configuredName ? { partitioned: true } : {}),
     });
   }
 }
