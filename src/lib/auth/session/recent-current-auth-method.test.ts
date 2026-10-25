@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { hashSessionToken } from "./session-cache";
 
 const { mockSessionFindUnique, mockCredentialFindFirst, mockWithBypassRls } =
   vi.hoisted(() => ({
@@ -32,7 +33,7 @@ import {
   canRecoverSessionWithPasskey,
 } from "./recent-current-auth-method";
 
-function makeRequest(cookie = "authjs.session-token=sess-1") {
+function makeRequest(cookie = "authjs.session-token=5e55-0001") {
   return new NextRequest("http://localhost:3000/api/test", {
     headers: { cookie },
   });
@@ -162,6 +163,54 @@ describe("evaluateStepUpFreshness", () => {
 });
 
 describe("requireRecentCurrentAuthMethod", () => {
+  // The cookie fixtures use the plain name, the configured one over http.
+  beforeEach(() => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // auth() authenticates the FIRST of two same-named cookies; a reader that
+  // took the last could evaluate a fresh session B for a request running as
+  // a stale session A. Both cells see the same fresh row, so only the
+  // header decides.
+  describe("duplicated session cookie", () => {
+    beforeEach(() => {
+      mockSessionFindUnique.mockResolvedValue({
+        provider: "google",
+        createdAt: minutesAgo(5),
+        passkeyVerifiedAt: null,
+      });
+    });
+
+    it("control: a single session cookie is evaluated (fresh → null)", async () => {
+      await expect(
+        requireRecentCurrentAuthMethod(makeRequest("authjs.session-token=bbbb")),
+      ).resolves.toBeNull();
+    });
+
+    it("evaluates the first session, the one auth() authenticates (stale → 403)", async () => {
+      // First = stale, second = fresh: reading the last would answer null.
+      mockSessionFindUnique.mockImplementation(async ({ where }: { where: { sessionToken: string } }) =>
+        where.sessionToken === hashSessionToken("aaaa")
+          ? { provider: "google", createdAt: minutesAgo(60), passkeyVerifiedAt: null }
+          : { provider: "google", createdAt: minutesAgo(5), passkeyVerifiedAt: null },
+      );
+
+      const result = await requireRecentCurrentAuthMethod(
+        makeRequest("authjs.session-token=aaaa; authjs.session-token=bbbb"),
+      );
+
+      expect(result?.status).toBe(403);
+      expect(mockSessionFindUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { sessionToken: hashSessionToken("aaaa") } }),
+      );
+    });
+  });
+
   it("returns 401 when the request has no session cookie", async () => {
     const result = await requireRecentCurrentAuthMethod(makeRequest(""));
 

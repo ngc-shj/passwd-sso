@@ -1,13 +1,13 @@
 import { redirect } from "@/i18n/navigation";
 import { redirect as nextRedirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { headers } from "next/headers";
 import { auth } from "@/auth";
 import {
   evaluateStepUpFreshness,
   canRecoverSessionWithPasskey,
   STEP_UP_FRESHNESS,
 } from "@/lib/auth/session/recent-current-auth-method";
-import { getSessionTokenFromCookieStore } from "@/app/api/sessions/helpers";
+import { getSessionTokenFromCookieHeader } from "@/app/api/sessions/helpers";
 import { SignInReauthPanel } from "@/components/auth/signin-reauth-panel";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { APP_NAME } from "@/lib/constants";
@@ -69,7 +69,9 @@ export default async function SignInPage({
       // handlers) live outside the [locale] segment and are step-up gated.
       // Evaluate the same freshness core the gate applies: bouncing a stale
       // session straight back would 403 again and loop forever.
-      const sessionToken = getSessionTokenFromCookieStore(await cookies());
+      const sessionToken = getSessionTokenFromCookieHeader(
+        (await headers()).get("cookie"),
+      );
       const verdict = sessionToken
         ? await evaluateStepUpFreshness(sessionToken)
         : STEP_UP_FRESHNESS.INVALID;

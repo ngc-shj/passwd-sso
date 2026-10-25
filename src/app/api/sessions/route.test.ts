@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaSession, mockPrismaUser, mockPrismaExtensionToken, mockRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateCachedSessions } =
@@ -69,6 +69,17 @@ import {
 
 const now = new Date("2025-01-01T00:00:00Z");
 
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("GET /api/sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,7 +117,7 @@ describe("GET /api/sessions", () => {
     mockPrismaUser.findUnique.mockResolvedValue({ tenant: { maxConcurrentSessions: null } });
 
     const req = createRequest("GET", "http://localhost:3000/api/sessions", {
-      headers: { Cookie: "authjs.session-token=current-token" },
+      headers: { Cookie: "authjs.session-token=c0ffee-0001" },
     });
     const res = await GET(req);
     const json = await res.json();
@@ -236,7 +247,7 @@ describe("DELETE /api/sessions", () => {
     mockPrismaSession.deleteMany.mockResolvedValue({ count: 3 });
 
     const req = createRequest("DELETE", "http://localhost:3000/api/sessions", {
-      headers: { Cookie: "authjs.session-token=my-token" },
+      headers: { Cookie: "authjs.session-token=ac7e-0002" },
     });
     const res = await DELETE(req);
     const json = await res.json();
@@ -247,7 +258,7 @@ describe("DELETE /api/sessions", () => {
     expect(mockPrismaSession.deleteMany).toHaveBeenCalledWith({
       where: {
         userId: "user-1",
-        sessionToken: { not: "hashed:my-token" },
+        sessionToken: { not: "hashed:ac7e-0002" },
       },
     });
 
@@ -268,7 +279,7 @@ describe("DELETE /api/sessions", () => {
     mockPrismaSession.deleteMany.mockResolvedValue({ count: 2 });
 
     const req = createRequest("DELETE", "http://localhost:3000/api/sessions", {
-      headers: { Cookie: "authjs.session-token=my-token" },
+      headers: { Cookie: "authjs.session-token=ac7e-0002" },
     });
     await DELETE(req);
 
@@ -283,7 +294,7 @@ describe("DELETE /api/sessions", () => {
     mockPrismaSession.deleteMany.mockResolvedValue({ count: 0 });
 
     const req = createRequest("DELETE", "http://localhost:3000/api/sessions", {
-      headers: { Cookie: "authjs.session-token=my-token" },
+      headers: { Cookie: "authjs.session-token=ac7e-0002" },
     });
     await DELETE(req);
 
@@ -297,7 +308,7 @@ describe("DELETE /api/sessions", () => {
     mockPrismaSession.deleteMany.mockRejectedValue(new Error("db down"));
 
     const req = createRequest("DELETE", "http://localhost:3000/api/sessions", {
-      headers: { Cookie: "authjs.session-token=my-token" },
+      headers: { Cookie: "authjs.session-token=ac7e-0002" },
     });
     await expect(DELETE(req)).rejects.toThrow("db down");
 

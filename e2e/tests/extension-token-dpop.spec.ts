@@ -22,6 +22,7 @@ import { test, expect, chromium, type BrowserContext } from "@playwright/test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
+import { configuredSessionCookieName } from "../../src/lib/auth/session/cookie-name";
 
 // Extension dist/ built by global-setup (e2e/global-setup.ts::buildExtension).
 const EXT_PATH = path.join(__dirname, "..", "..", "extension", "dist");
@@ -114,11 +115,9 @@ test.describe("@extension DPoP-bound token flow", () => {
           return;
         }
 
-        // Inject session cookie (matches the existing injectSession pattern from helpers/auth.ts).
-        const cookieName =
-          baseURL.startsWith("https")
-            ? "__Secure-authjs.session-token"
-            : "authjs.session-token";
+        // Inject session cookie under the name Auth.js reads in this
+        // deployment (same helper as injectSession in helpers/auth.ts).
+        const cookieName = configuredSessionCookieName();
 
         await context.addCookies([
           {

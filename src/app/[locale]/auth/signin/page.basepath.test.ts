@@ -30,7 +30,7 @@ const {
   mockNextRedirect,
   mockEvaluateStepUpFreshness,
   mockCanRecoverSessionWithPasskey,
-  mockGetSessionTokenFromCookieStore,
+  mockGetSessionTokenFromCookieHeader,
   mockSignInReauthPanel,
 } = vi.hoisted(() => ({
   // Non-throwing spy — the real redirect throws NEXT_REDIRECT, which would
@@ -38,7 +38,7 @@ const {
   mockNextRedirect: vi.fn(),
   mockEvaluateStepUpFreshness: vi.fn(),
   mockCanRecoverSessionWithPasskey: vi.fn(),
-  mockGetSessionTokenFromCookieStore: vi.fn(),
+  mockGetSessionTokenFromCookieHeader: vi.fn(),
   mockSignInReauthPanel: vi.fn(() => null),
 }));
 
@@ -46,7 +46,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/i18n/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/navigation", () => ({ redirect: mockNextRedirect }));
 vi.mock("next/headers", () => ({
-  cookies: () => Promise.resolve({ get: () => undefined }),
+  headers: () => Promise.resolve(new Headers()),
 }));
 vi.mock("next-intl/server", () => ({
   getTranslations: mockGetTranslations,
@@ -64,7 +64,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   STEP_UP_FRESHNESS: { FRESH: "fresh", STALE: "stale", INVALID: "invalid" },
 }));
 vi.mock("@/app/api/sessions/helpers", () => ({
-  getSessionTokenFromCookieStore: mockGetSessionTokenFromCookieStore,
+  getSessionTokenFromCookieHeader: mockGetSessionTokenFromCookieHeader,
 }));
 vi.mock("@/components/auth/signin-reauth-panel", () => ({
   SignInReauthPanel: mockSignInReauthPanel,
@@ -125,7 +125,7 @@ describe("SignInPage under BASE_PATH=/passwd-sso", () => {
     mockSetRequestLocale.mockReturnValue(undefined);
     mockRedirect.mockReturnValue(undefined);
     mockAuth.mockResolvedValue({ user: { id: "u1" } });
-    mockGetSessionTokenFromCookieStore.mockReturnValue("sess-1");
+    mockGetSessionTokenFromCookieHeader.mockReturnValue("sess-1");
     mockEvaluateStepUpFreshness.mockResolvedValue("fresh");
     mockCanRecoverSessionWithPasskey.mockResolvedValue(false);
     mockSignInReauthPanel.mockReturnValue(null);

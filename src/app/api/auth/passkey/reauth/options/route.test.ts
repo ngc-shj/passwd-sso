@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
@@ -107,11 +107,22 @@ const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
 
 const ROUTE_URL = "http://localhost:3000/api/auth/passkey/reauth/options";
 
-function makeRequest(cookie = "authjs.session-token=sess-1") {
+function makeRequest(cookie = "authjs.session-token=5e55-0001") {
   return createRequest("POST", ROUTE_URL, {
     headers: { origin: "http://localhost:3000", cookie },
   });
 }
+
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("POST /api/auth/passkey/reauth/options", () => {
   beforeEach(() => {

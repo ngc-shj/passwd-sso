@@ -31,7 +31,6 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 
 import { proxy } from "../proxy";
 import { applySecurityHeaders as _applySecurityHeaders } from "../lib/proxy/security-headers";
-import { extractSessionToken as _extractSessionToken } from "../lib/proxy/auth-gate";
 import { __resetAllowlistForTests } from "../lib/http/cors";
 import {
   PASSKEY_AUDIT_MAP_MAX as _PASSKEY_AUDIT_MAP_MAX,
@@ -46,6 +45,24 @@ import {
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
 
 const APP_ORIGIN = "http://localhost:3000";
+
+/**
+ * Every cookie fixture below uses the plain `authjs.session-token` name, which
+ * is the configured name only over http. Pin that shape so an AUTH_URL or
+ * basePath exported in the shell cannot turn every fixture into a
+ * non-configured cookie. AUTH_URL is stubbed empty (not to an http URL) so it
+ * does not also become the CSRF gate's configured origin.
+ */
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "");
+  vi.stubEnv("NEXTAUTH_URL", "");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+  vi.stubEnv("NODE_ENV", "test");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function createApiRequest(
   path: string,
@@ -143,7 +160,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("passes /api/extension/bridge-code through (route handler does its own auth + Origin + DPoP)", async () => {
     const res = await proxy(
       createApiRequest("/api/extension/bridge-code", {
-        Cookie: "authjs.session-token=sess-bridge",
+        Cookie: "authjs.session-token=5e55-0000",
       }),
       dummyOptions,
     );
@@ -254,7 +271,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/tags", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess-tags",
+        Cookie: "authjs.session-token=5e55-0001",
       }),
       dummyOptions,
     );
@@ -268,7 +285,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/teams", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess-teams",
+        Cookie: "authjs.session-token=5e55-0002",
       }),
       dummyOptions,
     );
@@ -323,7 +340,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("does NOT bypass without Bearer header on /api/passwords", async () => {
     const res = await proxy(
       createApiRequest("/api/passwords", {
-        Cookie: "authjs.session-token=sess-passwords",
+        Cookie: "authjs.session-token=5e55-0003",
       }),
       dummyOptions,
     );
@@ -333,7 +350,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("returns 401 for protected API route without session", async () => {
     const res = await proxy(
       createApiRequest("/api/extension/token", {
-        Cookie: "authjs.session-token=sess-token",
+        Cookie: "authjs.session-token=5e55-0004",
       }),
       dummyOptions,
     );
@@ -345,7 +362,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/extension/token/extra", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess-token-child",
+        Cookie: "authjs.session-token=5e55-0005",
       }),
       dummyOptions,
     );
@@ -361,7 +378,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/passwords", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess-cookie-plus-bearer",
+        Cookie: "authjs.session-token=5e55-0006",
       }),
       dummyOptions,
     );
@@ -376,7 +393,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/api-keys", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess-cookie-plus-bearer-apikey",
+        Cookie: "authjs.session-token=5e55-0007",
       }),
       dummyOptions,
     );
@@ -388,7 +405,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     const res = await proxy(
       createApiRequest("/api/vault/delegation/check", {
         Authorization: "Bearer tok123",
-        Cookie: "authjs.session-token=sess-cookie-plus-bearer-deleg",
+        Cookie: "authjs.session-token=5e55-0008",
       }),
       dummyOptions,
     );
@@ -399,7 +416,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("returns 401 for /api/sends without session", async () => {
     const res = await proxy(
       createApiRequest("/api/sends", {
-        Cookie: "authjs.session-token=sess-sends",
+        Cookie: "authjs.session-token=5e55-0009",
       }),
       dummyOptions,
     );
@@ -409,7 +426,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("returns 401 for /api/sends/file without session", async () => {
     const res = await proxy(
       createApiRequest("/api/sends/file", {
-        Cookie: "authjs.session-token=sess-sends-file",
+        Cookie: "authjs.session-token=5e55-000a",
       }),
       dummyOptions,
     );
@@ -419,7 +436,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("returns 401 for /api/vault/setup without session", async () => {
     const res = await proxy(
       createApiRequest("/api/vault/setup", {
-        Cookie: "authjs.session-token=sess-vault-setup",
+        Cookie: "authjs.session-token=5e55-000b",
       }),
       dummyOptions,
     );
@@ -429,7 +446,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("returns 401 for /api/vault/unlock without session", async () => {
     const res = await proxy(
       createApiRequest("/api/vault/unlock", {
-        Cookie: "authjs.session-token=sess-vault-unlock",
+        Cookie: "authjs.session-token=5e55-000c",
       }),
       dummyOptions,
     );
@@ -439,7 +456,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
   it("returns 401 for /api/folders without session", async () => {
     const res = await proxy(
       createApiRequest("/api/folders", {
-        Cookie: "authjs.session-token=sess-folders",
+        Cookie: "authjs.session-token=5e55-000d",
       }),
       dummyOptions,
     );
@@ -540,7 +557,7 @@ describe("proxy — C8 bridge-code passthrough", () => {
       method: "POST",
       headers: {
         origin: CHROME_EXT_ALLOWED,
-        Cookie: "authjs.session-token=sess-bridge",
+        Cookie: "authjs.session-token=5e55-0000",
         "Content-Type": "application/json",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -561,7 +578,7 @@ describe("proxy — C8 bridge-code passthrough", () => {
       method: "POST",
       headers: {
         origin: CHROME_EXT_ATTACKER,
-        Cookie: "authjs.session-token=sess-bridge",
+        Cookie: "authjs.session-token=5e55-0000",
         "Content-Type": "application/json",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -585,7 +602,7 @@ describe("proxy — C8 bridge-code passthrough", () => {
       method: "POST",
       headers: {
         origin: "https://attacker.example",
-        Cookie: "authjs.session-token=sess-bridge",
+        Cookie: "authjs.session-token=5e55-0000",
         "Content-Type": "application/json",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -693,7 +710,7 @@ describe("proxy — CORS preflight and headers", () => {
       method: "POST",
       headers: {
         origin: APP_ORIGIN,
-        Cookie: "authjs.session-token=sess-1",
+        Cookie: "authjs.session-token=5e55-000e",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
@@ -707,7 +724,7 @@ describe("proxy — CORS preflight and headers", () => {
       method: "POST",
       headers: {
         origin: "http://evil.com",
-        Cookie: "authjs.session-token=sess-1",
+        Cookie: "authjs.session-token=5e55-000e",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
@@ -723,7 +740,7 @@ describe("proxy — CORS preflight and headers", () => {
       method: "GET",
       headers: {
         origin: APP_ORIGIN,
-        Cookie: "authjs.session-token=sess-fail",
+        Cookie: "authjs.session-token=5e55-000f",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
@@ -794,66 +811,6 @@ describe("proxy — applySecurityHeaders basePath", () => {
   });
 });
 
-describe("extractSessionToken", () => {
-  it("extracts authjs.session-token value from cookie string", () => {
-    const cookie = "authjs.session-token=abc123def456";
-    expect(_extractSessionToken(cookie)).toBe("abc123def456");
-  });
-
-  it("extracts __Secure-authjs.session-token value preferentially", () => {
-    const cookie = "__Secure-authjs.session-token=secure-token-xyz; authjs.session-token=plain-token";
-    // __Secure- prefix takes priority (listed first in the names array)
-    expect(_extractSessionToken(cookie)).toBe("secure-token-xyz");
-  });
-
-  it("extracts authjs.session-token when __Secure- variant is absent", () => {
-    const cookie = "other-cookie=value; authjs.session-token=my-session; another=thing";
-    expect(_extractSessionToken(cookie)).toBe("my-session");
-  });
-
-  it("returns empty string when no session cookie exists", () => {
-    const cookie = "some-cookie=value; another-cookie=other";
-    expect(_extractSessionToken(cookie)).toBe("");
-  });
-
-  it("returns empty string for an empty cookie string", () => {
-    expect(_extractSessionToken("")).toBe("");
-  });
-
-  it("handles token value at end of cookie string without trailing semicolon", () => {
-    const cookie = "foo=bar; authjs.session-token=last-token-value";
-    expect(_extractSessionToken(cookie)).toBe("last-token-value");
-  });
-
-  it("handles cookies with special characters in token value", () => {
-    const cookie = "authjs.session-token=tok%2Fwith%3Dspecial%2Bchars; other=x";
-    expect(_extractSessionToken(cookie)).toBe("tok%2Fwith%3Dspecial%2Bchars");
-  });
-
-  // __Host-authjs.session-token is the cookie name Auth.js emits when
-  // useSecureCookies is true AND NEXT_PUBLIC_BASE_PATH is unset — the
-  // typical HTTPS-at-root production deployment. The post-merge review
-  // of PR #465 found the proxy's names array did NOT include __Host-,
-  // so every authenticated request in such deployments was treated as
-  // anonymous. These tests pin the contract.
-  it("extracts __Host-authjs.session-token value", () => {
-    const cookie = "__Host-authjs.session-token=host-token-abc";
-    expect(_extractSessionToken(cookie)).toBe("host-token-abc");
-  });
-
-  it("prefers __Host- when both __Host- and __Secure- are present", () => {
-    const cookie =
-      "__Host-authjs.session-token=host-tok; __Secure-authjs.session-token=secure-tok; authjs.session-token=plain-tok";
-    expect(_extractSessionToken(cookie)).toBe("host-tok");
-  });
-
-  it("falls through to __Secure- when only __Secure- + plain are present", () => {
-    const cookie =
-      "__Secure-authjs.session-token=secure-tok; authjs.session-token=plain-tok";
-    expect(_extractSessionToken(cookie)).toBe("secure-tok");
-  });
-});
-
 describe("proxy — access restriction", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -882,7 +839,7 @@ describe("proxy — access restriction", () => {
 
     const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
       method: "GET",
-      headers: { Cookie: "authjs.session-token=sess-acl-deny" },
+      headers: { Cookie: "authjs.session-token=5e55-0010" },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 
@@ -898,7 +855,7 @@ describe("proxy — access restriction", () => {
 
     const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
       method: "GET",
-      headers: { Cookie: "authjs.session-token=sess-acl-allow" },
+      headers: { Cookie: "authjs.session-token=5e55-0011" },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 
@@ -916,7 +873,7 @@ describe("proxy — access restriction", () => {
 
     const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
       method: "GET",
-      headers: { Cookie: "authjs.session-token=sess-acl-notenant" },
+      headers: { Cookie: "authjs.session-token=5e55-0012" },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 
@@ -931,7 +888,7 @@ describe("proxy — access restriction", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/vault/unlock`, {
       method: "POST",
       headers: {
-        Cookie: "authjs.session-token=sess-acl-vault",
+        Cookie: "authjs.session-token=5e55-0013",
         Origin: APP_ORIGIN,
         Host: "localhost:3000",
       },
@@ -949,7 +906,7 @@ describe("proxy — access restriction", () => {
 
     const req = new NextRequest(`${APP_ORIGIN}/api/folders`, {
       method: "GET",
-      headers: { Cookie: "authjs.session-token=sess-acl-folders" },
+      headers: { Cookie: "authjs.session-token=5e55-0014" },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 
@@ -958,13 +915,65 @@ describe("proxy — access restriction", () => {
     expect(body.error).toBe("ACCESS_DENIED");
   });
 
+  // `name =B; name=A`: Auth.js trims the key and authenticates B (first
+  // occurrence); an exact-key reader skips the first pair and decides on A.
+  // The IP restriction must never be checked against A's tenant for a
+  // request whose route handler will run as B.
+  describe("whitespace-spelled duplicate session cookie", () => {
+    const SESSION_OPEN = "a0a0a0a0-0000-4000-8000-00000000000a";
+    const SESSION_RESTRICTED = "b0b0b0b0-0000-4000-8000-00000000000b";
+
+    beforeEach(() => {
+      fetchSpy.mockImplementation(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        const cookie = new Headers(init?.headers).get("cookie") ?? "";
+        const userId = cookie.includes(SESSION_RESTRICTED) ? "u-restricted" : "u-open";
+        return new Response(JSON.stringify({ user: { id: userId } }), { status: 200 });
+      });
+      mockResolveUserTenantId.mockImplementation(async (userId: string) =>
+        userId === "u-restricted" ? "tenant-restricted" : "tenant-open",
+      );
+      mockCheckAccessWithAudit.mockImplementation(async (tenantId: string) => ({
+        allowed: tenantId !== "tenant-restricted",
+      }));
+    });
+
+    function requestWith(cookie: string) {
+      return new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+        method: "GET",
+        headers: { Cookie: cookie },
+      } as ConstructorParameters<typeof NextRequest>[1]);
+    }
+
+    it("control: the restricted session alone is denied, the open one alone allowed", async () => {
+      expect((await proxy(requestWith(`authjs.session-token=${SESSION_RESTRICTED}`), dummyOptions)).status).toBe(403);
+      expect((await proxy(requestWith(`authjs.session-token=${SESSION_OPEN}`), dummyOptions)).status).toBe(200);
+    });
+
+    it("decides on the first (trimmed) cookie, the session auth() authenticates", async () => {
+      // Auth.js trims the key and keeps the first: the route runs as the
+      // restricted session, so the restricted tenant's IP rule must apply.
+      const res = await proxy(
+        requestWith(`authjs.session-token =${SESSION_RESTRICTED}; authjs.session-token=${SESSION_OPEN}`),
+        dummyOptions,
+      );
+
+      expect(res.status).toBe(403);
+      expect(mockCheckAccessWithAudit).not.toHaveBeenCalledWith(
+        "tenant-open",
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
   it("returns 403 for dashboard route when access denied", async () => {
     mockResolveUserTenantId.mockResolvedValue("tenant1");
     mockCheckAccessWithAudit.mockResolvedValue({ allowed: false, reason: "IP not in allowed CIDRs" });
 
     const req = new NextRequest(`${APP_ORIGIN}/ja/dashboard`, {
       method: "GET",
-      headers: { Cookie: "authjs.session-token=sess-acl-dash" },
+      headers: { Cookie: "authjs.session-token=5e55-0015" },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 
@@ -1009,7 +1018,7 @@ describe("proxy — CSRF gate", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
       method: "POST",
       headers: {
-        Cookie: "authjs.session-token=sess-csrf-1",
+        Cookie: "authjs.session-token=5e55-0016",
         Origin: "https://evil.example.com",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1021,7 +1030,7 @@ describe("proxy — CSRF gate", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
       method: "GET",
       headers: {
-        Cookie: "authjs.session-token=sess-csrf-2",
+        Cookie: "authjs.session-token=5e55-0017",
         Origin: "https://evil.example.com",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1034,7 +1043,7 @@ describe("proxy — CSRF gate", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
       method: "POST",
       headers: {
-        Cookie: "authjs.session-token=sess-csrf-3",
+        Cookie: "authjs.session-token=5e55-0018",
         Origin: "https://evil.example.com",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1046,7 +1055,7 @@ describe("proxy — CSRF gate", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
       method: "POST",
       headers: {
-        Cookie: "authjs.session-token=sess-csrf-4",
+        Cookie: "authjs.session-token=5e55-0019",
         Origin: APP_ORIGIN,
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1073,7 +1082,7 @@ describe("proxy — CSRF gate", () => {
       method: "POST",
       headers: {
         Authorization: "Bearer ext-tok",
-        Cookie: "authjs.session-token=sess-csrf-6",
+        Cookie: "authjs.session-token=5e55-001a",
         Origin: "chrome-extension://abc1234567890abcdef1234567890abcdef",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1097,7 +1106,7 @@ describe("proxy — CSRF gate", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/csp-report`, {
       method: "POST",
       headers: {
-        Cookie: "authjs.session-token=sess-csrf-8",
+        Cookie: "authjs.session-token=5e55-001b",
         // Origin omitted (sandboxed iframe / null Origin)
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1110,7 +1119,7 @@ describe("proxy — CSRF gate", () => {
       method: "POST",
       headers: {
         Authorization: "Bearer api-key-tok",
-        Cookie: "authjs.session-token=sess-stale-csrf-9",
+        Cookie: "authjs.session-token=5e55-001c",
         Origin: "https://devtool.example.com",
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1125,7 +1134,7 @@ describe("proxy — CSRF gate", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
       method: "POST",
       headers: {
-        Cookie: "authjs.session-token=sess-internal-fetch",
+        Cookie: "authjs.session-token=5e55-001d",
         Origin: APP_ORIGIN, // explicit, matches APP_URL
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1140,7 +1149,7 @@ describe("proxy — CSRF gate", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
       method: "POST",
       headers: {
-        Cookie: "authjs.session-token=sess-internal-fetch-noorigin",
+        Cookie: "authjs.session-token=5e55-001e",
         // Origin intentionally omitted
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
@@ -1180,7 +1189,7 @@ describe("auth-gate session cache miss path", () => {
     const buildReq = () =>
       new NextRequest(`${APP_ORIGIN}/api/passwords`, {
         method: "GET",
-        headers: { Cookie: "authjs.session-token=sess-miss" },
+        headers: { Cookie: "authjs.session-token=5e55-001f" },
       } as ConstructorParameters<typeof NextRequest>[1]);
 
     // Hit path: cache returns SessionInfo, no upstream fetch.

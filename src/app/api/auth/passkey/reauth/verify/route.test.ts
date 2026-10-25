@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
@@ -110,7 +110,7 @@ function makeVerifyRequest(credentialResponseId = "cred-1") {
   return createRequest("POST", ROUTE_URL, {
     headers: {
       origin: "http://localhost:3000",
-      cookie: "authjs.session-token=sess-1",
+      cookie: "authjs.session-token=5e55-0001",
       "Content-Type": "application/json",
     },
     body: {
@@ -119,6 +119,17 @@ function makeVerifyRequest(credentialResponseId = "cred-1") {
     },
   });
 }
+
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("POST /api/auth/passkey/reauth/verify", () => {
   beforeEach(() => {
@@ -174,7 +185,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       "webauthn:challenge:reauth:user-1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
     expect(mockSessionUpdate).toHaveBeenCalledWith({
-      where: { sessionToken: "hashed:sess-1" },
+      where: { sessionToken: "hashed:5e55-0001" },
       data: { passkeyVerifiedAt: expect.any(Date) },
     });
     expect(mockLogAudit).toHaveBeenCalledWith(
@@ -617,7 +628,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
         createRequest("POST", ROUTE_URL, {
           headers: {
             origin: "http://localhost:3000",
-            cookie: "authjs.session-token=sess-1",
+            cookie: "authjs.session-token=5e55-0001",
             "Content-Type": "application/json",
           },
           body: {

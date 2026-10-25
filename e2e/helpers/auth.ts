@@ -6,16 +6,9 @@
  */
 import type { BrowserContext } from "@playwright/test";
 import {
-  getSessionCookieName as resolveSessionCookieName,
+  configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "../../src/lib/auth/session/cookie-name";
-
-function getSessionCookieName(): string {
-  return resolveSessionCookieName({
-    useSecureCookies: isSecureCookieFromAuthUrl(),
-    basePath: process.env.NEXT_PUBLIC_BASE_PATH,
-  });
-}
 
 /**
  * Resolve the cookie target URL from the test base URL.
@@ -39,7 +32,7 @@ export async function injectSession(
 ): Promise<void> {
   await context.addCookies([
     {
-      name: getSessionCookieName(),
+      name: configuredSessionCookieName(),
       value: sessionToken,
       url: getCookieUrl(),
       // Match the production session cookie attribute set in auth.config.ts.

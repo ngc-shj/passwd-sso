@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaSession, mockRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateCachedSessions } =
@@ -49,6 +49,17 @@ import {
   expectNotInvalidatedOnDbThrow,
 } from "@/__tests__/helpers/session-cache-assertions";
 
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("DELETE /api/sessions/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -87,13 +98,13 @@ describe("DELETE /api/sessions/[id]", () => {
   it("returns 400 when trying to revoke current session", async () => {
     mockPrismaSession.findFirst.mockResolvedValue({
       // H4: the DB stores the digest; the route hashes the cookie token to match.
-      sessionToken: "hashed:current-token",
+      sessionToken: "hashed:c0ffee-0001",
     });
 
     const req = createRequest(
       "DELETE",
       "http://localhost:3000/api/sessions/s1",
-      { headers: { Cookie: "authjs.session-token=current-token" } },
+      { headers: { Cookie: "authjs.session-token=c0ffee-0001" } },
     );
     const res = await DELETE(req, createParams({ id: "s1" }));
     const json = await res.json();
@@ -109,7 +120,7 @@ describe("DELETE /api/sessions/[id]", () => {
     const req = createRequest(
       "DELETE",
       "http://localhost:3000/api/sessions/s1",
-      { headers: { Cookie: "authjs.session-token=my-token" } },
+      { headers: { Cookie: "authjs.session-token=ac7e-0002" } },
     );
     const res = await DELETE(req, createParams({ id: "s1" }));
 
@@ -125,7 +136,7 @@ describe("DELETE /api/sessions/[id]", () => {
     const req = createRequest(
       "DELETE",
       "http://localhost:3000/api/sessions/s1",
-      { headers: { Cookie: "authjs.session-token=my-token" } },
+      { headers: { Cookie: "authjs.session-token=ac7e-0002" } },
     );
     const res = await DELETE(req, createParams({ id: "s1" }));
     const json = await res.json();
@@ -155,7 +166,7 @@ describe("DELETE /api/sessions/[id]", () => {
     const req = createRequest(
       "DELETE",
       "http://localhost:3000/api/sessions/s1",
-      { headers: { Cookie: "authjs.session-token=my-token" } },
+      { headers: { Cookie: "authjs.session-token=ac7e-0002" } },
     );
     await DELETE(req, createParams({ id: "s1" }));
 
@@ -169,7 +180,7 @@ describe("DELETE /api/sessions/[id]", () => {
     const req = createRequest(
       "DELETE",
       "http://localhost:3000/api/sessions/s1",
-      { headers: { Cookie: "authjs.session-token=my-token" } },
+      { headers: { Cookie: "authjs.session-token=ac7e-0002" } },
     );
     await DELETE(req, createParams({ id: "s1" }));
 
@@ -185,7 +196,7 @@ describe("DELETE /api/sessions/[id]", () => {
     const req = createRequest(
       "DELETE",
       "http://localhost:3000/api/sessions/s1",
-      { headers: { Cookie: "authjs.session-token=my-token" } },
+      { headers: { Cookie: "authjs.session-token=ac7e-0002" } },
     );
     await expect(DELETE(req, createParams({ id: "s1" }))).rejects.toThrow(
       "db down",

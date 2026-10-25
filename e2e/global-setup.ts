@@ -24,7 +24,7 @@
  *
  * Session tokens are written to .auth-state.json for test consumption.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -85,7 +85,9 @@ async function seedVaultReadyUser(
 
   await seedVaultKey(user.id, vault.verificationArtifact);
 
-  const sessionToken = `e2e-token-${randomBytes(16).toString("hex")}`;
+  // Same shape Auth.js mints (randomUUID): the session-cookie reader refuses
+  // values outside that alphabet (src/lib/auth/session/session-cookie.ts).
+  const sessionToken = randomUUID();
   await seedSession(user.id, sessionToken);
 
   return { sessionToken, encryptionKey: vault.encryptionKey };
@@ -221,7 +223,7 @@ export default async function globalSetup(): Promise<void> {
 
   // ── Fresh user (no vault) ─────────────────────────────────────
   await seedUser(TEST_USERS.fresh);
-  const freshToken = `e2e-token-${randomBytes(16).toString("hex")}`;
+  const freshToken = randomUUID();
   await seedSession(TEST_USERS.fresh.id, freshToken);
 
   // ── Team: pre-seed teamOwner as OWNER and teamMember as MEMBER ────

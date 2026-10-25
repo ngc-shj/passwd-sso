@@ -75,6 +75,17 @@ function mockValidSession(fetchSpy: ReturnType<typeof vi.spyOn>, user: SessionUs
   );
 }
 
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("handlePageRoute — public share routes (/s/...)", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -135,7 +146,7 @@ describe("handlePageRoute — protected routes auth check", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-deactivated",
+        cookie: "authjs.session-token=5e55-0100",
       }),
       dummyOptions,
     );
@@ -206,7 +217,7 @@ describe("handlePageRoute — protected routes auth check", () => {
     });
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-1",
+        cookie: "authjs.session-token=5e55-0001",
       }),
       dummyOptions,
     );
@@ -224,7 +235,7 @@ describe("handlePageRoute — protected routes auth check", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-blocked",
+        cookie: "authjs.session-token=5e55-0101",
       }),
       dummyOptions,
     );
@@ -269,7 +280,7 @@ describe("handlePageRoute — passkey enforcement", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-pk",
+        cookie: "authjs.session-token=5e55-0102",
       }),
       dummyOptions,
     );
@@ -288,7 +299,7 @@ describe("handlePageRoute — passkey enforcement", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=sess-pk2",
+        cookie: "authjs.session-token=5e55-0103",
       }),
       dummyOptions,
     );
@@ -306,7 +317,7 @@ describe("handlePageRoute — passkey enforcement", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/settings/auth/passkey", {
-        cookie: "authjs.session-token=sess-pk3",
+        cookie: "authjs.session-token=5e55-0104",
       }),
       dummyOptions,
     );
@@ -399,7 +410,7 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
       passkeyGracePeriodDays: 1,
     });
 
-    const baseHeaders = { cookie: "authjs.session-token=sess-dedup" };
+    const baseHeaders = { cookie: "authjs.session-token=5e55-0105" };
 
     await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", baseHeaders),
@@ -443,7 +454,7 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
     };
     mockValidSession(fetchSpy, sessionUser);
 
-    const headers = { cookie: "authjs.session-token=sess-f18" };
+    const headers = { cookie: "authjs.session-token=5e55-0106" };
 
     // First request to /ja/dashboard/passwords → audit emit fires.
     await handlePageRoute(makePageRequest("/ja/dashboard/passwords", headers), dummyOptions);

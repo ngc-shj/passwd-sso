@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
@@ -84,6 +84,17 @@ const userWithVault = {
   passphraseVerifierVersion: 1,
   tenantId: "test-tenant-id",
 };
+
+// Cookie fixtures use the plain `authjs.session-token` name, the configured
+// name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+beforeEach(() => {
+  vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("POST /api/vault/change-passphrase", () => {
   beforeEach(() => {
@@ -217,7 +228,7 @@ describe("POST /api/vault/change-passphrase", () => {
     // (resolved from the request cookie) is the mechanism that keeps
     // the caller signed in while every other bearer credential is
     // revoked.
-    const SESSION_TOKEN = "test-session-cookie-value";
+    const SESSION_TOKEN = "7e57-5e55-c00c1e";
     const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", {
       body: validBody,
       headers: { cookie: `authjs.session-token=${SESSION_TOKEN}` },

@@ -60,7 +60,7 @@ describe.skipIf(!hasDatabase)(
 
     async function insertSession(createdAt: Date): Promise<string> {
       // H4: the cookie carries the RAW token; the DB column stores its digest.
-      const token = `sess-${randomUUID()}`;
+      const token = randomUUID();
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(

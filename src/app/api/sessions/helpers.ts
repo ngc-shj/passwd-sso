@@ -1,25 +1,28 @@
 import type { NextRequest } from "next/server";
-import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
+import {
+  readSessionCookie,
+  SESSION_COOKIE_READ,
+} from "@/lib/auth/session/session-cookie";
 import { hashSessionToken } from "@/lib/auth/session/session-cache";
 
 /**
- * Minimal structural view of a cookie store — satisfied by both
- * `NextRequest.cookies` (route handlers) and the `cookies()` store from
- * `next/headers` (server components). Keeps the session-cookie NAME
- * resolution on the single SSoT (`configuredSessionCookieName`) for every reader.
+ * The session token Auth.js resolves from this Cookie header, or null when
+ * there is none or the header could be read as more than one session.
+ *
+ * Reads the raw header, never a `RequestCookies` / `cookies()` store: those
+ * keep the LAST occurrence of a name while Auth.js keeps the first, so
+ * `name=A; name=B` would have `auth()` authenticate A while step-up and
+ * "current session" checks evaluated B.
  */
-type CookieReader = {
-  get(name: string): { value: string } | undefined;
-};
-
-export function getSessionTokenFromCookieStore(
-  store: CookieReader,
+export function getSessionTokenFromCookieHeader(
+  cookieHeader: string | null,
 ): string | null {
-  return store.get(configuredSessionCookieName())?.value ?? null;
+  const read = readSessionCookie(cookieHeader);
+  return read.kind === SESSION_COOKIE_READ.TOKEN ? read.token : null;
 }
 
 export function getSessionToken(req: NextRequest): string | null {
-  return getSessionTokenFromCookieStore(req.cookies);
+  return getSessionTokenFromCookieHeader(req.headers.get("cookie"));
 }
 
 /**
@@ -29,12 +32,5 @@ export function getSessionToken(req: NextRequest): string | null {
  */
 export function getSessionTokenDigest(req: NextRequest): string | null {
   const raw = getSessionToken(req);
-  return raw == null ? null : hashSessionToken(raw);
-}
-
-export function getSessionTokenDigestFromCookieStore(
-  store: CookieReader,
-): string | null {
-  const raw = getSessionTokenFromCookieStore(store);
   return raw == null ? null : hashSessionToken(raw);
 }
