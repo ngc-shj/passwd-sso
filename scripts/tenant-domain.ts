@@ -776,10 +776,20 @@ type UnmappedRow = {
    * tenant, which does not hold the claim; the deactivated-target-row refusal
    * (`src/auth.ts`, before the bootstrap migration) files under the claim's
    * own tenant. Read from the registry now, not from the denial, so a claim
-   * since moved with `add --from` reads as where it is now.
+   * since moved with `add --from` reads as where it is now. Decided in
+   * cmdUnmapped after the query, not by it: see there.
    */
   filed_tenant_owns_claim: boolean;
 };
+
+/**
+ * The two OTHER_TENANT populations, one predicate each, shared by the print
+ * groups and the summary so the counts are of the rows under each heading.
+ */
+const OTHER_TENANT_ROWS = {
+  differentTenant: (row: UnmappedRow) => !row.filed_tenant_owns_claim,
+  deactivatedRow: (row: UnmappedRow) => row.filed_tenant_owns_claim,
+} as const;
 
 // `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
 // deployment's actual retention, so it can only ever be the default window —
@@ -825,14 +835,16 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
     );
   }
   const undelivered = rows.reduce((sum, r) => sum + Number(r.undelivered_cnt), 0);
-  const count = (bucket: UnmappedBucket) => rows.filter((r) => bucketOf(r) === bucket).length;
+  const count = (bucket: UnmappedBucket, include: (row: UnmappedRow) => boolean = () => true) =>
+    rows.filter((r) => bucketOf(r) === bucket && include(r)).length;
   // All three counts, always — a report that names only the registrable
   // population reads as "nothing else is wrong" (round-4 F3), and a report
   // that merges the other two sends the operator to the wrong remedy for one
   // of them (round-5 F1/S3).
   const base =
     `${count(UNMAPPED_BUCKET.UNREGISTERED)} unmapped-claim, ` +
-    `${count(UNMAPPED_BUCKET.OTHER_TENANT)} other-tenant, ` +
+    `${count(UNMAPPED_BUCKET.OTHER_TENANT, OTHER_TENANT_ROWS.differentTenant)} other-tenant, ` +
+    `${count(UNMAPPED_BUCKET.OTHER_TENANT, OTHER_TENANT_ROWS.deactivatedRow)} deactivated-membership, ` +
     `${count(UNMAPPED_BUCKET.REFUSED)} refused-claim and ` +
     `${count(UNMAPPED_BUCKET.PROVIDER_BINDING)} provider-binding denial group(s) in the last ${days} days.`;
   if (undelivered === 0) return base;
@@ -902,16 +914,11 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // command used to select only the first, so an IdP that started
         // emitting a zero-width character denied every sign-in in the
         // deployment while this report printed "no unmapped-claim denials".
-        const rows = await tx.$queryRawUnsafe<UnmappedRow[]>(
+        const queried = await tx.$queryRawUnsafe<Omit<UnmappedRow, "filed_tenant_owns_claim">[]>(
           `SELECT tenant_id::text AS tenant_id, claim, claim_refusal, reason,
                   bound_provider, sign_in_provider_ref,
                   count(*)::int AS cnt, max(created_at) AS last_seen,
-                  sum(undelivered)::int AS undelivered_cnt,
-                  EXISTS (
-                    SELECT 1 FROM tenant_claims c
-                     WHERE c.claim = combined.claim AND c.tenant_id = combined.tenant_id
-                       AND c.revoked_at IS NULL
-                  ) AS filed_tenant_owns_claim
+                  sum(undelivered)::int AS undelivered_cnt
              FROM (
                SELECT tenant_id, metadata->>'claim' AS claim,
                       metadata->>'claimRefusal' AS claim_refusal,
@@ -958,6 +965,23 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
           // copies could disagree.
           [...UNMAPPED_SELECTED_REASONS],
         );
+
+        // `filed_tenant_owns_claim`, decided here rather than in the query
+        // (round 5, N2). `claim` is the value as the IdP asserted it, while
+        // `tenant_claims.claim` is stored through normalizeTenantClaim, so a raw
+        // comparison filed a mixed-case deactivated-row refusal under the
+        // `add --from` heading. The registry's own normaliser, applied in JS,
+        // is the one rule; a SQL `lower()` would be a second to keep in step.
+        const filedTenants = [...new Set(queried.filter((r) => r.claim !== null).map((r) => r.tenant_id))];
+        const activeClaims = await tx.tenantClaim.findMany({
+          where: { tenantId: { in: filedTenants }, revokedAt: null },
+          select: { tenantId: true, claim: true },
+        });
+        const owned = new Set(activeClaims.map((c) => `${c.tenantId} ${c.claim}`));
+        const rows: UnmappedRow[] = queried.map((r) => ({
+          ...r,
+          filed_tenant_owns_claim: r.claim !== null && owned.has(`${r.tenant_id} ${normalizeTenantClaim(r.claim)}`),
+        }));
 
         // Round-3 A3, and here it is not merely defensive: `claim` comes out
         // of audit_logs.metadata / audit_outbox.payload, neither of which is
@@ -1023,7 +1047,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         printGroup(
           "Claims registered to a DIFFERENT tenant — investigate the user, or move the claim with `add --from`:",
           UNMAPPED_BUCKET.OTHER_TENANT,
-          (row) => !row.filed_tenant_owns_claim,
+          OTHER_TENANT_ROWS.differentTenant,
         );
         // The same reason, filed under the claim's own tenant: the user holds a
         // deactivated membership row there while active in a bootstrap tenant,
@@ -1035,7 +1059,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
             "removes the row with SCIM `DELETE /Users/<userId>`, and the user signs in before the next directory " +
             "sync recreates it:",
           UNMAPPED_BUCKET.OTHER_TENANT,
-          (row) => row.filed_tenant_owns_claim,
+          OTHER_TENANT_ROWS.deactivatedRow,
         );
         // "REFUSED", not "refused at ingest" (round-6 F1): the bucket now also
         // holds claims that PASS ingest and fail `storableClaimSchema` — SC9's

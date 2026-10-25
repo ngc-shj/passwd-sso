@@ -428,3 +428,74 @@ R50 T19, T20; RT10 T23; R29 T20, T21, T22. The rest are clean.
 - F-R4-5: the CLAUDE.md admin-script line lists `bind` and `legacy-accounts`, with the user's
   approval.
 - T20–T23 and the D11 team observation are done.
+
+---
+
+# Review round 5
+Date: 2026-10-25
+Scope: `6db9f1c57..HEAD` (2a9af2a54).
+
+## Changes from Previous Round
+- Resolved: S9, S10, F-R4-4, S11, F-R4-1, F-R4-3, T19–T23, and the `account.updateMany`
+  scope.
+- F-R4-2 is resolved for lowercase claims only (see N2 / F-R5-1 below).
+- Verified while checking:
+  - the reasons recorded for the kept tenant-owned models;
+  - the four bypass grants that gained `operatorToken` are the minimum;
+  - every consumer of `STRANDED_COUNTERS` handles the new key.
+
+## Findings
+- **Security**
+  - N1 Minor (the S9 class): a moved extension or iOS token stays live in the target tenant
+    without the target's passkey and lifetime checks until it is refreshed.
+  - N2 Minor: the `filed_tenant_owns_claim` comparison is case-sensitive. Converges with
+    F-R5-1 below.
+- **Functionality**
+  - F-R5-1 Major (= N2): a mixed-case claim is misbucketed under the `add --from` heading.
+  - F-R5-2 Minor: the summary line merges two remedies.
+  - F-R5-3 Minor: CLAUDE.md lacks `add`'s breaking change.
+  - F-R5-4 Minor: a stale count in two comments.
+- **Testing**
+  - T24 Major: writes made through helpers or aliases are skipped.
+  - T25 Major: nested writes and non-literal `data`/`where` are skipped.
+  - T26–T29 Minor.
+
+## Recurring Issue Check
+### Security expert
+R43 N1; R55/R57 N2. The rest are clean.
+### Functionality expert
+R2/R3 F-R5-3, F-R5-4; R34 F-R5-1. The rest are clean.
+### Testing expert
+R50/R3/R42 T24, T25; RT10 T28, T29; R50 ii T27. The rest are clean.
+
+## Decisions (round 5)
+- T24/T25: the gate refuses every shape it cannot read: an unclassified call, a non-literal
+  `data`/`where`, a nested write, a spread. It no longer adds one sample per newly found
+  spelling (memory: refuse the undecidable class outright).
+- F-R5-3: the user approved the CLAUDE.md addition, and the orchestrator applied it.
+
+## Resolution Status (round 5)
+- N1: extension and iOS tokens are revoked by the migration, not moved, and sessions still move.
+  The integration cells call the real `validateExtensionToken`: the old token gets
+  `EXTENSION_TOKEN_REVOKED`, and the positive control gets a distinct DPoP refusal. Red proofs
+  N1a and N1b.
+- N2 / F-R5-1: `unmapped` compares in JS, using `normalizeTenantClaim` against the filed
+  tenants' active claims, so the registry has one normaliser. The SQL `EXISTS` was removed.
+  Cells cover mixed case, lowercase, row 7, a revoked claim, and no claim. Red proofs N2a and
+  N2b.
+- F-R5-2: the summary counts `deactivated-membership` separately, through the same predicate as
+  the heading.
+- F-R5-3: CLAUDE.md records `add`'s breaking flag requirement and `list --unbound`. The user
+  approved this, and the orchestrator applied it.
+- F-R5-4: the stale counts were removed from the comments.
+- T24: every call, tagged template and `new` inside the callback must be a client call, a
+  read-only helper, or an exact `PURE_CALLS` entry. Anything else throws. Red proofs T24a–e.
+- T25: a write's argument, `data` and `where` must be object literals with no spread, and
+  nested writes are refused. `NON_COUNTER_DATA_KEYS` pins the data keys of each non-counter
+  write. Red proofs T25a–f.
+- T26: rows are keyed on reason plus their code spans. The stated heading count must equal the
+  number of `printGroup` calls, counted with ts-morph. Red proofs T26a and T26b.
+- T27: the schema parser refuses a `User` relation it cannot read. Red proofs T27a and T27b.
+- T28: operator tokens are seeded with the subject and the creator as different users, and a
+  realign `leftBehind` cell counts by subject. Red proofs T28a and T28b.
+- T29: the revoked-claim boundary is covered, and the heading-order assertion is unconditional.

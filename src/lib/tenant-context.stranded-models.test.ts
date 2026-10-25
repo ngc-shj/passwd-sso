@@ -53,6 +53,22 @@ describe("countStrandedRows member set", () => {
     expect(models.has("User")).toBe(true);
   });
 
+  it("refuses a User relation it cannot read on one line, rather than finding no column", () => {
+    // Round 5 (T27): a multi-line `@relation(` yielded no column, so the model
+    // silently left the class.
+    const model = (field: string) => `model Grant {\n  tenantId String\n${field}\n}\n`;
+    expect(() =>
+      parseSchemaModels(model("  target User @relation(\n    fields: [targetUserId], references: [id])")),
+    ).toThrow("does not close on its line");
+    expect(() => parseSchemaModels(model("  target User @relation(\"TargetUser\")"))).toThrow("names no fields:");
+    expect(() => parseSchemaModels(model("  target User"))).toThrow("names no fields:");
+    // The allow side: a one-line relation reads, and a list of users is not a column.
+    const read = parseSchemaModels(
+      model("  target User @relation(fields: [targetUserId], references: [id], onDelete: Cascade)\n  watchers User[]"),
+    );
+    expect(read.get("Grant")?.userRelationColumns).toEqual(["targetUserId"]);
+  });
+
   it("finds a user column by its relation to User, whatever it is named", () => {
     // The columns a name list missed (claim-binding review round 4, S10).
     expect(bound.get("OperatorToken")).toContain("subjectUserId");

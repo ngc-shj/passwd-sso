@@ -15,6 +15,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
+import { NextRequest } from "next/server";
 
 const { nextAuthConfigs } = vi.hoisted(() => ({ nextAuthConfigs: [] as unknown[] }));
 
@@ -53,6 +54,8 @@ import {
   type ClaimBindingMode,
 } from "@/lib/auth/jackson-providers";
 import { providerRef, resetIdentifierPepperForTests } from "@/lib/audit/identifier-pepper";
+import { hashToken } from "@/lib/crypto/crypto-server";
+import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { DEREGISTER_ACTOR_LABEL, TENANT_CLAIM_EVENT_OPERATION } from "@/lib/tenant/tenant-claim-event";
@@ -520,6 +523,8 @@ describe("tenant claim binding (C3/C4/C5)", () => {
   const hex = (bytes: number): string => randomBytes(bytes).toString("hex");
   const IV = "0".repeat(24);
   const TAG = "0".repeat(32);
+  /** The plaintext of the extension token `seedOwnedRows` gives `userId`, so a cell can present it. */
+  const extensionTokenOf = (userId: string): string => `ext_seed_${userId}`;
   const revocable = (table: string, column: string, userColumn = "user_id") =>
     `SELECT tenant_id::text || CASE WHEN ${column} IS NULL THEN '' ELSE ' revoked' END AS tenant_id
        FROM ${table} WHERE ${userColumn} = $1::uuid`;
@@ -591,12 +596,12 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         ),
     },
     extensionToken: {
-      select: `SELECT tenant_id FROM extension_tokens WHERE user_id = $1::uuid`,
+      select: revocable("extension_tokens", "revoked_at"),
       seed: (sql, ids) =>
         sql(
           `INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, expires_at, family_id, cnf_jkt)
            VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'passwords:read', now() + interval '1 day', $5::uuid, $6)`,
-          randomUUID(), ids.userId, ids.tenantId, hex(32), randomUUID(), hex(16),
+          randomUUID(), ids.userId, ids.tenantId, hashToken(extensionTokenOf(ids.userId)), randomUUID(), hex(16),
         ),
     },
     vaultKey: {
@@ -1066,9 +1071,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
 
     /**
      * The placement after a migration from `home` to `tenantId`: every table
-     * moved, but the REVOKE rows (MCP grants, operator tokens, bridge codes),
-     * which stay under `home`, revoked or consumed. Without `home`,
-     * every row of every table under `tenantId`, live — the seeded state.
+     * moved, but the REVOKE rows (MCP grants, operator and extension tokens,
+     * bridge codes), which stay under `home`, revoked or consumed. Without
+     * `home`, every row of every table under `tenantId`, live — the seeded state.
      */
     function movedTo(tenantId: string, home?: string) {
       const tables = Object.fromEntries(
@@ -1106,6 +1111,55 @@ describe("tenant claim binding (C3/C4/C5)", () => {
     async function seedBootstrapMember(): Promise<Victim & { providerAccountId: string }> {
       const member = await seedVictim(VICTIM_STATE.BOOTSTRAP, OTHER_PROVIDER);
       return { ...member, providerAccountId: await linkAccount(member.userId, member.home, SIGN_IN_PROVIDER) };
+    }
+
+    /**
+     * What the token validator answers for the extension token `seedOwnedRows`
+     * gave `userId`, presented without a DPoP proof: a live token gets past
+     * revocation, expiry and membership and is refused for the missing proof,
+     * so "revoked" cannot be mistaken for any other refusal.
+     */
+    async function validateSeededExtensionToken(userId: string) {
+      return validateExtensionToken(
+        new NextRequest("http://localhost:3000/api/passwords", {
+          headers: { authorization: `Bearer ${extensionTokenOf(userId)}` },
+        }),
+      );
+    }
+
+    /**
+     * Two operator tokens under the member's bootstrap tenant whose creator is
+     * not their subject: one with the member as subject (`other` created it),
+     * one the member only created (`other` its subject). The migration revokes
+     * by subject, so only the first is the member's credential.
+     */
+    async function seedCrossOperatorTokens(member: string, other: string, tenantId: string) {
+      const ids = { asSubject: randomUUID(), asCreator: randomUUID() };
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        for (const [id, subject, creator] of [
+          [ids.asSubject, member, other],
+          [ids.asCreator, other, member],
+        ] as const) {
+          await tx.$executeRawUnsafe(
+            `INSERT INTO operator_tokens (id, token_hash, prefix, name, tenant_id, subject_user_id, created_by_user_id, scope, expires_at)
+             VALUES ($1::uuid, $2, 'op_test', 'token', $3::uuid, $4::uuid, $5::uuid, 'maintenance', now() + interval '1 day')`,
+            id, hex(32), tenantId, subject, creator,
+          );
+        }
+      });
+      return ids;
+    }
+
+    async function operatorTokenState(id: string) {
+      return ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        const [row] = await tx.$queryRawUnsafe<{ tenant_id: string; revoked: boolean }[]>(
+          `SELECT tenant_id::text, revoked_at IS NOT NULL AS revoked FROM operator_tokens WHERE id = $1::uuid`,
+          id,
+        );
+        return row;
+      });
     }
 
     async function claimedTenant(arm: string): Promise<{ tenantId: string; claim: string }> {
@@ -1161,6 +1215,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           const boundary = await seedBoundary((id) => (boundaryTenant = id));
           member = await seedBootstrapMember();
           await expectSeededEverywhere(member.userId, member.home);
+          // A user with no rows of their own, so the boundary user's placement is untouched.
+          const other = await ctx.createUser(boundary.tenantId);
+          const operatorTokens = await seedCrossOperatorTokens(member.userId, other, member.home);
 
           expect(
             await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
@@ -1170,6 +1227,16 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);
           expect(await outboxRowsForClaim(target.claim)).toHaveLength(0);
           expect(await placement(boundary.userId)).toEqual(movedTo(boundary.tenantId));
+          // The pre-migration extension token is refused as revoked; the boundary
+          // user's, untouched, gets as far as the missing DPoP proof.
+          expect(await validateSeededExtensionToken(member.userId)).toEqual({ ok: false, error: "EXTENSION_TOKEN_REVOKED" });
+          expect(await validateSeededExtensionToken(boundary.userId)).toEqual({
+            ok: false,
+            error: "EXTENSION_TOKEN_DPOP_INVALID",
+            dpopError: "DPOP_HEADER_MISSING",
+          });
+          expect(await operatorTokenState(operatorTokens.asSubject)).toEqual({ tenant_id: member.home, revoked: true });
+          expect(await operatorTokenState(operatorTokens.asCreator)).toEqual({ tenant_id: member.home, revoked: false });
         } finally {
           await teardown(member, ...(member ? [member.home] : []), target.tenantId, ...(boundaryTenant ? [boundaryTenant] : []));
         }

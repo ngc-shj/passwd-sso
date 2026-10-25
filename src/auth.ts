@@ -636,10 +636,6 @@ async function claimedTenantMembership(
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
-      await tx.extensionToken.updateMany({
-        where: { userId, tenantId: existingTenantId },
-        data: { tenantId: target.id },
-      });
       await tx.passwordEntryHistory.updateMany({
         where: { tenantId: existingTenantId },
         data: { tenantId: target.id },
@@ -716,6 +712,16 @@ async function claimedTenantMembership(
       // revoked by subject, as invalidateUserSessions does.
       await tx.operatorToken.updateMany({
         where: { subjectUserId: userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      // An extension or iOS token is revoked, not moved: a moved token would be
+      // a live target-tenant credential, never checked against the target's
+      // `requirePasskey` or its token lifetimes until its next refresh. Revoked
+      // as invalidateUserSessions revokes it when a member leaves a tenant.
+      // Sessions above do move: the proxy reads the passkey requirement from
+      // the session's tenant on every request, and their cache is evicted below.
+      await tx.extensionToken.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
         data: { revokedAt },
       });
       // A pending bridge code is consumed, not moved. The passkey requirement

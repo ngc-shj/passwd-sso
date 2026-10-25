@@ -2217,7 +2217,7 @@ describe("tenant-domain CLI (C7)", () => {
           expect(result.message).toContain(`in the last ${DEFAULT_UNMAPPED_WINDOW_DAYS} days`);
           // All three counts, and the two new populations are non-zero — a
           // summary that merged them would not distinguish these numbers.
-          expect(result.message).toMatch(/[1-9]\d* unmapped-claim, [1-9]\d* other-tenant, [1-9]\d* refused-claim and \d+ provider-binding/);
+          expect(result.message).toMatch(/[1-9]\d* unmapped-claim, [1-9]\d* other-tenant, \d+ deactivated-membership, [1-9]\d* refused-claim and \d+ provider-binding/);
 
           // ─── Round-6 T3: the print GROUPS ────────────────────────────────
           //
@@ -2297,17 +2297,38 @@ describe("tenant-domain CLI (C7)", () => {
     // not hold the claim, and `add --from` may be its fix; the deactivated-row
     // refusal files under the claim's own tenant, where `add --from` would move
     // the claim out of the tenant it belongs to. The registry tells them apart.
+    //
+    // Round 5 (N2, T29): the denial carries the claim as the IdP asserted it,
+    // the registry as normalizeTenantClaim stored it, so a mixed-case denial
+    // must still read as the owner's; a revoked claim is no longer the filed
+    // tenant's; and a row with no claim is not compared at all.
     it.skipIf(SKIP)(
       "prints a deactivated-row refusal (filed under the claim's own tenant) apart from a row-7 mismatch",
       async () => {
         const owner = await ctx.createTenant();
         const elsewhere = await ctx.createTenant();
+        const revokedOwner = await ctx.createTenant();
         const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        // The IdP's spelling: one letter upper-cased, so only normalisation matches it.
+        const mixedCase = claim.replace(/[a-z]/, (ch) => ch.toUpperCase());
+        const revokedClaim = `${runToken()}.${ALIAS_CLAIM}`;
+        const refusal = `refused: contains U+200B (${runToken()})`;
         try {
           await ctx.su.prisma.tenantClaim.create({ data: { tenantId: owner, claim, createdBy: "test" } });
+          await ctx.su.prisma.tenantClaim.create({
+            data: { tenantId: revokedOwner, claim: revokedClaim, createdBy: "test", revokedAt: new Date() },
+          });
           await ctx.su.prisma.$transaction(async (tx) => {
             await setBypassRlsGucs(tx);
-            for (const tenantId of [owner, elsewhere]) {
+            const denials: [string, Record<string, string>][] = [
+              [owner, { claim: mixedCase }],
+              [owner, { claim }],
+              [elsewhere, { claim }],
+              [revokedOwner, { claim: revokedClaim }],
+              // No claim, filed under the owner: a later group, and nothing to compare.
+              [owner, { claimRefusal: refusal }],
+            ];
+            for (const [tenantId, fields] of denials) {
               await tx.auditLog.create({
                 data: {
                   tenantId,
@@ -2315,7 +2336,7 @@ describe("tenant-domain CLI (C7)", () => {
                   action: AuditAction.AUTH_LOGIN_FAILURE,
                   userId: randomUUID(),
                   actorType: ActorType.SYSTEM,
-                  metadata: { reason: "tenant_mismatch", claim, provider: "google" },
+                  metadata: { reason: "tenant_mismatch", ...fields, provider: "google" },
                 },
               });
             }
@@ -2332,29 +2353,51 @@ describe("tenant-domain CLI (C7)", () => {
             log.mockRestore();
           }
           expect(result.ok).toBe(true);
-          const rows = (result.rows ?? []) as { tenant_id: string; claim: string | null; filed_tenant_owns_claim: boolean }[];
-          expect(rows.find((r) => r.tenant_id === owner && r.claim === claim)?.filed_tenant_owns_claim).toBe(true);
-          expect(rows.find((r) => r.tenant_id === elsewhere && r.claim === claim)?.filed_tenant_owns_claim).toBe(false);
+          const rows = (result.rows ?? []) as {
+            tenant_id: string;
+            claim: string | null;
+            claim_refusal: string | null;
+            filed_tenant_owns_claim: boolean;
+          }[];
+          const owns = (tenantId: string, value: string) =>
+            rows.find((r) => r.tenant_id === tenantId && r.claim === value)?.filed_tenant_owns_claim;
+          expect(owns(owner, mixedCase)).toBe(true);
+          expect(owns(owner, claim)).toBe(true);
+          expect(owns(elsewhere, claim)).toBe(false);
+          expect(owns(revokedOwner, revokedClaim)).toBe(false);
+          const unclaimed = rows.find((r) => r.tenant_id === owner && r.claim_refusal === refusal);
+          expect(unclaimed?.claim).toBeNull();
+          expect(unclaimed?.filed_tenant_owns_claim).toBe(false);
 
           const differentHeading = printed.findIndex((l) => l.includes("registered to a DIFFERENT tenant"));
           const deactivatedHeading = printed.findIndex((l) => l.includes("DEACTIVATED membership row"));
+          const refusedHeading = printed.findIndex((l) => l.includes("Claims this deployment REFUSED"));
           expect(differentHeading).toBeGreaterThanOrEqual(0);
           expect(deactivatedHeading).toBeGreaterThan(differentHeading);
+          expect(refusedHeading).toBeGreaterThan(deactivatedHeading);
           expect(printed[deactivatedHeading]).toContain("SCIM `DELETE /Users/<userId>`");
           expect(printed[deactivatedHeading]).toContain("not `add --from`");
-          const rowAt = (tenantId: string) =>
-            printed.findIndex((l) => l.includes(`tenant=${tenantId}`) && l.includes(claim));
-          // Each row under its own heading: the deactivated heading is printed
-          // right after the different-tenant group, so the different-tenant
-          // row sits between the two headings and the owner's row after both.
-          expect(rowAt(elsewhere)).toBeGreaterThan(differentHeading);
-          expect(rowAt(elsewhere)).toBeLessThan(deactivatedHeading);
-          expect(rowAt(owner)).toBeGreaterThan(deactivatedHeading);
+          // Every printed line that is not indented is a heading, so a row
+          // belongs to the nearest one above it.
+          const headingAbove = (tenantId: string, field: string) => {
+            const at = printed.findIndex((l) => l.includes(`tenant=${tenantId}`) && l.includes(field));
+            expect(at, `printed line for ${tenantId} ${field}`).toBeGreaterThanOrEqual(0);
+            return printed.findLastIndex((l, i) => i < at && !l.startsWith("  "));
+          };
+          expect(headingAbove(owner, `claim="${mixedCase}"`)).toBe(deactivatedHeading);
+          expect(headingAbove(owner, `claim="${claim}"`)).toBe(deactivatedHeading);
+          expect(headingAbove(elsewhere, `claim="${claim}"`)).toBe(differentHeading);
+          expect(headingAbove(revokedOwner, `claim="${revokedClaim}"`)).toBe(differentHeading);
+          // The group after the deactivated one is printed, so the owner's rows
+          // end before it.
           const nextHeading = printed.findIndex((l, i) => i > deactivatedHeading && !l.startsWith("  "));
-          if (nextHeading >= 0) expect(rowAt(owner)).toBeLessThan(nextHeading);
+          expect(nextHeading).toBe(refusedHeading);
+          expect(headingAbove(owner, `refusal="${refusal}"`)).toBe(refusedHeading);
+          expect(result.message).toMatch(/\d+ other-tenant, [1-9]\d* deactivated-membership, /);
         } finally {
           await ctx.deleteTestData(owner);
           await ctx.deleteTestData(elsewhere);
+          await ctx.deleteTestData(revokedOwner);
         }
       },
     );
@@ -2591,7 +2634,7 @@ describe("tenant-domain CLI (C7)", () => {
 
     it("formatUnmappedMessage summarises a non-empty result and names the requested window", () => {
       const message = formatUnmappedMessage([unmappedRow({ cnt: 3 })], 90);
-      expect(message).toContain("1 unmapped-claim, 0 other-tenant, 0 refused-claim and 0 provider-binding");
+      expect(message).toContain("1 unmapped-claim, 0 other-tenant, 0 deactivated-membership, 0 refused-claim and 0 provider-binding");
       expect(message).toContain("in the last 90 days");
       expect(message).not.toContain("No unmapped-claim denials");
       // Nothing undelivered — the degraded-delivery sentence must not appear,
@@ -2622,13 +2665,27 @@ describe("tenant-domain CLI (C7)", () => {
         ],
         30,
       );
-      expect(message).toContain("1 unmapped-claim, 2 other-tenant, 2 refused-claim and 0 provider-binding");
+      expect(message).toContain("1 unmapped-claim, 2 other-tenant, 0 deactivated-membership, 2 refused-claim and 0 provider-binding");
+    });
+
+    // Round 5 (F-R5-2): the summary counts the two OTHER_TENANT headings
+    // apart, by the same predicates the print groups use.
+    it("formatUnmappedMessage counts deactivated-membership rows apart from other-tenant ones", () => {
+      const message = formatUnmappedMessage(
+        [
+          unmappedRow({ claim: "alias.example", reason: "tenant_mismatch" }),
+          unmappedRow({ claim: "beta.example", reason: "tenant_mismatch", filed_tenant_owns_claim: true }),
+          unmappedRow({ claim: "gamma.example", reason: "tenant_mismatch", filed_tenant_owns_claim: true }),
+        ],
+        30,
+      );
+      expect(message).toContain("0 unmapped-claim, 1 other-tenant, 2 deactivated-membership, 0 refused-claim and 0 provider-binding");
     });
 
     it("formatUnmappedMessage says zero refused groups rather than omitting the count", () => {
       const message = formatUnmappedMessage([unmappedRow({})], 30);
       expect(message).toContain(
-        "0 other-tenant, 0 refused-claim and 0 provider-binding denial group(s)",
+        "0 other-tenant, 0 deactivated-membership, 0 refused-claim and 0 provider-binding denial group(s)",
       );
     });
 
@@ -2640,7 +2697,7 @@ describe("tenant-domain CLI (C7)", () => {
         ],
         30,
       );
-      expect(message).toContain("0 unmapped-claim, 0 other-tenant, 0 refused-claim and 2 provider-binding");
+      expect(message).toContain("0 unmapped-claim, 0 other-tenant, 0 deactivated-membership, 0 refused-claim and 2 provider-binding");
     });
 
     it("formatUnmappedMessage reports undelivered outbox events as degraded delivery", () => {
@@ -2651,7 +2708,7 @@ describe("tenant-domain CLI (C7)", () => {
         ],
         30,
       );
-      expect(message).toContain("2 unmapped-claim, 0 other-tenant, 0 refused-claim and 0 provider-binding");
+      expect(message).toContain("2 unmapped-claim, 0 other-tenant, 0 deactivated-membership, 0 refused-claim and 0 provider-binding");
       expect(message).toContain("in the last 30 days");
       // Summed across groups, not per-row: the operator is being told how
       // many denial events will never reach audit_logs on their own.
@@ -2910,6 +2967,39 @@ describe("tenant-domain CLI (C7)", () => {
         targetId: userId,
         metadata: expect.objectContaining({ leftBehind: { tag: 1 } }),
       });
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    // Round 5 (T28): `operatorToken` is counted by its subject, the user the
+    // token authenticates as, not by who minted it. Two tokens the user only
+    // created stay out of the count, so counting by creator reads 2.
+    it.skipIf(SKIP)("records an operator token left behind by its subject, not one the user only created", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const other = await ctx.createUser(owning);
+      const token = (subjectUserId: string, createdByUserId: string) => ({
+        tokenHash: randomBytes(32).toString("hex"),
+        prefix: "op_test",
+        name: "token",
+        tenantId: owning,
+        subjectUserId,
+        createdByUserId,
+        scope: "maintenance",
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      await ctx.su.prisma.operatorToken.createMany({
+        data: [token(userId, other), token(other, userId), token(other, userId)],
+      });
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true, tenantId: former });
+      const rows = await realignRows([owning, former]);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.payload).toMatchObject({ metadata: expect.objectContaining({ leftBehind: { operatorToken: 1 } }) });
+      }
 
       await ctx.deleteTestData(owning);
       await ctx.deleteTestData(former);

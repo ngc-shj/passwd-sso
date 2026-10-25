@@ -12,6 +12,10 @@
  * `FK_LESS_USER_COLUMNS` is the one name list left, for columns that hold a
  * user id with no relation to say so: the MCP token and code rows' `userId`
  * (nullable, no FK) and `AuditLog.userId` (the trail outlives the user).
+ *
+ * A relation to `User` this line-wise parse cannot read throws rather than
+ * contributing no column (round 5, T27): one with no `fields:` on its line, or
+ * whose `@relation(` does not close on it.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,9 +29,10 @@ export type SchemaModel = {
 
 export const FK_LESS_USER_COLUMNS = ["userId"] as const;
 
-/** model -> its fields and user relations, from the schema the app is built from. */
-export function parseSchemaModels(): Map<string, SchemaModel> {
-  const src = readFileSync(join(process.cwd(), "prisma/schema.prisma"), "utf8");
+/** model -> its fields and user relations, from the schema the app is built from (or `src`). */
+export function parseSchemaModels(
+  src: string = readFileSync(join(process.cwd(), "prisma/schema.prisma"), "utf8"),
+): Map<string, SchemaModel> {
   const models = new Map<string, { fields: Map<string, string>; userRelationColumns: string[] }>();
   let current: { fields: Map<string, string>; userRelationColumns: string[] } | null = null;
   for (const line of src.split("\n")) {
@@ -48,8 +53,14 @@ export function parseSchemaModels(): Map<string, SchemaModel> {
     if (!field) continue;
     current.fields.set(field[1], field[2]);
     if (field[2] !== "User" || field[3]) continue;
-    const columns = /\bfields:\s*\[([^\]]*)\]/.exec(line);
-    if (columns) current.userRelationColumns.push(...columns[1].split(",").map((c) => c.trim()));
+    const relation = line.indexOf("@relation(");
+    const rest = relation < 0 ? "" : line.slice(relation);
+    if (relation >= 0 && rest.split("(").length !== rest.split(")").length) {
+      throw new Error(`user-bound-models: the @relation of ${field[1]} does not close on its line: ${trimmed}`);
+    }
+    const columns = /\bfields:\s*\[([^\]]*)\]/.exec(rest);
+    if (!columns) throw new Error(`user-bound-models: the User relation ${field[1]} names no fields: on its line: ${trimmed}`);
+    current.userRelationColumns.push(...columns[1].split(",").map((c) => c.trim()));
   }
   return models;
 }

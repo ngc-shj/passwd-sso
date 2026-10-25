@@ -19,6 +19,15 @@
  * `tx.<model>.<method>(`, the tag of `tx.$executeRaw`, or the exact argument of
  * a known read-only helper. An element access, an alias, a wrapped or cast
  * client, a use inside a nested function, or `prisma` itself throws.
+ *
+ * Round 5 refuses the rest of the undecidable class (T24): every call, tagged
+ * template and `new` inside the callback must be a classified client call, a
+ * read-only helper, or an exact-text `PURE_CALLS` entry, since a helper that
+ * writes through the ALS-bound `prisma` proxy, an outer alias or an outer
+ * `tx` never names the parameter. And each write's argument must be readable
+ * (T25): one object literal whose `data` and `where` are object literals, no
+ * spread anywhere in them, no nested write in `data`, and the non-counter
+ * writes' `data` keys pinned in `NON_COUNTER_DATA_KEYS`.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -43,6 +52,22 @@ const READ_METHODS = new Set(["findMany", "findUnique", "findFirst", "count"]);
 const AUDIT_MIGRATE_CALL = "CALL audit_log_tenant_migrate(";
 /** Helpers the transaction may hand `tx` to: each reads only. */
 const READ_ONLY_TX_HELPERS = new Set(["assertBootstrapSingleMember"]);
+/**
+ * Calls and constructors the transaction may make that are not the client, by
+ * exact callee text: only what the real body needs. A pure call's arguments
+ * must be function literals, so the walk sees inside them.
+ */
+const PURE_CALLS = new Set(["migratedSessions.map", "Date"]);
+/** Each non-counter write's `data` keys, by `<handle>.<method>`, read off the real body once and pinned. */
+const NON_COUNTER_DATA_KEYS: Record<string, readonly string[]> = {
+  "user.update": ["tenantId"],
+  "passwordEntryHistory.updateMany": ["tenantId"],
+  "auditLog.$executeRaw": [],
+  "emergencyAccessKeyPair.updateMany": ["tenantId"],
+  "shareAccessLog.updateMany": ["tenantId"],
+  "tenantMember.deleteMany": [],
+  "tenantMember.create": ["tenantId", "userId", "role"],
+};
 /** The bootstrap tenant's id as `claimedTenantMembership` names it. */
 const BOOTSTRAP_TENANT_ID = "existingTenantId";
 /** The three moves by tenant alone (no user column). */
@@ -67,10 +92,74 @@ function literalProperties(node: Node | undefined): Map<string, string> {
   return props;
 }
 
-function propertyInitializer(arg: Node | undefined, name: string): Node | undefined {
-  if (!Node.isObjectLiteralExpression(arg)) return undefined;
-  const prop = arg.getProperty(name);
-  return prop && Node.isPropertyAssignment(prop) ? prop.getInitializer() : undefined;
+/**
+ * A write's `data` keys and `where` literal; throws unless the argument is one
+ * object literal whose `data` and `where`, where present, are object literals,
+ * with no spread in any of them and no nested write (an object-literal value)
+ * in `data`.
+ */
+function writeArgument(at: string, call: Node): Pick<MigrationWrite, "dataKeys" | "where"> {
+  if (!Node.isCallExpression(call)) throw new Error(`${FUNCTION_NAME}: ${at} is not a call`);
+  const args = call.getArguments();
+  const [arg] = args;
+  if (args.length !== 1 || !Node.isObjectLiteralExpression(arg)) {
+    throw new Error(`${FUNCTION_NAME}: ${at}'s argument is not one object literal`);
+  }
+  if (arg.getProperties().some((p) => Node.isSpreadAssignment(p))) {
+    throw new Error(`${FUNCTION_NAME}: ${at}'s argument contains a spread`);
+  }
+  const part = (name: string) => {
+    const prop = arg.getProperty(name);
+    if (!prop) return undefined;
+    const init = Node.isPropertyAssignment(prop) ? prop.getInitializer() : undefined;
+    if (!Node.isObjectLiteralExpression(init)) throw new Error(`${FUNCTION_NAME}: ${at}'s ${name} is not an object literal`);
+    if (init.getProperties().some((p) => Node.isSpreadAssignment(p))) {
+      throw new Error(`${FUNCTION_NAME}: ${at}'s ${name} contains a spread`);
+    }
+    return init;
+  };
+  const data = part("data");
+  for (const p of data?.getProperties() ?? []) {
+    if (Node.isPropertyAssignment(p) && Node.isObjectLiteralExpression(p.getInitializer())) {
+      throw new Error(`${FUNCTION_NAME}: ${at}'s data.${p.getName()} is a nested write`);
+    }
+  }
+  return { dataKeys: [...literalProperties(data).keys()], where: literalProperties(part("where")) };
+}
+
+/** `<tx>.<model>.<method>` or `<tx>.<member>`, rooted at the client parameter's name. */
+function isClientMember(node: Node, tx: string): boolean {
+  if (!Node.isPropertyAccessExpression(node)) return false;
+  const object = node.getExpression();
+  if (Node.isIdentifier(object)) return object.getText() === tx;
+  return Node.isPropertyAccessExpression(object) && Node.isIdentifier(object.getExpression()) && object.getExpression().getText() === tx;
+}
+
+/**
+ * Refuses any call, tagged template or `new` inside the callback that is not a
+ * client call (`tx.<model>.<method>(`, the `tx.$executeRaw` tag, already
+ * classified by the identifier walk), a read-only helper, or a `PURE_CALLS`
+ * entry whose arguments are function literals.
+ */
+function refuseUnclassifiedCalls(callback: Node, tx: string): void {
+  const refuse = (callee: Node) =>
+    new Error(`${FUNCTION_NAME}: \`${callee.getText().slice(0, 80)}\` is called inside the transaction, and this walk cannot see its writes`);
+  for (const node of callback.getDescendants()) {
+    if (Node.isTaggedTemplateExpression(node)) {
+      if (!isClientMember(node.getTag(), tx)) throw refuse(node.getTag());
+      continue;
+    }
+    if (!Node.isCallExpression(node) && !Node.isNewExpression(node)) continue;
+    const callee = node.getExpression();
+    if (Node.isCallExpression(node) && isClientMember(callee, tx)) continue;
+    if (Node.isCallExpression(node) && Node.isIdentifier(callee) && READ_ONLY_TX_HELPERS.has(callee.getText())) continue;
+    if (!PURE_CALLS.has(callee.getText())) throw refuse(callee);
+    for (const arg of node.getArguments()) {
+      if (!Node.isArrowFunction(arg) && !Node.isFunctionExpression(arg)) {
+        throw new Error(`${FUNCTION_NAME}: \`${arg.getText().slice(0, 80)}\` is passed to ${callee.getText()}, and this walk cannot see inside it`);
+      }
+    }
+  }
 }
 
 /** An identifier in a name position (`a.<id>`, `{ <id>: v }`) rather than a reference. */
@@ -141,14 +230,9 @@ function migrationWrites(sf: SourceFile): MigrationWrite[] {
     const method = grand.getName();
     if (READ_METHODS.has(method)) continue;
     if (!WRITE_METHODS.has(method)) throw new Error(`${FUNCTION_NAME}: unclassified method ${grand.getText()}`);
-    const args = call.getArguments()[0];
-    writes.push({
-      handle: parent.getName(),
-      method,
-      dataKeys: [...literalProperties(propertyInitializer(args, "data")).keys()],
-      where: literalProperties(propertyInitializer(args, "where")),
-    });
+    writes.push({ handle: parent.getName(), method, ...writeArgument(`${parent.getName()}.${method}`, call) });
   }
+  refuseUnclassifiedCalls(callback, tx);
   if (writes.length === 0) throw new Error(`${FUNCTION_NAME}: the transaction yielded no writes`);
   return writes;
 }
@@ -279,6 +363,14 @@ describe("bootstrap migration member set", () => {
     expect(check.map((c) => c.getArguments()[1]?.getText())).toEqual([BOOTSTRAP_TENANT_ID]);
   });
 
+  it("writes each non-counter with exactly the data keys pinned for it", () => {
+    const pinned = migrationWrites(auth)
+      .filter((w) => w.handle in NON_COUNTER_WRITES)
+      .map((w) => [`${w.handle}.${w.method}`, w.dataKeys]);
+    expect(Object.fromEntries(pinned)).toEqual(NON_COUNTER_DATA_KEYS);
+    expect(pinned).toHaveLength(Object.keys(NON_COUNTER_DATA_KEYS).length);
+  });
+
   it("reads each counter's user column off STRANDED_COUNTERS", () => {
     const columns = counterUserColumns(strandedRows);
     expect([...columns.keys()].sort()).toEqual(Object.keys(STRANDED_COUNTERS).sort());
@@ -296,13 +388,17 @@ describe("bootstrap migration member set", () => {
     const sample = (body: string) =>
       source(`async function ${FUNCTION_NAME}() {\n  await prisma.$transaction(async (tx) => {\n${body}\n  });\n}\n`);
 
-    it("reads a write, a read-only helper and the audit procedure from its own sample", () => {
+    it("reads a write, a read-only helper, a pure call and the audit procedure from its own sample", () => {
       const writes = migrationWrites(
         sample(
           "await assertBootstrapSingleMember(tx, existingTenantId);\n" +
-            "await tx.tag.findMany({});\n" +
+            "const migratedSessions = await tx.session.findMany({});\n" +
+            "tokens = migratedSessions.map((s) => s.sessionToken);\n" +
+            "const revokedAt = new Date();\n" +
             "await tx.tag.updateMany({ where: { userId, tenantId: existingTenantId }, data: { tenantId: t } });\n" +
-            "await tx.$executeRaw`CALL audit_log_tenant_migrate(${a})`;",
+            "await tx.$executeRaw`CALL audit_log_tenant_migrate(${a})`;\n" +
+            "await tx.tenantMember.deleteMany({ where: { userId, tenantId: existingTenantId } });\n" +
+            "await tx.tenantMember.create({ data: { tenantId: target.id, userId, role: TENANT_ROLE.MEMBER } });",
         ),
       );
       expect(writes).toEqual([
@@ -313,6 +409,13 @@ describe("bootstrap migration member set", () => {
           where: new Map([["userId", "userId"], ["tenantId", "existingTenantId"]]),
         },
         { handle: "auditLog", method: "$executeRaw", dataKeys: [], where: new Map() },
+        {
+          handle: "tenantMember",
+          method: "deleteMany",
+          dataKeys: [],
+          where: new Map([["userId", "userId"], ["tenantId", "existingTenantId"]]),
+        },
+        { handle: "tenantMember", method: "create", dataKeys: ["tenantId", "userId", "role"], where: new Map() },
       ]);
     });
 
@@ -350,6 +453,47 @@ describe("bootstrap migration member set", () => {
         "tx is used inside a nested arrow passed as an argument",
         sample(`${WRITE}await Promise.all(ids.map((id) => tx.tag.updateMany({ where: { id }, data: { tenantId: x } })));`),
         "inside a nested function",
+      ],
+      // T24: calls that never name the client parameter.
+      ["a helper is called without tx", sample(`${WRITE}await moveEverything(userId);`), "`moveEverything` is called inside the transaction"],
+      [
+        "an alias declared outside the callback writes",
+        source(
+          `async function ${FUNCTION_NAME}() {\n  const db = prisma;\n  await prisma.$transaction(async (tx) => {\n` +
+            `${WRITE}await db.tag.updateMany({ data: { tenantId: x } });\n  });\n}\n`,
+        ),
+        "`db.tag.updateMany` is called inside the transaction",
+      ],
+      [
+        "an outer tx writes past a renamed parameter",
+        source(
+          `async function ${FUNCTION_NAME}(tx) {\n  await prisma.$transaction(async (client) => {\n` +
+            "await client.tag.updateMany({ data: { tenantId: x } });\nawait tx.tag.updateMany({ data: { tenantId: x } });\n  });\n}\n",
+        ),
+        "`tx.tag.updateMany` is called inside the transaction",
+      ],
+      ["the callee is an element access", sample(`${WRITE}await movers[kind](userId);`), "`movers[kind]` is called inside the transaction"],
+      ["the callee is a call", sample(`${WRITE}await moverFor(kind)(userId);`), "`moverFor(kind)` is called inside the transaction"],
+      ["a tagged template is not the client's", sample(`${WRITE}await sql\`UPDATE tags SET x = 1\`;`), "`sql` is called inside the transaction"],
+      ["a constructor is not a pure one", sample(`${WRITE}new Mover(userId);`), "`Mover` is called inside the transaction"],
+      ["a pure call is handed a function it cannot see", sample(`${WRITE}migratedSessions.map(moveOne);`), "`moveOne` is passed to migratedSessions.map"],
+      [
+        "a pure call's arrow uses tx",
+        sample(`${WRITE}migratedSessions.map((s) => tx.tag.updateMany({ where: { id: s.id }, data: { tenantId: x } }));`),
+        "inside a nested function",
+      ],
+      // T25: writes whose argument the walk cannot read.
+      ["a write's argument is not an object literal", sample(`${WRITE}await tx.tag.updateMany(args);`), "tag.updateMany's argument is not one object literal"],
+      ["a write's argument is spread", sample(`${WRITE}await tx.tag.updateMany({ ...args });`), "tag.updateMany's argument contains a spread"],
+      ["data is not an object literal", sample(`${WRITE}await tx.tag.updateMany({ data: payload });`), "tag.updateMany's data is not an object literal"],
+      ["data is shorthand", sample(`${WRITE}await tx.tag.updateMany({ data });`), "tag.updateMany's data is not an object literal"],
+      ["where is not an object literal", sample(`${WRITE}await tx.tag.updateMany({ where: scope, data: { tenantId: x } });`), "tag.updateMany's where is not an object literal"],
+      ["data contains a spread", sample(`${WRITE}await tx.tag.updateMany({ data: { ...payload } });`), "tag.updateMany's data contains a spread"],
+      ["where contains a spread", sample(`${WRITE}await tx.tag.updateMany({ where: { ...scope }, data: { tenantId: x } });`), "tag.updateMany's where contains a spread"],
+      [
+        "data holds a nested write",
+        sample(`${WRITE}await tx.user.update({ where: { id: u }, data: { tenant: { connect: { id: t } } } });`),
+        "user.update's data.tenant is a nested write",
       ],
     ])("throws when %s", (_case, sf, text) => {
       expect(() => migrationWrites(sf)).toThrow(text);

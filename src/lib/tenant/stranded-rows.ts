@@ -69,7 +69,7 @@ export const STRANDED_COUNTERS = {
  * How many rows of each kind the user still owns under `tenantId`.
  *
  * Zero-valued keys are DROPPED. The audit row an operator reads should carry
- * what is stranded, not twenty-one zeroes with two numbers hidden among them —
+ * what is stranded, not a zero per counter with two numbers hidden among them —
  * and an empty object is then the honest encoding of "nothing left behind".
  */
 export async function countStrandedRows(

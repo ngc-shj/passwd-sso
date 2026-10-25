@@ -714,7 +714,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
   it("row 4: reports only the models that actually hold rows", async () => {
     // Zero-valued keys are dropped, so `leftBehind` names what is stranded
-    // rather than burying two numbers among twenty-one zeroes.
+    // rather than burying two numbers among a row of zeroes.
     mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
     mockPrisma.tag.count.mockResolvedValue(3);
 
@@ -821,14 +821,16 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
       data: { tenantId: TENANT_CLAIMED },
     });
-    for (const model of ["tag", "folder", "session", "extensionToken"] as const) {
+    for (const model of ["tag", "folder", "session"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
         where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
         data: { tenantId: TENANT_CLAIMED },
       });
     }
-    // MCP grants are bound to their client's tenant: revoked, not moved.
-    for (const model of ["mcpAccessToken", "mcpRefreshToken", "delegationSession"] as const) {
+    // MCP grants are bound to their client's tenant, and an extension or iOS
+    // token would skip the target tenant's passkey requirement until its
+    // refresh: revoked, not moved.
+    for (const model of ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "extensionToken"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
         where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, revokedAt: null },
         data: { revokedAt: expect.any(Date) },
