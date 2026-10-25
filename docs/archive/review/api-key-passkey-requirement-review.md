@@ -250,7 +250,52 @@ R3 F31, F36, F38; R17 F31; R18 F36; R29 F32, F35, F37, F39 (21 functions, v1 7, 
 reproduced); R42 OK; R43 F32; R47 F33; R48 F31; R49 F34; R52 F33; R10 OK; R1 OK.
 ### Security expert
 R1 OK; R3 OK; R29 S23, S25 (21 reproduced); R42 OK; R43 OK; R46/R47 S21, S22; R48 OK (S16 holds);
-R49 OK; R52 OK; RS4 OK; RS6 S24; RS1/RS2/RS3/RS5 N/A.
+R49 OK; R52 OK (S24 belongs here — a durable write on a refusal arm; recorded as RS6 at the time, which is the escape-ordering rule, corrected in round 5); RS4 OK; RS1/RS2/RS3/RS5/RS6 N/A.
 ### Testing expert
 R3 N1, N2; R29 counts reproduced; R42 N3; R19/R49/R50 OK; RT1 N1, N2, N8; RT2 N4–N7; RT5 N2; RT6 OK;
 RT7 N3, N6; RT8 OK; RT10 OK; RT11 OK; RT3/RT4/RT9 N/A.
+
+## Round 5 (plan revision 5)
+
+No Critical findings. Every round-4 item verified resolved; the F32 decision opens no hole (a refused
+AutoFill upload cancels before any credential reaches the relying party).
+
+### Functionality (F41–F45, all Minor)
+- F41 prose: the mint-gate exempt file header and a self-test fixture still give only the C9 rationale.
+- F42 prose: `auth-surface-matrix.md` names `validateIosTokenDpop`.
+- F43: the limiter key lacks the `rl:` prefix.
+- F44 prose: the AutoFill silent cancel is not in SC5; the no-orphan property is unrecorded.
+- F45 prose: "after that `if`" is ambiguous in the nested exemption form.
+
+### Security (S26–S30, all Minor)
+- S26 prose: "cannot churn" is false for API keys and operator tokens until `#959`.
+- S27 design: the limiter's Redis-failure mode is unpinned.
+- S28 design: the ordering rule sees only literal `ok: true` returns.
+- S29 design: C7 inspects only `find*`; token-like columns outside the scan are unrecorded.
+- S30 design: the exemption pin misses namespace and dynamic imports.
+
+### Testing (T24 Major, T25–T30 Minor)
+- T24 Major design: the dedup cell passes if the second request is refused before the gate.
+- T25: the borrowed harnesses mock audit and rate-limit. T26: the limiter options are unpinned. T27:
+  the AutoFill acceptance cells have no home. T28: an inverted exemption guard passes C7. T29: as S28.
+  T30: the schema input has no fixture override and fails open when empty.
+
+### Revision 6
+- C3: `rl:` key; no `failClosedOnRedisError`; the bound restated with the `#959` precondition.
+- C5: the no-orphan property; the exempt file header and fixture reason.
+- C7: every `where`-taking method and raw SQL; the negated guard; returns before the gate must be
+  `ok: false` literals; namespace and dynamic imports refused; the schema under the fixture root,
+  empty set fails; out-of-class columns recorded.
+- Testing: T24 (second response asserted, fresh proofs, red proof), T25–T27.
+- Docs: `auth-surface-matrix.md`; SC5 names the AutoFill extension.
+
+## Recurring Issue Check (round 5)
+### Functionality expert
+R1 F43; R3 F41, F42; R10 OK; R17 OK; R18 OK; R29 checked (21 functions, 13 token models / 44 `find*`,
+9 `validateExtensionToken` sites, limiter semantics); R42 OK; R43 F44; R47 OK; R48 OK; R49 F45; R52 OK.
+### Security expert
+R1 OK; R3 OK; R29 S26; R42 S29; R43 OK; R46 S30; R47 S28; R48 OK; R49 S27; R52 OK; RS4 OK;
+RS1/RS2/RS3/RS5/RS6 N/A.
+### Testing expert
+R3 T27; R29 reproduced; R42 T27; R46/R47 T28, T29; R19/R49/R50 OK; RT1 OK (no C9 assertion exists);
+RT2 T24; RT4 OK; RT5 T25, T26; RT6 OK; RT7 T28–T30; RT8 OK; RT10 OK; RT11 OK; RT3/RT9 N/A.
