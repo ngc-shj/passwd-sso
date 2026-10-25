@@ -205,10 +205,11 @@ describe("tenant-domain flag parsing", () => {
     // F-R7-2) names `realign`'s user; "limit" and "apply" (C4/#838) are
     // `backfill-owning-column`'s candidate cap and its apply/dry-run switch;
     // "provider", "claim", "out", "unbound", "accept-unused-provider" and
-    // "from-members" are the claim-binding writers' (sso-claim-connection-binding C3).
+    // "from-members" are the claim-binding writers' (sso-claim-connection-binding C3);
+    // "single-connection" is `legacy-accounts`' operator attestation.
     expect([...declared]).toEqual([
       "tenant", "domain", "by", "from", "days", "after", "user", "limit", "provider", "claim", "out",
-      "yes", "apply", "unbound", "accept-unused-provider", "from-members",
+      "yes", "apply", "unbound", "accept-unused-provider", "from-members", "single-connection",
     ]);
     expect(read.size).toBeGreaterThan(0);
   });
@@ -267,6 +268,7 @@ describe("tenant-domain flag parsing", () => {
       ["realign", ["--user", "u", "--tenant", "t", "--by", "ops", "--yes"]],
       ["measure", []],
       ["legacy-accounts", []],
+      ["legacy-accounts", ["--single-connection"]],
       ["backfill-owning-column", ["--by", "ops", "--apply", "--yes", "--limit", "5"]],
     ])("%s accepts the documented form %j", (subcommand, argv) => {
       expect(strayOf(subcommand, argv)).toEqual([]);
@@ -316,6 +318,20 @@ describe("tenant-domain flag parsing", () => {
         return [name, readsOf(name === "bind" ? bindBody : chunk)] as const;
       });
       expect(unrecognisedFlagsUse('case "foo": return cmdFoo(flags);'), "the residue check against its own sample").toBe(true);
+      // dispatchBind reads bind's flags itself, so its body gets the same check.
+      // Its own signature and its stray-flag scan (`flags.keys()`, which reads
+      // no flag's value) are the two uses it is allowed besides the read spellings.
+      const BIND_SIGNATURE = "async function dispatchBind(flags: ParsedFlags, yes: boolean)";
+      const BIND_STRAY_SCAN = "[...flags.keys()]";
+      expect(bindBody.startsWith(BIND_SIGNATURE), "dispatchBind's signature as this test spells it").toBe(true);
+      expect(bindBody.split(BIND_STRAY_SCAN).length - 1, "dispatchBind's stray-flag scan, once").toBe(1);
+      const bindUnrecognised = (body: string): boolean =>
+        unrecognisedFlagsUse(body.replace(BIND_SIGNATURE, "").replace(BIND_STRAY_SCAN, ""));
+      expect(bindUnrecognised(bindBody), "dispatchBind uses flags other than by a recognised read").toBe(false);
+      expect(
+        bindUnrecognised(`${BIND_SIGNATURE} {\n  [...flags.keys()];\n  return cmdBindFoo(flags);\n}`),
+        "the dispatchBind residue check against its own sample",
+      ).toBe(true);
       expect(cases.map(([name]) => name)).toEqual(Object.keys(SUBCOMMAND_FLAGS));
       for (const [name, reads] of cases) {
         expect(reads, name).toEqual([...SUBCOMMAND_FLAGS[name as keyof typeof SUBCOMMAND_FLAGS]].sort());

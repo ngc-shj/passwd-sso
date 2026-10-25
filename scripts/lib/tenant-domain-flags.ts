@@ -71,9 +71,12 @@ export type AnyValueFlag = ValueFlag | ScopedValueFlag;
 /**
  * Flags that take no value. `--yes` and `--apply` (C4); `--unbound`,
  * `--accept-unused-provider` and `--from-members` are the binding writers'
- * (plan sso-claim-connection-binding, C3).
+ * (plan sso-claim-connection-binding, C3); `--single-connection` is
+ * `legacy-accounts`' operator attestation.
  */
-export const BOOLEAN_FLAGS = ["yes", "apply", "unbound", "accept-unused-provider", "from-members"] as const;
+export const BOOLEAN_FLAGS = [
+  "yes", "apply", "unbound", "accept-unused-provider", "from-members", "single-connection",
+] as const;
 
 export type BooleanFlag = (typeof BOOLEAN_FLAGS)[number];
 
@@ -94,7 +97,7 @@ export const SUBCOMMAND_FLAGS = {
   history: ["domain", "tenant", "after"],
   realign: ["user", "tenant", "by", "yes"],
   measure: [],
-  "legacy-accounts": [],
+  "legacy-accounts": ["single-connection"],
   "backfill-owning-column": ["by", "apply", "yes", "limit"],
 } as const satisfies Record<string, readonly (ValueFlag | ScopedValueFlag | BooleanFlag)[]>;
 

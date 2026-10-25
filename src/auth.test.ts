@@ -90,6 +90,24 @@ const {
       updateMany: vi.fn(),
       count: vi.fn(),
     },
+    extensionBridgeCode: {
+      updateMany: vi.fn(),
+    },
+    mobileBridgeCode: {
+      updateMany: vi.fn(),
+    },
+    mcpAccessToken: {
+      updateMany: vi.fn(),
+    },
+    mcpRefreshToken: {
+      updateMany: vi.fn(),
+    },
+    delegationSession: {
+      updateMany: vi.fn(),
+    },
+    mcpAuthorizationCode: {
+      updateMany: vi.fn(),
+    },
     team: {
       count: vi.fn(),
     },
@@ -800,12 +818,23 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
       data: { tenantId: TENANT_CLAIMED },
     });
-    for (const model of ["tag", "folder", "session", "extensionToken"] as const) {
+    for (const model of ["tag", "folder", "session", "extensionToken", "extensionBridgeCode", "mobileBridgeCode"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
         where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
         data: { tenantId: TENANT_CLAIMED },
       });
     }
+    // MCP grants are bound to their client's tenant: revoked, not moved.
+    for (const model of ["mcpAccessToken", "mcpRefreshToken", "delegationSession"] as const) {
+      expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    }
+    expect(mockPrisma.mcpAuthorizationCode.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, usedAt: null },
+      data: { usedAt: expect.any(Date) },
+    });
     // C13: audit_log tenant migration is now routed via SECURITY DEFINER
     // stored procedure (audit_log_tenant_migrate) instead of updateMany.
     expect(mockPrisma.$executeRaw).toHaveBeenCalled();
@@ -1337,7 +1366,12 @@ describe("signIn callback", () => {
     mockTenantClaimGetStore.mockReturnValue(mockTenantClaimStore);
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "absent" }));
     mockPrisma.user.findUnique.mockResolvedValue(null);
+    // mockReset, not clearAllMocks: a cell's unconsumed `...Once` queue on
+    // these would otherwise answer the next cell's first call.
+    mockPrisma.tenantMember.findMany.mockReset();
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMember.upsert.mockReset();
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
   });
 
   it("records the realignment end-to-end on a real sign-in", async () => {
@@ -2055,6 +2089,13 @@ describe("signIn callback", () => {
 
       // The try-catch in signIn callback catches the error and returns false
       expect(result).toBe(false);
+      // ...and files it as provider_error under the user the sign-in resolved.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "bootstrap@example.com",
+        provider: "nodemailer",
+        reason: "provider_error",
+        userId: "real-db-id",
+      });
     });
   });
 });

@@ -316,7 +316,7 @@ npm run docker:down
 
 このようなデプロイでは、SAML ユーザー全員の `Account` 行が、どの接続から来たかにかかわらず `provider = 'saml-jackson'` です。アップグレード後、アプリはこれらのクライアント ID では起動せず、`saml-jackson` が指せるのは高々 1 つの接続自身のクライアントです。
 
-**アップグレード後は `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` を設定しないでください。** 従来のペアがクライアントを指せたはずの接続も含め、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙します。こうすれば、アップグレード前の `saml-jackson` アカウントを解決するクライアントはなくなります。従来のペアが接続 X のクライアントを指していると、X の背後の IdP は、別の接続から来たユーザーの `providerAccountId` を主張できます。テナントクレームがなければ、そのサインインは既存ユーザーの経路で許可されるため、IdP はそのユーザーとしてサインインできます。`tenant-domain legacy-accounts`（手順 10）はこの構成を拒否します。
+**アップグレード後は `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` を設定しないでください。** 従来のペアがクライアントを指せたはずの接続も含め、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙します。こうすれば、アップグレード前の `saml-jackson` アカウントを解決するクライアントはなくなります。従来のペアが接続 X のクライアントを指していると、X の背後の IdP は、別の接続から来たユーザーの `providerAccountId` を主張できます。テナントクレームがなければ、そのサインインは既存ユーザーの経路で許可されるため、IdP はそのユーザーとしてサインインできます。`tenant-domain legacy-accounts`（手順 10）はこの構成を拒否します。従来のペアが設定され、`saml-jackson` のアカウントが 1 件でもあれば、オペレーターが `--single-connection` で証明しない限り 0 以外で終了します。このようなデプロイでは、その証明は事実に反します。
 
 すべての接続を列挙すると、これらのユーザーは自分の接続のプロバイダー（`saml-jackson-<id>`）でサインインしますが、そのプロバイダーに紐づくアカウントがないため `account_not_linked` で拒否されます。このリリースには、そのアカウントを移す手段がありません。`UPDATE accounts SET provider = …` を直接実行しても移せません。保存されている OAuth トークンはプロバイダーを AAD に含めて暗号化されている（`src/lib/crypto/account-token-crypto.ts`）ため、書き換えた行は復号できなくなります。`bind --from-members` が数えるのは設定済みのプロバイダーのアカウントだけです。`saml-jackson` を設定しなければ、これらのユーザーは evidence で `none` に数えられ、そのテナントには候補が入りません。テナントの本来の接続を紐づけようとすると、過半数チェックで拒否されることがあります（接続を確認したうえで `bind --claim` に `--accept-unused-provider` を付けます）。紐づけてもこれらのユーザーは解除されません。アカウントに記録されているのは `saml-jackson` のままだからです。再キー化コマンドが提供されるまで、これらのユーザーは既存アカウントにアクセスできず、再プロビジョニングが必要です。旧バージョンのまま運用を続けるのは安全な代替策ではありません。どの接続からも接続をまたいだ乗っ取りが可能なままになります（[SAML サインイン — テナントは接続そのものに紐づける](#saml-sign-in--bind-the-tenant-to-the-connection) の「この変更以前の露出」を参照）。
 
@@ -334,7 +334,11 @@ npm run docker:down
 7. 残りのクレームを 1 つずつ解決します。紐づけは `bind --claim` で行います。`--accept-unused-provider` は接続を確認してからだけ付けてください。別のカスタマーのテナントに先取りされたクレームは紐づけません。`add --from … --provider <正当な側のプロバイダー>` で正当なテナントに付け替えます。**正当なプロバイダーを先取りした側のテナントに `bind` しないでください。**
 8. ファイルを削除します。全テナントのクレームが載っています。
 9. 旧バージョンが完全に止まったら、もう一度 `list --unbound` を実行します。クレームが 1 件も出なければ完了です。
-10. アプリが起動時に使う環境変数で `legacy-accounts` を実行します。`saml-jackson` のアカウントを、そのユーザーがアクティブなテナントごとに数えます。書き込みは行いません。`saml-jackson` が設定されていて、それらのアカウントが 2 つ以上のテナントにまたがる場合は 0 以外で終了します。どのテナントでもアクティブでないユーザーは、もう 1 つのテナントとして数えます。そのユーザーとしてのサインインにもセッションが発行されるためです。プロバイダー設定を読めない場合も 0 以外で終了します。0 以外で終了したら、従来のペアを外し、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙してから（上記のロックアウトを参照）再実行してください。
+10. アプリが起動時に使う環境変数で `legacy-accounts` を実行します。書き込みは行いません。`saml-jackson` のアカウントを、そのユーザーがアクティブなテナントごとに一覧表示します。どのテナントでもアクティブでないユーザーは `(no active tenant)` として表示されます。アカウントには、ユーザーがどの Jackson 接続から来たかが記録されていません。そのため一覧は何も判定しません。アップグレード前の接続について把握していることと照らし合わせるための材料です。次の 2 つの場合は 0 で終了します:
+    - `saml-jackson` を記録したアカウントがない。
+    - コマンドが読み込んだ環境変数で `saml-jackson` が設定されていない。これは CLI の環境変数であり、アプリの環境変数と同じとは限りません。そのため出力の最後に、アプリの実行時の環境変数（タスク定義とシークレット）に `AUTH_JACKSON_ID` も `AUTH_JACKSON_SECRET` も設定されていないことを確認するよう指示します。先に進む前に確認してください。
+
+    `saml-jackson` が設定されていて、そのアカウントが 1 件でもあれば、`--single-connection` を付けない限り 0 以外で終了します。このフラグは、アップグレード前の Jackson が `saml-jackson` の背後にちょうど 1 つの接続、つまりいま `AUTH_JACKSON_ID` が指す接続だけを持っていたことを証明するものです。そのようなデプロイの場合だけ付けてください。2 つ以上の接続を持っていた場合は上記のロックアウトの対象です。フラグは付けず、従来のペアを外し、すべての接続を `AUTH_JACKSON_CONNECTIONS` に列挙してから再実行します。手順 3 の露出の確認もそのデプロイが対象です。プロバイダー設定を読めない場合や、プロバイダーが 1 つも設定されていない場合も、フラグの有無にかかわらず 0 以外で終了します。
 11. `AUTH_CLAIM_BINDING=strict` を設定してから、アプリを起動します。
 
 どのコマンドにも `MIGRATION_DATABASE_URL` が必要です。`bind` と `legacy-accounts` には、さらにアプリが起動時に使う SSO プロバイダーの環境変数（`AUTH_GOOGLE_*`、`AUTH_JACKSON_*`、`JACKSON_URL`）が必要です。それがない場合、`list --unbound` はプロバイダーのない行だけを表示し、その旨を出力します。
@@ -357,7 +361,8 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <rightful-ten
 # 9. クレームが 1 件も出ないこと
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --unbound
 
-# 10. 終了コードが 0 であること
+# 10. 終了コードが 0 であること。--single-connection は、アップグレード前の Jackson が
+#     saml-jackson の背後に接続を 1 つだけ持っていた場合にだけ付ける（手順 10）
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts
 ```
 
@@ -377,19 +382,19 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 
 ### IdP のドメインが変わった / テナントがロックアウトされた
 
-**症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。原因は **7 つ**あります。この CLI で直せるのは最初の 2 つと最後の 2 つです:
+**症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。原因は **8 つ**あります。この CLI で直せるのは最初の 2 つと最後の 2 つです:
 
 | `metadata.reason` | クレーム関連フィールド（`metadata.claim` / `metadata.claimRefusal`） | 原因 | 対処 |
 |---|---|---|---|
 | `tenant_claim_unmapped` | クレーム値 | どのテナントにも未登録 | `tenant-domain add` |
-| `tenant_mismatch` | クレーム値 | 別のテナントに登録済み | ユーザーを調査、または `add --from` でクレームを移動 |
+| `tenant_mismatch` | クレーム値 | 監査行の記録先テナントに登録済みで、ユーザーはそのテナントに**無効化された**メンバーシップ行を持ち、個人用ブートストラップテナントでアクティブ。サインインはユーザーをブートストラップテナントから移すことになるが、メンバーシップの再有効化はそのテナントが決めることでありサインインが決めることではないため拒否され、ユーザーはブートストラップテナントに残る | **`add --from` ではありません**: クレームは正しいテナントにあります。対象テナントが SCIM の `DELETE /Users/<userId>` でその行を削除し、次のディレクトリ同期が行を（無効化状態で）作り直す前にユーザーがサインインします。そのサインインは行を見つけないので、ユーザーを移します |
 | `tenant_mismatch` | `claimRefusal` あり（`claim` は無し） | IdP が送った値が**取り込み時点で拒否**された — 対になっていないサロゲート、制御文字・双方向制御文字・ゼロ幅文字、255 文字超、またはストレージ層が往復できない空白 | **IdP 側を修正してください。** その値は `add` で登録できないため、この CLI では復旧できません。`claimRefusal` が違反したルールを示します |
 | `tenant_mismatch` | `claimRefusal` あり、かつ `claim` あり | 値は取り込みを通ったが**保存できない** — 印字可能 ASCII ではなく、レジストリの `CHECK` 制約が拒否する | **IdP 側を修正**するか、そのテナントに ASCII のクレームを登録してください。`add` は同じ述語でこの値を拒否します |
 | `tenant_claim_system_tenant` | クレーム値 | クレームは**登録済み**だが、登録先が sentinel テナント（`__system__`）— 「所有テナント無し」を表す予約テナントで、アカウントを持ってはいけないため、サインイン時の書き込みを `CHECK` が拒否する。この状態を作る運用コマンドは存在しない（`add` は sentinel を登録先として拒否するので、帯域外で書き込まれた行） | クレームを実在テナントに付け替える。`unmapped` では *Unregistered claims* の見出しに出るので、そこが示す `tenant-domain add --tenant <ref> --domain <claim> --by <label>` を実行すると、`add` が拒否したうえで付け直すべき `--from <現在の所有者>` 付きコマンドをそのまま提示します |
 | `tenant_claim_unbound` | クレーム値と `boundProvider`（null）、`signInProviderRef` | strict 紐づけ: クレーム行にプロバイダーが記録されていないため、正しい接続から提示されたことをどのサインインも証明できない。紐づけアップグレード以前の行はすべてこの状態 | `tenant-domain bind` — [SSO tenant claim binding upgrade](#sso-tenant-claim-binding-upgrade) 参照 |
 | `tenant_claim_provider_mismatch` | クレーム値と `boundProvider`、`signInProviderRef` | strict 紐づけ: クレームが、このサインインとは別のプロバイダーに紐づいている。**攻撃の痕跡そのもの**で、ある接続の IdP が別カスタマーのクレームをアサートした形 | **まず調査してください。** 紐づけ先のテナントが別カスタマーのプロバイダー経由のサインインで作られていた場合は、`add --from … --provider <正当な側>` で正当なテナントに付け替えます。正当なプロバイダーを先取りした側のテナントに `bind` してはいけません |
 
-`claimRefusal` を持つ 2 つは文言ではなく**フィールドの有無**で判別してください。`claimRefusal` はこのデプロイ自身の拒否判定だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 7 つの原因を 4 つの見出しで報告します。`claimRefusal` を持つ 2 つは、対処が同じなので 1 つの見出しにまとめています。sentinel の行も、対処が `tenant-domain` である点で未登録の見出しに入ります。プロバイダー紐づけの 2 つは 4 つ目の見出しにまとめており、その見出しは「まず調査」と指示します。これらの行には `boundProvider` とサインイン時のプロバイダーが表示されます。監査行は所有テナントの管理者が読めるため、サインイン時のプロバイダーを鍵付きハッシュ `signInProviderRef` としてのみ保存します。`unmapped` は、設定済みのプロバイダー一覧と識別子 pepper（`AUDIT_IDENTIFIER_PEPPER`、なければ `AUTH_SECRET` から導出）を使って、その ref をプロバイダー ID に戻します。pepper がない場合は対応付けできない旨を表示します。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
+`claimRefusal` を持つ 2 つは文言ではなく**フィールドの有無**で判別してください。`claimRefusal` はこのデプロイ自身の拒否判定だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 8 つの原因を 4 つの見出しで報告します。`claimRefusal` を持たない `tenant_mismatch` の 2 つは、*Claims registered to a DIFFERENT tenant*（ユーザーがアクティブなテナントとは別のテナントに登録済み）という 1 つの見出しにまとめています。無効化された行のケースには、その見出しが示す `add --from` は当てはまりません。記録先テナントでのユーザーのメンバーシップ行で見分けます（そこに無効化された行があればそのケースです）。`claimRefusal` を持つ 2 つも、対処が同じなので 1 つの見出しにまとめています。sentinel の行も、対処が `tenant-domain` である点で未登録の見出しに入ります。プロバイダー紐づけの 2 つは 4 つ目の見出しにまとめており、その見出しは「まず調査」と指示します。これらの行には `boundProvider` とサインイン時のプロバイダーが表示されます。監査行は所有テナントの管理者が読めるため、サインイン時のプロバイダーを鍵付きハッシュ `signInProviderRef` としてのみ保存します。`unmapped` は、設定済みのプロバイダー一覧と識別子 pepper（`AUDIT_IDENTIFIER_PEPPER`、なければ `AUTH_SECRET` から導出）を使って、その ref をプロバイダー ID に戻します。pepper がない場合は対応付けできない旨を表示します。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
 
 ```bash
 # 最近拒否された未登録クレームを確認（既定の期間: 30 日）

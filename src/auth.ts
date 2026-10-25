@@ -687,6 +687,42 @@ async function claimedTenantMembership(
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
+      // A bridge code is exchanged for the extension / iOS token moved above,
+      // under the code's own tenant: it has no tenant-owned parent, so it
+      // moves with the user rather than mint a token in the tenant they left.
+      await tx.extensionBridgeCode.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.mobileBridgeCode.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      // MCP grants cannot move: each is bound to its client's tenant, and the
+      // client is tenant-owned and stays — the code exchange and the refresh
+      // refuse a grant whose tenant differs from its client's. They are revoked
+      // instead, the way invalidateUserSessions revokes them (and the delegation
+      // sessions riding on them) when a member leaves a tenant; an unused
+      // authorization code is consumed, its own revocation.
+      const revokedAt = new Date();
+      await tx.mcpAccessToken.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.mcpRefreshToken.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.delegationSession.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.mcpAuthorizationCode.updateMany({
+        where: { userId, tenantId: existingTenantId, usedAt: null },
+        data: { usedAt: revokedAt },
+      });
+      // teamMemberKey / teamPasswordFavorite stay: they are filed under their
+      // team's tenant, and teams and team memberships are not migrated.
 
       // Remove the bootstrap membership BEFORE creating the new one:
       // `tenant_members_one_active_per_user` refuses a second active row, so

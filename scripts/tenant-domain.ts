@@ -43,7 +43,7 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid> [--after <seq>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- realign --user <uuid|email> --tenant <ref> --by <label> [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- measure
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts [--single-connection]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]
 //
 // `measure` prints the three counts docs/archive/review/audit-tenant-adjudicator-design.md's
@@ -79,6 +79,12 @@
 // binding and records a `rebind`. The SSO provider set and the binding mode
 // come from the app env this process loaded — never the boot refusal, so these
 // commands run in the window before AUTH_CLAIM_BINDING=strict is set.
+//
+// `legacy-accounts --single-connection` is the operator's attestation that
+// Jackson held exactly one connection behind `saml-jackson` before the
+// upgrade, the one AUTH_JACKSON_ID now names. No database row can confirm it
+// — an account does not record its connection — so with that provider
+// configured and any account at it, the command refuses without the flag.
 //
 // `history` also reports a `deregister` operation now: deleting a row from
 // `tenant_claims` — directly, or by cascade from a tenant deletion — fires a
@@ -391,7 +397,7 @@ type AppEnv = {
   readonly mode: ClaimBindingMode;
 };
 
-function readAppEnv(): { ok: true; env: AppEnv } | { ok: false; result: CmdResult } {
+function readAppEnv(command: string): { ok: true; env: AppEnv } | { ok: false; result: CmdResult } {
   try {
     const claimProviders = listClaimProviderIds(process.env);
     return {
@@ -406,7 +412,7 @@ function readAppEnv(): { ok: true; env: AppEnv } | { ok: false; result: CmdResul
       result: {
         ok: false,
         code: 1,
-        message: `The SSO provider configuration in this process's env is refused (${e.message}); fix it before binding claims.`,
+        message: `The SSO provider configuration in this process's env is refused (${e.message}); fix it before running ${command}.`,
       },
     };
   }
@@ -646,7 +652,7 @@ export async function cmdList(args: { tenant?: string; unbound?: boolean }): Pro
  * evaluated, rather than reading as "every bound row is fine".
  */
 async function listUnbound(url: string, tenantRef: string | undefined): Promise<CmdResult> {
-  const app = readAppEnv();
+  const app = readAppEnv("list --unbound");
   if (!app.ok) return app.result;
   const appEnv = app.env;
 
@@ -946,7 +952,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // something other than what it is would be acted on.
         // The configured set's refs under this process's pepper — the same
         // derivation the app stores them with, from the app env loadEnv() read.
-        const app = readAppEnv();
+        const app = readAppEnv("unmapped");
         if (!app.ok && app.result.message) console.warn(`Warning: ${app.result.message}`);
         const refMapping = refMappingFor(
           app.ok ? app.env.claimProviders : [],
@@ -1215,7 +1221,7 @@ export async function cmdAdd(args: {
   const byError = validateActorLabel(args.by);
   if (byError) return byError;
 
-  const app = readAppEnv();
+  const app = readAppEnv("add");
   if (!app.ok) return app.result;
   const binding = resolveAddBinding(args, app.env);
   if (!binding.ok) return binding.result;
@@ -2114,7 +2120,7 @@ export async function cmdBind(args: {
   const byError = validateActorLabel(args.by);
   if (byError) return byError;
 
-  const app = readAppEnv();
+  const app = readAppEnv("bind --claim");
   if (!app.ok) return app.result;
   const providerError = validateProviderFlag(args.provider, app.env);
   if (providerError) return providerError;
@@ -2260,7 +2266,7 @@ export async function cmdBindFromMembers(args: { out: string }): Promise<CmdResu
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
 
-  const app = readAppEnv();
+  const app = readAppEnv("bind --from-members");
   if (!app.ok) return app.result;
   if (!app.env.present) return appEnvRequiredResult("bind --from-members");
   const appEnv = app.env;
@@ -2409,7 +2415,7 @@ export async function cmdBindApply(args: {
   const byError = validateActorLabel(args.by);
   if (byError) return byError;
 
-  const app = readAppEnv();
+  const app = readAppEnv("bind --apply");
   if (!app.ok) return app.result;
   if (!app.env.present) return appEnvRequiredResult("bind --apply");
   const appEnv = app.env;
@@ -2741,16 +2747,24 @@ export async function cmdMeasure(): Promise<CmdResult> {
  * audit events. Pre-upgrade SAML users of every connection hold an account at
  * `saml-jackson`. If the legacy provider is still configured, the IdP behind
  * the one connection its client names can assert another connection's user's
- * `providerAccountId` and, with no claim, sign in as that user. Refused (code 1)
- * when the provider is configured and those accounts span more than one tenant
- * (`legacyAccountVerdict`); without a readable provider configuration it
- * refuses rather than pass, since "not configured" is then unknown.
+ * `providerAccountId` and, with no claim, sign in as that user.
+ *
+ * An account does not record its connection, and no grouping of the database
+ * stands in for one (`legacyAccountVerdict`), so with the provider configured
+ * and any account at it the command refuses (code 1) unless the operator
+ * attests `--single-connection`: before the upgrade, Jackson held exactly one
+ * connection behind `saml-jackson`, the one AUTH_JACKSON_ID now names. The
+ * per-tenant grouping is printed in every case, as evidence for that
+ * attestation. Without a readable provider configuration it refuses rather
+ * than pass, since "not configured" is then unknown. "Not configured" is this
+ * process's env, so that pass tells the operator to confirm the app's own.
  */
-export async function cmdLegacyAccounts(): Promise<CmdResult> {
+export async function cmdLegacyAccounts(args: { singleConnection?: boolean } = {}): Promise<CmdResult> {
+  const singleConnection = args.singleConnection === true;
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
 
-  const app = readAppEnv();
+  const app = readAppEnv("legacy-accounts");
   if (!app.ok) return app.result;
   if (!app.env.present) {
     return {
@@ -2789,7 +2803,10 @@ export async function cmdLegacyAccounts(): Promise<CmdResult> {
             : await tx.tenant.findMany({ where: { id: { in: tenantIds } }, select: { id: true, name: true } });
         const nameOf = new Map(tenants.map((t) => [t.id, t.name]));
 
-        console.log(`Accounts at ${JACKSON_LEGACY_PROVIDER_ID}, by the tenant of their user's active membership:`);
+        console.log(
+          `Accounts at ${JACKSON_LEGACY_PROVIDER_ID}, by the tenant of their user's active membership ` +
+            "(evidence for the operator; an account does not record its connection):",
+        );
         if (groups.length === 0) console.log("  (none)");
         for (const group of groups) {
           const where =
@@ -2804,7 +2821,7 @@ export async function cmdLegacyAccounts(): Promise<CmdResult> {
         );
 
         const total = accounts.length;
-        const verdict = legacyAccountVerdict(groups, legacyConfigured);
+        const verdict = legacyAccountVerdict(groups, legacyConfigured, singleConnection);
         const rows = groups;
         switch (verdict) {
           case LEGACY_ACCOUNT_VERDICT.NONE:
@@ -2820,31 +2837,40 @@ export async function cmdLegacyAccounts(): Promise<CmdResult> {
               code: 0,
               rows,
               message:
-                `${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, and it is not configured, so no client ` +
-                "resolves them. Their users are refused with account_not_linked through their connection's own " +
-                'provider until re-provisioned (README, "Known lockout").',
+                `${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, and it is not configured in this ` +
+                "process's env, so no client built from it resolves them. Their users are refused with " +
+                "account_not_linked through their connection's own provider until re-provisioned (README, " +
+                '"Known lockout"). This check read the env this process loaded, not the app\'s: confirm that ' +
+                "the app's runtime env (its task definition and secrets) sets neither AUTH_JACKSON_ID nor " +
+                "AUTH_JACKSON_SECRET.",
             };
-          case LEGACY_ACCOUNT_VERDICT.ONE_GROUP:
+          case LEGACY_ACCOUNT_VERDICT.ATTESTED:
             return {
               ok: true,
               code: 0,
               rows,
               message:
-                `${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, all of one ` +
-                `${groups[0]?.tenantId === null ? "group (users with no active tenant)" : "tenant"}. ` +
-                "Check that AUTH_JACKSON_ID is that tenant's connection's own client.",
+                `${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, and it is configured. Passed on your ` +
+                `--single-connection attestation: before the upgrade, Jackson held exactly one connection behind ` +
+                `${JACKSON_LEGACY_PROVIDER_ID}, the one AUTH_JACKSON_ID now names, so every one of these accounts ` +
+                "came through it. If Jackson held two or more, this pass is wrong: see the README's \"Known lockout\".",
             };
-          case LEGACY_ACCOUNT_VERDICT.SPANS:
+          case LEGACY_ACCOUNT_VERDICT.UNATTESTED:
             return {
               ok: false,
               code: 1,
               rows,
               message:
-                `Refusing: ${total} account(s) at ${JACKSON_LEGACY_PROVIDER_ID} belong to the users of ${groups.length} ` +
-                "tenants (users with no active tenant count as one), and the legacy provider is configured. The IdP " +
-                "behind the connection AUTH_JACKSON_ID names can assert another tenant's user's account id and sign " +
-                "in as them. Unset AUTH_JACKSON_ID and AUTH_JACKSON_SECRET, list every connection, that one included, " +
-                'in AUTH_JACKSON_CONNECTIONS (README, "Known lockout"), and re-run this check.',
+                `Refusing: ${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, and it is configured. An account ` +
+                "does not record which Jackson connection its user came through, so this check cannot tell " +
+                "whether they all came through the connection AUTH_JACKSON_ID names. If Jackson held two or more " +
+                `connections behind ${JACKSON_LEGACY_PROVIDER_ID} before the upgrade, the IdP behind that one ` +
+                "connection can assert another connection's user's account id and sign in as them: unset " +
+                "AUTH_JACKSON_ID and AUTH_JACKSON_SECRET, list every connection, that one included, in " +
+                'AUTH_JACKSON_CONNECTIONS (README, "Known lockout"), and re-run this check. That remedy applies ' +
+                "only then: if Jackson held exactly one connection behind it, the one AUTH_JACKSON_ID names, " +
+                "re-run with --single-connection to attest it. The listing above is evidence to check against " +
+                "what you know of the pre-upgrade connections.",
             };
         }
       },
@@ -3160,7 +3186,7 @@ function printUsage(): void {
       "  tenant-domain history --domain <claim> | --tenant <uuid> [--after <seq>]",
       "  tenant-domain realign --user <uuid|email> --tenant <ref> --by <label> [--yes]",
       "  tenant-domain measure",
-      "  tenant-domain legacy-accounts",
+      "  tenant-domain legacy-accounts [--single-connection]",
       `  tenant-domain backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]  (default ${DEFAULT_BACKFILL_LIMIT}, max ${MAX_BACKFILL_LIMIT})`,
       "",
       "<ref> is a tenant UUID or one of its registered claims (not its slug).",
@@ -3189,9 +3215,11 @@ function printUsage(): void {
       "the oldest active membership wins over the column, and a multi-active user is",
       "decided, not refused, and flagged multiActive in the listing.",
       "",
-      "legacy-accounts counts the accounts at saml-jackson by their users' active tenant,",
-      "read-only, and exits non-zero when saml-jackson is configured and they span more",
-      "than one tenant (users with no active tenant count as one). Needs the app's SSO env.",
+      "legacy-accounts lists the accounts at saml-jackson by their users' active tenant,",
+      "read-only. With saml-jackson configured and any account at it, it exits non-zero",
+      "unless --single-connection attests that Jackson held exactly one connection behind",
+      "saml-jackson before the upgrade, the one AUTH_JACKSON_ID names. The listing is",
+      "evidence and decides nothing. Needs the app's SSO env.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",
@@ -3364,7 +3392,7 @@ async function main(): Promise<void> {
       result = await cmdMeasure();
       break;
     case "legacy-accounts":
-      result = await cmdLegacyAccounts();
+      result = await cmdLegacyAccounts({ singleConnection: flags.get("single-connection") === true });
       break;
     case "backfill-owning-column": {
       const by = getStringFlag(flags, "by");

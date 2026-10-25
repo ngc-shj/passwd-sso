@@ -57,6 +57,12 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { DEREGISTER_ACTOR_LABEL, TENANT_CLAIM_EVENT_OPERATION } from "@/lib/tenant/tenant-claim-event";
 import * as loggerModule from "@/lib/logger";
+import {
+  MIGRATED_COUNTERS,
+  MIGRATION_TREATMENT,
+  type MigratedCounterHandle,
+  type NonCounterWriteHandle,
+} from "@/__tests__/helpers/bootstrap-migration-set";
 
 type SignInParams = {
   user: { id?: string; email?: string | null };
@@ -488,149 +494,300 @@ describe("tenant claim binding (C3/C4/C5)", () => {
 
   type Victim = { userId: string; email: string; home: string };
 
+  /** Ids one `seedOwnedRows` call shares across its tables, so a child row can name its parent. */
+  type SeedIds = {
+    readonly userId: string;
+    readonly tenantId: string;
+    readonly entryId: string;
+    readonly grantId: string;
+    readonly shareId: string;
+    readonly mcpClientId: string;
+    readonly mcpTokenId: string;
+  };
+  type Sql = (text: string, ...values: unknown[]) => Promise<number>;
   /**
-   * The tables the bootstrap migration moves, read off its transaction in
-   * `claimedTenantMembership` (src/auth.ts): the `user.update`, every
-   * `tx.<model>.updateMany`, the `audit_log_tenant_migrate` CALL (audit_logs),
-   * and the membership's `deleteMany` + `create` (checked separately, with its
-   * active flag). Each entry selects the tenant of the user's own rows; the
-   * three the migration scopes by tenant alone (`passwordEntryHistory`,
-   * `emergencyAccessKeyPair`, `shareAccessLog`) are reached through their
-   * parent. A table added to the migration belongs here too.
+   * One table the bootstrap migration writes. `select` reads the tenant of the
+   * user's rows (`$1` = the user id); a table the migration revokes rather than
+   * moves appends " revoked" to a revoked row's tenant, so "left in place and
+   * revoked" and "moved" read differently. `seed` inserts one row of the
+   * user's, or is null where `createUser`/`linkAccount` already did.
    */
-  const MOVED_TABLES = {
-    users: `SELECT tenant_id FROM users WHERE id = $1::uuid`,
-    accounts: `SELECT tenant_id FROM accounts WHERE user_id = $1::uuid`,
-    password_entries: `SELECT tenant_id FROM password_entries WHERE user_id = $1::uuid`,
-    tags: `SELECT tenant_id FROM tags WHERE user_id = $1::uuid`,
-    folders: `SELECT tenant_id FROM folders WHERE user_id = $1::uuid`,
-    sessions: `SELECT tenant_id FROM sessions WHERE user_id = $1::uuid`,
-    extension_tokens: `SELECT tenant_id FROM extension_tokens WHERE user_id = $1::uuid`,
-    password_entry_histories: `SELECT h.tenant_id FROM password_entry_histories h
-                                 JOIN password_entries e ON e.id = h.entry_id WHERE e.user_id = $1::uuid`,
-    vault_keys: `SELECT tenant_id FROM vault_keys WHERE user_id = $1::uuid`,
-    audit_logs: `SELECT tenant_id FROM audit_logs WHERE user_id = $1::uuid`,
-    emergency_access_grants: `SELECT tenant_id FROM emergency_access_grants WHERE owner_id = $1::uuid`,
-    emergency_access_key_pairs: `SELECT k.tenant_id FROM emergency_access_key_pairs k
-                                   JOIN emergency_access_grants g ON g.id = k.grant_id WHERE g.owner_id = $1::uuid`,
-    password_shares: `SELECT tenant_id FROM password_shares WHERE created_by_id = $1::uuid`,
-    share_access_logs: `SELECT l.tenant_id FROM share_access_logs l
-                          JOIN password_shares s ON s.id = l.share_id WHERE s.created_by_id = $1::uuid`,
-    attachments: `SELECT tenant_id FROM attachments WHERE created_by_id = $1::uuid`,
-    notifications: `SELECT tenant_id FROM notifications WHERE user_id = $1::uuid`,
-    api_keys: `SELECT tenant_id FROM api_keys WHERE user_id = $1::uuid`,
-    webauthn_credentials: `SELECT tenant_id FROM webauthn_credentials WHERE user_id = $1::uuid`,
-  } as const;
-  type MovedTable = keyof typeof MOVED_TABLES;
+  type OwnedTable = {
+    readonly select: string;
+    readonly seed: ((sql: Sql, ids: SeedIds) => Promise<number>) | null;
+  };
 
   const hex = (bytes: number): string => randomBytes(bytes).toString("hex");
+  const IV = "0".repeat(24);
+  const TAG = "0".repeat(32);
+  const revocable = (table: string, column: string, userColumn = "user_id") =>
+    `SELECT tenant_id::text || CASE WHEN ${column} IS NULL THEN '' ELSE ' revoked' END AS tenant_id
+       FROM ${table} WHERE ${userColumn} = $1::uuid`;
 
   /**
-   * One row of `userId`'s in every moved table but `users`/`accounts` (seeded
-   * by `createUser`/`linkAccount`), filed under `tenantId`.
+   * Every counter the migration migrates, keyed by `MigratedCounterHandle`:
+   * a counter added to `STRANDED_COUNTERS` does not compile here until it is
+   * classified in `bootstrap-migration-set.ts` and, if migrated, given a row.
+   * Seeded in this order, parents first.
+   */
+  const COUNTER_TABLES: Record<MigratedCounterHandle, OwnedTable> = {
+    account: { select: `SELECT tenant_id FROM accounts WHERE user_id = $1::uuid`, seed: null },
+    passwordEntry: {
+      select: `SELECT tenant_id FROM password_entries WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO password_entries (
+             id, user_id, tenant_id,
+             encrypted_blob, blob_iv, blob_auth_tag,
+             encrypted_overview, overview_iv, overview_auth_tag,
+             key_version, aad_version, created_at, updated_at
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 'overview', $4, $5, 1, 1, now(), now())`,
+          ids.entryId, ids.userId, ids.tenantId, IV, TAG,
+        ),
+    },
+    emergencyAccessGrant: {
+      select: `SELECT tenant_id FROM emergency_access_grants WHERE owner_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO emergency_access_grants (id, tenant_id, owner_id, grantee_email, wait_days, token_hash, token_expires_at, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 'grantee@example.invalid', 7, $4, now() + interval '1 day', now())`,
+          ids.grantId, ids.tenantId, ids.userId, hex(32),
+        ),
+    },
+    passwordShare: {
+      select: `SELECT tenant_id FROM password_shares WHERE created_by_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO password_shares (id, tenant_id, token_hash, encrypted_data, data_iv, data_auth_tag, expires_at, created_by_id, password_entry_id)
+           VALUES ($1::uuid, $2::uuid, $3, 'data', $4, $5, now() + interval '1 day', $6::uuid, $7::uuid)`,
+          ids.shareId, ids.tenantId, hex(32), IV, TAG, ids.userId, ids.entryId,
+        ),
+    },
+    session: {
+      select: `SELECT tenant_id FROM sessions WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+           VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+          randomUUID(), hex(16), ids.userId, ids.tenantId,
+        ),
+    },
+    tag: {
+      select: `SELECT tenant_id FROM tags WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO tags (id, name, user_id, tenant_id, created_at, updated_at)
+           VALUES ($1::uuid, 'tag', $2::uuid, $3::uuid, now(), now())`,
+          randomUUID(), ids.userId, ids.tenantId,
+        ),
+    },
+    folder: {
+      select: `SELECT tenant_id FROM folders WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO folders (id, name, user_id, tenant_id, created_at, updated_at)
+           VALUES ($1::uuid, 'folder', $2::uuid, $3::uuid, now(), now())`,
+          randomUUID(), ids.userId, ids.tenantId,
+        ),
+    },
+    extensionToken: {
+      select: `SELECT tenant_id FROM extension_tokens WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, expires_at, family_id, cnf_jkt)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'passwords:read', now() + interval '1 day', $5::uuid, $6)`,
+          randomUUID(), ids.userId, ids.tenantId, hex(32), randomUUID(), hex(16),
+        ),
+    },
+    vaultKey: {
+      select: `SELECT tenant_id FROM vault_keys WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO vault_keys (id, user_id, tenant_id, version, verification_ciphertext, verification_iv, verification_auth_tag)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 'verify', $4, $5)`,
+          randomUUID(), ids.userId, ids.tenantId, IV, TAG,
+        ),
+    },
+    attachment: {
+      select: `SELECT tenant_id FROM attachments WHERE created_by_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO attachments (id, filename, content_type, size_bytes, encrypted_data, iv, auth_tag, tenant_id, password_entry_id, created_by_id)
+           VALUES ($1::uuid, 'a.bin', 'application/octet-stream', 1, '\\x00'::bytea, $2, $3, $4::uuid, $5::uuid, $6::uuid)`,
+          randomUUID(), IV, TAG, ids.tenantId, ids.entryId, ids.userId,
+        ),
+    },
+    notification: {
+      select: `SELECT tenant_id FROM notifications WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO notifications (id, user_id, tenant_id, type, title, body)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 'SECURITY_ALERT', 'title', 'body')`,
+          randomUUID(), ids.userId, ids.tenantId,
+        ),
+    },
+    apiKey: {
+      select: `SELECT tenant_id FROM api_keys WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', 'key', 'passwords:read', now() + interval '1 day')`,
+          randomUUID(), ids.userId, ids.tenantId, hex(32),
+        ),
+    },
+    webAuthnCredential: {
+      select: `SELECT tenant_id FROM webauthn_credentials WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO webauthn_credentials (id, user_id, tenant_id, credential_id, public_key, device_type)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'pk', 'singleDevice')`,
+          randomUUID(), ids.userId, ids.tenantId, hex(16),
+        ),
+    },
+    extensionBridgeCode: {
+      select: `SELECT tenant_id FROM extension_bridge_codes WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO extension_bridge_codes (id, code_hash, user_id, tenant_id, scope, expires_at, cnf_jkt)
+           VALUES ($1::uuid, $2, $3::uuid, $4::uuid, 'passwords:read', now() + interval '1 minute', $5)`,
+          randomUUID(), hex(32), ids.userId, ids.tenantId, hex(16),
+        ),
+    },
+    mobileBridgeCode: {
+      select: `SELECT tenant_id FROM mobile_bridge_codes WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO mobile_bridge_codes (id, code_hash, user_id, tenant_id, state, code_challenge, device_jkt, expires_at)
+           VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5, $6, $7, now() + interval '1 minute')`,
+          randomUUID(), hex(32), ids.userId, ids.tenantId, hex(16), hex(16), hex(21),
+        ),
+    },
+    mcpAccessToken: {
+      select: revocable("mcp_access_tokens", "revoked_at"),
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO mcp_access_tokens (id, token_hash, client_id, tenant_id, user_id, scope, expires_at)
+           VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, 'credentials:list', now() + interval '1 hour')`,
+          ids.mcpTokenId, hex(32), ids.mcpClientId, ids.tenantId, ids.userId,
+        ),
+    },
+    mcpRefreshToken: {
+      select: revocable("mcp_refresh_tokens", "revoked_at"),
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO mcp_refresh_tokens (id, token_hash, family_id, access_token_id, client_id, tenant_id, user_id, scope, expires_at)
+           VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, $6::uuid, $7::uuid, 'credentials:list', now() + interval '1 day')`,
+          randomUUID(), hex(32), randomUUID(), ids.mcpTokenId, ids.mcpClientId, ids.tenantId, ids.userId,
+        ),
+    },
+    delegationSession: {
+      select: revocable("delegation_sessions", "revoked_at"),
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO delegation_sessions (id, tenant_id, user_id, mcp_token_id, entry_ids, expires_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, ARRAY[$5]::text[], now() + interval '1 hour')`,
+          randomUUID(), ids.tenantId, ids.userId, ids.mcpTokenId, ids.entryId,
+        ),
+    },
+    mcpAuthorizationCode: {
+      select: revocable("mcp_authorization_codes", "used_at"),
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO mcp_authorization_codes (id, code_hash, client_id, tenant_id, user_id, redirect_uri, scope, code_challenge, expires_at)
+           VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, 'http://127.0.0.1/callback', 'credentials:list', $6, now() + interval '1 minute')`,
+          randomUUID(), hex(32), ids.mcpClientId, ids.tenantId, ids.userId, hex(32),
+        ),
+    },
+  };
+
+  /**
+   * The migration's writes that are not counters (`NON_COUNTER_WRITES`), but
+   * the membership, which `placement` reads with its active flag. The three
+   * the migration moves by tenant alone are reached through their parent.
+   */
+  const NON_COUNTER_TABLES: Record<Exclude<NonCounterWriteHandle, "tenantMember">, OwnedTable> = {
+    user: { select: `SELECT tenant_id FROM users WHERE id = $1::uuid`, seed: null },
+    passwordEntryHistory: {
+      select: `SELECT h.tenant_id FROM password_entry_histories h
+                 JOIN password_entries e ON e.id = h.entry_id WHERE e.user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO password_entry_histories (id, entry_id, tenant_id, encrypted_blob, blob_iv, blob_auth_tag, key_version)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 1)`,
+          randomUUID(), ids.entryId, ids.tenantId, IV, TAG,
+        ),
+    },
+    emergencyAccessKeyPair: {
+      select: `SELECT k.tenant_id FROM emergency_access_key_pairs k
+                 JOIN emergency_access_grants g ON g.id = k.grant_id WHERE g.owner_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO emergency_access_key_pairs (id, grant_id, tenant_id, encrypted_private_key, private_key_iv, private_key_auth_tag)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 'key', $4, $5)`,
+          randomUUID(), ids.grantId, ids.tenantId, IV, TAG,
+        ),
+    },
+    shareAccessLog: {
+      select: `SELECT l.tenant_id FROM share_access_logs l
+                 JOIN password_shares s ON s.id = l.share_id WHERE s.created_by_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO share_access_logs (id, share_id, tenant_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`,
+          randomUUID(), ids.shareId, ids.tenantId,
+        ),
+    },
+    auditLog: {
+      select: `SELECT tenant_id FROM audit_logs WHERE user_id = $1::uuid`,
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO audit_logs (id, scope, action, user_id, tenant_id, actor_type, outbox_id, created_at)
+           VALUES ($1::uuid, 'PERSONAL', 'AUTH_LOGIN', $2::uuid, $3::uuid, 'HUMAN', $4::uuid, now())`,
+          randomUUID(), ids.userId, ids.tenantId, randomUUID(),
+        ),
+    },
+  };
+
+  const OWNED_TABLES = { ...COUNTER_TABLES, ...NON_COUNTER_TABLES };
+  type OwnedHandle = keyof typeof OWNED_TABLES;
+
+  /**
+   * One row of `userId`'s in every table the migration writes but `users` /
+   * `accounts` (seeded by `createUser` / `linkAccount`), filed under
+   * `tenantId`, plus the MCP client the MCP rows hang off (tenant-owned).
    */
   async function seedOwnedRows(userId: string, tenantId: string): Promise<void> {
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      const entryId = randomUUID();
-      const grantId = randomUUID();
-      const shareId = randomUUID();
-      const sql = (text: string, ...values: unknown[]) => tx.$executeRawUnsafe(text, ...values);
+      const ids: SeedIds = {
+        userId,
+        tenantId,
+        entryId: randomUUID(),
+        grantId: randomUUID(),
+        shareId: randomUUID(),
+        mcpClientId: randomUUID(),
+        mcpTokenId: randomUUID(),
+      };
+      const sql: Sql = (text, ...values) => tx.$executeRawUnsafe(text, ...values);
       await sql(
-        `INSERT INTO password_entries (
-           id, user_id, tenant_id,
-           encrypted_blob, blob_iv, blob_auth_tag,
-           encrypted_overview, overview_iv, overview_auth_tag,
-           key_version, aad_version, created_at, updated_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 'overview', $4, $5, 1, 1, now(), now())`,
-        entryId, userId, tenantId, "0".repeat(24), "0".repeat(32),
+        `INSERT INTO mcp_clients (id, tenant_id, client_id, client_secret_hash, name, redirect_uris, allowed_scopes, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3, '', $4, ARRAY['http://127.0.0.1/callback']::text[], 'credentials:list', now())`,
+        ids.mcpClientId, tenantId, `mcpc_${hex(16)}`, `client-${hex(8)}`,
       );
-      await sql(
-        `INSERT INTO password_entry_histories (id, entry_id, tenant_id, encrypted_blob, blob_iv, blob_auth_tag, key_version)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 1)`,
-        randomUUID(), entryId, tenantId, "0".repeat(24), "0".repeat(32),
-      );
-      await sql(
-        `INSERT INTO emergency_access_grants (id, tenant_id, owner_id, grantee_email, wait_days, token_hash, token_expires_at, updated_at)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, 'grantee@example.invalid', 7, $4, now() + interval '1 day', now())`,
-        grantId, tenantId, userId, hex(32),
-      );
-      await sql(
-        `INSERT INTO emergency_access_key_pairs (id, grant_id, tenant_id, encrypted_private_key, private_key_iv, private_key_auth_tag)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, 'key', $4, $5)`,
-        randomUUID(), grantId, tenantId, "0".repeat(24), "0".repeat(32),
-      );
-      await sql(
-        `INSERT INTO password_shares (id, tenant_id, token_hash, encrypted_data, data_iv, data_auth_tag, expires_at, created_by_id, password_entry_id)
-         VALUES ($1::uuid, $2::uuid, $3, 'data', $4, $5, now() + interval '1 day', $6::uuid, $7::uuid)`,
-        shareId, tenantId, hex(32), "0".repeat(24), "0".repeat(32), userId, entryId,
-      );
-      await sql(
-        `INSERT INTO share_access_logs (id, share_id, tenant_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`,
-        randomUUID(), shareId, tenantId,
-      );
-      await sql(
-        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
-         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
-        randomUUID(), hex(16), userId, tenantId,
-      );
-      await sql(
-        `INSERT INTO tags (id, name, user_id, tenant_id, created_at, updated_at)
-         VALUES ($1::uuid, 'tag', $2::uuid, $3::uuid, now(), now())`,
-        randomUUID(), userId, tenantId,
-      );
-      await sql(
-        `INSERT INTO folders (id, name, user_id, tenant_id, created_at, updated_at)
-         VALUES ($1::uuid, 'folder', $2::uuid, $3::uuid, now(), now())`,
-        randomUUID(), userId, tenantId,
-      );
-      await sql(
-        `INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, expires_at, family_id, cnf_jkt)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'passwords:read', now() + interval '1 day', $5::uuid, $6)`,
-        randomUUID(), userId, tenantId, hex(32), randomUUID(), hex(16),
-      );
-      await sql(
-        `INSERT INTO vault_keys (id, user_id, tenant_id, version, verification_ciphertext, verification_iv, verification_auth_tag)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 'verify', $4, $5)`,
-        randomUUID(), userId, tenantId, "0".repeat(24), "0".repeat(32),
-      );
-      await sql(
-        `INSERT INTO audit_logs (id, scope, action, user_id, tenant_id, actor_type, outbox_id, created_at)
-         VALUES ($1::uuid, 'PERSONAL', 'AUTH_LOGIN', $2::uuid, $3::uuid, 'HUMAN', $4::uuid, now())`,
-        randomUUID(), userId, tenantId, randomUUID(),
-      );
-      await sql(
-        `INSERT INTO attachments (id, filename, content_type, size_bytes, encrypted_data, iv, auth_tag, tenant_id, password_entry_id, created_by_id)
-         VALUES ($1::uuid, 'a.bin', 'application/octet-stream', 1, '\\x00'::bytea, $2, $3, $4::uuid, $5::uuid, $6::uuid)`,
-        randomUUID(), "0".repeat(24), "0".repeat(32), tenantId, entryId, userId,
-      );
-      await sql(
-        `INSERT INTO notifications (id, user_id, tenant_id, type, title, body)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, 'SECURITY_ALERT', 'title', 'body')`,
-        randomUUID(), userId, tenantId,
-      );
-      await sql(
-        `INSERT INTO api_keys (id, user_id, tenant_id, token_hash, prefix, name, scope, expires_at)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'api_test', 'key', 'passwords:read', now() + interval '1 day')`,
-        randomUUID(), userId, tenantId, hex(32),
-      );
-      await sql(
-        `INSERT INTO webauthn_credentials (id, user_id, tenant_id, credential_id, public_key, device_type)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'pk', 'singleDevice')`,
-        randomUUID(), userId, tenantId, hex(16),
-      );
+      for (const table of Object.values(OWNED_TABLES)) {
+        if (table.seed) await table.seed(sql, ids);
+      }
     });
   }
 
-  /** Per moved table, the distinct tenants `userId`'s rows are filed under (sorted; empty when none). */
-  async function movedTableTenants(userId: string): Promise<Record<MovedTable, string[]>> {
+  /** Per table the migration writes, the distinct tenants `userId`'s rows are filed under (sorted; empty when none). */
+  async function movedTableTenants(userId: string): Promise<Record<OwnedHandle, string[]>> {
     const [row] = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      const columns = (Object.entries(MOVED_TABLES) as [MovedTable, string][])
-        .map(([table, select]) =>
-          `'${table}', COALESCE((SELECT json_agg(DISTINCT t.tenant_id ORDER BY t.tenant_id) FROM (${select}) t), '[]'::json)`)
+      const columns = (Object.entries(OWNED_TABLES) as [OwnedHandle, OwnedTable][])
+        .map(([handle, { select }]) =>
+          `'${handle}', COALESCE((SELECT json_agg(DISTINCT t.tenant_id ORDER BY t.tenant_id) FROM (${select}) t), '[]'::json)`)
         .join(",\n");
-      return tx.$queryRawUnsafe<{ rows: Record<MovedTable, string[]> }[]>(
+      return tx.$queryRawUnsafe<{ rows: Record<OwnedHandle, string[]> }[]>(
         `SELECT json_build_object(${columns}) AS rows`,
         userId,
       );
@@ -697,8 +854,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
    * The victim's user row goes first: a row-4 join moves the column but leaves
    * their rows under the old tenant, where `deleteTestData`'s by-tenant user
    * delete no longer reaches them and their RESTRICT tenant FKs block the
-   * tenant delete. Every moved table but audit_logs cascades from `users`;
-   * audit_logs and the outbox are swept by tenant.
+   * tenant delete. Every moved table but audit_logs and the MCP tables
+   * cascades from `users`; those, the MCP client and the outbox are swept by
+   * tenant.
    */
   async function teardown(victim: Victim | null, ...tenants: string[]): Promise<void> {
     if (victim) {
@@ -897,8 +1055,20 @@ describe("tenant claim binding (C3/C4/C5)", () => {
       return { tables: await movedTableTenants(userId), members };
     }
 
-    function movedTo(tenantId: string) {
-      const tables = Object.fromEntries(Object.keys(MOVED_TABLES).map((table) => [table, [tenantId]]));
+    /**
+     * The placement after a migration from `home` to `tenantId`: every table
+     * moved, but the MCP rows, which stay under `home`, revoked. Without `home`,
+     * every row of every table under `tenantId`, live — the seeded state.
+     */
+    function movedTo(tenantId: string, home?: string) {
+      const tables = Object.fromEntries(
+        Object.keys(OWNED_TABLES).map((handle) => {
+          const revoked =
+            home !== undefined &&
+            (MIGRATED_COUNTERS as Record<string, string>)[handle] === MIGRATION_TREATMENT.REVOKE;
+          return [handle, [revoked ? `${home} revoked` : tenantId]];
+        }),
+      );
       return { tables, members: [{ tenantId, deactivatedAt: null }] };
     }
 
@@ -906,10 +1076,12 @@ describe("tenant claim binding (C3/C4/C5)", () => {
      * A user of a third tenant with a row in every moved table. The migration
      * moves `passwordEntryHistory`, `emergencyAccessKeyPair` and
      * `shareAccessLog` by tenant alone, so these rows show it does not reach
-     * past the bootstrap tenant.
+     * past the bootstrap tenant. `onTenant` receives the tenant before any row
+     * is seeded, so a seed that throws still leaves it to the caller's teardown.
      */
-    async function seedBoundary(): Promise<{ tenantId: string; userId: string }> {
+    async function seedBoundary(onTenant: (tenantId: string) => void): Promise<{ tenantId: string; userId: string }> {
       const tenantId = await ctx.createTenant();
+      onTenant(tenantId);
       const userId = await ctx.createUser(tenantId);
       await linkAccount(userId, tenantId);
       await seedOwnedRows(userId, tenantId);
@@ -940,8 +1112,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         const claim = freshClaim(`migrate-9a-${mode}`);
         let member: (Victim & { providerAccountId: string }) | null = null;
         let created: string | null = null;
-        const boundary = await seedBoundary();
+        let boundaryTenant: string | null = null;
         try {
+          const boundary = await seedBoundary((id) => (boundaryTenant = id));
           member = await seedBootstrapMember();
           await expectSeededEverywhere(member.userId, member.home);
 
@@ -953,11 +1126,16 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           created = row.tenantId;
           ctx.trackTenant(created);
           expect(row.provider).toBe(SIGN_IN_PROVIDER);
-          expect(await placement(member.userId)).toEqual(movedTo(created));
+          expect(await placement(member.userId)).toEqual(movedTo(created, member.home));
           expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);
           expect(await placement(boundary.userId)).toEqual(movedTo(boundary.tenantId));
         } finally {
-          await teardown(member, ...(member ? [member.home] : []), ...(created ? [created] : []), boundary.tenantId);
+          await teardown(
+            member,
+            ...(member ? [member.home] : []),
+            ...(created ? [created] : []),
+            ...(boundaryTenant ? [boundaryTenant] : []),
+          );
         }
       },
     );
@@ -968,8 +1146,9 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         stubModeEnv(mode);
         const target = await claimedTenant(`migrate-6-${mode}`);
         let member: (Victim & { providerAccountId: string }) | null = null;
-        const boundary = await seedBoundary();
+        let boundaryTenant: string | null = null;
         try {
+          const boundary = await seedBoundary((id) => (boundaryTenant = id));
           member = await seedBootstrapMember();
           await expectSeededEverywhere(member.userId, member.home);
 
@@ -977,12 +1156,12 @@ describe("tenant claim binding (C3/C4/C5)", () => {
             await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
           ).toBe(true);
 
-          expect(await placement(member.userId)).toEqual(movedTo(target.tenantId));
+          expect(await placement(member.userId)).toEqual(movedTo(target.tenantId, member.home));
           expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);
           expect(await outboxRowsForClaim(target.claim)).toHaveLength(0);
           expect(await placement(boundary.userId)).toEqual(movedTo(boundary.tenantId));
         } finally {
-          await teardown(member, ...(member ? [member.home] : []), target.tenantId, boundary.tenantId);
+          await teardown(member, ...(member ? [member.home] : []), target.tenantId, ...(boundaryTenant ? [boundaryTenant] : []));
         }
       },
     );

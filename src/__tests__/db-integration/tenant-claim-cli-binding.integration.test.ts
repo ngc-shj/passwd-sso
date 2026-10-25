@@ -1271,19 +1271,47 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
   /**
    * The command counts every `saml-jackson` account in the database, so each
    * cell needs the shared dev database to hold none but its own: checked first,
-   * and a leftover fails the cell by name rather than as a wrong verdict.
+   * and a leftover fails the cell by name rather than as a wrong verdict. Every
+   * cell seeds inside its `try` through `seedTenant`, so a seed that throws
+   * part-way still has its tenants removed in `finally` and cannot turn the
+   * next cell, or the next run, red on this precondition.
    */
   describe("legacy-accounts", () => {
     const LEGACY = JACKSON_LEGACY_PROVIDER_ID;
     const LEGACY_AND_CONNECTION: ProviderEnvSpec = { legacy: true, connections: [ALPHA], mode: "strict" };
+    const INSPECT_SQL = `SELECT tenant_id, user_id, id FROM accounts WHERE provider = '${LEGACY}' ORDER BY tenant_id, user_id;`;
+
+    let seeded: string[] = [];
 
     beforeEach(async () => {
+      seeded = [];
       const foreign = await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return tx.account.count({ where: { provider: LEGACY } });
+        return tx.$queryRawUnsafe<{ n: number }[]>(
+          `SELECT count(*)::int AS n FROM (SELECT DISTINCT tenant_id, user_id FROM accounts WHERE provider = $1) t`,
+          LEGACY,
+        );
       });
-      expect(foreign, `the dev database already holds ${LEGACY} accounts; this check counts them all`).toBe(0);
+      expect(
+        foreign[0]!.n,
+        `the dev database already holds ${LEGACY} accounts in ${foreign[0]!.n} (tenant_id, user_id) pair(s), and ` +
+          "legacy-accounts counts every one, so these cells cannot run. Inspect them with: " +
+          `${INSPECT_SQL} A dev database with pre-upgrade legacy sign-ins must be cleaned of those accounts ` +
+          "first; one left by this suite names a cell whose cleanup did not run.",
+      ).toBe(0);
     });
+
+    /** A tenant with one member per entry, each holding an account at every listed provider; tracked first. */
+    async function seedTenant(...members: ReadonlyArray<readonly string[]>): Promise<string> {
+      const tenantId = await ctx.createTenant();
+      seeded.push(tenantId);
+      for (const providers of members) await member(tenantId, providers);
+      return tenantId;
+    }
+
+    async function cleanUpSeeded(): Promise<void> {
+      for (const tenantId of seeded) await ctx.deleteTestData(tenantId);
+    }
 
     async function auditRowsFor(tenantIds: readonly string[]): Promise<number> {
       return ctx.su.prisma.$transaction(async (tx) => {
@@ -1292,10 +1320,10 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       });
     }
 
-    it("passes with no account at the legacy provider", async () => {
+    it.each([false, true])("passes with no account at the legacy provider (--single-connection %s)", async (singleConnection) => {
       stubClaimProviderEnv(LEGACY_AND_CONNECTION);
       captureOutput();
-      expect(await cmdLegacyAccounts()).toMatchObject({
+      expect(await cmdLegacyAccounts({ singleConnection })).toMatchObject({
         ok: true,
         code: 0,
         rows: [],
@@ -1303,67 +1331,124 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       });
     });
 
-    it("passes when the accounts belong to one tenant's users", async () => {
-      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
-      const tenantId = await tenantWith([LEGACY], [LEGACY, ALPHA]);
-      const out = captureOutput();
-      try {
-        const result = await cmdLegacyAccounts();
-        expect(result).toMatchObject({ ok: true, code: 0, rows: [{ tenantId, users: 2, accounts: 2 }] });
-        expect(out.text()).toContain(`tenant=${tenantId}`);
-      } finally {
-        await ctx.deleteTestData(tenantId);
-      }
-    });
-
-    it("refuses when the accounts span two tenants, writing nothing", async () => {
-      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
-      const first = await tenantWith([LEGACY]);
-      const second = await tenantWith([LEGACY]);
-      captureOutput();
-      try {
-        const result = await cmdLegacyAccounts();
-        expect(result).toMatchObject({ ok: false, code: 1, message: expect.stringContaining("users of 2 tenants") });
-        expect(result.message).toContain("Unset AUTH_JACKSON_ID and AUTH_JACKSON_SECRET");
-        expect(await auditRowsFor([first, second])).toBe(0);
-      } finally {
-        await ctx.deleteTestData(first);
-        await ctx.deleteTestData(second);
-      }
-    });
-
-    it("refuses one tenant's users plus a user active nowhere, reporting them as their own group", async () => {
-      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
-      const tenantId = await tenantWith([LEGACY]);
-      const departedHome = await ctx.createTenant();
-      await member(departedHome, [LEGACY], { deactivated: true });
-      const out = captureOutput();
-      try {
-        const result = await cmdLegacyAccounts();
-        expect(result).toMatchObject({
-          ok: false,
-          code: 1,
-          rows: [{ tenantId, users: 1, accounts: 1 }, { tenantId: null, users: 1, accounts: 1 }],
-        });
-        expect(out.text()).toContain("(no active tenant)");
-      } finally {
-        await ctx.deleteTestData(tenantId);
-        await ctx.deleteTestData(departedHome);
-      }
-    });
-
-    it("passes, saying no client resolves them, when the legacy provider is not configured", async () => {
+    it("passes when the legacy provider is not configured, telling the operator to confirm the app's own env", async () => {
       stubClaimProviderEnv(TWO_CONNECTIONS);
-      const first = await tenantWith([LEGACY]);
-      const second = await tenantWith([LEGACY]);
       const out = captureOutput();
       try {
+        await seedTenant([LEGACY]);
+        await seedTenant([LEGACY]);
         const result = await cmdLegacyAccounts();
         expect(result).toMatchObject({ ok: true, code: 0, message: expect.stringContaining("it is not configured") });
+        expect(result.message).toMatch(
+          /confirm that the app's runtime env \(its task definition and secrets\) sets neither AUTH_JACKSON_ID nor AUTH_JACKSON_SECRET\.$/,
+        );
         expect(out.text()).toContain(`${LEGACY} is not configured in this process`);
       } finally {
-        await ctx.deleteTestData(first);
-        await ctx.deleteTestData(second);
+        await cleanUpSeeded();
+      }
+    });
+
+    it("refuses accounts of one tenant's users without --single-connection, in terms of connections, writing nothing", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const out = captureOutput();
+      try {
+        const tenantId = await seedTenant([LEGACY], [LEGACY, ALPHA]);
+        const result = await cmdLegacyAccounts();
+        expect(result).toMatchObject({ ok: false, code: 1, rows: [{ tenantId, users: 2, accounts: 2 }] });
+        expect(result.message).toContain("does not record which Jackson connection its user came through");
+        expect(result.message).toContain("unset AUTH_JACKSON_ID and AUTH_JACKSON_SECRET");
+        expect(result.message).toContain("That remedy applies only then");
+        expect(result.message).toContain("re-run with --single-connection");
+        expect(out.text()).toContain(`tenant=${tenantId}`);
+        expect(await auditRowsFor([tenantId])).toBe(0);
+      } finally {
+        await cleanUpSeeded();
+      }
+    });
+
+    it("refuses accounts spanning two tenants without --single-connection, writing nothing", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      captureOutput();
+      try {
+        const first = await seedTenant([LEGACY]);
+        const second = await seedTenant([LEGACY]);
+        const result = await cmdLegacyAccounts();
+        expect(result).toMatchObject({ ok: false, code: 1, message: expect.stringContaining("Refusing") });
+        expect(result.rows).toHaveLength(2);
+        expect(await auditRowsFor([first, second])).toBe(0);
+      } finally {
+        await cleanUpSeeded();
+      }
+    });
+
+    it("refuses accounts whose users are all active nowhere without --single-connection", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const out = captureOutput();
+      try {
+        const departedHome = await seedTenant();
+        await member(departedHome, [LEGACY], { deactivated: true });
+        const result = await cmdLegacyAccounts();
+        expect(result).toMatchObject({ ok: false, code: 1, rows: [{ tenantId: null, users: 1, accounts: 1 }] });
+        expect(out.text()).toContain("(no active tenant)");
+      } finally {
+        await cleanUpSeeded();
+      }
+    });
+
+    it("passes accounts of one tenant's users on --single-connection, stating what was attested", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const out = captureOutput();
+      try {
+        const tenantId = await seedTenant([LEGACY], [LEGACY, ALPHA]);
+        const result = await cmdLegacyAccounts({ singleConnection: true });
+        expect(result).toMatchObject({ ok: true, code: 0, rows: [{ tenantId, users: 2, accounts: 2 }] });
+        expect(result.message).toContain(
+          "--single-connection attestation: before the upgrade, Jackson held exactly one connection behind saml-jackson",
+        );
+        expect(out.text()).toContain(`tenant=${tenantId}`);
+      } finally {
+        await cleanUpSeeded();
+      }
+    });
+
+    it("passes accounts spanning two tenants on --single-connection: the flag is the decision, the grouping is evidence", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const out = captureOutput();
+      try {
+        const first = await seedTenant([LEGACY]);
+        const second = await seedTenant([LEGACY]);
+        const result = await cmdLegacyAccounts({ singleConnection: true });
+        expect(result).toMatchObject({ ok: true, code: 0 });
+        expect(result.rows).toHaveLength(2);
+        expect(out.text()).toContain(`tenant=${first}`);
+        expect(out.text()).toContain(`tenant=${second}`);
+      } finally {
+        await cleanUpSeeded();
+      }
+    });
+
+    it("groups a user active in one tenant under that tenant only, not under a tenant holding their deactivated row", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const out = captureOutput();
+      try {
+        const active = await seedTenant();
+        const userId = await member(active, [LEGACY]);
+        const former = await seedTenant();
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          await tx.$executeRawUnsafe(
+            `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
+            randomUUID(),
+            former,
+            userId,
+          );
+        });
+        const result = await cmdLegacyAccounts({ singleConnection: true });
+        expect(result).toMatchObject({ ok: true, code: 0, rows: [{ tenantId: active, users: 1, accounts: 1 }] });
+        expect(out.text()).not.toContain(`tenant=${former}`);
+      } finally {
+        await cleanUpSeeded();
       }
     });
 
@@ -1377,11 +1462,14 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
         },
         "configuration in this process's env is refused",
       ],
-    ] as const)("refuses, building no client, when %s", async (_case, stub, text) => {
+    ] as const)("refuses, building no client, when %s, with or without --single-connection", async (_case, stub, text) => {
       stub();
       const create = vi.spyOn(migrationClientFactory, "create");
-      const result = await cmdLegacyAccounts();
-      expect(result).toMatchObject({ ok: false, code: 1, message: expect.stringContaining(text) });
+      for (const singleConnection of [false, true]) {
+        const result = await cmdLegacyAccounts({ singleConnection });
+        expect(result).toMatchObject({ ok: false, code: 1, message: expect.stringContaining(text) });
+        expect(result.message).toContain("legacy-accounts");
+      }
       expect(create).not.toHaveBeenCalled();
     });
   });

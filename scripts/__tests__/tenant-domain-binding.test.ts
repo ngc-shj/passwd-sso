@@ -301,28 +301,40 @@ describe("legacy-accounts grouping and verdict", () => {
     ]);
   });
 
-  it("is none without accounts, whether or not the legacy provider is configured", () => {
-    expect(legacyAccountVerdict([], true)).toBe(LEGACY_ACCOUNT_VERDICT.NONE);
-    expect(legacyAccountVerdict([], false)).toBe(LEGACY_ACCOUNT_VERDICT.NONE);
+  const V = LEGACY_ACCOUNT_VERDICT;
+  const oneTenant = groupLegacyAccounts([{ userId: "u1" }, { userId: "u2" }], active);
+  const twoTenants = groupLegacyAccounts([{ userId: "u1" }, { userId: "u3" }], active);
+  const activeNowhere = groupLegacyAccounts([{ userId: "gone" }], active);
+
+  it("is none without accounts, whatever the configuration and the attestation", () => {
+    for (const configured of [true, false]) {
+      for (const attested of [true, false]) {
+        expect(legacyAccountVerdict([], configured, attested)).toBe(V.NONE);
+      }
+    }
   });
 
-  it("passes one group and refuses two, with the legacy provider configured", () => {
-    const one = groupLegacyAccounts([{ userId: "u1" }, { userId: "u2" }], active);
-    const two = groupLegacyAccounts([{ userId: "u1" }, { userId: "u3" }], active);
-    expect(legacyAccountVerdict(one, true)).toBe(LEGACY_ACCOUNT_VERDICT.ONE_GROUP);
-    expect(legacyAccountVerdict(two, true)).toBe(LEGACY_ACCOUNT_VERDICT.SPANS);
+  it("is unresolved, not refused, when the legacy provider is not configured, with or without the attestation", () => {
+    expect(legacyAccountVerdict(twoTenants, false, false)).toBe(V.UNRESOLVED);
+    expect(legacyAccountVerdict(twoTenants, false, true)).toBe(V.UNRESOLVED);
   });
 
-  it("counts users active nowhere as a group of their own", () => {
-    const groups = groupLegacyAccounts([{ userId: "u1" }, { userId: "gone" }], active);
-    expect(legacyAccountVerdict(groups, true)).toBe(LEGACY_ACCOUNT_VERDICT.SPANS);
-    expect(legacyAccountVerdict(groupLegacyAccounts([{ userId: "gone" }], active), true)).toBe(
-      LEGACY_ACCOUNT_VERDICT.ONE_GROUP,
-    );
+  it.each([
+    ["one tenant", oneTenant],
+    ["two tenants", twoTenants],
+    ["only users active nowhere", activeNowhere],
+  ])("refuses accounts in %s with the legacy provider configured and no attestation", (_case, groups) => {
+    expect(legacyAccountVerdict(groups, true, false)).toBe(V.UNATTESTED);
   });
 
-  it("is unresolved, not refused, when the legacy provider is not configured", () => {
-    const two = groupLegacyAccounts([{ userId: "u1" }, { userId: "u3" }], active);
-    expect(legacyAccountVerdict(two, false)).toBe(LEGACY_ACCOUNT_VERDICT.UNRESOLVED);
-  });
+  it.each([
+    ["one tenant", oneTenant],
+    ["two tenants", twoTenants],
+    ["only users active nowhere", activeNowhere],
+  ])(
+    "passes accounts in %s on the attestation: the flag decides, the grouping is evidence",
+    (_case, groups) => {
+      expect(legacyAccountVerdict(groups, true, true)).toBe(V.ATTESTED);
+    },
+  );
 });

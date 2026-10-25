@@ -247,3 +247,105 @@ RT11 holds; R50 T12; R29 T11; R16/R33 clean.
 - T10: both own-account allow cells assert that the snapshot changed.
 - T11: the 6b cell is red-proved, and D7 is reworded.
 - T12: the derivation test fails on an unrecognised `flags` use and names the case.
+
+---
+
+# Review round 3
+Date: 2026-10-25
+Scope: `3bfca8a88..HEAD` (312b8f2ac).
+
+## Changes from Previous Round
+- Resolved: S3 (README part), S4, S5, F-R2-1, F-R2-2, F-R2-3, T9, T10, T11 and T12.
+- Partly resolved: S3, through the `legacy-accounts` verdict, and T8.
+- Verified while checking: an `AUTH_JACKSON_CONNECTIONS` entry id can never equal
+  `saml-jackson`, and the SCIM DELETE remedy deletes only target-tenant rows.
+
+## Findings
+- **S6 Major / F-R3-1 Major (converged), with S8 [Adjacent] Minor.**
+  - Defect: `legacy-accounts` treats a tenant as a stand-in for a connection. No account
+    records its connection, so the verdict is wrong in both directions.
+  - False pass: one tenant reached through two connections, or users who are active nowhere.
+  - False refusal: a single-connection deployment with a departed SAML user or a bootstrap
+    user, where the prescribed remedy locks out every SAML user.
+- **S7 Minor.** The verdict depends on the environment the CLI loads, not the one the app
+  runs with.
+- **F-R3-2 Minor.** The README cause table lacks the deactivated-target-row
+  `tenant_mismatch`, and the SCIM DELETE remedy appears only in a code comment and in D8.
+- **F-R3-3 Minor.** Two messages are worded for the wrong context.
+- **T13 Major.**
+  - Defect: `MOVED_TABLES` is a hand-written list, tied neither to the migration body nor to
+    `STRANDED_COUNTERS`.
+  - [Adjacent]: eight `STRANDED_COUNTERS` models are not moved by the migration, and nothing
+    records why: `delegationSession`, `extensionBridgeCode`, `mcpAccessToken`,
+    `mcpAuthorizationCode`, `mcpRefreshToken`, `mobileBridgeCode`, `teamMemberKey` and
+    `teamPasswordFavorite`.
+  - Why it is in scope: on `main` the migration never succeeded, so this branch is what
+    makes the gap reachable.
+- **T14 Major.** The global precondition in the `legacy-accounts` cells, together with
+  seeding outside `try`, turns every later run red once a seed fails.
+- **T15–T18 Minor.**
+  - T15: once-queue hygiene.
+  - T16: `dispatchBind` is not scanned.
+  - T17: no allow cell for a deactivated row in another tenant.
+  - T18: the boundary row is not red-proved, and its seed runs outside `try`.
+
+## Recurring Issue Check
+### Security expert
+R42 S6; R49 S6, S7; R50 S7; R52 S6. R43: no widening. Output is escaped. The rest are clean.
+### Functionality expert
+R3 F-R3-2; R41 F-R3-1; R42 F-R3-2; R49 F-R3-1. The rest are clean.
+### Testing expert
+R3/R42 T13; RT7 T18; RT10 T17; R50 T13, T14. The rest are clean.
+
+## User decision (round 3)
+`legacy-accounts` decides on the operator's attestation (`--single-connection`), not on the
+tenant grouping, which the command now prints as evidence only. This replaces the round-2
+tenant-span condition.
+
+## Resolution Status (round 3)
+### S6 Major / F-R3-1 Major / S8 Minor / S7 Minor / F-R3-3 Minor — `legacy-accounts` verdict
+- Action: the command now decides on the operator's attestation, as the user decided.
+  - NONE (exit 0): no `saml-jackson` accounts exist.
+  - UNRESOLVED (exit 0): the legacy provider is not configured in the CLI's env. The message
+    ends with an instruction to confirm the app's runtime env as well.
+  - UNATTESTED (exit 1): the legacy provider is configured, accounts exist, and no
+    `--single-connection` was given.
+  - ATTESTED (exit 0): the same, with `--single-connection`.
+  - The per-tenant grouping is printed as evidence and decides nothing. The refusal text is
+    phrased in terms of connections, and `readAppEnv`'s refusal names the command.
+  - Red proofs L1–L3 and T17 are in D7.
+- Modified file: `scripts/lib/tenant-domain-binding.ts`, `scripts/tenant-domain.ts`,
+  `scripts/lib/tenant-domain-flags.ts`, README en/ja.
+
+### T13 Major — migration member set, and eight unmoved models
+- Action: each of the eight models was decided from existing code (D11).
+  - Moved: `extensionBridgeCode` and `mobileBridgeCode`. Their exchange mints an
+    `extension_tokens` row under the code's tenant, and that table is already moved.
+  - Revoked: `mcpAccessToken`, `mcpRefreshToken` and `delegationSession`. They are bound to a
+    tenant-owned MCP client that is not moved; `invalidateUserSessions` revokes the same three.
+  - Marked used: `mcpAuthorizationCode`.
+  - Kept, with reasons recorded in `NOT_MIGRATED`: `teamMemberKey` and `teamPasswordFavorite`.
+    They are written under the team's tenant, and teams are not moved.
+  - A ts-morph gate (`src/auth.bootstrap-migration.test.ts`) reads the migration transaction
+    body. It requires the writes to equal `STRANDED_COUNTERS` minus `NOT_MIGRATED`, plus the
+    non-counter writes, and it refuses loudly when nothing matches. The integration seeders are
+    typed from the same set.
+  - Red proofs B1–B3 are in D7.
+- Modified file: `src/auth.ts`, `src/auth.bootstrap-migration.test.ts`,
+  `src/__tests__/helpers/bootstrap-migration-set.ts`, the binding integration suite.
+
+### T14 Major — `legacy-accounts` cells and the shared DB
+- Action: every seed runs inside `try`, with cleanup in `finally`. The precondition is still a
+  hard failure, and its message is now actionable. Red proof T14 is in D7. The cross-run
+  persistence was not reproduced: `afterAll` cleanup already swept the leak. The in-run cascade
+  was reproduced and is fixed.
+
+### Minor findings
+- F-R3-2: the README cause table now has eight causes, including the deactivated-target-row
+  `tenant_mismatch` and its SCIM DELETE remedy.
+- T15: the once-queues are reset per cell, and the unexpected-error cell asserts its emit.
+- T16: the body of `dispatchBind` is scanned too.
+- T17: an allow cell for an active-in-A, deactivated-in-B user.
+- T18: `seedBoundary` runs inside `try`. The boundary assertion was red-proved with a
+  time-bounded predicate in place of the tenant condition, because dropping the condition would
+  have touched shared dev rows.

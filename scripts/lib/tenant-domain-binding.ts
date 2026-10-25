@@ -356,6 +356,7 @@ export function describeSignInProviderRef(ref: string | null, mapping: RefMappin
 /**
  * The users holding pre-upgrade `saml-jackson` accounts, grouped by the tenant
  * of their active membership. `tenantId` null groups the users active nowhere.
+ * Printed as evidence for the operator; the verdict does not read it.
  */
 export type LegacyAccountGroup = {
   readonly tenantId: string | null;
@@ -386,25 +387,30 @@ export const LEGACY_ACCOUNT_VERDICT = {
   NONE: "none",
   /** The legacy provider is not configured, so no client resolves those accounts. */
   UNRESOLVED: "unresolved",
-  /** Configured, and the accounts belong to one group's users. */
-  ONE_GROUP: "one-group",
-  /** Configured, and the accounts span more than one group: refused. */
-  SPANS: "spans",
+  /** Configured, accounts exist, and the operator has not attested a single connection: refused. */
+  UNATTESTED: "unattested",
+  /** Configured, accounts exist, and the operator attested `--single-connection`. */
+  ATTESTED: "attested",
 } as const;
 
 export type LegacyAccountVerdict = (typeof LEGACY_ACCOUNT_VERDICT)[keyof typeof LEGACY_ACCOUNT_VERDICT];
 
 /**
- * A tenant stands in for the connection its users came through: the accounts
- * do not record which connection that was. Users active nowhere count as one
- * more group, because a sign-in as them still gets a session; with any other
- * group present, one client resolves the users of two connections.
+ * An account does not record which Jackson connection its user came through,
+ * and no tenant grouping stands in for one: one tenant can sit behind two
+ * connections, and a single connection's users can be spread over bootstrap
+ * tenants or active nowhere. So with the legacy provider configured and any
+ * account at it, only the operator can say whether Jackson held one connection
+ * behind `saml-jackson` before the upgrade — `singleConnection` is that
+ * attestation. The groups are evidence for it, printed by the caller; they
+ * decide nothing here.
  */
 export function legacyAccountVerdict(
   groups: readonly LegacyAccountGroup[],
   legacyConfigured: boolean,
+  singleConnection: boolean,
 ): LegacyAccountVerdict {
   if (groups.length === 0) return LEGACY_ACCOUNT_VERDICT.NONE;
   if (!legacyConfigured) return LEGACY_ACCOUNT_VERDICT.UNRESOLVED;
-  return groups.length > 1 ? LEGACY_ACCOUNT_VERDICT.SPANS : LEGACY_ACCOUNT_VERDICT.ONE_GROUP;
+  return singleConnection ? LEGACY_ACCOUNT_VERDICT.ATTESTED : LEGACY_ACCOUNT_VERDICT.UNATTESTED;
 }
