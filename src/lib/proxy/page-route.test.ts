@@ -78,9 +78,11 @@ function mockValidSession(fetchSpy: ReturnType<typeof vi.spyOn>, user: SessionUs
 
 // Cookie fixtures use the plain `authjs.session-token` name, the configured
 // name only over http; pin that so a shell-exported AUTH_URL cannot flip it.
+// COOKIE_PARTITIONED likewise changes how many deletions a refusal sends.
 beforeEach(() => {
   vi.stubEnv("AUTH_URL", "http://localhost:3000");
   vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+  vi.stubEnv("COOKIE_PARTITIONED", "");
 });
 
 afterEach(() => {
@@ -330,6 +332,8 @@ describe("handlePageRoute — protected routes auth check", () => {
       expect(sessionDeletions.sort()).toEqual(
         [
           "__Host-authjs.session-token",
+          // The configured name: once partitioned, once not.
+          "__Secure-authjs.session-token",
           "__Secure-authjs.session-token",
           "__Secure-next-auth.session-token",
           "authjs.session-token",
@@ -352,8 +356,11 @@ describe("handlePageRoute — protected routes auth check", () => {
       return res.headers.getSetCookie().filter((h) => h.startsWith(`${SECURE_NAME}=`));
     }
 
-    it("deletes both variants of the configured name when COOKIE_PARTITIONED is on", async () => {
-      vi.stubEnv("COOKIE_PARTITIONED", "true");
+    it.each([
+      ["on", "true"],
+      ["off", ""],
+    ])("deletes both variants of the configured name (COOKIE_PARTITIONED %s)", async (_label, flag) => {
+      vi.stubEnv("COOKIE_PARTITIONED", flag);
       const res = await handlePageRoute(
         makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}.0=${TEST_SESSION_TOKEN}`),
         dummyOptions,
@@ -377,14 +384,45 @@ describe("handlePageRoute — protected routes auth check", () => {
       expect(others.some((h) => h.startsWith("csp-nonce="))).toBe(true);
     });
 
-    it("deletes the configured name once, unpartitioned, when COOKIE_PARTITIONED is off", async () => {
-      vi.stubEnv("COOKIE_PARTITIONED", "");
+    // The case the dual deletion exists for: a stale unpartitioned cookie and
+    // a new partitioned one share the name, the reader takes the first, the
+    // lookup fails, and the refusal is not an ambiguous reading.
+    it.each([
+      ["on", "true"],
+      ["off", ""],
+    ])("deletes both variants on a non-ambiguous refusal of a duplicated name (COOKIE_PARTITIONED %s)", async (_label, flag) => {
+      vi.stubEnv("COOKIE_PARTITIONED", flag);
+      fetchSpy.mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: null }), { status: 200 }),
+      );
       const res = await handlePageRoute(
-        makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}.0=${TEST_SESSION_TOKEN}`),
+        makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}=bbbb`),
         dummyOptions,
       );
       expect(res.status).toBe(307);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
       const configured = configuredDeletions(res);
+      expect(configured).toHaveLength(2);
+      expect(configured.filter((h) => /;\s*Partitioned/i.test(h))).toHaveLength(1);
+      expect(res.headers.getSetCookie().some((h) => h.startsWith(`${SECURE_NAME}.`))).toBe(false);
+    });
+
+    // Partitioned requires Secure, so over http no partitioned variant can
+    // exist and one deletion suffices, whatever the flag says.
+    it("deletes the configured name once, unpartitioned, over http", async () => {
+      vi.stubEnv("AUTH_URL", "http://localhost:3000");
+      vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+      vi.stubEnv("COOKIE_PARTITIONED", "true");
+      const res = await handlePageRoute(
+        makePageRequest("/ja/dashboard/passwords", {
+          cookie: `authjs.session-token=${TEST_SESSION_TOKEN}; authjs.session-token.0=${TEST_SESSION_TOKEN}`,
+        }),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      const configured = res.headers
+        .getSetCookie()
+        .filter((h) => h.startsWith("authjs.session-token="));
       expect(configured).toHaveLength(1);
       expect(configured[0]).not.toMatch(/;\s*Partitioned/i);
     });

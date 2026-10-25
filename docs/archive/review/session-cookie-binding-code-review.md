@@ -181,3 +181,36 @@ Scope: `f5bda5fa6..HEAD` (f86f33609).
 - M1: an http + `COOKIE_PARTITIONED=true` cell asserts no `partitioned`. Red proof: the raw env
   check in `auth.config.ts` reddens it.
 - [Adjacent]: the round-2 note is corrected.
+
+## Review round 4
+Scope: `f86f33609..37eac16c5`.
+
+### Findings
+- **Security**: no findings. The raw line carries only env-derived name and path, and always
+  `Secure` when emitted.
+- **Functionality**
+  - FN-6 Major (FN-5 reversed): after `COOKIE_PARTITIONED` goes true → false, the stale partitioned
+    cookie is sent first and the refusal, gated on the current flag, deleted only the new
+    unpartitioned one. The same loop.
+  - FN-7 Minor: sign-in and sign-out touch only the current variant, so a user holding both pays
+    one extra sign-in after a flip.
+- **Testing**
+  - T1 Minor: the only dual-deletion cell took the ambiguous path; the FN-5 case itself (a
+    duplicated name, read as a token, rejected by the lookup) was untested.
+  - T2 Minor: the file pinned `AUTH_URL` against the shell but not `COOKIE_PARTITIONED`.
+
+### Resolution Status (round 4)
+- FN-6: which variants a browser holds depends on every value the flag has had, so the configured
+  name is now deleted both ways whenever the deployment is Secure (Partitioned cannot exist
+  without it), regardless of the current flag. Over http there is one unpartitioned deletion. Red
+  proofs (scratch copy): gating on the current flag; emitting both over http; dropping the append;
+  dropping the partitioned flag — each reddens.
+- T1: a cell with `NAME=A; NAME=B`, a failed lookup (`fetch` called once) and both flag values
+  asserts two deletions, one partitioned, and no stray deletions. Red proof: gating the raw
+  deletion on `extraNames.length` reddens it.
+- T2: the top-level `beforeEach` pins `COOKIE_PARTITIONED` to empty.
+- FN-7: not done, recorded as a known limitation. The suggested fix — the sign-in response also
+  deleting the other variant — is unsafe: a browser without CHIPS ignores `Partitioned`, so the
+  deletion and the new session cookie address the same cookie and the sign-in would delete the
+  session it just set. The Auth.js sign-in and sign-out responses are not ours to change either.
+  The proxy refusal converges after one extra sign-in, which is the cost.

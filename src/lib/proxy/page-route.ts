@@ -13,7 +13,6 @@ import {
   ALL_KNOWN_SESSION_COOKIE_NAMES,
   configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
-  isSessionCookiePartitioned,
 } from "../auth/session/cookie-name";
 import {
   parseCookiePairs,
@@ -79,10 +78,18 @@ function clearAuthSessionCookies(
   // prefixed names and the cookie persists. Call `isSecureCookieFromAuthUrl()`
   // at delete-time (not module-evaluated) so test env stubs are honored.
   const useSecureCookies = isSecureCookieFromAuthUrl();
-  // Only the configured name is ever set partitioned (auth.config.ts); the
-  // other known names and the ambiguity strays are never Auth.js-set here.
+  // A CHIPS browser stores a partitioned and an unpartitioned cookie of the
+  // same name side by side and sends both, older first, and the reader takes
+  // the first. Which variants a browser holds depends on every value
+  // COOKIE_PARTITIONED has had, not the current one: a flip either way, or a
+  // session issued before passkey sign-in honoured the flag, leaves the other
+  // variant behind. Deleting only the current variant would remove the valid
+  // cookie and loop the user back here, so the configured name is deleted both
+  // ways whenever it can be partitioned at all (Partitioned requires Secure).
+  // A browser without CHIPS sees two deletions of the same cookie. Only the
+  // configured name is ever Auth.js-set; the other known names and the
+  // ambiguity strays get one unpartitioned deletion.
   const configuredName = configuredSessionCookieName();
-  const partitioned = isSessionCookiePartitioned();
   for (const name of [...ALL_KNOWN_SESSION_COOKIE_NAMES, ...extraNames]) {
     response.cookies.delete({
       name,
@@ -90,18 +97,13 @@ function clearAuthSessionCookies(
       secure: useSecureCookies,
       httpOnly: true,
       sameSite: "lax",
-      ...(partitioned && name === configuredName ? { partitioned: true } : {}),
+      ...(useSecureCookies && name === configuredName ? { partitioned: true } : {}),
     });
   }
-  if (!partitioned) return [];
-  // A CHIPS browser stores a partitioned and an unpartitioned cookie of the
-  // same name side by side and sends both. An unpartitioned one survives a
-  // flag flip or a session issued before passkey sign-in set the flag, comes
-  // first in the header, and is the one the reader takes; deleting only the
-  // partitioned variant would remove the valid cookie and loop the user back
-  // here. ResponseCookies holds one entry per name, so the unpartitioned
-  // deletion is returned as a raw header for the caller to append after the
-  // last `response.cookies` write, which would otherwise rewrite it away.
+  if (!useSecureCookies) return [];
+  // ResponseCookies holds one entry per name, so the unpartitioned deletion is
+  // returned as a raw header for the caller to append after the last
+  // `response.cookies` write, which would otherwise rewrite it away.
   const unpartitioned = new NextResponse(null);
   unpartitioned.cookies.delete({
     name: configuredName,
