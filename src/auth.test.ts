@@ -108,6 +108,9 @@ const {
     mcpAuthorizationCode: {
       updateMany: vi.fn(),
     },
+    operatorToken: {
+      updateMany: vi.fn(),
+    },
     team: {
       count: vi.fn(),
     },
@@ -322,7 +325,7 @@ function checkViolation(message: string): Error {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const nextAuthInitArgs = (mockNextAuth.mock.calls as any[])[0];
 
-const STRANDED_MODEL_HANDLES = ["account", "apiKey", "attachment", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey", "teamPasswordFavorite", "vaultKey", "webAuthnCredential"] as const;
+const STRANDED_MODEL_HANDLES = ["account", "apiKey", "attachment", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "operatorToken", "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey", "teamPasswordFavorite", "vaultKey", "webAuthnCredential"] as const;
 
 /**
  * The mocked delegate for a model `countStrandedRows` counts, created on demand.
@@ -810,7 +813,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       data: { tenantId: TENANT_CLAIMED },
     });
     expect(mockPrisma.account.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
+      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
       data: { tenantId: TENANT_CLAIMED },
     });
     // Verify all tenant-scoped data tables are migrated
@@ -818,7 +821,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
       data: { tenantId: TENANT_CLAIMED },
     });
-    for (const model of ["tag", "folder", "session", "extensionToken", "extensionBridgeCode", "mobileBridgeCode"] as const) {
+    for (const model of ["tag", "folder", "session", "extensionToken"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
         where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
         data: { tenantId: TENANT_CLAIMED },
@@ -831,9 +834,17 @@ describe("ensureTenantMembershipForSignIn", () => {
         data: { revokedAt: expect.any(Date) },
       });
     }
-    expect(mockPrisma.mcpAuthorizationCode.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, usedAt: null },
-      data: { usedAt: expect.any(Date) },
+    // Single-use codes are consumed: an MCP authorization code, and a bridge
+    // code, whose exchange would skip the target tenant's passkey requirement.
+    for (const model of ["mcpAuthorizationCode", "extensionBridgeCode", "mobileBridgeCode"] as const) {
+      expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, usedAt: null },
+        data: { usedAt: expect.any(Date) },
+      });
+    }
+    expect(mockPrisma.operatorToken.updateMany).toHaveBeenCalledWith({
+      where: { subjectUserId: "user-1", tenantId: TENANT_BOOTSTRAP, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
     });
     // C13: audit_log tenant migration is now routed via SECURITY DEFINER
     // stored procedure (audit_log_tenant_migrate) instead of updateMany.

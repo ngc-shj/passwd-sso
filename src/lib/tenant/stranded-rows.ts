@@ -15,9 +15,10 @@ import type { Prisma } from "@prisma/client";
  *
  * The member set is DERIVED, not listed: `tenant-context.stranded-models.test.ts`
  * parses `prisma/schema.prisma` for every model declaring `tenantId` beside a
- * user column and fails when one is neither counted here nor named in that
- * test's exclusion map with a reason. A model added later shows up as a failing
- * test rather than as a silent zero.
+ * user column (a relation to `User`, whatever the column is named) and fails
+ * when one is neither counted here nor named in that test's exclusion map with
+ * a reason. A model added later shows up as a failing test rather than as a
+ * silent zero.
  */
 export const STRANDED_COUNTERS = {
   account: (tx, userId, tenantId) => tx.account.count({ where: { userId, tenantId } }),
@@ -43,6 +44,9 @@ export const STRANDED_COUNTERS = {
     tx.mobileBridgeCode.count({ where: { userId, tenantId } }),
   notification: (tx, userId, tenantId) =>
     tx.notification.count({ where: { userId, tenantId } }),
+  // By subject: the user an op_* token authenticates as, not who minted it.
+  operatorToken: (tx, userId, tenantId) =>
+    tx.operatorToken.count({ where: { subjectUserId: userId, tenantId } }),
   passwordEntry: (tx, userId, tenantId) =>
     tx.passwordEntry.count({ where: { userId, tenantId } }),
   passwordShare: (tx, userId, tenantId) =>

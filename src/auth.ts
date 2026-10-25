@@ -608,7 +608,7 @@ async function claimedTenantMembership(
       });
 
       await tx.account.updateMany({
-        where: { userId },
+        where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
 
@@ -687,23 +687,13 @@ async function claimedTenantMembership(
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
-      // A bridge code is exchanged for the extension / iOS token moved above,
-      // under the code's own tenant: it has no tenant-owned parent, so it
-      // moves with the user rather than mint a token in the tenant they left.
-      await tx.extensionBridgeCode.updateMany({
-        where: { userId, tenantId: existingTenantId },
-        data: { tenantId: target.id },
-      });
-      await tx.mobileBridgeCode.updateMany({
-        where: { userId, tenantId: existingTenantId },
-        data: { tenantId: target.id },
-      });
       // MCP grants cannot move: each is bound to its client's tenant, and the
       // client is tenant-owned and stays — the code exchange and the refresh
       // refuse a grant whose tenant differs from its client's. They are revoked
-      // instead, the way invalidateUserSessions revokes them (and the delegation
-      // sessions riding on them) when a member leaves a tenant; an unused
-      // authorization code is consumed, its own revocation.
+      // instead: invalidateUserSessions revokes these two and the delegation
+      // sessions riding on them, by user and tenant, when a member leaves a
+      // tenant. It has no authorization-code arm; an unused code is consumed
+      // here, its own revocation.
       const revokedAt = new Date();
       await tx.mcpAccessToken.updateMany({
         where: { userId, tenantId: existingTenantId, revokedAt: null },
@@ -718,6 +708,26 @@ async function claimedTenantMembership(
         data: { revokedAt },
       });
       await tx.mcpAuthorizationCode.updateMany({
+        where: { userId, tenantId: existingTenantId, usedAt: null },
+        data: { usedAt: revokedAt },
+      });
+      // An op_* token authenticates as its subject with the bootstrap tenant's
+      // maintenance scope, which the user no longer holds after the move:
+      // revoked by subject, as invalidateUserSessions does.
+      await tx.operatorToken.updateMany({
+        where: { subjectUserId: userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      // A pending bridge code is consumed, not moved. The passkey requirement
+      // is checked when a code is issued and when a token is refreshed, not at
+      // the exchange, so a code issued under the bootstrap tenant and moved
+      // would mint a target-tenant token never held to the target's
+      // `requirePasskey`. The extension or app asks for a new code.
+      await tx.extensionBridgeCode.updateMany({
+        where: { userId, tenantId: existingTenantId, usedAt: null },
+        data: { usedAt: revokedAt },
+      });
+      await tx.mobileBridgeCode.updateMany({
         where: { userId, tenantId: existingTenantId, usedAt: null },
         data: { usedAt: revokedAt },
       });

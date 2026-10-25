@@ -314,9 +314,13 @@ describe("legacy-accounts grouping and verdict", () => {
     }
   });
 
-  it("is unresolved, not refused, when the legacy provider is not configured, with or without the attestation", () => {
+  it("is unresolved, not refused, when the legacy provider is not configured and nothing is attested", () => {
     expect(legacyAccountVerdict(twoTenants, false, false)).toBe(V.UNRESOLVED);
-    expect(legacyAccountVerdict(twoTenants, false, true)).toBe(V.UNRESOLVED);
+  });
+
+  it("refuses an attestation when the legacy provider is not configured: it names a client this env does not build", () => {
+    expect(legacyAccountVerdict(twoTenants, false, true)).toBe(V.ATTESTED_UNCONFIGURED);
+    expect(legacyAccountVerdict(activeNowhere, false, true)).toBe(V.ATTESTED_UNCONFIGURED);
   });
 
   it.each([

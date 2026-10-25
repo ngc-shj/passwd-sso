@@ -69,6 +69,7 @@ function unmappedRow(over: Partial<Parameters<typeof formatUnmappedMessage>[0][n
     undelivered_cnt: 0,
     bound_provider: null as string | null,
     sign_in_provider_ref: null as string | null,
+    filed_tenant_owns_claim: false,
     ...over,
   };
 }
@@ -2287,6 +2288,73 @@ describe("tenant-domain CLI (C7)", () => {
           });
 
           await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    // Round 4 (F-R4-2): the two `tenant_mismatch` producers in OTHER_TENANT
+    // have opposite remedies. Row 7 files under the user's tenant, which does
+    // not hold the claim, and `add --from` may be its fix; the deactivated-row
+    // refusal files under the claim's own tenant, where `add --from` would move
+    // the claim out of the tenant it belongs to. The registry tells them apart.
+    it.skipIf(SKIP)(
+      "prints a deactivated-row refusal (filed under the claim's own tenant) apart from a row-7 mismatch",
+      async () => {
+        const owner = await ctx.createTenant();
+        const elsewhere = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        try {
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId: owner, claim, createdBy: "test" } });
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            for (const tenantId of [owner, elsewhere]) {
+              await tx.auditLog.create({
+                data: {
+                  tenantId,
+                  scope: AuditScope.PERSONAL,
+                  action: AuditAction.AUTH_LOGIN_FAILURE,
+                  userId: randomUUID(),
+                  actorType: ActorType.SYSTEM,
+                  metadata: { reason: "tenant_mismatch", claim, provider: "google" },
+                },
+              });
+            }
+          });
+
+          const printed: string[] = [];
+          const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+            printed.push(args.map(String).join(" "));
+          });
+          let result: Awaited<ReturnType<typeof cmdUnmapped>>;
+          try {
+            result = await cmdUnmapped();
+          } finally {
+            log.mockRestore();
+          }
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { tenant_id: string; claim: string | null; filed_tenant_owns_claim: boolean }[];
+          expect(rows.find((r) => r.tenant_id === owner && r.claim === claim)?.filed_tenant_owns_claim).toBe(true);
+          expect(rows.find((r) => r.tenant_id === elsewhere && r.claim === claim)?.filed_tenant_owns_claim).toBe(false);
+
+          const differentHeading = printed.findIndex((l) => l.includes("registered to a DIFFERENT tenant"));
+          const deactivatedHeading = printed.findIndex((l) => l.includes("DEACTIVATED membership row"));
+          expect(differentHeading).toBeGreaterThanOrEqual(0);
+          expect(deactivatedHeading).toBeGreaterThan(differentHeading);
+          expect(printed[deactivatedHeading]).toContain("SCIM `DELETE /Users/<userId>`");
+          expect(printed[deactivatedHeading]).toContain("not `add --from`");
+          const rowAt = (tenantId: string) =>
+            printed.findIndex((l) => l.includes(`tenant=${tenantId}`) && l.includes(claim));
+          // Each row under its own heading: the deactivated heading is printed
+          // right after the different-tenant group, so the different-tenant
+          // row sits between the two headings and the owner's row after both.
+          expect(rowAt(elsewhere)).toBeGreaterThan(differentHeading);
+          expect(rowAt(elsewhere)).toBeLessThan(deactivatedHeading);
+          expect(rowAt(owner)).toBeGreaterThan(deactivatedHeading);
+          const nextHeading = printed.findIndex((l, i) => i > deactivatedHeading && !l.startsWith("  "));
+          if (nextHeading >= 0) expect(rowAt(owner)).toBeLessThan(nextHeading);
+        } finally {
+          await ctx.deleteTestData(owner);
+          await ctx.deleteTestData(elsewhere);
         }
       },
     );

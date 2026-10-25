@@ -645,7 +645,7 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         ),
     },
     extensionBridgeCode: {
-      select: `SELECT tenant_id FROM extension_bridge_codes WHERE user_id = $1::uuid`,
+      select: revocable("extension_bridge_codes", "used_at"),
       seed: (sql, ids) =>
         sql(
           `INSERT INTO extension_bridge_codes (id, code_hash, user_id, tenant_id, scope, expires_at, cnf_jkt)
@@ -654,7 +654,7 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         ),
     },
     mobileBridgeCode: {
-      select: `SELECT tenant_id FROM mobile_bridge_codes WHERE user_id = $1::uuid`,
+      select: revocable("mobile_bridge_codes", "used_at"),
       seed: (sql, ids) =>
         sql(
           `INSERT INTO mobile_bridge_codes (id, code_hash, user_id, tenant_id, state, code_challenge, device_jkt, expires_at)
@@ -696,6 +696,15 @@ describe("tenant claim binding (C3/C4/C5)", () => {
           `INSERT INTO mcp_authorization_codes (id, code_hash, client_id, tenant_id, user_id, redirect_uri, scope, code_challenge, expires_at)
            VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, 'http://127.0.0.1/callback', 'credentials:list', $6, now() + interval '1 minute')`,
           randomUUID(), hex(32), ids.mcpClientId, ids.tenantId, ids.userId, hex(32),
+        ),
+    },
+    operatorToken: {
+      select: revocable("operator_tokens", "revoked_at", "subject_user_id"),
+      seed: (sql, ids) =>
+        sql(
+          `INSERT INTO operator_tokens (id, token_hash, prefix, name, tenant_id, subject_user_id, created_by_user_id, scope, expires_at)
+           VALUES ($1::uuid, $2, 'op_test', 'token', $3::uuid, $4::uuid, $4::uuid, 'maintenance', now() + interval '1 day')`,
+          randomUUID(), hex(32), ids.tenantId, ids.userId,
         ),
     },
   };
@@ -1057,7 +1066,8 @@ describe("tenant claim binding (C3/C4/C5)", () => {
 
     /**
      * The placement after a migration from `home` to `tenantId`: every table
-     * moved, but the MCP rows, which stay under `home`, revoked. Without `home`,
+     * moved, but the REVOKE rows (MCP grants, operator tokens, bridge codes),
+     * which stay under `home`, revoked or consumed. Without `home`,
      * every row of every table under `tenantId`, live — the seeded state.
      */
     function movedTo(tenantId: string, home?: string) {

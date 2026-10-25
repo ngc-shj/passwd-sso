@@ -769,6 +769,16 @@ type UnmappedRow = {
    * other reason. Mapped back against this process's configured set.
    */
   sign_in_provider_ref: string | null;
+  /**
+   * Whether the claim is, as this report runs, an active claim of the tenant
+   * the row is filed under. That tells apart the two `tenant_mismatch`
+   * producers that share OTHER_TENANT: row 7 files under the user's own
+   * tenant, which does not hold the claim; the deactivated-target-row refusal
+   * (`src/auth.ts`, before the bootstrap migration) files under the claim's
+   * own tenant. Read from the registry now, not from the denial, so a claim
+   * since moved with `add --from` reads as where it is now.
+   */
+  filed_tenant_owns_claim: boolean;
 };
 
 // `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
@@ -896,7 +906,12 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
           `SELECT tenant_id::text AS tenant_id, claim, claim_refusal, reason,
                   bound_provider, sign_in_provider_ref,
                   count(*)::int AS cnt, max(created_at) AS last_seen,
-                  sum(undelivered)::int AS undelivered_cnt
+                  sum(undelivered)::int AS undelivered_cnt,
+                  EXISTS (
+                    SELECT 1 FROM tenant_claims c
+                     WHERE c.claim = combined.claim AND c.tenant_id = combined.tenant_id
+                       AND c.revoked_at IS NULL
+                  ) AS filed_tenant_owns_claim
              FROM (
                SELECT tenant_id, metadata->>'claim' AS claim,
                       metadata->>'claimRefusal' AS claim_refusal,
@@ -958,8 +973,12 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
           app.ok ? app.env.claimProviders : [],
           deriveIdentifierPepper(process.env),
         );
-        const printGroup = (heading: string, bucket: UnmappedBucket) => {
-          const group = rows.filter((r) => bucketOf(r) === bucket);
+        const printGroup = (
+          heading: string,
+          bucket: UnmappedBucket,
+          include: (row: UnmappedRow) => boolean = () => true,
+        ) => {
+          const group = rows.filter((r) => bucketOf(r) === bucket && include(r));
           if (group.length === 0) return;
           console.log(heading);
           for (const row of group) {
@@ -1004,6 +1023,19 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         printGroup(
           "Claims registered to a DIFFERENT tenant — investigate the user, or move the claim with `add --from`:",
           UNMAPPED_BUCKET.OTHER_TENANT,
+          (row) => !row.filed_tenant_owns_claim,
+        );
+        // The same reason, filed under the claim's own tenant: the user holds a
+        // deactivated membership row there while active in a bootstrap tenant,
+        // so the sign-in that would move them in was refused. `add --from`
+        // would move the claim out of the tenant it belongs to.
+        printGroup(
+          "Claims registered to the tenant the row is filed under, refused because the user holds a DEACTIVATED " +
+            "membership row there while active in a personal bootstrap tenant — not `add --from`: that tenant " +
+            "removes the row with SCIM `DELETE /Users/<userId>`, and the user signs in before the next directory " +
+            "sync recreates it:",
+          UNMAPPED_BUCKET.OTHER_TENANT,
+          (row) => row.filed_tenant_owns_claim,
         );
         // "REFUSED", not "refused at ingest" (round-6 F1): the bucket now also
         // holds claims that PASS ingest and fail `storableClaimSchema` — SC9's
@@ -2757,7 +2789,9 @@ export async function cmdMeasure(): Promise<CmdResult> {
  * per-tenant grouping is printed in every case, as evidence for that
  * attestation. Without a readable provider configuration it refuses rather
  * than pass, since "not configured" is then unknown. "Not configured" is this
- * process's env, so that pass tells the operator to confirm the app's own.
+ * process's env, so that pass tells the operator to confirm the app's own; with
+ * `--single-connection` it refuses instead, since the attestation names a
+ * configured client this env does not build.
  */
 export async function cmdLegacyAccounts(args: { singleConnection?: boolean } = {}): Promise<CmdResult> {
   const singleConnection = args.singleConnection === true;
@@ -2843,6 +2877,18 @@ export async function cmdLegacyAccounts(args: { singleConnection?: boolean } = {
                 '"Known lockout"). This check read the env this process loaded, not the app\'s: confirm that ' +
                 "the app's runtime env (its task definition and secrets) sets neither AUTH_JACKSON_ID nor " +
                 "AUTH_JACKSON_SECRET.",
+            };
+          case LEGACY_ACCOUNT_VERDICT.ATTESTED_UNCONFIGURED:
+            return {
+              ok: false,
+              code: 1,
+              rows,
+              message:
+                `Refusing: --single-connection attests a configured ${JACKSON_LEGACY_PROVIDER_ID} client, but ` +
+                `this process's env does not configure ${JACKSON_LEGACY_PROVIDER_ID} (AUTH_JACKSON_ID/SECRET), so ` +
+                `${total} account(s) at it are judged against an env other than the one the attestation is ` +
+                "about. Run this check with the app's env loaded. If the app's env does not configure it " +
+                "either, re-run without --single-connection.",
             };
           case LEGACY_ACCOUNT_VERDICT.ATTESTED:
             return {
@@ -3218,8 +3264,10 @@ function printUsage(): void {
       "legacy-accounts lists the accounts at saml-jackson by their users' active tenant,",
       "read-only. With saml-jackson configured and any account at it, it exits non-zero",
       "unless --single-connection attests that Jackson held exactly one connection behind",
-      "saml-jackson before the upgrade, the one AUTH_JACKSON_ID names. The listing is",
-      "evidence and decides nothing. Needs the app's SSO env.",
+      "saml-jackson before the upgrade, the one AUTH_JACKSON_ID names. With accounts at it",
+      "and saml-jackson not configured, --single-connection exits non-zero: the attestation",
+      "is about a client this env does not build. The listing is evidence and decides",
+      "nothing. Needs the app's SSO env.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",

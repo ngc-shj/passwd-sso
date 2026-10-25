@@ -1348,6 +1348,22 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
       }
     });
 
+    it("refuses --single-connection when the legacy provider is not configured: run it with the app's env", async () => {
+      stubClaimProviderEnv(TWO_CONNECTIONS);
+      const out = captureOutput();
+      try {
+        const tenantId = await seedTenant([LEGACY]);
+        const result = await cmdLegacyAccounts({ singleConnection: true });
+        expect(result).toMatchObject({ ok: false, code: 1, rows: [{ tenantId, users: 1, accounts: 1 }] });
+        expect(result.message).toContain(`this process's env does not configure ${LEGACY}`);
+        expect(result.message).toContain("Run this check with the app's env loaded");
+        expect(out.text()).toContain(`${LEGACY} is not configured in this process`);
+        expect(await auditRowsFor([tenantId])).toBe(0);
+      } finally {
+        await cleanUpSeeded();
+      }
+    });
+
     it("refuses accounts of one tenant's users without --single-connection, in terms of connections, writing nothing", async () => {
       stubClaimProviderEnv(LEGACY_AND_CONNECTION);
       const out = captureOutput();
@@ -1406,6 +1422,20 @@ describe.skipIf(SKIP)("tenant-domain claim binding (C3)", () => {
           "--single-connection attestation: before the upgrade, Jackson held exactly one connection behind saml-jackson",
         );
         expect(out.text()).toContain(`tenant=${tenantId}`);
+      } finally {
+        await cleanUpSeeded();
+      }
+    });
+
+    it("passes accounts whose users are all active nowhere on --single-connection, printing them as their own group", async () => {
+      stubClaimProviderEnv(LEGACY_AND_CONNECTION);
+      const out = captureOutput();
+      try {
+        const departedHome = await seedTenant();
+        await member(departedHome, [LEGACY], { deactivated: true });
+        const result = await cmdLegacyAccounts({ singleConnection: true });
+        expect(result).toMatchObject({ ok: true, code: 0, rows: [{ tenantId: null, users: 1, accounts: 1 }] });
+        expect(out.text()).toContain("tenant=-\t(no active tenant)\tusers=1\taccounts=1");
       } finally {
         await cleanUpSeeded();
       }

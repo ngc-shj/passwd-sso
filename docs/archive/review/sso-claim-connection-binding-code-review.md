@@ -349,3 +349,82 @@ tenant-span condition.
 - T18: `seedBoundary` runs inside `try`. The boundary assertion was red-proved with a
   time-bounded predicate in place of the tenant condition, because dropping the condition would
   have touched shared dev rows.
+
+---
+
+# Review round 4
+Date: 2026-10-25
+Scope: `312b8f2ac..HEAD` (6db9f1c57).
+
+## Changes from Previous Round
+- Resolved: S6, S7, S8, F-R3-1, F-R3-3, T13 (with T19 remaining), and T14–T18.
+- F-R3-2 was resolved in the en README only. The ja table replaced a row instead of adding
+  one (F-R4-1).
+- Verified while checking:
+  - MCP revocation covers every refresh family.
+  - Delegation keys in Redis are gated on the DB `revokedAt`.
+  - Kept team rows stay reachable through `TeamMember`.
+
+## Findings
+- Security:
+  - S9 Minor (R43): migrated bridge codes mint target-tenant tokens without the target's
+    passkey check at exchange.
+  - S10 Minor: `USER_COLUMNS` misses `subjectUserId`, `targetUserId` and `requesterUserId`.
+  - S11 Minor: the gate pins `data` keys but not the `where` scoping.
+- Functionality:
+  - F-R4-1 Major: the ja cause table lost the different-tenant row.
+  - F-R4-2 Minor: the `unmapped` different-tenant heading sends the deactivated-row case to
+    `add --from`.
+  - F-R4-3 Minor: `--single-connection` is accepted silently on UNRESOLVED.
+  - F-R4-4 Minor: the `OperatorToken` rows are not revoked. This converges with S10.
+  - F-R4-5 Minor: CLAUDE.md lacks `bind` and `legacy-accounts`.
+- Testing:
+  - T19 Major: the gate silently skips client uses it cannot classify.
+  - T20 Minor: three refusal arms have no sample.
+  - T21 Minor: a stale doc pointer.
+  - T22 Minor: D7 cites line numbers.
+  - T23 Minor: two attested-pass integration cells are missing.
+
+## Recurring Issue Check
+### Security expert
+R42 S10; R43 S9. The rest are clean.
+### Functionality expert
+R2/R3 F-R4-1, F-R4-2, F-R4-5; R41 F-R4-3; R42 F-R4-4; R49 F-R4-3. The rest are clean.
+### Testing expert
+R50 T19, T20; RT10 T23; R29 T20, T21, T22. The rest are clean.
+
+## Decisions (round 4)
+- F-R4-3: adopted. UNRESOLVED together with `--single-connection` refuses. The D11 no-op was an
+  implementation choice, not a user decision, and the CLI's own rule is that a flag the
+  operator wrote must take effect or stop the command.
+- F-R4-5: the user approved the CLAUDE.md edit, and the orchestrator applied it.
+
+## Resolution Status (round 4)
+- F-R4-1 Major: the ja table has its different-tenant row back, so en and ja match row for row
+  (8 rows). The new `readme-cause-table-parity.test.ts` pins the reason sequence and the stated
+  counts, and it fails loudly when a table is missing. Red proof P1.
+- T19 Major: the gate classifies every `tx` and `prisma` identifier in the callback by its
+  parent chain. Only `tx.<model>.<method>(`, the `$executeRaw` tag, and a read-only helper
+  argument are allowed; anything else throws. Each refused shape has a sample. Red proofs
+  T19a–e.
+- S9: bridge codes are consumed (`usedAt`) instead of moved, and are classified as REVOKE.
+  Red proofs S9a and S9b.
+- S10 / F-R4-4:
+  - User columns are derived from `User` relations.
+  - `operatorToken` joins `STRANDED_COUNTERS`, and the migration revokes it, as
+    `invalidateUserSessions` does.
+  - The other newly seen models are tenant-owned and are kept, each with a reason (D12):
+    `AdminVaultReset`, `PersonalLogAccessGrant`, `AccessRequest`, `MasterKeyRotation`,
+    `TeamInvitation` and `TeamPasswordEntryHistory`.
+  - Red proofs O1, D1 and D2.
+- S11: the gate asserts each write's `where`, which must hold the user column,
+  `tenantId: existingTenantId`, and the null predicate for a revoke. This exposed a real
+  defect: `account.updateMany` was scoped by `userId` alone, and it now carries the old tenant
+  too (D12). Red proofs W1–W5.
+- F-R4-2: `unmapped` splits the different-tenant heading. A refusal filed under the claim's own
+  tenant gets the SCIM DELETE remedy. Red proofs U1 and U2.
+- F-R4-3: UNRESOLVED together with `--single-connection` refuses
+  (`ATTESTED_UNCONFIGURED`). Red proof L4.
+- F-R4-5: the CLAUDE.md admin-script line lists `bind` and `legacy-accounts`, with the user's
+  approval.
+- T20–T23 and the D11 team observation are done.

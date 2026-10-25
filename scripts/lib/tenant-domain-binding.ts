@@ -387,6 +387,11 @@ export const LEGACY_ACCOUNT_VERDICT = {
   NONE: "none",
   /** The legacy provider is not configured, so no client resolves those accounts. */
   UNRESOLVED: "unresolved",
+  /**
+   * Not configured, yet the operator attested `--single-connection`: an
+   * attestation about a client this process's env does not build, refused.
+   */
+  ATTESTED_UNCONFIGURED: "attested_unconfigured",
   /** Configured, accounts exist, and the operator has not attested a single connection: refused. */
   UNATTESTED: "unattested",
   /** Configured, accounts exist, and the operator attested `--single-connection`. */
@@ -404,6 +409,12 @@ export type LegacyAccountVerdict = (typeof LEGACY_ACCOUNT_VERDICT)[keyof typeof 
  * behind `saml-jackson` before the upgrade — `singleConnection` is that
  * attestation. The groups are evidence for it, printed by the caller; they
  * decide nothing here.
+ *
+ * An attestation with the provider not configured is refused rather than
+ * ignored: it names a client this process's env does not configure, so the
+ * operator ran the check with an env other than the app's, and a flag the
+ * operator wrote either takes effect or stops the command. With no account the
+ * attestation is moot and the flag changes nothing.
  */
 export function legacyAccountVerdict(
   groups: readonly LegacyAccountGroup[],
@@ -411,6 +422,8 @@ export function legacyAccountVerdict(
   singleConnection: boolean,
 ): LegacyAccountVerdict {
   if (groups.length === 0) return LEGACY_ACCOUNT_VERDICT.NONE;
-  if (!legacyConfigured) return LEGACY_ACCOUNT_VERDICT.UNRESOLVED;
+  if (!legacyConfigured) {
+    return singleConnection ? LEGACY_ACCOUNT_VERDICT.ATTESTED_UNCONFIGURED : LEGACY_ACCOUNT_VERDICT.UNRESOLVED;
+  }
   return singleConnection ? LEGACY_ACCOUNT_VERDICT.ATTESTED : LEGACY_ACCOUNT_VERDICT.UNATTESTED;
 }
