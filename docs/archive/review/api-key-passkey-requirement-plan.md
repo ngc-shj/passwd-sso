@@ -382,8 +382,8 @@ enforces immediately.
   not migrated to C3.
 - SC4: sessions on `/api/*`, the exempt page set, and open-tab UX — `#959`.
 - SC5: presenting `PASSKEY_REQUIRED` promptly in the iOS host app, the iOS AutoFill extension
-  (which today cancels the passkey sheet silently) and the browser extension — a follow-up issue,
-  proposed at the end of Phase 1 (F44).
+  (which today cancels the passkey sheet silently) and the browser extension — `#963`
+  (F44).
 - Documentation: `docs/security/policy-enforcement.md` — the `requirePasskey` row lists the
   per-use bearer validators beside the proxy (F22), and the extension idle/absolute rows note
   that a blocked user's refresh answers `PASSKEY_REQUIRED` before the family is revoked (F38);
