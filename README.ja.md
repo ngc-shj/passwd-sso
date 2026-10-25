@@ -306,7 +306,17 @@ npm run docker:down
 <a id="sso-tenant-claim-binding-upgrade"></a>
 ### SSO tenant claim binding upgrade（テナントクレームのプロバイダー紐づけ）
 
-**破壊的なアップグレードです。** 各テナントクレームを、それを提示してよい SSO プロバイダーに紐づけ、各 Jackson プロバイダーを 1 つの Jackson 接続に紐づけます。背景は [SAML サインイン — テナントは接続そのものに紐づける](#saml-sign-in--bind-the-tenant-to-the-connection) を参照してください。変わる点は 2 つです:
+**破壊的なアップグレードです。** 各テナントクレームを、それを提示してよい SSO プロバイダーに紐づけ、各 Jackson プロバイダーを 1 つの Jackson 接続に紐づけます。背景は [SAML サインイン — テナントは接続そのものに紐づける](#saml-sign-in--bind-the-tenant-to-the-connection) を参照してください。
+
+**既知のロックアウトがあり、このリリースにはアプリ内の復旧手段がありません。** 次の 3 つをすべて満たすデプロイが対象です:
+
+- `AUTH_JACKSON_ID` が `dummy`、または `tenant=…&product=…` 形式のクライアント ID である。
+- `AUTH_REDIRECT_PROXY_URL` が設定されている。設定がなければ従来プロバイダーは Jackson が必須とする `state` を送らず、サインインを完了できなかったため、SAML ユーザーは存在しません。
+- Jackson が、その 1 つの `saml-jackson` プロバイダーの背後に 2 つ以上の接続を持っている。
+
+このようなデプロイでは、SAML ユーザー全員の `Account` 行が、どの接続から来たかにかかわらず `provider = 'saml-jackson'` です。アップグレード後、アプリはこれらのクライアント ID では起動せず、`saml-jackson` が指せるのは高々 1 つの接続自身のクライアントです。それ以外の接続のユーザーは、自分の接続の新しいプロバイダー（`saml-jackson-<id>`）でサインインしますが、そのプロバイダーに紐づくアカウントがないため `account_not_linked` で拒否されます。このリリースには、そのアカウントを移す手段がありません。`UPDATE accounts SET provider = …` を直接実行しても移せません。保存されている OAuth トークンはプロバイダーを AAD に含めて暗号化されている（`src/lib/crypto/account-token-crypto.ts`）ため、書き換えた行は復号できなくなります。また `bind --from-members` は、これらのユーザーのテナントに `saml-jackson` を提案します。アカウントに記録されているのがその値だからです。この提案はそのテナントの IdP が背後にいる接続ではないので、該当行は空欄のままにしてください。再キー化コマンドが提供されるまでは、旧バージョンのまま運用を続けるか、これらのユーザーが既存アカウントにアクセスできなくなり再プロビジョニングが必要になることを受け入れるかのどちらかです。
+
+変わる点は 2 つです:
 
 - **従来の Jackson プロバイダーが強化されます。** `saml-jackson` は PKCE を使わずにコードを交換し、`AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` で認証します。この 2 つは、その接続自身のクライアント資格情報でなければなりません。Jackson の `dummy` クライアント、`tenant=…&product=…` 形式のクライアント ID、`fed_` で始まるフェデレーション ID、`JACKSON_URL` のない Jackson 資格情報のいずれかがあると、アプリは起動しません。古い `AUTH_JACKSON_SECRET` は起動時には検出されません。PKCE 経路ではシークレットが一度も検査されていなかったためです。その場合は最初のコールバックで失敗し、Jackson が 401 を返して、Auth.js が `OperationProcessingError` を記録します。アップグレード前に、その接続の現在の `clientID` / `clientSecret` を Jackson から写してください。
 - **SSO プロバイダーが 2 つ以上なら strict が必須です。** Google は `AUTH_GOOGLE_ID` と `AUTH_GOOGLE_SECRET` が両方設定されていれば 1 つと数え、Jackson プロバイダーはそれぞれ 1 つと数えます。2 つ以上ある場合、`AUTH_CLAIM_BINDING=strict` を設定するまでアプリは起動しません。strict はプロバイダーのないクレーム行でのサインインをすべて拒否し、マイグレーション直後は既存の行がすべてその状態です。そのため、変数を設定する前に行を紐づけます:

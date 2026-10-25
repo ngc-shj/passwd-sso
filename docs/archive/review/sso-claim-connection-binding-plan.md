@@ -210,6 +210,7 @@ rules, measured Jackson versions and that a Jackson bump requires a probe run, t
 consequence, migration: `list --unbound` → `bind`), `docs/setup/*`, `docs/operations/alerts.md`, the
 cookie comment in `auth.config.ts` (login CSRF rests on state, not PKCE, for Jackson), `#742`
 updated with M1–M11.
+Known breaking consequence (recorded in Phase 3 round 2, D9): a deployment that ran the legacy provider on `dummy` or an encoded client id with `AUTH_REDIRECT_PROXY_URL` set and two or more connections recorded every SAML account as `saml-jackson`, so after the upgrade the users of all but at most one connection are refused with `account_not_linked`; this release documents it as breaking, and the re-key command is a follow-up.
 
 ## Testing strategy
 

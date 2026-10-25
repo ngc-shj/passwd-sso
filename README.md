@@ -306,7 +306,17 @@ There is no supported way to keep the old hashes correlating; treat the upgrade 
 
 ### SSO tenant claim binding upgrade
 
-**Breaking upgrade.** It binds each tenant claim to the SSO provider that may present it, and binds each Jackson provider to one Jackson connection. The background is in [SAML sign-in — bind the tenant to the connection](#saml-sign-in--bind-the-tenant-to-the-connection). Two things change:
+**Breaking upgrade.** It binds each tenant claim to the SSO provider that may present it, and binds each Jackson provider to one Jackson connection. The background is in [SAML sign-in — bind the tenant to the connection](#saml-sign-in--bind-the-tenant-to-the-connection).
+
+**Known lockout, with no in-app recovery in this release.** It affects a deployment that meets all three of these:
+
+- `AUTH_JACKSON_ID` is `dummy` or a `tenant=…&product=…`-encoded client ID.
+- `AUTH_REDIRECT_PROXY_URL` is set. Without it, the legacy provider sent no `state`, which Jackson requires, so it could not complete a sign-in and the deployment has no SAML users.
+- Jackson holds two or more connections behind that one `saml-jackson` provider.
+
+Every SAML user of such a deployment has an `Account` row with `provider = 'saml-jackson'`, whichever connection they came through. After the upgrade, the app refuses to start on those client IDs, and `saml-jackson` can name at most one connection's own client. The users of every other connection sign in through their connection's new provider (`saml-jackson-<id>`), have no account linked to it, and are refused with `account_not_linked`. This release cannot move their accounts. A raw `UPDATE accounts SET provider = …` does not either: the stored OAuth tokens are encrypted with the provider in their AAD (`src/lib/crypto/account-token-crypto.ts`), so rewritten rows no longer decrypt. `bind --from-members` also suggests `saml-jackson` for those users' tenants, because that is what their accounts record. That suggestion is not the connection their IdP sits behind, so leave those lines empty. Until a re-key command ships, either keep the deployment on the previous version, or accept that those users are locked out of their existing accounts and must be re-provisioned.
+
+Two things change:
 
 - **The legacy Jackson provider is hardened.** `saml-jackson` exchanges its code without PKCE and authenticates with `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET`. These must be the connection's own client credentials. The app refuses to start on Jackson's `dummy` client, a `tenant=…&product=…`-encoded client ID, a `fed_` federation ID, or Jackson credentials without `JACKSON_URL`. A stale `AUTH_JACKSON_SECRET` is not caught at boot, because the PKCE path never checked it. The first callback then fails: Jackson answers 401, and Auth.js logs it as `OperationProcessingError`. Copy the connection's current `clientID` / `clientSecret` from Jackson before you upgrade.
 - **Two or more SSO providers require strict binding.** Google counts as one when `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` are both set, and each Jackson provider counts as one. With two or more, the app refuses to start until `AUTH_CLAIM_BINDING=strict` is set. Strict mode refuses a sign-in on any claim row without a provider, and the migration leaves every existing row without one. So bind the rows before you set the variable:

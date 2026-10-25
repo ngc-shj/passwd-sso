@@ -379,12 +379,8 @@ describe("tenant claim binding (C3/C4/C5)", () => {
    * has no active membership, so the sign-in creates the tenant and the claim
    * and joins it. The row is bound to the presenting provider in either mode —
    * the existing-user twin of the first-registration cell below, through
-   * `ensureTenantMembershipForSignIn` rather than `createUser`.
-   *
-   * Row 9a (a bootstrap member) is not a cell: its migration transaction
-   * upserts the new membership before deleting the bootstrap one, which
-   * `tenant_members_one_active_per_user` refuses, so on a real database that
-   * arm ends in provider_error today. Reported, not pinned.
+   * `ensureTenantMembershipForSignIn` rather than `createUser`. A bootstrap
+   * member's twin (row 9a) is in the bootstrap-migration block below.
    */
   it.each([CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT])(
     "%s mode, existing user with no active membership, unregistered claim: registered to the presenting provider",
@@ -482,6 +478,103 @@ describe("tenant claim binding (C3/C4/C5)", () => {
   });
 
   /**
+   * The members the S1 and bootstrap-migration cells sign in as: a departed
+   * member (no active membership) and a bootstrap member, each with a vault
+   * entry, a session and the account they signed up through.
+   */
+  const VICTIM_STATE = { DEPARTED: "departed member", BOOTSTRAP: "bootstrap member" } as const;
+  type VictimState = (typeof VICTIM_STATE)[keyof typeof VICTIM_STATE];
+
+  type Victim = { userId: string; email: string; home: string };
+
+  /** The victim and their rows: a vault entry, a session, and the account they signed up through. */
+  async function seedVictim(state: VictimState, accountProvider: string): Promise<Victim> {
+    const home = await ctx.createTenant();
+    if (state === VICTIM_STATE.BOOTSTRAP) {
+      await ctx.su.prisma.$executeRaw`UPDATE tenants SET is_bootstrap = true WHERE id = ${home}::uuid`;
+    }
+    const userId = await ctx.createUser(home);
+    await linkAccount(userId, home, accountProvider);
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO password_entries (
+           id, user_id, tenant_id,
+           encrypted_blob, blob_iv, blob_auth_tag,
+           encrypted_overview, overview_iv, overview_auth_tag,
+           key_version, aad_version, created_at, updated_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 'overview', $4, $5, 1, 1, now(), now())`,
+        randomUUID(),
+        userId,
+        home,
+        "0".repeat(24),
+        "0".repeat(32),
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
+        randomUUID(),
+        randomUUID().replace(/-/g, ""),
+        userId,
+        home,
+      );
+    });
+    if (state === VICTIM_STATE.DEPARTED) await deactivateMemberships(userId);
+    return { userId, email: await emailOf(userId), home };
+  }
+
+  /** Every row of the victim's a sign-in could move, as text so a change anywhere shows. */
+  async function victimRows(userId: string): Promise<string> {
+    const [row] = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ rows: string }[]>(
+        `SELECT json_build_object(
+           'user', (SELECT json_build_object('tenant', tenant_id, 'email', email) FROM users WHERE id = $1::uuid),
+           'members', (SELECT json_agg(json_build_object('tenant', tenant_id, 'active', deactivated_at IS NULL) ORDER BY tenant_id)
+                         FROM tenant_members WHERE user_id = $1::uuid),
+           'entries', (SELECT json_agg(json_build_object('id', id, 'tenant', tenant_id) ORDER BY id)
+                         FROM password_entries WHERE user_id = $1::uuid),
+           'sessions', (SELECT json_agg(json_build_object('id', id, 'tenant', tenant_id) ORDER BY id)
+                          FROM sessions WHERE user_id = $1::uuid),
+           'accounts', (SELECT json_agg(json_build_object('provider', provider, 'sub', provider_account_id, 'tenant', tenant_id)
+                          ORDER BY provider, provider_account_id) FROM accounts WHERE user_id = $1::uuid)
+         )::text AS rows`,
+        userId,
+      );
+    });
+    return row!.rows;
+  }
+
+  async function activeMembers(tenantId: string): Promise<number> {
+    return ctx.su.prisma.tenantMember.count({ where: { tenantId, deactivatedAt: null } });
+  }
+
+  async function notLinkedRows(userId: string): Promise<OutboxRow[]> {
+    return ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<OutboxRow[]>(
+        `SELECT tenant_id::text, payload->'metadata' AS metadata, row_to_json(o)::text AS row_text
+           FROM audit_outbox o
+          WHERE payload->>'action' = 'AUTH_LOGIN_FAILURE' AND payload->>'userId' = $1`,
+        userId,
+      );
+    });
+  }
+
+  /** The attacker's tenant, with its claim bound to the attacker's own connection. */
+  async function attackerTenant(mode: ClaimBindingMode): Promise<{ tenantId: string; claim: string }> {
+    const tenantId = await ctx.createTenant();
+    const claim = freshClaim(`s1-${mode}`);
+    await bindClaim(tenantId, claim, SIGN_IN_PROVIDER);
+    return { tenantId, claim };
+  }
+
+  async function teardown(victim: Victim | null, ...tenants: string[]): Promise<void> {
+    if (victim) await dropAuthRows(victim.userId);
+    for (const tenantId of tenants) await ctx.deleteTestData(tenantId);
+  }
+
+  /**
    * S1 — whose rows a sign-in writes. Auth.js calls the signIn callback BEFORE
    * its own account-link check and refuses an unlinked account whose email
    * names a user (`OAuthAccountNotLinked`) only afterwards, so a callback that
@@ -492,104 +585,10 @@ describe("tenant claim binding (C3/C4/C5)", () => {
    *
    * The victim states: a departed member (no active membership), whom row 4
    * would join to the attacker's tenant and realign — a write that commits —
-   * and a bootstrap member, the finding's own case. The bootstrap migration
-   * fails on its own today (see the row-9a note above), so the bootstrap
-   * victim's cells pin "refused, nothing written" but the red proof for a
-   * write that lands is the departed member's.
+   * and a bootstrap member, the finding's own case, whom row 6 would migrate
+   * into the attacker's tenant with all their rows.
    */
   describe("S1: the sign-in subject is the user Auth.js signs in", () => {
-    const VICTIM_STATE = { DEPARTED: "departed member", BOOTSTRAP: "bootstrap member" } as const;
-    type VictimState = (typeof VICTIM_STATE)[keyof typeof VICTIM_STATE];
-
-    type Victim = { userId: string; email: string; home: string };
-
-    /** The victim and their rows: a vault entry, a session, and the account they signed up through. */
-    async function seedVictim(state: VictimState, accountProvider: string): Promise<Victim> {
-      const home = await ctx.createTenant();
-      if (state === VICTIM_STATE.BOOTSTRAP) {
-        await ctx.su.prisma.$executeRaw`UPDATE tenants SET is_bootstrap = true WHERE id = ${home}::uuid`;
-      }
-      const userId = await ctx.createUser(home);
-      await linkAccount(userId, home, accountProvider);
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
-          `INSERT INTO password_entries (
-             id, user_id, tenant_id,
-             encrypted_blob, blob_iv, blob_auth_tag,
-             encrypted_overview, overview_iv, overview_auth_tag,
-             key_version, aad_version, created_at, updated_at
-           ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'blob', $4, $5, 'overview', $4, $5, 1, 1, now(), now())`,
-          randomUUID(),
-          userId,
-          home,
-          "0".repeat(24),
-          "0".repeat(32),
-        );
-        await tx.$executeRawUnsafe(
-          `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
-           VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', now(), now())`,
-          randomUUID(),
-          randomUUID().replace(/-/g, ""),
-          userId,
-          home,
-        );
-      });
-      if (state === VICTIM_STATE.DEPARTED) await deactivateMemberships(userId);
-      return { userId, email: await emailOf(userId), home };
-    }
-
-    /** Every row of the victim's a sign-in could move, as text so a change anywhere shows. */
-    async function victimRows(userId: string): Promise<string> {
-      const [row] = await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<{ rows: string }[]>(
-          `SELECT json_build_object(
-             'user', (SELECT json_build_object('tenant', tenant_id, 'email', email) FROM users WHERE id = $1::uuid),
-             'members', (SELECT json_agg(json_build_object('tenant', tenant_id, 'active', deactivated_at IS NULL) ORDER BY tenant_id)
-                           FROM tenant_members WHERE user_id = $1::uuid),
-             'entries', (SELECT json_agg(json_build_object('id', id, 'tenant', tenant_id) ORDER BY id)
-                           FROM password_entries WHERE user_id = $1::uuid),
-             'sessions', (SELECT json_agg(json_build_object('id', id, 'tenant', tenant_id) ORDER BY id)
-                            FROM sessions WHERE user_id = $1::uuid),
-             'accounts', (SELECT json_agg(json_build_object('provider', provider, 'sub', provider_account_id, 'tenant', tenant_id)
-                            ORDER BY provider, provider_account_id) FROM accounts WHERE user_id = $1::uuid)
-           )::text AS rows`,
-          userId,
-        );
-      });
-      return row!.rows;
-    }
-
-    async function activeMembers(tenantId: string): Promise<number> {
-      return ctx.su.prisma.tenantMember.count({ where: { tenantId, deactivatedAt: null } });
-    }
-
-    async function notLinkedRows(userId: string): Promise<OutboxRow[]> {
-      return ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<OutboxRow[]>(
-          `SELECT tenant_id::text, payload->'metadata' AS metadata, row_to_json(o)::text AS row_text
-             FROM audit_outbox o
-            WHERE payload->>'action' = 'AUTH_LOGIN_FAILURE' AND payload->>'userId' = $1`,
-          userId,
-        );
-      });
-    }
-
-    /** The attacker's tenant, with its claim bound to the attacker's own connection. */
-    async function attackerTenant(mode: ClaimBindingMode): Promise<{ tenantId: string; claim: string }> {
-      const tenantId = await ctx.createTenant();
-      const claim = freshClaim(`s1-${mode}`);
-      await bindClaim(tenantId, claim, SIGN_IN_PROVIDER);
-      return { tenantId, claim };
-    }
-
-    async function teardown(victim: Victim | null, ...tenants: string[]): Promise<void> {
-      if (victim) await dropAuthRows(victim.userId);
-      for (const tenantId of tenants) await ctx.deleteTestData(tenantId);
-    }
-
     const DENY_GRID = [CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT].flatMap((mode) =>
       Object.values(VICTIM_STATE).map((state) => [mode, state] as const),
     );
@@ -677,6 +676,28 @@ describe("tenant claim binding (C3/C4/C5)", () => {
       },
     );
 
+    it.each([CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT])(
+      "%s mode: the bootstrap victim's own linked account migrates them (row 6)",
+      async (mode) => {
+        stubModeEnv(mode);
+        const target = await attackerTenant(mode);
+        let victim: Victim | null = null;
+        try {
+          victim = await seedVictim(VICTIM_STATE.BOOTSTRAP, OTHER_PROVIDER);
+          const own = await linkAccount(victim.userId, victim.home, SIGN_IN_PROVIDER);
+
+          expect(await capturedSignIn()(signInParams(victim.email, target.claim, SIGN_IN_PROVIDER, own))).toBe(true);
+          expect(await tenantOf(victim.userId)).toBe(target.tenantId);
+          expect(await ctx.su.prisma.tenantMember.findMany({
+            where: { userId: victim.userId },
+            select: { tenantId: true, deactivatedAt: true },
+          })).toEqual([{ tenantId: target.tenantId, deactivatedAt: null }]);
+        } finally {
+          await teardown(victim, ...(victim ? [victim.home] : []), target.tenantId);
+        }
+      },
+    );
+
     /**
      * Google with GOOGLE_WORKSPACE_DOMAINS set links by email, so an unlinked
      * Google account whose email names a user proceeds with that user. The
@@ -711,6 +732,169 @@ describe("tenant claim binding (C3/C4/C5)", () => {
         expect(await notLinkedRows(victim.userId)).toHaveLength(0);
       } finally {
         await teardown(victim, ...(victim ? [victim.home] : []), target);
+      }
+    });
+  });
+
+  /**
+   * Rows 6 / 9a: a bootstrap member signing in with a claim moves to the
+   * claimed tenant — every row of theirs, and their one active membership.
+   * The migration deletes the bootstrap membership before creating the new
+   * one; the other order is refused by `tenant_members_one_active_per_user`,
+   * which unit tests with a mocked Prisma cannot see.
+   */
+  describe("rows 6 / 9a: the bootstrap migration", () => {
+    /** Where each of the member's rows is filed, and their memberships. */
+    async function placement(userId: string) {
+      const [row] = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<{ rows: { user: string; entries: string[]; sessions: string[]; accounts: string[] } }[]>(
+          `SELECT json_build_object(
+             'user', (SELECT tenant_id FROM users WHERE id = $1::uuid),
+             'entries', (SELECT json_agg(DISTINCT tenant_id) FROM password_entries WHERE user_id = $1::uuid),
+             'sessions', (SELECT json_agg(DISTINCT tenant_id) FROM sessions WHERE user_id = $1::uuid),
+             'accounts', (SELECT json_agg(DISTINCT tenant_id) FROM accounts WHERE user_id = $1::uuid)
+           ) AS rows`,
+          userId,
+        );
+      });
+      const members = await ctx.su.prisma.tenantMember.findMany({
+        where: { userId },
+        select: { tenantId: true, deactivatedAt: true },
+      });
+      return { ...row!.rows, members };
+    }
+
+    function movedTo(tenantId: string) {
+      return {
+        user: tenantId,
+        entries: [tenantId],
+        sessions: [tenantId],
+        accounts: [tenantId],
+        members: [{ tenantId, deactivatedAt: null }],
+      };
+    }
+
+    async function seedBootstrapMember(): Promise<Victim & { providerAccountId: string }> {
+      const member = await seedVictim(VICTIM_STATE.BOOTSTRAP, OTHER_PROVIDER);
+      return { ...member, providerAccountId: await linkAccount(member.userId, member.home, SIGN_IN_PROVIDER) };
+    }
+
+    async function claimedTenant(arm: string): Promise<{ tenantId: string; claim: string }> {
+      const tenantId = await ctx.createTenant();
+      const claim = freshClaim(arm);
+      await bindClaim(tenantId, claim, SIGN_IN_PROVIDER);
+      return { tenantId, claim };
+    }
+
+    it.each([CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT])(
+      "%s mode, row 9a: an unregistered claim creates its tenant and moves the member there",
+      async (mode) => {
+        stubModeEnv(mode);
+        const claim = freshClaim(`migrate-9a-${mode}`);
+        let member: (Victim & { providerAccountId: string }) | null = null;
+        let created: string | null = null;
+        try {
+          member = await seedBootstrapMember();
+
+          expect(
+            await capturedSignIn()(signInParams(member.email, claim, SIGN_IN_PROVIDER, member.providerAccountId)),
+          ).toBe(true);
+
+          const row = await ctx.su.prisma.tenantClaim.findUniqueOrThrow({ where: { claim } });
+          created = row.tenantId;
+          ctx.trackTenant(created);
+          expect(row.provider).toBe(SIGN_IN_PROVIDER);
+          expect(await placement(member.userId)).toEqual(movedTo(created));
+          expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);
+        } finally {
+          await teardown(member, ...(member ? [member.home] : []), ...(created ? [created] : []));
+        }
+      },
+    );
+
+    it.each([CLAIM_BINDING_MODE.OFF, CLAIM_BINDING_MODE.STRICT])(
+      "%s mode, row 6: a registered claim moves the member into its tenant",
+      async (mode) => {
+        stubModeEnv(mode);
+        const target = await claimedTenant(`migrate-6-${mode}`);
+        let member: (Victim & { providerAccountId: string }) | null = null;
+        try {
+          member = await seedBootstrapMember();
+
+          expect(
+            await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
+          ).toBe(true);
+
+          expect(await placement(member.userId)).toEqual(movedTo(target.tenantId));
+          expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: member.home } })).toBe(0);
+          expect(await outboxRowsForClaim(target.claim)).toHaveLength(0);
+        } finally {
+          await teardown(member, ...(member ? [member.home] : []), target.tenantId);
+        }
+      },
+    );
+
+    /**
+     * The target already holds a membership row for the member — deactivated,
+     * since the bootstrap membership is the active one. Reactivating it is the
+     * target tenant's decision, not a sign-in's, so the migration is refused
+     * before any write and the member keeps their bootstrap tenant.
+     */
+    it("row 6, a deactivated membership row in the target: refused with tenant_mismatch, nothing written", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await claimedTenant("migrate-6-deactivated");
+      let member: (Victim & { providerAccountId: string }) | null = null;
+      try {
+        member = await seedBootstrapMember();
+        const { userId } = member;
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          await tx.$executeRawUnsafe(
+            `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
+            randomUUID(),
+            target.tenantId,
+            userId,
+          );
+        });
+        const before = await victimRows(member.userId);
+
+        expect(
+          await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
+        ).toBe(false);
+
+        expect(await victimRows(member.userId)).toBe(before);
+        expect(await tenantOf(member.userId)).toBe(member.home);
+        const rows = await outboxRowsForClaim(target.claim);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.tenant_id).toBe(target.tenantId);
+        expect(rows[0]!.metadata.reason).toBe("tenant_mismatch");
+      } finally {
+        await teardown(member, ...(member ? [member.home] : []), target.tenantId);
+      }
+    });
+
+    /** Row 6b: a bootstrap tenant with a second active member is not migrated. */
+    it("row 6b, a second active member in the bootstrap tenant: refused, nothing written", async () => {
+      stubModeEnv(CLAIM_BINDING_MODE.OFF);
+      const target = await claimedTenant("migrate-6b");
+      let member: (Victim & { providerAccountId: string }) | null = null;
+      try {
+        member = await seedBootstrapMember();
+        const second = await ctx.createUser(member.home);
+        const before = await victimRows(member.userId);
+        const targetMembers = await ctx.su.prisma.tenantMember.count({ where: { tenantId: target.tenantId } });
+
+        expect(
+          await capturedSignIn()(signInParams(member.email, target.claim, SIGN_IN_PROVIDER, member.providerAccountId)),
+        ).toBe(false);
+
+        expect(await victimRows(member.userId)).toBe(before);
+        expect(await ctx.su.prisma.tenantMember.count({ where: { tenantId: target.tenantId } })).toBe(targetMembers);
+        expect(await tenantOf(second)).toBe(member.home);
+      } finally {
+        await teardown(member, ...(member ? [member.home] : []), target.tenantId);
       }
     });
   });

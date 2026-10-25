@@ -558,6 +558,31 @@ async function claimedTenantMembership(
       };
     }
 
+    // A membership row the user already holds in the target can only be a
+    // deactivated one: the bootstrap membership is their active one, and
+    // `tenant_members_one_active_per_user` allows no second. Reactivating it is
+    // the target tenant's decision — SCIM, directory sync, its admins — not a
+    // sign-in's: row 4 leaves such a row deactivated (`update: {}`), and
+    // `tenant-domain realign` does too. Migrating anyway would delete the
+    // bootstrap membership and leave the user active nowhere, so the migration
+    // is refused here, before any write, and the user keeps their bootstrap
+    // tenant. Filed under the target, whose admins hold the remedy. Reachable
+    // on row 6 only: a tenant row 9a has just created has no members.
+    const priorMembership = await tx.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId: target.id, userId } },
+      select: { id: true },
+    });
+    if (priorMembership) {
+      return {
+        ok: false,
+        reason: "tenant_mismatch",
+        tenantId: target.id,
+        claim: tenantClaim,
+        claimRefusal: null,
+        providerBinding: null,
+      };
+    }
+
     // Rows 6 / 9a: migrate.
     // Captured inside the tx for cache invalidation after commit (R3 site
     // #10 — Session.tenantId is cached in SessionInfo, so the migration
@@ -653,24 +678,21 @@ async function claimedTenantMembership(
         data: { tenantId: target.id },
       });
 
-      // Create membership in new tenant and remove old
-      await tx.tenantMember.upsert({
-        where: {
-          tenantId_userId: {
-            tenantId: target.id,
-            userId,
-          },
-        },
-        create: {
+      // Remove the bootstrap membership BEFORE creating the new one:
+      // `tenant_members_one_active_per_user` refuses a second active row, so
+      // the other order failed every migration on a real database. `create`,
+      // not an upsert: the check above found no row in the target, and one
+      // that appeared since is refused (P2002) rather than kept as found.
+      await tx.tenantMember.deleteMany({
+        where: { userId, tenantId: existingTenantId },
+      });
+
+      await tx.tenantMember.create({
+        data: {
           tenantId: target.id,
           userId,
           role: TENANT_ROLE.MEMBER,
         },
-        update: {},
-      });
-
-      await tx.tenantMember.deleteMany({
-        where: { userId, tenantId: existingTenantId },
       });
     });
 

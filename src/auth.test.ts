@@ -23,7 +23,9 @@ const {
     },
     tenantMember: {
       findMany: vi.fn(),
+      findUnique: vi.fn(),
       upsert: vi.fn(),
+      create: vi.fn(),
       deleteMany: vi.fn(),
       count: vi.fn(),
     },
@@ -367,6 +369,9 @@ describe("ensureTenantMembershipForSignIn", () => {
     });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
+    // No membership row in the migration target: the ordinary row-6/9a case.
+    mockPrisma.tenantMember.findUnique.mockResolvedValue(null);
+    mockPrisma.tenantMember.create.mockResolvedValue({ id: "member-migrated" });
     mockPrisma.tenantMember.deleteMany.mockResolvedValue({ count: 1 });
     // Every model `countStrandedRows` counts. Built from the same list the
     // production helper iterates, so a model added there surfaces here as an
@@ -837,9 +842,45 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
     });
-    // Bootstrap migration returns early — no redundant upsert
-    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.tenantMember.create).toHaveBeenCalledWith({
+      data: { tenantId: TENANT_CLAIMED, userId: "user-1", role: "MEMBER" },
+    });
+    // The bootstrap membership goes FIRST: `tenant_members_one_active_per_user`
+    // refuses the new active row while the bootstrap one is still active.
+    expect(mockPrisma.tenantMember.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrisma.tenantMember.create.mock.invocationCallOrder[0]!,
+    );
+    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
     expect(mockPrisma.tenant.delete).not.toHaveBeenCalled();
+  });
+
+  // Row 6, the target already holds a membership row for this user — a
+  // deactivated one, since the bootstrap membership is the active one. A
+  // sign-in does not reactivate it (row 4 leaves it as found), and migrating
+  // would leave the user active nowhere, so it is refused before any write.
+  it("row 6: refuses with tenant_mismatch, before any write, when the user holds a membership row in the target", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+    mockPrisma.tenantMember.findUnique.mockResolvedValue({ id: "member-deactivated" });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "tenant_mismatch",
+      // The target's admins hold the remedy (reactivating the member).
+      tenantId: TENANT_CLAIMED,
+      claim: "tenant-acme",
+      claimRefusal: null,
+      providerBinding: null,
+    });
+    expect(mockPrisma.tenantMember.findUnique).toHaveBeenCalledWith({
+      where: { tenantId_userId: { tenantId: TENANT_CLAIMED, userId: "user-1" } },
+      select: { id: true },
+    });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.create).not.toHaveBeenCalled();
   });
 
   // Row 6b: bootstrap tenant has >1 active member — assertBootstrapSingleMember
@@ -855,7 +896,8 @@ describe("ensureTenantMembershipForSignIn", () => {
     ).rejects.toThrow(/Bootstrap migration aborted/);
 
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
-    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.create).not.toHaveBeenCalled();
   });
 
   // Row 7: claim resolves, but the user's existing tenant is a DIFFERENT,
@@ -1006,11 +1048,15 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { id: "user-1" },
       data: { tenantId: TENANT_NEW },
     });
-    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith({
-      where: { tenantId_userId: { tenantId: TENANT_NEW, userId: "user-1" } },
-      create: { tenantId: TENANT_NEW, userId: "user-1", role: "MEMBER" },
-      update: {},
+    expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
     });
+    expect(mockPrisma.tenantMember.create).toHaveBeenCalledWith({
+      data: { tenantId: TENANT_NEW, userId: "user-1", role: "MEMBER" },
+    });
+    expect(mockPrisma.tenantMember.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrisma.tenantMember.create.mock.invocationCallOrder[0]!,
+    );
   });
 
   // Row 9a refusals (round-1 M2): same two arms as row 8b, reached via the
