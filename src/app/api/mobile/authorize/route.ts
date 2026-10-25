@@ -137,7 +137,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
   // re-sign-in) and returns here via callbackUrl. The chooser still fails
   // closed on the unauthorized() paths (no/absent session row).
   // @stepup id:mobile-authorize-get method:GET
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) {
     // @browser-redirect-recovery
     return stepUpError.status === 403 ? redirectToSignIn(req) : stepUpError;

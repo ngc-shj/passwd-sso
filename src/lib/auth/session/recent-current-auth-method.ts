@@ -40,9 +40,14 @@ export type StepUpFreshness =
  * fallback alongside the ceremony.
  * `provider === null` (legacy sessions predating the provenance migration)
  * falls through to the generic recent-session gate.
+ *
+ * `userId` is the user the caller's `auth()` resolved. A row owned by another
+ * user is INVALID: its freshness says nothing about the session `auth()`
+ * authenticated, so it must never turn into a FRESH verdict for this caller.
  */
 export async function evaluateStepUpFreshness(
   sessionToken: string,
+  userId: string,
   options: RequireRecentSessionOptions = {},
 ): Promise<StepUpFreshness> {
   // H4: `sessionToken` is the raw cookie token; the DB row is keyed by its digest.
@@ -53,6 +58,7 @@ export async function evaluateStepUpFreshness(
       tx.session.findUnique({
         where: { sessionToken: sessionTokenDigest },
         select: {
+          userId: true,
           provider: true,
           createdAt: true,
           passkeyVerifiedAt: true,
@@ -62,7 +68,7 @@ export async function evaluateStepUpFreshness(
     BYPASS_GRANT.AUTH_SESSION_LIFECYCLE,
   );
 
-  if (!sessionRow) return STEP_UP_FRESHNESS.INVALID;
+  if (!sessionRow || sessionRow.userId !== userId) return STEP_UP_FRESHNESS.INVALID;
 
   if (sessionRow.provider === "webauthn") {
     // C5 member 0: an unbound session (legacy row, or the bound credential
@@ -125,11 +131,13 @@ export async function canRecoverSessionWithPasskey(
 /**
  * Route-level step-up gate. Thin wrapper over `evaluateStepUpFreshness`
  * preserving the pre-refactor external contract: missing token / missing
- * session row → 401; stale → 403 with the caller-supplied `errorCode`
+ * session row / row not owned by `userId` (the user the route's `auth()`
+ * resolved) → 401; stale → 403 with the caller-supplied `errorCode`
  * (default `SESSION_STEP_UP_REQUIRED`); fresh → null.
  */
 export async function requireRecentCurrentAuthMethod(
   req: NextRequest,
+  userId: string,
   options: RequireRecentSessionOptions = {},
 ) {
   const sessionToken = getSessionToken(req);
@@ -137,7 +145,7 @@ export async function requireRecentCurrentAuthMethod(
     return unauthorized();
   }
 
-  const verdict = await evaluateStepUpFreshness(sessionToken, options);
+  const verdict = await evaluateStepUpFreshness(sessionToken, userId, options);
   if (verdict === STEP_UP_FRESHNESS.INVALID) {
     return unauthorized();
   }

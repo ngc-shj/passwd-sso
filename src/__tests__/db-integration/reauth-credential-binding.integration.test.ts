@@ -356,7 +356,7 @@ describe.skipIf(!hasDatabase)("sessions.auth_credential_id binding (real DB)", (
 
     // Nulling the binding on an otherwise-fresh row is what must flip the
     // verdict (M4) — the timestamp alone would pass the pre-fix gate.
-    const deny = await requireRecentCurrentAuthMethod(makeRequest(token));
+    const deny = await requireRecentCurrentAuthMethod(makeRequest(token), userId);
     expect(deny).not.toBeNull();
     expect(deny!.status).toBe(403);
     const denyBody = await deny!.json();
@@ -371,7 +371,7 @@ describe.skipIf(!hasDatabase)("sessions.auth_credential_id binding (real DB)", (
       );
     });
 
-    const allow = await requireRecentCurrentAuthMethod(makeRequest(token));
+    const allow = await requireRecentCurrentAuthMethod(makeRequest(token), userId);
     expect(allow).toBeNull();
   });
 

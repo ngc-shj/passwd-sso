@@ -28,17 +28,18 @@ function getCookieUrl(): string {
  */
 export async function injectSession(
   context: BrowserContext,
-  sessionToken: string
+  sessionToken: string,
 ): Promise<void> {
   await context.addCookies([
     {
       name: configuredSessionCookieName(),
       value: sessionToken,
       url: getCookieUrl(),
-      // Match the production session cookie attribute set in auth.config.ts.
-      // Diverging from production lets a future cross-site E2E test pass
-      // while production would have dropped the cookie.
-      sameSite: "Strict",
+      // Match the production session cookie attribute set in auth.config.ts
+      // (`sameSite: "lax"`). Diverging from production lets a future
+      // cross-site E2E test pass while production would have dropped the
+      // cookie, or fail where production works.
+      sameSite: "Lax",
       ...(isSecureCookieFromAuthUrl() && { secure: true }),
     },
   ]);

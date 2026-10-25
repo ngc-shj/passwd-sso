@@ -47,14 +47,24 @@ export default async function SignInPage({
   const t = await getTranslations("Auth");
   const tc = await getTranslations("Common");
 
+  // The proxy decides "is there a session" with this reader; a header it
+  // refuses (two readings, encoded value) is signed out here too. Asking
+  // auth() instead would let it accept what the proxy refused and bounce the
+  // visitor back into the refusal: a redirect loop.
+  const sessionToken = getSessionTokenFromCookieHeader(
+    (await headers()).get("cookie"),
+  );
+
   let session = null;
-  try {
-    session = await auth();
-  } catch {
-    // DB may be unavailable; continue to show sign-in page
+  if (sessionToken) {
+    try {
+      session = await auth();
+    } catch {
+      // DB may be unavailable; continue to show sign-in page
+    }
   }
 
-  if (session?.user) {
+  if (sessionToken && session?.user) {
     // Resolve callbackUrl using env-based origin (never from request headers)
     let origin = "";
     try {
@@ -69,12 +79,7 @@ export default async function SignInPage({
       // handlers) live outside the [locale] segment and are step-up gated.
       // Evaluate the same freshness core the gate applies: bouncing a stale
       // session straight back would 403 again and loop forever.
-      const sessionToken = getSessionTokenFromCookieHeader(
-        (await headers()).get("cookie"),
-      );
-      const verdict = sessionToken
-        ? await evaluateStepUpFreshness(sessionToken)
-        : STEP_UP_FRESHNESS.INVALID;
+      const verdict = await evaluateStepUpFreshness(sessionToken, session.user.id);
       if (verdict === STEP_UP_FRESHNESS.FRESH) {
         // Strip basePath + locale: Next's redirect() re-prepends basePath,
         // so passing the basePath-qualified path as-is would double it
@@ -82,7 +87,7 @@ export default async function SignInPage({
         // it would inject the locale (→ /<locale>/api/... → 404).
         nextRedirect(callbackUrlToHref(resolved));
       }
-      if (verdict === STEP_UP_FRESHNESS.STALE && sessionToken) {
+      if (verdict === STEP_UP_FRESHNESS.STALE) {
         const canUsePasskey = await canRecoverSessionWithPasskey(
           sessionToken,
           session.user.id,
@@ -102,8 +107,8 @@ export default async function SignInPage({
           />
         );
       }
-      // "invalid" (session row vanished mid-flight): fall through to the
-      // sign-in form below.
+      // "invalid" (session row vanished mid-flight, or not this user's):
+      // fall through to the sign-in form below.
     } else {
       // Strip basePath + locale: next-intl redirect() re-adds both
       const href = callbackUrlToHref(resolved);

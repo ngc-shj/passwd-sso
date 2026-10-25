@@ -32,8 +32,12 @@ import {
   requireRecentCurrentAuthMethod,
   canRecoverSessionWithPasskey,
 } from "./recent-current-auth-method";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 
-function makeRequest(cookie = "authjs.session-token=5e55-0001") {
+// The user the route's auth() resolved.
+const USER_ID = "user-1";
+
+function makeRequest(cookie = `authjs.session-token=${TEST_SESSION_TOKEN}`) {
   return new NextRequest("http://localhost:3000/api/test", {
     headers: { cookie },
   });
@@ -55,11 +59,29 @@ describe("evaluateStepUpFreshness", () => {
   it("returns invalid when the session row is missing", async () => {
     mockSessionFindUnique.mockResolvedValue(null);
 
-    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("invalid");
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("invalid");
+  });
+
+  // The row must belong to the user auth() resolved. Each cell differs from
+  // its "fresh" counterpart below only in the owner.
+  it.each([
+    ["a fresh createdAt row", { provider: "google", createdAt: minutesAgo(5), passkeyVerifiedAt: null }],
+    [
+      "a freshly verified webauthn row",
+      { provider: "webauthn", createdAt: minutesAgo(120), passkeyVerifiedAt: minutesAgo(5), authCredentialId: "cred-row-1" },
+    ],
+  ])("returns invalid for %s owned by another user", async (_label, row) => {
+    mockSessionFindUnique.mockResolvedValue({ userId: "someone-else", ...row });
+
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("invalid");
+    expect(mockSessionFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ userId: true }) }),
+    );
   });
 
   it("judges webauthn sessions on passkeyVerifiedAt: fresh within the window", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "webauthn",
       createdAt: minutesAgo(120),
       passkeyVerifiedAt: minutesAgo(5),
@@ -68,33 +90,36 @@ describe("evaluateStepUpFreshness", () => {
 
     // Load-bearing security case: fresh passkeyVerifiedAt + OLD createdAt is
     // fresh — the ceremony (not session age) carries the freshness evidence.
-    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("fresh");
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("fresh");
   });
 
   it("judges webauthn sessions on passkeyVerifiedAt: stale past the window", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "webauthn",
       createdAt: minutesAgo(5),
       passkeyVerifiedAt: minutesAgo(20),
       authCredentialId: "cred-row-1",
     });
 
-    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("stale");
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("stale");
   });
 
   it("maps webauthn with NULL passkeyVerifiedAt to stale, not invalid", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "webauthn",
       createdAt: minutesAgo(5),
       passkeyVerifiedAt: null,
       authCredentialId: "cred-row-1",
     });
 
-    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("stale");
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("stale");
   });
 
   it("C5 member 0: maps webauthn with NULL authCredentialId to stale, even with a fresh timestamp", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "webauthn",
       createdAt: minutesAgo(120),
       passkeyVerifiedAt: minutesAgo(5),
@@ -103,53 +128,58 @@ describe("evaluateStepUpFreshness", () => {
 
     // The criterion the previous revision could not fail (finding M4):
     // nulling ONLY the binding on an otherwise-fresh row must flip the verdict.
-    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("stale");
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("stale");
   });
 
   it("judges non-webauthn sessions on createdAt: fresh within the window", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "google",
       createdAt: minutesAgo(5),
       passkeyVerifiedAt: null,
     });
 
-    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("fresh");
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("fresh");
   });
 
   it("judges non-webauthn sessions on createdAt: stale past the window", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "google",
       createdAt: minutesAgo(20),
       passkeyVerifiedAt: null,
     });
 
-    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("stale");
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("stale");
   });
 
   it("treats provider null (pre-provenance session) like the createdAt branch", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: null,
       createdAt: minutesAgo(20),
       passkeyVerifiedAt: null,
     });
 
-    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("stale");
+    await expect(evaluateStepUpFreshness("sess-1", USER_ID)).resolves.toBe("stale");
   });
 
   it("honors a custom maxAgeMs on the createdAt branch", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "google",
       createdAt: minutesAgo(20),
       passkeyVerifiedAt: null,
     });
 
     await expect(
-      evaluateStepUpFreshness("sess-1", { maxAgeMs: 30 * MS_PER_MINUTE }),
+      evaluateStepUpFreshness("sess-1", USER_ID, { maxAgeMs: 30 * MS_PER_MINUTE }),
     ).resolves.toBe("fresh");
   });
 
   it("honors a custom maxAgeMs on the passkeyVerifiedAt branch", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "webauthn",
       createdAt: minutesAgo(120),
       passkeyVerifiedAt: minutesAgo(20),
@@ -157,7 +187,7 @@ describe("evaluateStepUpFreshness", () => {
     });
 
     await expect(
-      evaluateStepUpFreshness("sess-1", { maxAgeMs: 30 * MS_PER_MINUTE }),
+      evaluateStepUpFreshness("sess-1", USER_ID, { maxAgeMs: 30 * MS_PER_MINUTE }),
     ).resolves.toBe("fresh");
   });
 });
@@ -180,6 +210,7 @@ describe("requireRecentCurrentAuthMethod", () => {
   describe("duplicated session cookie", () => {
     beforeEach(() => {
       mockSessionFindUnique.mockResolvedValue({
+        userId: USER_ID,
         provider: "google",
         createdAt: minutesAgo(5),
         passkeyVerifiedAt: null,
@@ -188,7 +219,7 @@ describe("requireRecentCurrentAuthMethod", () => {
 
     it("control: a single session cookie is evaluated (fresh → null)", async () => {
       await expect(
-        requireRecentCurrentAuthMethod(makeRequest("authjs.session-token=bbbb")),
+        requireRecentCurrentAuthMethod(makeRequest("authjs.session-token=bbbb"), USER_ID),
       ).resolves.toBeNull();
     });
 
@@ -196,12 +227,13 @@ describe("requireRecentCurrentAuthMethod", () => {
       // First = stale, second = fresh: reading the last would answer null.
       mockSessionFindUnique.mockImplementation(async ({ where }: { where: { sessionToken: string } }) =>
         where.sessionToken === hashSessionToken("aaaa")
-          ? { provider: "google", createdAt: minutesAgo(60), passkeyVerifiedAt: null }
-          : { provider: "google", createdAt: minutesAgo(5), passkeyVerifiedAt: null },
+          ? { userId: USER_ID, provider: "google", createdAt: minutesAgo(60), passkeyVerifiedAt: null }
+          : { userId: USER_ID, provider: "google", createdAt: minutesAgo(5), passkeyVerifiedAt: null },
       );
 
       const result = await requireRecentCurrentAuthMethod(
         makeRequest("authjs.session-token=aaaa; authjs.session-token=bbbb"),
+        USER_ID,
       );
 
       expect(result?.status).toBe(403);
@@ -212,7 +244,26 @@ describe("requireRecentCurrentAuthMethod", () => {
   });
 
   it("returns 401 when the request has no session cookie", async () => {
-    const result = await requireRecentCurrentAuthMethod(makeRequest(""));
+    const result = await requireRecentCurrentAuthMethod(makeRequest(""), USER_ID);
+
+    expect(result?.status).toBe(401);
+    expect(mockSessionFindUnique).not.toHaveBeenCalled();
+  });
+
+  // Refused side of the reader: the 401 must come from the refusal, before
+  // any lookup, not from a row the lookup failed to find.
+  it.each([
+    ["a chunk-named cookie", `authjs.session-token.0=${TEST_SESSION_TOKEN}`],
+    ["a quoted value", `authjs.session-token="${TEST_SESSION_TOKEN}"`],
+  ])("returns 401 without a lookup for %s", async (_label, cookie) => {
+    mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
+      provider: "google",
+      createdAt: minutesAgo(5),
+      passkeyVerifiedAt: null,
+    });
+
+    const result = await requireRecentCurrentAuthMethod(makeRequest(cookie), USER_ID);
 
     expect(result?.status).toBe(401);
     expect(mockSessionFindUnique).not.toHaveBeenCalled();
@@ -221,31 +272,52 @@ describe("requireRecentCurrentAuthMethod", () => {
   it("returns 401 when the cookie is valid but the session row is missing (DB miss)", async () => {
     mockSessionFindUnique.mockResolvedValue(null);
 
-    const result = await requireRecentCurrentAuthMethod(makeRequest());
+    const result = await requireRecentCurrentAuthMethod(makeRequest(), USER_ID);
+
+    expect(result?.status).toBe(401);
+    // The 401 is the lookup's miss, not a refused cookie.
+    expect(mockSessionFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { sessionToken: hashSessionToken(TEST_SESSION_TOKEN) } }),
+    );
+  });
+
+  // Paired with the fresh (null) and stale (403) cells below, which differ
+  // from this one only in the owner.
+  it("returns 401 when the session row belongs to another user, even when fresh", async () => {
+    mockSessionFindUnique.mockResolvedValue({
+      userId: "someone-else",
+      provider: "google",
+      createdAt: minutesAgo(5),
+      passkeyVerifiedAt: null,
+    });
+
+    const result = await requireRecentCurrentAuthMethod(makeRequest(), USER_ID);
 
     expect(result?.status).toBe(401);
   });
 
   it("returns null for a fresh session", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "google",
       createdAt: minutesAgo(5),
       passkeyVerifiedAt: null,
     });
 
     await expect(
-      requireRecentCurrentAuthMethod(makeRequest()),
+      requireRecentCurrentAuthMethod(makeRequest(), USER_ID),
     ).resolves.toBeNull();
   });
 
   it("returns 403 SESSION_STEP_UP_REQUIRED for a stale session by default", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "google",
       createdAt: minutesAgo(20),
       passkeyVerifiedAt: null,
     });
 
-    const result = await requireRecentCurrentAuthMethod(makeRequest());
+    const result = await requireRecentCurrentAuthMethod(makeRequest(), USER_ID);
 
     expect(result?.status).toBe(403);
     const body = (await result?.json()) as { error: string };
@@ -254,13 +326,14 @@ describe("requireRecentCurrentAuthMethod", () => {
 
   it("preserves a caller-supplied errorCode on the stale 403 (operator-tokens contract)", async () => {
     mockSessionFindUnique.mockResolvedValue({
+      userId: USER_ID,
       provider: "webauthn",
       createdAt: minutesAgo(5),
       passkeyVerifiedAt: minutesAgo(20),
       authCredentialId: "cred-row-1",
     });
 
-    const result = await requireRecentCurrentAuthMethod(makeRequest(), {
+    const result = await requireRecentCurrentAuthMethod(makeRequest(), USER_ID, {
       errorCode: API_ERROR.OPERATOR_TOKEN_STALE_SESSION,
     });
 

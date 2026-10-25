@@ -35,6 +35,7 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 });
 
 import { handlePageRoute } from "./page-route";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 import {
   recordPasskeyAuditEmit,
   PASSKEY_AUDIT_DEDUP_MS,
@@ -146,12 +147,15 @@ describe("handlePageRoute — protected routes auth check", () => {
 
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
-        cookie: "authjs.session-token=5e55-0100",
+        cookie: `authjs.session-token=${TEST_SESSION_TOKEN}`,
       }),
       dummyOptions,
     );
     expect(res.status).toBe(307);
     expect(res.headers.get("location") ?? "").toContain("/auth/signin");
+    // The redirect is the membership verdict, not a refused cookie.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith("u-deactivated");
   });
 
   it("emits Set-Cookie deletions with full attribute set (Secure on https)", async () => {
@@ -202,6 +206,73 @@ describe("handlePageRoute — protected routes auth check", () => {
     expect(line).not.toMatch(/;\s*Secure/i);
     expect(line).toMatch(/;\s*HttpOnly/i);
     expect(line).toMatch(/;\s*SameSite=lax/i);
+  });
+
+  // A stray `<name>.0` / `<name>X` keeps every request ambiguous until it is
+  // gone; deleting only the known names would refuse the visitor forever.
+  it("on an ambiguous refusal, also deletes each request cookie prefixed with the configured name", async () => {
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords", {
+        cookie: `authjs.session-token=${TEST_SESSION_TOKEN}; authjs.session-token.0=${TEST_SESSION_TOKEN}; authjs.session-tokenX=y; other=1`,
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(307);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const headers = res.headers.getSetCookie();
+    for (const name of ["authjs.session-token.0", "authjs.session-tokenX"]) {
+      const line = headers.find((h) => h.startsWith(`${name}=`));
+      expect(line, `Set-Cookie for ${name} not emitted`).toBeDefined();
+      expect(line).toMatch(/;\s*Path=\/(;|$)/i);
+      expect(line).toMatch(/;\s*HttpOnly/i);
+      expect(line).toMatch(/;\s*SameSite=lax/i);
+      expect(line).not.toMatch(/;\s*Secure/i);
+      expect(line).toMatch(/Max-Age=0|Expires=Thu,\s*01\s*Jan\s*1970/i);
+    }
+    expect(headers.find((h) => h.startsWith("other="))).toBeUndefined();
+  });
+
+  it("deletes only the known names when the refusal is not an ambiguous reading", async () => {
+    mockValidSession(fetchSpy, { id: "u-deactivated" });
+    mockResolveUserTenantId.mockResolvedValueOnce(null);
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords", {
+        cookie: `authjs.session-token=${TEST_SESSION_TOKEN}; other=1`,
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(307);
+    const sessionDeletions = res.headers
+      .getSetCookie()
+      .map((h) => h.split("=")[0])
+      .filter((name) => name.includes("session-token"));
+    expect(sessionDeletions.sort()).toEqual(
+      [
+        "__Host-authjs.session-token",
+        "__Secure-authjs.session-token",
+        "__Secure-next-auth.session-token",
+        "authjs.session-token",
+        "next-auth.session-token",
+      ],
+    );
+  });
+
+  it("deletes nothing on a valid single-cookie session", async () => {
+    mockValidSession(fetchSpy, {
+      hasPasskey: false,
+      requirePasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords", {
+        cookie: `authjs.session-token=${TEST_SESSION_TOKEN}`,
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    // next-intl may set its locale cookie; no session cookie is touched.
+    expect(res.headers.getSetCookie().filter((h) => h.includes("session-token"))).toEqual([]);
   });
 
   it("allows /dashboard with valid session (returns intl response with security headers)", async () => {

@@ -22,10 +22,7 @@ import { test, expect, chromium, type BrowserContext } from "@playwright/test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import {
-  configuredSessionCookieName,
-  isSecureCookieFromAuthUrl,
-} from "../../src/lib/auth/session/cookie-name";
+import { injectSession } from "../helpers/auth";
 
 // Extension dist/ built by global-setup (e2e/global-setup.ts::buildExtension).
 const EXT_PATH = path.join(__dirname, "..", "..", "extension", "dist");
@@ -118,23 +115,7 @@ test.describe("@extension DPoP-bound token flow", () => {
           return;
         }
 
-        // Inject session cookie under the name Auth.js reads in this
-        // deployment (same helper as injectSession in helpers/auth.ts).
-        const cookieName = configuredSessionCookieName();
-
-        await context.addCookies([
-          {
-            name: cookieName,
-            value: sessionToken,
-            domain: new URL(baseURL).hostname,
-            path: "/",
-            httpOnly: true,
-            // The same source as the name: a __Host-/__Secure- cookie without
-            // `secure` is dropped by the browser.
-            secure: isSecureCookieFromAuthUrl(),
-            sameSite: "Lax",
-          },
-        ]);
+        await injectSession(context, sessionToken);
 
         // Navigate to the dashboard with ?ext_connect=1 to trigger AutoExtensionConnect.
         // The extension must respond to PASSWD_SSO_EXT_JKT_REQUEST within 500 ms.

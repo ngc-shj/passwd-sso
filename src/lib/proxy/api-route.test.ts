@@ -25,6 +25,7 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 });
 
 import { handleApiAuth } from "./api-route";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 
 const APP_ORIGIN = "http://localhost:3000";
 
@@ -246,9 +247,12 @@ describe("handleApiAuth — session-required + access restriction", () => {
   it("returns 401 when the user has no active tenant membership (deactivated)", async () => {
     mockResolveUserTenantId.mockResolvedValueOnce(null);
     const res = await handleApiAuth(
-      makeRequest("/api/passwords", "GET", { Cookie: "authjs.session-token=5e55" }),
+      makeRequest("/api/passwords", "GET", { Cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
     expect(res.status).toBe(401);
+    // The 401 is the membership verdict, not a refused cookie.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith("u-1");
   });
 
   it("returns 403 when access restriction denies", async () => {

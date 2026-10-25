@@ -82,7 +82,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:team-rotate-key-post method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const rl = await teamRotateKeyLimiter.check(`rl:team_rotate_key:${teamId}`);

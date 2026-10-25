@@ -16,12 +16,12 @@ async function handleDELETE(
 ) {
   const authed = await checkAuth(req);
   if (!authed.ok) return authed.response;
+  const { userId } = authed.auth;
   // Step-up parity with POST: API-key revocation is a management op affecting
   // availability, so require the same recent re-auth bar as issuance.
   // @stepup id:api-keys-id-delete method:DELETE
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, userId);
   if (stepUpError) return stepUpError;
-  const { userId } = authed.auth;
 
   const { id } = await params;
 

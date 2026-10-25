@@ -90,7 +90,7 @@ async function handlePUT(
   if (!existing) return notFound();
 
   // @stepup id:mcp-client-id-put method:PUT
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, updateSchema);
@@ -160,7 +160,7 @@ async function handleDELETE(
   if (!existing) return notFound();
 
   // @stepup id:mcp-client-id-delete method:DELETE
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   await withTenantRls(prisma, actor.tenantId, async (tx) =>

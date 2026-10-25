@@ -65,7 +65,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:team-member-put method:PUT
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const target = await withTeamTenantRls(teamId, async () =>
@@ -177,7 +177,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:team-member-delete method:DELETE
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const target = await withTeamTenantRls(teamId, async () =>

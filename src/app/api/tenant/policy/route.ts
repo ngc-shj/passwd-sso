@@ -205,7 +205,7 @@ async function handlePATCH(req: NextRequest) {
   }
 
   // @stepup id:tenant-policy-patch method:PATCH
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   const bodyRead = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);

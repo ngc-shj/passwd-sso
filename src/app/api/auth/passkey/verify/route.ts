@@ -36,10 +36,6 @@ const rateLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 
-// Cookie name must match auth.config.ts — both read
-// configuredSessionCookieName, so the selection cannot drift.
-const SESSION_COOKIE_NAME = configuredSessionCookieName();
-
 // POST /api/auth/passkey/verify
 // Unauthenticated endpoint — verifies a passkey authentication response
 // and creates a database session directly (bypassing Auth.js Credentials
@@ -170,7 +166,10 @@ async function handlePOST(req: NextRequest) {
     ...(user.prf ? { prf: user.prf } : {}),
   });
   response.headers.set("Cache-Control", NO_STORE_HEADERS["Cache-Control"]);
-  response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
+  // Cookie name must match auth.config.ts — both read
+  // configuredSessionCookieName, so the selection cannot drift. Read at call
+  // time, like isSecureCookieFromAuthUrl() below, so the two cannot disagree.
+  response.cookies.set(configuredSessionCookieName(), sessionToken, {
     path: `${basePath}/`,
     httpOnly: true,
     sameSite: "lax",

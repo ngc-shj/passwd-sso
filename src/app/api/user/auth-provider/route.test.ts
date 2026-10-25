@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 
 const { mockAuth, mockPrismaAccount, mockWithBypassRls, mockCanRecoverSessionWithPasskey } =
   vi.hoisted(() => ({
@@ -165,13 +166,13 @@ describe("GET /api/user/auth-provider", () => {
       mockPrismaAccount.findMany.mockResolvedValue([]);
       mockCanRecoverSessionWithPasskey.mockResolvedValue(true);
 
-      const res = await GET(makeRequest("authjs.session-token=5e55-b0d"));
+      const res = await GET(makeRequest(`authjs.session-token=${TEST_SESSION_TOKEN}`));
 
       const json = await res.json();
       expect(res.status).toBe(200);
       expect(json.canPasskeyReauth).toBe(true);
       expect(mockCanRecoverSessionWithPasskey).toHaveBeenCalledWith(
-        "5e55-b0d",
+        TEST_SESSION_TOKEN,
         "user-1",
       );
     });
@@ -180,11 +181,16 @@ describe("GET /api/user/auth-provider", () => {
       mockPrismaAccount.findMany.mockResolvedValue([]);
       mockCanRecoverSessionWithPasskey.mockResolvedValue(false);
 
-      const res = await GET(makeRequest("authjs.session-token=5e55-0b0d"));
+      const res = await GET(makeRequest(`authjs.session-token=${TEST_SESSION_TOKEN}`));
 
       const json = await res.json();
       expect(res.status).toBe(200);
       expect(json.canPasskeyReauth).toBe(false);
+      // The false is the predicate's answer, not a refused cookie.
+      expect(mockCanRecoverSessionWithPasskey).toHaveBeenCalledWith(
+        TEST_SESSION_TOKEN,
+        "user-1",
+      );
     });
 
     it("returns false without consulting the predicate when no session cookie is present", async () => {

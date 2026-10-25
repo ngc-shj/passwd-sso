@@ -17,9 +17,14 @@ export type RequireRecentSessionOptions = {
 /**
  * Require that the current Auth.js session was created recently enough for
  * sensitive credential-issuance flows.
+ *
+ * `userId` is the user the route's `auth()` resolved. The row must belong to
+ * that user: the freshness of a session `auth()` did not authenticate says
+ * nothing about this request, so a row owned by anyone else is a 401.
  */
 export async function requireRecentSession(
   req: NextRequest,
+  userId: string,
   options: RequireRecentSessionOptions = {},
 ) {
   const {
@@ -36,12 +41,12 @@ export async function requireRecentSession(
     async (tx) =>
       tx.session.findUnique({
         where: { sessionToken: sessionTokenDigest },
-        select: { createdAt: true },
+        select: { userId: true, createdAt: true },
       }),
     BYPASS_GRANT.AUTH_SESSION_LIFECYCLE,
   );
 
-  if (!sessionRow) {
+  if (!sessionRow || sessionRow.userId !== userId) {
     return unauthorized();
   }
 

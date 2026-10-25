@@ -277,6 +277,7 @@ describe("POST /api/tenant/operator-tokens", () => {
     // the custom code to the gate — the client branches on this exact code.
     expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledWith(
       expect.anything(),
+      USER_ID,
       { errorCode: "OPERATOR_TOKEN_STALE_SESSION" },
     );
   });

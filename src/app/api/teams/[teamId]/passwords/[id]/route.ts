@@ -187,7 +187,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   // handler is auth()-only (no Bearer path).
   if (permanent) {
     // @stepup id:team-password-id-delete-permanent method:DELETE
-    const stepUp = await requireRecentCurrentAuthMethod(req);
+    const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id);
     if (stepUp) return stepUp;
   }
 

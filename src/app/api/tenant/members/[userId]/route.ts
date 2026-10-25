@@ -44,7 +44,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   }
 
   // @stepup id:tenant-member-put method:PUT
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   // Cannot change own role — must be before ownership transfer

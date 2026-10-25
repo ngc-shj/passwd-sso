@@ -11,8 +11,14 @@ import { consentFormActionSources } from "../security/consent-form-action";
 import { getSessionInfo } from "./auth-gate";
 import {
   ALL_KNOWN_SESSION_COOKIE_NAMES,
+  configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "../auth/session/cookie-name";
+import {
+  parseCookiePairs,
+  readSessionCookie,
+  SESSION_COOKIE_READ,
+} from "../auth/session/session-cookie";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 import {
@@ -60,7 +66,11 @@ function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
   return PASSKEY_EXEMPT_PATHS.has(pathWithoutLocale);
 }
 
-function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
+function clearAuthSessionCookies(
+  response: NextResponse,
+  basePath: string = "",
+  extraNames: readonly string[] = [],
+): void {
   const cookiePath = `${basePath}/`;
   // Mirror the set-time attributes. The `__Secure-` / `__Host-` prefixes
   // require the Secure attribute on Set-Cookie per RFC 6265bis §4.1.3.1/3.2,
@@ -68,7 +78,7 @@ function clearAuthSessionCookies(response: NextResponse, basePath: string = ""):
   // prefixed names and the cookie persists. Call `isSecureCookieFromAuthUrl()`
   // at delete-time (not module-evaluated) so test env stubs are honored.
   const useSecureCookies = isSecureCookieFromAuthUrl();
-  for (const name of ALL_KNOWN_SESSION_COOKIE_NAMES) {
+  for (const name of [...ALL_KNOWN_SESSION_COOKIE_NAMES, ...extraNames]) {
     response.cookies.delete({
       name,
       path: cookiePath,
@@ -77,6 +87,31 @@ function clearAuthSessionCookies(response: NextResponse, basePath: string = ""):
       sameSite: "lax",
     });
   }
+}
+
+/**
+ * The request cookies that made the session cookie ambiguous: every key that
+ * starts with the configured name (a chunk `<name>.0`, `<name>X`). Deleting
+ * only the exact known names would leave such a stray behind, and every
+ * later request would be refused again. Empty when the header is not
+ * ambiguous, so a refusal for any other reason deletes nothing extra.
+ *
+ * Only cookies this response can address go away: a deletion matches name,
+ * path and domain, and it is sent host-only at `${basePath}/`. A cookie set
+ * at another path or with `Domain=` (a sibling subdomain) cannot be deleted
+ * from here and keeps the request refused until it expires or is cleared in
+ * the browser.
+ */
+function ambiguousSessionCookieNames(cookieHeader: string | null): string[] {
+  if (readSessionCookie(cookieHeader).kind !== SESSION_COOKIE_READ.AMBIGUOUS) return [];
+  const name = configuredSessionCookieName();
+  return [
+    ...new Set(
+      parseCookiePairs(cookieHeader ?? "")
+        .map((pair) => pair.key)
+        .filter((key) => key.startsWith(name)),
+    ),
+  ];
 }
 
 export async function handlePageRoute(
@@ -111,7 +146,11 @@ export async function handlePageRoute(
       signInUrl.pathname = `/${locale}/auth/signin`;
       signInUrl.searchParams.set("callbackUrl", `${basePath}${request.nextUrl.pathname}${request.nextUrl.search}`);
       const redirectResponse = NextResponse.redirect(signInUrl);
-      clearAuthSessionCookies(redirectResponse, basePath);
+      clearAuthSessionCookies(
+        redirectResponse,
+        basePath,
+        ambiguousSessionCookieNames(request.headers.get("cookie")),
+      );
       return applySecurityHeaders(redirectResponse, options, basePath);
     }
 

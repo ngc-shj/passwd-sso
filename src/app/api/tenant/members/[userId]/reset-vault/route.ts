@@ -118,7 +118,7 @@ async function handlePOST(
   }
 
   // @stepup id:reset-vault-post method:POST
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUpError) return stepUpError;
 
   // A reset this tenant cannot execute is refused here rather than created:

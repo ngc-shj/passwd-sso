@@ -26,9 +26,11 @@ import {
 export type CookiePair = { key: string; value: string };
 
 /**
- * Session tokens are minted by exactly two generators: Auth.js's default
- * `generateSessionToken` (`crypto.randomUUID()`, `@auth/core/lib/init.js`,
- * not overridden in `src/auth.ts`) and the passkey sign-in route
+ * Session tokens are minted by exactly two generators: Auth.js's
+ * `generateSessionToken`, set explicitly in `src/auth.ts` to
+ * `crypto.randomUUID()` (the same as Auth.js's default in
+ * `@auth/core/lib/init.js`, pinned so an upgrade cannot change it), and the
+ * passkey sign-in route
  * (`${randomUUID()}${randomBytes(16).toString("hex")}`,
  * `src/app/api/auth/passkey/verify/route.ts`). Both emit lowercase hex and
  * `-` only. A value outside this alphabet is never a real token, and
