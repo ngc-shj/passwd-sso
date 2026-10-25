@@ -33,13 +33,17 @@
 // need it set.
 //
 // Usage:
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list [--tenant <ref>]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list [--tenant <ref>] [--unbound]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped [--days <n>]
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add     --tenant <ref> --domain <domain> --by <label> (--provider <id> | --unbound) [--from <current-owner-uuid>] [--accept-unused-provider] [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind    --claim <claim> --provider <id> --by <label> [--accept-unused-provider] [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind    --from-members --out <file>
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- bind    --apply <file> --by <label> [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove  --tenant <ref> --domain <domain> --by <label> [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid> [--after <seq>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- realign --user <uuid|email> --tenant <ref> --by <label> [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- measure
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- legacy-accounts [--single-connection]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]
 //
 // `measure` prints the three counts docs/archive/review/audit-tenant-adjudicator-design.md's
@@ -60,14 +64,27 @@
 // deliberately not overwritten on the un-revoke or reassign paths, which
 // preserve the original registrant, see cmdAdd — but that is `createdBy`
 // specifically, not the flag. `--by` ALSO supplies `actor_label` on the
-// `tenant_claim_events` row every one of the four verbs (register / revoke /
-// unrevoke / reassign) appends in the same transaction (SC11 / #743), which
+// `tenant_claim_events` row every one of the five verbs (register / revoke /
+// unrevoke / reassign / rebind) appends in the same transaction (SC11 / #743), which
 // is why `remove` requires it too, not just `add`. See `tenant-domain
 // history` to read those rows back.
 //
 // `--from` is `add`'s reassignment flag: it names the tenant that currently
 // owns the claim, and moves the claim off it. See cmdAdd for why it is a bare
 // UUID and why it does not require a prior `remove`.
+//
+// `--provider` / `bind` (plan sso-claim-connection-binding, C3): every writer
+// that sets a claim's provider binding runs one evidence check on the target
+// tenant and records the binding on its event; `bind` changes an active row's
+// binding and records a `rebind`. The SSO provider set and the binding mode
+// come from the app env this process loaded — never the boot refusal, so these
+// commands run in the window before AUTH_CLAIM_BINDING=strict is set.
+//
+// `legacy-accounts --single-connection` is the operator's attestation that
+// Jackson held exactly one connection behind `saml-jackson` before the
+// upgrade, the one AUTH_JACKSON_ID now names. No database row can confirm it
+// — an account does not record its connection — so with that provider
+// configured and any account at it, the command refuses without the flag.
 //
 // `history` also reports a `deregister` operation now: deleting a row from
 // `tenant_claims` — directly, or by cascade from a tenant deletion — fires a
@@ -86,7 +103,10 @@ loadEnv();
 
 import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
-import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
+import { closeSync, fchmodSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
@@ -101,10 +121,29 @@ import {
   UNSAFE_DISPLAY_CHARS_RE,
 } from "@/lib/security/unsafe-display-chars";
 import {
+  ENGINE_WRITTEN_LABELS,
   recordTenantClaimEvent,
   SIGNIN_ACTOR_LABEL,
   TENANT_CLAIM_EVENT_OPERATION,
 } from "@/lib/tenant/tenant-claim-event";
+// The configured provider set, the derived binding mode and the adjudicator's
+// strict predicate, from the same prisma-free modules the app reads (plan
+// sso-claim-connection-binding, C2/C3). Never the boot refusal: `bind` and
+// `list --unbound` exist for the window before strict is set.
+import {
+  CLAIM_BINDING_MODE,
+  GOOGLE_PROVIDER_ID,
+  JACKSON_CONNECTION_PROVIDER_ID_PREFIX,
+  JACKSON_LEGACY_PROVIDER_ID,
+  PROVIDER_ID_PATTERN,
+  ProviderConfigError,
+  deriveClaimBindingMode,
+  isProviderIdShape,
+  listClaimProviderIds,
+  type ClaimBindingMode,
+} from "@/lib/auth/jackson-providers";
+import { deriveIdentifierPepper } from "@/lib/audit/identifier-pepper";
+import { isUnusableUnderStrict } from "@/lib/tenant/claim-binding";
 import { ACTOR_TYPE, AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 // `realign`'s I/O, from modules that never import the application's Prisma
 // singleton: it throws at import without DATABASE_URL, and this tool runs on
@@ -132,6 +171,9 @@ import {
   getStringFlag,
   findValuelessFlag,
   valuelessError,
+  findStrayFlags,
+  strayFlagsError,
+  type ParsedFlags,
 } from "./lib/tenant-domain-flags";
 import {
   bucketOf,
@@ -139,6 +181,26 @@ import {
   UNMAPPED_SELECTED_REASONS,
   type UnmappedBucket,
 } from "./lib/tenant-domain-buckets";
+import {
+  describeSignInProviderRef,
+  evidenceOf,
+  formatBindFile,
+  formatEvidence,
+  formatFlags,
+  groupLegacyAccounts,
+  isBindFileWritable,
+  isInsideWorktree,
+  isMajority,
+  LEGACY_ACCOUNT_VERDICT,
+  legacyAccountVerdict,
+  parseBindFile,
+  parseEvidence,
+  refMappingFor,
+  suggestedProvider,
+  type BindFileRow,
+  type BindRowFlags,
+  type ClaimEvidence,
+} from "./lib/tenant-domain-binding";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -316,11 +378,211 @@ async function defaultConfirm(message: string): Promise<boolean> {
   }
 }
 
+// ─── shared: the app env and the binding evidence ───────────────
+
+/**
+ * What this process knows of the deployment's SSO configuration (plan
+ * sso-claim-connection-binding, C3): the claim-presenting provider ids and the
+ * derived binding mode, read from the env `loadEnv()` loaded — the app's own
+ * `.env` when the tool runs where the app does.
+ *
+ * "The app env is present" means at least one claim provider is configured.
+ * Without one there is nothing to bind to: `--provider` falls back to the
+ * provider-id pattern with a warning, and the commands that bind many rows at
+ * once refuse. Read per call, never memoised, like MIGRATION_DATABASE_URL.
+ */
+type AppEnv = {
+  readonly present: boolean;
+  readonly claimProviders: readonly string[];
+  readonly mode: ClaimBindingMode;
+};
+
+function readAppEnv(command: string): { ok: true; env: AppEnv } | { ok: false; result: CmdResult } {
+  try {
+    const claimProviders = listClaimProviderIds(process.env);
+    return {
+      ok: true,
+      env: { present: claimProviders.length > 0, claimProviders, mode: deriveClaimBindingMode(process.env) },
+    };
+  } catch (e) {
+    // ProviderConfigError messages name the variable, never a value.
+    if (!(e instanceof ProviderConfigError)) throw e;
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        code: 1,
+        message: `The SSO provider configuration in this process's env is refused (${e.message}); fix it before running ${command}.`,
+      },
+    };
+  }
+}
+
+function appEnvRequiredResult(command: string): CmdResult {
+  return {
+    ok: false,
+    code: 1,
+    message:
+      `${command} needs the app's environment: it binds claims to the configured SSO providers ` +
+      "(AUTH_GOOGLE_*, AUTH_JACKSON_ID/SECRET, AUTH_JACKSON_CONNECTIONS, JACKSON_URL), and none is configured " +
+      "in this process. Run it with the app's .env loaded.",
+  };
+}
+
+/**
+ * `--provider` against the configured set when the app env is present;
+ * without it against the provider-id pattern only, with a warning that says so.
+ */
+function validateProviderFlag(provider: string, appEnv: AppEnv): CmdResult | null {
+  if (appEnv.present) {
+    if (appEnv.claimProviders.includes(provider)) return null;
+    return {
+      ok: false,
+      code: 1,
+      message:
+        `--provider "${escapeUnsafeDisplayChars(provider)}" is not a configured claim provider. ` +
+        `Configured: ${appEnv.claimProviders.join(", ")}.`,
+    };
+  }
+  if (!isProviderIdShape(provider)) {
+    return {
+      ok: false,
+      code: 1,
+      message: `--provider "${escapeUnsafeDisplayChars(provider)}" is not a provider id (${PROVIDER_ID_PATTERN}).`,
+    };
+  }
+  console.warn(
+    `Warning: no SSO provider is configured in this process, so --provider "${escapeUnsafeDisplayChars(provider)}" ` +
+      "was checked against the provider-id pattern only, not against the deployment's providers. A typo binds " +
+      "the claim to a provider no sign-in presents.",
+  );
+  return null;
+}
+
+/** A Google or Jackson provider id by shape — the claim providers this tool can recognise without the app env. */
+function isClaimProviderShapedId(id: string): boolean {
+  return (
+    id === GOOGLE_PROVIDER_ID ||
+    id === JACKSON_LEGACY_PROVIDER_ID ||
+    id.startsWith(JACKSON_CONNECTION_PROVIDER_ID_PREFIX)
+  );
+}
+
+/**
+ * The member evidence for one tenant: per claim provider, how many of its
+ * ACTIVE members hold an account there, against the total. The providers
+ * counted are the configured set; without the app env, every Google- or
+ * Jackson-shaped provider the members hold accounts at, plus `extra` (the
+ * provider being bound).
+ */
+async function readMemberEvidence(
+  tx: TxClient,
+  tenantId: string,
+  appEnv: AppEnv,
+  extra: string | null,
+): Promise<ClaimEvidence> {
+  const members = await tx.tenantMember.findMany({
+    where: { tenantId, deactivatedAt: null },
+    select: { userId: true },
+  });
+  const accounts =
+    members.length === 0
+      ? []
+      : await tx.account.findMany({
+          where: { userId: { in: members.map((m) => m.userId) } },
+          select: { userId: true, provider: true },
+        });
+  const providersByUser = new Map<string, string[]>();
+  for (const account of accounts) {
+    const list = providersByUser.get(account.userId) ?? [];
+    list.push(account.provider);
+    providersByUser.set(account.userId, list);
+  }
+  const universe = new Set<string>(
+    appEnv.present ? appEnv.claimProviders : accounts.map((a) => a.provider).filter(isClaimProviderShapedId),
+  );
+  if (extra !== null) universe.add(extra);
+  return evidenceOf(
+    members.map((m) => ({ userId: m.userId, providers: providersByUser.get(m.userId) ?? [] })),
+    universe,
+  );
+}
+
+/**
+ * Where the claim came from, for the operator: who created the row, whether the
+ * claim is the tenant's own id (the backfilled `external_id = id` shape), any
+ * operator reassign/unrevoke, and the provider its last `register` event
+ * recorded (null — "unknown" — for a pre-change event or none). Evidence, not
+ * an attestation: the history predates provenance.
+ */
+async function readProvenance(
+  tx: TxClient,
+  claim: string,
+  tenantId: string,
+  createdBy: string | null,
+): Promise<BindRowFlags> {
+  const events = await tx.tenantClaimEvent.findMany({
+    where: { claim },
+    orderBy: { seq: "asc" },
+    select: { operation: true, newProvider: true },
+  });
+  const operatorOps: readonly string[] = [TENANT_CLAIM_EVENT_OPERATION.REASSIGN, TENANT_CLAIM_EVENT_OPERATION.UNREVOKE];
+  const registers = events.filter((e) => e.operation === TENANT_CLAIM_EVENT_OPERATION.REGISTER);
+  return {
+    createdBy,
+    uuidClaim: claim === tenantId,
+    operatorEvents: events.filter((e) => operatorOps.includes(e.operation)).map((e) => e.operation),
+    registerProvider: registers.length === 0 ? null : registers[registers.length - 1].newProvider,
+  };
+}
+
+function printEvidence(tenantId: string, evidence: ClaimEvidence, flags: BindRowFlags | null): void {
+  console.log(`Binding evidence for tenant ${tenantId} (active members holding an account at each claim provider):`);
+  console.log(`  members:    ${formatEvidence(evidence)}`);
+  if (flags !== null) console.log(`  provenance: ${formatFlags(flags)}`);
+  console.log(
+    "  This is evidence for you to weigh, not an attestation: the claim's history predates provenance, " +
+      "so no field above decides a binding on its own.",
+  );
+}
+
+/**
+ * The majority rule every provider-setting writer applies: members holding an
+ * account at `provider` must be MORE than half of the tenant's active members,
+ * unless the operator overrides it. A tenant with no active members has no
+ * evidence either way and proceeds — normal onboarding before anyone signs in.
+ */
+function majorityRefusal(evidence: ClaimEvidence, provider: string, acceptUnused: boolean): CmdResult | null {
+  if (evidence.total === 0) {
+    console.log("  No evidence: the tenant has no active members yet, so nothing contradicts this binding.");
+    return null;
+  }
+  const using = evidence.counts.get(provider) ?? 0;
+  if (isMajority(using, evidence.total)) return null;
+  const shortfall =
+    `only ${using} of the tenant's ${evidence.total} active member(s) hold an account at ` +
+    `"${escapeUnsafeDisplayChars(provider)}" — not a majority`;
+  if (acceptUnused) {
+    console.log(`  --accept-unused-provider: proceeding although ${shortfall}.`);
+    return null;
+  }
+  return {
+    ok: false,
+    code: 1,
+    message:
+      `Refusing: ${shortfall}. Check that this is the connection this tenant's IdP sits behind ` +
+      "(a claim bound to another customer's connection lets that IdP sign in as this tenant). " +
+      "Re-run with --accept-unused-provider to bind it anyway.",
+  };
+}
+
 // ─── list ────────────────────────────────────────────────────────
 
-export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
+export async function cmdList(args: { tenant?: string; unbound?: boolean }): Promise<CmdResult> {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
+
+  if (args.unbound === true) return listUnbound(url, args.tenant);
 
   const prisma = migrationClientFactory.create(url);
   try {
@@ -338,7 +600,7 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
 
         const rows = await tx.tenantClaim.findMany({
           where: tenantId ? { tenantId } : undefined,
-          select: { claim: true, tenantId: true, createdBy: true, createdAt: true, revokedAt: true },
+          select: { claim: true, tenantId: true, createdBy: true, createdAt: true, revokedAt: true, provider: true },
           orderBy: { claim: "asc" },
         });
 
@@ -355,8 +617,11 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
         for (const row of rows) {
           const status = row.revokedAt ? `revoked ${row.revokedAt.toISOString()}` : "active";
           const createdBy = row.createdBy === null ? "-" : escapeUnsafeDisplayChars(row.createdBy);
+          // `provider` is CHECK-constrained to PROVIDER_ID_PATTERN; escaped anyway,
+          // one rendering convention per column.
+          const provider = row.provider === null ? "-" : escapeUnsafeDisplayChars(row.provider);
           console.log(
-            `${escapeUnsafeDisplayChars(row.claim)}\ttenant=${row.tenantId}\tcreatedBy=${createdBy}\tcreatedAt=${row.createdAt.toISOString()}\t${status}`,
+            `${escapeUnsafeDisplayChars(row.claim)}\ttenant=${row.tenantId}\tprovider=${provider}\tcreatedBy=${createdBy}\tcreatedAt=${row.createdAt.toISOString()}\t${status}`,
           );
         }
 
@@ -370,6 +635,76 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
         return { ok: true, code: 0, rows, message };
       },
       BYPASS_GRANT.TENANT_CLAIM_LIST,
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+/**
+ * `list --unbound`: the active rows strict mode refuses for every configured
+ * claim provider — unbound, or bound to a provider no longer configured —
+ * decided by the adjudicator's own predicate (`isUnusableUnderStrict`), with a
+ * suggested provider when the tenant's active members all use exactly one.
+ *
+ * Without the app env there is no configured set to judge a bound row
+ * against, so only NULL rows are listed and the message says the rest were not
+ * evaluated, rather than reading as "every bound row is fine".
+ */
+async function listUnbound(url: string, tenantRef: string | undefined): Promise<CmdResult> {
+  const app = readAppEnv("list --unbound");
+  if (!app.ok) return app.result;
+  const appEnv = app.env;
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        let tenantId: string | undefined;
+        if (tenantRef) {
+          const tenant = await resolveTenantRef(tx, tenantRef);
+          if (!tenant) {
+            return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(tenantRef)}` };
+          }
+          tenantId = tenant.id;
+        }
+
+        const candidates = await tx.tenantClaim.findMany({
+          where: {
+            revokedAt: null,
+            ...(tenantId ? { tenantId } : {}),
+            ...(appEnv.present ? {} : { provider: null }),
+          },
+          select: { claim: true, tenantId: true, createdBy: true, revokedAt: true, provider: true },
+          orderBy: { claim: "asc" },
+        });
+        const rows = appEnv.present
+          ? candidates.filter((row) => isUnusableUnderStrict(row, appEnv.claimProviders))
+          : candidates;
+
+        for (const row of rows) {
+          const evidence = await readMemberEvidence(tx, row.tenantId, appEnv, null);
+          const suggestion = suggestedProvider(evidence);
+          const provider = row.provider === null ? "-" : escapeUnsafeDisplayChars(row.provider);
+          console.log(
+            `${escapeUnsafeDisplayChars(row.claim)}\ttenant=${row.tenantId}\tprovider=${provider}` +
+              `\tmembers=${formatEvidence(evidence)}\tsuggest=${suggestion ?? "-"}`,
+          );
+        }
+
+        const scope = appEnv.present
+          ? `strict mode (claim providers: ${appEnv.claimProviders.join(", ")}) refuses at sign-in`
+          : "carry no provider. No SSO provider is configured in this process, so rows bound to a provider " +
+            "the deployment no longer configures were NOT evaluated; run this with the app's env to see them too";
+        return {
+          ok: true,
+          code: 0,
+          rows,
+          message: `${rows.length} active claim(s) that ${scope}.`,
+        };
+      },
+      BYPASS_GRANT.TENANT_CLAIM_BINDING_READ,
     );
   } finally {
     await prisma.$disconnect();
@@ -423,7 +758,75 @@ type UnmappedRow = {
   undelivered_cnt: bigint | number;
   /** `tenant_claim_unmapped` or `tenant_mismatch`. */
   reason: string;
+  /**
+   * A provider-binding denial's row binding (`boundProvider`): the owning
+   * tenant's own provider, NULL for an unbound row and for every other reason.
+   */
+  bound_provider: string | null;
+  /**
+   * The presenting provider as the app stored it: a ref under the identifier
+   * pepper, never the id (C4). NULL when the app had no pepper, and for every
+   * other reason. Mapped back against this process's configured set.
+   */
+  sign_in_provider_ref: string | null;
+  /**
+   * Whether the claim is, as this report runs, an active claim of the tenant
+   * the row is filed under. That tells apart the two `tenant_mismatch`
+   * producers that share OTHER_TENANT: row 7 files under the user's own
+   * tenant, which does not hold the claim; the deactivated-target-row refusal
+   * (`src/auth.ts`, before the bootstrap migration) files under the claim's
+   * own tenant. Read from the registry now, not from the denial, so a claim
+   * since moved with `add --from` reads as where it is now. Decided in
+   * cmdUnmapped after the query, not by it: see there.
+   */
+  filed_tenant_owns_claim: boolean;
 };
+
+/**
+ * The two OTHER_TENANT populations, one predicate each, shared by the print
+ * groups and the summary so the counts are of the rows under each heading.
+ */
+const OTHER_TENANT_ROWS = {
+  differentTenant: (row: UnmappedRow) => !row.filed_tenant_owns_claim,
+  deactivatedRow: (row: UnmappedRow) => row.filed_tenant_owns_claim,
+} as const;
+
+/**
+ * Every class the report counts, in print order: the summary line and the
+ * empty-result message both read this table, so neither can name a class the
+ * other leaves out (the drift round-5 F6 and round-6 F-R6-1 each shipped).
+ * `summary` is the label in the counted line, `empty` the one in the "no
+ * denials" sentence.
+ */
+export const UNMAPPED_SUMMARY_CLASSES: ReadonlyArray<{
+  summary: string;
+  empty: string;
+  bucket: UnmappedBucket;
+  include?: (row: UnmappedRow) => boolean;
+}> = [
+  { summary: "unmapped-claim", empty: "unregistered", bucket: UNMAPPED_BUCKET.UNREGISTERED },
+  {
+    summary: "other-tenant",
+    empty: "other-tenant",
+    bucket: UNMAPPED_BUCKET.OTHER_TENANT,
+    include: OTHER_TENANT_ROWS.differentTenant,
+  },
+  {
+    summary: "deactivated-membership",
+    empty: "deactivated-membership",
+    bucket: UNMAPPED_BUCKET.OTHER_TENANT,
+    include: OTHER_TENANT_ROWS.deactivatedRow,
+  },
+  { summary: "refused-claim", empty: "refused", bucket: UNMAPPED_BUCKET.REFUSED },
+  { summary: "provider-binding", empty: "provider-binding", bucket: UNMAPPED_BUCKET.PROVIDER_BINDING },
+];
+
+/** `a, b, c and d` — the last item joined by `conjunction`. */
+function joinWithLast(items: readonly string[], conjunction: string): string {
+  return items.length < 2
+    ? items.join("")
+    : `${items.slice(0, -1).join(", ")} ${conjunction} ${items[items.length - 1]}`;
+}
 
 // `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
 // deployment's actual retention, so it can only ever be the default window —
@@ -461,7 +864,7 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
     // an operator using this to rule out the README's third cause would
     // otherwise get a message that never mentions it.
     return (
-      `No claim-bearing sign-in denials — unregistered, other-tenant or refused — in the ` +
+      `No claim-bearing sign-in denials — ${joinWithLast(UNMAPPED_SUMMARY_CLASSES.map((c) => c.empty), "or")} — in the ` +
       `last ${days} days. That is the window this query covered, NOT this deployment's ` +
       `retention: a denial older than ${days} days is outside it whether or not the row ` +
       "still exists. Re-run with --days <n> to widen. An empty result does NOT by itself " +
@@ -469,15 +872,17 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
     );
   }
   const undelivered = rows.reduce((sum, r) => sum + Number(r.undelivered_cnt), 0);
-  const count = (bucket: UnmappedBucket) => rows.filter((r) => bucketOf(r) === bucket).length;
-  // All three counts, always — a report that names only the registrable
+  const count = (bucket: UnmappedBucket, include: (row: UnmappedRow) => boolean = () => true) =>
+    rows.filter((r) => bucketOf(r) === bucket && include(r)).length;
+  // Every bucket's count, always — a report that names only the registrable
   // population reads as "nothing else is wrong" (round-4 F3), and a report
-  // that merges the other two sends the operator to the wrong remedy for one
-  // of them (round-5 F1/S3).
+  // that merges two of the others sends the operator to the wrong remedy for
+  // one of them (round-5 F1/S3).
   const base =
-    `${count(UNMAPPED_BUCKET.UNREGISTERED)} unmapped-claim, ` +
-    `${count(UNMAPPED_BUCKET.OTHER_TENANT)} other-tenant and ` +
-    `${count(UNMAPPED_BUCKET.REFUSED)} refused-claim denial group(s) in the last ${days} days.`;
+    `${joinWithLast(
+      UNMAPPED_SUMMARY_CLASSES.map((c) => `${count(c.bucket, c.include)} ${c.summary}`),
+      "and",
+    )} denial group(s) in the last ${days} days.`;
   if (undelivered === 0) return base;
   // Round-2 F-B: the operator must see that outbox delivery itself is degraded,
   // because these rows are the ones that would have been INVISIBLE while the
@@ -545,14 +950,18 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // command used to select only the first, so an IdP that started
         // emitting a zero-width character denied every sign-in in the
         // deployment while this report printed "no unmapped-claim denials".
-        const rows = await tx.$queryRawUnsafe<UnmappedRow[]>(
+        const queried = await tx.$queryRawUnsafe<Omit<UnmappedRow, "filed_tenant_owns_claim">[]>(
           `SELECT tenant_id::text AS tenant_id, claim, claim_refusal, reason,
+                  bound_provider, sign_in_provider_ref,
                   count(*)::int AS cnt, max(created_at) AS last_seen,
                   sum(undelivered)::int AS undelivered_cnt
              FROM (
                SELECT tenant_id, metadata->>'claim' AS claim,
                       metadata->>'claimRefusal' AS claim_refusal,
-                      metadata->>'reason' AS reason, created_at, 0 AS undelivered
+                      metadata->>'reason' AS reason,
+                      metadata->>'boundProvider' AS bound_provider,
+                      metadata->>'signInProviderRef' AS sign_in_provider_ref,
+                      created_at, 0 AS undelivered
                  FROM audit_logs
                 WHERE action = 'AUTH_LOGIN_FAILURE'::"AuditAction"
                   AND metadata->>'reason' = ANY($3::text[])
@@ -560,7 +969,10 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
                UNION ALL
                SELECT tenant_id, payload->'metadata'->>'claim' AS claim,
                       payload->'metadata'->>'claimRefusal' AS claim_refusal,
-                      payload->'metadata'->>'reason' AS reason, created_at,
+                      payload->'metadata'->>'reason' AS reason,
+                      payload->'metadata'->>'boundProvider' AS bound_provider,
+                      payload->'metadata'->>'signInProviderRef' AS sign_in_provider_ref,
+                      created_at,
                       CASE
                         WHEN status = 'PENDING'::"AuditOutboxStatus" THEN 0
                         WHEN status = 'PROCESSING'::"AuditOutboxStatus"
@@ -578,7 +990,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
             -- now carry no claim at all (round-5 S2) -- the exact population
             -- round-4 F3 widened this query to catch.
             WHERE claim IS NOT NULL OR claim_refusal IS NOT NULL
-            GROUP BY tenant_id, claim, claim_refusal, reason
+            GROUP BY tenant_id, claim, claim_refusal, reason, bound_provider, sign_in_provider_ref
             ORDER BY last_seen DESC`,
           days,
           PROCESSING_LEASE_SECONDS,
@@ -590,14 +1002,43 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
           [...UNMAPPED_SELECTED_REASONS],
         );
 
+        // `filed_tenant_owns_claim`, decided here rather than in the query
+        // (round 5, N2). `claim` is the value as the IdP asserted it, while
+        // `tenant_claims.claim` is stored through normalizeTenantClaim, so a raw
+        // comparison filed a mixed-case deactivated-row refusal under the
+        // `add --from` heading. The registry's own normaliser, applied in JS,
+        // is the one rule; a SQL `lower()` would be a second to keep in step.
+        const filedTenants = [...new Set(queried.filter((r) => r.claim !== null).map((r) => r.tenant_id))];
+        const activeClaims = await tx.tenantClaim.findMany({
+          where: { tenantId: { in: filedTenants }, revokedAt: null },
+          select: { tenantId: true, claim: true },
+        });
+        const owned = new Set(activeClaims.map((c) => `${c.tenantId} ${c.claim}`));
+        const rows: UnmappedRow[] = queried.map((r) => ({
+          ...r,
+          filed_tenant_owns_claim: r.claim !== null && owned.has(`${r.tenant_id} ${normalizeTenantClaim(r.claim)}`),
+        }));
+
         // Round-3 A3, and here it is not merely defensive: `claim` comes out
         // of audit_logs.metadata / audit_outbox.payload, neither of which is
         // CHECK-constrained, and rows written before this PR's ingest boundary
         // landed can still carry U+202E. This is the report an operator reads
         // while deciding which claim to register, so a value that renders as
         // something other than what it is would be acted on.
-        const printGroup = (heading: string, bucket: UnmappedBucket) => {
-          const group = rows.filter((r) => bucketOf(r) === bucket);
+        // The configured set's refs under this process's pepper — the same
+        // derivation the app stores them with, from the app env loadEnv() read.
+        const app = readAppEnv("unmapped");
+        if (!app.ok && app.result.message) console.warn(`Warning: ${app.result.message}`);
+        const refMapping = refMappingFor(
+          app.ok ? app.env.claimProviders : [],
+          deriveIdentifierPepper(process.env),
+        );
+        const printGroup = (
+          heading: string,
+          bucket: UnmappedBucket,
+          include: (row: UnmappedRow) => boolean = () => true,
+        ) => {
+          const group = rows.filter((r) => bucketOf(r) === bucket && include(r));
           if (group.length === 0) return;
           console.log(heading);
           for (const row of group) {
@@ -619,6 +1060,16 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
             if (row.claim_refusal !== null) {
               parts.push(`refusal="${escapeUnsafeDisplayChars(row.claim_refusal)}"`);
             }
+            // Both ids for a binding denial (C4): the owning tenant's binding as
+            // stored, and the presenting provider mapped back from its ref with
+            // the app's own `providerRef` — the audit row carries only the ref,
+            // so another customer's connection id is never shown to this tenant.
+            if (bucket === UNMAPPED_BUCKET.PROVIDER_BINDING) {
+              parts.push(
+                `boundProvider=${row.bound_provider === null ? "-" : `"${escapeUnsafeDisplayChars(row.bound_provider)}"`}`,
+              );
+              parts.push(`signInProvider="${describeSignInProviderRef(row.sign_in_provider_ref, refMapping)}"`);
+            }
             console.log(
               `  tenant=${row.tenant_id}  ${parts.join("  ")}  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
                 (undelivered > 0 ? `  undelivered=${undelivered}` : ""),
@@ -632,6 +1083,19 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         printGroup(
           "Claims registered to a DIFFERENT tenant — investigate the user, or move the claim with `add --from`:",
           UNMAPPED_BUCKET.OTHER_TENANT,
+          OTHER_TENANT_ROWS.differentTenant,
+        );
+        // The same reason, filed under the claim's own tenant: the user holds a
+        // deactivated membership row there while active in a bootstrap tenant,
+        // so the sign-in that would move them in was refused. `add --from`
+        // would move the claim out of the tenant it belongs to.
+        printGroup(
+          "Claims registered to the tenant the row is filed under, refused because the user holds a DEACTIVATED " +
+            "membership row there while active in a personal bootstrap tenant — not `add --from`: that tenant " +
+            "removes the row with SCIM `DELETE /Users/<userId>`, and the user signs in before the next directory " +
+            "sync recreates it:",
+          UNMAPPED_BUCKET.OTHER_TENANT,
+          OTHER_TENANT_ROWS.deactivatedRow,
         );
         // "REFUSED", not "refused at ingest" (round-6 F1): the bucket now also
         // holds claims that PASS ingest and fail `storableClaimSchema` — SC9's
@@ -640,6 +1104,17 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         printGroup(
           "Claims this deployment REFUSED (at ingest, or as unstorable) — `add` cannot register them; the remedy is at the IdP:",
           UNMAPPED_BUCKET.REFUSED,
+        );
+        // Plan sso-claim-connection-binding, C4.
+        printGroup(
+          "Claims strict binding REFUSED for the presenting provider (unbound, or bound to another provider) — " +
+            "investigate first: a mismatch is the signature of one connection's IdP asserting another customer's claim. " +
+            "A claim registered by sign-in is bound to the provider that first presented it, so a claim squatted " +
+            "through one connection is unusable through another until an operator acts. If the bound tenant was " +
+            "created by sign-in through another customer's provider, re-point the claim to the rightful tenant with " +
+            "`add --tenant <rightful> --domain <claim> --from <bound-tenant-uuid> --provider <theirs> --by <label>`; never `bind` the rightful " +
+            "provider into it. An unbound claim whose tenant is the rightful owner is bound with `tenant-domain bind`:",
+          UNMAPPED_BUCKET.PROVIDER_BINDING,
         );
 
         // S12: an empty result says so explicitly, with the window it
@@ -663,7 +1138,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
 
 // Sized to `tenant_claim_events.actor_label VARCHAR(255)`
 // (prisma/migrations/20260731100000_add_tenant_claim_events) — the column
-// every one of the four verbs writes `--by` into as attribution.
+// every one of the five verbs writes `--by` into as attribution.
 const ACTOR_LABEL_MAX_LENGTH = 255;
 
 // Shared by `add` and `remove` (C4/#743): `--by` supplies `actor_label` on
@@ -689,14 +1164,22 @@ function validateActorLabel(by: string): CmdResult | null {
   // construction. `db_user` is the real attribution. What this buys is that the
   // ONE label a `history` reader treats as engine-written cannot be typed by a
   // person at the sanctioned entry point.
-  if (by.trim().toLowerCase() === SIGNIN_ACTOR_LABEL) {
+  //
+  // Every engine-written label, not only `signin` (plan
+  // sso-claim-connection-binding, C3): `backfill` is the `created_by` the
+  // claim-table migration wrote and `db-delete` the actor of the deregister
+  // trigger, and the binding evidence reads both as provenance. Derived from
+  // the label constants, with `signin`'s normalisation for all three.
+  const reserved = ENGINE_WRITTEN_LABELS.find((label) => label === by.trim().toLowerCase());
+  if (reserved !== undefined) {
     return {
       ok: false,
       code: 1,
       message:
-        `--by must not be "${SIGNIN_ACTOR_LABEL}": that label is reserved for the sign-in ` +
-        "auto-registration path, and a routing event carrying it would read as engine-written " +
-        "rather than operator-asserted. Use your own identifier.",
+        `--by must not be "${reserved}": that label is reserved for a path the engine writes ` +
+        (reserved === SIGNIN_ACTOR_LABEL ? "(the sign-in auto-registration path)" : "") +
+        ", and a routing event carrying it would read as engine-written rather than operator-asserted. " +
+        "Use your own identifier.",
     };
   }
 
@@ -767,11 +1250,60 @@ const REASSIGNMENT_WARNING = [
   "returned by this command.",
 ].join("\n");
 
+/**
+ * The binding `add` writes, from `--provider`/`--unbound` (plan
+ * sso-claim-connection-binding, C3). Every writing arm — create, unrevoke and
+ * the `--from` re-point — sets the row's provider to exactly what the operator
+ * stated, so the flag is required rather than defaulted: in strict mode a
+ * NULL row is refused (sign-in would refuse the claim), and outside strict one
+ * is written only on an explicit `--unbound`.
+ */
+function resolveAddBinding(
+  args: { provider?: string; unbound?: boolean; acceptUnusedProvider?: boolean },
+  appEnv: AppEnv,
+): { ok: true; provider: string | null } | { ok: false; result: CmdResult } {
+  const refuse = (message: string) => ({ ok: false as const, result: { ok: false, code: 1, message } });
+  if (args.provider !== undefined && args.unbound === true) {
+    return refuse("--provider and --unbound contradict each other; give one.");
+  }
+  if (args.unbound === true && args.acceptUnusedProvider === true) {
+    return refuse(
+      "--accept-unused-provider overrides the member evidence for a --provider binding; an --unbound claim " +
+        "has no provider to accept. Drop one of them.",
+    );
+  }
+  if (args.provider === undefined) {
+    if (appEnv.mode === CLAIM_BINDING_MODE.STRICT) {
+      return refuse(
+        "Claim binding is strict in this environment, and strict mode refuses a claim with no provider at " +
+          "sign-in. Name the provider the tenant's users sign in through: --provider <id>" +
+          (appEnv.present ? ` (configured: ${appEnv.claimProviders.join(", ")}).` : "."),
+      );
+    }
+    if (args.unbound !== true) {
+      return refuse(
+        "State the claim's provider binding: --provider <id> for the SSO provider this tenant's users sign " +
+          "in through, or --unbound to write the claim with no provider (strict mode refuses such a claim " +
+          "at sign-in until `tenant-domain bind` binds it).",
+      );
+    }
+    return { ok: true, provider: null };
+  }
+  const providerError = validateProviderFlag(args.provider, appEnv);
+  return providerError ? { ok: false, result: providerError } : { ok: true, provider: args.provider };
+}
+
 export async function cmdAdd(args: {
   tenant: string;
   domain: string;
   by: string;
   from?: string;
+  /** The full provider id the claim is bound to. */
+  provider?: string;
+  /** Write the claim with no provider; refused in strict mode. */
+  unbound?: boolean;
+  /** Proceed although the provider's users are not a majority of the tenant's members. */
+  acceptUnusedProvider?: boolean;
   yes?: boolean;
   confirm?: ConfirmFn;
 }): Promise<CmdResult> {
@@ -780,6 +1312,12 @@ export async function cmdAdd(args: {
 
   const byError = validateActorLabel(args.by);
   if (byError) return byError;
+
+  const app = readAppEnv("add");
+  if (!app.ok) return app.result;
+  const binding = resolveAddBinding(args, app.env);
+  if (!binding.ok) return binding.result;
+  const newProvider = binding.provider;
 
   // `--from` is the reassignment flag, and it takes a bare tenant UUID —
   // deliberately NOT the `<ref>` forms `--tenant` accepts. Reassignment is
@@ -867,7 +1405,7 @@ export async function cmdAdd(args: {
         // revoked rows to null so sign-in cannot resurrect them silently).
         const existing = await tx.tenantClaim.findUnique({
           where: { claim },
-          select: { id: true, tenantId: true, revokedAt: true, createdBy: true, createdAt: true },
+          select: { id: true, tenantId: true, revokedAt: true, createdBy: true, createdAt: true, provider: true },
         });
 
         if (args.from !== undefined && !existing) {
@@ -903,7 +1441,9 @@ export async function cmdAdd(args: {
             message:
               `Claim "${escapeUnsafeDisplayChars(claim)}" is ${state} tenant ${existing.tenantId}, not ${tenant.id}. ` +
               "Refusing to reassign implicitly. To move it, name the current owner: " +
-              `add --tenant ${tenant.id} --domain ${escapeUnsafeDisplayChars(claim)} --by <label> --from ${existing.tenantId}. ` +
+              `add --tenant ${tenant.id} --domain ${escapeUnsafeDisplayChars(claim)} ` +
+              `${newProvider === null ? "--unbound" : `--provider ${escapeUnsafeDisplayChars(newProvider)}`} ` +
+              `--by <label> --from ${existing.tenantId}. ` +
               '("remove" does not free a claim — it soft-deletes, leaving the owner unchanged.)',
           };
         }
@@ -915,6 +1455,20 @@ export async function cmdAdd(args: {
         // about to mutate).
         if (existing && !isReassignment && existing.revokedAt === null) {
           printTenantSummary(tenant, activeMembers);
+          // The binding the operator stated must hold too, or the flag was an
+          // instruction silently not applied. Changing an active row's binding
+          // is `bind`'s, which records it as a `rebind`.
+          if (existing.provider !== newProvider) {
+            return {
+              ok: false,
+              code: 1,
+              message:
+                `Claim "${escapeUnsafeDisplayChars(claim)}" is already registered to this tenant, bound to ` +
+                `${existing.provider === null ? "no provider" : `"${escapeUnsafeDisplayChars(existing.provider)}"`}, not ` +
+                `${newProvider === null ? "no provider" : `"${escapeUnsafeDisplayChars(newProvider)}"`}. No change made; ` +
+                "change the binding with `tenant-domain bind --claim <claim> --provider <id> --by <label>`.",
+            };
+          }
           console.log(`Claim "${escapeUnsafeDisplayChars(claim)}" is already registered to this tenant. No change made.`);
           return { ok: true, code: 0, tenantId: tenant.id, claim, message: "already registered (idempotent)" };
         }
@@ -957,6 +1511,25 @@ export async function cmdAdd(args: {
           const registeredBy =
             existing.createdBy === null ? "-" : escapeUnsafeDisplayChars(existing.createdBy);
           console.log(`  registered by: ${registeredBy} at ${existing.createdAt.toISOString()} (preserved)`);
+          console.log(
+            `  provider: ${existing.provider === null ? "none" : escapeUnsafeDisplayChars(existing.provider)} → ` +
+              `${newProvider === null ? "none (--unbound)" : escapeUnsafeDisplayChars(newProvider)}`,
+          );
+        } else {
+          console.log(`  provider: ${newProvider === null ? "none (--unbound)" : escapeUnsafeDisplayChars(newProvider)}`);
+        }
+        console.log("");
+
+        // The evidence check every provider-setting writer runs, on the
+        // tenant the claim will select (C3).
+        const evidence = await readMemberEvidence(tx, tenant.id, app.env, newProvider);
+        const provenance = existing
+          ? await readProvenance(tx, claim, existing.tenantId, existing.createdBy)
+          : null;
+        printEvidence(tenant.id, evidence, provenance);
+        if (newProvider !== null) {
+          const refusal = majorityRefusal(evidence, newProvider, args.acceptUnusedProvider === true);
+          if (refusal) return refusal;
         }
         console.log("");
         console.log(ROW_6_9A_WARNING);
@@ -992,9 +1565,16 @@ export async function cmdAdd(args: {
         // them. Every field the preview showed and this write changes has to be
         // in the WHERE, or the CAS only covers the fields someone remembered.
         if (existing && isReassignment) {
+          // `provider` joins the CAS for the same reason (C3): this write
+          // replaces the binding the preview showed.
           const moved = await tx.tenantClaim.updateMany({
-            where: { id: existing.id, tenantId: existing.tenantId, revokedAt: existing.revokedAt },
-            data: { tenantId: tenant.id, revokedAt: null },
+            where: {
+              id: existing.id,
+              tenantId: existing.tenantId,
+              revokedAt: existing.revokedAt,
+              provider: existing.provider,
+            },
+            data: { tenantId: tenant.id, revokedAt: null, provider: newProvider },
           });
           if (moved.count === 0) {
             return {
@@ -1014,6 +1594,8 @@ export async function cmdAdd(args: {
             oldRevokedAt: existing.revokedAt,
             newRevokedAt: null,
             actorLabel: args.by,
+            oldProvider: existing.provider,
+            newProvider,
           });
         } else if (existing) {
           // M2 / SC8: `createdBy` is NOT overwritten with `--by`. SC8 defers
@@ -1029,8 +1611,8 @@ export async function cmdAdd(args: {
           // concurrent change to either field is a refusal rather than a
           // silent overwrite.
           const unrevoked = await tx.tenantClaim.updateMany({
-            where: { id: existing.id, tenantId: tenant.id, revokedAt: existing.revokedAt },
-            data: { revokedAt: null },
+            where: { id: existing.id, tenantId: tenant.id, revokedAt: existing.revokedAt, provider: existing.provider },
+            data: { revokedAt: null, provider: newProvider },
           });
           if (unrevoked.count === 0) {
             return {
@@ -1047,10 +1629,12 @@ export async function cmdAdd(args: {
             oldRevokedAt: existing.revokedAt,
             newRevokedAt: null,
             actorLabel: args.by,
+            oldProvider: existing.provider,
+            newProvider,
           });
         } else {
           try {
-            await tx.tenantClaim.create({ data: { tenantId: tenant.id, claim, createdBy: args.by } });
+            await tx.tenantClaim.create({ data: { tenantId: tenant.id, claim, createdBy: args.by, provider: newProvider } });
           } catch (e) {
             if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
               return {
@@ -1069,6 +1653,8 @@ export async function cmdAdd(args: {
             oldRevokedAt: null,
             newRevokedAt: null,
             actorLabel: args.by,
+            oldProvider: null,
+            newProvider,
           });
         }
 
@@ -1105,6 +1691,9 @@ export async function cmdAdd(args: {
           if (existing.revokedAt !== null) {
             overwritten.push(`revokedAt ${existing.revokedAt.toISOString()}`);
           }
+          if (existing.provider !== newProvider) {
+            overwritten.push(`provider ${existing.provider === null ? "none" : escapeUnsafeDisplayChars(existing.provider)}`);
+          }
           if (overwritten.length > 0) {
             console.log(
               `Overwritten on this row (not lost — recorded in tenant_claim_events; read it with the ` +
@@ -1122,7 +1711,7 @@ export async function cmdAdd(args: {
 
         return { ok: true, code: 0, tenantId: tenant.id, claim };
       },
-      BYPASS_GRANT.TENANT_CLAIM_REGISTER,
+      BYPASS_GRANT.TENANT_CLAIM_BINDING_WRITE,
       confirmationTransaction.options(),
     );
   } catch (e) {
@@ -1182,7 +1771,7 @@ export async function cmdRemove(args: {
 
         const existing = await tx.tenantClaim.findUnique({
           where: { claim },
-          select: { id: true, tenantId: true, revokedAt: true, createdAt: true },
+          select: { id: true, tenantId: true, revokedAt: true, createdAt: true, provider: true },
         });
         if (!existing) {
           return { ok: false, code: 1, message: `No claim "${escapeUnsafeDisplayChars(claim)}" is registered to any tenant.` };
@@ -1230,9 +1819,13 @@ export async function cmdRemove(args: {
         // Hoisted rather than inlined into `data`: the event below must
         // record the SAME instant that was written, not a second
         // `new Date()` a few microseconds later.
+        //
+        // The provider is part of the CAS because the event records it: a
+        // rebind committed while the operator read the prompt would otherwise
+        // be revoked under an event naming the provider it replaced.
         const revokedAt = new Date();
         const result = await tx.tenantClaim.updateMany({
-          where: { claim, tenantId: tenant.id, revokedAt: null },
+          where: { claim, tenantId: tenant.id, revokedAt: null, provider: existing.provider },
           data: { revokedAt },
         });
         if (result.count === 0) {
@@ -1250,6 +1843,8 @@ export async function cmdRemove(args: {
           oldRevokedAt: null,
           newRevokedAt: revokedAt,
           actorLabel: args.by,
+          oldProvider: existing.provider,
+          newProvider: existing.provider,
         });
 
         console.log(`Revoked claim "${escapeUnsafeDisplayChars(claim)}" for tenant ${tenant.id}.`);
@@ -1464,6 +2059,11 @@ export async function cmdHistory(args: {
               `oldTenant=${row.oldTenantId ?? "-"}\tnewTenant=${row.newTenantId ?? "-"}\t` +
               `oldRevokedAt=${row.oldRevokedAt ? row.oldRevokedAt.toISOString() : "-"}\t` +
               `newRevokedAt=${row.newRevokedAt ? row.newRevokedAt.toISOString() : "-"}\t` +
+              // Both bindings on every row, for the same reason as both
+              // tenants: a `reassign` or `unrevoke` can change the provider
+              // too, not only a `rebind`. CHECK-constrained ids, escaped anyway.
+              `oldProvider=${row.oldProvider === null ? "-" : escapeUnsafeDisplayChars(row.oldProvider)}\t` +
+              `newProvider=${row.newProvider === null ? "-" : escapeUnsafeDisplayChars(row.newProvider)}\t` +
               `by=${escapeUnsafeDisplayChars(row.actorLabel)}\t` +
               `dbUser=${escapeUnsafeDisplayChars(row.dbUser)}\t` +
               `sessionDbUser=${escapeUnsafeDisplayChars(row.sessionDbUser)}`,
@@ -1536,6 +2136,448 @@ export async function cmdHistory(args: {
       },
       BYPASS_GRANT.TENANT_CLAIM_HISTORY,
     );
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+// ─── bind ────────────────────────────────────────────────────────
+
+/** How one `bind --apply` line ended. */
+export const BIND_LINE_OUTCOME = {
+  BOUND: "bound",
+  ALREADY_BOUND: "already bound",
+  /** The row is no longer the unbound row of the line's tenant. */
+  CAS_LOST: "CAS lost",
+  /** The recomputed evidence differs from the line's. */
+  EVIDENCE_CHANGED: "evidence changed",
+  /** No active members, or the provider's users are not a majority. */
+  EVIDENCE_REFUSED: "evidence refused",
+} as const;
+
+export type BindLineOutcome = (typeof BIND_LINE_OUTCOME)[keyof typeof BIND_LINE_OUTCOME];
+
+/**
+ * Change an active row's provider binding and record it — the one `rebind`
+ * writer, shared by `bind` and `bind --apply`.
+ *
+ * Compare-and-swap on `(tenant_id, provider, revoked_at)`: the row must still
+ * select the tenant, carry the binding and be active as read, so a concurrent
+ * re-point, `remove` or second bind is a refusal rather than an overwrite of a
+ * state the operator was never shown.
+ */
+async function rebindInTx(
+  tx: TxClient,
+  row: { id: string; claim: string; tenantId: string; provider: string | null },
+  provider: string,
+  by: string,
+): Promise<boolean> {
+  const rebound = await tx.tenantClaim.updateMany({
+    where: { id: row.id, tenantId: row.tenantId, provider: row.provider, revokedAt: null },
+    data: { provider },
+  });
+  if (rebound.count === 0) return false;
+  await recordTenantClaimEvent(tx, {
+    claim: row.claim,
+    operation: TENANT_CLAIM_EVENT_OPERATION.REBIND,
+    oldTenantId: row.tenantId,
+    newTenantId: row.tenantId,
+    oldRevokedAt: null,
+    newRevokedAt: null,
+    actorLabel: by,
+    oldProvider: row.provider,
+    newProvider: provider,
+  });
+  return true;
+}
+
+/**
+ * `tenant-domain bind --claim <c> --provider <id> --by <label>`: bind one
+ * active claim to a provider, or move its binding (plan
+ * sso-claim-connection-binding, C3). The same evidence check as `add`; the
+ * same-provider case is a no-op; a revoked or absent claim is refused — `add`
+ * is how a claim is registered or un-revoked, and it takes `--provider` too.
+ */
+export async function cmdBind(args: {
+  claim: string;
+  provider: string;
+  by: string;
+  acceptUnusedProvider?: boolean;
+  yes?: boolean;
+  confirm?: ConfirmFn;
+}): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
+
+  const app = readAppEnv("bind --claim");
+  if (!app.ok) return app.result;
+  const providerError = validateProviderFlag(args.provider, app.env);
+  if (providerError) return providerError;
+
+  // storableClaimSchema, as `remove` reads one: a stored non-domain claim
+  // (a backfilled tenant id, a sign-in-registered value) must be bindable.
+  const parsed = storableClaimSchema.safeParse(normalizeTenantClaim(args.claim));
+  if (!parsed.success) {
+    return {
+      ok: false,
+      code: 1,
+      message: `Invalid --claim "${escapeUnsafeDisplayChars(args.claim)}": ${parsed.error.issues[0]?.message ?? "does not satisfy storableClaimSchema"}`,
+    };
+  }
+  const claim = parsed.data;
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        const row = await tx.tenantClaim.findUnique({
+          where: { claim },
+          select: { id: true, tenantId: true, revokedAt: true, provider: true, createdBy: true },
+        });
+        if (!row) {
+          return {
+            ok: false,
+            code: 1,
+            message:
+              `No claim "${escapeUnsafeDisplayChars(claim)}" is registered. Register it with ` +
+              "`add --tenant <ref> --domain <claim> --provider <id> --by <label>`.",
+          };
+        }
+        if (row.revokedAt !== null) {
+          return {
+            ok: false,
+            code: 1,
+            message:
+              `Claim "${escapeUnsafeDisplayChars(claim)}" is revoked (since ${row.revokedAt.toISOString()}). ` +
+              "bind changes an active claim's binding only; `add --provider <id>` un-revokes it with its binding.",
+          };
+        }
+        if (row.provider === args.provider) {
+          return {
+            ok: true,
+            code: 0,
+            tenantId: row.tenantId,
+            claim,
+            message: `Claim "${escapeUnsafeDisplayChars(claim)}" is already bound to "${escapeUnsafeDisplayChars(args.provider)}". No change made.`,
+          };
+        }
+
+        const tenant = await tx.tenant.findUnique({
+          where: { id: row.tenantId },
+          select: { id: true, name: true, slug: true },
+        });
+        if (tenant) printTenantSummary(tenant, await activeMemberCount(tx, tenant.id));
+        console.log("Target claim row:");
+        console.log(`  claim:    ${escapeUnsafeDisplayChars(claim)}`);
+        console.log(
+          `  provider: ${row.provider === null ? "none" : escapeUnsafeDisplayChars(row.provider)} → ${escapeUnsafeDisplayChars(args.provider)}`,
+        );
+        console.log("");
+        const evidence = await readMemberEvidence(tx, row.tenantId, app.env, args.provider);
+        printEvidence(row.tenantId, evidence, await readProvenance(tx, claim, row.tenantId, row.createdBy));
+        const refusal = majorityRefusal(evidence, args.provider, args.acceptUnusedProvider === true);
+        if (refusal) return refusal;
+        console.log("");
+        console.log(
+          "From now on, a sign-in presenting this claim selects this tenant only through the provider above " +
+            "(in strict mode); a sign-in through any other provider is refused.",
+        );
+
+        const confirmed = args.yes === true ? true : await (args.confirm ?? defaultConfirm)("Proceed?");
+        if (!confirmed) {
+          return { ok: false, code: 1, message: "Aborted: not confirmed." };
+        }
+
+        if (!(await rebindInTx(tx, { ...row, claim }, args.provider, args.by))) {
+          return {
+            ok: false,
+            code: 1,
+            message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current state.`,
+          };
+        }
+        console.log(
+          `Bound claim "${escapeUnsafeDisplayChars(claim)}" to "${escapeUnsafeDisplayChars(args.provider)}" ` +
+            `(was ${row.provider === null ? "unbound" : `"${escapeUnsafeDisplayChars(row.provider)}"`}).`,
+        );
+        return { ok: true, code: 0, tenantId: row.tenantId, claim };
+      },
+      BYPASS_GRANT.TENANT_CLAIM_BINDING_WRITE,
+      confirmationTransaction.options(),
+    );
+  } catch (e) {
+    const timedOut = confirmationTimeoutResult(e);
+    if (timedOut) return timedOut;
+    throw e;
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+/** This CLI's own directory: `--out` is checked against the worktree it lives in. */
+const CLI_DIR = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The git worktrees a bind file must not be written into: the one this CLI
+ * lives in and the one the operator runs it from, by `git rev-parse
+ * --show-toplevel`. A directory that is not in a worktree (or a host without
+ * git) contributes none.
+ */
+function gitWorktreeTops(): string[] {
+  const tops = new Set<string>();
+  for (const cwd of [CLI_DIR, process.cwd()]) {
+    try {
+      const top = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (top) tops.add(top);
+    } catch {
+      // Not inside a work tree, or no git binary: nothing to protect there.
+    }
+  }
+  return [...tops];
+}
+
+/**
+ * `bind --from-members --out <file>`: the first half of the upgrade path. Writes
+ * one line per active claim with no provider — the tenant, the member evidence,
+ * a provider suggestion when the members are unanimous, and the provenance flags
+ * on a comment line above — for the operator to review. Writes nothing to the
+ * database.
+ *
+ * The file lists every tenant's claims, so it is refused inside a git worktree
+ * (by realpath, so a symlinked parent or `..` cannot carry it in), created
+ * exclusively (an existing path is never overwritten) with mode 0600.
+ */
+export async function cmdBindFromMembers(args: { out: string }): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const app = readAppEnv("bind --from-members");
+  if (!app.ok) return app.result;
+  if (!app.env.present) return appEnvRequiredResult("bind --from-members");
+  const appEnv = app.env;
+
+  for (const top of gitWorktreeTops()) {
+    let inside: boolean;
+    try {
+      inside = isInsideWorktree(args.out, top);
+    } catch {
+      return {
+        ok: false,
+        code: 1,
+        message: `--out "${escapeUnsafeDisplayChars(args.out)}": its directory does not exist.`,
+      };
+    }
+    if (inside) {
+      return {
+        ok: false,
+        code: 1,
+        message:
+          `--out "${escapeUnsafeDisplayChars(args.out)}" is inside the git worktree ${escapeUnsafeDisplayChars(top)}. ` +
+          "The bind file lists every tenant's claims; write it outside the repository.",
+      };
+    }
+  }
+
+  let fd: number;
+  try {
+    // "wx": exclusive create — an existing path is refused, never overwritten.
+    fd = openSync(args.out, "wx", 0o600);
+  } catch (e) {
+    const code = e instanceof Error && "code" in e ? String((e as NodeJS.ErrnoException).code) : "unknown";
+    return {
+      ok: false,
+      code: 1,
+      message:
+        code === "EEXIST"
+          ? `--out "${escapeUnsafeDisplayChars(args.out)}" already exists. Refusing to overwrite it; choose a new path.`
+          : `--out "${escapeUnsafeDisplayChars(args.out)}" cannot be created (${escapeUnsafeDisplayChars(code)}).`,
+    };
+  }
+
+  const prisma = migrationClientFactory.create(url);
+  let written = false;
+  try {
+    // The umask can only narrow the mode `open` was given; this states it.
+    fchmodSync(fd, 0o600);
+    const rows = await withBypassRls(
+      prisma,
+      async (tx) => {
+        const unbound = await tx.tenantClaim.findMany({
+          where: { provider: null, revokedAt: null },
+          select: { claim: true, tenantId: true, createdBy: true },
+          orderBy: { claim: "asc" },
+        });
+        const out: BindFileRow[] = [];
+        for (const row of unbound) {
+          out.push({
+            claim: row.claim,
+            tenantId: row.tenantId,
+            evidence: await readMemberEvidence(tx, row.tenantId, appEnv, null),
+            flags: await readProvenance(tx, row.claim, row.tenantId, row.createdBy),
+          });
+        }
+        return out;
+      },
+      BYPASS_GRANT.TENANT_CLAIM_BINDING_READ,
+    );
+    writeSync(fd, formatBindFile(rows));
+    written = true;
+    const lines = rows.filter((row) => isBindFileWritable(row.claim));
+    const notWritten = rows.filter((row) => !isBindFileWritable(row.claim));
+    const suggested = lines.filter((row) => suggestedProvider(row.evidence) !== null).length;
+    return {
+      ok: true,
+      code: 0,
+      rows,
+      message:
+        `Wrote ${lines.length} unbound claim(s) to ${escapeUnsafeDisplayChars(args.out)} (mode 0600); ` +
+        `${suggested} carry a suggested provider. Review and edit the provider column, then run ` +
+        "`bind --apply <file> --by <label>`. Delete the file afterwards." +
+        (notWritten.length === 0
+          ? ""
+          : `\nNOT WRITTEN: ${notWritten.length} claim(s) starting with "#", which the file would read back as ` +
+            "comments (listed in its header note). Bind each with `bind --claim <claim> --provider <id> --by <label>`: " +
+            notWritten.map((row) => `"${escapeUnsafeDisplayChars(row.claim)}"`).join(", ")),
+    };
+  } finally {
+    closeSync(fd);
+    if (!written) unlinkSync(args.out);
+    await prisma.$disconnect();
+  }
+}
+
+/**
+ * One bind-file line, in its own transaction: the row must still be the
+ * unbound row of the line's tenant (CAS), the evidence recomputed now must
+ * equal the line's, and the provider's users must be a majority — no
+ * file-level override (`bind --accept-unused-provider` is the per-row path),
+ * and a tenant with no active members is refused. A row already bound to the
+ * line's provider reads as already bound, so a rerun is safe.
+ */
+async function applyBindLine(
+  tx: TxClient,
+  line: { claim: string; tenantId: string; provider: string; evidence: string },
+  appEnv: AppEnv,
+  by: string,
+): Promise<BindLineOutcome> {
+  const row = await tx.tenantClaim.findUnique({
+    where: { claim: line.claim },
+    select: { id: true, tenantId: true, revokedAt: true, provider: true },
+  });
+  if (row && row.tenantId === line.tenantId && row.revokedAt === null && row.provider === line.provider) {
+    return BIND_LINE_OUTCOME.ALREADY_BOUND;
+  }
+  if (!row || row.tenantId !== line.tenantId || row.revokedAt !== null || row.provider !== null) {
+    return BIND_LINE_OUTCOME.CAS_LOST;
+  }
+  const evidence = await readMemberEvidence(tx, row.tenantId, appEnv, null);
+  if (formatEvidence(evidence) !== line.evidence) return BIND_LINE_OUTCOME.EVIDENCE_CHANGED;
+  if (!isMajority(evidence.counts.get(line.provider) ?? 0, evidence.total)) {
+    return BIND_LINE_OUTCOME.EVIDENCE_REFUSED;
+  }
+  return (await rebindInTx(tx, { ...row, claim: line.claim }, line.provider, by))
+    ? BIND_LINE_OUTCOME.BOUND
+    : BIND_LINE_OUTCOME.CAS_LOST;
+}
+
+/**
+ * `bind --apply <file> --by <label>`: the second half. Validates the whole
+ * file first and refuses it on any error; lines with an empty provider are not
+ * applied. Prints a summary with the operator-chosen lines (provider differing
+ * from the suggestion, or none was made) listed apart, asks once, then binds
+ * line by line and prints a result per line. Exits non-zero when any line was
+ * refused; the lines bound before it stay bound.
+ */
+export async function cmdBindApply(args: {
+  file: string;
+  by: string;
+  yes?: boolean;
+  confirm?: ConfirmFn;
+}): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
+
+  const app = readAppEnv("bind --apply");
+  if (!app.ok) return app.result;
+  if (!app.env.present) return appEnvRequiredResult("bind --apply");
+  const appEnv = app.env;
+
+  let text: string;
+  try {
+    text = readFileSync(args.file, "utf8");
+  } catch {
+    return { ok: false, code: 1, message: `Cannot read bind file "${escapeUnsafeDisplayChars(args.file)}".` };
+  }
+  const parsed = parseBindFile(text, new Set(appEnv.claimProviders));
+  if (!parsed.ok) {
+    for (const error of parsed.errors) console.error(`  ${error}`);
+    return {
+      ok: false,
+      code: 1,
+      message: `Refusing the bind file: ${parsed.errors.length} error(s) above. Nothing was applied.`,
+    };
+  }
+
+  const kept = parsed.lines.flatMap((line) => (line.provider === null ? [] : [{ ...line, provider: line.provider }]));
+  const skipped = parsed.lines.length - kept.length;
+  const chosen = kept.filter((line) => {
+    const evidence = parseEvidence(line.evidence);
+    return evidence === null || suggestedProvider(evidence) !== line.provider;
+  });
+  const suggestedLines = kept.filter((line) => !chosen.includes(line));
+  const describe = (line: (typeof kept)[number]) =>
+    `  line ${line.lineNo}: ${escapeUnsafeDisplayChars(line.claim)}\ttenant=${line.tenantId}\tprovider=${escapeUnsafeDisplayChars(line.provider)}\tmembers=${escapeUnsafeDisplayChars(line.evidence)}`;
+  console.log(`Lines to bind as suggested (${suggestedLines.length}):`);
+  suggestedLines.forEach((line) => console.log(describe(line)));
+  console.log(
+    `Operator-chosen lines — the provider differs from the suggestion, or there was none (${chosen.length}):`,
+  );
+  chosen.forEach((line) => console.log(describe(line)));
+  console.log(`Lines left with an empty provider, not applied: ${skipped}.`);
+
+  if (kept.length === 0) {
+    return { ok: true, code: 0, rows: [], message: "No line names a provider; nothing to apply." };
+  }
+  const confirmed = args.yes === true ? true : await (args.confirm ?? defaultConfirm)("Proceed?");
+  if (!confirmed) {
+    return { ok: false, code: 1, message: "Aborted: not confirmed." };
+  }
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    const results: Array<{ lineNo: number; claim: string; outcome: BindLineOutcome }> = [];
+    for (const line of kept) {
+      const outcome = await withBypassRls(
+        prisma,
+        (tx) => applyBindLine(tx, line, appEnv, args.by),
+        BYPASS_GRANT.TENANT_CLAIM_BINDING_WRITE,
+      );
+      results.push({ lineNo: line.lineNo, claim: line.claim, outcome });
+      console.log(`  line ${line.lineNo}\t${escapeUnsafeDisplayChars(line.claim)}\t${outcome}`);
+    }
+    const settled: readonly BindLineOutcome[] = [BIND_LINE_OUTCOME.BOUND, BIND_LINE_OUTCOME.ALREADY_BOUND];
+    const refused = results.filter((r) => !settled.includes(r.outcome)).length;
+    const bound = results.filter((r) => r.outcome === BIND_LINE_OUTCOME.BOUND).length;
+    return {
+      ok: refused === 0,
+      code: refused === 0 ? 0 : 1,
+      rows: results,
+      message:
+        `${bound} bound, ${results.length - bound - refused} already bound, ${refused} refused of ${results.length} line(s).` +
+        (refused > 0
+          ? " A refused line changed since the file was written: regenerate the file, or bind it with `bind --claim`."
+          : ""),
+    };
   } finally {
     await prisma.$disconnect();
   }
@@ -1783,6 +2825,162 @@ export async function cmdMeasure(): Promise<CmdResult> {
         };
       },
       BYPASS_GRANT.TENANT_DOMAIN_DIVERGENCE_READ,
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+// ─── legacy-accounts ─────────────────────────────────────────────
+
+/**
+ * The upgrade check for the legacy multi-connection deployment (README, "SSO
+ * tenant claim binding upgrade" → "Known lockout"): read-only, no writes, no
+ * audit events. Pre-upgrade SAML users of every connection hold an account at
+ * `saml-jackson`. If the legacy provider is still configured, the IdP behind
+ * the one connection its client names can assert another connection's user's
+ * `providerAccountId` and, with no claim, sign in as that user.
+ *
+ * An account does not record its connection, and no grouping of the database
+ * stands in for one (`legacyAccountVerdict`), so with the provider configured
+ * and any account at it the command refuses (code 1) unless the operator
+ * attests `--single-connection`: before the upgrade, Jackson held exactly one
+ * connection behind `saml-jackson`, the one AUTH_JACKSON_ID now names. The
+ * per-tenant grouping is printed in every case, as evidence for that
+ * attestation. Without a readable provider configuration it refuses rather
+ * than pass, since "not configured" is then unknown. "Not configured" is this
+ * process's env, so that pass tells the operator to confirm the app's own; with
+ * `--single-connection` it refuses instead, since the attestation names a
+ * configured client this env does not build.
+ */
+export async function cmdLegacyAccounts(args: { singleConnection?: boolean } = {}): Promise<CmdResult> {
+  const singleConnection = args.singleConnection === true;
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  const app = readAppEnv("legacy-accounts");
+  if (!app.ok) return app.result;
+  if (!app.env.present) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "legacy-accounts needs the app's environment: whether the result is safe depends on whether " +
+        `${JACKSON_LEGACY_PROVIDER_ID} (AUTH_JACKSON_ID/SECRET) is configured, and no SSO provider is ` +
+        "configured in this process. Run it with the app's .env loaded; it does not pass without it.",
+    };
+  }
+  const legacyConfigured = app.env.claimProviders.includes(JACKSON_LEGACY_PROVIDER_ID);
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        const accounts = await tx.account.findMany({
+          where: { provider: JACKSON_LEGACY_PROVIDER_ID },
+          select: { userId: true },
+        });
+        const userIds = [...new Set(accounts.map((a) => a.userId))];
+        const memberships =
+          userIds.length === 0
+            ? []
+            : await tx.tenantMember.findMany({
+                where: { userId: { in: userIds }, deactivatedAt: null },
+                select: { userId: true, tenantId: true },
+              });
+        const groups = groupLegacyAccounts(accounts, new Map(memberships.map((m) => [m.userId, m.tenantId])));
+        const tenantIds = groups.flatMap((g) => (g.tenantId === null ? [] : [g.tenantId]));
+        const tenants =
+          tenantIds.length === 0
+            ? []
+            : await tx.tenant.findMany({ where: { id: { in: tenantIds } }, select: { id: true, name: true } });
+        const nameOf = new Map(tenants.map((t) => [t.id, t.name]));
+
+        console.log(
+          `Accounts at ${JACKSON_LEGACY_PROVIDER_ID}, by the tenant of their user's active membership ` +
+            "(evidence for the operator; an account does not record its connection):",
+        );
+        if (groups.length === 0) console.log("  (none)");
+        for (const group of groups) {
+          const where =
+            group.tenantId === null
+              ? "tenant=-\t(no active tenant)"
+              : `tenant=${group.tenantId}\tname=${escapeUnsafeDisplayChars(nameOf.get(group.tenantId) ?? "-")}`;
+          console.log(`  ${where}\tusers=${group.users}\taccounts=${group.accounts}`);
+        }
+        console.log(
+          `${JACKSON_LEGACY_PROVIDER_ID} is ${legacyConfigured ? "" : "not "}configured in this process ` +
+            `(claim providers: ${app.env.claimProviders.join(", ")}).`,
+        );
+
+        const total = accounts.length;
+        const verdict = legacyAccountVerdict(groups, legacyConfigured, singleConnection);
+        const rows = groups;
+        switch (verdict) {
+          case LEGACY_ACCOUNT_VERDICT.NONE:
+            return {
+              ok: true,
+              code: 0,
+              rows,
+              message: `No account records ${JACKSON_LEGACY_PROVIDER_ID}: the legacy provider resolves no pre-upgrade account.`,
+            };
+          case LEGACY_ACCOUNT_VERDICT.UNRESOLVED:
+            return {
+              ok: true,
+              code: 0,
+              rows,
+              message:
+                `${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, and it is not configured in this ` +
+                "process's env, so no client built from it resolves them. Their users are refused with " +
+                "account_not_linked through their connection's own provider until re-provisioned (README, " +
+                '"Known lockout"). This check read the env this process loaded, not the app\'s: confirm that ' +
+                "the app's runtime env (its task definition and secrets) sets neither AUTH_JACKSON_ID nor " +
+                "AUTH_JACKSON_SECRET.",
+            };
+          case LEGACY_ACCOUNT_VERDICT.ATTESTED_UNCONFIGURED:
+            return {
+              ok: false,
+              code: 1,
+              rows,
+              message:
+                `Refusing: --single-connection attests a configured ${JACKSON_LEGACY_PROVIDER_ID} client, but ` +
+                `this process's env does not configure ${JACKSON_LEGACY_PROVIDER_ID} (AUTH_JACKSON_ID/SECRET), so ` +
+                `${total} account(s) at it are judged against an env other than the one the attestation is ` +
+                "about. Run this check with the app's env loaded. If the app's env does not configure it " +
+                "either, re-run without --single-connection.",
+            };
+          case LEGACY_ACCOUNT_VERDICT.ATTESTED:
+            return {
+              ok: true,
+              code: 0,
+              rows,
+              message:
+                `${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, and it is configured. Passed on your ` +
+                `--single-connection attestation: before the upgrade, Jackson held exactly one connection behind ` +
+                `${JACKSON_LEGACY_PROVIDER_ID}, the one AUTH_JACKSON_ID now names, so every one of these accounts ` +
+                "came through it. If Jackson held two or more, this pass is wrong: see the README's \"Known lockout\".",
+            };
+          case LEGACY_ACCOUNT_VERDICT.UNATTESTED:
+            return {
+              ok: false,
+              code: 1,
+              rows,
+              message:
+                `Refusing: ${total} account(s) record ${JACKSON_LEGACY_PROVIDER_ID}, and it is configured. An account ` +
+                "does not record which Jackson connection its user came through, so this check cannot tell " +
+                "whether they all came through the connection AUTH_JACKSON_ID names. If Jackson held two or more " +
+                `connections behind ${JACKSON_LEGACY_PROVIDER_ID} before the upgrade, the IdP behind that one ` +
+                "connection can assert another connection's user's account id and sign in as them: unset " +
+                "AUTH_JACKSON_ID and AUTH_JACKSON_SECRET, list every connection, that one included, in " +
+                'AUTH_JACKSON_CONNECTIONS (README, "Known lockout"), and re-run this check. That remedy applies ' +
+                "only then: if Jackson held exactly one connection behind it, the one AUTH_JACKSON_ID names, " +
+                "re-run with --single-connection to attest it. The listing above is evidence to check against " +
+                "what you know of the pre-upgrade connections.",
+            };
+        }
+      },
+      BYPASS_GRANT.TENANT_LEGACY_ACCOUNT_READ,
     );
   } finally {
     await prisma.$disconnect();
@@ -2083,13 +3281,18 @@ function printUsage(): void {
   console.error(
     [
       "Usage:",
-      "  tenant-domain list    [--tenant <ref>]",
+      "  tenant-domain list    [--tenant <ref>] [--unbound]",
       `  tenant-domain unmapped [--days <n>]           (default ${DEFAULT_UNMAPPED_WINDOW_DAYS})`,
-      "  tenant-domain add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
+      "  tenant-domain add     --tenant <ref> --domain <domain> --by <label> (--provider <id> | --unbound)",
+      "                        [--from <current-owner-uuid>] [--accept-unused-provider] [--yes]",
+      "  tenant-domain bind    --claim <claim> --provider <id> --by <label> [--accept-unused-provider] [--yes]",
+      "  tenant-domain bind    --from-members --out <file>",
+      "  tenant-domain bind    --apply <file> --by <label> [--yes]",
       "  tenant-domain remove  --tenant <ref> --domain <domain> --by <label> [--yes]",
       "  tenant-domain history --domain <claim> | --tenant <uuid> [--after <seq>]",
       "  tenant-domain realign --user <uuid|email> --tenant <ref> --by <label> [--yes]",
       "  tenant-domain measure",
+      "  tenant-domain legacy-accounts [--single-connection]",
       `  tenant-domain backfill-owning-column --by <label> [--apply] [--yes] [--limit <n>]  (default ${DEFAULT_BACKFILL_LIMIT}, max ${MAX_BACKFILL_LIMIT})`,
       "",
       "<ref> is a tenant UUID or one of its registered claims (not its slug).",
@@ -2099,7 +3302,14 @@ function printUsage(): void {
       "membership row, for the member SCIM and directory sync may not take back.",
       "It refuses the sentinel tenant as the target, and an email that matches more",
       "than one user (case variants of one address; name the user by UUID).",
-      "add, remove and realign ask for confirmation inside their transaction:",
+      "--provider is the full SSO provider id a claim is bound to (google, saml-jackson,",
+      "saml-jackson-<connection id>). In strict binding mode add requires it; otherwise",
+      "add needs --provider or an explicit --unbound. add and bind refuse a provider whose",
+      "users are not a majority of the tenant's active members unless --accept-unused-provider.",
+      "bind --from-members writes a review file of every unbound claim (outside the git",
+      "worktree, never overwriting); bind --apply binds the lines whose provider you kept.",
+      "Both need the app's SSO provider env. list --unbound lists the claims strict refuses.",
+      "add, remove, bind and realign ask for confirmation inside their transaction:",
       `answer within ${confirmationBudgetText()}, or re-run the command. Do not leave a prompt`,
       "open while migrations deploy: its reads hold table locks a migration waits for,",
       "and sign-ins queue behind that migration.",
@@ -2111,15 +3321,69 @@ function printUsage(): void {
       "the oldest active membership wins over the column, and a multi-active user is",
       "decided, not refused, and flagged multiActive in the listing.",
       "",
+      "legacy-accounts lists the accounts at saml-jackson by their users' active tenant,",
+      "read-only. With saml-jackson configured and any account at it, it exits non-zero",
+      "unless --single-connection attests that Jackson held exactly one connection behind",
+      "saml-jackson before the upgrade, the one AUTH_JACKSON_ID names. With accounts at it",
+      "and saml-jackson not configured, --single-connection exits non-zero: the attestation",
+      "is about a client this env does not build. The listing is evidence and decides",
+      "nothing. Needs the app's SSO env.",
+      "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",
     ].join("\n"),
   );
 }
 
+/**
+ * `bind`'s three forms, told apart by which of `--claim`, `--from-members` and
+ * `--apply` is given — exactly one. A flag the chosen form does not read stops
+ * the command rather than being dropped (the flags module's rule). Null means
+ * print the usage.
+ */
+async function dispatchBind(flags: ParsedFlags, yes: boolean): Promise<CmdResult | null> {
+  const claim = getStringFlag(flags, "claim");
+  const applyFile = getStringFlag(flags, "apply");
+  const fromMembers = flags.get("from-members") === true;
+  if ([claim !== undefined, applyFile !== undefined, fromMembers].filter(Boolean).length !== 1) return null;
+
+  const accepted = fromMembers
+    ? ["from-members", "out"]
+    : applyFile !== undefined
+      ? ["apply", "by", "yes"]
+      : ["claim", "provider", "by", "accept-unused-provider", "yes"];
+  const stray = [...flags.keys()].filter((name) => !accepted.includes(name));
+  if (stray.length > 0) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        `This form of bind does not read ${stray.map((name) => `--${escapeUnsafeDisplayChars(name)}`).join(", ")}. ` +
+        "Refusing rather than ignoring it: a flag the operator wrote must either take effect or stop the command.",
+    };
+  }
+
+  if (fromMembers) {
+    const out = getStringFlag(flags, "out");
+    return out ? cmdBindFromMembers({ out }) : null;
+  }
+  const by = getStringFlag(flags, "by");
+  if (!by) return null;
+  if (applyFile !== undefined) return cmdBindApply({ file: applyFile, by, yes });
+  const provider = getStringFlag(flags, "provider");
+  if (!claim || !provider) return null;
+  return cmdBind({
+    claim,
+    provider,
+    by,
+    acceptUnusedProvider: flags.get("accept-unused-provider") === true,
+    yes,
+  });
+}
+
 async function main(): Promise<void> {
   const [subcommand, ...rest] = process.argv.slice(2);
-  const parsed = parseFlags(rest);
+  const parsed = parseFlags(rest, subcommand);
   if (!parsed.ok) {
     console.error(parsed.error);
     process.exitCode = 1;
@@ -2128,9 +3392,18 @@ async function main(): Promise<void> {
   const flags = parsed.flags;
   const yes = flags.get("yes") === true;
 
-  const valueless = findValuelessFlag(flags);
+  // Stray flags first: `remove --provider` is a flag remove never reads, and
+  // "requires a value" would send the operator to supply one.
+  const stray = findStrayFlags(flags, subcommand);
+  if (subcommand !== undefined && stray.length > 0) {
+    console.error(strayFlagsError(stray, subcommand));
+    process.exitCode = 1;
+    return;
+  }
+
+  const valueless = findValuelessFlag(flags, subcommand);
   if (valueless) {
-    console.error(valuelessError(valueless));
+    console.error(valuelessError(valueless, subcommand));
     process.exitCode = 1;
     return;
   }
@@ -2138,7 +3411,7 @@ async function main(): Promise<void> {
   let result: CmdResult;
   switch (subcommand) {
     case "list":
-      result = await cmdList({ tenant: getStringFlag(flags, "tenant") });
+      result = await cmdList({ tenant: getStringFlag(flags, "tenant"), unbound: flags.get("unbound") === true });
       break;
     case "unmapped": {
       const rawDays = getStringFlag(flags, "days");
@@ -2169,7 +3442,26 @@ async function main(): Promise<void> {
         process.exitCode = 1;
         return;
       }
-      result = await cmdAdd({ tenant, domain, by, from, yes });
+      result = await cmdAdd({
+        tenant,
+        domain,
+        by,
+        from,
+        provider: getStringFlag(flags, "provider"),
+        unbound: flags.get("unbound") === true,
+        acceptUnusedProvider: flags.get("accept-unused-provider") === true,
+        yes,
+      });
+      break;
+    }
+    case "bind": {
+      const bindResult = await dispatchBind(flags, yes);
+      if (bindResult === null) {
+        printUsage();
+        process.exitCode = 1;
+        return;
+      }
+      result = bindResult;
       break;
     }
     case "remove": {
@@ -2206,6 +3498,9 @@ async function main(): Promise<void> {
     }
     case "measure":
       result = await cmdMeasure();
+      break;
+    case "legacy-accounts":
+      result = await cmdLegacyAccounts({ singleConnection: flags.get("single-connection") === true });
       break;
     case "backfill-owning-column": {
       const by = getStringFlag(flags, "by");

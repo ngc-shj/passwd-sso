@@ -23,7 +23,9 @@ const {
     },
     tenantMember: {
       findMany: vi.fn(),
+      findUnique: vi.fn(),
       upsert: vi.fn(),
+      create: vi.fn(),
       deleteMany: vi.fn(),
       count: vi.fn(),
     },
@@ -88,6 +90,27 @@ const {
       updateMany: vi.fn(),
       count: vi.fn(),
     },
+    extensionBridgeCode: {
+      updateMany: vi.fn(),
+    },
+    mobileBridgeCode: {
+      updateMany: vi.fn(),
+    },
+    mcpAccessToken: {
+      updateMany: vi.fn(),
+    },
+    mcpRefreshToken: {
+      updateMany: vi.fn(),
+    },
+    delegationSession: {
+      updateMany: vi.fn(),
+    },
+    mcpAuthorizationCode: {
+      updateMany: vi.fn(),
+    },
+    operatorToken: {
+      updateMany: vi.fn(),
+    },
     team: {
       count: vi.fn(),
     },
@@ -113,7 +136,7 @@ const {
     // internals that would need rewriting the moment C4 lands.
     mockResolveTenantByClaim: vi.fn(),
     mockFindOrCreateTenantForClaim: vi.fn(),
-    mockTenantClaimStore: { tenantClaim: null as string | null },
+    mockTenantClaimStore: { tenantClaim: null as string | null, provider: null as string | null },
     mockTenantClaimGetStore: vi.fn(),
     mockSessionMetaGetStore: vi.fn(),
     mockLogAudit: vi.fn(),
@@ -130,6 +153,15 @@ const {
   };
 });
 
+// The adapter's own account/email lookups, which the signIn callback resolves
+// an OAuth/OIDC sign-in's subject through, and the linking predicate it shares
+// with the provider construction in auth.config.ts.
+const { mockGetUserByAccount, mockGetUserByEmail, mockAllowsDangerousEmailAccountLinking } = vi.hoisted(() => ({
+  mockGetUserByAccount: vi.fn(),
+  mockGetUserByEmail: vi.fn(),
+  mockAllowsDangerousEmailAccountLinking: vi.fn(),
+}));
+
 const { mockNextAuth } = vi.hoisted(() => ({
   mockNextAuth: vi.fn(() => ({
     handlers: {},
@@ -144,7 +176,10 @@ vi.mock("next-auth", () => ({
 }));
 
 vi.mock("@/lib/auth/session/auth-adapter", () => ({
-  createCustomAdapter: vi.fn(() => ({})),
+  createCustomAdapter: vi.fn(() => ({
+    getUserByAccount: mockGetUserByAccount,
+    getUserByEmail: mockGetUserByEmail,
+  })),
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -156,8 +191,17 @@ vi.mock("@/lib/auth/session/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
 
+const { mockInvalidateCachedSessions, mockSentryCaptureMessage } = vi.hoisted(() => ({
+  mockInvalidateCachedSessions: vi.fn(),
+  mockSentryCaptureMessage: vi.fn(),
+}));
+
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
-  invalidateCachedSessions: vi.fn(),
+  invalidateCachedSessions: mockInvalidateCachedSessions,
+}));
+
+vi.mock("@sentry/nextjs", () => ({
+  captureMessage: mockSentryCaptureMessage,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -189,6 +233,7 @@ vi.mock("@/lib/tenant/tenant-management", async (importOriginal) => {
   return {
     refusalFromLookup: actual.refusalFromLookup,
     claimRefusalOf: actual.claimRefusalOf,
+    providerBindingOf: actual.providerBindingOf,
     resolveTenantByClaim: mockResolveTenantByClaim,
     findOrCreateTenantForClaim: mockFindOrCreateTenantForClaim,
   };
@@ -204,9 +249,13 @@ vi.mock("@/lib/logger", () => ({
 
 vi.mock("./auth.config", () => ({
   default: { callbacks: {} },
+  allowsDangerousEmailAccountLinking: mockAllowsDangerousEmailAccountLinking,
 }));
 
+import type { Account } from "next-auth";
 import { ensureTenantMembershipForSignIn, assertBootstrapSingleMember } from "./auth";
+import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
+import { toAuditProvider } from "@/lib/audit/auth-failure-mapping";
 import type { ClaimLookup, ClaimTenantResolution } from "@/lib/tenant/tenant-management";
 import type { TenantClaimExtraction } from "@/lib/tenant/tenant-claim";
 // The REAL producer, not a literal (round-6 SEC-R6-3): `ClaimRefusalDiagnosis`
@@ -253,6 +302,13 @@ function lookup(l: ClaimLookup) {
   return l;
 }
 
+/** The account a claim-routed sign-in arrives with: its provider is the presenting one (C5). */
+const SIGN_IN_ACCOUNT = {
+  provider: "saml-jackson-a",
+  type: "oidc",
+  providerAccountId: "idp-subject-1",
+} satisfies Account;
+
 /**
  * A 23514 shaped exactly like sentinel-tenant-constraint.test.ts's own
  * `checkViolation` fixture — `meta.driverAdapterError.cause` carrying the
@@ -278,7 +334,7 @@ function checkViolation(message: string): Error {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const nextAuthInitArgs = (mockNextAuth.mock.calls as any[])[0];
 
-const STRANDED_MODEL_HANDLES = ["account", "apiKey", "attachment", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey", "teamPasswordFavorite", "vaultKey", "webAuthnCredential"] as const;
+const STRANDED_MODEL_HANDLES = ["account", "apiKey", "attachment", "delegationSession", "emergencyAccessGrant", "extensionBridgeCode", "extensionToken", "folder", "mcpAccessToken", "mcpAuthorizationCode", "mcpRefreshToken", "mobileBridgeCode", "notification", "operatorToken", "passwordEntry", "passwordShare", "session", "tag", "teamMemberKey", "teamPasswordFavorite", "vaultKey", "webAuthnCredential"] as const;
 
 /**
  * The mocked delegate for a model `countStrandedRows` counts, created on demand.
@@ -343,6 +399,9 @@ describe("ensureTenantMembershipForSignIn", () => {
     });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
+    // No membership row in the migration target: the ordinary row-6/9a case.
+    mockPrisma.tenantMember.findUnique.mockResolvedValue(null);
+    mockPrisma.tenantMember.create.mockResolvedValue({ id: "member-migrated" });
     mockPrisma.tenantMember.deleteMany.mockResolvedValue({ count: 1 });
     // Every model `countStrandedRows` counts. Built from the same list the
     // production helper iterates, so a model added there surfaces here as an
@@ -420,7 +479,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, null);
 
-    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: null, claim: null, claimRefusal: null });
+    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: null, claim: null, claimRefusal: null, providerBinding: null });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
   });
@@ -440,7 +499,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({
       ok: false,
@@ -456,6 +515,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       // `claim` would be forgeable by the actor who supplies it.
       claim: null,
       claimRefusal: claimRefusal("contains U+200B"),
+      providerBinding: null,
     });
     // Nothing may be looked up, created or joined from a value we refused.
     expect(mockResolveTenantByClaim).not.toHaveBeenCalled();
@@ -468,7 +528,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "malformed", diagnosis: claimRefusal("312 characters (max 255)") }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({
       ok: false,
@@ -476,6 +536,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       tenantId: null,
       claim: null,
       claimRefusal: claimRefusal("312 characters (max 255)"),
+      providerBinding: null,
     });
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -490,7 +551,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       { tenantId: "tenant-b" },
     ]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     // Round-4 T1. The MULTI_TENANT throw beats the refusal to the exit, so
     // `ok === false` alone made this test an exact duplicate of row 3 — it
@@ -508,6 +569,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       tenantId: null,
       claim: null,
       claimRefusal: claimRefusal("contains U+200B"),
+      providerBinding: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -525,7 +587,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
       mockPrisma.tenant.findUnique.mockResolvedValue({ isBootstrap: false });
 
-      const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+      const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
       // TENANT_CLAIM_OWNER, not TENANT_OTHER: `tenant-domain unmapped` groups
       // by (tenant_id, claim), and the no-membership path files this same
@@ -537,6 +599,7 @@ describe("ensureTenantMembershipForSignIn", () => {
         tenantId: TENANT_CLAIM_OWNER,
         claim: "tenant-acme",
         claimRefusal: null,
+        providerBinding: null,
       });
       expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
       expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -562,7 +625,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
     mockPrisma.tenant.findUnique.mockResolvedValue({ isBootstrap: false });
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({
       ok: false,
@@ -570,6 +633,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       tenantId: TENANT_OTHER,
       claim: "tenant-acme",
       claimRefusal: claimRefusal("claim must be printable ASCII"),
+      providerBinding: null,
     });
     // Round-6 F5: a refusing lookup is dispatched straight from the arm. It
     // used to be answered by calling findOrCreateTenantForClaim, which retook
@@ -580,10 +644,10 @@ describe("ensureTenantMembershipForSignIn", () => {
 
   // Row 4: claim resolves, no existing membership -> upsert -> allow.
   it("row 4: joins the resolved claim tenant when the user has no existing membership", async () => {
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(true);
-    expect(mockResolveTenantByClaim).toHaveBeenCalledWith("tenant-acme", mockPrisma);
+    expect(mockResolveTenantByClaim).toHaveBeenCalledWith("tenant-acme", SIGN_IN_ACCOUNT.provider, CLAIM_BINDING_MODE.OFF, mockPrisma);
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith({
       where: { tenantId_userId: { tenantId: TENANT_CLAIMED, userId: "user-1" } },
@@ -605,7 +669,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.passwordEntry.count.mockResolvedValue(7);
     mockPrisma.webAuthnCredential.count.mockResolvedValue(2);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({ ok: true });
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
@@ -636,7 +700,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
     mockPrisma.passwordEntry.count.mockResolvedValue(7);
 
-    await ensureTenantMembershipForSignIn("user-1", null, {});
+    await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(mockLogAuditInTx).toHaveBeenCalledTimes(2);
     const [joined, released] = mockLogAuditInTx.mock.calls;
@@ -659,11 +723,11 @@ describe("ensureTenantMembershipForSignIn", () => {
 
   it("row 4: reports only the models that actually hold rows", async () => {
     // Zero-valued keys are dropped, so `leftBehind` names what is stranded
-    // rather than burying two numbers among twenty-one zeroes.
+    // rather than burying two numbers among a row of zeroes.
     mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
     mockPrisma.tag.count.mockResolvedValue(3);
 
-    await ensureTenantMembershipForSignIn("user-1", null, {});
+    await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     const [[, , params]] = mockLogAuditInTx.mock.calls;
     expect((params as { metadata: { leftBehind: Record<string, number> } }).metadata.leftBehind)
@@ -674,7 +738,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     // The zero the cell above is measured against. A realignment that fired on
     // every join would satisfy that cell and say nothing about divergence — and
     // it would put a write and three counts on the ordinary sign-in path.
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({ ok: true });
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
@@ -687,7 +751,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     // cannot read. Reported here because the caller keys its emit on that null.
     mockPrisma.user.findUnique.mockResolvedValue(null);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({ ok: true });
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
@@ -697,7 +761,7 @@ describe("ensureTenantMembershipForSignIn", () => {
   it("row 5: keeps existing tenant when already a member of the claimed tenant", async () => {
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_CLAIMED }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(true);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
@@ -715,7 +779,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_CLAIMED }]);
     mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(true);
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
@@ -737,10 +801,10 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_CLAIMED }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_CLAIMED }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(true);
-    expect(mockResolveTenantByClaim).toHaveBeenCalledWith("alias.example", mockPrisma);
+    expect(mockResolveTenantByClaim).toHaveBeenCalledWith("alias.example", SIGN_IN_ACCOUNT.provider, CLAIM_BINDING_MODE.OFF, mockPrisma);
     expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledTimes(1);
   });
 
@@ -749,7 +813,7 @@ describe("ensureTenantMembershipForSignIn", () => {
   it("row 6: migrates from the bootstrap tenant to the resolved claim tenant", async () => {
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(true);
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
@@ -758,7 +822,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       data: { tenantId: TENANT_CLAIMED },
     });
     expect(mockPrisma.account.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
+      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
       data: { tenantId: TENANT_CLAIMED },
     });
     // Verify all tenant-scoped data tables are migrated
@@ -766,12 +830,33 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
       data: { tenantId: TENANT_CLAIMED },
     });
-    for (const model of ["tag", "folder", "session", "extensionToken"] as const) {
+    for (const model of ["tag", "folder", "session"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
         where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
         data: { tenantId: TENANT_CLAIMED },
       });
     }
+    // MCP grants are bound to their client's tenant, and an extension or iOS
+    // token would skip the target tenant's passkey requirement until its
+    // refresh, an API key for its whole life: revoked, not moved.
+    for (const model of ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "extensionToken", "apiKey"] as const) {
+      expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    }
+    // Single-use codes are consumed: an MCP authorization code, and a bridge
+    // code, whose exchange would skip the target tenant's passkey requirement.
+    for (const model of ["mcpAuthorizationCode", "extensionBridgeCode", "mobileBridgeCode"] as const) {
+      expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, usedAt: null },
+        data: { usedAt: expect.any(Date) },
+      });
+    }
+    expect(mockPrisma.operatorToken.updateMany).toHaveBeenCalledWith({
+      where: { subjectUserId: "user-1", tenantId: TENANT_BOOTSTRAP, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
     // C13: audit_log tenant migration is now routed via SECURITY DEFINER
     // stored procedure (audit_log_tenant_migrate) instead of updateMany.
     expect(mockPrisma.$executeRaw).toHaveBeenCalled();
@@ -808,9 +893,45 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
     });
-    // Bootstrap migration returns early — no redundant upsert
-    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.tenantMember.create).toHaveBeenCalledWith({
+      data: { tenantId: TENANT_CLAIMED, userId: "user-1", role: "MEMBER" },
+    });
+    // The bootstrap membership goes FIRST: `tenant_members_one_active_per_user`
+    // refuses the new active row while the bootstrap one is still active.
+    expect(mockPrisma.tenantMember.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrisma.tenantMember.create.mock.invocationCallOrder[0]!,
+    );
+    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
     expect(mockPrisma.tenant.delete).not.toHaveBeenCalled();
+  });
+
+  // Row 6, the target already holds a membership row for this user — a
+  // deactivated one, since the bootstrap membership is the active one. A
+  // sign-in does not reactivate it (row 4 leaves it as found), and migrating
+  // would leave the user active nowhere, so it is refused before any write.
+  it("row 6: refuses with tenant_mismatch, before any write, when the user holds a membership row in the target", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+    mockPrisma.tenantMember.findUnique.mockResolvedValue({ id: "member-deactivated" });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "tenant_mismatch",
+      // The target's admins hold the remedy (reactivating the member).
+      tenantId: TENANT_CLAIMED,
+      claim: "tenant-acme",
+      claimRefusal: null,
+      providerBinding: null,
+    });
+    expect(mockPrisma.tenantMember.findUnique).toHaveBeenCalledWith({
+      where: { tenantId_userId: { tenantId: TENANT_CLAIMED, userId: "user-1" } },
+      select: { id: true },
+    });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.create).not.toHaveBeenCalled();
   });
 
   // Row 6b: bootstrap tenant has >1 active member — assertBootstrapSingleMember
@@ -822,11 +943,12 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.tenantMember.count.mockResolvedValue(2);
 
     await expect(
-      ensureTenantMembershipForSignIn("user-1", null, {}),
+      ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {}),
     ).rejects.toThrow(/Bootstrap migration aborted/);
 
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
-    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.create).not.toHaveBeenCalled();
   });
 
   // Row 7: claim resolves, but the user's existing tenant is a DIFFERENT,
@@ -834,7 +956,7 @@ describe("ensureTenantMembershipForSignIn", () => {
   it("row 7: denies with tenant_mismatch for cross-tenant sign-in to a non-bootstrap tenant", async () => {
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({
       ok: false,
@@ -842,6 +964,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       tenantId: TENANT_OTHER,
       claim: "tenant-acme",
       claimRefusal: null,
+      providerBinding: null,
     });
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
@@ -856,7 +979,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       return null;
     });
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(false);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
@@ -872,7 +995,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       return null;
     });
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(true);
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
@@ -882,10 +1005,10 @@ describe("ensureTenantMembershipForSignIn", () => {
   it("row 8: creates and joins a new tenant for an unregistered claim with no existing membership", async () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(true);
-    expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith("tenant-acme", mockPrisma);
+    expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith("tenant-acme", SIGN_IN_ACCOUNT.provider, CLAIM_BINDING_MODE.OFF, mockPrisma);
     expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith({
       where: { tenantId_userId: { tenantId: TENANT_NEW, userId: "user-1" } },
       create: { tenantId: TENANT_NEW, userId: "user-1", role: "MEMBER" },
@@ -903,7 +1026,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
     mockFindOrCreateTenantForClaim.mockResolvedValue(refusal({ kind: "claim_taken", tenantId: TENANT_CLAIM_OWNER }));
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     // Filed under the tenant that OWNS the contested claim, not under `null`
     // (round-3 F7). Two consequences: `tenant-domain unmapped` groups by
@@ -917,6 +1040,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       tenantId: TENANT_CLAIM_OWNER,
       claim: "tenant-acme",
       claimRefusal: null,
+      providerBinding: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -930,7 +1054,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       refusal({ kind: "claim_invalid", tenantId: null, refusal: claimRefusal("claim must be printable ASCII") }),
     );
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({
       ok: false,
@@ -940,6 +1064,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       // Round-6 F1: the diagnosis travels with the arm, so `unmapped` buckets
       // this as refused rather than as "move it with `add --from`".
       claimRefusal: claimRefusal("claim must be printable ASCII"),
+      providerBinding: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -954,7 +1079,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockFindOrCreateTenantForClaim.mockRejectedValueOnce(new Error("slug conflict"));
 
     await expect(
-      ensureTenantMembershipForSignIn("user-1", null, {}),
+      ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {}),
     ).rejects.toThrow("slug conflict");
   });
 
@@ -965,20 +1090,62 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result.ok).toBe(true);
-    expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith("tenant-acme", mockPrisma);
+    expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith("tenant-acme", SIGN_IN_ACCOUNT.provider, CLAIM_BINDING_MODE.OFF, mockPrisma);
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
       data: { tenantId: TENANT_NEW },
     });
-    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith({
-      where: { tenantId_userId: { tenantId: TENANT_NEW, userId: "user-1" } },
-      create: { tenantId: TENANT_NEW, userId: "user-1", role: "MEMBER" },
-      update: {},
+    expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP },
     });
+    expect(mockPrisma.tenantMember.create).toHaveBeenCalledWith({
+      data: { tenantId: TENANT_NEW, userId: "user-1", role: "MEMBER" },
+    });
+    expect(mockPrisma.tenantMember.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrisma.tenantMember.create.mock.invocationCallOrder[0]!,
+    );
+    expect(mockPrisma.apiKey.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_BOOTSTRAP, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  // The migrated sessions' cache tombstones: a write that did not land leaves
+  // the pre-migration SessionInfo cached, raised as invalidateUserSessions raises it.
+  it("row 6: logs and reports the migrated sessions' cache tombstones that did not land", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+    mockPrisma.session.findMany.mockResolvedValue([{ sessionToken: "digest-1" }, { sessionToken: "digest-2" }]);
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 2, failed: 1 });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result.ok).toBe(true);
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["digest-1", "digest-2"]);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1", failures: 1, _logType: "session.cache_tombstone_failures" }),
+      "session.cache_tombstone_failures",
+    );
+    expect(mockSentryCaptureMessage).toHaveBeenCalledWith(
+      expect.stringContaining("tombstone failures"),
+      expect.objectContaining({ level: "error", extra: expect.objectContaining({ userId: "user-1", failures: 1 }) }),
+    );
+  });
+
+  it("row 6: raises nothing when every migrated session's cache tombstone lands", async () => {
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+    mockPrisma.session.findMany.mockResolvedValue([{ sessionToken: "digest-1" }]);
+    mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 1, failed: 0 });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+    expect(result.ok).toBe(true);
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["digest-1"]);
+    expect(mockLoggerError).not.toHaveBeenCalled();
+    expect(mockSentryCaptureMessage).not.toHaveBeenCalled();
   });
 
   // Row 9a refusals (round-1 M2): same two arms as row 8b, reached via the
@@ -989,7 +1156,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockFindOrCreateTenantForClaim.mockResolvedValue(refusal({ kind: "claim_taken", tenantId: TENANT_CLAIM_OWNER }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     // The claim's owner outranks the user's existing tenant (round-3 F7):
     // both are known here, and the operator's remedy names the owner. Before
@@ -1001,6 +1168,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       tenantId: TENANT_CLAIM_OWNER,
       claim: "tenant-acme",
       claimRefusal: null,
+      providerBinding: null,
     });
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -1013,7 +1181,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     );
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({
       ok: false,
@@ -1021,6 +1189,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       tenantId: TENANT_BOOTSTRAP,
       claim: "tenant-acme",
       claimRefusal: claimRefusal("claim must be printable ASCII"),
+      providerBinding: null,
     });
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -1035,7 +1204,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
 
-    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+    const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
 
     expect(result).toEqual({
       ok: false,
@@ -1043,6 +1212,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       tenantId: TENANT_OTHER,
       claim: "tenant-acme",
       claimRefusal: null,
+      providerBinding: null,
     });
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -1060,7 +1230,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     ]);
 
     await expect(
-      ensureTenantMembershipForSignIn("user-1", null, {}),
+      ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {}),
     ).rejects.toThrow("MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED");
 
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
@@ -1091,7 +1261,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     // or replaced the error would still satisfy .rejects.toThrow() but would
     // no longer be the value the outer signIn callback's catch logs and
     // classifies from.
-    await expect(ensureTenantMembershipForSignIn("user-1", null, {})).rejects.toBe(error);
+    await expect(ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {})).rejects.toBe(error);
     // The distinguishing log line belongs to the OTHER arm (unnamed_check)
     // only — a different constraint has a name, just not one of ours, so
     // there is nothing here for that branch to say.
@@ -1105,7 +1275,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     const error = checkViolation("リレーションの新しい行はチェック制約に違反しています");
     mockPrisma.tenantMember.upsert.mockRejectedValueOnce(error);
 
-    await expect(ensureTenantMembershipForSignIn("user-1", null, {})).rejects.toBe(error);
+    await expect(ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {})).rejects.toBe(error);
     // The ONE place this deployment records that a CHECK was involved at
     // all: the reason the outer catch's emit will carry (provider_error) is
     // indistinguishable from a dozen unrelated failures, and only this line
@@ -1118,23 +1288,150 @@ describe("ensureTenantMembershipForSignIn", () => {
   });
 });
 
-describe("signIn callback", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const signInCallback = (nextAuthInitArgs[0] as any).callbacks.signIn as (
-    params: {
-      user: { id?: string; email?: string };
-      account?: { provider: string } | null;
-      profile?: Record<string, unknown> | null;
-    },
-  ) => Promise<boolean>;
+/**
+ * Plan sso-claim-connection-binding, C4/C5, at the dispatch level. The resolver
+ * is mocked, so these pin what src/auth.ts hands it and what it makes of the
+ * binding arms; the real adjudication is in the db-integration grid.
+ */
+describe("ensureTenantMembershipForSignIn — provider binding", () => {
+  const TENANT_OWNER = "00000000-0000-4000-a000-000000000004";
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "");
+    vi.stubEnv("AUTH_SECRET", "");
+    mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+  });
+
+  it("refuses a claim that arrives with no account, without resolving it", async () => {
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "provider_error",
+      tenantId: null,
+      claim: "tenant-acme",
+      claimRefusal: null,
+      providerBinding: null,
+    });
+    expect(mockResolveTenantByClaim).not.toHaveBeenCalled();
+    expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
+  });
+
+  it("allows a claimless sign-in with no account (no provider is needed)", async () => {
+    mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "absent" }));
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    await expect(ensureTenantMembershipForSignIn("user-1", null, null)).resolves.toEqual({ ok: true });
+  });
+
+  it("hands the resolver the derived mode, read from the env at the call", async () => {
+    vi.stubEnv("AUTH_GOOGLE_ID", "google-id");
+    vi.stubEnv("AUTH_GOOGLE_SECRET", "google-secret");
+    vi.stubEnv("AUTH_CLAIM_BINDING", "strict");
+    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_OWNER }));
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-1" });
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OWNER });
+
+    await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+    expect(mockResolveTenantByClaim).toHaveBeenCalledWith(
+      "tenant-acme",
+      SIGN_IN_ACCOUNT.provider,
+      CLAIM_BINDING_MODE.STRICT,
+      mockPrisma,
+    );
+
+    vi.stubEnv("AUTH_CLAIM_BINDING", "off");
+    await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+    expect(mockResolveTenantByClaim).toHaveBeenLastCalledWith(
+      "tenant-acme",
+      SIGN_IN_ACCOUNT.provider,
+      CLAIM_BINDING_MODE.OFF,
+      mockPrisma,
+    );
+  });
+
+  it.each([
+    [
+      "provider_mismatch",
+      lookup({ kind: "provider_mismatch", tenantId: TENANT_OWNER, boundProvider: "saml-jackson-b" }),
+      "tenant_claim_provider_mismatch",
+      "saml-jackson-b",
+    ],
+    ["unbound", lookup({ kind: "unbound", tenantId: TENANT_OWNER }), "tenant_claim_unbound", null],
+  ] as const)(
+    "a %s lookup refuses under the owning tenant with its binding fields",
+    async (_label, refusing, reason, boundProvider) => {
+      mockResolveTenantByClaim.mockResolvedValue(refusing);
+
+      const result = await ensureTenantMembershipForSignIn("user-1", SIGN_IN_ACCOUNT, {});
+
+      expect(result).toEqual({
+        ok: false,
+        reason,
+        tenantId: TENANT_OWNER,
+        claim: "tenant-acme",
+        claimRefusal: null,
+        // No pepper in this env, so no ref.
+        providerBinding: { boundProvider, signInProviderRef: null },
+      });
+      expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("signIn callback", () => {
+  type SignInParams = {
+    user: { id?: string; email?: string };
+    account?: { provider: string; type: string; providerAccountId: string } | null;
+    profile?: Record<string, unknown> | null;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const capturedSignIn = (nextAuthInitArgs[0] as any).callbacks.signIn as (
+    params: SignInParams,
+  ) => Promise<boolean>;
+  // `type` decides the subject lookup: an oauth/oidc account resolves through
+  // the adapter's account link, anything else by email. A cell that omits it
+  // drives the email arm, which no Google/Jackson sign-in takes, so it is
+  // refused here as well as at compile time.
+  const signInCallback = (params: SignInParams): Promise<boolean> => {
+    if (params.account && !params.account.type) {
+      throw new Error(
+        `signIn cell passed a "${params.account.provider}" account without \`type\`; ` +
+          `Google/Jackson sign-ins arrive as type "oidc"`,
+      );
+    }
+    if (
+      (params.account?.type === "oidc" || params.account?.type === "oauth") &&
+      !params.account.providerAccountId
+    ) {
+      throw new Error(
+        `signIn cell passed an ${params.account.type} account without \`providerAccountId\``,
+      );
+    }
+    return capturedSignIn(params);
+  };
+  const GOOGLE_ACCOUNT = { provider: "google", type: "oidc", providerAccountId: "google-sub-1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // clearAllMocks keeps implementations, so the subject lookups are reset
+    // here: an earlier cell's linked user must not leak into a first sign-in.
+    mockGetUserByAccount.mockResolvedValue(null);
+    mockGetUserByEmail.mockResolvedValue(null);
+    mockAllowsDangerousEmailAccountLinking.mockReturnValue(false);
     mockTenantClaimStore.tenantClaim = null;
+    mockTenantClaimStore.provider = null;
     mockTenantClaimGetStore.mockReturnValue(mockTenantClaimStore);
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "absent" }));
     mockPrisma.user.findUnique.mockResolvedValue(null);
+    // mockReset, not clearAllMocks: a cell's unconsumed `...Once` queue on
+    // these would otherwise answer the next cell's first call.
+    mockPrisma.tenantMember.findMany.mockReset();
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMember.upsert.mockReset();
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
   });
 
   it("records the realignment end-to-end on a real sign-in", async () => {
@@ -1151,12 +1448,8 @@ describe("signIn callback", () => {
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
     mockPrisma.user.update.mockResolvedValue({});
-    mockPrisma.user.findUnique.mockImplementation(
-      async ({ select }: { select?: Record<string, unknown> }) =>
-        select && "tenantId" in select
-          ? { tenantId: TENANT_LEFT }
-          : { id: "real-db-id" },
-    );
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "moved@corp.com" });
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_LEFT });
     for (const handle of STRANDED_MODEL_HANDLES) {
       strandedDelegate(handle).count.mockResolvedValue(0);
     }
@@ -1164,7 +1457,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "moved@corp.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1189,20 +1482,23 @@ describe("signIn callback", () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_JOINED }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
-    mockPrisma.user.findUnique.mockImplementation(
-      async ({ select }: { select?: Record<string, unknown> }) =>
-        select && "tenantId" in select
-          ? { tenantId: TENANT_JOINED }
-          : { id: "real-db-id" },
-    );
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "ordinary@corp.com" });
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_JOINED });
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "ordinary@corp.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
     expect(result).toBe(true);
+    // The join ran, for the account's user: without this a sign-in that
+    // resolved no subject would also return true and emit nothing.
+    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId_userId: { tenantId: TENANT_JOINED, userId: "real-db-id" } },
+      }),
+    );
     expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 
@@ -1211,46 +1507,59 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@example.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
     expect(result).toBe(true);
-    // Should have looked up by email
-    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-      where: { email: "new@example.com" },
-      select: { id: true },
+    // Should have looked up the account link, then the email
+    expect(mockGetUserByAccount).toHaveBeenCalledWith({
+      provider: GOOGLE_ACCOUNT.provider,
+      providerAccountId: GOOGLE_ACCOUNT.providerAccountId,
     });
+    expect(mockGetUserByEmail).toHaveBeenCalledWith("new@example.com");
     // Should NOT have tried to upsert tenant membership
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
 
   it("uses DB id (not pre-generated id) for existing user", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    const TENANT_JOINED = "00000000-0000-4000-a000-000000000001";
+    mockExtractTenantClaimValue.mockReturnValue(
+      extraction({ kind: "claim", value: "tenant-acme" }),
+    );
+    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_JOINED }));
+    mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_JOINED });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "existing@example.com" });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "existing@example.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
     expect(result).toBe(true);
-    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-      where: { email: "existing@example.com" },
-      select: { id: true },
+    expect(mockGetUserByAccount).toHaveBeenCalledWith({
+      provider: GOOGLE_ACCOUNT.provider,
+      providerAccountId: GOOGLE_ACCOUNT.providerAccountId,
     });
+    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId_userId: { tenantId: TENANT_JOINED, userId: "real-db-id" } },
+      }),
+    );
   });
 
   it("returns true when user has no email", async () => {
     const result = await signInCallback({
       user: { id: "some-id" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
     expect(result).toBe(true);
-    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    expect(mockGetUserByEmail).not.toHaveBeenCalled();
   });
 
   it("stores tenant claim in tenantClaimStorage for new user", async () => {
@@ -1259,12 +1568,14 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
     expect(result).toBe(true);
     expect(mockTenantClaimStore.tenantClaim).toBe("acme.com");
+    // Set together with the claim (C5): createUser decides the binding on it.
+    expect(mockTenantClaimStore.provider).toBe("google");
     // ensureTenantMembershipForSignIn should NOT be called for new users
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -1275,7 +1586,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@example.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1304,7 +1615,7 @@ describe("signIn callback", () => {
       // spellings are refusals is pinned in tenant-claim.test.ts against the
       // real function.
       user: { id: "pre-gen-id", email: "new@acme.example" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1333,7 +1644,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1355,7 +1666,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "new@example.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1366,7 +1677,7 @@ describe("signIn callback", () => {
   });
 
   it("calls ensureTenantMembershipForSignIn with DB id for existing user with tenant claim", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
@@ -1374,7 +1685,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1395,7 +1706,7 @@ describe("signIn callback", () => {
   // trail is wrong. These two tests drive the real signIn callback and
   // assert what actually reaches emitAuthLoginFailure.
   it("emits tenant_claim_unmapped via emitAuthLoginFailure (row 9b, driven through signIn)", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@newco.example" });
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "newco.example" }));
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000003" }]);
@@ -1403,7 +1714,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@newco.example" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "newco.example" },
     });
 
@@ -1416,12 +1727,13 @@ describe("signIn callback", () => {
       userId: "real-db-id",
       claim: "newco.example",
       claimRefusal: null,
+      providerBinding: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
 
   it("emits tenant_mismatch via emitAuthLoginFailure (row 7, driven through signIn)", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000003" }]);
@@ -1429,7 +1741,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1442,6 +1754,7 @@ describe("signIn callback", () => {
       userId: "real-db-id",
       claim: "tenant-acme",
       claimRefusal: null,
+      providerBinding: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -1460,7 +1773,7 @@ describe("signIn callback", () => {
    * operator runs to find them returns nothing at all.
    */
   it("forwards the refusal diagnosis to emitAuthLoginFailure (existing user, driven through signIn)", async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
     mockExtractTenantClaimValue.mockReturnValue(
       extraction({ kind: "malformed", diagnosis: claimRefusal("contains U+200B") }),
     );
@@ -1470,7 +1783,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: {},
     });
 
@@ -1483,6 +1796,7 @@ describe("signIn callback", () => {
       userId: "real-db-id",
       claim: null,
       claimRefusal: claimRefusal("contains U+200B"),
+      providerBinding: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -1495,7 +1809,7 @@ describe("signIn callback", () => {
   it.each(["boxyhq-saml", "saml-jackson"])(
     "maps the %s provider id to the saml audit provider",
     async (providerId) => {
-      mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+      mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
       mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
       mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
       mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000003" }]);
@@ -1503,7 +1817,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "user@acme.com" },
-        account: { provider: providerId },
+        account: { provider: providerId, type: "oidc", providerAccountId: "idp-sub-1" },
         profile: {},
       });
 
@@ -1531,7 +1845,7 @@ describe("signIn callback", () => {
     ],
     ["an unnamed check constraint", "リレーションの新しい行はチェック制約に違反しています"],
   ])("routes a 23514 from %s to provider_error", async (_label, message) => {
-    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockGetUserByAccount.mockResolvedValue({ id: "real-db-id", email: "user@acme.com" });
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
     mockResolveTenantByClaim.mockResolvedValue(
       lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }),
@@ -1541,7 +1855,7 @@ describe("signIn callback", () => {
 
     const result = await signInCallback({
       user: { id: "pre-gen-id", email: "user@acme.com" },
-      account: { provider: "google" },
+      account: GOOGLE_ACCOUNT,
       profile: { hd: "acme.com" },
     });
 
@@ -1555,6 +1869,120 @@ describe("signIn callback", () => {
       provider: "google",
       reason: "provider_error",
       userId: "real-db-id",
+    });
+  });
+
+  // S1: Auth.js runs this callback BEFORE its account-link check, so the user
+  // an OAuth/OIDC sign-in writes for must be the one Auth.js signs in — never
+  // the user the IdP-asserted email happens to name.
+  describe("OAuth/OIDC sign-in subject", () => {
+    const LINKED_USER = "00000000-0000-4000-b000-000000000001";
+    const EMAIL_USER = "00000000-0000-4000-b000-000000000002";
+    const OIDC_ACCOUNT = { provider: "saml-jackson-alpha", type: "oidc", providerAccountId: "idp-sub-1" };
+
+    beforeEach(() => {
+      mockGetUserByAccount.mockResolvedValue(null);
+      mockGetUserByEmail.mockResolvedValue(null);
+      mockAllowsDangerousEmailAccountLinking.mockReturnValue(false);
+      mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
+      mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }));
+      mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+      mockPrisma.tenantMember.upsert.mockResolvedValue({ id: "member-joined" });
+      mockPrisma.user.findUnique.mockResolvedValue({ tenantId: "00000000-0000-4000-a000-000000000001" });
+      for (const handle of STRANDED_MODEL_HANDLES) {
+        strandedDelegate(handle).count.mockResolvedValue(0);
+      }
+    });
+
+    it("writes for the linked account's user, whatever email is asserted", async () => {
+      mockGetUserByAccount.mockResolvedValue({ id: LINKED_USER, email: "linked@corp.example" });
+      mockGetUserByEmail.mockResolvedValue({ id: EMAIL_USER, email: "victim@corp.example" });
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "victim@corp.example" },
+        account: OIDC_ACCOUNT,
+        profile: {},
+      });
+
+      expect(result).toBe(true);
+      expect(mockGetUserByAccount).toHaveBeenCalledWith({
+        provider: OIDC_ACCOUNT.provider,
+        providerAccountId: OIDC_ACCOUNT.providerAccountId,
+      });
+      expect(mockGetUserByEmail).not.toHaveBeenCalled();
+      expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ userId: LINKED_USER }) }),
+      );
+    });
+
+    it("refuses an unlinked account whose email names a user, before any write", async () => {
+      mockGetUserByEmail.mockResolvedValue({ id: EMAIL_USER, email: "victim@corp.example" });
+
+      const result = await signInCallback({
+        user: { id: "idp-sub-1", email: "victim@corp.example" },
+        account: OIDC_ACCOUNT,
+        profile: {},
+      });
+
+      expect(result).toBe(false);
+      expect(mockAllowsDangerousEmailAccountLinking).toHaveBeenCalledWith(OIDC_ACCOUNT.provider);
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "victim@corp.example",
+        // The real mapping: this connection is not configured in the unit env.
+        provider: toAuditProvider(OIDC_ACCOUNT.provider),
+        reason: "account_not_linked",
+        userId: EMAIL_USER,
+      });
+      expect(mockResolveTenantByClaim).not.toHaveBeenCalled();
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockTenantClaimStore.tenantClaim).toBeNull();
+    });
+
+    it("proceeds with the email's user where the provider links by email", async () => {
+      mockGetUserByEmail.mockResolvedValue({ id: EMAIL_USER, email: "user@corp.example" });
+      mockAllowsDangerousEmailAccountLinking.mockReturnValue(true);
+
+      const result = await signInCallback({
+        user: { id: "google-sub", email: "user@corp.example" },
+        account: { provider: "google", type: "oidc", providerAccountId: "google-sub" },
+        profile: {},
+      });
+
+      expect(result).toBe(true);
+      expect(mockAllowsDangerousEmailAccountLinking).toHaveBeenCalledWith("google");
+      expect(mockEmitAuthLoginFailure).not.toHaveBeenCalled();
+      expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ userId: EMAIL_USER }) }),
+      );
+    });
+
+    it("takes the first-sign-in path for an unlinked account whose email names no user", async () => {
+      const result = await signInCallback({
+        user: { id: "idp-sub-1", email: "new@corp.example" },
+        account: OIDC_ACCOUNT,
+        profile: {},
+      });
+
+      expect(result).toBe(true);
+      expect(mockGetUserByEmail).toHaveBeenCalledWith("new@corp.example");
+      expect(mockTenantClaimStore.tenantClaim).toBe("tenant-acme");
+      expect(mockTenantClaimStore.provider).toBe(OIDC_ACCOUNT.provider);
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it("leaves a non-OAuth account type on the email lookup", async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "magic@example.com" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "magic@example.com" },
+        profile: null,
+      });
+
+      expect(result).toBe(true);
+      expect(mockGetUserByAccount).not.toHaveBeenCalled();
+      expect(mockGetUserByEmail).not.toHaveBeenCalled();
     });
   });
 
@@ -1593,7 +2021,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "newuser@example.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "newuser@example.com" },
         profile: null,
       });
 
@@ -1609,7 +2037,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "bootstrap@example.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "bootstrap@example.com" },
         profile: null,
       });
 
@@ -1622,7 +2050,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "sso-user@corp.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "sso-user@corp.com" },
         profile: null,
       });
 
@@ -1656,7 +2084,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "scim-moved@corp.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "scim-moved@corp.com" },
         profile: null,
       });
 
@@ -1691,7 +2119,7 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "orphaned@corp.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "orphaned@corp.com" },
         profile: null,
       });
 
@@ -1715,12 +2143,19 @@ describe("signIn callback", () => {
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "bootstrap@example.com" },
-        account: { provider: "nodemailer" },
+        account: { provider: "nodemailer", type: "email", providerAccountId: "bootstrap@example.com" },
         profile: null,
       });
 
       // The try-catch in signIn callback catches the error and returns false
       expect(result).toBe(false);
+      // ...and files it as provider_error under the user the sign-in resolved.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "bootstrap@example.com",
+        provider: "nodemailer",
+        reason: "provider_error",
+        userId: "real-db-id",
+      });
     });
   });
 });

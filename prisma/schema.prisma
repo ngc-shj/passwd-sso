@@ -1818,6 +1818,9 @@ model TenantClaim {
   createdBy String?   @map("created_by") @db.VarChar(255)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+  /// The SSO provider id the claim is bound to; NULL = provenance unknown.
+  /// CHECK on PROVIDER_ID_PATTERN in the migration.
+  provider  String?   @db.VarChar(64)
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -1856,6 +1859,8 @@ model TenantClaimEvent {
   clientAddr    String?   @map("client_addr") @db.Inet
   createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
   seq           BigInt    @unique @default(autoincrement())
+  oldProvider   String?   @map("old_provider") @db.VarChar(64)
+  newProvider   String?   @map("new_provider") @db.VarChar(64)
 
   @@index([claim])
   @@index([createdAt])

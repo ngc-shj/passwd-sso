@@ -1,4 +1,5 @@
 import type { envObject } from "@/lib/env-schema";
+import { CONNECTION_ID_PATTERN } from "@/lib/auth/jackson-providers";
 import type { z } from "zod";
 
 // T22: enumerated groups — typos become compile errors.
@@ -38,6 +39,9 @@ export type SidecarEntry = {
   description: string;
   example?: string;
   secret?: boolean;
+  /** false: init-env never offers a random value for this secret — its value
+   *  is structured (e.g. JSON), so a generated key would be refused at boot. */
+  generate?: false;
   scope?: "runtime" | "build" | "framework-set";
   /** When true, .env.example renders this key uncommented even if it has no
    *  Zod default and is not isAlwaysRequired — it is required for any
@@ -192,17 +196,43 @@ export const descriptions: Record<
     description: "OIDC client secret registered in BoxyHQ SAML Jackson.",
     secret: true,
   },
-  JACKSON_URL: {
+  AUTH_JACKSON_CONNECTIONS: {
     group: "Auth providers",
     order: 6,
     description:
+      "JSON array of Jackson connections, one Auth.js provider each:\n" +
+      '[{"id":"acme","name":"Acme SSO","clientId":"...","clientSecret":"..."}].\n' +
+      "Each entry signs in as provider 'saml-jackson-<id>' with that connection's\n" +
+      "own client id and secret; the connection's redirectUrl must allow\n" +
+      `/api/auth/callback/saml-jackson-<id>. id: ${CONNECTION_ID_PATTERN}, unique, and\n` +
+      "immutable (renaming it orphans the accounts signed in through it).\n" +
+      "May coexist with AUTH_JACKSON_ID/AUTH_JACKSON_SECRET (provider 'saml-jackson').\n" +
+      "Refused: the 'dummy' client, tenant/product-encoded client ids, 'fed_' ids,\n" +
+      "and a client id shared by two providers.",
+    secret: true,
+    generate: false,
+  },
+  JACKSON_URL: {
+    group: "Auth providers",
+    order: 7,
+    description:
       "Base URL of the BoxyHQ SAML Jackson instance (OIDC proxy).\n" +
-      "Required when AUTH_JACKSON_ID and AUTH_JACKSON_SECRET are set.",
+      "Required when AUTH_JACKSON_ID/AUTH_JACKSON_SECRET or AUTH_JACKSON_CONNECTIONS are set.",
     example: "http://localhost:5225",
+  },
+  AUTH_CLAIM_BINDING: {
+    group: "Auth providers",
+    order: 8,
+    description:
+      "Tenant-claim binding mode: 'off' or 'strict' (default: off). In strict mode a\n" +
+      "tenant claim resolves only through the SSO provider it is bound to.\n" +
+      "Must be set to 'strict' explicitly when two or more SSO providers (Google and\n" +
+      "each Jackson connection) are configured — the app refuses to start otherwise.",
+    example: "strict",
   },
   AUTH_TENANT_CLAIM_KEYS: {
     group: "Auth providers",
-    order: 7,
+    order: 9,
     description:
       "Comma-separated JWT claim keys used to extract the tenant identifier\n" +
       "from the OIDC token (e.g. 'tenant,org_id'). Leaving this unset selects a\n" +
@@ -220,8 +250,10 @@ export const descriptions: Record<
   },
   SAML_PROVIDER_NAME: {
     group: "Auth providers",
-    order: 8,
-    description: "Display name for the SAML/SSO button on the sign-in page. Default: SSO.",
+    order: 10,
+    description:
+      "Display name for the AUTH_JACKSON_ID provider's button on the sign-in page. Default: SSO.\n" +
+      "AUTH_JACKSON_CONNECTIONS entries carry their own name.",
     example: "SSO",
   },
 

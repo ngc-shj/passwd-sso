@@ -43,8 +43,9 @@ Set these in Vercel Project Settings → Environment Variables:
   - `AUTH_GOOGLE_SECRET`
   - `GOOGLE_WORKSPACE_DOMAINS` (optional)
   - `JACKSON_URL` (URL of your externally-hosted Jackson service — Vercel cannot run Docker containers)
-  - `AUTH_JACKSON_ID`
-  - `AUTH_JACKSON_SECRET`
+  - `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` (one Jackson connection's own client credentials — provider `saml-jackson`; never Jackson's `dummy` client or a `tenant=…&product=…` id)
+  - `AUTH_JACKSON_CONNECTIONS` (optional — further connections, one provider `saml-jackson-<id>` each; see the README's [SAML sign-in](../../../README.md#saml-sign-in--bind-the-tenant-to-the-connection) section)
+  - `AUTH_CLAIM_BINDING` (`strict` when two or more SSO providers are configured — the app refuses to start otherwise; on an existing deployment run the [SSO tenant claim binding upgrade](../../../README.md#sso-tenant-claim-binding-upgrade) first)
   - `SAML_PROVIDER_NAME`
   - `JACKSON_API_KEY` (API key for the externally-hosted Jackson container; passed to Jackson as `JACKSON_API_KEYS`)
 
@@ -92,6 +93,7 @@ Jackson required env vars:
 - `NEXTAUTH_URL` and `EXTERNAL_URL` (public URL of Jackson)
 - `NEXTAUTH_SECRET` (same value as `AUTH_SECRET`)
 - `NEXTAUTH_ACL=*`
+- `FLATTEN_RAW_CLAIMS` unset or `false` (Jackson's default). With `true`, an IdP can override the id_token's `nonce` and `requested` fields, which the SAML connection binding relies on
 
 ## 5. Post-deploy Verification
 

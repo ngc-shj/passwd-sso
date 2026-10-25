@@ -68,7 +68,7 @@ Auth.js connects to it as a standard OIDC provider, so no SAML implementation is
 
 Any SAML 2.0 compliant IdP (HENNGE, Okta, Azure AD, OneLogin, Google Workspace SAML, etc.) can be used.
 
-The npm package (`@boxyhq/saml-jackson`) was avoided due to heavy dependencies and known vulnerabilities. The Docker image (`boxyhq/jackson:latest`) is used instead.
+The npm package (`@boxyhq/saml-jackson`) was avoided due to heavy dependencies and known vulnerabilities. The Docker image is used instead, pinned to a version (`boxyhq/jackson:1.52.2` in `docker-compose.yml`): the SAML connection binding depends on how Jackson's token endpoint behaves, measured per version (see the README's [SAML sign-in](../../../README.md#saml-sign-in--bind-the-tenant-to-the-connection) section). Do not bump it without a probe run.
 
 ## Prerequisites
 
@@ -118,9 +118,11 @@ Set the following values:
 | `AUTH_GOOGLE_SECRET` | Google OAuth Client Secret | From Google Cloud Console |
 | `GOOGLE_WORKSPACE_DOMAINS` | Allowed domain(s), comma-separated | e.g., `example.com,example.co.jp` |
 | `JACKSON_URL` | SAML Jackson URL | `http://localhost:5225` for dev |
-| `AUTH_JACKSON_ID` | Jackson OIDC Client ID | From Jackson admin panel |
-| `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret | From Jackson admin panel |
-| `SAML_PROVIDER_NAME` | SAML IdP display name on sign-in page | e.g., `HENNGE`, `Okta`, `Azure AD` |
+| `AUTH_JACKSON_ID` | Client ID of one Jackson connection (provider `saml-jackson`) | That connection's own `clientID` — never `dummy` or a `tenant=…&product=…` id |
+| `AUTH_JACKSON_SECRET` | That connection's Client Secret | That connection's own `clientSecret` |
+| `AUTH_JACKSON_CONNECTIONS` | (Optional) More Jackson connections, one provider `saml-jackson-<id>` each | `[{"id":"acme","name":"Acme SSO","clientId":"...","clientSecret":"..."}]` |
+| `AUTH_CLAIM_BINDING` | `off` (default) or `strict`. Must be `strict` when two or more SSO providers (Google, each Jackson connection) are configured — the app refuses to start otherwise | `strict` |
+| `SAML_PROVIDER_NAME` | Sign-in button label for the `AUTH_JACKSON_ID` provider | e.g., `HENNGE`, `Okta`, `Azure AD` |
 | `SHARE_MASTER_KEY` | Master key for organization vault encryption (256-bit hex) | `openssl rand -hex 32` |
 | `REDIS_URL` | Redis URL — REQUIRED in production (Zod schema enforces this for `NODE_ENV=production`). Backs the session cache (tombstone-based revocation propagation, PR #407) and shared rate limiting. Single-instance dev may omit it; the app falls back to in-memory caches with a logged warning. Set `HEALTH_REDIS_REQUIRED=true` to fail readiness probes when Redis is unreachable. | e.g., `redis://host:6379` |
 | `JACKSON_API_KEY` | API key for the SAML Jackson container — mapped to `JACKSON_API_KEYS` inside Jackson. Not in the Zod schema (external service credential). | `openssl rand -hex 24` |
@@ -264,17 +266,25 @@ Any SAML 2.0 compliant IdP (HENNGE, Okta, Azure AD, OneLogin, etc.) can be used.
    docker compose up jackson -d
    ```
 
-2. In the Jackson admin panel (`http://localhost:5225`):
-   - Register your IdP's SAML metadata XML
-   - Configure tenant / product
+2. In the Jackson admin panel (`http://localhost:5225`), create one SSO connection per customer IdP:
+   - Register the IdP's SAML metadata XML. Each connection's IdP must have its own entityId and signing key. Jackson picks candidate connections by the response's Issuer, so two connections that share one would be indistinguishable.
+   - Set tenant / product.
+   - Set the connection's redirect URL to allow `<AUTH_URL><NEXT_PUBLIC_BASE_PATH>/api/auth/callback/<provider id>`. The provider id is `saml-jackson` for the connection in `AUTH_JACKSON_ID`, and `saml-jackson-<id>` for an `AUTH_JACKSON_CONNECTIONS` entry.
 
 3. In your IdP's admin panel:
    - ACS URL: `http://localhost:5225/api/oauth/saml`
    - Entity ID: Use the value provided by Jackson
 
-4. Set the OIDC Client ID / Secret issued by Jackson in `.env`
+4. Put each connection's own Client ID / Client Secret in `.env`. Jackson shows them with the connection.
+   - One connection goes in `AUTH_JACKSON_ID` / `AUTH_JACKSON_SECRET` (provider `saml-jackson`).
+   - Further connections go in `AUTH_JACKSON_CONNECTIONS`, one entry each. The entry's `id` is immutable once users have signed in through it: renaming it orphans their accounts, and pointing it at another connection hands that connection's IdP every account under it.
+   - The app refuses to start on Jackson's `dummy` client, a `tenant=…&product=…`-encoded client id, a `fed_` id, or a client id used twice.
 
-5. Set `SAML_PROVIDER_NAME` in `.env` to the IdP name shown on the sign-in page (e.g., `HENNGE`, `Okta`)
+5. Set `SAML_PROVIDER_NAME` in `.env` to the button label for the `AUTH_JACKSON_ID` connection (e.g., `HENNGE`, `Okta`). `AUTH_JACKSON_CONNECTIONS` entries use their own `name`.
+
+6. With two or more SSO providers (Google and each Jackson connection count), set `AUTH_CLAIM_BINDING=strict`; the app refuses to start without it. On an existing deployment, bind the existing tenant claims first: see the README's [SSO tenant claim binding upgrade](../../../README.md#sso-tenant-claim-binding-upgrade).
+
+Leave Jackson's `FLATTEN_RAW_CLAIMS` unset or `false`. With `true`, an IdP can override the id_token's `nonce` and `requested` fields.
 
 ## Production Deployment
 

@@ -4,7 +4,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
-import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
+import { findOrCreateTenantForClaim, providerBindingOf } from "@/lib/tenant/tenant-management";
+import { deriveClaimBindingMode } from "@/lib/auth/jackson-providers";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -13,7 +14,7 @@ import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
 import { BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit/audit";
-import { emitAuthLoginFailure } from "@/lib/audit/auth-failure";
+import { emitAuthLoginFailure, type ProviderBindingAudit } from "@/lib/audit/auth-failure";
 import {
   CLAIM_REFUSAL_REASON,
   toAuditProvider,
@@ -76,17 +77,26 @@ export class TenantClaimUnusableError extends Error {
    * the shape of round-4 F1, round-5 F2 and round-6 F1 (SEC-R6-3 / F1).
    */
   readonly refusal: ClaimRefusalDiagnosis | null;
+  /**
+   * `boundProvider` / `signInProviderRef` for the two binding arms
+   * (`claim_unbound`, `claim_provider_mismatch`); null otherwise. Rides along
+   * for the same reason as `tenantId`: the emit happens in the catch, after the
+   * transaction that knew them has gone.
+   */
+  readonly providerBinding: ProviderBindingAudit | null;
 
   constructor(
     kind: ClaimRefusalKind,
     tenantId: string | null,
     refusal: ClaimRefusalDiagnosis | null = null,
+    providerBinding: ProviderBindingAudit | null = null,
   ) {
     super("TENANT_CLAIM_UNUSABLE");
     this.name = "TenantClaimUnusableError";
     this.kind = kind;
     this.tenantId = tenantId;
     this.refusal = refusal;
+    this.providerBinding = providerBinding;
   }
 }
 
@@ -261,6 +271,9 @@ export function createCustomAdapter(): Adapter {
       // between them passes the producer's guard and lands here.
       const claimStore = tenantClaimStorage.getStore();
       const pendingClaim = claimStore?.tenantClaim ?? null;
+      // Read together with the claim (C5): the provider that presented it is
+      // what the binding is decided against.
+      const pendingProvider = claimStore?.provider ?? null;
 
       const created = await withBypassRls(prisma, async (tx) => {
         // Fail closed INSIDE the transaction, so the refusal takes the same
@@ -299,7 +312,31 @@ export function createCustomAdapter(): Adapter {
         // migration. An unusable claim now fails the sign-in closed.
         let tenant: { id: string };
         if (pendingClaim) {
-          const resolution = await findOrCreateTenantForClaim(pendingClaim, tx);
+          // No NULL fallback: resolving without the presenting provider would
+          // register the claim with no provenance, or match it in off mode as
+          // if the provider did not matter.
+          if (pendingProvider === null) {
+            logger.error("auth.create_user.claim_without_provider");
+            throw new TenantClaimUnusableError("provider_unavailable", null);
+          }
+          // The signIn callback also records the provider in sessionMetaStorage
+          // for Session.provider. Two carriers of one fact must agree; an
+          // absent meta is not a disagreement (the claim store is the
+          // carrier the binding decision reads).
+          const metaProvider = sessionMetaStorage.getStore()?.provider ?? null;
+          if (metaProvider !== null && metaProvider !== pendingProvider) {
+            logger.error(
+              { claimProvider: pendingProvider, sessionProvider: metaProvider },
+              "auth.create_user.claim_provider_disagreement",
+            );
+            throw new TenantClaimUnusableError("provider_disagreement", null);
+          }
+          const resolution = await findOrCreateTenantForClaim(
+            pendingClaim,
+            pendingProvider,
+            deriveClaimBindingMode(),
+            tx,
+          );
           if (resolution.kind !== "tenant") {
             // Revoked claim row (D2) or storableClaimSchema reject (SC9). In every case the claim is not
             // this deployment's to hand out, and the operator's remedy is in
@@ -331,6 +368,7 @@ export function createCustomAdapter(): Adapter {
               resolution.kind,
               resolution.tenantId,
               resolution.kind === "claim_invalid" ? resolution.refusal : null,
+              providerBindingOf(resolution, pendingProvider),
             );
           }
           tenant = { id: resolution.id };
@@ -395,6 +433,7 @@ export function createCustomAdapter(): Adapter {
             reason: CLAIM_REFUSAL_REASON[error.kind],
             claim: pendingClaim,
             claimRefusal: error.refusal,
+            providerBinding: error.providerBinding,
             // Binds the row to the tenant that OWNS the contested claim. The
             // row is enqueued either way — without this it lands under
             // SYSTEM_TENANT_ID — so what this buys is attribution, not

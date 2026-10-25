@@ -165,6 +165,58 @@ describe("env validation", () => {
     expect(env.AUTH_JACKSON_ID).toBe("jackson-id");
   });
 
+  it("passes with AUTH_JACKSON_CONNECTIONS only in production", async () => {
+    setFullProdEnv();
+    delete process.env.AUTH_GOOGLE_ID;
+    delete process.env.AUTH_GOOGLE_SECRET;
+    process.env.JACKSON_URL = "http://jackson:5225";
+    process.env.AUTH_JACKSON_CONNECTIONS = JSON.stringify([
+      { id: "acme", name: "Acme", clientId: "acme-client", clientSecret: "acme-secret" },
+    ]);
+    const { env } = await import("@/lib/env");
+    expect(env.NODE_ENV).toBe("production");
+  });
+
+  it("refuses Jackson credentials without JACKSON_URL", async () => {
+    setFullProdEnv();
+    process.env.AUTH_JACKSON_CONNECTIONS = JSON.stringify([
+      { id: "acme", name: "Acme", clientId: "acme-client", clientSecret: "acme-secret" },
+    ]);
+    delete process.env.JACKSON_URL;
+    await expect(import("@/lib/env")).rejects.toThrow("JACKSON_URL");
+  });
+
+  it("refuses Google + Jackson unless AUTH_CLAIM_BINDING=strict", async () => {
+    setFullProdEnv();
+    process.env.AUTH_JACKSON_ID = "jackson-id";
+    process.env.AUTH_JACKSON_SECRET = "jackson-secret";
+    process.env.JACKSON_URL = "http://jackson:5225";
+    await expect(import("@/lib/env")).rejects.toThrow("AUTH_CLAIM_BINDING");
+  });
+
+  it("passes Google + Jackson with AUTH_CLAIM_BINDING=strict", async () => {
+    setFullProdEnv();
+    process.env.AUTH_JACKSON_ID = "jackson-id";
+    process.env.AUTH_JACKSON_SECRET = "jackson-secret";
+    process.env.JACKSON_URL = "http://jackson:5225";
+    process.env.AUTH_CLAIM_BINDING = "strict";
+    const { env } = await import("@/lib/env");
+    expect(env.AUTH_CLAIM_BINDING).toBe("strict");
+  });
+
+  it("refuses a placeholder Jackson client id outside production too", async () => {
+    setMinimalDevEnv();
+    process.env.AUTH_JACKSON_ID = "dummy";
+    process.env.AUTH_JACKSON_SECRET = "jackson-secret-S3CR3T";
+    process.env.JACKSON_URL = "http://jackson:5225";
+    const error = await import("@/lib/env").then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(error?.message).toContain("AUTH_JACKSON_ID");
+    expect(error?.message).not.toContain("jackson-secret-S3CR3T");
+  });
+
   // Blob backend validation is handled by each store's validateConfig()
   // in src/lib/blob-store/config.ts — not by env.ts superRefine.
   // See src/lib/blob-store/*.test.ts for those checks.

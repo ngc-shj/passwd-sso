@@ -21,6 +21,13 @@
 import { z } from "zod";
 import { HEX64_RE } from "@/lib/validations/common";
 import {
+  ProviderConfigError,
+  assertClaimBindingBootConfig,
+  isGoogleProviderConfigured,
+  parseJacksonProviders,
+  type ProviderEnvKey,
+} from "@/lib/auth/jackson-providers";
+import {
   MS_PER_HOUR,
   MS_PER_DAY,
   MS_PER_MINUTE,
@@ -261,7 +268,14 @@ export const envObject = z.object({
   AUTH_GOOGLE_SECRET: nonEmpty.optional(),
   AUTH_JACKSON_ID: nonEmpty.optional(),
   AUTH_JACKSON_SECRET: nonEmpty.optional(),
+  // JSON array of { id, name, clientId, clientSecret }, one per Jackson
+  // connection. Validated (in every NODE_ENV) by the same parser
+  // src/auth.config.ts builds the providers from — see superRefine below.
+  AUTH_JACKSON_CONNECTIONS: z.string().optional(),
   JACKSON_URL: nonEmpty.optional(),
+  // "off" | "strict"; any other value is refused by the same parser. Must be
+  // "strict" whenever two or more SSO providers can present a tenant claim.
+  AUTH_CLAIM_BINDING: z.string().optional(),
   GOOGLE_WORKSPACE_DOMAINS: z.string().optional(),
   // Fails closed at boot on a value that names no usable key, or names one
   // twice (round-6, raised independently by Codex). The parser used to filter
@@ -559,6 +573,35 @@ export const envObject = z.object({
 export const envSchema = envObject.superRefine((data, ctx) => {
   const isProd = data.NODE_ENV === "production";
 
+  // ── SSO provider set (always enforced) ──────────────────
+  // The parser auth.config.ts builds the providers from; its refusals hold in
+  // every NODE_ENV, and auth.config.ts re-runs them for processes that never
+  // parse this schema. Its messages carry no values, only variable names.
+  const providerEnv = {
+    AUTH_GOOGLE_ID: data.AUTH_GOOGLE_ID,
+    AUTH_GOOGLE_SECRET: data.AUTH_GOOGLE_SECRET,
+    JACKSON_URL: data.JACKSON_URL,
+    AUTH_JACKSON_ID: data.AUTH_JACKSON_ID,
+    AUTH_JACKSON_SECRET: data.AUTH_JACKSON_SECRET,
+    AUTH_JACKSON_CONNECTIONS: data.AUTH_JACKSON_CONNECTIONS,
+    AUTH_CLAIM_BINDING: data.AUTH_CLAIM_BINDING,
+    SAML_PROVIDER_NAME: data.SAML_PROVIDER_NAME,
+  } satisfies Record<ProviderEnvKey, string | undefined>;
+  // null: the Jackson config was refused, which is reported on its own
+  // variable and must not also read as "no provider configured".
+  let jacksonProviderCount: number | null = null;
+  try {
+    jacksonProviderCount = parseJacksonProviders(providerEnv).length;
+    assertClaimBindingBootConfig(providerEnv);
+  } catch (error) {
+    if (!(error instanceof ProviderConfigError)) throw error;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [error.variable],
+      message: error.message,
+    });
+  }
+
   // ── Production-required checks ──────────────────────────
 
   if (isProd) {
@@ -608,12 +651,8 @@ export const envSchema = envObject.superRefine((data, ctx) => {
     }
 
     // At least one auth provider must be fully configured
-    const hasGoogle = !!(data.AUTH_GOOGLE_ID && data.AUTH_GOOGLE_SECRET);
-    const hasJackson = !!(
-      data.AUTH_JACKSON_ID &&
-      data.AUTH_JACKSON_SECRET &&
-      data.JACKSON_URL
-    );
+    const hasGoogle = isGoogleProviderConfigured(providerEnv);
+    const hasJackson = jacksonProviderCount === null || jacksonProviderCount > 0;
     const hasEmail = !!data.EMAIL_PROVIDER;
 
     if (!hasGoogle && !hasJackson && !hasEmail) {
@@ -623,7 +662,8 @@ export const envSchema = envObject.superRefine((data, ctx) => {
         message:
           "At least one auth provider must be configured in production: " +
           "Google (AUTH_GOOGLE_ID + AUTH_GOOGLE_SECRET), " +
-          "SAML Jackson (AUTH_JACKSON_ID + AUTH_JACKSON_SECRET + JACKSON_URL), or " +
+          "SAML Jackson (AUTH_JACKSON_ID + AUTH_JACKSON_SECRET, or " +
+          "AUTH_JACKSON_CONNECTIONS, with JACKSON_URL), or " +
           "Email (EMAIL_PROVIDER)",
       });
     }

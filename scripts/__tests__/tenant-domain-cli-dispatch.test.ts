@@ -41,6 +41,42 @@ describe("tenant-domain CLI dispatch", () => {
     expect(r.stderr).not.toContain(MISSING_URL);
   }, CASE_TIMEOUT_MS);
 
+  it("dispatches bind --apply <file> to its handler, reading the file name as --apply's value", () => {
+    const r = runCli("bind", "--apply", "/nonexistent/bind.tsv", "--by", "ops");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(MISSING_URL);
+    expect(r.stderr).not.toContain("Usage:");
+  }, CASE_TIMEOUT_MS);
+
+  it("refuses a flag the chosen bind form does not read, before reaching a handler", () => {
+    const r = runCli("bind", "--from-members", "--out", "/nonexistent/bind.tsv", "--by", "ops");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("This form of bind does not read --by");
+    expect(r.stderr).not.toContain(MISSING_URL);
+  }, CASE_TIMEOUT_MS);
+
+  it("refuses a flag the subcommand does not read, before reaching a handler", () => {
+    const r = runCli("remove", "--tenant", "t", "--domain", "a.example", "--by", "ops", "--provider", "google");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("remove does not read --provider");
+    expect(r.stderr).not.toContain(MISSING_URL);
+  }, CASE_TIMEOUT_MS);
+
+  it("refuses a valueless flag the subcommand does not read as stray, not as missing its value", () => {
+    const r = runCli("remove", "--tenant", "t", "--domain", "a.example", "--by", "ops", "--provider");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("remove does not read --provider");
+    expect(r.stderr).not.toContain("requires a value");
+  }, CASE_TIMEOUT_MS);
+
+  it("prints the usage for bind with no form or two forms", () => {
+    for (const args of [["bind", "--by", "ops"], ["bind", "--claim", "a.example", "--from-members"]]) {
+      const r = runCli(...args);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("Usage:");
+    }
+  }, CASE_TIMEOUT_MS);
+
   it("dispatches a real subcommand through the same path to its handler", () => {
     const r = runCli("list");
     expect(r.status).toBe(1);

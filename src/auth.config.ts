@@ -1,6 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import Nodemailer from "next-auth/providers/nodemailer";
+import type { OIDCConfig } from "next-auth/providers";
 import { API_PATH } from "@/lib/constants";
 import { parseAllowedGoogleDomains } from "@/lib/url/google-domain";
 import { sendEmail } from "@/lib/email";
@@ -9,6 +10,14 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { MAGIC_LINK_TTL_SEC } from "@/lib/constants/auth/magic-link";
 import { getLogger } from "@/lib/logger";
+import {
+  assertClaimBindingBootConfig,
+  GOOGLE_PROVIDER_ID,
+  isGoogleProviderConfigured,
+  listClaimProviderIds,
+  parseJacksonProviders,
+} from "@/lib/auth/jackson-providers";
+import { assertDistinctProviderRefs, deriveIdentifierPepper } from "@/lib/audit/identifier-pepper";
 import {
   getSessionCookieName,
   isSecureCookieFromAuthUrl,
@@ -22,25 +31,53 @@ const magicLinkEmailLimiter = createRateLimiter({
 });
 
 const allowedGoogleDomains = parseAllowedGoogleDomains();
+
+/**
+ * Whether Auth.js links a sign-in through `providerId` to an existing user by
+ * email alone (`allowDangerousEmailAccountLinking`). The provider construction
+ * below and `src/auth.ts`'s signIn callback both read this: the callback has to
+ * decide which user a sign-in is for BEFORE Auth.js does, and a second copy of
+ * the condition would let the two disagree about whose rows it writes.
+ *
+ * Google only, and only with a domain restriction: without one, any Google
+ * account could take over an existing account by matching its email address.
+ */
+export function allowsDangerousEmailAccountLinking(providerId: string): boolean {
+  return providerId === GOOGLE_PROVIDER_ID && allowedGoogleDomains.length > 0;
+}
+
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
 const useSecureCookies = isSecureCookieFromAuthUrl();
 
+// Both throw on a refused configuration, so a process whose provider set is
+// misconfigured fails at startup in every NODE_ENV — not only where
+// envSchema's production rules run.
+const jacksonProviders = parseJacksonProviders();
+assertClaimBindingBootConfig();
+// Binding refusals store the presenting provider as a ref; two providers with
+// one ref would make the operator's mapping name the wrong connection.
+assertDistinctProviderRefs(listClaimProviderIds(), deriveIdentifierPepper(process.env));
+
+type JacksonProfile = {
+  sub: string;
+  name?: string;
+  email: string;
+  picture?: string;
+};
+
 export default {
   providers: [
     // Only register providers whose credentials are fully configured.
-    // Partial config (e.g. ID without SECRET) → broken OAuth at runtime;
-    // missing issuer (JACKSON_URL) → Auth.js throws InvalidEndpoints.
-    // Conditions mirror env.ts superRefine checks (L139-144).
-    ...(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
+    // Partial config (e.g. ID without SECRET) → broken OAuth at runtime.
+    // The predicates live in jackson-providers.ts, which env-schema.ts and
+    // the sign-in page read too.
+    ...(isGoogleProviderConfigured()
       ? [
           Google({
             clientId: process.env.AUTH_GOOGLE_ID,
             clientSecret: process.env.AUTH_GOOGLE_SECRET,
-            // Allow account linking only when domain restriction is active.
-            // Without domain restriction, any Google account could hijack
-            // an existing account by matching on email address.
-            allowDangerousEmailAccountLinking: allowedGoogleDomains.length > 0,
+            allowDangerousEmailAccountLinking: allowsDangerousEmailAccountLinking(GOOGLE_PROVIDER_ID),
             authorization: {
               params: {
                 // Restrict to specific domain (optional, omit for personal accounts).
@@ -57,38 +94,41 @@ export default {
           }),
         ]
       : []),
-    ...(process.env.JACKSON_URL &&
-    process.env.AUTH_JACKSON_ID &&
-    process.env.AUTH_JACKSON_SECRET
-      ? [
-          {
-            id: "saml-jackson" as const,
-            name: process.env.SAML_PROVIDER_NAME ?? "SSO",
-            type: "oidc" as const,
-            issuer: process.env.JACKSON_URL,
-            clientId: process.env.AUTH_JACKSON_ID ?? "dummy",
-            clientSecret: process.env.AUTH_JACKSON_SECRET ?? "dummy",
-            authorization: {
-              params: {
-                scope: "openid email profile",
-              },
-            },
-            profile(profile: {
-              sub: string;
-              name?: string;
-              email: string;
-              picture?: string;
-            }) {
-              return {
-                id: profile.sub,
-                name: profile.name ?? profile.email,
-                email: profile.email,
-                image: profile.picture ?? null,
-              };
-            },
+    // One provider per Jackson connection, each with that connection's own
+    // client id and secret. PKCE is deliberately off: Jackson's PKCE branch
+    // skips client authentication at the token endpoint, so a PKCE exchange
+    // attests nothing about which connection authenticated the user, and any
+    // code_verifier on the wire lets a code minted for another connection's
+    // IdP be redeemed here. `state` (login CSRF; Jackson also requires it) and
+    // `nonce` (code injection) carry the checks instead. Token-endpoint auth
+    // stays Auth.js's default, client_secret_basic. Never set
+    // allowDangerousEmailAccountLinking on these (and
+    // allowsDangerousEmailAccountLinking answers false for them): an IdP behind
+    // one connection must not take over an account created through another.
+    ...jacksonProviders.map(
+      (connection): OIDCConfig<JacksonProfile> => ({
+        id: connection.id,
+        name: connection.name,
+        type: "oidc",
+        issuer: connection.issuer,
+        clientId: connection.clientId,
+        clientSecret: connection.clientSecret,
+        checks: ["state", "nonce"],
+        authorization: {
+          params: {
+            scope: "openid email profile",
           },
-        ]
-      : []),
+        },
+        profile(profile) {
+          return {
+            id: profile.sub,
+            name: profile.name ?? profile.email,
+            email: profile.email,
+            image: profile.picture ?? null,
+          };
+        },
+      }),
+    ),
     // Magic Link (Email authentication)
     ...(process.env.EMAIL_PROVIDER
       ? [
@@ -156,10 +196,12 @@ export default {
         // lax: the OAuth callback redirect chain is treated by browsers
         // as cross-site-initiated, so strict suppresses the just-issued
         // cookie on the first hit to the post-callback destination and
-        // bounces users back to /auth/signin. Login CSRF is defended by
-        // Auth.js's `state` cookie + PKCE on OAuth and by the proxy CSRF
-        // gate (Origin-header check on POST/PUT/PATCH/DELETE for
-        // cookie-bearing mutating requests, src/lib/proxy/csrf-gate.ts).
+        // bounces users back to /auth/signin. Login CSRF on OAuth is
+        // defended by PKCE for Google and by Auth.js's `state` cookie for
+        // the Jackson providers, which run without PKCE (see the provider
+        // comment above), and by the proxy CSRF gate (Origin-header check
+        // on POST/PUT/PATCH/DELETE for cookie-bearing mutating requests,
+        // src/lib/proxy/csrf-gate.ts).
         sameSite: "lax" as const,
         secure: useSecureCookies,
         // A07-6 (CHIPS): partitioned cookies are isolated per top-level
@@ -205,7 +247,7 @@ export default {
 
     // Validate domain claim against allowed Google Workspace domains
     async signIn({ account, profile }) {
-      if (account?.provider === "google" && allowedGoogleDomains.length > 0) {
+      if (account?.provider === GOOGLE_PROVIDER_ID && allowedGoogleDomains.length > 0) {
         // Type guard, not a cast (round-4 F7). A cast asserts a shape rather
         // than checking it: a non-string `hd` makes `.toLowerCase()` throw
         // inside the signIn callback instead of denying cleanly. Same class

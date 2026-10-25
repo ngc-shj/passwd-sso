@@ -107,6 +107,8 @@ function hasElement(
   predicate: (el: { type: unknown; props: Record<string, unknown> }) => boolean,
 ): boolean {
   if (node == null || typeof node !== "object") return false;
+  // A mapped list (one button per provider) is an array nested in children.
+  if (Array.isArray(node)) return node.some((child: unknown) => hasElement(child, predicate));
   const el = node as { type?: unknown; props?: Record<string, unknown> };
   if (el.type && el.props && predicate(el as { type: unknown; props: Record<string, unknown> }))
     return true;
@@ -404,6 +406,95 @@ describe("SignInPage", () => {
       const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
       expect(hasProvider(result, "saml-jackson")).toBe(false);
+    });
+
+    function setConnections(entries: Array<{ id: string; name: string }>) {
+      vi.stubEnv("JACKSON_URL", "http://localhost:5225");
+      vi.stubEnv(
+        "AUTH_JACKSON_CONNECTIONS",
+        JSON.stringify(
+          entries.map((e) => ({ ...e, clientId: `client-${e.id}`, clientSecret: `secret-${e.id}` })),
+        ),
+      );
+    }
+
+    function buttons(tree: unknown): Array<{ provider: string; label: string }> {
+      const found: Array<{ provider: string; label: string }> = [];
+      hasElement(tree, (el) => {
+        if (el.type === mockSignInButton) {
+          found.push({ provider: el.props.provider as string, label: el.props.label as string });
+        }
+        return false;
+      });
+      return found;
+    }
+
+    it("shows one SSO button per AUTH_JACKSON_CONNECTIONS entry, labelled with its name", async () => {
+      setGoogle(false);
+      setSaml(false);
+      setConnections([
+        { id: "acme", name: "Acme SSO" },
+        { id: "beta", name: "Beta SSO" },
+      ]);
+      mockGetTranslations.mockResolvedValue(
+        (key: string, values?: { provider?: string }) => (values?.provider ? `${key}:${values.provider}` : key),
+      );
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
+
+      expect(buttons(result)).toEqual([
+        { provider: "saml-jackson-acme", label: "signInWithSSO:Acme SSO" },
+        { provider: "saml-jackson-beta", label: "signInWithSSO:Beta SSO" },
+      ]);
+    });
+
+    it("keeps SAML_PROVIDER_NAME on the legacy button alongside entries", async () => {
+      setGoogle(false);
+      setSaml(true);
+      vi.stubEnv("SAML_PROVIDER_NAME", "Corp");
+      setConnections([{ id: "acme", name: "Acme SSO" }]);
+      mockGetTranslations.mockResolvedValue(
+        (key: string, values?: { provider?: string }) => (values?.provider ? `${key}:${values.provider}` : key),
+      );
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
+
+      expect(buttons(result)).toEqual([
+        { provider: "saml-jackson", label: "signInWithSSO:Corp" },
+        { provider: "saml-jackson-acme", label: "signInWithSSO:Acme SSO" },
+      ]);
+    });
+
+    // Parity with the providers auth.config.ts actually registers: a button
+    // for an unregistered id is a dead end, a registered id with no button is
+    // unreachable.
+    it.each([
+      ["Google only", { google: true, legacy: false, entries: 0 }],
+      ["legacy only", { google: false, legacy: true, entries: 0 }],
+      ["Google + legacy + two entries", { google: true, legacy: true, entries: 2 }],
+      ["entries only", { google: false, legacy: false, entries: 2 }],
+      ["nothing", { google: false, legacy: false, entries: 0 }],
+    ])("renders exactly the registered SSO provider ids (%s)", async (_label, cfg) => {
+      setGoogle(cfg.google);
+      setSaml(cfg.legacy);
+      if (cfg.entries > 0) {
+        setConnections([
+          { id: "acme", name: "Acme" },
+          { id: "beta", name: "Beta" },
+        ].slice(0, cfg.entries));
+      }
+      vi.stubEnv("AUTH_CLAIM_BINDING", "strict");
+      vi.stubEnv("EMAIL_PROVIDER", "");
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
+      vi.resetModules();
+      const config = (await import("@/auth.config")).default;
+      const registered = config.providers.map((p) => p.id);
+
+      expect(buttons(result).map((b) => b.provider).sort()).toEqual([...registered].sort());
     });
   });
 

@@ -3,10 +3,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   BOOLEAN_FLAGS,
+  SUBCOMMAND_FLAGS,
   VALUE_FLAG_HINTS,
+  findStrayFlags,
   findValuelessFlag,
   getStringFlag,
   parseFlags,
+  strayFlagsError,
   valuelessError,
 } from "../lib/tenant-domain-flags";
 import {
@@ -200,8 +203,14 @@ describe("tenant-domain flag parsing", () => {
     // rather than something that slips in with an unrelated change. "after"
     // (20260731170000) is `history`'s pagination cursor; "user" (round 7,
     // F-R7-2) names `realign`'s user; "limit" and "apply" (C4/#838) are
-    // `backfill-owning-column`'s candidate cap and its apply/dry-run switch.
-    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "after", "user", "limit", "yes", "apply"]);
+    // `backfill-owning-column`'s candidate cap and its apply/dry-run switch;
+    // "provider", "claim", "out", "unbound", "accept-unused-provider" and
+    // "from-members" are the claim-binding writers' (sso-claim-connection-binding C3);
+    // "single-connection" is `legacy-accounts`' operator attestation.
+    expect([...declared]).toEqual([
+      "tenant", "domain", "by", "from", "days", "after", "user", "limit", "provider", "claim", "out",
+      "yes", "apply", "unbound", "accept-unused-provider", "from-members", "single-connection",
+    ]);
     expect(read.size).toBeGreaterThan(0);
   });
 
@@ -220,6 +229,134 @@ describe("tenant-domain flag parsing", () => {
 
   it("refuses a repeated --yes", () => {
     expect(errorOf(["--yes", "--yes"])).toContain("--yes was given more than once");
+  });
+
+  // Round-1 F4 (Phase 3): a flag valid for SOME subcommand passed parseFlags
+  // everywhere and was dropped where nothing read it.
+  describe("per-subcommand accepted flags", () => {
+    function strayOf(subcommand: string, argv: string[]): string[] {
+      const parsed = parseFlags(argv, subcommand);
+      if (!parsed.ok) throw new Error(`expected parse to succeed: ${parsed.error}`);
+      return findStrayFlags(parsed.flags, subcommand);
+    }
+
+    it.each([
+      ["remove", ["--tenant", "t", "--domain", "d", "--by", "ops", "--provider", "google"], ["provider"]],
+      ["list", ["--provider", "google"], ["provider"]],
+      ["list", ["--from-members", "--out", "/tmp/x"], ["from-members", "out"]],
+      ["add", ["--tenant", "t", "--domain", "d", "--by", "ops", "--claim", "c"], ["claim"]],
+      ["add", ["--tenant", "t", "--domain", "d", "--by", "ops", "--from-members"], ["from-members"]],
+      ["history", ["--domain", "d", "--unbound"], ["unbound"]],
+      ["realign", ["--user", "u", "--tenant", "t", "--by", "ops", "--accept-unused-provider"], ["accept-unused-provider"]],
+      ["unmapped", ["--out", "/tmp/x"], ["out"]],
+      ["measure", ["--yes"], ["yes"]],
+      ["legacy-accounts", ["--tenant", "t"], ["tenant"]],
+    ])("%s refuses %j", (subcommand, argv, stray) => {
+      expect(strayOf(subcommand, argv)).toEqual(stray);
+    });
+
+    it.each([
+      ["list", ["--tenant", "t", "--unbound"]],
+      ["unmapped", ["--days", "180"]],
+      ["add", ["--tenant", "t", "--domain", "d", "--by", "ops", "--from", "f", "--provider", "google", "--accept-unused-provider", "--yes"]],
+      ["add", ["--tenant", "t", "--domain", "d", "--by", "ops", "--unbound"]],
+      ["bind", ["--claim", "c", "--provider", "google", "--by", "ops", "--accept-unused-provider", "--yes"]],
+      ["bind", ["--from-members", "--out", "/tmp/x"]],
+      ["bind", ["--apply", "/tmp/x", "--by", "ops", "--yes"]],
+      ["remove", ["--tenant", "t", "--domain", "d", "--by", "ops", "--yes"]],
+      ["history", ["--domain", "d", "--tenant", "t", "--after", "3"]],
+      ["realign", ["--user", "u", "--tenant", "t", "--by", "ops", "--yes"]],
+      ["measure", []],
+      ["legacy-accounts", []],
+      ["legacy-accounts", ["--single-connection"]],
+      ["backfill-owning-column", ["--by", "ops", "--apply", "--yes", "--limit", "5"]],
+    ])("%s accepts the documented form %j", (subcommand, argv) => {
+      expect(strayOf(subcommand, argv)).toEqual([]);
+    });
+
+    it("leaves an unknown subcommand to the usage", () => {
+      expect(strayOf("preflight", ["--tenant", "t"])).toEqual([]);
+    });
+
+    it("names the subcommand and every stray flag, escaped", () => {
+      expect(strayFlagsError(["provider", "claim"], "remove")).toMatch(/^remove does not read --provider, --claim\. Refusing/);
+      expect(strayFlagsError(["x\u202e"], "list")).not.toContain("\u202e");
+    });
+
+    it("each subcommand accepts exactly the flags its dispatch reads", () => {
+      // Derived from the CLI, the same three read spellings as the known-flag
+      // test above: a case in main()'s switch (or dispatchBind, for bind) that
+      // reads a flag its SUBCOMMAND_FLAGS entry lacks would refuse a valid
+      // command; one that lists a flag the case never reads would drop it.
+      const cli = readFileSync(resolve(__dirname, "../tenant-domain.ts"), "utf8");
+      const switchStart = cli.indexOf("switch (subcommand) {");
+      const switchBody = cli.slice(switchStart, cli.indexOf("    default:", switchStart));
+      const bindBody = cli.slice(cli.indexOf("async function dispatchBind("), cli.indexOf("async function main("));
+      const SPELLINGS = [
+        /getStringFlag\(flags,\s*"([^"]+)"\)/g,
+        /flags\.get\("([^"]+)"\)/g,
+        /flags\.has\("([^"]+)"\)/g,
+      ];
+      const readsOf = (body: string): string[] => {
+        const read = new Set<string>();
+        for (const re of SPELLINGS) for (const m of body.matchAll(re)) read.add(m[1]);
+        // `yes` is read once above the switch and passed on as an identifier.
+        if (/(?<![-\w])yes(?=\s*[,})])/.test(body)) read.add("yes");
+        return [...read].sort();
+      };
+      // A case that hands `flags` on whole (`cmdFoo(flags)`) reads flags this
+      // derivation cannot see, so any `flags` reference other than the read
+      // spellings and bind's dispatcher call fails the test, naming the case.
+      const unrecognisedFlagsUse = (chunk: string): boolean => {
+        let residue = chunk.replace("dispatchBind(flags, yes)", "");
+        for (const re of SPELLINGS) residue = residue.replace(re, "");
+        return /\bflags\b/.test(residue);
+      };
+      const cases = switchBody.split(/\n    case "/).slice(1).map((chunk) => {
+        const name = chunk.slice(0, chunk.indexOf('"'));
+        expect(unrecognisedFlagsUse(chunk), `case "${name}" uses flags other than by a recognised read`).toBe(false);
+        return [name, readsOf(name === "bind" ? bindBody : chunk)] as const;
+      });
+      expect(unrecognisedFlagsUse('case "foo": return cmdFoo(flags);'), "the residue check against its own sample").toBe(true);
+      // dispatchBind reads bind's flags itself, so its body gets the same check.
+      // Its own signature and its stray-flag scan (`flags.keys()`, which reads
+      // no flag's value) are the two uses it is allowed besides the read spellings.
+      const BIND_SIGNATURE = "async function dispatchBind(flags: ParsedFlags, yes: boolean)";
+      const BIND_STRAY_SCAN = "[...flags.keys()]";
+      expect(bindBody.startsWith(BIND_SIGNATURE), "dispatchBind's signature as this test spells it").toBe(true);
+      expect(bindBody.split(BIND_STRAY_SCAN).length - 1, "dispatchBind's stray-flag scan, once").toBe(1);
+      const bindUnrecognised = (body: string): boolean =>
+        unrecognisedFlagsUse(body.replace(BIND_SIGNATURE, "").replace(BIND_STRAY_SCAN, ""));
+      expect(bindUnrecognised(bindBody), "dispatchBind uses flags other than by a recognised read").toBe(false);
+      expect(
+        bindUnrecognised(`${BIND_SIGNATURE} {\n  [...flags.keys()];\n  return cmdBindFoo(flags);\n}`),
+        "the dispatchBind residue check against its own sample",
+      ).toBe(true);
+      expect(cases.map(([name]) => name)).toEqual(Object.keys(SUBCOMMAND_FLAGS));
+      for (const [name, reads] of cases) {
+        expect(reads, name).toEqual([...SUBCOMMAND_FLAGS[name as keyof typeof SUBCOMMAND_FLAGS]].sort());
+      }
+    });
+  });
+
+  describe("--apply under bind takes the reviewed file (C3)", () => {
+    it("reads the value after --apply as bind's file", () => {
+      const parsed = parseFlags(["--apply", "/tmp/bind.tsv", "--by", "ops"], "bind");
+      expect(parsed.ok && getStringFlag(parsed.flags, "apply")).toBe("/tmp/bind.tsv");
+    });
+
+    it("reports a bare bind --apply as a missing file, not a switch", () => {
+      const parsed = parseFlags(["--apply", "--by", "ops"], "bind");
+      if (!parsed.ok) throw new Error(parsed.error);
+      expect(findValuelessFlag(parsed.flags, "bind")).toBe("apply");
+      expect(valuelessError("apply", "bind")).toContain("the reviewed bind file");
+    });
+
+    it("still refuses a value on --apply outside bind (the adjacent allow keeps it a switch there)", () => {
+      expect(errorOf(["--apply", "/tmp/bind.tsv"])).toContain('Unexpected argument "/tmp/bind.tsv"');
+      const parsed = parseFlags(["--apply", "/tmp/bind.tsv"], "backfill-owning-column");
+      expect(parsed.ok).toBe(false);
+    });
   });
 
   it("parses the boolean --apply", () => {

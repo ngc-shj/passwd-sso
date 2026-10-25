@@ -63,14 +63,51 @@ describe("GET /api/user/auth-provider", () => {
     expect(json.canPasskeySignIn).toBe(false);
   });
 
-  it("returns canPasskeySignIn: false for saml-jackson-only user", async () => {
-    mockPrismaAccount.findMany.mockResolvedValue([
-      { provider: "saml-jackson" },
-    ]);
-    const res = await GET(makeRequest());
-    const json = await res.json();
-    expect(res.status).toBe(200);
-    expect(json.canPasskeySignIn).toBe(false);
+  // The Jackson provider set comes from the env parser (membership, not a
+  // prefix), so the legacy id and each connection id count only when
+  // configured.
+  describe("Jackson providers", () => {
+    beforeEach(() => {
+      vi.stubEnv("JACKSON_URL", "http://jackson.test:5225");
+      vi.stubEnv("AUTH_JACKSON_ID", "legacy-client");
+      vi.stubEnv("AUTH_JACKSON_SECRET", "legacy-secret");
+      vi.stubEnv(
+        "AUTH_JACKSON_CONNECTIONS",
+        JSON.stringify([{ id: "acme", name: "Acme", clientId: "acme-client", clientSecret: "acme-secret" }]),
+      );
+    });
+
+    it.each(["saml-jackson", "saml-jackson-acme"])(
+      "returns canPasskeySignIn: false for a %s-only user",
+      async (provider) => {
+        mockPrismaAccount.findMany.mockResolvedValue([{ provider }]);
+        const res = await GET(makeRequest());
+        const json = await res.json();
+        expect(res.status).toBe(200);
+        expect(json.canPasskeySignIn).toBe(false);
+      },
+    );
+
+    it("returns canPasskeySignIn: false for a user of two configured SSO providers", async () => {
+      mockPrismaAccount.findMany.mockResolvedValue([
+        { provider: "google" },
+        { provider: "saml-jackson-acme" },
+      ]);
+      const res = await GET(makeRequest());
+      const json = await res.json();
+      expect(json.canPasskeySignIn).toBe(false);
+    });
+
+    // Adjacent ids that a prefix match would wrongly count as SSO.
+    it.each(["saml-jackson-other", "saml-jacksonx"])(
+      "treats the unconfigured id %s as non-SSO",
+      async (provider) => {
+        mockPrismaAccount.findMany.mockResolvedValue([{ provider }]);
+        const res = await GET(makeRequest());
+        const json = await res.json();
+        expect(json.canPasskeySignIn).toBe(true);
+      },
+    );
   });
 
   it("returns canPasskeySignIn: true for user with google + nodemailer", async () => {

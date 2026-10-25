@@ -27,6 +27,7 @@ import {
   sqlStateOf,
 } from "./helpers";
 import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
+import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
 import { slugifyTenant } from "@/lib/tenant/tenant-claim";
 import {
   normalizeTenantClaim,
@@ -62,6 +63,10 @@ type DeniedPolicyEntry = {
 };
 
 const SKIP = !process.env.DATABASE_URL;
+
+// The presenting provider every off-mode registration below records; the
+// binding grid is tenant-claim-binding.integration.test.ts.
+const SIGN_IN_PROVIDER = "google";
 
 
 /**
@@ -764,13 +769,13 @@ describe("findOrCreateTenantForClaim (C4)", () => {
             (c) =>
               withBypassRls(
                 c,
-                (tx) => findOrCreateTenantForClaim(claim, tx),
+                (tx) => findOrCreateTenantForClaim(claim, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
                 CLAIM_RESOLUTION_GRANT,
               ),
             (c) =>
               withBypassRls(
                 c,
-                (tx) => findOrCreateTenantForClaim(claim, tx),
+                (tx) => findOrCreateTenantForClaim(claim, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
                 CLAIM_RESOLUTION_GRANT,
               ),
           );
@@ -879,8 +884,8 @@ describe("findOrCreateTenantForClaim (C4)", () => {
       // transaction — the real-Postgres proof round-4 required.
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        const resultA = await findOrCreateTenantForClaim(claimA, tx);
-        const resultB = await findOrCreateTenantForClaim(claimB, tx);
+        const resultA = await findOrCreateTenantForClaim(claimA, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx);
+        const resultB = await findOrCreateTenantForClaim(claimB, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx);
         if (resultA.kind !== "tenant") throw new Error(`claimA returned ${resultA.kind}`);
         if (resultB.kind !== "tenant") throw new Error(`claimB returned ${resultB.kind}`);
         // Tracked before the assertion that can throw, and tracked at all
@@ -923,7 +928,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         const claim = `${runToken()}.${ALIAS_CLAIM}`;
         const result = await withBypassRls(
           ctx.su.prisma,
-          (tx) => findOrCreateTenantForClaim(claim, tx),
+          (tx) => findOrCreateTenantForClaim(claim, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
           CLAIM_RESOLUTION_GRANT,
         );
         if (result.kind !== "tenant") throw new Error(`unexpected ${result.kind}`);
@@ -964,7 +969,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
 
         const resultA = await withBypassRls(
           ctx.su.prisma,
-          (tx) => findOrCreateTenantForClaim(claimA, tx),
+          (tx) => findOrCreateTenantForClaim(claimA, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
           CLAIM_RESOLUTION_GRANT,
         );
         if (resultA.kind !== "tenant") throw new Error(`claimA returned ${resultA.kind}`);
@@ -972,7 +977,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
 
         const resultB = await withBypassRls(
           ctx.su.prisma,
-          (tx) => findOrCreateTenantForClaim(claimB, tx),
+          (tx) => findOrCreateTenantForClaim(claimB, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
           CLAIM_RESOLUTION_GRANT,
         );
         if (resultB.kind !== "tenant") throw new Error(`claimB returned ${resultB.kind}`);
@@ -1014,7 +1019,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
 
         const result = await withBypassRls(
           ctx.su.prisma,
-          (tx) => findOrCreateTenantForClaim(claim, tx),
+          (tx) => findOrCreateTenantForClaim(claim, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
           CLAIM_RESOLUTION_GRANT,
         );
         expect(result).toEqual({ kind: "tenant", id: tenantId });
@@ -1044,7 +1049,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         try {
           await ctx.su.prisma.$transaction(async (tx) => {
             await setBypassRlsGucs(tx);
-            const result = await findOrCreateTenantForClaim(abortedClaim, tx);
+            const result = await findOrCreateTenantForClaim(abortedClaim, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx);
             if (result.kind !== "tenant") throw new Error(`unexpected ${result.kind}`);
             await tx.$executeRawUnsafe(`SELECT 1/0`);
           });
@@ -1066,7 +1071,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         // both the claim row and its event commit together.
         const result = await withBypassRls(
           ctx.su.prisma,
-          (tx) => findOrCreateTenantForClaim(committedClaim, tx),
+          (tx) => findOrCreateTenantForClaim(committedClaim, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
           CLAIM_RESOLUTION_GRANT,
         );
         if (result.kind !== "tenant") throw new Error(`unexpected ${result.kind}`);
@@ -1185,7 +1190,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
             const allowClaim = `${token}-allow.${ALIAS_CLAIM}`;
             const allowResult = await withBypassRls(
               probePrisma,
-              (tx) => findOrCreateTenantForClaim(allowClaim, tx),
+              (tx) => findOrCreateTenantForClaim(allowClaim, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
               CLAIM_RESOLUTION_GRANT,
             );
             if (allowResult.kind !== "tenant") {
@@ -1208,7 +1213,7 @@ describe("findOrCreateTenantForClaim (C4)", () => {
             try {
               await withBypassRls(
                 probePrisma,
-                (tx) => findOrCreateTenantForClaim(denyClaim, tx),
+                (tx) => findOrCreateTenantForClaim(denyClaim, SIGN_IN_PROVIDER, CLAIM_BINDING_MODE.OFF, tx),
                 CLAIM_RESOLUTION_GRANT,
               );
             } catch (e) {

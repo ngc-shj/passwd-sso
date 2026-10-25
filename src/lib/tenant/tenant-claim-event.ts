@@ -1,15 +1,16 @@
 import type { TxOrPrisma } from "@/lib/prisma";
 
 /**
- * The five routing operations recorded in `tenant_claim_events` (SC11 / #743).
+ * The six routing operations recorded in `tenant_claim_events` (SC11 / #743).
  *
  * A const-object plus a derived union rather than a bare string union: the
  * repo's standing convention for an enumerated set of three or more literals,
  * and the shape `AUDIT_ACTION` / `TENANT_ROLE` already use.
  *
- * `tenant_claim_events_operation_check`, widened to five values by
- * `prisma/migrations/20260731170000_tenant_claim_events_hardening/migration.sql`
- * (originally four, from `.../20260731100000_add_tenant_claim_events`),
+ * `tenant_claim_events_operation_check`, widened to six values by
+ * `prisma/migrations/20261025000000_tenant_claim_provider/migration.sql`
+ * (originally four, from `.../20260731100000_add_tenant_claim_events`, then
+ * five from `.../20260731170000_tenant_claim_events_hardening`),
  * carries the same set. The two are pinned against each other by a drift test
  * that reads `pg_get_constraintdef` from the LIVE catalogue — not from either
  * migration file, both immutable once applied and therefore silent on what
@@ -35,6 +36,8 @@ export const TENANT_CLAIM_EVENT_OPERATION = {
   UNREVOKE: "unrevoke",
   REASSIGN: "reassign",
   DEREGISTER: "deregister",
+  /** `tenant-domain bind`: an active row's provider binding changed, nothing else. */
+  REBIND: "rebind",
 } as const;
 
 export type TenantClaimEventOperation =
@@ -67,6 +70,24 @@ export const SIGNIN_ACTOR_LABEL = "signin";
  */
 export const DEREGISTER_ACTOR_LABEL = "db-delete";
 
+/**
+ * The `created_by` the `20260729110000_add_tenant_claims` backfill wrote on the
+ * claim rows it derived from every pre-existing tenant's `external_id`. SQL is
+ * its only writer; the constant names it for the readers.
+ */
+export const BACKFILL_CREATED_BY_LABEL = "backfill";
+
+/**
+ * Every label the engine — not a person — writes as a claim row's `created_by`
+ * or an event's `actor_label`. `tenant-domain` refuses each as `--by`, so a
+ * routing change typed by an operator cannot read as engine-written.
+ */
+export const ENGINE_WRITTEN_LABELS = [
+  SIGNIN_ACTOR_LABEL,
+  BACKFILL_CREATED_BY_LABEL,
+  DEREGISTER_ACTOR_LABEL,
+] as const;
+
 export type TenantClaimEventInput = {
   claim: string;
   operation: TenantClaimEventOperation;
@@ -78,6 +99,10 @@ export type TenantClaimEventInput = {
   newRevokedAt: Date | null;
   /** Self-asserted operator label (`--by`), or `SIGNIN_ACTOR_LABEL`. */
   actorLabel: string;
+  /** The provider the claim was bound to before this change; null when unbound or new. */
+  oldProvider: string | null;
+  /** The provider it is bound to after; null when the row is unbound. */
+  newProvider: string | null;
 };
 
 /**
@@ -102,8 +127,9 @@ export type TenantClaimEventInput = {
  * by privilege.
  *
  * **The column list below is the grant.** Since 20260731190000 `passwd_app`
- * holds INSERT on exactly these eight columns — not on the table — so naming a
- * NINTH one here raises `42501` at run time, on the fail-closed sign-in path,
+ * holds INSERT on exactly these columns — not on the table; ten since
+ * 20261025000000 added the provider pair — so naming another one here raises
+ * `42501` at run time, on the fail-closed sign-in path,
  * while every mocked test stays green. Adding a column means editing
  * `columnGrants.INSERT` in `scripts/checks/app-role-denied-privileges.json` and
  * writing the matching `GRANT` in a migration; the two are pinned against each
@@ -123,11 +149,11 @@ export async function recordTenantClaimEvent(
   await db.$executeRaw`
     INSERT INTO tenant_claim_events
       (id, claim, operation, old_tenant_id, new_tenant_id,
-       old_revoked_at, new_revoked_at, actor_label)
+       old_revoked_at, new_revoked_at, actor_label, old_provider, new_provider)
     VALUES
       (gen_random_uuid(), ${event.claim}, ${event.operation},
        ${event.oldTenantId}::uuid, ${event.newTenantId}::uuid,
        ${event.oldRevokedAt}::timestamptz, ${event.newRevokedAt}::timestamptz,
-       ${event.actorLabel})
+       ${event.actorLabel}, ${event.oldProvider}, ${event.newProvider})
   `;
 }

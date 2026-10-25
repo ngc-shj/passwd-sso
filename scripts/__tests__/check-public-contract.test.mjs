@@ -43,6 +43,8 @@ const FIXTURE_SOURCES = [
   "src/lib/boot-stderr.ts",
   "src/lib/key-provider/types.ts",
   "src/lib/env-schema.ts",
+  "src/lib/auth/jackson-providers.ts",
+  "src/lib/security/unsafe-display-chars.ts",
   "src/lib/validations/common.ts",
   "src/lib/constants/time.ts",
 ];

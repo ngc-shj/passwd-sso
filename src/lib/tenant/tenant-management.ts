@@ -11,6 +11,15 @@ import {
   SIGNIN_ACTOR_LABEL,
   TENANT_CLAIM_EVENT_OPERATION,
 } from "@/lib/tenant/tenant-claim-event";
+import type { ClaimBindingMode } from "@/lib/auth/jackson-providers";
+import { adjudicateClaimBinding, type ClaimRow } from "@/lib/tenant/claim-binding";
+import { providerRefOf } from "@/lib/audit/identifier-pepper";
+import type { ProviderBindingAudit } from "@/lib/audit/auth-failure";
+import { getLogger } from "@/lib/logger";
+
+// Moved to a prisma-free module so the tenant-domain CLI decides with the
+// same predicate; re-exported for the callers that already import them here.
+export { adjudicateClaimBinding, type ClaimBindingVerdict, type ClaimRow } from "@/lib/tenant/claim-binding";
 
 /**
  * The single `tenantClaim.findUnique` call site in the codebase — every
@@ -22,14 +31,50 @@ import {
  * callers decide what a revoked row means (D2): the resolver denies it, the
  * creator refuses to shadow it.
  */
-async function findClaimRow(
-  db: TxOrPrisma,
-  claim: string,
-): Promise<{ tenantId: string; revokedAt: Date | null } | null> {
+async function findClaimRow(db: TxOrPrisma, claim: string): Promise<ClaimRow | null> {
   return db.tenantClaim.findUnique({
     where: { claim },
-    select: { tenantId: true, revokedAt: true },
+    select: { tenantId: true, revokedAt: true, provider: true },
   });
+}
+
+/**
+ * The verdict as a lookup, with its log line. Provider ids and the owning
+ * tenant only — never the claim: these lines are operator-facing, and the
+ * audit row already carries the claim where tenant admins can see it.
+ */
+function lookupFromRow(
+  row: ClaimRow,
+  signInProvider: string,
+  mode: ClaimBindingMode,
+): Exclude<ClaimLookup, { kind: "unstorable" } | { kind: "unregistered" }> {
+  const verdict = adjudicateClaimBinding(row, signInProvider, mode);
+  switch (verdict.kind) {
+    case "tenant":
+      if (verdict.unenforcedMismatch !== null) {
+        getLogger().warn(
+          { tenantId: verdict.id, boundProvider: verdict.unenforcedMismatch, signInProvider },
+          "auth.tenant_claim.provider_mismatch",
+        );
+      }
+      return { kind: "tenant", id: verdict.id };
+    case "revoked":
+      return verdict;
+    case "unbound":
+    case "provider_mismatch":
+      // The structured line carries both raw ids; the audit row, readable by
+      // the owning tenant's admins, carries the sign-in provider as a ref.
+      getLogger().warn(
+        {
+          tenantId: verdict.tenantId,
+          boundProvider: verdict.kind === "unbound" ? null : verdict.boundProvider,
+          signInProvider,
+          verdict: verdict.kind,
+        },
+        "auth.tenant_claim.binding_refused",
+      );
+      return verdict;
+  }
 }
 
 /**
@@ -54,6 +99,10 @@ export type ClaimLookup =
   | { kind: "tenant"; id: string }
   /** A revoked `tenant_claims` row owns the claim (D2). The owner is carried. */
   | { kind: "revoked"; tenantId: string }
+  /** Strict: the owning row records no provider (C4). The owner is carried. */
+  | { kind: "unbound"; tenantId: string }
+  /** Strict: the owning row is bound to another provider (C4). */
+  | { kind: "provider_mismatch"; tenantId: string; boundProvider: string }
   /**
    * The claim cannot be stored at all (`storableClaimSchema` — SC9's ASCII
    * narrowing). Nobody owns it and nobody can: `tenant-domain add` would
@@ -90,19 +139,22 @@ export type ClaimLookup =
  * Never writes (I5). The schema check runs only after the lookup has missed,
  * so an ordinary sign-in does not pay for it.
  *
+ * `signInProvider` is the Auth.js provider id the sign-in came through and
+ * `mode` the derived binding mode (`deriveClaimBindingMode()`); both are
+ * required, so no caller resolves a claim without stating which provider is
+ * presenting it.
+ *
  * Caller must already be inside a `withBypassRls` context.
  */
 export async function resolveTenantByClaim(
   tenantClaim: string,
+  signInProvider: string,
+  mode: ClaimBindingMode,
   db: TxOrPrisma = prisma,
 ): Promise<ClaimLookup> {
   const claim = normalizeTenantClaim(tenantClaim);
   const row = await findClaimRow(db, claim);
-  if (row) {
-    return row.revokedAt === null
-      ? { kind: "tenant", id: row.tenantId }
-      : { kind: "revoked", tenantId: row.tenantId };
-  }
+  if (row) return lookupFromRow(row, signInProvider, mode);
 
   // From here the claim resolves to nothing. The schema check is the same one
   // `findOrCreateTenantForClaim` applies, so the two answer "can it be
@@ -152,6 +204,14 @@ export function refusalFromLookup(
   switch (lookup.kind) {
     case "revoked":
       return { kind: "claim_taken", tenantId: lookup.tenantId };
+    case "unbound":
+      return { kind: "claim_unbound", tenantId: lookup.tenantId, boundProvider: null };
+    case "provider_mismatch":
+      return {
+        kind: "claim_provider_mismatch",
+        tenantId: lookup.tenantId,
+        boundProvider: lookup.boundProvider,
+      };
     case "unstorable":
       return { kind: "claim_invalid", tenantId: null, refusal: lookup.refusal };
   }
@@ -172,6 +232,28 @@ export function claimRefusalOf(
     case "claim_invalid":
       return refusal.refusal;
     case "claim_taken":
+    case "claim_unbound":
+    case "claim_provider_mismatch":
+      return null;
+  }
+}
+
+/**
+ * What a binding refusal adds to its audit row, or null for every other arm.
+ * The sign-in provider leaves as a ref under the identifier pepper (none
+ * without one), because the row is readable by the owning tenant's admins and
+ * the provider id can name another customer's connection.
+ */
+export function providerBindingOf(
+  refusal: Exclude<ClaimTenantResolution, { kind: "tenant" }>,
+  signInProvider: string,
+): ProviderBindingAudit | null {
+  switch (refusal.kind) {
+    case "claim_unbound":
+    case "claim_provider_mismatch":
+      return { boundProvider: refusal.boundProvider, signInProviderRef: providerRefOf(signInProvider) };
+    case "claim_taken":
+    case "claim_invalid":
       return null;
   }
 }
@@ -214,6 +296,11 @@ export type ClaimTenantResolution =
   // resurrection — callers report this as `tenant_claim_unmapped`, the reason
   // `tenant-domain unmapped` filters on.
   | { kind: "claim_taken"; tenantId: string }
+  // Strict binding (C4): the owning row records no provider, or a different
+  // one. Both carry the owner, so the denial is filed under the tenant whose
+  // claim it is — the tenant whose operator has to bind or re-point it.
+  | { kind: "claim_unbound"; tenantId: string; boundProvider: null }
+  | { kind: "claim_provider_mismatch"; tenantId: string; boundProvider: string }
   // The normalised claim fails `storableClaimSchema` (SC9's ASCII narrowing).
   // Nothing is registrable, so registering a claim is not the remedy — and no
   // tenant owns it, so this is the one arm that cannot carry a tenantId.
@@ -236,9 +323,16 @@ export type ClaimTenantResolution =
  * already pass a `tx`; this makes the requirement a compile error instead of
  * a latent footgun (round-4 N10/N4, deferred to Phase 2 by that round —
  * fixed here by making the parameter required).
+ *
+ * `signInProvider` and `mode` as for `resolveTenantByClaim`. A claim this
+ * creates is bound to `signInProvider` in every mode — so under strict a claim
+ * squatted through one connection is unusable through another until an
+ * operator re-points or binds it.
  */
 export async function findOrCreateTenantForClaim(
   tenantClaim: string,
+  signInProvider: string,
+  mode: ClaimBindingMode,
   db: TxOrPrisma,
 ): Promise<ClaimTenantResolution> {
   const claim = normalizeTenantClaim(tenantClaim);
@@ -258,18 +352,22 @@ export async function findOrCreateTenantForClaim(
     // Refusing here (not falling through to create) is what keeps a revoked
     // row from being resurrected — creating would hit P2002 on
     // tenant_claims_claim_key.
-    return row.revokedAt === null
-      ? { kind: "tenant", id: row.tenantId }
-      // The owning tenant rides on the refusal so the caller can emit an
-      // audit row that resolveTenantId() binds to the RIGHT tenant. Without
-      // it, a first-ever sign-in has no user row, the lookup on
-      // SYSTEM_ACTOR_ID finds nothing, and the row is filed under
-      // SYSTEM_TENANT_ID — so `tenant-domain unmapped`, which groups by
-      // tenant_id, shows the denial under the sentinel rather than under the
-      // tenant it is about, which is the whole point of distinguishing this
-      // refusal. (Before the encoding landed the emit dead-lettered and the
-      // denial was invisible entirely.)
-      : { kind: "claim_taken", tenantId: row.tenantId };
+    //
+    // Every refusal carries the owning tenant so the caller can emit an
+    // audit row that resolveTenantId() binds to the RIGHT tenant. Without
+    // it, a first-ever sign-in has no user row, the lookup on
+    // SYSTEM_ACTOR_ID finds nothing, and the row is filed under
+    // SYSTEM_TENANT_ID — so `tenant-domain unmapped`, which groups by
+    // tenant_id, shows the denial under the sentinel rather than under the
+    // tenant it is about, which is the whole point of distinguishing this
+    // refusal. (Before the encoding landed the emit dead-lettered and the
+    // denial was invisible entirely.)
+    //
+    // The same adjudicator as the resolver, so the loser of a concurrent
+    // first registration through a second provider — serialised behind the
+    // lock above — gets the resolver's answer for the row the winner wrote.
+    const lookup = lookupFromRow(row, signInProvider, mode);
+    return lookup.kind === "tenant" ? lookup : refusalFromLookup(lookup);
   }
 
   const parsed = storableClaimSchema.safeParse(claim);
@@ -299,7 +397,7 @@ export async function findOrCreateTenantForClaim(
       data: {
         name: tenantClaim,
         slug: tenantSlug,
-        claims: { create: { claim, createdBy: "signin" } },
+        claims: { create: { claim, createdBy: SIGNIN_ACTOR_LABEL, provider: signInProvider } },
       },
       select: { id: true },
     });
@@ -318,7 +416,7 @@ export async function findOrCreateTenantForClaim(
       data: {
         name: tenantClaim,
         slug: `${tenantSlug.slice(0, SLUG_MAX_LENGTH - suffix.length - 1)}-${suffix}`,
-        claims: { create: { claim, createdBy: "signin" } },
+        claims: { create: { claim, createdBy: SIGNIN_ACTOR_LABEL, provider: signInProvider } },
       },
       select: { id: true },
     });
@@ -352,6 +450,8 @@ export async function findOrCreateTenantForClaim(
     oldRevokedAt: null,
     newRevokedAt: null,
     actorLabel: SIGNIN_ACTOR_LABEL,
+    oldProvider: null,
+    newProvider: signInProvider,
   });
 
   return { kind: "tenant", id: created.id };

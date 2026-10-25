@@ -23,6 +23,7 @@ import {
   ALIAS_CLAIM,
   NON_DOMAIN_CLAIM,
   runToken,
+  stubClaimProviderEnv,
 } from "@/__tests__/helpers/tenant-claim-fixtures";
 import {
   cmdList,
@@ -33,6 +34,7 @@ import {
   cmdRealign,
   confirmationTransaction,
   formatUnmappedMessage,
+  UNMAPPED_SUMMARY_CLASSES,
   migrationClientFactory,
   DEFAULT_UNMAPPED_WINDOW_DAYS,
 } from "../../../scripts/tenant-domain";
@@ -66,6 +68,9 @@ function unmappedRow(over: Partial<Parameters<typeof formatUnmappedMessage>[0][n
     cnt: 1,
     last_seen: new Date(),
     undelivered_cnt: 0,
+    bound_provider: null as string | null,
+    sign_in_provider_ref: null as string | null,
+    filed_tenant_owns_claim: false,
     ...over,
   };
 }
@@ -104,6 +109,10 @@ describe("tenant-domain CLI (C7)", () => {
     if (!process.env.MIGRATION_DATABASE_URL) {
       vi.stubEnv("MIGRATION_DATABASE_URL", process.env.DATABASE_URL as string);
     }
+    // No claim provider, so the CLI runs in off mode whatever the developer's
+    // `.env` configures: `add --unbound`, which most cells here use, is refused
+    // when the env derives strict.
+    stubClaimProviderEnv({});
   });
 
   afterEach(() => {
@@ -125,7 +134,7 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
-      const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
+      const result = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(true);
       expect(result.code).toBe(0);
@@ -148,6 +157,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
       const result = await cmdAdd({
+        unbound: true,
         tenant: tenantId,
         domain: claim,
         by: `ops${String.fromCodePoint(0x202e)}admin`,
@@ -167,7 +177,7 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
-      const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+      const result = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
 
       expect(result.ok).toBe(true);
       expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.createdBy).toBe(
@@ -196,7 +206,7 @@ describe("tenant-domain CLI (C7)", () => {
       try {
         await cmdList({ tenant: tenantId });
         // The un-revoke path, which is where the missed site lives.
-        await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+        await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
       } finally {
         log.mockRestore();
       }
@@ -217,10 +227,10 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
-      const first = await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
+      const first = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "test-op", yes: true });
       expect(first.ok).toBe(true);
 
-      const second = await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op-2", yes: true });
+      const second = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "test-op-2", yes: true });
       expect(second.ok).toBe(true);
       expect(second.code).toBe(0);
 
@@ -237,7 +247,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: ownerTenant, claim, createdBy: "seed" } });
 
-      const result = await cmdAdd({ tenant: otherTenant, domain: claim, by: "test-op", yes: true });
+      const result = await cmdAdd({ unbound: true, tenant: otherTenant, domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       expect(result.code).not.toBe(0);
@@ -246,6 +256,10 @@ describe("tenant-domain CLI (C7)", () => {
       // leaves tenant_id unchanged, so the next `add` lands here again.
       expect(result.message).toContain("--from");
       expect(result.message).not.toMatch(/run "remove" on the owning tenant first/);
+      // The printed command must be runnable as given: since provider binding,
+      // `add` refuses without --provider or --unbound, so the hint carries the
+      // binding this invocation stated.
+      expect(result.message).toContain(`--domain ${claim} --unbound --by <label> --from ${ownerTenant}`);
 
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
       expect(row?.tenantId).toBe(ownerTenant);
@@ -258,7 +272,7 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
-      const added = await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
+      const added = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "test-op", yes: true });
       expect(added.ok).toBe(true);
 
       const removed = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
@@ -266,7 +280,7 @@ describe("tenant-domain CLI (C7)", () => {
       const afterRemove = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
       expect(afterRemove?.revokedAt).not.toBeNull();
 
-      const readded = await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op-recover", yes: true });
+      const readded = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "test-op-recover", yes: true });
       expect(readded.ok).toBe(true);
       expect(readded.code).toBe(0);
 
@@ -292,7 +306,7 @@ describe("tenant-domain CLI (C7)", () => {
         data: { tenantId: ownerTenant, claim, createdBy: "seed", revokedAt },
       });
 
-      const result = await cmdAdd({ tenant: otherTenant, domain: claim, by: "test-op", yes: true });
+      const result = await cmdAdd({ unbound: true, tenant: otherTenant, domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       expect(result.code).not.toBe(0);
@@ -312,13 +326,14 @@ describe("tenant-domain CLI (C7)", () => {
       const mixedCase = `${token}-Alias.Example`;
       const normalized = `${token}-alias.example`;
 
-      const added = await cmdAdd({ tenant: tenantId, domain: mixedCase, by: "test-op", yes: true });
+      const added = await cmdAdd({ unbound: true, tenant: tenantId, domain: mixedCase, by: "test-op", yes: true });
       expect(added.ok).toBe(true);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim: normalized } });
       expect(row).not.toBeNull();
       expect(row?.claim).toBe(normalized);
 
       const rejected = await cmdAdd({
+        unbound: true,
         tenant: tenantId,
         domain: `https://${token}-alias.example`,
         by: "test-op",
@@ -336,7 +351,7 @@ describe("tenant-domain CLI (C7)", () => {
 
     it.skipIf(SKIP)("an unresolvable --tenant is refused with no row changed", async () => {
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
-      const result = await cmdAdd({ tenant: randomUUID(), domain: claim, by: "test-op", yes: true });
+      const result = await cmdAdd({ unbound: true, tenant: randomUUID(), domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
@@ -347,7 +362,7 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
-      const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op", confirm: alwaysNo });
+      const result = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "test-op", confirm: alwaysNo });
 
       expect(result.ok).toBe(false);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
@@ -372,6 +387,7 @@ describe("tenant-domain CLI (C7)", () => {
       // Through the `confirm` seam rather than `--yes`, so this also pins
       // that the move is gated on a confirmation at all.
       const result = await cmdAdd({
+        unbound: true,
         tenant: gainingTenant,
         domain: claim,
         by: "test-op",
@@ -426,6 +442,7 @@ describe("tenant-domain CLI (C7)", () => {
       });
       try {
         const result = await cmdAdd({
+          unbound: true,
           tenant: gainingTenant,
           domain: claim,
           by: "test-op",
@@ -466,7 +483,7 @@ describe("tenant-domain CLI (C7)", () => {
         lines.push(args.map(String).join(" "));
       });
       try {
-        await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
+        await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "test-op", yes: true });
       } finally {
         log.mockRestore();
       }
@@ -483,6 +500,7 @@ describe("tenant-domain CLI (C7)", () => {
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
 
       const result = await cmdAdd({
+        unbound: true,
         tenant: gainingTenant,
         domain: claim,
         by: "test-op",
@@ -517,6 +535,7 @@ describe("tenant-domain CLI (C7)", () => {
       const createSpy = vi.spyOn(migrationClientFactory, "create");
       try {
         const result = await cmdAdd({
+          unbound: true,
           tenant: gainingTenant,
           domain: claim,
           by: "test-op",
@@ -546,6 +565,7 @@ describe("tenant-domain CLI (C7)", () => {
       });
 
       const result = await cmdAdd({
+        unbound: true,
         tenant: gainingTenant,
         domain: claim,
         by: "test-op",
@@ -569,6 +589,7 @@ describe("tenant-domain CLI (C7)", () => {
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
 
       const result = await cmdAdd({
+        unbound: true,
         tenant: gainingTenant,
         domain: claim,
         by: "test-op",
@@ -590,6 +611,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
       const result = await cmdAdd({
+        unbound: true,
         tenant: tenantId,
         domain: claim,
         by: "test-op",
@@ -641,6 +663,7 @@ describe("tenant-domain CLI (C7)", () => {
 
         try {
           const result = await cmdAdd({
+            unbound: true,
             tenant: gainingTenant,
             domain: claim,
             by: "test-op",
@@ -696,6 +719,7 @@ describe("tenant-domain CLI (C7)", () => {
 
         try {
           const result = await cmdAdd({
+            unbound: true,
             tenant: tenantId,
             domain: claim,
             by: "test-op",
@@ -755,6 +779,7 @@ describe("tenant-domain CLI (C7)", () => {
 
         try {
           const result = await cmdAdd({
+            unbound: true,
             tenant: gainingTenant,
             domain: claim,
             by: "test-op",
@@ -794,7 +819,7 @@ describe("tenant-domain CLI (C7)", () => {
         // left to the resolver's comment, because the tenant below really
         // does have that slug — only the resolver refuses to look at it.
         const bySlug = `${runToken()}.${ALIAS_CLAIM}`;
-        const slugResult = await cmdAdd({ tenant: tenant.slug, domain: bySlug, by: "test-op", yes: true });
+        const slugResult = await cmdAdd({ unbound: true, tenant: tenant.slug, domain: bySlug, by: "test-op", yes: true });
         expect(slugResult.ok).toBe(false);
         // Round-3 T12: `ok === false` alone does not say the SLUG was refused
         // — a missing `--by`, a rejected `--domain`, or an unset
@@ -931,7 +956,7 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
-      const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+      const result = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
       expect(result.ok).toBe(true);
 
       const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
@@ -978,7 +1003,7 @@ describe("tenant-domain CLI (C7)", () => {
       const revokedAt = new Date();
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed", revokedAt } });
 
-      const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+      const result = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
       expect(result.ok).toBe(true);
 
       const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
@@ -1004,6 +1029,7 @@ describe("tenant-domain CLI (C7)", () => {
         await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
 
         const result = await cmdAdd({
+          unbound: true,
           tenant: gainingTenant,
           domain: claim,
           by: "ops-oncall",
@@ -1040,6 +1066,7 @@ describe("tenant-domain CLI (C7)", () => {
         });
 
         const result = await cmdAdd({
+          unbound: true,
           tenant: gainingTenant,
           domain: claim,
           by: "ops-oncall",
@@ -1077,6 +1104,7 @@ describe("tenant-domain CLI (C7)", () => {
 
       try {
         const result = await cmdAdd({
+          unbound: true,
           tenant: gainingTenant,
           domain: claim,
           by: "ops-oncall",
@@ -1335,6 +1363,7 @@ describe("tenant-domain CLI (C7)", () => {
 
         try {
           const added = await cmdAdd({
+            unbound: true,
             tenant: gainingTenant,
             domain: claim,
             by: "ops-oncall",
@@ -1387,7 +1416,7 @@ describe("tenant-domain CLI (C7)", () => {
         const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
         try {
-          const added = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+          const added = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
           expect(added.ok).toBe(true);
 
           await ctx.su.prisma.$transaction(async (tx) => {
@@ -1442,6 +1471,7 @@ describe("tenant-domain CLI (C7)", () => {
 
         try {
           const added = await cmdAdd({
+            unbound: true,
             tenant: gainingTenant,
             domain: claim,
             by: "ops-oncall",
@@ -1477,7 +1507,7 @@ describe("tenant-domain CLI (C7)", () => {
         const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
         try {
-          const added = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+          const added = await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
           expect(added.ok).toBe(true);
 
           // The claim string itself is a valid resolveTenantRef ref (the
@@ -1515,8 +1545,8 @@ describe("tenant-domain CLI (C7)", () => {
         const claimB = `${runToken()}.${PRIMARY_CLAIM}`;
 
         try {
-          expect((await cmdAdd({ tenant: tenantA, domain: claimA, by: "ops-oncall", yes: true })).ok).toBe(true);
-          expect((await cmdAdd({ tenant: tenantB, domain: claimB, by: "ops-oncall", yes: true })).ok).toBe(true);
+          expect((await cmdAdd({ unbound: true, tenant: tenantA, domain: claimA, by: "ops-oncall", yes: true })).ok).toBe(true);
+          expect((await cmdAdd({ unbound: true, tenant: tenantB, domain: claimB, by: "ops-oncall", yes: true })).ok).toBe(true);
 
           // Both selectors name something that EXISTS and each would return a
           // different, non-empty answer — so a refusal here cannot be mistaken
@@ -1660,9 +1690,9 @@ describe("tenant-domain CLI (C7)", () => {
           // register, revoke, un-revoke — cheaper than inserting rows
           // directly and exercising the real writers `cmdAdd`/`cmdRemove`
           // use in production.
-          expect((await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-1", yes: true })).ok).toBe(true);
+          expect((await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "ops-1", yes: true })).ok).toBe(true);
           expect((await cmdRemove({ tenant: tenantId, domain: claim, by: "ops-2", yes: true })).ok).toBe(true);
-          expect((await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-3", yes: true })).ok).toBe(true);
+          expect((await cmdAdd({ unbound: true, tenant: tenantId, domain: claim, by: "ops-3", yes: true })).ok).toBe(true);
 
           const allEvents = await cmdHistory({ domain: claim });
           expect(allEvents.ok).toBe(true);
@@ -2188,7 +2218,7 @@ describe("tenant-domain CLI (C7)", () => {
           expect(result.message).toContain(`in the last ${DEFAULT_UNMAPPED_WINDOW_DAYS} days`);
           // All three counts, and the two new populations are non-zero — a
           // summary that merged them would not distinguish these numbers.
-          expect(result.message).toMatch(/[1-9]\d* unmapped-claim, [1-9]\d* other-tenant and [1-9]\d* refused-claim/);
+          expect(result.message).toMatch(/[1-9]\d* unmapped-claim, [1-9]\d* other-tenant, \d+ deactivated-membership, [1-9]\d* refused-claim and \d+ provider-binding/);
 
           // ─── Round-6 T3: the print GROUPS ────────────────────────────────
           //
@@ -2259,6 +2289,116 @@ describe("tenant-domain CLI (C7)", () => {
           });
 
           await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    // Round 4 (F-R4-2): the two `tenant_mismatch` producers in OTHER_TENANT
+    // have opposite remedies. Row 7 files under the user's tenant, which does
+    // not hold the claim, and `add --from` may be its fix; the deactivated-row
+    // refusal files under the claim's own tenant, where `add --from` would move
+    // the claim out of the tenant it belongs to. The registry tells them apart.
+    //
+    // Round 5 (N2, T29): the denial carries the claim as the IdP asserted it,
+    // the registry as normalizeTenantClaim stored it, so a mixed-case denial
+    // must still read as the owner's; a revoked claim is no longer the filed
+    // tenant's; and a row with no claim is not compared at all.
+    it.skipIf(SKIP)(
+      "prints a deactivated-row refusal (filed under the claim's own tenant) apart from a row-7 mismatch",
+      async () => {
+        const owner = await ctx.createTenant();
+        const elsewhere = await ctx.createTenant();
+        const revokedOwner = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        // The IdP's spelling: one letter upper-cased, so only normalisation matches it.
+        const mixedCase = claim.replace(/[a-z]/, (ch) => ch.toUpperCase());
+        const revokedClaim = `${runToken()}.${ALIAS_CLAIM}`;
+        const refusal = `refused: contains U+200B (${runToken()})`;
+        try {
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId: owner, claim, createdBy: "test" } });
+          await ctx.su.prisma.tenantClaim.create({
+            data: { tenantId: revokedOwner, claim: revokedClaim, createdBy: "test", revokedAt: new Date() },
+          });
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            const denials: [string, Record<string, string>][] = [
+              [owner, { claim: mixedCase }],
+              [owner, { claim }],
+              [elsewhere, { claim }],
+              [revokedOwner, { claim: revokedClaim }],
+              // No claim, filed under the owner: a later group, and nothing to compare.
+              [owner, { claimRefusal: refusal }],
+            ];
+            for (const [tenantId, fields] of denials) {
+              await tx.auditLog.create({
+                data: {
+                  tenantId,
+                  scope: AuditScope.PERSONAL,
+                  action: AuditAction.AUTH_LOGIN_FAILURE,
+                  userId: randomUUID(),
+                  actorType: ActorType.SYSTEM,
+                  metadata: { reason: "tenant_mismatch", ...fields, provider: "google" },
+                },
+              });
+            }
+          });
+
+          const printed: string[] = [];
+          const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+            printed.push(args.map(String).join(" "));
+          });
+          let result: Awaited<ReturnType<typeof cmdUnmapped>>;
+          try {
+            result = await cmdUnmapped();
+          } finally {
+            log.mockRestore();
+          }
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as {
+            tenant_id: string;
+            claim: string | null;
+            claim_refusal: string | null;
+            filed_tenant_owns_claim: boolean;
+          }[];
+          const owns = (tenantId: string, value: string) =>
+            rows.find((r) => r.tenant_id === tenantId && r.claim === value)?.filed_tenant_owns_claim;
+          expect(owns(owner, mixedCase)).toBe(true);
+          expect(owns(owner, claim)).toBe(true);
+          expect(owns(elsewhere, claim)).toBe(false);
+          expect(owns(revokedOwner, revokedClaim)).toBe(false);
+          const unclaimed = rows.find((r) => r.tenant_id === owner && r.claim_refusal === refusal);
+          expect(unclaimed?.claim).toBeNull();
+          expect(unclaimed?.filed_tenant_owns_claim).toBe(false);
+
+          const differentHeading = printed.findIndex((l) => l.includes("registered to a DIFFERENT tenant"));
+          const deactivatedHeading = printed.findIndex((l) => l.includes("DEACTIVATED membership row"));
+          const refusedHeading = printed.findIndex((l) => l.includes("Claims this deployment REFUSED"));
+          expect(differentHeading).toBeGreaterThanOrEqual(0);
+          expect(deactivatedHeading).toBeGreaterThan(differentHeading);
+          expect(refusedHeading).toBeGreaterThan(deactivatedHeading);
+          expect(printed[deactivatedHeading]).toContain("SCIM `DELETE /Users/<userId>`");
+          expect(printed[deactivatedHeading]).toContain("not `add --from`");
+          // Every printed line that is not indented is a heading, so a row
+          // belongs to the nearest one above it.
+          const headingAbove = (tenantId: string, field: string) => {
+            const at = printed.findIndex((l) => l.includes(`tenant=${tenantId}`) && l.includes(field));
+            expect(at, `printed line for ${tenantId} ${field}`).toBeGreaterThanOrEqual(0);
+            return printed.findLastIndex((l, i) => i < at && !l.startsWith("  "));
+          };
+          expect(headingAbove(owner, `claim="${mixedCase}"`)).toBe(deactivatedHeading);
+          expect(headingAbove(owner, `claim="${claim}"`)).toBe(deactivatedHeading);
+          expect(headingAbove(elsewhere, `claim="${claim}"`)).toBe(differentHeading);
+          expect(headingAbove(revokedOwner, `claim="${revokedClaim}"`)).toBe(differentHeading);
+          // The group after the deactivated one is printed, so the owner's rows
+          // end before it.
+          const nextHeading = printed.findIndex((l, i) => i > deactivatedHeading && !l.startsWith("  "));
+          expect(nextHeading).toBe(refusedHeading);
+          expect(headingAbove(owner, `refusal="${refusal}"`)).toBe(refusedHeading);
+          expect(result.message).toMatch(/\d+ other-tenant, [1-9]\d* deactivated-membership, /);
+        } finally {
+          await ctx.deleteTestData(owner);
+          await ctx.deleteTestData(elsewhere);
+          await ctx.deleteTestData(revokedOwner);
         }
       },
     );
@@ -2489,13 +2629,18 @@ describe("tenant-domain CLI (C7)", () => {
       expect(message).toContain("No claim-bearing sign-in denials");
       expect(message).toContain("in the last 30 days");
       expect(message).toContain("does NOT by itself mean nothing was denied");
+      // Every class the non-empty report counts, so an empty result rules each one out.
+      expect(UNMAPPED_SUMMARY_CLASSES).toHaveLength(5);
+      for (const { empty } of UNMAPPED_SUMMARY_CLASSES) {
+        expect(message).toContain(empty);
+      }
       // Func F4: the empty message must not claim to have covered retention.
       expect(message).not.toContain("retained window");
     });
 
     it("formatUnmappedMessage summarises a non-empty result and names the requested window", () => {
       const message = formatUnmappedMessage([unmappedRow({ cnt: 3 })], 90);
-      expect(message).toContain("1 unmapped-claim, 0 other-tenant and 0 refused-claim");
+      expect(message).toContain("1 unmapped-claim, 0 other-tenant, 0 deactivated-membership, 0 refused-claim and 0 provider-binding");
       expect(message).toContain("in the last 90 days");
       expect(message).not.toContain("No unmapped-claim denials");
       // Nothing undelivered — the degraded-delivery sentence must not appear,
@@ -2526,12 +2671,39 @@ describe("tenant-domain CLI (C7)", () => {
         ],
         30,
       );
-      expect(message).toContain("1 unmapped-claim, 2 other-tenant and 2 refused-claim");
+      expect(message).toContain("1 unmapped-claim, 2 other-tenant, 0 deactivated-membership, 2 refused-claim and 0 provider-binding");
+    });
+
+    // Round 5 (F-R5-2): the summary counts the two OTHER_TENANT headings
+    // apart, by the same predicates the print groups use.
+    it("formatUnmappedMessage counts deactivated-membership rows apart from other-tenant ones", () => {
+      const message = formatUnmappedMessage(
+        [
+          unmappedRow({ claim: "alias.example", reason: "tenant_mismatch" }),
+          unmappedRow({ claim: "beta.example", reason: "tenant_mismatch", filed_tenant_owns_claim: true }),
+          unmappedRow({ claim: "gamma.example", reason: "tenant_mismatch", filed_tenant_owns_claim: true }),
+        ],
+        30,
+      );
+      expect(message).toContain("0 unmapped-claim, 1 other-tenant, 2 deactivated-membership, 0 refused-claim and 0 provider-binding");
     });
 
     it("formatUnmappedMessage says zero refused groups rather than omitting the count", () => {
       const message = formatUnmappedMessage([unmappedRow({})], 30);
-      expect(message).toContain("0 other-tenant and 0 refused-claim denial group(s)");
+      expect(message).toContain(
+        "0 other-tenant, 0 deactivated-membership, 0 refused-claim and 0 provider-binding denial group(s)",
+      );
+    });
+
+    it("formatUnmappedMessage counts provider-binding denials under their own heading", () => {
+      const message = formatUnmappedMessage(
+        [
+          unmappedRow({ claim: "alias.example", reason: "tenant_claim_unbound" }),
+          unmappedRow({ claim: "beta.example", reason: "tenant_claim_provider_mismatch" }),
+        ],
+        30,
+      );
+      expect(message).toContain("0 unmapped-claim, 0 other-tenant, 0 deactivated-membership, 0 refused-claim and 2 provider-binding");
     });
 
     it("formatUnmappedMessage reports undelivered outbox events as degraded delivery", () => {
@@ -2542,7 +2714,7 @@ describe("tenant-domain CLI (C7)", () => {
         ],
         30,
       );
-      expect(message).toContain("2 unmapped-claim, 0 other-tenant and 0 refused-claim");
+      expect(message).toContain("2 unmapped-claim, 0 other-tenant, 0 deactivated-membership, 0 refused-claim and 0 provider-binding");
       expect(message).toContain("in the last 30 days");
       // Summed across groups, not per-row: the operator is being told how
       // many denial events will never reach audit_logs on their own.
@@ -2576,11 +2748,16 @@ describe("tenant-domain CLI (C7)", () => {
      * A user who left `former` for `owning` and was suspended there: active in no
      * tenant, filed under `owning`, with a deactivated membership row in `former`.
      * SCIM and directory sync in `former` may not take them back, and a claimless
-     * `former` has no sign-in that would.
+     * `former` has no sign-in that would. Both tenants, and every user filed
+     * under either, are deleted when the cell ends, however it ends.
      */
     async function seedDeparted() {
       const owning = await ctx.createTenant();
       const former = await ctx.createTenant();
+      onTestFinished(async () => {
+        await ctx.deleteTestData(owning);
+        await ctx.deleteTestData(former);
+      });
       const userId = await ctx.createUser(owning);
       await ctx.su.prisma.$executeRawUnsafe(
         `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
@@ -2628,28 +2805,26 @@ describe("tenant-domain CLI (C7)", () => {
       expect(rows.find((r) => r.tenantId === former)?.payload).toMatchObject({
         metadata: expect.objectContaining({ previousTenantId: owning, movedUserId: userId }),
       });
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("finds the user by email, matched case-insensitively", async () => {
-      const { owning, former, userId } = await seedDeparted();
+      const { former, userId } = await seedDeparted();
       const { email } = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
 
       const result = await cmdRealign({ user: (email as string).toUpperCase(), tenant: former, by: "test-op", yes: true });
 
       expect(result, result.message).toMatchObject({ ok: true });
       expect(await columnOf(userId)).toBe(former);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("refuses a user with an active membership anywhere, writing nothing", async () => {
       // The deny side: an active membership decides ownership.
       const owning = await ctx.createTenant();
       const former = await ctx.createTenant();
+      onTestFinished(async () => {
+        await ctx.deleteTestData(owning);
+        await ctx.deleteTestData(former);
+      });
       const userId = await ctx.createUser(owning); // ACTIVE in owning
       await ctx.su.prisma.$executeRawUnsafe(
         `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
@@ -2665,24 +2840,18 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result.message).toContain("active membership");
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("refuses a target where the user holds no membership row", async () => {
-      const { owning, former, userId } = await seedDeparted();
+      const { owning, userId } = await seedDeparted();
       const stranger = await ctx.createTenant();
+      onTestFinished(() => ctx.deleteTestData(stranger));
 
       const result = await cmdRealign({ user: userId, tenant: stranger, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       expect(result.message).toContain("holds no membership row");
       expect(await columnOf(userId)).toBe(owning);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
-      await ctx.deleteTestData(stranger);
     });
 
     it.skipIf(SKIP)("answers that nothing is to be done when the column already names the target, recording nothing", async () => {
@@ -2694,9 +2863,6 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result, result.message).toMatchObject({ ok: true });
       expect(result.message).toContain("nothing to do");
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("refuses a --by label carrying a bidi control, before building a client", async () => {
@@ -2724,9 +2890,6 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result).toMatchObject({ ok: false, message: "Aborted: not confirmed." });
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("matches --user literally: `_` and `%` in the typed address are not wildcards", async () => {
@@ -2743,9 +2906,6 @@ describe("tenant-domain CLI (C7)", () => {
       }
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("refuses an email that names two users differing only in case, moving neither", async () => {
@@ -2761,21 +2921,16 @@ describe("tenant-domain CLI (C7)", () => {
       expect(await columnOf(first.userId)).toBe(first.owning);
       expect(await columnOf(second.userId)).toBe(second.owning);
       expect(await realignRows([first.owning, first.former, second.owning, second.former])).toEqual([]);
-
-      for (const t of [first.owning, first.former, second.owning, second.former]) await ctx.deleteTestData(t);
     });
 
     it.skipIf(SKIP)("refuses the sentinel tenant as the target", async () => {
-      const { owning, former, userId } = await seedDeparted();
+      const { owning, userId } = await seedDeparted();
 
       const result = await cmdRealign({ user: userId, tenant: SYSTEM_TENANT_ID, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       expect(result.message).toContain("sentinel tenant");
       expect(await columnOf(userId)).toBe(owning);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("resolves a target by its claim, and records what stays behind and each row's target", async () => {
@@ -2801,9 +2956,36 @@ describe("tenant-domain CLI (C7)", () => {
         targetId: userId,
         metadata: expect.objectContaining({ leftBehind: { tag: 1 } }),
       });
+    });
 
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
+    // Round 5 (T28): `operatorToken` is counted by its subject, the user the
+    // token authenticates as, not by who minted it. Two tokens the user only
+    // created stay out of the count, so counting by creator reads 2.
+    it.skipIf(SKIP)("records an operator token left behind by its subject, not one the user only created", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const other = await ctx.createUser(owning);
+      const token = (subjectUserId: string, createdByUserId: string) => ({
+        tokenHash: randomBytes(32).toString("hex"),
+        prefix: "op_test",
+        name: "token",
+        tenantId: owning,
+        subjectUserId,
+        createdByUserId,
+        scope: "maintenance",
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      await ctx.su.prisma.operatorToken.createMany({
+        data: [token(userId, other), token(other, userId), token(other, userId)],
+      });
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true, tenantId: former });
+      const rows = await realignRows([owning, former]);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.payload).toMatchObject({ metadata: expect.objectContaining({ leftBehind: { operatorToken: 1 } }) });
+      }
     });
 
     it.skipIf(SKIP)("names a confirmation that outlived the transaction, and writes nothing", async () => {
@@ -2815,21 +2997,15 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result.message).toContain("took longer than this command's transaction allows");
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("commits after a confirmation that took six seconds, past Prisma's default transaction timeout", async () => {
-      const { owning, former, userId } = await seedDeparted();
+      const { former, userId } = await seedDeparted();
 
       const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: confirmAfter(6000) });
 
       expect(result, result.message).toMatchObject({ ok: true });
       expect(await columnOf(userId)).toBe(former);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("rethrows an error that is not an expired confirmation (round 9 T-R9-2)", async () => {
@@ -2840,9 +3016,6 @@ describe("tenant-domain CLI (C7)", () => {
 
       await expect(cmdRealign({ user: userId, tenant: former, by: "test-op", confirm })).rejects.toThrow("boom");
       expect(await columnOf(userId)).toBe(owning);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
   });
 
@@ -2854,6 +3027,7 @@ describe("tenant-domain CLI (C7)", () => {
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
 
       const result = await cmdAdd({
+        unbound: true,
         tenant: gainingTenant,
         domain: claim,
         by: "test-op",
@@ -2888,7 +3062,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
       shortenBudget({ timeout: 1000, maxWait: 2000 });
-      const result = await cmdAdd({ tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: confirmAfter(2500) });
+      const result = await cmdAdd({ unbound: true, tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: confirmAfter(2500) });
       expect(result.ok).toBe(false);
       expect(result.message).toContain("took longer than this command's transaction allows");
       expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.tenantId).toBe(losingTenant);
@@ -2922,7 +3096,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
 
-      await expect(cmdAdd({ tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: boom() })).rejects.toThrow("boom");
+      await expect(cmdAdd({ unbound: true, tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: boom() })).rejects.toThrow("boom");
 
       await ctx.deleteTestData(losingTenant);
       await ctx.deleteTestData(gainingTenant);
@@ -3018,7 +3192,7 @@ describe("tenant-domain CLI (C7)", () => {
         const results = await Promise.all([
           cmdList({}),
           cmdUnmapped(),
-          cmdAdd({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
+          cmdAdd({ unbound: true, tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
           cmdRemove({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
           cmdRealign({ user: randomUUID(), tenant: "acmecorp", by: "test-op", yes: true }),
         ]);
@@ -3168,6 +3342,7 @@ describe("tenant-domain CLI (C7)", () => {
       // cleans up on exactly the runs that do not need it.
       try {
         const result = await cmdAdd({
+          unbound: true,
           tenant: SYSTEM_TENANT_ID,
           domain: claim,
           by: "test-op",
@@ -3198,7 +3373,7 @@ describe("tenant-domain CLI (C7)", () => {
         data: { tenantId: SYSTEM_TENANT_ID, claim: existing, createdBy: "seed" },
       });
       try {
-        const result = await cmdAdd({ tenant: existing, domain: fresh, by: "test-op", yes: true });
+        const result = await cmdAdd({ unbound: true, tenant: existing, domain: fresh, by: "test-op", yes: true });
 
         expect(result.ok).toBe(false);
         expect(result.message).toContain("Refusing to register a claim against the sentinel tenant");
@@ -3221,7 +3396,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
       try {
-        const result = await cmdAdd({ tenant: "__system__", domain: claim, by: "test-op", yes: true });
+        const result = await cmdAdd({ unbound: true, tenant: "__system__", domain: claim, by: "test-op", yes: true });
 
         expect(result.ok).toBe(false);
         expect(result.message).toBe("Tenant not found: __system__");

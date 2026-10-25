@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import * as Sentry from "@sentry/nextjs";
 import type { Account } from "next-auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { logAuditAsync } from "@/lib/audit/audit";
@@ -13,6 +14,7 @@ import {
   findOrCreateTenantForClaim,
   refusalFromLookup,
   claimRefusalOf,
+  providerBindingOf,
   type ClaimTenantResolution,
   type ClaimLookup,
 } from "@/lib/tenant/tenant-management";
@@ -31,7 +33,9 @@ import { realignmentBySignIn, realignToMembershipInTx } from "@/lib/tenant/tenan
 import {
   emitAuthLoginFailure,
   type AuthLoginFailureReason,
+  type ProviderBindingAudit,
 } from "@/lib/audit/auth-failure";
+import { deriveClaimBindingMode, type ClaimBindingMode } from "@/lib/auth/jackson-providers";
 // Shared with the adapter's first-ever-sign-in refusal site, which classifies
 // the same refusal arms (see that module's header for why it is not hosted in
 // either of the two files that use it).
@@ -39,7 +43,7 @@ import {
   CLAIM_REFUSAL_REASON,
   toAuditProvider,
 } from "@/lib/audit/auth-failure-mapping";
-import authConfig from "./auth.config";
+import authConfig, { allowsDangerousEmailAccountLinking } from "./auth.config";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { errorLogFields } from "@/lib/logger/error-fields";
 
@@ -74,14 +78,21 @@ export async function assertBootstrapSingleMember(
 // shape. The reason is instead carried out of withBypassRls (it is generic
 // over the callback's return, src/lib/tenant-rls.ts:54) and
 // emitAuthLoginFailure stays at the signIn callback, post-transaction.
+type SignInRefusalReason = Extract<
+  AuthLoginFailureReason,
+  | "tenant_mismatch"
+  | "tenant_claim_unmapped"
+  | "tenant_claim_system_tenant"
+  | "tenant_claim_unbound"
+  | "tenant_claim_provider_mismatch"
+  | "provider_error"
+>;
+
 export type SignInTenantResult =
   | { ok: true }
   | {
       ok: false;
-      reason: Extract<
-        AuthLoginFailureReason,
-        "tenant_mismatch" | "tenant_claim_unmapped" | "tenant_claim_system_tenant"
-      >;
+      reason: SignInRefusalReason;
       tenantId: string | null;
       /** The value the IdP asserted, or null when it asserted nothing usable. */
       claim: string | null;
@@ -106,6 +117,12 @@ export type SignInTenantResult =
        * a comment (SEC-R6-3).
        */
       claimRefusal: ClaimRefusalDiagnosis | null;
+      /**
+       * The binding refusals' `boundProvider` and `signInProviderRef`
+       * (`providerBindingOf`); null on every other arm. Required, so each arm
+       * states which it is.
+       */
+      providerBinding: ProviderBindingAudit | null;
     };
 
 /**
@@ -178,10 +195,7 @@ function lookupOwnerId(lookup: ClaimLookup): string | null {
  */
 function lookupRefusalReason(
   lookup: Exclude<ClaimLookup, { kind: "tenant" }>,
-): Extract<
-  AuthLoginFailureReason,
-  "tenant_mismatch" | "tenant_claim_unmapped" | "tenant_claim_system_tenant"
-> {
+): SignInRefusalReason {
   // The reported production bug: the IdP is sending a claim this deployment has
   // not registered, and registering it IS the remedy. Every other arm reads the
   // shared table through the shared mapping.
@@ -201,6 +215,15 @@ function lookupRefusalDiagnosis(
   return claimRefusalOf(refusalFromLookup(lookup));
 }
 
+/** The binding audit fields a refusing lookup carries, where its arm has them. */
+function lookupProviderBinding(
+  lookup: Exclude<ClaimLookup, { kind: "tenant" }>,
+  signInProvider: string,
+): ProviderBindingAudit | null {
+  if (lookup.kind === "unregistered") return null;
+  return providerBindingOf(refusalFromLookup(lookup), signInProvider);
+}
+
 /**
  * Rows 4/8 and 6/9a: the tenant this sign-in should join, or the refusal that
  * stops it.
@@ -214,17 +237,27 @@ function lookupRefusalDiagnosis(
 async function resolveTargetTenant(
   lookup: ClaimLookup,
   tenantClaim: string,
+  signInProvider: string,
+  mode: ClaimBindingMode,
   db: TxOrPrisma,
 ): Promise<ClaimTenantResolution> {
   if (lookup.kind === "tenant") return { kind: "tenant", id: lookup.id };
-  if (lookup.kind === "unregistered") return findOrCreateTenantForClaim(tenantClaim, db);
+  if (lookup.kind === "unregistered") {
+    return findOrCreateTenantForClaim(tenantClaim, signInProvider, mode, db);
+  }
   return refusalFromLookup(lookup);
 }
 
+/**
+ * `account` is required (C5): its `provider` is the presenting provider the
+ * claim binding is decided against. `null` stays expressible because Auth.js
+ * types the callback's account that way; a claim arriving with no account is
+ * refused, never resolved as if unbound.
+ */
 export async function ensureTenantMembershipForSignIn(
   userId: string,
-  account?: Account | null,
-  profile?: Record<string, unknown> | null,
+  account: Account | null,
+  profile: Record<string, unknown> | null,
 ): Promise<SignInTenantResult> {
   const extraction = extractTenantClaimValue(account, profile);
   if (extraction.kind !== "claim") {
@@ -263,6 +296,7 @@ export async function ensureTenantMembershipForSignIn(
           tenantId: null,
           claim: null,
           claimRefusal: diagnosis,
+          providerBinding: null,
         };
       }
       throw error;
@@ -279,6 +313,7 @@ export async function ensureTenantMembershipForSignIn(
         // imitate it (round-5 S2).
         claim: null,
         claimRefusal: diagnosis,
+        providerBinding: null,
       };
     }
 
@@ -288,8 +323,28 @@ export async function ensureTenantMembershipForSignIn(
   }
   const tenantClaim = extraction.value;
 
+  const signInProvider = account?.provider;
+  if (!signInProvider) {
+    getLogger().error({ userId }, "auth.signin.claim_without_provider");
+    return {
+      ok: false,
+      reason: CLAIM_REFUSAL_REASON.provider_unavailable,
+      tenantId: null,
+      claim: tenantClaim,
+      claimRefusal: null,
+      providerBinding: null,
+    };
+  }
+
   try {
-    return await claimedTenantMembership(userId, tenantClaim);
+    // Derived per sign-in, not cached: the mode follows the env the process
+    // was started with, and tests select it by stubbing that env.
+    return await claimedTenantMembership(
+      userId,
+      tenantClaim,
+      signInProvider,
+      deriveClaimBindingMode(),
+    );
   } catch (error) {
     // The claim resolved to SYSTEM_TENANT_ID and a CHECK refused the write
     // (CF13). Two writers below can reach it: the `tenantMember.upsert` on the
@@ -336,6 +391,7 @@ export async function ensureTenantMembershipForSignIn(
       // while every unit assertion passed.
       claim: tenantClaim,
       claimRefusal: null,
+      providerBinding: null,
     };
   }
 }
@@ -343,6 +399,8 @@ export async function ensureTenantMembershipForSignIn(
 async function claimedTenantMembership(
   userId: string,
   tenantClaim: string,
+  signInProvider: string,
+  mode: ClaimBindingMode,
 ): Promise<SignInTenantResult> {
   return withBypassRls(prisma, async (tx) => {
     // Both lookups run inside this single withBypassRls callback, in this
@@ -363,7 +421,7 @@ async function claimedTenantMembership(
     // with no app.tenant_id set: tenantMember.findMany would return zero
     // rows and every deny below would silently become an allow — a
     // cross-tenant fail-open.
-    const lookup = await resolveTenantByClaim(tenantClaim, tx);
+    const lookup = await resolveTenantByClaim(tenantClaim, signInProvider, mode, tx);
     const existingTenantId = await resolveUserTenantIdFromClient(prisma, userId);
     // The claim's owner where the lookup knows one (`revoked`) — derived from
     // the arms through refusalFromLookup, not from whichever arm a finding
@@ -374,7 +432,7 @@ async function claimedTenantMembership(
     if (existingTenantId === null) {
       // Rows 4 / 8: no existing membership. Join the claimed tenant,
       // creating it first if this is the first sign-in to see this claim.
-      const target = await resolveTargetTenant(lookup, tenantClaim, tx);
+      const target = await resolveTargetTenant(lookup, tenantClaim, signInProvider, mode, tx);
       if (target.kind !== "tenant") {
         // Row 8b: the claim is unusable, so there is no tenant to join. The
         // reason distinguishes the refusals (see CLAIM_REFUSAL_REASON) —
@@ -387,6 +445,7 @@ async function claimedTenantMembership(
           tenantId: refusalTenantId(target, null),
           claim: tenantClaim,
           claimRefusal: claimRefusalOf(target),
+          providerBinding: providerBindingOf(target, signInProvider),
         };
       }
 
@@ -475,6 +534,8 @@ async function claimedTenantMembership(
         tenantId: refusalTenantId({ tenantId: claimOwnerId }, existingTenantId),
         claim: tenantClaim,
         claimRefusal: lookup.kind === "tenant" ? null : lookupRefusalDiagnosis(lookup),
+        providerBinding:
+          lookup.kind === "tenant" ? null : lookupProviderBinding(lookup, signInProvider),
       };
     }
 
@@ -485,7 +546,7 @@ async function claimedTenantMembership(
     // the claim is unresolved would regress the primary bootstrap->SSO
     // onboarding path (a magic-link user's first Google sign-in) into a hard
     // denial of the same NF2 shape as the bug this PR fixes.
-    const target = await resolveTargetTenant(lookup, tenantClaim, tx);
+    const target = await resolveTargetTenant(lookup, tenantClaim, signInProvider, mode, tx);
     if (target.kind !== "tenant") {
       // Same refusal dispatch as row 8b, reached via the bootstrap branch.
       return {
@@ -494,6 +555,42 @@ async function claimedTenantMembership(
         tenantId: refusalTenantId(target, existingTenantId),
         claim: tenantClaim,
         claimRefusal: claimRefusalOf(target),
+        providerBinding: providerBindingOf(target, signInProvider),
+      };
+    }
+
+    // A membership row the user already holds in the target can only be a
+    // deactivated one: the bootstrap membership is their active one, and
+    // `tenant_members_one_active_per_user` allows no second. Reactivating it is
+    // the target tenant's decision — SCIM, directory sync, its admins — not a
+    // sign-in's: row 4 leaves such a row deactivated (`update: {}`), and
+    // `tenant-domain realign` does too. Migrating anyway would delete the
+    // bootstrap membership and leave the user active nowhere, so the migration
+    // is refused here, before any write, and the user keeps their bootstrap
+    // tenant and its data. Filed under the target. Reachable on row 6 only: a
+    // tenant row 9a has just created has no members.
+    //
+    // No producer can reactivate this user today, so the refusal repeats on
+    // every sign-in. Directory sync created the row deactivated because the
+    // bootstrap membership is active, and refuses to reactivate it with
+    // ACTIVE_IN_ANOTHER_TENANT (`usersActiveInAnotherTenant` has no bootstrap
+    // exemption). SCIM reactivation meets `tenant_members_one_active_per_user`
+    // and answers 409. `realign` takes only users active nowhere. What works
+    // today: the target tenant deletes the row (SCIM `DELETE /Users/<userId>`,
+    // `deactivateScimUser`), and the user signs in before the next directory
+    // sync recreates it; the sign-in then finds no row and migrates.
+    const priorMembership = await tx.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId: target.id, userId } },
+      select: { id: true },
+    });
+    if (priorMembership) {
+      return {
+        ok: false,
+        reason: "tenant_mismatch",
+        tenantId: target.id,
+        claim: tenantClaim,
+        claimRefusal: null,
+        providerBinding: null,
       };
     }
 
@@ -512,7 +609,7 @@ async function claimedTenantMembership(
       });
 
       await tx.account.updateMany({
-        where: { userId },
+        where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
 
@@ -537,10 +634,6 @@ async function claimedTenantMembership(
       });
       migratedSessionTokens = migratedSessions.map((s) => s.sessionToken);
       await tx.session.updateMany({
-        where: { userId, tenantId: existingTenantId },
-        data: { tenantId: target.id },
-      });
-      await tx.extensionToken.updateMany({
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
@@ -583,33 +676,91 @@ async function claimedTenantMembership(
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
-      await tx.apiKey.updateMany({
-        where: { userId, tenantId: existingTenantId },
-        data: { tenantId: target.id },
-      });
       await tx.webAuthnCredential.updateMany({
         where: { userId, tenantId: existingTenantId },
         data: { tenantId: target.id },
       });
+      // MCP grants cannot move: each is bound to its client's tenant, and the
+      // client is tenant-owned and stays — the code exchange and the refresh
+      // refuse a grant whose tenant differs from its client's. They are revoked
+      // instead: invalidateUserSessions revokes these two and the delegation
+      // sessions riding on them, by user and tenant, when a member leaves a
+      // tenant. It has no authorization-code arm; an unused code is consumed
+      // here, its own revocation.
+      const revokedAt = new Date();
+      await tx.mcpAccessToken.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.mcpRefreshToken.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.delegationSession.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.mcpAuthorizationCode.updateMany({
+        where: { userId, tenantId: existingTenantId, usedAt: null },
+        data: { usedAt: revokedAt },
+      });
+      // An op_* token authenticates as its subject with the bootstrap tenant's
+      // maintenance scope, which the user no longer holds after the move:
+      // revoked by subject, as invalidateUserSessions does.
+      await tx.operatorToken.updateMany({
+        where: { subjectUserId: userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      // An extension or iOS token, or an API key, is revoked, not moved: a
+      // moved one would be a live target-tenant credential never checked
+      // against the target's `requirePasskey` — an extension token until its
+      // next refresh, an API key for the rest of its life — since each is
+      // validated only against revocation, expiry and an active membership in
+      // its own tenant. Revoked as invalidateUserSessions revokes both when a
+      // member leaves a tenant. Sessions above do move, where
+      // invalidateUserSessions deletes them: the proxy reads the passkey
+      // requirement from the tenant of the user's ACTIVE MEMBERSHIP
+      // (resolveOwningTenantIdFromClient) on every request, and their cache is
+      // evicted below.
+      await tx.extensionToken.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.apiKey.updateMany({
+        where: { userId, tenantId: existingTenantId, revokedAt: null },
+        data: { revokedAt },
+      });
+      // A pending bridge code is consumed, not moved. The passkey requirement
+      // is checked when a code is issued and when a token is refreshed, not at
+      // the exchange, so a code issued under the bootstrap tenant and moved
+      // would mint a target-tenant token never held to the target's
+      // `requirePasskey`. The extension or app asks for a new code.
+      await tx.extensionBridgeCode.updateMany({
+        where: { userId, tenantId: existingTenantId, usedAt: null },
+        data: { usedAt: revokedAt },
+      });
+      await tx.mobileBridgeCode.updateMany({
+        where: { userId, tenantId: existingTenantId, usedAt: null },
+        data: { usedAt: revokedAt },
+      });
+      // teamMemberKey / teamPasswordFavorite stay: they are filed under their
+      // team's tenant, and teams and team memberships are not migrated.
 
-      // Create membership in new tenant and remove old
-      await tx.tenantMember.upsert({
-        where: {
-          tenantId_userId: {
-            tenantId: target.id,
-            userId,
-          },
-        },
-        create: {
+      // Remove the bootstrap membership BEFORE creating the new one:
+      // `tenant_members_one_active_per_user` refuses a second active row, so
+      // the other order failed every migration on a real database. `create`,
+      // not an upsert: the check above found no row in the target, and one
+      // that appeared since is refused (P2002) rather than kept as found.
+      await tx.tenantMember.deleteMany({
+        where: { userId, tenantId: existingTenantId },
+      });
+
+      await tx.tenantMember.create({
+        data: {
           tenantId: target.id,
           userId,
           role: TENANT_ROLE.MEMBER,
         },
-        update: {},
-      });
-
-      await tx.tenantMember.deleteMany({
-        where: { userId, tenantId: existingTenantId },
       });
     });
 
@@ -617,16 +768,98 @@ async function claimedTenantMembership(
     // tombstone the migrated tokens so the proxy stops serving the
     // stale (pre-migration) tenantId for up to SESSION_CACHE_TTL_MS.
     if (migratedSessionTokens.length > 0) {
-      await invalidateCachedSessions(migratedSessionTokens);
+      const { failed } = await invalidateCachedSessions(migratedSessionTokens);
+      // Same signal invalidateUserSessions raises: a tombstone that did not
+      // land leaves the pre-migration SessionInfo cached on workers.
+      if (failed > 0) {
+        getLogger().error(
+          {
+            userId,
+            failures: failed,
+            reason: "bootstrap_tenant_migration",
+            _logType: "session.cache_tombstone_failures",
+          },
+          "session.cache_tombstone_failures",
+        );
+        Sentry.captureMessage(
+          "session cache tombstone failures during the bootstrap tenant migration",
+          {
+            level: "error",
+            tags: { reason: "bootstrap_tenant_migration" },
+            extra: { userId, failures: failed, tenantScope: target.id },
+          },
+        );
+      }
     }
 
     return { ok: true };
   }, BYPASS_GRANT.AUTH_TENANT_CLAIM_MEMBERSHIP);
 }
 
+// One instance, shared by NextAuth and the signIn callback's subject lookup
+// below, so both read accounts and users through the same methods.
+const adapter = createCustomAdapter();
+
+type OAuthSignInSubject =
+  /** `userId` null: no user yet — the first-ever sign-in path. */
+  | { kind: "user"; userId: string | null }
+  /** Auth.js will refuse with OAuthAccountNotLinked; `userId` is the email's user. */
+  | { kind: "not_linked"; userId: string };
+
+/**
+ * The user an OAuth/OIDC sign-in will be signed in as, resolved the way
+ * Auth.js's `handleLoginOrRegister` resolves it, through the same adapter
+ * methods.
+ *
+ * Auth.js calls the signIn callback BEFORE its own account-link check, so the
+ * callback cannot take the user by the IdP-asserted email: every membership
+ * write below — the bootstrap migration, the row-4 join and realignment —
+ * commits in its own transaction, and Auth.js's later `OAuthAccountNotLinked`
+ * does not undo it. An IdP asserting another user's email, with a claim bound
+ * to the IdP's own tenant, would move that user's tenant and data while the
+ * session itself was refused.
+ *
+ * - The provider account is linked: its user, whatever email is asserted.
+ * - Not linked, and the email names a user: that user only where the provider
+ *   links by email (`allowsDangerousEmailAccountLinking`, the predicate the
+ *   provider construction uses); otherwise `not_linked`.
+ * - Not linked, no such user: none.
+ *
+ * Not modelled: a sign-in made while another session is active, which Auth.js
+ * links to that session's user. The app has no linking flow; such a sign-in is
+ * resolved as if no session existed, with three outcomes:
+ * - refused (`not_linked`);
+ * - through a provider that links by email, resolved to the user whose email
+ *   that provider vouches for;
+ * - when the email names no user (any provider), resolved to none: the callback
+ *   allows it with no writes (no `createUser` follows), Auth.js links the IdP
+ *   account to the session's user, and that user's claim gate runs on their
+ *   next sign-in through that account.
+ */
+async function resolveOAuthSignInSubject(
+  account: Account,
+  email: string | null | undefined,
+): Promise<OAuthSignInSubject> {
+  const { getUserByAccount, getUserByEmail } = adapter;
+  if (!getUserByAccount || !getUserByEmail) {
+    throw new Error("auth adapter does not implement getUserByAccount/getUserByEmail");
+  }
+  const linked = await getUserByAccount({
+    provider: account.provider,
+    providerAccountId: account.providerAccountId,
+  });
+  if (linked) return { kind: "user", userId: linked.id };
+  if (!email) return { kind: "user", userId: null };
+  const byEmail = await getUserByEmail(email);
+  if (!byEmail) return { kind: "user", userId: null };
+  return allowsDangerousEmailAccountLinking(account.provider)
+    ? { kind: "user", userId: byEmail.id }
+    : { kind: "not_linked", userId: byEmail.id };
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   basePath: getAuthRouteBasePath(),
-  adapter: createCustomAdapter(),
+  adapter,
   session: {
     strategy: "database",
     // Outer cookie/session ceiling. Matches the policy ceiling
@@ -738,7 +971,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // id before the user row is actually inserted (new OAuth sign-in).
       let userId: string | null = null;
       const lookupEmail = params.user?.email;
-      if (lookupEmail) {
+      const account = params.account;
+      if (account && (account.type === "oauth" || account.type === "oidc")) {
+        const subject = await resolveOAuthSignInSubject(account, lookupEmail);
+        if (subject.kind === "not_linked") {
+          await emitAuthLoginFailure({
+            email: emailForAudit,
+            provider: auditProvider,
+            reason: "account_not_linked",
+            userId: subject.userId,
+          });
+          return false;
+        }
+        userId = subject.userId;
+      } else if (lookupEmail) {
         const existing = await withBypassRls(prisma, async (tx) =>
           tx.user.findUnique({
             where: { email: lookupEmail },
@@ -821,7 +1067,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             });
             return false;
           }
+          // Set together (C5): createUser decides the binding against this
+          // provider, and refuses a claim that arrives without one.
           store.tenantClaim = extraction.value;
+          store.provider = provider ?? null;
         }
         return true;
       }
@@ -829,7 +1078,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       try {
         const result = await ensureTenantMembershipForSignIn(
           userId,
-          params.account,
+          params.account ?? null,
           (params.profile ?? null) as Record<string, unknown> | null,
         );
         if (!result.ok) {
@@ -841,6 +1090,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             userId,
             claim: result.claim,
             claimRefusal: result.claimRefusal,
+            providerBinding: result.providerBinding,
           });
         }
         return result.ok;

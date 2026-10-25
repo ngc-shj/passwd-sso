@@ -45,6 +45,14 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/ci-integration.yml'
+      # jackson-probe: the Jackson images the repo references, and the
+      # provider wiring whose security rests on what that probe measures.
+      - 'docker-compose.yml'
+      - 'infra/terraform/**'
+      - 'src/auth.ts'
+      - 'src/auth.config.ts'
+      - 'src/app/\[locale\]/auth/signin/**'
+      - 'scripts/probes/**'
 
 permissions:
   # Round 4 S23 fix: principle of least privilege — only content read needed.
@@ -254,3 +262,88 @@ jobs:
           # depend on it assert it with `assertRlsApplies`.
           DATABASE_URL: postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_test
         run: npm run test:integration
+
+  # C1 (#742): a SAML sign-in must not complete through one Jackson connection's
+  # client with another connection's IdP. The app's side is "no PKCE, each
+  # provider exchanges with its own connection's credentials"; whether that
+  # holds is decided by Jackson's token endpoint, so it is measured against
+  # every Jackson version the repo references (docker-compose.yml, and the
+  # terraform.tfvars.example ECR re-tags `v<x>` of upstream `<x>`). The list and
+  # its digests are pinned here only; scripts/__tests__/jackson-probe-images.test.mjs
+  # holds them to those files. The probe itself asserts that the server reports
+  # the version its digest is listed under.
+  jackson-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - jackson: '1.52.2'
+            image: 'boxyhq/jackson:1.52.2@sha256:1d0b58424b1861520b85c4093191ea37dfde221f7ff5fddfe146e65269fd2826'
+          - jackson: '1.42.0'
+            image: 'boxyhq/jackson:1.42.0@sha256:90d91d80e5683250d9da72e057eac9e7484097dba4b6a46f14088dc189150bf6'
+    env:
+      # The probe's own runtime: it signs IdP responses with @boxyhq/saml20 and
+      # mints IdP certificates with node-forge, which only the newer image ships
+      # as standalone modules (1.42.0 bundles them into its Next.js chunks). It
+      # plays the IdP and the app, never the server under test, so one image
+      # serves every matrix entry; it is the docker-compose.yml entry above.
+      PROBE_DRIVER_IMAGE: 'boxyhq/jackson:1.52.2@sha256:1d0b58424b1861520b85c4093191ea37dfde221f7ff5fddfe146e65269fd2826'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      # The token exchange runs through the repo's locked oauth4webapi (the copy
+      # @auth/core resolves); the probe asserts its version against the lockfile.
+      - name: Install dependencies
+        run: npm ci
+
+      # The matrix above is what this job measures; the drift test holds it to
+      # the images docker-compose.yml and terraform.tfvars.example reference.
+      # Run here as well as in app-ci, so a PR that changes only the matrix or
+      # a tfvars re-tag cannot leave this job green on a list that has drifted.
+      - name: Check the probe matrix against the referenced Jackson images
+        run: npx vitest run scripts/__tests__/jackson-probe-images.test.mjs
+
+      # Teardown is registered before anything is created, so a failed start or
+      # probe still removes the server and network; the server log is printed on
+      # any failure. Keys, API key and IdP certificates are generated per run;
+      # Jackson's database is in memory.
+      - name: Probe Jackson ${{ matrix.jackson }} connection binding
+        env:
+          JACKSON_IMAGE: ${{ matrix.image }}
+          JACKSON_VERSION: ${{ matrix.jackson }}
+        run: |
+          env_file="$RUNNER_TEMP/jackson-probe.env"
+          teardown() {
+            rc=$?
+            if [ "$rc" -ne 0 ]; then docker logs jackson-probe-server || true; fi
+            docker rm -f jackson-probe-server >/dev/null 2>&1 || true
+            docker network rm jackson-probe >/dev/null 2>&1 || true
+            rm -f "$env_file"
+            exit "$rc"
+          }
+          trap teardown EXIT
+          docker run --rm --entrypoint node -v "$PWD/scripts/probes:/probe:ro" \
+            "$PROBE_DRIVER_IMAGE" /probe/jackson-connection-binding.mjs env > "$env_file"
+          docker network create jackson-probe >/dev/null
+          docker run -d --name jackson-probe-server --network jackson-probe --network-alias jackson \
+            --env-file "$env_file" \
+            -e DB_ENGINE=mem \
+            -e EXTERNAL_URL=http://jackson:5225 \
+            -e NEXTAUTH_URL=http://jackson:5225 \
+            "$JACKSON_IMAGE" >/dev/null
+          docker run --rm --network jackson-probe --entrypoint node --env-file "$env_file" \
+            -e JACKSON_URL=http://jackson:5225 \
+            -e EXPECTED_JACKSON_VERSION="$JACKSON_VERSION" \
+            -e REPO_ROOT=/repo \
+            -v "$PWD/scripts/probes:/probe:ro" \
+            -v "$PWD/node_modules:/repo/node_modules:ro" \
+            -v "$PWD/package-lock.json:/repo/package-lock.json:ro" \
+            "$PROBE_DRIVER_IMAGE" /probe/jackson-connection-binding.mjs run

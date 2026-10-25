@@ -58,9 +58,9 @@ function writeFiles(root, files) {
 }
 
 // F-R2-1: the gate's NON_LITERAL_IMPORT_ALLOWLIST (scripts/checks/check-raw-
-// sql-usage.mjs) now denies if any of its three entries is MISSING from the
+// sql-usage.mjs) now denies if any of its entries is MISSING from the
 // Layer 2 scan — true on the real tree, but every isolated fixture tree
-// below is its own mini-tree that normally holds none of these three real
+// below is its own mini-tree that normally holds none of these real
 // paths at all. Auto-inject a benign stand-in for each, with the right
 // non-literal import() COUNT, into every fixture by default — unless a row
 // supplies its own file at that path (to exercise the count-mismatch check)
@@ -71,6 +71,7 @@ const NON_LITERAL_IMPORT_ALLOWLIST_STUBS = {
   "scripts/check-env-docs.ts": 4,
   "src/i18n/messages.ts": 2,
   "src/lib/crypto/crypto-client.ts": 1,
+  "scripts/probes/jackson-connection-binding.mjs": 1,
 };
 function stubWithNonLiteralImportCalls(n) {
   const lines = [];
@@ -622,11 +623,28 @@ describe("check-raw-sql-usage Layer 2 — NON_LITERAL_IMPORT (D-5 refinement)", 
     expect(result.stderr).toContain("measured set drifted");
   });
 
+  it("allow: the exact allowlisted shape (scripts/probes/jackson-connection-binding.mjs, 1 non-literal import() call)", () => {
+    const result = run({
+      "scripts/probes/jackson-connection-binding.mjs": `export async function a(mod) {\n  return import(mod);\n}\n`,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("check-raw-sql-usage: OK");
+  });
+
+  it("deny: a count mismatch in scripts/probes/jackson-connection-binding.mjs (measured set drifted)", () => {
+    const result = run({
+      "scripts/probes/jackson-connection-binding.mjs": `export async function a(mod, other) {\n  await import(mod);\n  return import(other);\n}\n`,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("NON_LITERAL_IMPORT");
+    expect(result.stderr).toContain("measured set drifted");
+  });
+
   // F-R2-1: a deleted/renamed allowlisted file was never detected — the
   // per-file count-mismatch check only runs for files that ARE still
-  // scanned. Omit one allowlisted path entirely (the other two stay present
+  // scanned. Omit one allowlisted path entirely (the others stay present
   // via the default stub injection) and expect the stale-key deny, named by
-  // path; the adjacent allow row proves normal operation (all three
+  // path; the adjacent allow row proves normal operation (all four
   // present) stays clean.
   it("deny: a stale NON_LITERAL_IMPORT_ALLOWLIST entry (allowlisted file deleted/renamed)", () => {
     const result = run({}, { omitNonLiteralImportFiles: ["src/i18n/messages.ts"] });
@@ -636,7 +654,7 @@ describe("check-raw-sql-usage Layer 2 — NON_LITERAL_IMPORT (D-5 refinement)", 
     expect(result.stderr).toContain("allowlisted path no longer exists in the Layer 2 scan");
   });
 
-  it("allow: all three NON_LITERAL_IMPORT_ALLOWLIST files present with the right counts", () => {
+  it("allow: all four NON_LITERAL_IMPORT_ALLOWLIST files present with the right counts", () => {
     const result = run({});
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("check-raw-sql-usage: OK");

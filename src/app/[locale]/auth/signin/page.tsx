@@ -27,6 +27,11 @@ import { Shield, ChevronDown } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
 import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
 import { parseAllowedGoogleDomains } from "@/lib/url/google-domain";
+import {
+  GOOGLE_PROVIDER_ID,
+  isGoogleProviderConfigured,
+  parseJacksonProviders,
+} from "@/lib/auth/jackson-providers";
 
 export default async function SignInPage({
   params,
@@ -104,16 +109,13 @@ export default async function SignInPage({
     }
   }
 
-  const hasGoogle = !!(
-    process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
-  );
+  // The same parser auth.config.ts registers the providers from, so every
+  // button names a registered provider id.
+  const hasGoogle = isGoogleProviderConfigured();
   const isGoogleMultiDomain =
     hasGoogle && parseAllowedGoogleDomains().length > 1;
-  const hasSaml = !!(
-    process.env.JACKSON_URL &&
-    process.env.AUTH_JACKSON_ID &&
-    process.env.AUTH_JACKSON_SECRET
-  );
+  const jacksonProviders = parseJacksonProviders();
+  const hasSaml = jacksonProviders.length > 0;
   const hasSso = hasGoogle || hasSaml;
   const hasEmail = !!process.env.EMAIL_PROVIDER;
   const hasWebAuthn = !!process.env.WEBAUTHN_RP_ID;
@@ -142,7 +144,7 @@ export default async function SignInPage({
           {hasGoogle && (
             <>
               <SignInButton
-                provider="google"
+                provider={GOOGLE_PROVIDER_ID}
                 label={t("signInWithGoogle")}
                 icon={
                   <svg className="h-5 w-5" viewBox="0 0 24 24">
@@ -180,15 +182,14 @@ export default async function SignInPage({
               </span>
             </div>
           )}
-          {hasSaml && (
+          {jacksonProviders.map((provider) => (
             <SignInButton
-              provider="saml-jackson"
-              label={t("signInWithSSO", {
-                provider: process.env.SAML_PROVIDER_NAME ?? "SSO",
-              })}
+              key={provider.id}
+              provider={provider.id}
+              label={t("signInWithSSO", { provider: provider.name })}
               icon={<Shield className="h-5 w-5 text-blue-600" />}
             />
-          )}
+          ))}
 
           {/* Individual user mode: passkey + email */}
           {showPasskeySignIn && (

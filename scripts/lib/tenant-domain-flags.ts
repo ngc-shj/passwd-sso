@@ -41,12 +41,65 @@ export const VALUE_FLAG_HINTS = {
   after: "the seq cursor printed by a capped `history` result, to continue from",
   user: "the user's UUID, or their email (matched case-insensitively)",
   limit: "the maximum number of backfill candidates to list or apply",
+  provider: "the full SSO provider id the claim is bound to, e.g. saml-jackson-acme or google",
+  claim: "the registered claim whose provider binding changes",
+  out: "the path of the bind file to create, outside the git worktree",
 } as const satisfies Record<string, string>;
+
+/**
+ * Flags that take a value for ONE subcommand and none elsewhere. `--apply` is
+ * `backfill-owning-column`'s dry-run switch and `bind`'s reviewed file (plan
+ * sso-claim-connection-binding, C3); the subcommand decides which, so a file
+ * name after `bind --apply` is never read as a stray positional and a value
+ * after `backfill-owning-column --apply` is still refused.
+ */
+export const SUBCOMMAND_VALUE_FLAG_HINTS = {
+  bind: {
+    apply: "the reviewed bind file `bind --from-members --out` wrote",
+  },
+} as const satisfies Record<string, Record<string, string>>;
 
 export type ValueFlag = keyof typeof VALUE_FLAG_HINTS;
 
-/** Flags that take no value. `--yes` and `--apply` (C4) are the only two. */
-export const BOOLEAN_FLAGS = ["yes", "apply"] as const;
+type ScopedValueFlag = {
+  [S in keyof typeof SUBCOMMAND_VALUE_FLAG_HINTS]: keyof (typeof SUBCOMMAND_VALUE_FLAG_HINTS)[S];
+}[keyof typeof SUBCOMMAND_VALUE_FLAG_HINTS];
+
+/** Any flag that takes a value under some subcommand. */
+export type AnyValueFlag = ValueFlag | ScopedValueFlag;
+
+/**
+ * Flags that take no value. `--yes` and `--apply` (C4); `--unbound`,
+ * `--accept-unused-provider` and `--from-members` are the binding writers'
+ * (plan sso-claim-connection-binding, C3); `--single-connection` is
+ * `legacy-accounts`' operator attestation.
+ */
+export const BOOLEAN_FLAGS = [
+  "yes", "apply", "unbound", "accept-unused-provider", "from-members", "single-connection",
+] as const;
+
+export type BooleanFlag = (typeof BOOLEAN_FLAGS)[number];
+
+/**
+ * The flags each subcommand reads — every other one stops the command, the
+ * module's rule applied per subcommand. Without it a flag valid for SOME
+ * subcommand passed `parseFlags` everywhere and was dropped where nothing read
+ * it: `remove --provider`, `list --from-members` and `add --claim` looked
+ * applied and were not. `bind` additionally narrows this set per form
+ * (`dispatchBind`). A subcommand absent here is not one, and gets the usage.
+ */
+export const SUBCOMMAND_FLAGS = {
+  list: ["tenant", "unbound"],
+  unmapped: ["days"],
+  add: ["tenant", "domain", "by", "from", "provider", "unbound", "accept-unused-provider", "yes"],
+  bind: ["claim", "provider", "by", "accept-unused-provider", "yes", "apply", "from-members", "out"],
+  remove: ["tenant", "domain", "by", "yes"],
+  history: ["domain", "tenant", "after"],
+  realign: ["user", "tenant", "by", "yes"],
+  measure: [],
+  "legacy-accounts": ["single-connection"],
+  "backfill-owning-column": ["by", "apply", "yes", "limit"],
+} as const satisfies Record<string, readonly (ValueFlag | ScopedValueFlag | BooleanFlag)[]>;
 
 export type ParsedFlags = Map<string, string | true>;
 
@@ -66,6 +119,14 @@ function isBooleanFlag(name: string): boolean {
   return (BOOLEAN_FLAGS as readonly string[]).includes(name);
 }
 
+/** The value-taking flags only `subcommand` declares, with their hints. */
+function scopedValueFlags(subcommand: string | undefined): Readonly<Record<string, string>> {
+  if (subcommand === undefined || !Object.prototype.hasOwnProperty.call(SUBCOMMAND_VALUE_FLAG_HINTS, subcommand)) {
+    return {};
+  }
+  return SUBCOMMAND_VALUE_FLAG_HINTS[subcommand as keyof typeof SUBCOMMAND_VALUE_FLAG_HINTS];
+}
+
 /**
  * Parse `--name value`, `--name=value` and `--name` forms, refusing anything
  * this CLI does not define.
@@ -81,8 +142,9 @@ function isBooleanFlag(name: string): boolean {
  * spelling fixed: `--dayss 30`, `--Days 30` and any future typo now stop the
  * command instead of being dropped.
  */
-export function parseFlags(argv: string[]): FlagParseResult {
+export function parseFlags(argv: string[], subcommand?: string): FlagParseResult {
   const flags: ParsedFlags = new Map();
+  const scoped = scopedValueFlags(subcommand);
 
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
@@ -122,7 +184,9 @@ export function parseFlags(argv: string[]): FlagParseResult {
       };
     }
 
-    if (isBooleanFlag(name)) {
+    const isScopedValue = Object.prototype.hasOwnProperty.call(scoped, name);
+
+    if (!isScopedValue && isBooleanFlag(name)) {
       if (inlineValue !== undefined) {
         return {
           ok: false,
@@ -133,13 +197,13 @@ export function parseFlags(argv: string[]): FlagParseResult {
       continue;
     }
 
-    if (!isValueFlag(name)) {
+    if (!isScopedValue && !isValueFlag(name)) {
       return { ok: false, error: `Unknown flag --${escapeUnsafeDisplayChars(name)}. ${usageHint()}` };
     }
 
     if (inlineValue !== undefined) {
       if (inlineValue === "") {
-        return { ok: false, error: valuelessError(name) };
+        return { ok: false, error: valuelessError(name as AnyValueFlag, subcommand) };
       }
       flags.set(name, inlineValue);
       continue;
@@ -168,8 +232,12 @@ function usageHint(): string {
   return `Known flags: ${known}.`;
 }
 
-export function valuelessError(name: ValueFlag): string {
-  return `--${name} requires a value (${VALUE_FLAG_HINTS[name]}). ${REFUSAL_RATIONALE}`;
+export function valuelessError(name: AnyValueFlag, subcommand?: string): string {
+  const scoped = scopedValueFlags(subcommand);
+  const hint = Object.prototype.hasOwnProperty.call(scoped, name)
+    ? scoped[name]
+    : VALUE_FLAG_HINTS[name as ValueFlag];
+  return `--${name} requires a value (${hint}). ${REFUSAL_RATIONALE}`;
 }
 
 export function getStringFlag(flags: ParsedFlags, name: string): string | undefined {
@@ -177,10 +245,35 @@ export function getStringFlag(flags: ParsedFlags, name: string): string | undefi
   return typeof v === "string" ? v : undefined;
 }
 
-/** The first value-taking flag that was given without a value, if any. */
-export function findValuelessFlag(flags: ParsedFlags): ValueFlag | null {
+/**
+ * The first value-taking flag that was given without a value, if any — under
+ * `subcommand`, whose scoped value flags count too (a bare `bind --apply` is
+ * a missing file, not a switch).
+ */
+export function findValuelessFlag(flags: ParsedFlags, subcommand?: string): AnyValueFlag | null {
   for (const name of Object.keys(VALUE_FLAG_HINTS) as ValueFlag[]) {
     if (flags.get(name) === true) return name;
   }
+  for (const name of Object.keys(scopedValueFlags(subcommand)) as ScopedValueFlag[]) {
+    if (flags.get(name) === true) return name;
+  }
   return null;
+}
+
+/**
+ * The flags given that `subcommand` does not read, in command-line order. Empty
+ * for a subcommand `SUBCOMMAND_FLAGS` does not list — the caller prints the
+ * usage for that one.
+ */
+export function findStrayFlags(flags: ParsedFlags, subcommand: string | undefined): string[] {
+  if (subcommand === undefined || !Object.prototype.hasOwnProperty.call(SUBCOMMAND_FLAGS, subcommand)) return [];
+  const accepted: readonly string[] = SUBCOMMAND_FLAGS[subcommand as keyof typeof SUBCOMMAND_FLAGS];
+  return [...flags.keys()].filter((name) => !accepted.includes(name));
+}
+
+export function strayFlagsError(stray: readonly string[], subcommand: string): string {
+  return (
+    `${escapeUnsafeDisplayChars(subcommand)} does not read ${stray.map((name) => `--${escapeUnsafeDisplayChars(name)}`).join(", ")}. ` +
+    "Refusing rather than ignoring it: a flag the operator wrote must either take effect or stop the command."
+  );
 }
