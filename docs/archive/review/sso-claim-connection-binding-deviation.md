@@ -215,7 +215,7 @@ After the runs the copy's leak check (tenants, users, accounts, `saml-jackson` a
 | S3b raised on every invalidation (`failed >= 0`) | unit: `row 6: raises nothing when every migrated session's cache tombstone lands` |
 | F1a `deactivated-membership` dropped from the empty-result message | `formatUnmappedMessage names the window it queried when there are no rows` |
 | T30a a failing assertion injected into `refuses the sentinel tenant as the target`, cleanup as committed | that cell only; no `swept … leaked test tenant(s)` line: the failed cell's two tenants were deleted by its `onTestFinished` |
-| T30b the same failure with `seedDeparted`'s `onTestFinished` removed | that cell; the afterAll sweep reports `swept 28 leaked test tenant(s)` — 14 cells × 2 tenants, since the cleanup is now each cell's only delete |
+| T30b the same failure with `seedDeparted`'s `onTestFinished` removed | that cell; the afterAll sweep reports `swept 28 leaked test tenant(s)` — 14 `seedDeparted` calls in 13 cells (one cell seeds twice) × 2 tenants, since the cleanup is now each cell's only delete |
 
 After the runs, and after the full integration run, the copy's leak check (round 5's tables plus `api_keys`) matched its pre-run counts.
 

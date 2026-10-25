@@ -559,3 +559,55 @@ Test hygiene T30. The rest are clean.
 - T30: `seedDeparted` registers cleanup with `onTestFinished`, and the redundant trailing
   deletes are gone. Red proofs T30a and T30b. With the hook removed, an injected failure leaked
   28 tenants.
+
+---
+
+# Review round 7
+Date: 2026-10-25
+Scope: `d6eec0613..HEAD` (52598f012).
+
+## Changes from Previous Round
+Every round-6 finding was verified as resolved: S-R6-1, S-R6-3, F-R6-1 and T30. The security
+and functionality experts returned "No findings". The testing expert returned three Minors:
+- T31: two realign cells still clean up after their assertions;
+- T32: the empty-result labels are a hand list beside the summary's, and this drift has
+  shipped twice;
+- a D7 wording slip (T30b cell count).
+
+## Recurring Issue Check
+### Security expert
+R42 parity, R43 (narrowed), logging hygiene, fail-open on revocation: all clean.
+### Functionality expert
+Member-set parity, docs ↔ code, the swallowed failure signal, test cleanup: all clean.
+### Testing expert
+R42 class closure: T31, T32. Positive controls, mock hoisting, red-proof bookkeeping: clean,
+apart from the D7 wording.
+
+## Tightening-only skip — Round 7
+Findings applied directly (no round 8 review):
+- T31 [Minor] The two realign cells register their cleanup with `onTestFinished`, and their
+  trailing deletes are dropped. File: `src/__tests__/db-integration/tenant-claim-cli.integration.test.ts`.
+- T32 [Minor] `UNMAPPED_SUMMARY_CLASSES` is one table that both arms of
+  `formatUnmappedMessage` read. The empty-message cell iterates over it. The output text is
+  unchanged. Red-proved on the scratch copy: an empty arm that stops reading the table fails the
+  cell. Files: `scripts/tenant-domain.ts` and the same test file.
+- D7 T30b wording now reads "14 `seedDeparted` calls in 13 cells".
+
+Justification:
+- Every finding falls inside the round-6 fix scope: the realign cleanup, the unmapped summary
+  and the D7 table.
+- All three are inline minors (test hygiene, message assembly with identical output, doc
+  wording).
+- None touches a security boundary.
+
+## Follow-ups (not in this PR)
+- S-R6-2: enabling `requirePasskey` never re-checks existing API keys. This predates the branch.
+- F-R2-1 remedy: directory sync and SCIM should migrate a user who is active only in a
+  sole-member bootstrap tenant. Draft: `scratchpad/followup-bootstrap-reactivation.md`.
+- D9: a re-key command for the multi-connection legacy lockout. Draft:
+  `scratchpad/followup-rekey.md`.
+
+## Environment Verification Report
+N/A: Phase 1 declared no environment constraints. The browser sign-in through two live Jackson
+connections (`sso-claim-connection-binding-manual-test.md`) has not been executed; it is
+manual.

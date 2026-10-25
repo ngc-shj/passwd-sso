@@ -791,6 +791,43 @@ const OTHER_TENANT_ROWS = {
   deactivatedRow: (row: UnmappedRow) => row.filed_tenant_owns_claim,
 } as const;
 
+/**
+ * Every class the report counts, in print order: the summary line and the
+ * empty-result message both read this table, so neither can name a class the
+ * other leaves out (the drift round-5 F6 and round-6 F-R6-1 each shipped).
+ * `summary` is the label in the counted line, `empty` the one in the "no
+ * denials" sentence.
+ */
+export const UNMAPPED_SUMMARY_CLASSES: ReadonlyArray<{
+  summary: string;
+  empty: string;
+  bucket: UnmappedBucket;
+  include?: (row: UnmappedRow) => boolean;
+}> = [
+  { summary: "unmapped-claim", empty: "unregistered", bucket: UNMAPPED_BUCKET.UNREGISTERED },
+  {
+    summary: "other-tenant",
+    empty: "other-tenant",
+    bucket: UNMAPPED_BUCKET.OTHER_TENANT,
+    include: OTHER_TENANT_ROWS.differentTenant,
+  },
+  {
+    summary: "deactivated-membership",
+    empty: "deactivated-membership",
+    bucket: UNMAPPED_BUCKET.OTHER_TENANT,
+    include: OTHER_TENANT_ROWS.deactivatedRow,
+  },
+  { summary: "refused-claim", empty: "refused", bucket: UNMAPPED_BUCKET.REFUSED },
+  { summary: "provider-binding", empty: "provider-binding", bucket: UNMAPPED_BUCKET.PROVIDER_BINDING },
+];
+
+/** `a, b, c and d` — the last item joined by `conjunction`. */
+function joinWithLast(items: readonly string[], conjunction: string): string {
+  return items.length < 2
+    ? items.join("")
+    : `${items.slice(0, -1).join(", ")} ${conjunction} ${items[items.length - 1]}`;
+}
+
 // `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
 // deployment's actual retention, so it can only ever be the default window —
 // never a claim about what is retained. A deployment retaining a year of
@@ -827,7 +864,7 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
     // an operator using this to rule out the README's third cause would
     // otherwise get a message that never mentions it.
     return (
-      `No claim-bearing sign-in denials — unregistered, other-tenant, deactivated-membership, refused or provider-binding — in the ` +
+      `No claim-bearing sign-in denials — ${joinWithLast(UNMAPPED_SUMMARY_CLASSES.map((c) => c.empty), "or")} — in the ` +
       `last ${days} days. That is the window this query covered, NOT this deployment's ` +
       `retention: a denial older than ${days} days is outside it whether or not the row ` +
       "still exists. Re-run with --days <n> to widen. An empty result does NOT by itself " +
@@ -842,11 +879,10 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
   // that merges two of the others sends the operator to the wrong remedy for
   // one of them (round-5 F1/S3).
   const base =
-    `${count(UNMAPPED_BUCKET.UNREGISTERED)} unmapped-claim, ` +
-    `${count(UNMAPPED_BUCKET.OTHER_TENANT, OTHER_TENANT_ROWS.differentTenant)} other-tenant, ` +
-    `${count(UNMAPPED_BUCKET.OTHER_TENANT, OTHER_TENANT_ROWS.deactivatedRow)} deactivated-membership, ` +
-    `${count(UNMAPPED_BUCKET.REFUSED)} refused-claim and ` +
-    `${count(UNMAPPED_BUCKET.PROVIDER_BINDING)} provider-binding denial group(s) in the last ${days} days.`;
+    `${joinWithLast(
+      UNMAPPED_SUMMARY_CLASSES.map((c) => `${count(c.bucket, c.include)} ${c.summary}`),
+      "and",
+    )} denial group(s) in the last ${days} days.`;
   if (undelivered === 0) return base;
   // Round-2 F-B: the operator must see that outbox delivery itself is degraded,
   // because these rows are the ones that would have been INVISIBLE while the

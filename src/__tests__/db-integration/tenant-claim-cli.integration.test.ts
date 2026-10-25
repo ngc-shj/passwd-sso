@@ -34,6 +34,7 @@ import {
   cmdRealign,
   confirmationTransaction,
   formatUnmappedMessage,
+  UNMAPPED_SUMMARY_CLASSES,
   migrationClientFactory,
   DEFAULT_UNMAPPED_WINDOW_DAYS,
 } from "../../../scripts/tenant-domain";
@@ -2629,8 +2630,9 @@ describe("tenant-domain CLI (C7)", () => {
       expect(message).toContain("in the last 30 days");
       expect(message).toContain("does NOT by itself mean nothing was denied");
       // Every class the non-empty report counts, so an empty result rules each one out.
-      for (const bucket of ["unregistered", "other-tenant", "deactivated-membership", "refused", "provider-binding"]) {
-        expect(message).toContain(bucket);
+      expect(UNMAPPED_SUMMARY_CLASSES).toHaveLength(5);
+      for (const { empty } of UNMAPPED_SUMMARY_CLASSES) {
+        expect(message).toContain(empty);
       }
       // Func F4: the empty message must not claim to have covered retention.
       expect(message).not.toContain("retained window");
@@ -2819,6 +2821,10 @@ describe("tenant-domain CLI (C7)", () => {
       // The deny side: an active membership decides ownership.
       const owning = await ctx.createTenant();
       const former = await ctx.createTenant();
+      onTestFinished(async () => {
+        await ctx.deleteTestData(owning);
+        await ctx.deleteTestData(former);
+      });
       const userId = await ctx.createUser(owning); // ACTIVE in owning
       await ctx.su.prisma.$executeRawUnsafe(
         `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
@@ -2834,22 +2840,18 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result.message).toContain("active membership");
       expect(await columnOf(userId)).toBe(owning);
       expect(await realignRows([owning, former])).toEqual([]);
-
-      await ctx.deleteTestData(owning);
-      await ctx.deleteTestData(former);
     });
 
     it.skipIf(SKIP)("refuses a target where the user holds no membership row", async () => {
       const { owning, userId } = await seedDeparted();
       const stranger = await ctx.createTenant();
+      onTestFinished(() => ctx.deleteTestData(stranger));
 
       const result = await cmdRealign({ user: userId, tenant: stranger, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       expect(result.message).toContain("holds no membership row");
       expect(await columnOf(userId)).toBe(owning);
-
-      await ctx.deleteTestData(stranger);
     });
 
     it.skipIf(SKIP)("answers that nothing is to be done when the column already names the target, recording nothing", async () => {
