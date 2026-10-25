@@ -68,3 +68,62 @@ R1 OK; R3 S6; R29 S2, S3; R42 S1, S3; R48 OK; R49 S1; RS2 OK (S5); RS4 OK; RS1/R
 ### Testing expert
 R3 T1; R19 T2, T8; R42 T5; R49 T6; R50 T5; RT1 T11, T2; RT2 T7; RT5 OK; RT6 T2; RT7 T4, T5;
 RT8 T4, T7; RT10 T10; RT11 OK.
+
+## Round 2 (plan revision 2)
+
+### Security
+- S2–S6 resolved.
+- S1 continuing.
+- S7 Critical (escalate: true; verified by the orchestrator): the proxy's session-cookie
+  extraction is not the session Auth.js resolves.
+  - `extractSessionToken` keys the cache on the first cookie found in
+    `ALL_KNOWN_SESSION_COOKIE_NAMES` order, while Auth.js reads only `getSessionCookieName(...)`.
+  - On `__Secure-` (basePath) and http deployments, the cache can bind an attacker-chosen key to
+    another session. That bypasses the IP restriction today, and it would bypass C4.
+- S8 Critical (escalate: true): a cookie plus a junk Bearer header skips C4.
+- S9–S12 Major:
+  - S9: the proxy's own fetches recurse or get blocked;
+  - S10: the exempt passkey page cannot register while the vault is locked;
+  - S11: the C5 order contradicts the DPoP helper writing `lastUsedAt`;
+  - S12: revocation is blocked.
+- S13–S15 Minor.
+
+### Functionality
+- F1–F7 resolved; F8 is partial.
+- F9 and F10 Critical: the exempt page sits behind `VaultGate`, and the session lookup recurses.
+- F11–F16 Major:
+  - F11: the audit-emit self-fetch is answered 403;
+  - F12: C4's placement, its premise, and the routes that own their passkey UX;
+  - F13: `authOrToken` gives 401, not 403, and the clients;
+  - F14: the C5 order, `lastUsedAt` and the grant;
+  - F15: self-revocation;
+  - F16: tabs that are already open.
+- F17–F20 Minor.
+
+### Testing
+- T2–T8, T10 and T12 resolved for bearers; T1 and T11 continuing; T9 partial.
+- TQ1 Critical: the self-fetch recursion is hidden by the global fetch mock.
+- TQ2–TQ9 Major:
+  - TQ2: existing proxy tests flip;
+  - TQ3: no real-path session test;
+  - TQ4: the exempt-set pin;
+  - TQ5: the C5 status;
+  - TQ6: the C5 I2 proof;
+  - TQ7: C6 is shadowed by C5;
+  - TQ8: the placement of the mapper;
+  - TQ9: the C7 mechanism.
+- TQ10–TQ12 Minor.
+
+### Character of the round
+- The C4 session gate carries 4 of the Critical and 9 of the Major findings.
+- The bearer contracts (C1, C2, C5, C7) carry Majors of specification, not of design: shapes,
+  ordering, mock boundaries.
+- S7 is a pre-existing defect, independent of either.
+
+### User decision
+Split into three:
+1. S7 as its own small PR, first.
+2. This branch: the bearer credentials only (C1, C2, C3, C5, C6/C7), with the round-2 bearer
+   findings applied.
+3. The session gate (C4) as a separate issue and plan, carrying S1, S8–S10, S12 (session part),
+   S13, S14, F9–F12, F15–F17, F19, TQ1–TQ4 and the TQ11 session cells.
