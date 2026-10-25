@@ -48,10 +48,12 @@ export function configuredSessionCookieName(): string {
 
 /**
  * Whether the session cookie carries `Partitioned` (CHIPS) in THIS deployment —
- * the condition `auth.config.ts` sets it under. Every writer and deleter of the
- * configured session cookie must use this too: a CHIPS browser keys a
- * partitioned cookie apart from an unpartitioned one of the same name, so a
- * delete sent without the flag misses the cookie Auth.js set. Evaluated at
+ * the condition `auth.config.ts` sets it under. Every writer of the configured
+ * session cookie must use this too. A deleter must NOT gate on it: a CHIPS
+ * browser keys a partitioned cookie apart from an unpartitioned one of the
+ * same name, and which of them a browser holds depends on every value the
+ * flag has had, so a deleter removes both whenever the deployment is Secure
+ * (see clearAuthSessionCookies in src/lib/proxy/page-route.ts). Evaluated at
  * call time, like isSecureCookieFromAuthUrl().
  */
 export function isSessionCookiePartitioned(): boolean {

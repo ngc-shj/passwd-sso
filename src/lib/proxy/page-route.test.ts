@@ -191,6 +191,26 @@ describe("handlePageRoute — protected routes auth check", () => {
     }
   });
 
+  // https without a basePath: the configured name is `__Host-`, and it gets
+  // both variants at Path=/ whatever the flag says.
+  it.each([
+    ["on", "true"],
+    ["off", ""],
+  ])("deletes both variants of __Host-authjs.session-token (COOKIE_PARTITIONED %s)", async (_label, flag) => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("COOKIE_PARTITIONED", flag);
+    const res = await handlePageRoute(makePageRequest("/ja/dashboard/passwords"), dummyOptions);
+    const configured = res.headers
+      .getSetCookie()
+      .filter((h) => h.startsWith("__Host-authjs.session-token="));
+    expect(configured).toHaveLength(2);
+    expect(configured.filter((h) => /;\s*Partitioned/i.test(h))).toHaveLength(1);
+    for (const line of configured) {
+      expect(line).toMatch(/;\s*Path=\/(;|$)/i);
+      expect(line).toMatch(/;\s*Secure/i);
+    }
+  });
+
   it("does NOT add Secure to deletion when AUTH_URL is http (dev)", async () => {
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     const res = await handlePageRoute(
@@ -346,10 +366,11 @@ describe("handlePageRoute — protected routes auth check", () => {
     });
 
     // A CHIPS browser keys a partitioned cookie apart from an unpartitioned one
-    // of the same name and sends both, so with the flag on the configured name
-    // gets one deletion of each variant: the partitioned one Auth.js set, and an
-    // unpartitioned one left by a flag flip or an older passkey sign-in. Strays
-    // and the other known names were never set partitioned and stay single.
+    // of the same name and sends both, so whenever the deployment is Secure,
+    // whatever COOKIE_PARTITIONED is now, the configured name gets one deletion
+    // of each variant: either may be left by a flag flip or an older passkey
+    // sign-in. Strays and the other known names were never set partitioned and
+    // stay single.
     // Asserted on the final response, after applySecurityHeaders' own cookie
     // write, which rewrites Set-Cookie from a name-keyed map.
     function configuredDeletions(res: Response): string[] {

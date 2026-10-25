@@ -209,8 +209,47 @@ Scope: `f86f33609..37eac16c5`.
   asserts two deletions, one partitioned, and no stray deletions. Red proof: gating the raw
   deletion on `extraNames.length` reddens it.
 - T2: the top-level `beforeEach` pins `COOKIE_PARTITIONED` to empty.
-- FN-7: not done, recorded as a known limitation. The suggested fix — the sign-in response also
-  deleting the other variant — is unsafe: a browser without CHIPS ignores `Partitioned`, so the
-  deletion and the new session cookie address the same cookie and the sign-in would delete the
-  session it just set. The Auth.js sign-in and sign-out responses are not ours to change either.
-  The proxy refusal converges after one extra sign-in, which is the cost.
+- FN-7: not done, recorded as a known limitation. Corrected in round 5; the original reasoning
+  here was wrong.
+
+## Review round 5
+Scope: `37eac16c5..aba295951`.
+
+### Findings
+- **Security**: no code findings. Minor: the FN-7 note understated the effect (below).
+- **Functionality**: no code findings. A partitioned deletion on a Secure deployment that never used
+  the flag is harmless in every browser class: it matches nothing under CHIPS, is a duplicate
+  deletion without CHIPS, and is dropped alone where refused. Minor (FN-8): the FN-7 reasoning was
+  wrong (below).
+- **Testing**
+  - Minor: no dual-deletion cell for the `__Host-` name (https, no basePath).
+  - Minor: the comment above `configuredDeletions` still said "with the flag on".
+  - Minor (adjacent): the `isSessionCookiePartitioned()` JSDoc told every deleter to gate on it.
+
+### FN-7, corrected
+Round 4 rejected deleting the other variant on sign-in as unsafe because a browser without CHIPS
+would delete the session it had just set. That holds only if the deletion follows the set:
+Set-Cookie lines apply in order, so a deletion placed first is safe in both browser classes. The
+actual constraints are mechanical: `ResponseCookies` re-serializes every line on each write, so
+the deletion and the session cookie must both be raw ordered lines; and the Auth.js sign-in and
+sign-out responses are produced by Auth.js (only passkey sign-in sets the cookie itself).
+
+The effect is also wider than one extra sign-in. It needs a browser that holds both variants after
+a `COOKIE_PARTITIONED` flip:
+- Sign-out revokes the row of the first cookie only (Auth.js reads the first duplicate). The other
+  variant's session row stays valid until it expires; it can still be revoked from the session list.
+- If both variants are valid sessions at once (a sign-in while an old-variant session is still
+  valid), the older cookie is read first, so the user stays on the old session. The proxy refusal
+  does not converge this while that session is valid.
+
+Neither is introduced by this branch or reachable by an attacker on its own; both need an operator
+flag flip. The fix — sign-out revoking every session cookie in the header and deleting both
+variants, plus delete-before-set on sign-in — touches the Auth.js handler and is proposed as a
+follow-up rather than folded into this fix.
+
+### Resolution Status (round 5)
+- `__Host-` cell: two deletions at `Path=/`, one partitioned, for both flag values. Red proof:
+  hard-coding the `__Secure-` name in place of the configured one reddens it.
+- The test comment and the `isSessionCookiePartitioned()` JSDoc now say writers gate on the flag
+  and deleters remove both variants whenever Secure.
+- FN-7 / FN-8: the note above replaces the round-4 reasoning.
