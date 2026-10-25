@@ -1,7 +1,7 @@
 # Plan: api-key-passkey-requirement
 
 Issue `#956` (follow-up from `#742`, PR `#957`, code review round 6, finding S-R6-2).
-Revision 6. After plan review round 2 the user split the work three ways: the session-cookie
+Revision 7. After plan review round 2 the user split the work three ways: the session-cookie
 reader fix shipped as `#961`; the session gate on `/api/*` (former C4) moved to `#959`; this plan
 covers the bearer credentials only. Findings are cited by ID from the review record.
 
@@ -173,72 +173,62 @@ Moved to `#959` (SC4). The ID is not reused.
   party records nothing and no orphaned registration is left (F44). The
   `autofill-token` entry in `passkey-mint-gate-exempt.txt` gets the reason "gated per use via the
   `IOS_APP` host token in `validateExtensionToken` (C5; supersedes C9)". The file's header,
-  which describes only parent-token exemptions and cites C9, is rewritten to name both kinds —
-  gated through a parent token, and gated per use in the credential's validator — and the
+  which describes only parent-token exemptions and cites C9, is rewritten to name the three
+  kinds — gated through a parent token, gated per use in the credential's validator, and gated
+  inline in the mint or refresh library function (F48) — and the
   self-test fixture's superseded deadlock reason is replaced (F41).
 
 ### C6 — removed
 The AutoFill mint is covered by C5. The ID is not reused.
 
 ### C7 — a static gate for the class
-- A ts-morph gate `scripts/checks/check-bearer-passkey-gate.mjs`, built after reading
-  `check-session-token-hashed.mjs` and its self-test, with a JSON manifest. Self-test
-  `scripts/__tests__/check-bearer-passkey-gate.test.mjs` (the name
-  `check-gate-selftest-coverage.sh` requires), including a cell that passes against the real
-  repo. Wired into `scripts/pre-pr.sh` and the static-checks CI job.
-- **Lookups:** every call in non-test `src/**` on a delegate method that takes a `where`
-  (`find*`, `update*`, `delete*`, `upsert`) whose `where` has a `tokenHash` or `codeHash` key —
-  written as a property, shorthand, or string-literal key — so a validator written as
-  `update({ where: { tokenHash } })` is a lookup too (S29). Raw SQL (`$queryRaw*`,
-  `$executeRaw*`) mentioning `token_hash` or `code_hash` fails. On the delegates of models that declare a `tokenHash` or
-  `codeHash` column — read from `prisma/schema.prisma` through `lib/prisma-relation-reach.mjs`,
-  not hand-listed — a `where` that is not an object literal, a spread inside it, or a computed
-  key fails the gate (refuse rather than guess). Other models are not inspected, so
-  `mcpClient.findFirst({ where: sameNameWhereBase })` passes (F33/N3). The schema path is
-  under the same fixture-root override as the scan and the manifest, and an empty token-model set
-  fails the gate (T30).
-- **Attribution:** the nearest enclosing named function, method or exported `const`; an anonymous
-  callback attributes to its enclosing function. Manifest key: `<repo path>#<name>`.
-- **Classes:** `per-use-gated` — the function calls `passkeyGateBlocks`, resolved scope-aware to
-  the `passkey-gate` module (alias, namespace and relative imports accepted; a shadowing local or
-  another module's export of the same name is not); the awaited call is the whole condition of an
-  `if` whose consequent returns, optionally nested in an `if` whose condition is the negated
-  `passkeyExemption` option (`!opts?.passkeyExemption` or `=== undefined`; an un-negated guard
-  fails, T28); and, in the function body's statement list, every `return` before the outermost of
-  those `if`s returns an object literal with a literal `ok: false`, at least one `return` comes
-  after it, and nothing returns a non-literal value before it — so a forwarded success
-  (`return dpopResult`, `return success(d)`) above the gate fails (S21, F34, F45, S28, T29); `refresh-bound` — names its refresh route, lifetime constant and,
-  where it has one, the inline gate it relies on; `exempt` — a reason.
-- **Exemption pin:** every `validateExtensionToken` call (import resolved scope-aware, aliases
-  included) whose second argument is present must be an object literal whose `passkeyExemption`
-  resolves to a `PASSKEY_EXEMPTION` member; the set of (path#handler, member) pairs must equal
-  the three in C5. A variable, spread or forwarded options argument fails, and so does any
-  reference to the imported binding outside callee position (assignment, argument, `.call`,
-  `.apply`) or a re-export of it, a namespace-member call of the module, and a dynamic
-  `import()` of it outside the module itself (S22, S30).
-- **Forbidden reads:** `requirePasskey`/`hasPasskey` read under non-test
-  `src/lib/auth/tokens/**` as a property access, element access or destructuring; an
-  object-literal property assignment is not a read.
-- **Fails** on an unlisted function, a stale entry, a count that differs from the manifest size or
-  is zero.
-- **Initial manifest** (derivation: the gate's own first run, cross-checked with
-  `grep -rn 'tokenHash\|codeHash' src | grep -v test | grep where`; 21 functions from the `find*`
-  lookups, plus whatever the wider method set adds — at least `mobile/token#handlePOST`'s
-  `updateMany` consume, already listed, and `emergency-access-state.ts`'s `updateMany` calls,
-  classified when the first run lists them):
-  - `per-use-gated`: `validateApiKey`, `validateOperatorToken`, `validateExtensionToken`.
-  - `refresh-bound`: `validateMcpToken` (1 h; refresh gate in `resolveRefreshTokenGate`),
-    `resolveRefreshTokenGate`, `exchangeRefreshToken`, `mobile/token/refresh#handlePOST` (inline
-    gate in `refreshIosToken`).
-  - `exempt`: `validateServiceAccountToken`, `validateScimToken` (not user-bound);
-    `oauth-server#revokeToken`, `extension/token/refresh#detectRefreshReplay` (revocation only)
-    (F35); `vault/admin-reset#handlePOST`,
-    `emergency-access/accept#handlePOST`, `emergency-access/reject#handlePOST` (one-time action
-    tokens, not API credentials); `share-links/verify-access#handlePOST`, `s/[token]#SharePage`,
-    `s/[token]/download#GET` (share links, not user-bound); `mobile/token#handlePOST`,
-    `extension/token/exchange#handlePOST` (one-time codes; the minted extension-row token is
-    gated per use by C5); `oauth-server#resolveCodeTenantId`, `oauth-server#exchangeCodeForToken`
-    (one-time codes; gated inline at exchange, the minted MCP token refresh-bound, SC1) (S25).
+Revision 7 de-specifies this contract on purpose. Rounds 4–6 kept finding defects in the
+previous revision's mechanism text rather than in the design, and each fix seeded the next
+round's finding; a mechanism that cannot be described without being run is one to run. The
+plan keeps what no toolchain decides — the class, the adjudication rules, the decisions — and
+leaves fixture construction and exact AST spellings to Phase 2, where the gate's own first run
+and its red proofs settle them. Phase 3 reviews the built gate.
+
+- **Form:** a ts-morph gate `scripts/checks/check-bearer-passkey-gate.mjs` with a JSON
+  manifest and a self-test `scripts/__tests__/check-bearer-passkey-gate.test.mjs` (the name
+  `check-gate-selftest-coverage.sh` requires) that includes a cell passing against the real
+  repo. Built after reading `check-session-token-hashed.mjs`, `check-passkey-mint-gate.sh` and
+  their self-tests. Wired into `scripts/pre-pr.sh` and the static-checks CI job. The scan root,
+  the schema and the manifest sit under one fixture-root override.
+- **What the class is (adjudicated by the code, not a list):** a digest lookup — any delegate
+  call whose argument has a `where` containing a `tokenHash` or `codeHash` key, on the models
+  that declare such a column in `prisma/schema.prisma` (read through
+  `lib/prisma-relation-reach.mjs`; an empty set fails). Raw SQL whose text mentions
+  `token_hash`/`code_hash`, or whose SQL argument is not a literal, fails.
+- **Refuse rather than guess:** on those models a `where` the gate cannot read (not an object
+  literal, or containing a spread) is a decision a human makes, not one the gate infers. Such a
+  function needs an `opaque-where` manifest entry with a reason and its call count, so a new
+  opaque site still fails (F46/T34). The first run's list is the seed; today's known members are
+  `emergency-access-state#transition` and `#bulkTransition` (the digest arrives through
+  `args.where` from the accept/reject routes), `user-session-invalidation#invalidateUserSessions`,
+  `user/mcp-tokens/[id]#handleDELETE`, `share-links#handleGET` and `share-links/mine#handleGET`.
+- **Classes for each attributed function** (attribution: nearest named function, method or
+  exported `const`; key `<repo path>#<name>`): `per-use-gated`, `refresh-bound` (names its
+  refresh route, lifetime constant and any inline gate it relies on), `exempt` (a reason),
+  `opaque-where` (above).
+- **`per-use-gated` means**, adjudicated on the AST with scope-aware import resolution: the
+  function's own body (nested blocks included, nested functions excluded) returns nothing but
+  an `ok: false` object literal before one `if` that is a direct statement of the body, whose
+  condition is the awaited `passkeyGateBlocks(...)` from `passkey-gate` — or a negated
+  `passkeyExemption` test wrapping that `if` — and at least one return follows it (S21, S28,
+  S31, F45, F47, T28, T29).
+- **Exemption pin (I3):** the set of `(path#handler, member)` pairs passing
+  `passkeyExemption` equals the three in C5; any way of reaching `validateExtensionToken` the
+  gate cannot follow — value references, `.call`/`.apply`, named or `export *` re-exports,
+  namespace or dynamic imports — fails (S22, S30, S33).
+- **Forbidden reads:** `requirePasskey`/`hasPasskey` read in non-test `src/lib/auth/tokens/**`.
+- **Seed for the first run** (to be confirmed by it, not a frozen list): `per-use-gated` —
+  `validateApiKey`, `validateOperatorToken`, `validateExtensionToken`; `refresh-bound` —
+  `validateMcpToken`, `resolveRefreshTokenGate`, `exchangeRefreshToken`,
+  `mobile/token/refresh#handlePOST`; `exempt` — SA and SCIM validators, revocation-only lookups
+  (`revokeToken`, `detectRefreshReplay`), one-time action tokens (admin reset, emergency access
+  accept/reject), share links, and the one-time codes (bridge and mobile codes: the minted row is
+  gated per use by C5; MCP codes: gated at exchange, the token refresh-bound, SC1).
 
 ### C8 — `authOrToken` reports a passkey refusal
 - `AuthOrTokenResult` gains `{ type: "passkey_required" }`, returned when the API-key or
@@ -297,7 +287,12 @@ enforces immediately.
   and `jti`. Red proof: delete the limiter check (T24).
   The file does not mock `@/lib/audit/audit` or `@/lib/security/rate-limit`, which some of the
   harnesses it borrows seeders from do; route limiters stay real, under budget because every
-  test seeds fresh users and credentials. Mocking `@/lib/redis` to `null` is acceptable (T25). Grace boundary cells (deny
+  test seeds fresh users and credentials (T25). Three acceptance routes use fail-closed
+  limiters, which answer 503 without Redis, so `@/lib/security/rate-limit` is partially mocked
+  to construct every limiter with `failClosedOnRedisError: false` — real semantics, in memory
+  when Redis is absent (T31). `@/auth` returns no session, the session boundary; `checkAuth`
+  and `authOrToken` are not mocked (T32). AutoFill cells assert the `PASSKEY_REQUIRED` code;
+  the mint cell sends a real JWK so that, with the gate removed, it would reach the mint (T33). Grace boundary cells (deny
   at `now − (grace+1) d`, allow at `now − (grace−1) d`). Audit deltas counted in `audit_outbox`
   by `tenant_id` and `payload->>'action'`; each test seeds its own credentials, so the audit
   limiter's keys never repeat across tests.
@@ -370,18 +365,9 @@ enforces immediately.
   - Static gates: `passkey-mint-gate-exempt.txt` gains the refresh entry and the rewritten
     AutoFill reason; `check-bypass-rls.mjs` loses the `validate-token-dpop.ts` entry (N1).
   - No integration or E2E test turns `requirePasskey` on today, so none flips.
-- **C7 self-test fixtures:** shorthand, string-literal and computed `tokenHash` keys; `where` as a
-  variable; `OrThrow` variants; a lookup inside an anonymous callback; gate import aliased,
-  namespaced, relative, shadowed and from another module; a gate call whose result is unused or
-  not a returning `if`; an exemption passed as a variable, a spread, through a forwarding
-  wrapper, or with the wrong member; the validator referenced as a value, through `.call`, or
-  re-exported, called through a namespace import, or imported dynamically; a non-literal `where`
-  on a token model (fails) and on another model (passes); a digest lookup through `update` and
-  through raw SQL; an empty token-model schema (fails); an un-negated exemption guard; a gate
-  placed after an `ok: true` return; a forwarded success value (`return dpopResult`) above the
-  gate; forbidden reads as property, element access and
-  destructuring, and an object-literal key that is not a read; a stale manifest entry (T18, S19,
-  S21, S22, N3).
+- **C7 self-test:** one fixture per refusal and acceptance rule in C7, each red-proved
+  by the gate failing on it; the real-repo cell passes. The fixture set is built in Phase 2
+  from the rules, not listed here.
 - **Red proofs on a scratch copy:** remove each gate; the helper returns `false`; `lastUsedAt`
   written before the gate; the write put back into the DPoP helper; an `ok: true` return
   moved above the gate; a DPoP failure audited; an
@@ -421,13 +407,27 @@ enforces immediately.
   reissuing; the extension needs re-pairing if its refresh was refused meanwhile.
 - A blocked user can still revoke their extension token or reset its key.
 
+## Carried-Forward Plan Findings
+
+Round 6 left three Majors, all resolved in revision 7 but not re-reviewed as plan prose: F46/T34
+(the `opaque-where` decision) and T31 (the integration limiter mode). They are settled by
+building — the C7 gate's first run against the real repo and the integration suite's allow
+cells — and Phase 3 reviews the result.
+
+- F46/T34 — Anti-Deferral: resolved by decision (`opaque-where` with reason and count), not
+  deferred. Settled when the gate's real-repo cell passes with exactly the seeded opaque members
+  and fails when one is removed.
+- T31 — Anti-Deferral: resolved by decision (limiters constructed fail-open in the integration
+  file). Settled when the allow cells on the three fail-closed-limiter routes answer 200 with and
+  without `REDIS_URL`.
+
 ## Go/No-Go Gate
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | API key per-use gate, `validateV1Auth` response, OpenAPI, CLI | pending |
-| C2 | operator token membership + per-use gate, ten routes | pending |
-| C3 | shared bearer gate helper, audit, precedence | pending |
-| C5 | extension-row per-use gate, write order, exemption, refresh | pending |
-| C7 | static class gate and initial manifest | pending |
-| C8 | `authOrToken` passkey variant and its consumers | pending |
+| C1 | API key per-use gate, `validateV1Auth` response, OpenAPI, CLI | locked |
+| C2 | operator token membership + per-use gate, ten routes | locked |
+| C3 | shared bearer gate helper, audit, precedence | locked |
+| C5 | extension-row per-use gate, write order, exemption, refresh, AutoFill | locked |
+| C7 | static class gate (rules; fixtures and spellings in Phase 2) | locked |
+| C8 | `authOrToken` passkey variant and its consumers | locked |

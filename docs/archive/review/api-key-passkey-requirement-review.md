@@ -299,3 +299,44 @@ RS1/RS2/RS3/RS5/RS6 N/A.
 ### Testing expert
 R3 T27; R29 reproduced; R42 T27; R46/R47 T28, T29; R19/R49/R50 OK; RT1 OK (no C9 assertion exists);
 RT2 T24; RT4 OK; RT5 T25, T26; RT6 OK; RT7 T28–T30; RT8 OK; RT10 OK; RT11 OK; RT3/RT9 N/A.
+
+## Round 6 (plan revision 6)
+
+No Critical findings.
+
+### Functionality
+- F46 Major design: the opaque-`where` refusal fails on 11 real-repo calls in 6 functions (3
+  pre-existing `find*`, 8 from the widening); `emergency-access-state` was described as
+  classifiable when the rule refuses it.
+- F47 Minor prose: whether nested-block returns count. F48 Minor prose: the exempt file holds three
+  kinds of entry, not two.
+
+### Security (all Minor design)
+- S31: the ordering rule does not scope nested returns or pin the gate `if` as a direct statement.
+- S32: `count`/`aggregate`/`groupBy` and non-literal raw SQL. S33: `export *` re-exports.
+
+### Testing
+- T31 Major design: without Redis, fail-closed route limiters answer 503 on the allow cells.
+- T34 Major design: as F46.
+- T32 Minor: `@/auth` must be mocked to no session. T33 Minor: the AutoFill mint delta is decorative
+  without a JWK body; assert the code.
+
+### Exit decision (revision 7)
+The round-4 to round-6 findings sat almost entirely in C7 mechanism text the previous revision had
+added, and each fix seeded the next round's finding (the `where` refusal in rounds 4, 5 and 6).
+Per the standing direction to stop specifying at that point, revision 7 de-specifies C7 to its
+class, adjudication rules and decisions, resolves the three Majors by decision (`opaque-where`
+with a reason and count; fail-open limiters in the integration file), applies the Minors, and
+locks the contracts. The remaining verification is by building: the gate's first run, its red
+proofs, the integration allow cells, and Phase 3.
+
+## Recurring Issue Check (round 6)
+### Functionality expert
+R1 OK; R3 F48; R10 OK; R17 OK; R18 OK; R29 F46 (21 lookup functions hold; 11 opaque calls in 6
+functions); R42 F46; R43 OK; R47 OK; R48 OK; R49 F47; R52 OK.
+### Security expert
+R1 OK; R3 OK; R29 OK; R42 S32; R43 OK; R46 S33; R47 S31; R48 OK; R49 OK; R52 OK; RS4 S31; RS6 OK;
+RS1/RS2/RS3/RS5 N/A.
+### Testing expert
+R3 OK; R19/R49/R50 OK; R29 T34; R42 T34; R46/R47 OK; RT1 T31; RT2 T33; RT4 OK; RT5 T31, T32; RT6 OK;
+RT7 T34; RT8 OK; RT10 OK; RT11 OK; RT3/RT9 N/A.
