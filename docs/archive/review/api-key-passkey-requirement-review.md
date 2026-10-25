@@ -98,7 +98,11 @@ RT8 T4, T7; RT10 T10; RT11 OK.
   - F14: the C5 order, `lastUsedAt` and the grant;
   - F15: self-revocation;
   - F16: tabs that are already open.
-- F17–F20 Minor.
+- F17–F20 Minor:
+  - F17: the exempt-page request derivation (to `#959`);
+  - F18: C6 is unreachable behind C5, and `issueAutofillToken` lacks `req`;
+  - F19: passkey registration does not invalidate the session cache (to `#959`);
+  - F20: miscounts — 5 direct extension callers (6 sites), 8 `derivePasskeyState` sites.
 
 ### Testing
 - T2–T8, T10 and T12 resolved for bearers; T1 and T11 continuing; T9 partial.
@@ -127,3 +131,70 @@ Split into three:
    findings applied.
 3. The session gate (C4) as a separate issue and plan, carrying S1, S8–S10, S12 (session part),
    S13, S14, F9–F12, F15–F17, F19, TQ1–TQ4 and the TQ11 session cells.
+
+## Round 3 (plan revision 3, bearer credentials only)
+
+No Critical findings.
+
+### Functionality (F21–F30, all Minor)
+- F21 prose: one-time codes are keyed by `codeHash`, so C7 cannot "classify" them.
+- F22 prose: the README has no passkey-policy text; `docs/security/policy-enforcement.md` is the table.
+- F23 design: C2 omitted `PASSKEY_REQUIRED` in `OperatorTokenValidationError`, and `verifyAdminToken`
+  collapses every failure to `INVALID`.
+- F24 design: the gate now precedes the scope and clientKind checks, which was unstated; a distinct
+  reason in the two MCP-scope routes serves no client.
+- F25 prose: the shared OpenAPI `Forbidden` is also used by session routes; the v1 operations
+  missing a 403 were not named.
+- F26 prose: the CLI passkey message covers only `env`/`run` with an API key; the OAuth CLI uses MCP.
+- F27 design: C5 shadows the refresh route's inline gate and reorders it before family/presence
+  revocation.
+- F28 [Adjacent] design: the gate runs before `enforceAccessRestriction`.
+- F29 prose: the `openapi.json` denial status was unspecified.
+- F30 prose: F17–F20 had no recorded content (now recorded above).
+
+### Security (S16–S20, all Minor)
+- S16 design: as F28 — an off-network use of a stolen key is audited as a deduped passkey block,
+  not `ACCESS_DENIED`.
+- S17 prose: revision 3 dropped `personalAuditBase`, the token's `tenantId` and the named
+  `blockedPath` constants.
+- S18 design: dedup by user and kind collapses distinct credentials.
+- S19 design: the C7 exemption pin had no key, no literal-argument rule, no member match.
+- S20 prose: the member table claimed C7 sees codes and a removed admin env token; the iOS refresh
+  inline gate was not recorded.
+
+### Testing (T13–T18 Major, T19–T23 Minor)
+- T13 Major design: no inventory of the existing tests the change breaks.
+- T14 Major design: the C5 I2 proof could not see the write returning to the DPoP helper; the IP/UA
+  cells would be lost; per-branch and DPoP-failure cells were missing.
+- T15 Major design: exempt allow cells are vacuous where route tests mock the validator.
+- T16 Major design: the CLI and OpenAPI deliverables had no cells.
+- T17 Major design: the C7 manifest member set, key format and count were not listed.
+- T18 Major design: C7 "used result" undefined; escape spellings without fixtures.
+- T19–T22 Minor design: status assertions and `OPENAPI_PUBLIC`; mapper cells and the v1 count;
+  where audit deltas are counted; fail-closed routes and the grant pin.
+- T23 Minor [Adjacent] prose: the iOS 403 handling is not uniform, so E1's premise was wrong.
+
+### Revision 4
+- C1: CLI `env`/`run` named; a v1-specific forbidden response; `passwords/{id}` gains 403.
+- C2: `OperatorTokenValidationError` and `verifyAdminToken` carry `PASSKEY_REQUIRED` to a 403.
+- C3: the audit spec restored; per-credential dedup; the precedence over scope and network stated
+  and accepted, with the reason (the validator placement is what makes I1 structural).
+- C5: write on both branches; the exemption call shape; the refresh inline gate removed with the
+  outcome change stated.
+- C7: `tokenHash` and `codeHash`; refuse non-literal `where`; attribution, classes, "used", the
+  exemption pin and forbidden-read spellings defined; the 21-function initial manifest; the
+  self-test name.
+- C8: MCP-scope routes use the existing 403 arm; `openapi.json` answers 403.
+- E1 corrected; SC5 (iOS presentation) added; the documentation target is `policy-enforcement.md`.
+- Testing strategy: T13–T22 applied.
+
+## Recurring Issue Check (round 3)
+### Functionality expert
+R1 OK; R3 F23, F30; R10 OK; R17 OK; R29 F21, F22, F25, F26 (counts reproduced); R42 F21; R48/R49
+OK; R52 OK.
+### Security expert
+R3 OK; R29 S17, S20; R42 S20; R43 OK (exempt routes read end to end); R46/R47 S19; R48 S16; R49 S17;
+R1/R52 OK; RS4 OK; RS1/RS2/RS3/RS5/RS6 N/A.
+### Testing expert
+R3 T13, T16, T20; R29 checked (v1 and C7 counts were unstated); R42 T17; R19/R49/R50 OK; RT1 T13;
+RT2 T15, T19, T22; RT5 OK; RT6 T14; RT7 T14, T15, T18; RT8 T21; RT10 OK; RT11 OK; RT3/RT4/RT9 N/A.
