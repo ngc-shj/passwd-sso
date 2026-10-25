@@ -92,6 +92,14 @@ describe("auth.config session cookie attributes", () => {
     expect(config.cookies?.sessionToken?.options).not.toHaveProperty("partitioned");
   });
 
+  // Partitioned requires Secure; on http a browser drops the cookie outright.
+  it("omits partitioned over http even when COOKIE_PARTITIONED is true", async () => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    vi.stubEnv("COOKIE_PARTITIONED", "true");
+    const config = (await import("@/auth.config")).default;
+    expect(config.cookies?.sessionToken?.options).not.toHaveProperty("partitioned");
+  });
+
   // Matrix: AUTH_URL × NEXT_PUBLIC_BASE_PATH drives the cookie name.
   // A regression that inlines the prefix-selection in auth.config.ts
   // would trip whichever quadrant got missed.

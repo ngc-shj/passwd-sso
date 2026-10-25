@@ -71,7 +71,7 @@ function clearAuthSessionCookies(
   response: NextResponse,
   basePath: string = "",
   extraNames: readonly string[] = [],
-): void {
+): readonly string[] {
   const cookiePath = `${basePath}/`;
   // Mirror the set-time attributes. The `__Secure-` / `__Host-` prefixes
   // require the Secure attribute on Set-Cookie per RFC 6265bis §4.1.3.1/3.2,
@@ -93,6 +93,24 @@ function clearAuthSessionCookies(
       ...(partitioned && name === configuredName ? { partitioned: true } : {}),
     });
   }
+  if (!partitioned) return [];
+  // A CHIPS browser stores a partitioned and an unpartitioned cookie of the
+  // same name side by side and sends both. An unpartitioned one survives a
+  // flag flip or a session issued before passkey sign-in set the flag, comes
+  // first in the header, and is the one the reader takes; deleting only the
+  // partitioned variant would remove the valid cookie and loop the user back
+  // here. ResponseCookies holds one entry per name, so the unpartitioned
+  // deletion is returned as a raw header for the caller to append after the
+  // last `response.cookies` write, which would otherwise rewrite it away.
+  const unpartitioned = new NextResponse(null);
+  unpartitioned.cookies.delete({
+    name: configuredName,
+    path: cookiePath,
+    secure: useSecureCookies,
+    httpOnly: true,
+    sameSite: "lax",
+  });
+  return unpartitioned.headers.getSetCookie();
 }
 
 /**
@@ -152,12 +170,16 @@ export async function handlePageRoute(
       signInUrl.pathname = `/${locale}/auth/signin`;
       signInUrl.searchParams.set("callbackUrl", `${basePath}${request.nextUrl.pathname}${request.nextUrl.search}`);
       const redirectResponse = NextResponse.redirect(signInUrl);
-      clearAuthSessionCookies(
+      const unpartitionedDeletions = clearAuthSessionCookies(
         redirectResponse,
         basePath,
         ambiguousSessionCookieNames(request.headers.get("cookie")),
       );
-      return applySecurityHeaders(redirectResponse, options, basePath);
+      const securedResponse = applySecurityHeaders(redirectResponse, options, basePath);
+      for (const line of unpartitionedDeletions) {
+        securedResponse.headers.append("set-cookie", line);
+      }
+      return securedResponse;
     }
 
     // Access restriction check for dashboard routes

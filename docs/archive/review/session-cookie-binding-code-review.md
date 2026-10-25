@@ -127,7 +127,9 @@ Scope: `5114f00a9..HEAD` (f5bda5fa6).
 - N1 / FN-3: the reauth options and verify routes select `userId`. A row owned by another user is
   refused with 401 before any audit, verifier call or challenge consumption. The verify write is
   `update({ where: { sessionToken, userId } })`. Red proofs a, b and b2. The integration test
-  `reauth-credential-binding` passes against real Prisma.
+  `reauth-credential-binding` still passes, but it exercises only the denial arms: the success
+  path needs a validly signed assertion that tier cannot produce, so the compound `where` is pinned
+  by the unit success cell and by the build, not by a real-DB write. (Corrected in round 3.)
 - FN-1 + [Adjacent]: one call-time helper, `isSessionCookiePartitioned()`, used by `auth.config.ts`,
   passkey sign-in and the cookie deletion. Stray chunk names stay unpartitioned. Red proofs c and
   c2.
@@ -144,3 +146,38 @@ Scope: `5114f00a9..HEAD` (f5bda5fa6).
 - Test N5: `injectSession` sets `httpOnly: true`.
 - Not done: the [Adjacent] sign-in page message for an undeletable stray cookie. It is a UX item,
   outside the scope of a security fix.
+
+## Review round 3
+Scope: `f5bda5fa6..HEAD` (f86f33609).
+
+### Changes from Previous Round
+- Every round-2 finding was verified as resolved. The reauth 401 contract is unchanged: a row owned
+  by another user takes the same arm as a missing row, and the client treats every non-ok response
+  alike.
+
+### Findings
+- **Security**: no findings. Observation: the round-2 note claimed a real-Prisma pass for the reauth
+  write, which the integration suite never reaches.
+- **Functionality**
+  - FN-5 Major (R38, introduced by the FN-1 fix): a CHIPS browser stores a partitioned and an
+    unpartitioned cookie of the same name side by side and sends both, older first. With
+    `COOKIE_PARTITIONED=true`, an unpartitioned one left by a flag flip or a pre-fix passkey sign-in
+    is the one the reader takes. The refusal deleted only the partitioned variant — the valid new
+    cookie — so the user looped through sign-in until the stale cookie expired. `ResponseCookies`
+    keeps one entry per name and rewrites `Set-Cookie` on every write, including
+    `applySecurityHeaders`' nonce cookie, so the second variant cannot go through it.
+- **Testing**
+  - M1 Minor: the `auth.config.ts` Partitioned cells use https only; a raw env check without the
+    Secure condition passes both.
+  - [Adjacent] Minor: the round-2 real-Prisma wording above.
+
+### Resolution Status (round 3)
+- FN-5: with the flag on, the configured name gets both deletions. The partitioned one stays in
+  `response.cookies` (FN-1 preserved); the unpartitioned one is serialized by a throwaway
+  `NextResponse` and appended after `applySecurityHeaders`. With the flag off there is exactly one
+  unpartitioned deletion. The cells assert on the final response. Red proofs (scratch copy): drop
+  the append; drop the partitioned flag; append before `applySecurityHeaders`; always emit the
+  second variant — each reddens.
+- M1: an http + `COOKIE_PARTITIONED=true` cell asserts no `partitioned`. Red proof: the raw env
+  check in `auth.config.ts` reddens it.
+- [Adjacent]: the round-2 note is corrected.

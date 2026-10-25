@@ -342,27 +342,51 @@ describe("handlePageRoute — protected routes auth check", () => {
     });
 
     // A CHIPS browser keys a partitioned cookie apart from an unpartitioned one
-    // of the same name, so the configured name's deletion must carry the same
-    // Partitioned flag auth.config.ts set it with. Strays and the other known
-    // names were never set partitioned by Auth.js and stay unpartitioned.
-    it.each([
-      ["on", "true", true],
-      ["off", "", false],
-    ])("marks only the configured name's deletion Partitioned (COOKIE_PARTITIONED %s)", async (_label, flag, expected) => {
-      vi.stubEnv("COOKIE_PARTITIONED", flag);
+    // of the same name and sends both, so with the flag on the configured name
+    // gets one deletion of each variant: the partitioned one Auth.js set, and an
+    // unpartitioned one left by a flag flip or an older passkey sign-in. Strays
+    // and the other known names were never set partitioned and stay single.
+    // Asserted on the final response, after applySecurityHeaders' own cookie
+    // write, which rewrites Set-Cookie from a name-keyed map.
+    function configuredDeletions(res: Response): string[] {
+      return res.headers.getSetCookie().filter((h) => h.startsWith(`${SECURE_NAME}=`));
+    }
+
+    it("deletes both variants of the configured name when COOKIE_PARTITIONED is on", async () => {
+      vi.stubEnv("COOKIE_PARTITIONED", "true");
       const res = await handlePageRoute(
         makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}.0=${TEST_SESSION_TOKEN}`),
         dummyOptions,
       );
       expect(res.status).toBe(307);
-      const headers = res.headers.getSetCookie();
-      const configured = headers.find((h) => h.startsWith(`${SECURE_NAME}=`));
-      expect(configured).toBeDefined();
-      expect(/;\s*Partitioned/i.test(configured!)).toBe(expected);
-      for (const line of headers.filter((h) => !h.startsWith(`${SECURE_NAME}=`))) {
+      const configured = configuredDeletions(res);
+      expect(configured).toHaveLength(2);
+      expect(configured.filter((h) => /;\s*Partitioned/i.test(h))).toHaveLength(1);
+      for (const line of configured) {
+        expect(line).toMatch(/;\s*Path=\/passwd-sso\/(;|$)/i);
+        expect(line).toMatch(/;\s*Secure/i);
+        expect(line).toMatch(/;\s*HttpOnly/i);
+        expect(line).toMatch(/;\s*SameSite=lax/i);
+        expect(line).toMatch(/Max-Age=0|Expires=Thu,\s*01\s*Jan\s*1970/i);
+      }
+      const others = res.headers.getSetCookie().filter((h) => !h.startsWith(`${SECURE_NAME}=`));
+      for (const line of others) {
         expect(line).not.toMatch(/;\s*Partitioned/i);
       }
-      expect(headers.some((h) => h.startsWith(`${SECURE_NAME}.0=`))).toBe(true);
+      expect(others.some((h) => h.startsWith(`${SECURE_NAME}.0=`))).toBe(true);
+      expect(others.some((h) => h.startsWith("csp-nonce="))).toBe(true);
+    });
+
+    it("deletes the configured name once, unpartitioned, when COOKIE_PARTITIONED is off", async () => {
+      vi.stubEnv("COOKIE_PARTITIONED", "");
+      const res = await handlePageRoute(
+        makeBasePathRequest(`${SECURE_NAME}=${TEST_SESSION_TOKEN}; ${SECURE_NAME}.0=${TEST_SESSION_TOKEN}`),
+        dummyOptions,
+      );
+      expect(res.status).toBe(307);
+      const configured = configuredDeletions(res);
+      expect(configured).toHaveLength(1);
+      expect(configured[0]).not.toMatch(/;\s*Partitioned/i);
     });
   });
 
