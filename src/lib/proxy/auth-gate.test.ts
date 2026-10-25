@@ -31,6 +31,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import {
+  extractConfiguredSessionCookie,
   extractSessionToken,
   hasSessionCookie,
   getSessionInfo,
@@ -117,6 +118,117 @@ describe("hasSessionCookie", () => {
 
   it("returns false for empty cookie header", () => {
     expect(hasSessionCookie("")).toBe(false);
+  });
+});
+
+/**
+ * The deployment shapes whose configured name is not the first entry of
+ * ALL_KNOWN_SESSION_COOKIE_NAMES: https with a basePath (`__Secure-`), and
+ * http (`authjs.session-token`). `__Host-` comes first in that list, so these
+ * are the shapes where reading "any known name" disagreed with Auth.js.
+ */
+const SECURE_BASEPATH = { AUTH_URL: "https://app.example.test/passwd-sso", NEXT_PUBLIC_BASE_PATH: "/passwd-sso" };
+const PLAIN_HTTP = { AUTH_URL: "http://localhost:3000", NEXT_PUBLIC_BASE_PATH: "" };
+
+function stubDeployment(env: Record<string, string>) {
+  for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+}
+
+describe("extractConfiguredSessionCookie", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("reads only __Secure- on an https basePath deployment, ignoring an earlier __Host- cookie", () => {
+    stubDeployment(SECURE_BASEPATH);
+    expect(
+      extractConfiguredSessionCookie(
+        "__Host-authjs.session-token=X; __Secure-authjs.session-token=session-b",
+      ),
+    ).toEqual({ token: "session-b", pair: "__Secure-authjs.session-token=session-b" });
+  });
+
+  it("reads only the plain name over http, ignoring __Host- and __Secure- cookies", () => {
+    stubDeployment(PLAIN_HTTP);
+    expect(
+      extractConfiguredSessionCookie(
+        "__Host-authjs.session-token=X; __Secure-authjs.session-token=Y; authjs.session-token=session-b",
+      ),
+    ).toEqual({ token: "session-b", pair: "authjs.session-token=session-b" });
+  });
+
+  it("returns null when only a non-configured session cookie is present", () => {
+    stubDeployment(SECURE_BASEPATH);
+    expect(extractConfiguredSessionCookie("__Host-authjs.session-token=X")).toBeNull();
+  });
+
+  it("takes the first occurrence of the configured name, as Auth.js does", () => {
+    stubDeployment(PLAIN_HTTP);
+    expect(
+      extractConfiguredSessionCookie("authjs.session-token=first; authjs.session-token=second")?.token,
+    ).toBe("first");
+  });
+
+  it("dequotes the cache key but forwards the pair as received", () => {
+    stubDeployment(PLAIN_HTTP);
+    expect(extractConfiguredSessionCookie('authjs.session-token="tok-quoted"')).toEqual({
+      token: "tok-quoted",
+      pair: 'authjs.session-token="tok-quoted"',
+    });
+  });
+
+  it("returns null for an empty value", () => {
+    stubDeployment(PLAIN_HTTP);
+    expect(extractConfiguredSessionCookie("authjs.session-token=")).toBeNull();
+  });
+
+  it("hasSessionCookie still sees any known name (CSRF stays broad)", () => {
+    stubDeployment(SECURE_BASEPATH);
+    expect(hasSessionCookie("__Host-authjs.session-token=X")).toBe(true);
+  });
+});
+
+describe("getSessionInfo binds the cache to the session Auth.js resolves", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch");
+    mockGetCachedSession.mockReset();
+    mockSetCachedSession.mockReset();
+    mockResolveUserTenantId.mockReset();
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("looks up and forwards the configured cookie, not an attacker-chosen __Host- key sent first", async () => {
+    stubDeployment(SECURE_BASEPATH);
+    // Step 2 of the attack: a key the attacker bound to another session's
+    // info earlier, sent ahead of the session being authenticated. The cache
+    // must be asked about session B, and the session read must see only B.
+    mockGetCachedSession.mockResolvedValueOnce(null);
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
+
+    await getSessionInfo(
+      makeRequest({
+        cookie: "__Host-authjs.session-token=attacker-key; __Secure-authjs.session-token=session-b; other=1",
+      }),
+    );
+
+    expect(mockGetCachedSession).toHaveBeenCalledWith("session-b");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("cookie")).toBe("__Secure-authjs.session-token=session-b");
+  });
+
+  it("is invalid, with no cache lookup and no fetch, when only a non-configured cookie is sent", async () => {
+    stubDeployment(SECURE_BASEPATH);
+    const result = await getSessionInfo(makeRequest({ cookie: "__Host-authjs.session-token=attacker-key" }));
+    expect(result).toEqual({ valid: false });
+    expect(mockGetCachedSession).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

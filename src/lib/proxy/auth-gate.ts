@@ -17,7 +17,10 @@ import {
   type SessionInfo,
 } from "@/lib/auth/session/session-cache";
 import { resolveUserTenantId } from "@/lib/tenant-context";
-import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
+import {
+  ALL_KNOWN_SESSION_COOKIE_NAMES,
+  configuredSessionCookieName,
+} from "@/lib/auth/session/cookie-name";
 import { getLogger } from "@/lib/logger";
 
 export type { SessionInfo } from "@/lib/auth/session/session-cache";
@@ -63,12 +66,44 @@ export function hasSessionCookie(cookieHeader: string): boolean {
   return extractSessionToken(cookieHeader) !== "";
 }
 
-export async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
-  const cookie = request.headers.get("cookie");
-  if (!cookie) return { valid: false };
+/**
+ * The configured session cookie (`configuredSessionCookieName()`) from the
+ * header: its canonical value, used as the cache key, and the raw `name=value`
+ * pair, the only cookie forwarded to `/api/auth/session`. The FIRST occurrence
+ * wins, as it does in Auth.js's own parse.
+ *
+ * This is deliberately not `extractSessionToken`. That one accepts every known
+ * name, which is right for "is any session cookie present" (CSRF), but wrong
+ * for "which session is this". The cache used to be keyed on whichever known
+ * name came first, while the session read forwarded the whole header and
+ * Auth.js resolved only its configured name. A client could therefore bind a
+ * key of its choosing (`__Host-…=X`) to session A, then send the same key with
+ * session B: the proxy decided on A's cached info (IP restriction, tenant) and
+ * the route authenticated B.
+ */
+export function extractConfiguredSessionCookie(
+  cookie: string,
+): { token: string; pair: string } | null {
+  const name = configuredSessionCookieName();
+  for (const segment of cookie.split(";")) {
+    const trimmed = segment.trim();
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1 || trimmed.slice(0, eqIdx) !== name) continue;
+    const raw = trimmed.slice(eqIdx + 1);
+    const token =
+      raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2 ? raw.slice(1, -1) : raw;
+    return token ? { token, pair: trimmed } : null;
+  }
+  return null;
+}
 
-  const token = extractSessionToken(cookie);
-  if (!token) return { valid: false };
+export async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
+  const cookieHeader = request.headers.get("cookie");
+  if (!cookieHeader) return { valid: false };
+
+  const session = extractConfiguredSessionCookie(cookieHeader);
+  if (!session) return { valid: false };
+  const { token, pair: cookie } = session;
 
   const cached = await getCachedSession(token);
   if (cached) return cached;

@@ -21,7 +21,7 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import {
-  getSessionCookieName,
+  configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "@/lib/auth/session/cookie-name";
 import { createCappedSession } from "@/lib/auth/session/session-concurrency";
@@ -36,13 +36,9 @@ const rateLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 
-// Cookie name must match auth.config.ts — both paths use the shared
-// getSessionCookieName helper + isSecureCookieFromAuthUrl so the
-// selection cannot drift.
-const SESSION_COOKIE_NAME = getSessionCookieName({
-  useSecureCookies: isSecureCookieFromAuthUrl(),
-  basePath: process.env.NEXT_PUBLIC_BASE_PATH,
-});
+// Cookie name must match auth.config.ts — both read
+// configuredSessionCookieName, so the selection cannot drift.
+const SESSION_COOKIE_NAME = configuredSessionCookieName();
 
 // POST /api/auth/passkey/verify
 // Unauthenticated endpoint — verifies a passkey authentication response
