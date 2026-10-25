@@ -161,6 +161,19 @@ describe("handleApiAuth — Bearer-bypass dispatch", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  // SessionStore skips an empty value, so an empty session cookie carries no
+  // session and must not cost a Bearer client its bypass.
+  it("Bearer + bypass route + empty session cookie → bypass still taken", async () => {
+    const res = await handleApiAuth(
+      makeRequest("/api/passwords", "GET", {
+        Authorization: "Bearer junk",
+        Cookie: "authjs.session-token=",
+      }),
+    );
+    expect(res.status).not.toBe(401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("Bearer + non-bypass route + cookie → session check fires (no bypass)", async () => {
     const res = await handleApiAuth(
       makeRequest("/api/tags", "GET", {

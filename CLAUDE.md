@@ -119,7 +119,7 @@ route handlers own application-layer concerns.
 **`src/lib/proxy/*` module layout** (each with a single responsibility):
 
 - `route-policy.ts` — `classifyRoute(pathname): RoutePolicy` pure function. Use `ROUTE_POLICY_KIND` constants in comparisons (typo = compile error).
-- `auth-gate.ts` — session validation + in-process session cache. Exposes `getSessionInfo`, `hasSessionCookie`, `extractSessionToken`.
+- `auth-gate.ts` — session validation + in-process session cache. Exposes `getSessionInfo`, `hasSessionCookie`. The session cookie is read only through `readSessionCookie` (`src/lib/auth/session/session-cookie.ts`), which mirrors Auth.js's own parse; every other reader of "which session is this" goes through it too.
 - `cors-gate.ts` — Bearer-bypass route detection + preflight wiring.
 - `csrf-gate.ts` — baseline CSRF (Origin) for cookie-bearing mutating requests. **Request-attribute-based, NOT path-classification-based** — fires whenever cookie + mutating method, regardless of route classification. This is what closes the "did this route call assertOrigin?" gap structurally.
 - `security-headers.ts` — CSP / HSTS / X-Frame-Options application.

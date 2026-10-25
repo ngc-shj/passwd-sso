@@ -116,11 +116,14 @@ export function readSessionCookie(header: string | null): SessionCookieRead {
 /**
  * True when the header carries anything that could be a session cookie under
  * any known name, prefix-matched as `SessionStore` matches. For the CSRF gate
- * and the Bearer-bypass decision, where over-detecting only means the
- * stricter path runs.
+ * and the Bearer-bypass decision. An empty value is not counted: `SessionStore`
+ * skips it, so it can carry no session, and counting it would send a Bearer
+ * client that happens to hold one down the session path to a 401.
  */
 export function hasAnySessionCookie(header: string): boolean {
-  return parseCookiePairs(header).some((pair) =>
-    ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => pair.key.startsWith(name)),
+  return parseCookiePairs(header).some(
+    (pair) =>
+      pair.value !== "" &&
+      ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => pair.key.startsWith(name)),
   );
 }

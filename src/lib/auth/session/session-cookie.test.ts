@@ -160,6 +160,13 @@ describe("hasAnySessionCookie", () => {
     expect(hasAnySessionCookie(`__Secure-authjs.session-tokenX=${TOKEN_A}`)).toBe(true);
   });
 
+  it("does not count an empty value, which SessionStore skips", () => {
+    expect(hasAnySessionCookie("authjs.session-token=")).toBe(false);
+    expect(hasAnySessionCookie("authjs.session-token.0=; other=1")).toBe(false);
+    // Control: the same name with a value is seen.
+    expect(hasAnySessionCookie(`authjs.session-token.0=${TOKEN_A}`)).toBe(true);
+  });
+
   it("sees a whitespace-spelled key", () => {
     expect(hasAnySessionCookie(`foo=1;\tauthjs.session-token =${TOKEN_A}`)).toBe(true);
   });
@@ -229,6 +236,7 @@ describe("readSessionCookie agrees with Auth.js (differential)", () => {
       stubDeployment(deployment.env);
       const name = deployment.name;
       let tokens = 0;
+      let nones = 0;
       let refusals = 0;
       for (const header of corpus(name)) {
         const read = readSessionCookie(header);
@@ -237,13 +245,15 @@ describe("readSessionCookie agrees with Auth.js (differential)", () => {
           tokens++;
           expect({ header, resolved }).toEqual({ header, resolved: read.token });
         } else if (read.kind === SESSION_COOKIE_READ.NONE) {
+          nones++;
           expect({ header, resolved }).toEqual({ header, resolved: "" });
         } else {
           refusals++;
         }
       }
-      // The corpus must exercise both arms or the property is vacuous.
+      // The corpus must exercise every arm or the property is vacuous.
       expect(tokens).toBeGreaterThan(100);
+      expect(nones).toBeGreaterThan(100);
       expect(refusals).toBeGreaterThan(100);
     });
 

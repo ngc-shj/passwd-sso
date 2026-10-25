@@ -22,7 +22,10 @@ import { test, expect, chromium, type BrowserContext } from "@playwright/test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { configuredSessionCookieName } from "../../src/lib/auth/session/cookie-name";
+import {
+  configuredSessionCookieName,
+  isSecureCookieFromAuthUrl,
+} from "../../src/lib/auth/session/cookie-name";
 
 // Extension dist/ built by global-setup (e2e/global-setup.ts::buildExtension).
 const EXT_PATH = path.join(__dirname, "..", "..", "extension", "dist");
@@ -126,7 +129,9 @@ test.describe("@extension DPoP-bound token flow", () => {
             domain: new URL(baseURL).hostname,
             path: "/",
             httpOnly: true,
-            secure: baseURL.startsWith("https"),
+            // The same source as the name: a __Host-/__Secure- cookie without
+            // `secure` is dropped by the browser.
+            secure: isSecureCookieFromAuthUrl(),
             sameSite: "Lax",
           },
         ]);

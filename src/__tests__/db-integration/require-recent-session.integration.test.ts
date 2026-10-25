@@ -122,7 +122,9 @@ describe.skipIf(!hasDatabase)(
     });
 
     it("returns 401 when the session row does not exist", async () => {
-      const result = await requireRecentSession(makeRequest(`missing-${randomUUID()}`));
+      const result = await // A well-formed token with no row, so the 401 comes from the row lookup and
+      // not from the cookie reader refusing a malformed value.
+      requireRecentSession(makeRequest(randomUUID()));
 
       expect(result).not.toBeNull();
       expect(result!.status).toBe(401);
