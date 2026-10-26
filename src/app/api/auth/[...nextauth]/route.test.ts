@@ -52,8 +52,14 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
 }));
 
 const mockLoggerWarn = vi.fn();
+const mockLoggerError = vi.fn();
 vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ warn: mockLoggerWarn, error: vi.fn(), info: vi.fn() }),
+  getLogger: () => ({ warn: mockLoggerWarn, error: mockLoggerError, info: vi.fn() }),
+}));
+
+const mockDeleteSessionByToken = vi.fn<(token: string) => Promise<void>>();
+vi.mock("@/lib/auth/session/auth-adapter", () => ({
+  deleteSessionByToken: (token: string) => mockDeleteSessionByToken(token),
 }));
 
 describe("withAuthBasePath", () => {
@@ -206,7 +212,18 @@ describe("isCallbackRoute", () => {
     );
     expect(_isCallbackRoute("/api/auth/callbackz")).toBe(false);
     expect(_isCallbackRoute("/api/auth/callback")).toBe(false);
+    expect(_isCallbackRoute("/api/auth/callback//")).toBe(false);
   });
+
+  // Auth.js drops empty segments when it parses the action, so these are the
+  // callback action to it and must be to us.
+  it.each(["/api/auth//callback/google", "/api/auth/callback//google", "/api//auth/callback/google"])(
+    "classifies %s as a callback, as Auth.js parses it",
+    async (path) => {
+      const { _isCallbackRoute } = await import("@/app/api/auth/[...nextauth]/route");
+      expect(_isCallbackRoute(path)).toBe(true);
+    },
+  );
 });
 
 describe("withCallbackRateLimit", () => {
@@ -591,6 +608,47 @@ describe("basePath: the path checks see the Auth.js action, not the prefix", () 
   });
 });
 
+describe("magic-link sign-in classification follows Auth.js's segment parse", () => {
+  beforeEach(() => {
+    mockRateLimitCheck.mockReset();
+    mockExtractClientIp.mockReset();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockExtractClientIp.mockReturnValue("203.0.113.5");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function limited(path: string, method = "POST"): Promise<boolean> {
+    const { _withMagicLinkIpRateLimit } = await import("@/app/api/auth/[...nextauth]/route");
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    await _withMagicLinkIpRateLimit(inner)(new NextRequest(`http://localhost:3000${path}`, { method }));
+    return mockRateLimitCheck.mock.calls.length > 0;
+  }
+
+  it.each(["/api/auth//signin/nodemailer", "/api/auth/signin//email", "/api/auth/signin/nodemailer/"])(
+    "rate-limits %s",
+    async (path) => {
+      expect(await limited(path)).toBe(true);
+    },
+  );
+
+  it("rate-limits a magic-link sign-in when the basePath is /api", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/api");
+    expect(await limited("/api/auth/signin/nodemailer")).toBe(true);
+  });
+
+  it.each([
+    ["/api/auth/signin/google", "POST"],
+    ["/api/auth/signin/nodemailer/extra", "POST"],
+    ["/api/auth/signin/nodemailer", "GET"],
+  ])("does not rate-limit %s %s", async (path, method) => {
+    expect(await limited(path, method)).toBe(false);
+  });
+});
+
 describe("withoutSessionCookieOnCallback", () => {
   const SESSION_COOKIES = [
     "authjs.session-token=aaaa",
@@ -598,6 +656,7 @@ describe("withoutSessionCookieOnCallback", () => {
     "__Host-authjs.session-token=cccc",
     "authjs.session-token.0=dddd",
     "next-auth.session-token=eeee",
+    "__Secure-next-auth.session-token=gggg",
   ];
   const OTHER_COOKIES = [
     "authjs.pkce.code_verifier=pk",
@@ -640,6 +699,51 @@ describe("withoutSessionCookieOnCallback", () => {
     expect(req.headers.get("cookie")).toBe(OTHER_COOKIES.join("; "));
   });
 
+  // Auth.js's SessionStore joins every cookie whose name STARTS WITH the
+  // session name, not only `<name>.<n>` chunks.
+  it.each([
+    "authjs.session-tokenX=ffff",
+    "__Host-authjs.session-tokenX=ffff",
+    "__Secure-authjs.session-tokenX=ffff",
+  ])("drops %s, which Auth.js would read as part of the session", async (sessionCookie) => {
+    const req = await forward("/api/auth/callback/google", `${sessionCookie}; authjs.state=st`);
+    expect(req.headers.get("cookie")).toBe("authjs.state=st");
+  });
+
+  it("reaches the handler with no cookie header when none was sent", async () => {
+    const req = await forward("/api/auth/callback/google", null);
+    expect(req.headers.get("cookie")).toBeNull();
+  });
+
+  it("keeps a cookie whose value holds `=` and percent-encoding byte-for-byte", async () => {
+    const kept = "authjs.callback-url=http%3A%2F%2Flocalhost%3A3000%2Fja%3Fa%3Db; opaque=a=b==";
+    const req = await forward("/api/auth/callback/google", `authjs.session-token=aaaa; ${kept}`);
+    expect(req.headers.get("cookie")).toBe(kept);
+  });
+
+  it("leaves a header with no session cookie exactly as sent", async () => {
+    const cookie = "authjs.state=st;authjs.pkce.code_verifier=pk;  flag; NEXT_LOCALE=ja";
+    const req = await forward("/api/auth/callback/google", cookie);
+    expect(req.headers.get("cookie")).toBe(cookie);
+  });
+
+  it("strips on a callback path with an empty segment", async () => {
+    const req = await forward("/api/auth//callback/google", "authjs.session-token=aaaa; authjs.state=st");
+    expect(req.headers.get("cookie")).toBe("authjs.state=st");
+  });
+
+  // withAuthBasePath leaves "/api/auth/..." unprefixed when the basePath is
+  // "/api", so the action path arrives without it.
+  it("strips on a callback when the basePath is /api", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/api");
+    const { _isCallbackRoute } = await import("@/app/api/auth/[...nextauth]/route");
+    expect(_isCallbackRoute("/api/auth/callback/google")).toBe(true);
+    expect(_isCallbackRoute("/api/api/auth/callback/google")).toBe(true);
+    expect(_isCallbackRoute("/api/auth/session")).toBe(false);
+    const req = await forward("/api/auth/callback/google", "authjs.session-token=aaaa; authjs.state=st");
+    expect(req.headers.get("cookie")).toBe("authjs.state=st");
+  });
+
   it("removes the cookie header when only session cookies were sent", async () => {
     const req = await forward("/api/auth/callback/google", SESSION_COOKIES.join("; "));
     expect(req.headers.get("cookie")).toBeNull();
@@ -675,14 +779,19 @@ describe("withoutSessionCookieOnCallback", () => {
 });
 
 describe("exported handlers reach Auth.js without a session cookie on callback", () => {
+  beforeEach(() => {
+    mockRateLimitCheck.mockReset();
+    mockExtractClientIp.mockReset();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockExtractClientIp.mockReturnValue("203.0.113.5");
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
   });
 
   it.each(["GET", "POST"] as const)("%s callback", async (method) => {
-    mockRateLimitCheck.mockResolvedValue({ allowed: true });
-    mockExtractClientIp.mockReturnValue("203.0.113.5");
     const route = await import("@/app/api/auth/[...nextauth]/route");
     const { handlers } = await import("@/auth");
     const handler = vi.mocked(handlers[method]);
@@ -696,5 +805,110 @@ describe("exported handlers reach Auth.js without a session cookie on callback",
     expect(handler).toHaveBeenCalledTimes(1);
     const reached = handler.mock.calls[0][0] as NextRequest;
     expect(reached.headers.get("cookie")).toBe("authjs.state=st");
+  });
+
+  // Next.js hands the route the path with the basePath stripped;
+  // withAuthBasePath puts it back before the inner wrappers run.
+  it("GET with a basePath: the callback is rate-limited and reaches Auth.js without the session cookie", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    const route = await import("@/app/api/auth/[...nextauth]/route");
+    const { handlers } = await import("@/auth");
+    const handler = vi.mocked(handlers.GET);
+    handler.mockClear();
+    await route.GET(
+      new NextRequest("http://localhost:3000/api/auth/callback/google", {
+        headers: { cookie: "authjs.session-token=aaaa; authjs.state=st" },
+      }),
+    );
+    expect(mockRateLimitCheck).toHaveBeenCalledWith("rl:auth_callback:203.0.113.5");
+    expect(handler).toHaveBeenCalledTimes(1);
+    const reached = handler.mock.calls[0][0] as NextRequest;
+    expect(new URL(reached.url).pathname).toBe("/passwd-sso/api/auth/callback/google");
+    expect(reached.headers.get("cookie")).toBe("authjs.state=st");
+  });
+});
+
+describe("withoutSessionCookieOnCallback revokes the session a callback replaces", () => {
+  beforeEach(() => {
+    mockDeleteSessionByToken.mockReset();
+    mockDeleteSessionByToken.mockResolvedValue(undefined);
+    mockLoggerError.mockReset();
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function complete(cookie: string | null, setCookies: string[], status = 302) {
+    const { _withoutSessionCookieOnCallback } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const headers = new Headers({ location: "http://localhost:3000/dashboard" });
+    for (const line of setCookies) headers.append("set-cookie", line);
+    const inner = vi.fn<RouteHandler>(async () => new Response(null, { status, headers }));
+    return _withoutSessionCookieOnCallback(inner)(
+      new NextRequest("http://localhost:3000/api/auth/callback/google", {
+        headers: cookie === null ? {} : { cookie },
+      }),
+    );
+  }
+
+  const NEW_SESSION = "authjs.session-token=bbbb-cccc; Path=/; HttpOnly; SameSite=Lax";
+
+  it("deletes the previous session when the callback sets a new session cookie", async () => {
+    await complete("authjs.session-token=aaaa; authjs.state=st", [
+      "authjs.state=; Max-Age=0; Path=/",
+      NEW_SESSION,
+    ]);
+    expect(mockDeleteSessionByToken).toHaveBeenCalledTimes(1);
+    expect(mockDeleteSessionByToken).toHaveBeenCalledWith("aaaa");
+  });
+
+  it("deletes nothing when the callback sets no session cookie", async () => {
+    await complete("authjs.session-token=aaaa; authjs.state=st", ["authjs.state=; Max-Age=0; Path=/"]);
+    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  });
+
+  it("deletes nothing when the callback sets the same session token", async () => {
+    await complete("authjs.session-token=aaaa", ["authjs.session-token=aaaa; Path=/; HttpOnly"]);
+    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  });
+
+  it("deletes nothing when a failed callback clears the session cookie", async () => {
+    await complete("authjs.session-token=aaaa", ["authjs.session-token=; Max-Age=0; Path=/"]);
+    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  });
+
+  it("deletes nothing when the new cookie is not the configured session cookie", async () => {
+    await complete("authjs.session-token=aaaa", ["__Secure-authjs.session-token=bbbb; Path=/; Secure"]);
+    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  });
+
+  it("deletes nothing when the request carried no session token", async () => {
+    await complete("authjs.state=st", [NEW_SESSION]);
+    await complete(null, [NEW_SESSION]);
+    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  });
+
+  // An ambiguous header (a second session-name cookie) names no one session.
+  it("deletes nothing when the session cookie read is ambiguous", async () => {
+    await complete("authjs.session-token=aaaa; authjs.session-token.0=dddd", [NEW_SESSION]);
+    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  });
+
+  it("returns the sign-in response and logs without the token when the delete fails", async () => {
+    mockDeleteSessionByToken.mockRejectedValue(new TypeError("db down aaaa"));
+    const res = await complete("authjs.session-token=aaaa", [NEW_SESSION]);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("http://localhost:3000/dashboard");
+    expect(res.headers.getSetCookie()).toContain(NEW_SESSION);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      { errClass: "TypeError" },
+      "auth.callback.previous_session_revoke_failed",
+    );
+    expect(JSON.stringify(mockLoggerError.mock.calls)).not.toContain("aaaa");
   });
 });

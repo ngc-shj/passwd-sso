@@ -101,6 +101,19 @@ export class TenantClaimUnusableError extends Error {
 }
 
 /**
+ * Revokes the session a raw cookie token names, in the adapter's deleteSession
+ * order (digest, delete, then cache eviction), for callers outside Auth.js.
+ * A row that is already gone is not an error.
+ */
+export async function deleteSessionByToken(sessionToken: string): Promise<void> {
+  const digest = hashSessionToken(sessionToken);
+  await withBypassRls(prisma, async (tx) =>
+    tx.session.deleteMany({ where: { sessionToken: digest } }),
+  BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
+  await invalidateCachedSessions([digest]);
+}
+
+/**
  * Custom Auth.js adapter that extends PrismaAdapter with:
  * - createSession: captures IP/UA from AsyncLocalStorage
  * - updateSession: updates lastActiveAt on session refresh

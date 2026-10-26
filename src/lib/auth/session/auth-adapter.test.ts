@@ -7,6 +7,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
     findUnique: vi.fn(),
     findMany: vi.fn(),
     delete: vi.fn(),
+    deleteMany: vi.fn(),
   },
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -104,7 +105,7 @@ vi.mock("@/lib/auth/session/session-cache", () => ({
   hashSessionToken: (token: string) => `hashed:${token}`,
 }));
 
-import { createCustomAdapter } from "./auth-adapter";
+import { createCustomAdapter, deleteSessionByToken } from "./auth-adapter";
 import type { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
 import type { ClaimTenantResolution } from "@/lib/tenant/tenant-management";
@@ -121,6 +122,7 @@ import {
   expectInvalidatedAfterCommit,
   expectNotInvalidatedOnDbThrow,
 } from "@/__tests__/helpers/session-cache-assertions";
+import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 describe("createCustomAdapter", () => {
   const expires = new Date("2025-06-01T00:00:00Z");
@@ -1970,5 +1972,44 @@ describe("createCustomAdapter", () => {
         spy.mockRestore();
       }
     });
+  });
+});
+
+describe("deleteSessionByToken", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWithBypassRls.mockImplementation(
+      async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
+    );
+  });
+
+  it("deletes the row keyed by the token digest under the session-lifecycle grant", async () => {
+    mockPrismaSession.deleteMany.mockResolvedValue({ count: 1 });
+    await deleteSessionByToken("tok-1");
+    expect(mockPrismaSession.deleteMany).toHaveBeenCalledWith({ where: { sessionToken: "hashed:tok-1" } });
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_GRANT.AUTH_SESSION_LIFECYCLE,
+    );
+  });
+
+  it("evicts the cached session by digest after the delete", async () => {
+    mockPrismaSession.deleteMany.mockResolvedValue({ count: 1 });
+    await deleteSessionByToken("tok-1");
+    expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["hashed:tok-1"], mockPrismaSession.deleteMany);
+  });
+
+  it("resolves when no row matches", async () => {
+    // What Prisma's `delete` does on a missing row (P2025).
+    mockPrismaSession.delete.mockRejectedValue(new Error("Record to delete does not exist"));
+    mockPrismaSession.deleteMany.mockResolvedValue({ count: 0 });
+    await expect(deleteSessionByToken("gone")).resolves.toBeUndefined();
+  });
+
+  it("does not evict the cache when the delete throws", async () => {
+    mockPrismaSession.deleteMany.mockRejectedValue(new Error("db down"));
+    await expect(deleteSessionByToken("tok-1")).rejects.toThrow("db down");
+    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
   });
 });

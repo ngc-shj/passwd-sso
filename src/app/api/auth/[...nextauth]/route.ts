@@ -9,8 +9,17 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
-import { parseCookiePairs } from "@/lib/auth/session/session-cookie";
+import {
+  ALL_KNOWN_SESSION_COOKIE_NAMES,
+  configuredSessionCookieName,
+} from "@/lib/auth/session/cookie-name";
+import {
+  parseCookiePairs,
+  readSessionCookie,
+  SESSION_COOKIE_READ,
+} from "@/lib/auth/session/session-cookie";
+import { deleteSessionByToken } from "@/lib/auth/session/auth-adapter";
+import { getLogger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -48,13 +57,21 @@ function withAuthBasePath<H extends RouteHandler>(handler: H): H {
 }
 
 /**
- * The Auth.js action path with any basePath removed. The wrappers below run
- * inside withAuthBasePath, whose rebuilt request carries the basePath, so a
- * check against "/api/auth/..." must not depend on whether it is there.
+ * The non-empty path segments Auth.js could be acting on, split the way its
+ * parseActionAndProviderId splits them (on "/", empty segments dropped, so
+ * "/api/auth//callback/x" is a callback). Two readings: the path as given,
+ * and the path with a leading basePath removed. The wrappers below run inside
+ * withAuthBasePath, whose rebuilt request carries the basePath unless the path
+ * already started with it — as "/api/auth/..." does for a basePath of "/api".
  */
-function authActionPath(pathname: string): string {
+function authPathReadings(pathname: string): string[][] {
+  const segments = (path: string) => path.split("/").filter(Boolean);
+  const readings = [segments(pathname)];
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-  return basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) : pathname;
+  if (basePath && pathname.startsWith(`${basePath}/`)) {
+    readings.push(segments(pathname.slice(basePath.length)));
+  }
+  return readings;
 }
 
 function withSessionMeta<H extends RouteHandler>(handler: H): H {
@@ -93,7 +110,9 @@ const callbackRateLimiter = createRateLimiter({
 });
 
 function isCallbackRoute(pathname: string): boolean {
-  return authActionPath(pathname).startsWith("/api/auth/callback/");
+  return authPathReadings(pathname).some(
+    (segs) => segs.length >= 4 && segs[0] === "api" && segs[1] === "auth" && segs[2] === "callback",
+  );
 }
 
 function withCallbackRateLimit<H extends RouteHandler>(handler: H): H {
@@ -146,11 +165,16 @@ const magicLinkIpLimiter = createRateLimiter({
 function isMagicLinkSigninRoute(pathname: string, method: string): boolean {
   // Auth.js v5 routes: POST /api/auth/signin/{providerId}
   // (nodemailer provider's POST entrypoint)
-  const path = authActionPath(pathname);
   return (
     method === "POST" &&
-    (path === "/api/auth/signin/nodemailer" ||
-      path === "/api/auth/signin/email")
+    authPathReadings(pathname).some(
+      (segs) =>
+        segs.length === 4 &&
+        segs[0] === "api" &&
+        segs[1] === "auth" &&
+        segs[2] === "signin" &&
+        (segs[3] === "nodemailer" || segs[3] === "email"),
+    )
   );
 }
 
@@ -194,8 +218,22 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
 // outlives the stolen session. Dropping the session cookies from callback
 // requests makes every callback a fresh sign-in. The other Auth.js cookies
 // (state, PKCE, nonce, callback URL, CSRF) are kept.
+//
+// A fresh sign-in no longer replaces the session the browser held, as Auth.js
+// would have; it only overwrites the cookie, which would leave that session
+// alive server-side. So when the callback sets a new session cookie, the
+// session the request carried is revoked. A failed revocation is logged and
+// does not fail the sign-in that already succeeded.
 function isSessionCookieKey(key: string): boolean {
   return ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => key.startsWith(name));
+}
+
+function setsNewSessionCookie(response: Response, previousToken: string): boolean {
+  const name = configuredSessionCookieName();
+  return response.headers.getSetCookie().some((line) => {
+    const [pair] = parseCookiePairs(line.split(";")[0] ?? "");
+    return pair !== undefined && pair.key === name && pair.value !== "" && pair.value !== previousToken;
+  });
 }
 
 function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
@@ -204,7 +242,13 @@ function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
     if (!cookie || !isCallbackRoute(request.nextUrl.pathname)) {
       return handler(request, ...rest);
     }
-    const kept = parseCookiePairs(cookie).filter((pair) => !isSessionCookieKey(pair.key));
+    const pairs = parseCookiePairs(cookie);
+    const kept = pairs.filter((pair) => !isSessionCookieKey(pair.key));
+    if (kept.length === pairs.length) {
+      return handler(request, ...rest);
+    }
+    const read = readSessionCookie(cookie);
+    const previousToken = read.kind === SESSION_COOKIE_READ.TOKEN ? read.token : null;
     const headers = new Headers(request.headers);
     if (kept.length > 0) {
       headers.set("cookie", kept.map((pair) => `${pair.key}=${pair.value}`).join("; "));
@@ -217,7 +261,18 @@ function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
       body: request.body,
       duplex: "half",
     });
-    return handler(stripped, ...rest);
+    const response = await handler(stripped, ...rest);
+    if (previousToken && setsNewSessionCookie(response, previousToken)) {
+      try {
+        await deleteSessionByToken(previousToken);
+      } catch (err) {
+        getLogger().error(
+          { errClass: err instanceof Error ? err.name : typeof err },
+          "auth.callback.previous_session_revoke_failed",
+        );
+      }
+    }
+    return response;
   };
   return wrapped as unknown as H;
 }
