@@ -43,6 +43,8 @@ import {
 } from "./session-concurrency";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
+const LIVE = new Date(Date.now() + 3_600_000);
+
 function makeTx() {
   return {
     $executeRaw: vi.fn().mockResolvedValue(1),
@@ -85,7 +87,7 @@ describe("createSessionUnderConcurrencyCap", () => {
 
   it("deletes the replaced session by digest after the lock and before the cap is read", async () => {
     const tx = makeTx();
-    tx.session.findUnique.mockResolvedValue({ userId: "u-2" });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-2", expires: LIVE });
     tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
     tx.session.create.mockResolvedValue({ userId: "u-1", expires });
 
@@ -358,7 +360,7 @@ describe("createCappedSession", () => {
     const tx = makeTx();
     tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
     tx.session.create.mockResolvedValue({ userId: "u-1", expires });
-    tx.session.findUnique.mockResolvedValue({ userId: "u-2" });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-2", expires: LIVE });
     const state = openTxAround(tx);
     let deletedWhileOpen: boolean | null = null;
     tx.session.deleteMany.mockImplementation(async () => {
@@ -382,7 +384,7 @@ describe("createCappedSession", () => {
     const tx = makeTx();
     tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
     tx.session.create.mockRejectedValue(new Error("db down"));
-    tx.session.findUnique.mockResolvedValue({ userId: "u-1" });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-1", expires: LIVE });
     openTxAround(tx);
 
     await expect(
@@ -398,7 +400,7 @@ describe("createCappedSession", () => {
     const tx = makeTx();
     tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
     tx.session.create.mockResolvedValue({ userId: "u-1", expires });
-    tx.session.findUnique.mockResolvedValue({ userId: "u-1" });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-1", expires: LIVE });
     openTxAround(tx);
 
     await createCappedSession({ ...input, replacesSessionToken: "prev-token" });
@@ -406,11 +408,24 @@ describe("createCappedSession", () => {
     expect(mockCheckNewDeviceAndNotify).not.toHaveBeenCalled();
   });
 
+  it("still checks for a new device when the replaced own session had expired", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-1", expires: new Date(Date.now() - 60_000) });
+    openTxAround(tx);
+
+    await createCappedSession({ ...input, replacesSessionToken: "prev-token" });
+
+    expect(tx.session.deleteMany).toHaveBeenCalled();
+    expect(mockCheckNewDeviceAndNotify).toHaveBeenCalledTimes(1);
+  });
+
   it("still checks for a new device when the replaced session was another user's", async () => {
     const tx = makeTx();
     tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
     tx.session.create.mockResolvedValue({ userId: "u-1", expires });
-    tx.session.findUnique.mockResolvedValue({ userId: "u-2" });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-2", expires: LIVE });
     openTxAround(tx);
 
     await createCappedSession({ ...input, replacesSessionToken: "prev-token" });

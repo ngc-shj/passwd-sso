@@ -207,3 +207,21 @@ No findings.
 - **Not run:** a guard-dropping mutant that deletes with an undefined filter. Against the shared
   dev DB it would delete every session row. The `findUnique` on the digest now runs first, and
   Prisma rejects an undefined unique key.
+
+## Round 4 (e9064e2d7, combined)
+No Critical or Major findings.
+- R4-1, Minor: `replacedOwnSession` ignored `expires`.
+  - An own session row that had expired, or been killed by the idle timeout, could still
+    suppress the new-device alert, as long as the row was not yet removed by the retention
+    sweep. Meanwhile the callback issued a fresh, working session.
+  - Upstream Auth.js also sends no alert there, but it returns the dead session rather than a
+    new one.
+  - The check is UA-based and can be spoofed, so this adds no new capability.
+
+## Resolution Status (round 4)
+- **R4-1:** the capped create selects `expires`. Only a live own session sets
+  `replacedOwnSession`, and the row is deleted regardless.
+  - New cell: an expired own session still runs the new-device check.
+  - Red-proved by dropping the `expires` condition.
+- **pre-pr:** one unrelated hook timeout in `check-public-contract.test.mjs` (10s), during a
+  572s run under concurrent load. It passes on its own (17/17).

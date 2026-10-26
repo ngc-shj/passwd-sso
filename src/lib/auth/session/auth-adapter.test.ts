@@ -778,7 +778,9 @@ describe("createCustomAdapter", () => {
         ];
         mockTxSession.findUnique.mockImplementation(
           async ({ where }: { where: { sessionToken: string } }) =>
-            rows.find((row) => row.sessionToken === where.sessionToken) ? { userId: "u-1" } : null,
+            rows.find((row) => row.sessionToken === where.sessionToken)
+              ? { userId: "u-1", expires: new Date(Date.now() + 3_600_000) }
+              : null,
         );
         mockTxSession.findMany.mockImplementation(async () => [...rows]);
         mockTxSession.deleteMany.mockImplementation(

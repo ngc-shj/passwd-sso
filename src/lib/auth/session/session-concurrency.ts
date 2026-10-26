@@ -85,11 +85,14 @@ export async function createSessionUnderConcurrencyCap(
     const digest = hashSessionToken(input.replacesSessionToken);
     const replaced = await tx.session.findUnique({
       where: { sessionToken: digest },
-      select: { userId: true },
+      select: { userId: true, expires: true },
     });
     if (replaced) {
       await tx.session.deleteMany({ where: { sessionToken: digest } });
-      replacedOwnSession = replaced.userId === input.userId;
+      // Only a live session proves the browser is a known device; an expired
+      // row lingers until the retention sweep removes it.
+      replacedOwnSession =
+        replaced.userId === input.userId && replaced.expires > new Date();
     }
   }
 
