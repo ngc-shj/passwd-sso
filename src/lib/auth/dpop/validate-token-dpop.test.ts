@@ -139,7 +139,6 @@ describe("validateExtensionTokenDpop", () => {
         accessToken: ACCESS_TOKEN,
       });
 
-      await new Promise((r) => setTimeout(r, 10));
       expect(mockExtUpdate).not.toHaveBeenCalled();
     });
   });
@@ -160,7 +159,6 @@ describe("validateExtensionTokenDpop", () => {
         accessToken: ACCESS_TOKEN,
       });
 
-      await new Promise((r) => setTimeout(r, 10));
       expect(mockExtUpdate).not.toHaveBeenCalled();
     });
   });

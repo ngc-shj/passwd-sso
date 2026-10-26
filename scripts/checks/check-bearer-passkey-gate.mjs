@@ -5,40 +5,88 @@
  * lifetime (I1), and only the three self-protection call sites skip the gate
  * (I3). Plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7.
  *
- * The class is derived from the code, not from a list:
+ * What it adjudicates, by syntax alone: Prisma query-builder digest lookups,
+ * by the shape of a call's argument; and raw SQL, by the text of its literals
+ * (backed at run time by renderSql). It does not follow values across files or
+ * through types; the residuals below are what that leaves, and the recovery
+ * for them is the validators' own unit and integration tests and review.
  *
  *   - Token models: every model in prisma/schema.prisma declaring a `tokenHash`
  *     or `codeHash` field (read as source through lib/prisma-relation-reach.mjs
  *     — the static-checks job need not have a generated client). An empty set
  *     fails.
- *   - A digest lookup: a delegate call (`<recv>.<handle>.<method>(...)`, the
- *     handle also as a bare identifier, a string element access, or a name
- *     bound by destructuring it, renamed or not) whose argument's `where` or
- *     `cursor` contains a `tokenHash`/`codeHash` key — directly, under
- *     AND/OR/NOT, or under a relation filter.
- *   - Delegates the scan cannot follow fail: a token-model delegate (`x.<handle>`,
- *     `x["<handle>"]`, or a destructured alias) referenced other than as the
- *     receiver of a direct call with a literal method name — a value
- *     reference, an argument, `x.<handle>["findUnique"](...)`, `.call`/`.apply`
- *     — or destructured into a nested pattern. `x.<handle>.<name>` for a name
- *     no delegate has is a row's relation field, not a delegate; `$extends`
- *     (which could add such names) fails anywhere.
- *   - Model coverage: every token model has an analysed lookup, or a manifest
- *     `models` entry with a reason; an entry for a model that has one is stale.
- *   - Refuse rather than guess: where the position's model is a token model, a
- *     `where` (or the argument holding it) that is not an object literal — a
- *     `const` bound to one is followed, scope-aware — or that holds a spread,
- *     a computed key or an accessor, is "opaque". A function with an opaque
- *     site needs an `opaque-where` manifest entry; its count pins the sites.
- *   - Raw SQL: the column names `token_hash` / `code_hash` in ANY string or
- *     template literal text, as written or as cooked (`token\x5fhash`), fail
- *     outright — a fragment interpolated into a tagged template is invisible at
- *     the call, so the name is refused wherever it is written. An Unsafe call's
- *     SQL argument must be a string literal, a no-substitution template, or
- *     `renderSql(trustedSql`...`)` with both names resolving, scope-aware, to
- *     imports from src/lib/prisma/raw-sql (its text is literal and scanned by
- *     the rule above); `$queryRaw`/`$executeRaw` must be tag of a template.
- *     Any other spelling of a raw method fails.
+ *   - A digest lookup: ANY call — whatever its receiver (`Reflect.get(tx,
+ *     "apiKey")`, `tx[k]`, a delegate passed as a parameter, `$parent`) —
+ *     an argument of which holds a `tokenHash`/`codeHash` property (plain,
+ *     shorthand, string-literal or escaped key) anywhere under a filter
+ *     position: the top-level `where` / `cursor` / `having`; the `where` of a
+ *     relation under `include` / `select` / `_count.select`, recursively; and
+ *     the nested writes under `data` (or an upsert's `create` / `update`):
+ *     `connect`, `disconnect`, `set`, `delete`, `deleteMany`, and the `where`
+ *     of `update`, `updateMany`, `upsert`, `connectOrCreate`. A `const` bound
+ *     to an object literal is followed, scope-aware. A `data: { tokenHash }`
+ *     is a write, not a lookup.
+ *   - Model coverage: every token model has an analysed lookup whose position
+ *     resolves to it, or a manifest `models` entry with a reason; an entry for
+ *     a model that has one is stale.
+ *   - Refuse rather than guess, where the call's receiver resolves to a model
+ *     (`x.<handle>`, `x["<handle>"]`, `x[k]` with `const k = "<handle>"`, the
+ *     handle as a bare name, or a name destructured from it). "Opaque" is:
+ *       * a `where` / `cursor` / relation filter on a token model that is not
+ *         an object literal (a `const` bound to one is followed) or holds a
+ *         spread, a computed key or an accessor — a spread in a filter is
+ *         opaque by decision, even when its value could be read;
+ *       * an argument, `select` / `include` (each relation's, recursively)
+ *         or `data` (of a create / update / upsert, and their nested writes)
+ *         on a token model or a model with a relation to one (one hop) that is
+ *         not an object literal or holds a computed key, an accessor, or a
+ *         spread whose value this file cannot read (`...(c ? {a} : {})`,
+ *         `...(c && {a})` and a `const`-bound literal are read in place).
+ *         createMany / updateMany `data` holds scalar columns only.
+ *     A function with an opaque site needs an `opaque-where` manifest entry;
+ *     its count pins the sites.
+ *   - Receivers the model resolution cannot follow fail: a where-taking
+ *     delegate method called on an element access whose key is not a literal
+ *     or a `const`-bound one; and a token-model delegate (`x.<handle>`,
+ *     `x["<handle>"]`, `x[k]`, or a destructured alias) referenced other than
+ *     as the receiver of a direct call with a literal method name — a value
+ *     reference, an argument, `x.<handle>["findUnique"](...)`, `.call` /
+ *     `.apply`, `x.<handle>.fields` — or destructured into a nested pattern.
+ *     `x.<handle>.<name>` for a name no delegate has is a row's relation
+ *     field, not a delegate; `$extends` (which could add such names) fails
+ *     anywhere.
+ *   - Raw SQL: in ANY string, template (head, middle, tail) or regular
+ *     expression literal of non-test src, as written or as cooked
+ *     (`token\x5fhash`), the column names `token_hash` / `code_hash` fail, and
+ *     so do `U&` / `UESCAPE` (a Unicode-escaped identifier, `U&"token\005fhash"`).
+ *     An Unsafe call's SQL argument must be a string literal, a
+ *     no-substitution template, or `renderSql(trustedSql`...`)` with both
+ *     names resolving, scope-aware, to imports from src/lib/prisma/raw-sql;
+ *     `$queryRaw`/`$executeRaw` must be the tag of a template (whose
+ *     substitutions are bound parameters, never text). Any other spelling of
+ *     a raw method fails. The literal parts of a trustedSql template are
+ *     scanned here; the identifiers and fragments spliced into it
+ *     (`sqlIdentifier`, `joinSql`) exist only as rendered text, so renderSql
+ *     throws at run time when that text names a digest column
+ *     (src/lib/prisma/raw-sql.ts). check-raw-sql-usage refuses every other
+ *     way to splice text (Prisma.raw / Prisma.sql / Prisma.join).
+ *
+ * Residuals (Anti-Deferral entries: the plan's deviation log, C7):
+ *   - A delegate reached by a reflective spelling the model resolution does not
+ *     follow (`Reflect.get(tx, "apiKey")`, `Object.values(tx)`, a delegate a
+ *     function returns or a parameter not named by its handle): a lookup
+ *     through it is still found, but its opaque positions are not refused.
+ *   - An opaque value one relation hop further than the rule above (a
+ *     `data` on a model with no token relation that hides a nested write
+ *     through a model that has one), and a spread in a `where` of a model
+ *     that is not a token model — the same scoping, applied to every position.
+ *   - A computed key (`{ [k]: h }`) under a filter position of a call whose
+ *     receiver does not resolve to a token model: the key's name is not read.
+ *   - Raw SQL whose text never names the column: a whole-row projection
+ *     compared or searched as a value (`to_jsonb(t)`, `row_to_json(t)`,
+ *     `t::text`, `t.*`), dynamic SQL built inside the statement (`EXECUTE
+ *     format(...)` in a DO block or a function), and database objects defined
+ *     outside src (a view, function or trigger in prisma/migrations).
  *
  * Each lookup or opaque site is attributed to the nearest named function,
  * method, `const`-bound function, or exported `const`; the key is
@@ -62,9 +110,13 @@
  *   - refresh-bound: names `refreshRoute` (a file that exists), `lifetime`
  *     (`<path>#<name>`: an exported top-level const of that file), and at
  *     least one `inlineGate` (`<path>#<fn>` keys, each designating one
- *     function whose body, callbacks included, calls passkeyEnforcementBlocks
- *     from src/lib/auth/policy/passkey-enforcement or passkeyGateBlocks from
- *     passkey-gate — resolved scope-aware — as (part of) an `if` condition).
+ *     function whose body, callbacks included, holds an `if` whose condition
+ *     is exactly a call — optionally awaited, not negated, no conjunct — of
+ *     passkeyEnforcementBlocks from src/lib/auth/policy/passkey-enforcement
+ *     or passkeyGateBlocks from passkey-gate, resolved scope-aware, with no
+ *     `else` and a consequent returning a refusal literal: `ok: false`, or no
+ *     `ok` and an `error`, or no `ok` and a string `type` other than
+ *     "success").
  *   - exempt: a reason.
  *   - opaque-where: a reason; the function must still have an opaque site.
  *
@@ -124,13 +176,30 @@ const EXEMPTION_PIN = [
 
 // Delegate methods that take a `where` (FILTERING minus the create family).
 const WHERE_METHODS = new Set([...FILTERING].filter((m) => !m.startsWith("create")));
-// Every member a model delegate has. A client extension could add more, so `$extends` is refused.
-const DELEGATE_MEMBERS = new Set([...FILTERING, ...WRITING.keys(), "fields"]);
+// Every method a model delegate has; with "fields", every member. A client extension could add
+// more, so `$extends` is refused.
+const DELEGATE_METHODS = new Set([...FILTERING, ...WRITING.keys()]);
+const DELEGATE_MEMBERS = new Set([...DELEGATE_METHODS, "fields"]);
+// Argument keys by position: filters (a digest under one is a lookup), projections, writes.
+const FILTER_KEYS = new Set(["where", "cursor", "having"]);
+const PROJECTION_KEYS = new Set(["select", "include"]);
+const WRITE_KEYS = new Set(["data", "create", "update"]);
+// Nested-write operations under a relation field in a `data`: those whose value is a filter
+// on the related model, and those whose value is `{ where?, data / create / update }`.
+const WRITE_FILTER_OPS = new Set(["connect", "disconnect", "set", "delete", "deleteMany"]);
+const WRITE_ARG_OPS = new Set(["update", "updateMany", "upsert", "connectOrCreate"]);
+// The writes whose `data` can hold nested writes. createMany / updateMany (and their
+// AndReturn forms) take scalar columns only, so their `data` cannot hide a lookup.
+const RELATION_WRITE_METHODS = new Set(["create", "update", "upsert"]);
+const SCALAR_WRITE_OPS = new Set(["createMany", "updateMany"]);
 // A RegExp, not a string literal: check-raw-sql-usage's PRISMA_EXTENDS (the repo-wide control)
 // denies a "$extends" literal in scripts/ too.
 const EXTENDS_RE = /^\$extends$/;
 const RAW_METHOD = /^\$(query|execute)Raw(Unsafe)?$/;
 const DIGEST_COLUMN = /token_hash|code_hash/i;
+// PostgreSQL's Unicode-escape forms (`U&"token\005fhash"`, `UESCAPE`) spell an identifier
+// without its plain text; refused in any literal, like the column names.
+const UNICODE_ESCAPE_SQL = /u&|uescape/i;
 const LOGICAL = new Set(["AND", "OR", "NOT"]);
 const FN_LIKE = new Set([
   SyntaxKind.FunctionDeclaration,
@@ -167,6 +236,13 @@ const TOKEN_MODELS = new Set(
 );
 if (TOKEN_MODELS.size === 0) fatal(`${SCHEMA_PATH} declares no model with a tokenHash/codeHash field, so no lookup can be classified.`);
 const TOKEN_HANDLES = new Set([...HANDLES].filter(([, m]) => TOKEN_MODELS.has(m)).map(([h]) => h));
+// Token models and the models with a relation field to one: a projection or a write on one of
+// these can name a token model's relation and put a filter on it. One hop, like the `where`
+// rule's token-model scoping: what an unreadable value could reach through a further model is
+// the same residual as a spread in that model's `where` (header).
+const TOKEN_ADJACENT = new Set(
+  [...MODELS].filter(([m, fields]) => TOKEN_MODELS.has(m) || [...fields.values()].some((f) => TOKEN_MODELS.has(f.type))).map(([m]) => m),
+);
 
 const manifestAbs = join(ROOT, MANIFEST_PATH);
 if (!existsSync(manifestAbs)) fatal(`manifest not found at ${manifestAbs}.`);
@@ -288,7 +364,7 @@ function attribute(node) {
   return null;
 }
 
-// ─── Digest lookups and opaque wheres ────────────────────────
+// ─── Digest lookups and opaque positions ─────────────────────
 
 /** The property an object-binding element reads (`{ a }`, `{ a: b }`, `{ ["a"]: b }`), or null. */
 function bindingKey(el) {
@@ -299,6 +375,18 @@ function bindingKey(el) {
     return isStringish(e) ? e.getLiteralText() : null;
   }
   return literalName(pn);
+}
+
+/** The string a value names: a string literal, or a name a `const` binds to one (scope-aware). Null otherwise. */
+function constString(node, file) {
+  const v = unwrapExpression(node);
+  if (isStringish(v)) return v.getLiteralText();
+  if (v?.getKind() !== SyntaxKind.Identifier) return null;
+  const d = visibleBinding(v.getText(), v, file.bindingsFor);
+  if (d?.getKind() !== SyntaxKind.VariableDeclaration || d.getNameNode().getKind() !== SyntaxKind.Identifier) return null;
+  if (d.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
+  const init = unwrapExpression(d.getInitializer());
+  return isStringish(init) ? init.getLiteralText() : null;
 }
 
 /** The model whose delegate `id` names when it is bound by destructuring a handle (`const { apiKey: k } = tx`). */
@@ -315,23 +403,27 @@ function destructuredModel(id, file) {
   return null;
 }
 
-/** The model a delegate call targets, if it is a where-taking delegate method. */
-function delegateModel(call, file) {
+/**
+ * The model a delegate call targets (`{ model }`), `{ unreadable: true }` for a where-taking
+ * method on an element access whose key this file cannot read, or null. This decides only
+ * which model's opacity rules apply; whether the call is a lookup does not depend on it.
+ */
+function delegateTarget(call, file) {
   const callee = unwrapExpression(call.getExpression());
-  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return null;
-  if (!WHERE_METHODS.has(callee.getName())) return null;
+  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression || !DELEGATE_METHODS.has(callee.getName())) return null;
   const recv = unwrapExpression(callee.getExpression());
   let handle = null;
   if (recv.getKind() === SyntaxKind.PropertyAccessExpression) handle = recv.getName();
   else if (recv.getKind() === SyntaxKind.Identifier) {
     const aliased = destructuredModel(recv, file);
-    if (aliased) return aliased;
+    if (aliased) return { model: aliased, method: callee.getName() };
     handle = recv.getText();
   } else if (recv.getKind() === SyntaxKind.ElementAccessExpression) {
-    const a = unwrapExpression(recv.getArgumentExpression());
-    if (isStringish(a)) handle = a.getLiteralText();
+    handle = constString(recv.getArgumentExpression(), file);
+    if (handle === null && WHERE_METHODS.has(callee.getName())) return { unreadable: true };
   }
-  return (handle && HANDLES.get(handle)) || null;
+  const model = handle && HANDLES.get(handle);
+  return model ? { model, method: callee.getName() } : null;
 }
 
 /**
@@ -351,95 +443,212 @@ const isNullish = (n) => {
   const v = unwrapExpression(n);
   return v?.getKind() === SyntaxKind.NullKeyword || (v?.getKind() === SyntaxKind.Identifier && v.getText() === "undefined");
 };
+const isBooleanLiteral = (n) => {
+  const k = unwrapExpression(n)?.getKind();
+  return k === SyntaxKind.TrueKeyword || k === SyntaxKind.FalseKeyword;
+};
+const isArrayLiteral = (n) => unwrapExpression(n)?.getKind() === SyntaxKind.ArrayLiteralExpression;
+const relationOf = (model, name) => {
+  const field = model && MODELS.get(model)?.get(name);
+  return field && MODELS.has(field.type) ? field : null;
+};
 
-/** Properties of the literals a value can be, or null (unreadable). Spreads/computed/accessors are reported. */
-function readProps(node, ctx, onOpaque) {
+/**
+ * Properties of the literals a value can be, or null (unreadable). Computed keys, accessors and
+ * spreads are reported — except, with `followSpreads`, a spread whose value this file can read
+ * (`...(c ? { a } : {})`, `...(c && { a })`, a `const`-bound literal), which is read in place.
+ * A filter never follows spreads: there a spread is opaque by decision (plan C7).
+ */
+function readProps(node, ctx, onOpaque, followSpreads = false) {
   const lits = objectLiterals(node, ctx);
   if (!lits) return null;
+  return lits.flatMap((lit) => literalProps(lit, ctx, onOpaque, followSpreads));
+}
+
+function literalProps(lit, ctx, onOpaque, followSpreads) {
   const props = [];
-  for (const lit of lits) {
-    for (const prop of lit.getProperties()) {
-      const k = prop.getKind();
-      if (k === SyntaxKind.PropertyAssignment || k === SyntaxKind.ShorthandPropertyAssignment) {
-        const name = literalName(prop.getNameNode());
-        if (name === null) {
-          onOpaque("computed key");
-          continue;
-        }
-        const value = k === SyntaxKind.ShorthandPropertyAssignment ? prop.getNameNode() : prop.getInitializer();
-        props.push({ name, value });
-      } else {
-        onOpaque(k === SyntaxKind.SpreadAssignment ? "spread" : "accessor/method");
+  for (const prop of lit.getProperties()) {
+    const k = prop.getKind();
+    if (k === SyntaxKind.PropertyAssignment || k === SyntaxKind.ShorthandPropertyAssignment) {
+      const name = literalName(prop.getNameNode());
+      if (name === null) {
+        onOpaque("computed key");
+        continue;
       }
+      const value = k === SyntaxKind.ShorthandPropertyAssignment ? prop.getNameNode() : prop.getInitializer();
+      props.push({ name, value });
+    } else if (k === SyntaxKind.SpreadAssignment && followSpreads) {
+      const spread = spreadLiterals(prop.getExpression(), ctx);
+      if (spread) for (const s of spread) props.push(...literalProps(s, ctx, onOpaque, true));
+      else onOpaque("spread");
+    } else {
+      onOpaque(k === SyntaxKind.SpreadAssignment ? "spread" : "accessor/method");
     }
   }
   return props;
 }
 
-const opaqueFor = (model, res, what) => (detail) => {
-  if (TOKEN_MODELS.has(model)) res.opaque.push(`${model} ${what}: ${detail}`);
-};
-
-function readWhere(node, model, res, ctx, what = "where") {
-  if (isNullish(node)) return;
-  const opaque = opaqueFor(model, res, what);
-  const props = readProps(node, ctx, opaque);
-  if (!props) return opaque("not an object literal");
-  walkWhereProps(props, model, res, ctx);
+/** The object literals a spread operand can be (`[]` for nothing), or null when this file cannot say. */
+function spreadLiterals(expr, ctx) {
+  const v = unwrapExpression(expr);
+  if (!v || isNullish(v) || v.getKind() === SyntaxKind.FalseKeyword) return [];
+  if (v.getKind() === SyntaxKind.ConditionalExpression) {
+    const whenTrue = spreadLiterals(v.getWhenTrue(), ctx);
+    const whenFalse = spreadLiterals(v.getWhenFalse(), ctx);
+    return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
+  }
+  if (v.getKind() === SyntaxKind.BinaryExpression && v.getOperatorToken().getKind() === SyntaxKind.AmpersandAmpersandToken) {
+    return spreadLiterals(v.getRight(), ctx);
+  }
+  return objectLiterals(v, ctx);
 }
 
-function walkWhereProps(props, model, res, ctx) {
-  const opaque = opaqueFor(model, res, "where");
+/**
+ * One walk decides both questions for a call. `model` is the schema model at the position,
+ * or null where the receiver did not resolve (or the key is not a relation): the walk goes on
+ * either way, so a digest key under a filter position is a lookup whatever the receiver.
+ * Opacity is reported only where `model` is known — in a filter on a token model, or in an
+ * argument / projection / write on a model that reaches one by relation.
+ */
+const opaqueIf = (applies, res, label) => (detail) => {
+  if (applies) res.opaque.push(`${label}: ${detail}`);
+};
+
+/** A call's argument object, or a nested relation's: its filter, projection and write positions. */
+function walkArgs(node, model, res, ctx, what = "argument", writesRelations = true) {
+  if (isNullish(node) || isBooleanLiteral(node)) return;
+  const opaque = opaqueIf(TOKEN_ADJACENT.has(model), res, `${model} ${what}`);
+  const props = readProps(node, ctx, opaque, true);
+  if (!props) return opaque("not an object literal");
+  for (const { name, value } of props) {
+    if (FILTER_KEYS.has(name)) walkWhere(value, model, res, ctx, name);
+    else if (PROJECTION_KEYS.has(name)) walkProjection(value, model, res, ctx, name);
+    else if (WRITE_KEYS.has(name)) walkData(value, writesRelations ? model : null, res, ctx, name);
+  }
+}
+
+/** `select` / `include`: each relation's own arguments, and `_count` (`{ select: { rel: { where } } }`). */
+function walkProjection(node, model, res, ctx, what) {
+  if (isNullish(node) || isBooleanLiteral(node)) return;
+  const opaque = opaqueIf(TOKEN_ADJACENT.has(model), res, `${model} ${what}`);
+  const props = readProps(node, ctx, opaque, true);
+  if (!props) return opaque("not an object literal");
+  for (const { name, value } of props) {
+    if (name === "_count") walkArgs(value, model, res, ctx, "_count");
+    else walkArgs(value, relationOf(model, name)?.type ?? null, res, ctx, name);
+  }
+}
+
+function walkWhere(node, model, res, ctx, what = "where") {
+  if (isNullish(node) || isBooleanLiteral(node)) return;
+  const opaque = opaqueIf(TOKEN_MODELS.has(model), res, `${model} ${what}`);
+  if (isArrayLiteral(node)) {
+    for (const el of unwrapExpression(node).getElements()) {
+      if (el.getKind() === SyntaxKind.SpreadElement) opaque("spread");
+      else walkWhere(el, model, res, ctx, what);
+    }
+    return;
+  }
+  const props = readProps(node, ctx, opaque);
+  if (!props) return opaque("not an object literal");
+  walkWhereProps(props, model, res, ctx, opaque);
+}
+
+function walkWhereProps(props, model, res, ctx, opaque) {
   for (const { name, value } of props) {
     if (DIGEST_KEYS.has(name)) {
       res.lookup = true;
-      res.lookupModels.add(model);
+      if (MODELS.get(model)?.has(name)) res.lookupModels.add(model);
       continue;
     }
     if (LOGICAL.has(name)) {
-      const v = unwrapExpression(value);
-      if (v?.getKind() === SyntaxKind.ArrayLiteralExpression) {
-        for (const el of v.getElements()) {
+      if (isArrayLiteral(value)) {
+        for (const el of unwrapExpression(value).getElements()) {
           if (el.getKind() === SyntaxKind.SpreadElement) opaque(`${name} spread`);
-          else readWhere(el, model, res, ctx);
+          else walkWhere(el, model, res, ctx);
         }
-      } else readWhere(value, model, res, ctx);
+      } else walkWhere(value, model, res, ctx);
       continue;
     }
-    const field = MODELS.get(model)?.get(name);
-    if (field && MODELS.has(field.type)) readRelationFilter(value, field.type, res, ctx);
+    const field = relationOf(model, name);
+    if (field) readRelationFilter(value, field.type, res, ctx);
+    else walkWhere(value, null, res, ctx); // a scalar filter, or a key of a model this walk does not know
   }
 }
 
 function readRelationFilter(node, related, res, ctx) {
   if (isNullish(node)) return;
-  const opaque = opaqueFor(related, res, "relation filter");
+  const opaque = opaqueIf(TOKEN_MODELS.has(related), res, `${related} relation filter`);
   const props = readProps(node, ctx, opaque);
   if (!props) return opaque("not an object literal");
   if (props.length > 0 && props.every((p) => RELATION_FILTERS.has(p.name))) {
-    for (const { value } of props) readWhere(value, related, res, ctx);
+    for (const { value } of props) walkWhere(value, related, res, ctx);
   } else {
-    walkWhereProps(props, related, res, ctx); // a direct to-one filter
+    walkWhereProps(props, related, res, ctx, opaqueIf(TOKEN_MODELS.has(related), res, `${related} where`)); // a direct to-one filter
   }
 }
 
-/** { lookup, opaque[] } for one delegate call on `model`. */
-function readCall(call, model, ctx) {
+/** A `data` (or an upsert's `create`/`update`): an object, or an array of them, keyed by field. */
+function walkData(node, model, res, ctx, what = "data") {
+  if (isNullish(node)) return;
+  const opaque = opaqueIf(TOKEN_ADJACENT.has(model), res, `${model} ${what}`);
+  if (isArrayLiteral(node)) {
+    for (const el of unwrapExpression(node).getElements()) {
+      if (el.getKind() === SyntaxKind.SpreadElement) opaque("spread");
+      else walkData(el, model, res, ctx, what);
+    }
+    return;
+  }
+  const props = readProps(node, ctx, opaque, true);
+  if (!props) return opaque("not an object literal");
+  for (const { name, value } of props) walkNestedWrite(value, relationOf(model, name)?.type ?? null, res, ctx, name);
+}
+
+/** A field's value in a `data`: for a relation, its nested-write operations. */
+function walkNestedWrite(node, model, res, ctx, field) {
+  if (isNullish(node) || isBooleanLiteral(node)) return;
+  const opaque = opaqueIf(TOKEN_ADJACENT.has(model), res, `${model} ${field}`);
+  const props = readProps(node, ctx, opaque, true);
+  if (!props) return opaque("not an object literal");
+  for (const { name, value } of props) {
+    const what = `${field}.${name}`;
+    if (WRITE_FILTER_OPS.has(name)) walkWhere(value, model, res, ctx, what);
+    else if (name === "create") walkData(value, model, res, ctx, what);
+    else if (name === "createMany") walkArgs(value, model, res, ctx, what, false);
+    else if (WRITE_ARG_OPS.has(name)) {
+      for (const el of isArrayLiteral(value) ? unwrapExpression(value).getElements() : [value]) {
+        const elOpaque = opaqueIf(TOKEN_ADJACENT.has(model), res, `${model} ${what}`);
+        if (el.getKind() === SyntaxKind.SpreadElement) {
+          elOpaque("spread");
+          continue;
+        }
+        const elProps = readProps(el, ctx, elOpaque, true);
+        if (!elProps) {
+          elOpaque("not an object literal");
+          continue;
+        }
+        // `{ where, data }` / `{ where, create, update }`, or a to-one `update` given the data itself.
+        if (!elProps.some((p) => p.name === "where" || WRITE_KEYS.has(p.name))) {
+          for (const p of elProps) walkNestedWrite(p.value, relationOf(model, p.name)?.type ?? null, res, ctx, p.name);
+          continue;
+        }
+        for (const p of elProps) {
+          if (p.name === "where") walkWhere(p.value, model, res, ctx, `${what}.where`);
+          else if (WRITE_KEYS.has(p.name)) walkData(p.value, SCALAR_WRITE_OPS.has(name) ? null : model, res, ctx, `${what}.${p.name}`);
+        }
+      }
+    }
+  }
+}
+
+/** { lookup, lookupModels, opaque[] } for one call: every argument is walked, the first under the delegate's model. */
+function readCall(call, target, ctx) {
   const res = { lookup: false, lookupModels: new Set(), opaque: [] };
-  const args = call.getArguments();
-  if (args.length === 0) return res;
-  const opaque = opaqueFor(model, res, "argument");
-  if (args[0].getKind() === SyntaxKind.SpreadElement) {
-    opaque("spread");
-    return res;
-  }
-  const props = readProps(args[0], ctx, opaque);
-  if (!props) {
-    opaque("not an object literal");
-    return res;
-  }
-  // A `cursor` is a unique-where input too: a digest in it is a lookup.
-  for (const { name, value } of props) if (name === "where" || name === "cursor") readWhere(value, model, res, ctx, name);
+  call.getArguments().forEach((arg, i) => {
+    const argModel = (i === 0 && target?.model) || null;
+    if (arg.getKind() === SyntaxKind.SpreadElement) opaqueIf(TOKEN_ADJACENT.has(argModel), res, `${argModel} argument`)("spread");
+    else if (argModel || ctx.mayHoldDigestKey) walkArgs(arg, argModel, res, ctx, "argument", !argModel || RELATION_WRITE_METHODS.has(target.method));
+  });
   return res;
 }
 
@@ -492,16 +701,6 @@ function isGateStatement(stmt, fn, file) {
   return isGateIf(soleStatement(stmt.getThenStatement()), file);
 }
 
-/** Is `call` (part of) the condition of an `if`, within the same function? */
-function inIfCondition(call) {
-  let child = call;
-  for (let p = call.getParent(); p && !FN_LIKE.has(p.getKind()); child = p, p = p.getParent()) {
-    if (p.getKind() === SyntaxKind.IfStatement) return p.getExpression() === child;
-    if (p.getKind() === SyntaxKind.Block || p.getKind() === SyntaxKind.SourceFile) return false;
-  }
-  return false;
-}
-
 /** Null when `fn` satisfies per-use-gated, else why not. */
 function perUseGatedViolation(fn, file) {
   const body = fn?.getBody?.();
@@ -535,18 +734,24 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
   let bindings;
   const file = { sf, rel, bindingsFor: () => (bindings ??= bindingIndex(sf)), imports: importsOf(sf, rel) };
   files.set(rel, file);
-  const ctx = { bindingsFor: file.bindingsFor };
+  // A digest key is a property name spelled `tokenHash`/`codeHash`, or one an escape spells
+  // (`"token\x48ash"`, `token\u0048ash`, a line continuation): a file with neither has no
+  // lookup, and a call on no known delegate there need not be walked.
+  const ctx = { bindingsFor: file.bindingsFor, mayHoldDigestKey: /tokenHash|codeHash|\\/.test(sf.getFullText()) };
 
-  // Digest lookups and opaque wheres.
+
+  // Digest lookups (any call) and opaque positions (calls on a resolved delegate).
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const model = delegateModel(call, file);
-    if (!model) continue;
-    const res = readCall(call, model, ctx);
+    const target = delegateTarget(call, file);
+    if (target?.unreadable) {
+      failAt(rel, call, `delegate method called on an element access whose key this gate cannot read (\`x[k].<method>(...)\`): name the delegate (\`x.<handle>\`), or bind the key with \`const k = "<handle>"\``);
+    }
+    const res = readCall(call, target, ctx);
     if (!res.lookup && res.opaque.length === 0) continue;
     for (const m of res.lookupModels) lookedUpModels.add(m);
     const at = attribute(call);
     if (!at) {
-      failAt(rel, call, `token-model lookup cannot be attributed to a named function, method or exported const`);
+      failAt(rel, call, `digest lookup or opaque site cannot be attributed to a named function, method or exported const`);
       continue;
     }
     const key = `${rel}#${at.name}`;
@@ -561,19 +766,21 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     a.lines.push(call.getStartLineNumber());
   }
 
-  // Token-model delegates reached other than as `<recv>.<handle>.<method>(...)` are invisible
-  // to the lookup scan above: a value reference, an element-access or `.call`/`.apply` method,
-  // a delegate passed as an argument, or an alias bound by destructuring a handle.
+  // A lookup through any receiver is found above, but opacity is judged only where the
+  // receiver resolves to a model. A token-model delegate reached other than as
+  // `<recv>.<handle>.<method>(...)` — a value reference, an element-access or `.call`/`.apply`
+  // method, a delegate passed as an argument — would take its calls' unreadable wheres out of
+  // that judgement, so it fails; an alias bound by destructuring a handle is followed.
   const delegateRefs = [];
   for (const pa of sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
     if (TOKEN_HANDLES.has(pa.getName())) delegateRefs.push(pa);
     if (EXTENDS_RE.test(pa.getName())) failAt(rel, pa, `$extends: a client extension can add delegate members this gate cannot read`);
   }
   for (const ea of sf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
-    const a = unwrapExpression(ea.getArgumentExpression());
-    if (!isStringish(a)) continue;
-    if (TOKEN_HANDLES.has(a.getLiteralText())) delegateRefs.push(ea);
-    if (EXTENDS_RE.test(a.getLiteralText())) failAt(rel, ea, `$extends: a client extension can add delegate members this gate cannot read`);
+    const key = constString(ea.getArgumentExpression(), file);
+    if (key === null) continue;
+    if (TOKEN_HANDLES.has(key)) delegateRefs.push(ea);
+    if (EXTENDS_RE.test(key)) failAt(rel, ea, `$extends: a client extension can add delegate members this gate cannot read`);
   }
   for (const el of sf.getDescendantsOfKind(SyntaxKind.BindingElement)) {
     if (el.getParent()?.getKind() !== SyntaxKind.ObjectBindingPattern) continue;
@@ -598,21 +805,31 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
   }
   for (const ref of delegateRefs) {
     if (!isDirectDelegateUse(ref)) {
-      failAt(rel, ref, `token-model delegate referenced other than as \`<delegate>.<method>(...)\` (${ref.getParent().getKindName()}): its lookups cannot be read`);
+      failAt(
+        rel,
+        ref,
+        `token-model delegate referenced other than as \`<delegate>.<method>(...)\` (${ref.getParent().getKindName()}): its calls' wheres cannot be read. Call a method on it directly, read a row's relation field (\`x.<handle>.<field>\`, a name no delegate has), or rename a non-Prisma property that shares the handle's name`,
+      );
     }
   }
 
-  // Raw SQL: the digest columns in any literal text, and unreadable SQL arguments.
+  // Raw SQL: the digest columns and the Unicode-escape forms in any literal text (a regular
+  // expression's too: `/token_hash/.source` is that text), and unreadable SQL arguments.
   for (const lit of [
     ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
     ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
     ...sf.getDescendantsOfKind(SyntaxKind.TemplateHead),
     ...sf.getDescendantsOfKind(SyntaxKind.TemplateMiddle),
     ...sf.getDescendantsOfKind(SyntaxKind.TemplateTail),
+    ...sf.getDescendantsOfKind(SyntaxKind.RegularExpressionLiteral),
   ]) {
     // Source spelling and cooked value both: `token\x5fhash` spells the column only once cooked.
-    if (DIGEST_COLUMN.test(lit.getText()) || DIGEST_COLUMN.test(lit.compilerNode.text ?? "")) {
+    const texts = [lit.getText(), lit.compilerNode.text ?? ""];
+    if (texts.some((t) => DIGEST_COLUMN.test(t))) {
       failAt(rel, lit, `literal text names a digest column (token_hash/code_hash): raw SQL digest lookups are refused`);
+    }
+    if (texts.some((t) => UNICODE_ESCAPE_SQL.test(t))) {
+      failAt(rel, lit, `literal text holds U& / UESCAPE: a Unicode-escaped SQL identifier can spell a digest column the scan cannot read`);
     }
   }
   for (const pa of sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
@@ -686,19 +903,15 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     const isDynamic = callee.getKind() === SyntaxKind.ImportKeyword;
     const isRequire = callee.getKind() === SyntaxKind.Identifier && callee.getText() === "require" && !visibleBinding("require", callee, file.bindingsFor);
     if (!isDynamic && !isRequire) continue;
-    let arg = unwrapExpression(call.getArguments()[0]);
-    if (arg?.getKind() === SyntaxKind.Identifier) {
-      const d = visibleBinding(arg.getText(), arg, file.bindingsFor);
-      const init = d?.getKind() === SyntaxKind.VariableDeclaration && d.getVariableStatement?.()?.getDeclarationKind() === "const" ? unwrapExpression(d.getInitializer()) : null;
-      arg = isStringish(init) ? init : arg;
-    }
+    const arg = unwrapExpression(call.getArguments()[0]);
     // A template whose fixed tail ends in `.json` can only load JSON, never the module.
     if (arg?.getKind() === SyntaxKind.TemplateExpression && /\.json$/.test(arg.getTemplateSpans().at(-1).getLiteral().getLiteralText())) continue;
-    if (!isStringish(arg)) {
+    const spec = arg ? constString(arg, file) : null;
+    if (spec === null) {
       failAt(rel, call, `dynamic import/require with a specifier this gate cannot read: it could reach ${EXT_FN}`);
       continue;
     }
-    if (resolveSpecifier(rel, arg.getLiteralText()) === EXT_MODULE && !isExtFile) {
+    if (resolveSpecifier(rel, spec) === EXT_MODULE && !isExtFile) {
       failAt(rel, call, `dynamic import/require of extension-token: calls through it cannot be followed`);
     }
   }
@@ -780,11 +993,41 @@ function findNamedFunctions(key) {
   return found;
 }
 
-/** Does `fn` call an INLINE_GATES function, resolved scope-aware, as (part of) an `if` condition? */
+/**
+ * A refusal: an object literal (no spread, computed key or accessor) that is `ok: false`, or
+ * has no `ok` and an `error`, or has no `ok` and a string-literal `type` other than "success".
+ */
+function isNonSuccessLiteral(expr) {
+  const v = unwrapExpression(expr);
+  if (v?.getKind() !== SyntaxKind.ObjectLiteralExpression) return false;
+  const props = v.getProperties();
+  if (props.some((p) => p.getKind() !== SyntaxKind.PropertyAssignment && p.getKind() !== SyntaxKind.ShorthandPropertyAssignment)) return false;
+  if (props.some((p) => p.getNameNode().getKind() === SyntaxKind.ComputedPropertyName)) return false;
+  const named = (n) => props.filter((p) => literalName(p.getNameNode()) === n);
+  if (named("ok").length > 0) return isOkFalseLiteral(v);
+  const errors = named("error");
+  if (errors.length > 0) return errors.length === 1 && errors[0].getKind() === SyntaxKind.PropertyAssignment;
+  const types = named("type");
+  if (types.length !== 1 || types[0].getKind() !== SyntaxKind.PropertyAssignment) return false;
+  const t = unwrapExpression(types[0].getInitializer());
+  return isStringish(t) && t.getLiteralText() !== "success";
+}
+
+/**
+ * Does `fn` (callbacks included) hold `if (<gate>(...))` or `if (await <gate>(...))` — the
+ * condition exactly that call, an INLINE_GATES function resolved scope-aware — with no `else`
+ * and a consequent that returns a refusal literal?
+ */
 function callsInlineGate({ node, file }) {
-  return node
-    .getDescendantsOfKind(SyntaxKind.CallExpression)
-    .some((c) => INLINE_GATES.some(([m, n]) => refersToImport(c.getExpression(), file, m, n)) && inIfCondition(c));
+  return node.getDescendantsOfKind(SyntaxKind.IfStatement).some((stmt) => {
+    if (stmt.getElseStatement()) return false;
+    let cond = unwrapExpression(stmt.getExpression());
+    if (cond?.getKind() === SyntaxKind.AwaitExpression) cond = unwrapExpression(cond.getExpression());
+    if (cond?.getKind() !== SyntaxKind.CallExpression) return false;
+    if (!INLINE_GATES.some(([m, n]) => refersToImport(cond.getExpression(), file, m, n))) return false;
+    const consequent = soleStatement(stmt.getThenStatement());
+    return consequent?.getKind() === SyntaxKind.ReturnStatement && isNonSuccessLiteral(consequent.getExpression());
+  });
 }
 
 /** Is `ref` (`<path>#<name>`) an exported top-level `const` of that file? */
@@ -820,10 +1063,10 @@ for (const [key, a] of analysed) {
     failures.push(`COUNT_MISMATCH: ${where} has ${calls} site(s) (${a.lookups} lookup, ${a.opaque.length} opaque call(s)); the manifest says ${entry.calls}.`);
   }
   if (a.opaque.length > 0 && entry.class !== "opaque-where") {
-    failures.push(`OPAQUE_WHERE: ${key} has a where this gate cannot read (${a.opaque.join("; ")}) — a human classifies it as opaque-where.`);
+    failures.push(`OPAQUE_WHERE: ${key} has a position this gate cannot read (${a.opaque.join("; ")}) — a human classifies it as opaque-where.`);
   }
   if (entry.class === "opaque-where" && a.opaque.length === 0) {
-    failures.push(`STALE_OPAQUE: ${key} is opaque-where but every where it has is now readable — reclassify it.`);
+    failures.push(`STALE_OPAQUE: ${key} is opaque-where but every position it has is now readable — reclassify it.`);
   }
   if (entry.class === "per-use-gated") {
     const why = a.fns.size > 1 ? `its sites sit in ${a.fns.size} functions` : perUseGatedViolation(a.fn, a.file);
@@ -844,14 +1087,14 @@ for (const [key, a] of analysed) {
         failures.push(`AMBIGUOUS_KEY: inline gate ${JSON.stringify(g)} of ${key} names ${found.length} functions.`);
       } else if (found.length === 0 || !callsInlineGate(found[0])) {
         failures.push(
-          `BAD_ENTRY: ${key} relies on inline gate ${JSON.stringify(g)}, which does not exist or does not call ${INLINE_GATES.map(([m, n]) => `${n} (${m})`).join(" / ")} in an if condition.`,
+          `BAD_ENTRY: ${key} relies on inline gate ${JSON.stringify(g)}, which does not exist or does not hold \`if ([await] <gate>(...)) return <refusal literal>\` (no else) for a gate of ${INLINE_GATES.map(([m, n]) => `${n} (${m})`).join(" / ")}.`,
         );
       }
     }
   }
 }
 for (const key of ENTRIES.keys()) {
-  if (!analysed.has(key)) failures.push(`STALE_ENTRY: ${key} is in the manifest but no digest lookup or opaque where is attributed to it.`);
+  if (!analysed.has(key)) failures.push(`STALE_ENTRY: ${key} is in the manifest but no digest lookup or opaque site is attributed to it.`);
 }
 
 // Model coverage: a token model no analysed lookup reaches is looked up some way this gate

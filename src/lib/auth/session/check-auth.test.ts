@@ -110,6 +110,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-2",
+        tenantId: "tenant-2",
         scopes: ["passwords:read"],
       });
 
@@ -122,13 +123,14 @@ describe("checkAuth", () => {
         auth: {
           type: "token",
           userId: "user-2",
+          tenantId: "tenant-2",
           scopes: ["passwords:read"],
         },
       });
       expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
         req,
         "user-2",
-        undefined,
+        "tenant-2",
       );
     });
 
@@ -225,6 +227,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-4",
+        tenantId: "tenant-4",
         scopes: ["passwords:read"],
       });
       const deniedResponse = NextResponse.json(
@@ -296,6 +299,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-5",
+        tenantId: "tenant-5",
         scopes: ["passwords:read"],
       });
 
@@ -361,6 +365,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-8",
+        tenantId: "tenant-8",
         scopes: [EXTENSION_TOKEN_SCOPE.PASSWORDS_READ],
       });
 

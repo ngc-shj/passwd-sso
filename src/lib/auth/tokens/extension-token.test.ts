@@ -678,10 +678,18 @@ describe("validateExtensionToken — passkey gate (C5)", () => {
     };
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: null });
     mockExtensionTokenUpdate.mockResolvedValue({});
+    // N-4: mockReturnValueOnce queued by the truncation cell below survives
+    // clearAllMocks (mockClear doesn't drain the once-queue) — reset and
+    // re-delegate to the real header parser so every cell starts clean.
+    mockExtractClientIp.mockReset();
+    const actual = await vi.importActual<typeof import("@/lib/auth/policy/ip-access")>(
+      "@/lib/auth/policy/ip-access",
+    );
+    mockExtractClientIp.mockImplementation(actual.extractClientIp as (...a: unknown[]) => unknown);
   });
 
   it.each([
@@ -768,6 +776,7 @@ describe("validateExtensionToken — passkey gate (C5)", () => {
     const result = await validateExtensionToken(makeReqWithIpUa());
 
     expect(result.ok).toBe(true);
+    expect(mockExtractClientIp).toHaveBeenCalledTimes(1);
     const { data } = mockExtensionTokenUpdate.mock.calls[0][0] as {
       data: { lastUsedIp: string };
     };

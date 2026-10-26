@@ -118,6 +118,21 @@ describe("renderSql", () => {
     expect(() => renderSql(id as unknown as SqlFragment)).toThrow(TypeError);
   });
 
+  // The bearer passkey gate (C7) refuses the digest column names in source
+  // literals; a name spliced from identifiers only exists once rendered.
+  it.each([
+    ["an identifier spliced after a literal prefix", () => trustedSql`SELECT id FROM api_keys WHERE token_${sqlIdentifier("hash")} = $1`],
+    ["the code column, upper-case prefix", () => trustedSql`SELECT id FROM mcp_authorization_codes WHERE CODE_${sqlIdentifier("hash")} = $1`],
+    ["a joinSql of identifiers", () => joinSql([sqlIdentifier("token"), sqlIdentifier("hash")], trustedSql`_`)],
+  ])("refuses rendered text naming a digest column: %s", (_label, build) => {
+    expect(() => renderSql(build())).toThrow(/digest column/);
+  });
+
+  it("renders spliced identifiers that do not form a digest column name", () => {
+    const fragment = trustedSql`SELECT ${sqlIdentifier("token")}, ${sqlIdentifier("hash")} FROM notes`;
+    expect(renderSql(fragment)).toBe("SELECT token, hash FROM notes");
+  });
+
   it.each([
     ["a plain string", "SELECT 1"],
     ["a JSON-parsed object", JSON.parse('{"__sqlFragment":true}')],

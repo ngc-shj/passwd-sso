@@ -195,15 +195,43 @@ and its red proofs settle them. Phase 3 reviews the built gate.
   repo. Built after reading `check-session-token-hashed.mjs`, `check-passkey-mint-gate.sh` and
   their self-tests. Wired into `scripts/pre-pr.sh` and the static-checks CI job. The scan root,
   the schema and the manifest sit under one fixture-root override.
-- **What the class is (adjudicated by the code, not a list):** a digest lookup — any delegate
-  call whose argument has a `where` containing a `tokenHash` or `codeHash` key, on the models
-  that declare such a column in `prisma/schema.prisma` (read through
-  `lib/prisma-relation-reach.mjs`; an empty set fails). Raw SQL whose text mentions
-  `token_hash`/`code_hash`, or whose SQL argument is not a literal, fails.
-- **Refuse rather than guess:** on those models a `where` the gate cannot read (not an object
-  literal, or containing a spread) is a decision a human makes, not one the gate infers. Such a
-  function needs an `opaque-where` manifest entry with a reason and its call count, so a new
-  opaque site still fails (F46/T34). The first run's list is the seed; today's known members are
+- **Control class (R49):** a syntactic gate. It adjudicates Prisma query-builder digest
+  lookups by the AST shape of a call's argument, and raw SQL by the text of its literals,
+  backed at run time by `renderSql`. It does not follow values across files or through types.
+  The residuals are enumerated in the gate header and in the deviation log, each with an
+  Anti-Deferral entry:
+  - delegates reached by a reflective spelling the gate does not resolve, whose opaque
+    positions go unrefused (their lookups are still found);
+  - an opaque value more than one relation hop from a token model, and a spread in a non-token
+    model's `where`;
+  - a computed key under a filter of a call that does not resolve to a token model;
+  - raw SQL that never names the column: whole-row projections, dynamic SQL inside the
+    statement, and database objects defined in migrations.
+
+  Recovery for a residual is the validators' own gate (this one, on their spelling), their unit
+  and integration tests, and review. The gate is not a proof that no other lookup exists.
+- **What the class is (adjudicated by the code, not a list):** a digest lookup is any call,
+  whatever its receiver, an argument of which holds a `tokenHash` or `codeHash` key under a
+  filter position. Filter positions are:
+  - the top-level `where` / `cursor` / `having`;
+  - the relation `where`s under `include` / `select` / `_count.select`;
+  - the nested-write filters under `data`.
+
+  The token models are the ones that declare such a column in `prisma/schema.prisma` (read
+  through `lib/prisma-relation-reach.mjs`; an empty set fails). For raw SQL, any literal
+  naming `token_hash` / `code_hash` or holding `U&` / `UESCAPE` fails, and so does a SQL
+  argument that is not a literal. `renderSql` throws on rendered text naming the column.
+- **Refuse rather than guess:** where the receiver resolves to a model, some positions are
+  unreadable (not an object literal, or holding a spread or a computed key):
+  - a filter on a token model;
+  - an argument, projection or relational `data` on a token model, or on a model with a
+    relation to one.
+
+  Whether such a position hides a lookup is a decision a human makes, not one the gate infers.
+  Such a function needs an `opaque-where` manifest entry with a reason and its call count, so
+  a new opaque site still fails (F46/T34). Two kinds of receiver fail outright: a where-taking
+  method on an element access with an unreadable key, and a token-model delegate the gate
+  cannot follow. The first run's list is the seed; today's known members are
   `emergency-access-state#transition` and `#bulkTransition` (the digest arrives through
   `args.where` from the accept/reject routes), `user-session-invalidation#invalidateUserSessions`,
   `user/mcp-tokens/[id]#handleDELETE`, `share-links#handleGET` and `share-links/mine#handleGET`.

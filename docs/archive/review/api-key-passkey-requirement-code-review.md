@@ -90,3 +90,67 @@ RT2 OK; RT3 T-9; RT4 OK; RT5 T-2; RT6 OK; RT7 T-3, T-7; RT8 OK; RT9 N/A; RT10 T-
   - The integration file has 29 cells, all passing against the real DB.
 - Verification: lint, full vitest (1092 files), build, the C7 gate and the raw-SQL gate all
   pass.
+
+## Round 2
+Scope: `bb14ae253..52f783a0e`. No fix widened a predicate against round 1 (R43, all three experts).
+
+### Findings
+- **Security**
+  - S2–S7 resolved. S1 continues as C1.
+  - C1 Major: the residual's justification was refuted. `Reflect.get` and a `const`-bound handle
+    escape, and a receiver-independent digest-shape rule closes them without a Program.
+  - N1 Major: digest filters under `include`/`select`/`_count`/nested writes were not read.
+  - N2 Major: the raw-SQL rule was defeated by `U&` identifiers, `trustedSql`/`sqlIdentifier`
+    splicing, and whole-row projections.
+  - M1 Minor: `inlineGate` accepted a negated condition or a non-refusing consequent.
+- **Functionality**
+  - F1–F5 resolved.
+  - F6 Minor: the `requirePasskey` row omits the mint-point gates.
+  - F7 Minor: the idle/absolute rows omit the iOS host token.
+  - F8 Minor [Adjacent]: `CLAUDE.md` cites `src/proxy.ts:153` for the audit-emit fetch.
+  - F9 Minor: same as N-1.
+  - F10 Minor: the delegate-reference refusal message gives no remedy.
+- **Testing**
+  - T-1–T-12 resolved.
+  - N-1 Minor: a `checkAuth` fixture omits `tenantId` and pins the removed contract.
+  - N-2 Minor: some `.replace`-built variants have no no-op guard.
+  - N-3 Minor: new C7 clauses have no fixtures.
+  - N-4 Minor: a `mockReturnValueOnce` can leak into the next cell.
+  - N-5 Minor: a fixed sleep before a negative assertion.
+
+### User decision
+C1/N1/N2: change the mechanism rather than keep closing spellings, or declare the gate a
+tripwire.
+
+### Resolution Status (round 2)
+- **C1/N1:** lookup detection is receiver-independent. A digest key anywhere in a filter
+  position counts, so `Reflect.get`, computed and parameter-passed delegates are all covered:
+  - top-level `where`/`cursor`/`having`;
+  - relation `where` under `include`/`select`/`_count`;
+  - nested-write filters.
+  
+  Opaque refusal covers token models and one relation hop.
+  - Why one hop: the transitive closure is 57 of 60 models, which would make 41 functions opaque
+    today.
+  - The longer hops are a declared residual with an Anti-Deferral entry.
+  - The manifest goes from 28 to 39. The newly visible sites were each read; none is an ungated
+    user-bound lookup.
+- **N2:**
+  - `U&`/`UESCAPE` are refused.
+  - `renderSql` throws at run time on `token_hash`/`code_hash`, which closes identifier
+    splicing. It has two callers, neither affected.
+  - Whole-row projections, dynamic SQL inside the statement, and migration-defined objects are
+    declared residuals.
+- **R49:** the gate header and the plan's C7 now state the control class, its adjudicated
+  surface, its residuals and the real recovery path.
+- **Minors:** M1, N-2, N-3 and F10 fixed in the gate. N-1/F9, N-4, N-5, F6 and F7 fixed in the
+  tests and the docs.
+- **F8:** `CLAUDE.md` is edited only with explicit user approval. The change was proposed and
+  awaits an answer.
+- **Red proofs (scratch copy):** 29 mutations for the detection rules, 7 for raw SQL, 9 for M1,
+  and the N-3 cells. Each turned its cell red.
+  - Exception: one rule was found to be a no-op, because ts-morph's `getText()` already returns
+    unescaped names, so it was reverted.
+- **Verification:** lint, full vitest (1092 files, 18881 tests), build, the C7 gate (39/39) and
+  the raw-SQL gate all pass.
+- **Runtime:** the gate takes about 6.5–7 s.

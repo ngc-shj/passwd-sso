@@ -1,5 +1,5 @@
 {
-  "$comment": "Classification of every function holding a tokenHash/codeHash digest lookup or an unreadable where on a token model. Enforced by scripts/checks/check-bearer-passkey-gate.mjs (plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7). calls = the number of calls in the function that are a lookup or opaque. Keys are <repo path>#<function>. refresh-bound entries name lifetime as <repo path>#<exported const> and at least one inlineGate. models: a token model (tokenHash/codeHash column) that no analysed lookup reaches, keyed by model name with a reason; empty while every token model has one.",
+  "$comment": "Classification of every function holding a tokenHash/codeHash digest lookup (any call whose argument has the key under a filter position, whatever its receiver) or a position this gate cannot read (opaque-where: a where on a token model, or an argument / select / include / data on a token model or a model with a relation to one). Enforced by scripts/checks/check-bearer-passkey-gate.mjs (plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7). calls = the number of calls in the function that are a lookup or opaque. Keys are <repo path>#<function>. refresh-bound entries name lifetime as <repo path>#<exported const> and at least one inlineGate. models: a token model (tokenHash/codeHash column) that no analysed lookup reaches, keyed by model name with a reason; empty while every token model has one.",
   "models": {},
   "functions": {
     "src/lib/auth/tokens/api-key.ts#validateApiKey": {
@@ -76,13 +76,13 @@
     },
     "src/app/api/emergency-access/accept/route.ts#handlePOST": {
       "class": "exempt",
-      "calls": 1,
-      "reason": "One-time emergency access invitation token, accepted under a session; not a reusable bearer API credential."
+      "calls": 2,
+      "reason": "One-time emergency access invitation token, accepted under a session: the digest lookup and the CAS transition({ where: { id, tokenHash } }) on the row it found; not a reusable bearer API credential."
     },
     "src/app/api/emergency-access/reject/route.ts#handlePOST": {
       "class": "exempt",
-      "calls": 1,
-      "reason": "One-time emergency access invitation token, rejected under a session; not a reusable bearer API credential."
+      "calls": 2,
+      "reason": "One-time emergency access invitation token, rejected under a session: the digest lookup and the CAS transition({ where: { id, tokenHash } }) on the row it found; not a reusable bearer API credential."
     },
     "src/app/api/share-links/verify-access/route.ts#handlePOST": {
       "class": "exempt",
@@ -153,6 +153,61 @@
       "class": "opaque-where",
       "calls": 1,
       "reason": "DelegationSession lookup whose McpAccessToken relation filter spreads tokenBinding ({ id } of the caller's own already-validated MCP token, or {}); filters by row id, never by digest."
+    },
+    "src/app/api/passwords/[id]/route.ts#handlePUT": {
+      "class": "opaque-where",
+      "calls": 2,
+      "reason": "PasswordEntry update (both the history-snapshot and the plain branch): data is a Record<string, unknown> built by assigning scalar columns plus tags: tagSet(ids) (a Tag relation by id); it names no share-link relation and filters by no digest."
+    },
+    "src/app/api/v1/passwords/[id]/route.ts#handlePUT": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "PasswordEntry update over API v1: data is a Record<string, unknown> built by assigning scalar columns plus tags: tagSet(ids) (a Tag relation by id); it names no share-link relation and filters by no digest."
+    },
+    "src/app/api/v1/passwords/route.ts#handlePOST": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "PasswordEntry create over API v1: the unreadable spreads are toBlobColumns/toOverviewColumns (src/lib/crypto/crypto-blob.ts), which return the three ciphertext/iv/authTag scalar columns each; no relation, no digest."
+    },
+    "src/lib/services/personal-password-service.ts#createPersonalPasswordEntry": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "PasswordEntry create: the unreadable spreads are toBlobColumns/toOverviewColumns (src/lib/crypto/crypto-blob.ts), which return scalar ciphertext/iv/authTag columns; no relation, no digest."
+    },
+    "src/lib/services/team-password-service.ts#createTeamPassword": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "TeamPasswordEntry create: the unreadable spreads are toBlobColumns/toOverviewColumns (src/lib/crypto/crypto-blob.ts), which return scalar ciphertext/iv/authTag columns; no relation, no digest."
+    },
+    "src/lib/services/team-password-service.ts#updateTeamPassword": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "TeamPasswordEntry update: data is a Record<string, unknown> built by assigning scalar columns plus tags: tagSet(ids) (a TeamTag relation by id); no share-link relation, no digest."
+    },
+    "src/app/api/teams/[teamId]/route.ts#handlePUT": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Team update: data is a Record<string, unknown> built by assigning scalar columns (name, description); no token relation, no digest."
+    },
+    "src/app/api/tenant/mcp-clients/[id]/route.ts#handlePUT": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "McpClient update: data is a Record<string, unknown> built by assigning scalar columns (name, redirectUris, allowedScopes, isActive); it names no token relation and filters by no digest."
+    },
+    "src/app/api/tenant/policy/route.ts#handlePATCH": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Tenant policy update: data is a Record<string, unknown> built by assigning scalar columns (session, token-timeout, passkey, retention and network policy fields); no token relation, no digest."
+    },
+    "src/lib/auth/session/auth-adapter.ts#updateUser": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Auth.js adapter updateUser: data is the rest of Partial<AdapterUser> (name, email, image, emailVerified) that Auth.js passes in, keyed by the user id; it is not a bearer lookup and carries no relation."
+    },
+    "src/workers/retention-gc-worker/sweep.ts#sweepPerTenantAge": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Retention sweep: the computed select key is the entry's tenantRetentionColumn, a closed union of Tenant retention-day scalar columns from the retention registry; it selects, it never filters by a digest."
     }
   }
 }

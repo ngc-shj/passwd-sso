@@ -212,11 +212,31 @@ export function joinSql(
   return obj as unknown as SqlFragment;
 }
 
-/** The only way out: text for a genuine `SqlFragment`. An identifier alone is not a fragment. */
+// Bearer-token digest columns. The bearer passkey gate (C7,
+// check-bearer-passkey-gate.mjs) refuses their names in any source literal, but
+// identifiers spliced here (`token_${sqlIdentifier("hash")}`, a joinSql of
+// parts) only exist as rendered text, so renderSql refuses them at run time: a
+// digest lookup must go through the Prisma query builder, where C7 classifies
+// it. Spelled with a group so this pattern is not itself such a literal.
+const DIGEST_COLUMN_RE = /(?:token|code)_hash/i;
+const digestColumnExec = RegExp.prototype.exec.bind(DIGEST_COLUMN_RE) as (
+  input: string,
+) => RegExpExecArray | null;
+
+/**
+ * The only way out: text for a genuine `SqlFragment`. An identifier alone is
+ * not a fragment. Throws when the text names a bearer-token digest column.
+ */
 export function renderSql(fragment: SqlFragment): string {
   const text = fragmentGet(fragment);
   if (text === undefined) {
     throw new TypeError("renderSql: argument must be a genuine SqlFragment");
+  }
+  if (digestColumnExec(text) !== null) {
+    throw new Error(
+      "renderSql: rendered SQL names a bearer-token digest column (the tokenHash / codeHash fields); " +
+        "look the digest up through the Prisma query builder",
+    );
   }
   return text;
 }

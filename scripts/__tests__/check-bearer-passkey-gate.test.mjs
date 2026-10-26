@@ -8,7 +8,7 @@
  * Every refusal rule has a fixture the gate must FAIL on, paired with the
  * passing base fixture (or a named good variant) it differs from by that rule
  * alone, so each cell is able to fail for the reason it names. Where a variant
- * is built by `.replace` on the base, the cell asserts the replace took effect. The gate is
+ * is built by `.replace` on the base, `swap` asserts the replace took effect. The gate is
  * driven against fixtures through BEARER_PASSKEY_GATE_ROOT (scan root, schema
  * and manifest together); tracked files are never mutated.
  */
@@ -26,8 +26,15 @@ const MANIFEST = "scripts/checks/bearer-passkey-gate-manifest.json";
 
 const SCHEMA = `
 model User {
-  id      String   @id
-  apiKeys ApiKey[]
+  id        String     @id
+  apiKeys   ApiKey[]
+  authCodes AuthCode[]
+}
+
+model Profile {
+  id     String @id
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 }
 
 model ApiKey {
@@ -45,6 +52,8 @@ model ExtensionToken {
 model AuthCode {
   id       String @id
   codeHash String @unique
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
 }
 
 model Note {
@@ -54,6 +63,13 @@ model Note {
 `;
 
 const GATE_IMPORT = `import { passkeyGateBlocks } from "@/lib/auth/policy/passkey-gate";`;
+
+/** `base` with `from` replaced by `to`, asserting the replace changed something. */
+function swap(base, from, to) {
+  const variant = base.replace(from, to);
+  expect(variant).not.toBe(base);
+  return variant;
+}
 
 /** An API-key validator file with the given function body. */
 const apiKey = (body, header = GATE_IMPORT) =>
@@ -177,7 +193,7 @@ const LISTED_LOOKUP = { "src/lib/other.ts#lookup": { class: "exempt", calls: 1, 
 const RAW_SQL_IMPORT = `import { renderSql, trustedSql } from "@/lib/prisma/raw-sql";`;
 const ENFORCEMENT_IMPORT = `import { passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";`;
 const ROTATE_BODY =
-  "export function rotate(s: unknown) {\n  return withBypassRls(prisma, async () => {\n    if (passkeyEnforcementBlocks(s)) return null;\n  });\n}\nexport function ungated() {\n  return null;\n}\n";
+  "export function rotate(s: unknown) {\n  return withBypassRls(prisma, async () => {\n    if (passkeyEnforcementBlocks(s)) return { ok: false, error: \"PASSKEY_REQUIRED\" };\n  });\n}\nexport function ungated() {\n  return null;\n}\n";
 const ROTATE = `${ENFORCEMENT_IMPORT}\n${ROTATE_BODY}`;
 
 describe.concurrent("check-bearer-passkey-gate.mjs — inputs", { timeout: 60_000 }, () => {
@@ -217,14 +233,12 @@ describe.concurrent("check-bearer-passkey-gate.mjs — inputs", { timeout: 60_00
   });
 
   it("FAILS when passkey-gate does not export passkeyGateBlocks", async () => {
-    const gate = BASE_FILES["src/lib/auth/policy/passkey-gate.ts"].replace("export async function", "async function");
-    expect(gate).not.toBe(BASE_FILES["src/lib/auth/policy/passkey-gate.ts"]);
+    const gate = swap(BASE_FILES["src/lib/auth/policy/passkey-gate.ts"], "export async function", "async function");
     await expectFail({ files: { "src/lib/auth/policy/passkey-gate.ts": gate } }, /does not export function passkeyGateBlocks/);
   });
 
   it("FAILS when extension-token does not export validateExtensionToken", async () => {
-    const ext = EXT_TOKEN.replace("export async function validateExtensionToken", "async function validateExtensionToken");
-    expect(ext).not.toBe(EXT_TOKEN);
+    const ext = swap(EXT_TOKEN, "export async function validateExtensionToken", "async function validateExtensionToken");
     await expectFail({ files: { "src/lib/auth/tokens/extension-token.ts": ext } }, /does not export function validateExtensionToken/);
   });
 
@@ -322,6 +336,176 @@ describe.concurrent("digest lookup detection", { timeout: 60_000 }, () => {
   });
 });
 
+// Whether a call is a lookup does not depend on its receiver: each spelling and each filter
+// position is a deny cell with `tokenHash`, paired with the same call filtering by `id`.
+describe.concurrent("lookups, whatever the receiver", { timeout: 60_000 }, () => {
+  const LOOKUP_IN_OTHER = /UNLISTED: src\/lib\/other\.ts#lookup.*1 digest lookup/;
+  const other = (code) => ({ files: { "src/lib/other.ts": NOTE_FN(`  ${code}`) } });
+  const cells = (code) => [other(code.replaceAll("%K%", "tokenHash")), other(code.replaceAll("%K%", "id"))];
+
+  const RECEIVERS = [
+    ["Reflect.get", `return Reflect.get(tx, "apiKey").findUnique({ where: { %K%: t } });`],
+    ["a delegate a function returns", `return delegateFor(tx).findFirst({ where: { %K%: t } });`],
+    ["$parent", `return tx.$parent.findFirst({ where: { %K%: t } });`],
+    ["a bare name that is no handle (a parameter-passed delegate)", `return d.findFirst({ where: { %K%: t } });`],
+    ["a .call of the method", `return tx.repo.findFirst.call(null, { where: { %K%: t } });`],
+    ["an argument other than the first", `return find(tx, { where: { %K%: t } });`],
+  ];
+  it.each(RECEIVERS)("FAILS on a lookup through %s", async (_label, code) => {
+    await expectFail(cells(code)[0], LOOKUP_IN_OTHER);
+  });
+  it.each(RECEIVERS)("passes on the same call through %s filtering by id", async (_label, code) => {
+    await expectPass(cells(code)[1]);
+  });
+
+  const POSITIONS = [
+    ["a shorthand key", `const %K% = t;\n  return x.findFirst({ where: { %K% } });`],
+    ["a string-literal key", `return x.findFirst({ where: { "%K%": t } });`],
+    ["a having", `return x.groupBy({ by: ["id"], having: { %K%: t } });`],
+    ["a relation filter under a logical", `return x.findFirst({ where: { AND: [{ user: { apiKeys: { some: { %K%: t } } } }] } });`],
+    ["an include relation's where", `return x.findFirst({ include: { apiKeys: { where: { %K%: t } } } });`],
+    ["a select relation's where", `return x.findFirst({ select: { apiKeys: { where: { %K%: t } } } });`],
+    ["a _count.select relation's where", `return x.findFirst({ select: { _count: { select: { apiKeys: { where: { %K%: t } } } } } });`],
+    ["an include nested under an include", `return x.findFirst({ include: { user: { include: { apiKeys: { where: { %K%: t } } } } } });`],
+    ["a nested update's where", `return x.update({ where: { id: t }, data: { apiKeys: { update: { where: { %K%: t }, data: {} } } } });`],
+    ["a nested updateMany's where", `return x.update({ where: { id: t }, data: { apiKeys: { updateMany: [{ where: { %K%: t }, data: {} }] } } });`],
+    ["a nested upsert's where", `return x.update({ where: { id: t }, data: { apiKeys: { upsert: { where: { %K%: t }, create: {}, update: {} } } } });`],
+    ["a nested connectOrCreate's where", `return x.create({ data: { apiKeys: { connectOrCreate: { where: { %K%: t }, create: {} } } } });`],
+    ["a nested connect", `return x.create({ data: { apiKeys: { connect: { %K%: t } } } });`],
+    ["a nested connect array", `return x.create({ data: { apiKeys: { connect: [{ %K%: t }] } } });`],
+    ["a nested disconnect", `return x.update({ where: { id: t }, data: { apiKeys: { disconnect: { %K%: t } } } });`],
+    ["a nested set", `return x.update({ where: { id: t }, data: { apiKeys: { set: [{ %K%: t }] } } });`],
+    ["a nested delete", `return x.update({ where: { id: t }, data: { apiKeys: { delete: { %K%: t } } } });`],
+    ["a nested deleteMany", `return x.update({ where: { id: t }, data: { apiKeys: { deleteMany: { %K%: t } } } });`],
+    ["a nested write in a nested create", `return x.create({ data: { user: { create: { apiKeys: { connect: { %K%: t } } } } } });`],
+    ["a to-one update given its data directly", `return x.update({ where: { id: t }, data: { user: { update: { apiKeys: { connect: { %K%: t } } } } } });`],
+    ["an upsert's top-level update", `return x.upsert({ where: { id: t }, create: {}, update: { apiKeys: { connect: { %K%: t } } } });`],
+    ["a const-bound argument", `const args = { where: { %K%: t } };\n  return x.findFirst(args);`],
+  ];
+  it.each(POSITIONS)("FAILS on a digest key in %s", async (_label, code) => {
+    await expectFail(cells(code)[0], LOOKUP_IN_OTHER);
+  });
+  it.each(POSITIONS)("passes on an id key in %s", async (_label, code) => {
+    await expectPass(cells(code)[1]);
+  });
+
+  it("FAILS on an escaped string-literal key (read cooked)", async () => {
+    await expectFail(other(`return x.findFirst({ where: { "token\\x48ash": t } });`), LOOKUP_IN_OTHER);
+  });
+
+  it("FAILS on an identifier key spelled with a unicode escape (read cooked)", async () => {
+    await expectFail(other(`return x.findFirst({ where: { token\\u0048ash: t } });`), LOOKUP_IN_OTHER);
+  });
+
+  it("passes on a digest written as data (a write, not a lookup)", async () => {
+    await expectPass(other(`await x.create({ data: { tokenHash: t } });\n  return x.update({ where: { id: t }, data: { tokenHash: t } });`));
+  });
+
+  it("passes on a digest key outside any filter position", async () => {
+    await expectPass(other(`return log({ meta: { tokenHash: t }, orderBy: { tokenHash: "asc" } });`));
+  });
+
+  describe("model coverage through the position, not the receiver", () => {
+    const authCodeListed = { manifest: LISTED_LOOKUP, models: NO_AUTHCODE_ENTRY };
+
+    it("passes when a nested include on a resolved receiver reaches the model", async () => {
+      await expectPass({ ...other(`return tx.user.findFirst({ include: { authCodes: { where: { codeHash: t } } } });`), ...authCodeListed });
+    });
+
+    it("FAILS as UNCOVERED_MODEL when the only lookup's receiver does not resolve", async () => {
+      await expectFail({ ...other(`return Reflect.get(tx, "authCode").findFirst({ where: { codeHash: t } });`), ...authCodeListed }, /UNCOVERED_MODEL: AuthCode/);
+    });
+  });
+});
+
+describe.concurrent("delegate receivers by element access", { timeout: 60_000 }, () => {
+  const fn = (decl, call) => ({ files: { "src/lib/other.ts": `export async function lookup(t: string, k: string) {\n  ${decl}\n  return ${call};\n}\n` } });
+  const UNREADABLE_KEY = /element access whose key this gate cannot read/;
+
+  it("FAILS on a where-taking method on an element access with a parameter key", async () => {
+    await expectFail(fn("", `tx[k].findFirst({ where: { id: t } })`), UNREADABLE_KEY);
+  });
+
+  it("FAILS on the same call when the key is a let, not a const", async () => {
+    await expectFail(fn(`let h = "apiKey";`, `tx[h].findFirst({ where: { id: t } })`), UNREADABLE_KEY);
+  });
+
+  it("passes on the same call with a const-bound key", async () => {
+    await expectPass(fn(`const h = "apiKey";`, `tx[h].findFirst({ where: { id: t } })`));
+  });
+
+  it("passes on a method that takes no where (create) on that element access", async () => {
+    await expectPass(fn("", `tx[k].create({ data: { id: t } })`));
+  });
+
+  it("FAILS on an opaque where through a const-bound handle (the handle is followed)", async () => {
+    await expectFail(fn(`const h = "apiKey";`, `tx[h].findFirst({ where: t })`), /ApiKey where: not an object literal/);
+  });
+
+  it("passes on that where when the const-bound handle names a model without a digest column", async () => {
+    await expectPass(fn(`const h = "note";`, `tx[h].findFirst({ where: t })`));
+  });
+
+  it("FAILS on a token-model delegate bound through a const-bound handle", async () => {
+    await expectFail(fn(`const h = "apiKey";\n  const d = tx[h];`, `run(d)`), /token-model delegate referenced other than as/);
+  });
+
+  it("passes on the same binding when the handle names a model without a digest column", async () => {
+    await expectPass(fn(`const h = "note";\n  const d = tx[h];`, `run(d)`));
+  });
+});
+
+// A projection, write or argument on a token model or a model related to one, that the gate
+// cannot read, could hold a nested lookup: it is opaque. Each deny is paired with the same
+// shape on Note (no token relation) or in a readable spelling.
+describe.concurrent("opaque projections, writes and arguments", { timeout: 60_000 }, () => {
+  const other = (code) => ({ files: { "src/lib/other.ts": NOTE_FN(`  ${code}`) } });
+  const CASES = [
+    ["a non-literal include", `return tx.%M%.findFirst({ include: t });`, /User include: not an object literal/],
+    ["a select spread", `return tx.%M%.findFirst({ select: { ...t } });`, /User select: spread/],
+    ["a computed select key", `return tx.%M%.findFirst({ select: { [t]: true } });`, /User select: computed key/],
+    ["a non-literal data", `return tx.%M%.update({ where: { id: t }, data: t });`, /User data: not an object literal/],
+    ["a data spread", `return tx.%M%.create({ data: { ...t } });`, /User data: spread/],
+    ["a non-literal argument", `return tx.%M%.findFirst(t);`, /User argument: not an object literal/],
+    ["an argument spread", `return tx.%M%.findFirst({ ...t, where: { id: t } });`, /User argument: spread/],
+    ["a non-literal upsert create", `return tx.%M%.upsert({ where: { id: t }, create: t, update: {} });`, /User create: not an object literal/],
+  ];
+  it.each(CASES)("FAILS on %s on a model related to a token model", async (_label, code, pattern) => {
+    await expectFail(other(code.replace("%M%", "user")), pattern);
+  });
+  it.each(CASES)("passes on %s on a model with no token relation", async (_label, code) => {
+    await expectPass(other(code.replace("%M%", "note")));
+  });
+
+  it("passes on readable spreads in a data and a select (conditional, &&, const-bound)", async () => {
+    await expectPass(
+      other(
+        `const extra = { id: t };\n  return tx.user.update({ where: { id: t }, data: { ...(t ? { id: t } : {}), ...(t && { id: t }), ...extra }, select: { ...(t ? { id: true } : null) } });`,
+      ),
+    );
+  });
+
+  it("passes on a non-literal data of updateMany (scalar columns only)", async () => {
+    await expectPass(other(`return tx.user.updateMany({ where: { id: t }, data: t });`));
+  });
+
+  it("FAILS on a non-literal where of a relation under include on a token model", async () => {
+    await expectFail(other(`return tx.user.findFirst({ include: { apiKeys: { where: t } } });`), /ApiKey where: not an object literal/);
+  });
+
+  it("FAILS on a non-literal nested connect into a token model", async () => {
+    await expectFail(other(`return tx.user.update({ where: { id: t }, data: { apiKeys: { connect: t } } });`), /ApiKey apiKeys\.connect: not an object literal/);
+  });
+
+  it("FAILS on a non-literal relation value under include into a token model", async () => {
+    await expectFail(other(`return tx.user.findFirst({ include: { apiKeys: t } });`), /ApiKey apiKeys: not an object literal/);
+  });
+
+  it("passes on a non-literal data two relation hops from a token model (declared residual)", async () => {
+    await expectPass(other(`return tx.profile.update({ where: { id: t }, data: t });`));
+  });
+});
+
 describe.concurrent("raw SQL", { timeout: 60_000 }, () => {
   const rawFile = (stmt, header = "") => `${header}\nexport async function q(tx: any, t: string) {\n  ${stmt}\n}\n`;
 
@@ -378,6 +562,44 @@ describe.concurrent("raw SQL", { timeout: 60_000 }, () => {
 
   it("FAILS on a raw method used as a value", async () => {
     await expectFail({ files: { "src/lib/raw.ts": rawFile("const run = tx.$queryRaw; return run;") } }, /used other than as a template tag/);
+  });
+
+  it("FAILS on a template middle naming token_hash", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile("return `${t} token_hash ${t}`;") } }, /names a digest column/);
+  });
+
+  it("FAILS on a template tail naming code_hash", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile("return `${t} code_hash`;") } }, /names a digest column/);
+  });
+
+  it("passes on a template whose middle and tail name no digest column", async () => {
+    await expectPass({ files: { "src/lib/raw.ts": rawFile("return `${t} token ${t} hash`;") } });
+  });
+
+  it("FAILS on a regular expression literal naming token_hash (its .source is that text)", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile("return /token_hash/.source;") } }, /names a digest column/);
+  });
+
+  it("passes on a regular expression literal naming no digest column", async () => {
+    await expectPass({ files: { "src/lib/raw.ts": rawFile("return /token-hash/.source;") } });
+  });
+
+  const UNICODE = /holds U& \/ UESCAPE/;
+
+  it("FAILS on U& in a literal (a Unicode-escaped identifier)", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile(`return "SELECT id FROM api_keys WHERE U&\\"token\\\\005fhash\\" = $1";`) } }, UNICODE);
+  });
+
+  it("FAILS on UESCAPE in a template literal, any case", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile("return `SELECT 1 FROM t WHERE x = 'a' uEscape '!'`;") } }, UNICODE);
+  });
+
+  it("FAILS on U& spelled only once cooked (an escape)", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile(`return "U\\x26'x'";`) } }, UNICODE);
+  });
+
+  it("passes on an ampersand that is no U& prefix", async () => {
+    await expectPass({ files: { "src/lib/raw.ts": rawFile(`return "SELECT a & b, 'escape' FROM t";`) } });
   });
 
   it("FAILS on a raw method reached by element access", async () => {
@@ -584,8 +806,51 @@ describe.concurrent("manifest entries", { timeout: 60_000 }, () => {
     });
 
     it("passes with passkeyGateBlocks from passkey-gate as the inline gate", async () => {
-      const viaGate = `${GATE_IMPORT}\nexport async function rotate(u: string) {\n  if (await passkeyGateBlocks({ userId: u })) return null;\n  return 1;\n}\n`;
+      const viaGate = `${GATE_IMPORT}\nexport async function rotate(u: string) {\n  if (await passkeyGateBlocks({ userId: u })) return { ok: false, error: "PASSKEY_REQUIRED" };\n  return 1;\n}\n`;
       await expectPass({ files: { ...refreshFiles, "src/lib/rotate.ts": viaGate }, manifest: entry({}) });
+    });
+
+    it("FAILS when the inline gate's passkeyEnforcementBlocks is imported from another module", async () => {
+      const fake = swap(ROTATE, ENFORCEMENT_IMPORT, `import { passkeyEnforcementBlocks } from "@/lib/fake-enforcement";`);
+      await expectFail({ files: { ...refreshFiles, "src/lib/rotate.ts": fake }, manifest: entry({}) }, /relies on inline gate/);
+    });
+
+    it("FAILS when the lifetime is an exported let, not a const", async () => {
+      const ttl = { ...refreshFiles, "src/lib/ttl.ts": "export let TOKEN_TTL = 3600;\n" };
+      await expectFail({ files: ttl, manifest: entry({}) }, /lifetime "src\/lib\/ttl\.ts#TOKEN_TTL" is not a <path>#<name>/);
+    });
+
+    it("passes when the inline gate key names an overloaded function (signatures have no body)", async () => {
+      const overloaded = `${ENFORCEMENT_IMPORT}\nexport function rotate(s: string): unknown;\nexport function rotate(s: number): unknown;\n${ROTATE_BODY.replace("export function rotate(s: unknown) {", "export function rotate(s: unknown): unknown {")}`;
+      await expectPass({ files: { ...refreshFiles, "src/lib/rotate.ts": overloaded }, manifest: entry({}) });
+    });
+
+    // M1: the condition is exactly the call, the consequent a refusal. Each variant changes
+    // the base ROTATE's gate `if` and nothing else.
+    const GATE_IF = `if (passkeyEnforcementBlocks(s)) return { ok: false, error: "PASSKEY_REQUIRED" };`;
+    const inlineVariant = (to) => ({ files: { ...refreshFiles, "src/lib/rotate.ts": swap(ROTATE, GATE_IF, to) }, manifest: entry({}) });
+    const INLINE_DENY = [
+      ["a negated condition", `if (!passkeyEnforcementBlocks(s)) return { ok: false, error: "PASSKEY_REQUIRED" };`],
+      ["a conjunct", `if (s && passkeyEnforcementBlocks(s)) return { ok: false, error: "PASSKEY_REQUIRED" };`],
+      ["a disjunct", `if (passkeyEnforcementBlocks(s) || s) return { ok: false, error: "PASSKEY_REQUIRED" };`],
+      ["an else branch", `if (passkeyEnforcementBlocks(s)) return { ok: false, error: "PASSKEY_REQUIRED" }; else void 0;`],
+      ["a consequent returning null", `if (passkeyEnforcementBlocks(s)) return null;`],
+      ["a consequent returning ok: true", `if (passkeyEnforcementBlocks(s)) return { ok: true, error: "PASSKEY_REQUIRED" };`],
+      ["a consequent returning type: success", `if (passkeyEnforcementBlocks(s)) return { type: "success" };`],
+      ["a consequent literal with a spread", `if (passkeyEnforcementBlocks(s)) return { error: "PASSKEY_REQUIRED", ...s };`],
+      ["a consequent that is no return", `if (passkeyEnforcementBlocks(s)) { void s; }`],
+    ];
+    it.each(INLINE_DENY)("FAILS when the inline gate if has %s", async (_label, to) => {
+      await expectFail(inlineVariant(to), /relies on inline gate/);
+    });
+
+    const INLINE_ALLOW = [
+      ["an error literal", `if (passkeyEnforcementBlocks(s)) { return { error: "access_denied" as const, userId: s }; }`],
+      ["a non-success type literal", `if (passkeyEnforcementBlocks(s)) return { type: "passkey_required" as const };`],
+      ["an awaited condition", `if (await passkeyEnforcementBlocks(s)) return { ok: false, error: "PASSKEY_REQUIRED" };`],
+    ];
+    it.each(INLINE_ALLOW)("passes when the inline gate if returns %s", async (_label, to) => {
+      await expectPass(inlineVariant(to));
     });
 
     it("FAILS when the inline gate key names two functions (AMBIGUOUS_KEY)", async () => {
@@ -620,7 +885,7 @@ describe.concurrent("per-use-gated predicate", { timeout: 60_000 }, () => {
   });
 
   it("FAILS when the gate is not awaited", async () => {
-    await expectFail(withBody([LOOKUP, GATE.replace("await ", ""), `  return { ok: true, data: key };`].join("\n")), NOT_GATED);
+    await expectFail(withBody([LOOKUP, swap(GATE, "await ", ""), `  return { ok: true, data: key };`].join("\n")), NOT_GATED);
   });
 
   it("FAILS when the gate's consequent does not return ok: false", async () => {
@@ -628,11 +893,7 @@ describe.concurrent("per-use-gated predicate", { timeout: 60_000 }, () => {
   });
 
   // Each variant changes the gate's consequent literal and nothing else.
-  const consequent = (literal) => {
-    const variant = GATED_BODY.replace(`{ ok: false, error: "PASSKEY_REQUIRED" }`, literal);
-    expect(variant).not.toBe(GATED_BODY);
-    return variant;
-  };
+  const consequent = (literal) => swap(GATED_BODY, `{ ok: false, error: "PASSKEY_REQUIRED" }`, literal);
 
   it("FAILS when the gate's consequent returns ok: true", async () => {
     await expectFail(withBody(consequent(`{ ok: true, error: "PASSKEY_REQUIRED" }`)), NOT_GATED);
@@ -651,13 +912,11 @@ describe.concurrent("per-use-gated predicate", { timeout: 60_000 }, () => {
   });
 
   it("FAILS when the gate if has an else", async () => {
-    const variant = GATED_BODY.replace(GATE, `${GATE} else void 0;`);
-    expect(variant).not.toBe(GATED_BODY);
-    await expectFail(withBody(variant), NOT_GATED);
+    await expectFail(withBody(swap(GATED_BODY, GATE, `${GATE} else void 0;`)), NOT_GATED);
   });
 
   it("FAILS on two gates", async () => {
-    await expectFail(withBody(GATED_BODY.replace(GATE, `${GATE}\n${GATE}`)), /found 2/);
+    await expectFail(withBody(swap(GATED_BODY, GATE, `${GATE}\n${GATE}`)), /found 2/);
   });
 
   it("FAILS on an expression-bodied arrow (no block body)", async () => {
@@ -670,7 +929,7 @@ describe.concurrent("per-use-gated predicate", { timeout: 60_000 }, () => {
   // withBypassRls callback of LOOKUP, the innermost function would be that callback.)
   const DIRECT_LOOKUP = `  const key = await tx.apiKey.findUnique({ where: { tokenHash: h(req) } });`;
   const twoFns = (second) =>
-    `${GATE_IMPORT}\nexport const validateApiKey = {\n  a: async (req: Request) => {\n${GATED_BODY.replace(LOOKUP, DIRECT_LOOKUP)}\n  },\n${second ? `  b: async (req: Request) => {\n${DIRECT_LOOKUP}\n    return { ok: true, data: key };\n  },\n` : ""}};\n`;
+    `${GATE_IMPORT}\nexport const validateApiKey = {\n  a: async (req: Request) => {\n${swap(GATED_BODY, LOOKUP, DIRECT_LOOKUP)}\n  },\n${second ? `  b: async (req: Request) => {\n${DIRECT_LOOKUP}\n    return { ok: true, data: key };\n  },\n` : ""}};\n`;
 
   it("FAILS when a per-use-gated key's sites sit in two functions", async () => {
     await expectFail(
@@ -699,7 +958,7 @@ describe.concurrent("per-use-gated predicate", { timeout: 60_000 }, () => {
   });
 
   it("passes with an aliased import of the gate (import resolution, not spelling)", async () => {
-    await expectPass(withBody(GATED_BODY.replace("passkeyGateBlocks(", "gate("), `import { passkeyGateBlocks as gate } from "../policy/passkey-gate";`));
+    await expectPass(withBody(swap(GATED_BODY, "passkeyGateBlocks(", "gate("), `import { passkeyGateBlocks as gate } from "../policy/passkey-gate";`));
   });
 
   it("passes when an ok: true return before the gate sits in a nested function", async () => {
@@ -707,13 +966,12 @@ describe.concurrent("per-use-gated predicate", { timeout: 60_000 }, () => {
   });
 
   it("FAILS when the exemption wrapper tests something other than the function's own parameter", async () => {
-    const ext = EXT_TOKEN.replace("if (!opts?.passkeyExemption)", "if (!globalOpts.passkeyExemption)");
+    const ext = swap(EXT_TOKEN, "if (!opts?.passkeyExemption)", "if (!globalOpts.passkeyExemption)");
     await expectFail({ files: { "src/lib/auth/tokens/extension-token.ts": ext } }, /NOT_GATED: src\/lib\/auth\/tokens\/extension-token\.ts#validateExtensionToken/);
   });
 
   it("FAILS when the exemption wrapper has an else branch", async () => {
-    const ext = EXT_TOKEN.replace("  }\n  return { ok: true, data: token };", "  } else {\n    void 0;\n  }\n  return { ok: true, data: token };");
-    expect(ext).toContain("} else {");
+    const ext = swap(EXT_TOKEN, "  }\n  return { ok: true, data: token };", "  } else {\n    void 0;\n  }\n  return { ok: true, data: token };");
     await expectFail({ files: { "src/lib/auth/tokens/extension-token.ts": ext } }, /NOT_GATED: src\/lib\/auth\/tokens\/extension-token\.ts#validateExtensionToken/);
   });
 });
@@ -749,9 +1007,7 @@ describe.concurrent("exemption pin", { timeout: 60_000 }, () => {
   });
 
   it("FAILS when a pinned site's options literal has an extra property", async () => {
-    const base = exemptRoute("handleDELETE", "SELF_REVOCATION");
-    const variant = base.replace("PASSKEY_EXEMPTION.SELF_REVOCATION }", "PASSKEY_EXEMPTION.SELF_REVOCATION, extra: 1 }");
-    expect(variant).not.toBe(base);
+    const variant = swap(exemptRoute("handleDELETE", "SELF_REVOCATION"), "PASSKEY_EXEMPTION.SELF_REVOCATION }", "PASSKEY_EXEMPTION.SELF_REVOCATION, extra: 1 }");
     await expectFail({ files: { "src/app/api/extension/token/route.ts": variant } }, /options must be the inline literal/);
   });
 
@@ -868,6 +1124,28 @@ describe.concurrent("token-model delegate references", { timeout: 60_000 }, () =
 
   it("FAILS on a delegate method read without a call", async () => {
     await expectFail(other(`  return tx.apiKey.findFirst;`), REF);
+  });
+
+  it("FAILS on a delegate's fields read (a delegate member, not a row field)", async () => {
+    await expectFail(other(`  return tx.apiKey.fields.tokenHash;`), REF);
+  });
+
+  it("says how to comply: call a method, read a row field, or rename the property", async () => {
+    await expectFail(other(`  return run(tx.apiKey);`), /read a row's relation field \(`x\.<handle>\.<field>`[^)]*\), or rename a non-Prisma property/);
+  });
+
+  it("passes on a destructured alias's same-named non-references (keys, types, other bindings)", async () => {
+    const body = [
+      `  const { apiKey: k } = tx;`,
+      `  const o = { k: 1 };`,
+      `  type T = typeof k;`,
+      `  const { k: z } = o;`,
+      `  const g = (k: number) => run(k);`,
+      `  void (null as unknown as T);`,
+      `  await k.findFirst({ where: { id: t } });`,
+      `  return [o.k, z, g(1)];`,
+    ].join("\n");
+    await expectPass(other(body));
   });
 
   it("passes on a row's relation field read (a name no delegate has)", async () => {
