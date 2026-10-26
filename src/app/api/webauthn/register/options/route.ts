@@ -8,6 +8,8 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { derivePasskeyState, passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import {
   generateRegistrationOpts,
   derivePrfSaltV2,
@@ -46,6 +48,18 @@ async function handlePOST(req: NextRequest) {
   const redis = getRedis();
   if (!redis) {
     return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
+  }
+
+  // D5 (#959): while the tenant's passkey requirement blocks this member, a
+  // session cookie alone must not be able to clear the gate AND mint a
+  // durable credential — require the same recent-sign-in proof the other
+  // step-up routes do. Ordinary enrollment (not blocked) stays cookie-only.
+  const tenantId = await withUserTenantRls(userId, async (tid) => tid);
+  const pkState = await derivePasskeyState({ userId, tenantId });
+  if (passkeyEnforcementBlocks(pkState)) {
+    // @stepup id:webauthn-register-options-post method:POST
+    const stepUp = await requireRecentCurrentAuthMethod(req, userId);
+    if (stepUp) return stepUp;
   }
 
   // Fetch existing credentials to exclude re-registration

@@ -205,7 +205,12 @@ export async function handlePageRoute(
     // MFA (passkey) enforcement: redirect users without a registered passkey
     // when the tenant requires it and the grace period has expired.
     // Skip for the security settings page and WebAuthn/auth routes to prevent loops.
+    // A degraded bundle (the session callback could not read the passkey
+    // state) is an outage, not a requirement: neither redirect nor audit it,
+    // and let the navigation reach the layouts, which re-check with a fresh
+    // auth() and render a retry state.
     if (
+      !session.passkeyStateDegraded &&
       session.requirePasskey &&
       !session.hasPasskey &&
       !isPasskeyExemptPath(pathWithoutLocale)
@@ -241,7 +246,7 @@ export async function handlePageRoute(
           basePath,
         );
       }
-      // Within grace period: allow through; client reads /api/user/passkey-status for banner
+      // Within grace period: allow through.
     }
   }
 

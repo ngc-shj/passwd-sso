@@ -14,6 +14,22 @@ vi.mock("@/lib/openapi-spec", () => ({
   buildOpenApiSpec: mockBuildOpenApiSpec,
 }));
 
+// A session result re-derives the passkey block (#959 S7); these cells are the
+// allowed case, so the tenant and passkey state resolve to "not required".
+// The blocked case is covered in src/app/api/v1/openapi.json/route.test.ts.
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: async (_userId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"),
+}));
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>()),
+  derivePasskeyState: async () => ({
+    requirePasskey: false,
+    hasPasskey: false,
+    requirePasskeyEnabledAt: null,
+    passkeyGracePeriodDays: null,
+  }),
+}));
+
 const URL = "http://localhost:3000/api/v1/openapi.json";
 
 describe("GET /api/v1/openapi.json", () => {

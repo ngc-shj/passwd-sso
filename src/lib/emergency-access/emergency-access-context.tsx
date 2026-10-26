@@ -43,6 +43,8 @@ interface EmergencyAccessProviderProps {
   getSecretKey: () => Uint8Array | null;
   keyVersion: number;
   userId: string | undefined;
+  /** True while the session is passkey-blocked or degraded: the proxy refuses the confirm calls. */
+  pollingSuspended: boolean;
   children: ReactNode;
 }
 
@@ -51,10 +53,11 @@ export function EmergencyAccessProvider({
   getSecretKey,
   keyVersion,
   userId,
+  pollingSuspended,
   children,
 }: EmergencyAccessProviderProps) {
   useEffect(() => {
-    if (vaultStatus !== VAULT_STATUS.UNLOCKED || !userId) return;
+    if (vaultStatus !== VAULT_STATUS.UNLOCKED || !userId || pollingSuspended) return;
 
     let inFlight = false;
 
@@ -86,7 +89,7 @@ export function EmergencyAccessProvider({
       document.removeEventListener("visibilitychange", handleVisible);
       window.removeEventListener("online", handleOnline);
     };
-  }, [vaultStatus, userId, getSecretKey, keyVersion]);
+  }, [vaultStatus, userId, getSecretKey, keyVersion, pollingSuspended]);
 
   return <>{children}</>;
 }

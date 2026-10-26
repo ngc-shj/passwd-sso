@@ -15,6 +15,8 @@ const {
   mockGenerateRegistrationOpts,
   mockDerivePrfSalt,
   mockDerivePrfSaltV2,
+  mockDerivePasskeyState,
+  mockRequireRecentCurrentAuthMethod,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
   return {
@@ -30,6 +32,8 @@ const {
     mockGenerateRegistrationOpts: vi.fn(),
     mockDerivePrfSalt: vi.fn(),
     mockDerivePrfSaltV2: vi.fn(),
+    mockDerivePasskeyState: vi.fn(),
+    mockRequireRecentCurrentAuthMethod: vi.fn(),
   };
 });
 
@@ -51,6 +55,20 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+
+// D5 (#959): the real `passkeyEnforcementBlocks` predicate stays live
+// (pure, no I/O); only the DB re-derivation is mocked.
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
+  return {
+    ...real,
+    derivePasskeyState: mockDerivePasskeyState,
+  };
+});
+
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 // A02-8: route calls derivePrfSaltV2 with a random per-credential salt.
@@ -120,8 +138,17 @@ describe("POST /api/webauthn/register/options", () => {
       return "v2-" + perCredentialSalt.slice(0, 60);
     });
     mockWithUserTenantRls.mockImplementation(
-      (_userId: string, fn: () => unknown) => fn(),
+      (_userId: string, fn: (tenantId?: string) => unknown) => fn("tenant-1"),
     );
+    // Default: passkey enforcement off (does not block) — the step-up gate
+    // is a no-op and requireRecentCurrentAuthMethod is never reached.
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -298,5 +325,51 @@ describe("POST /api/webauthn/register/options", () => {
     await POST(req);
 
     expect(mockRateLimiterCheck).toHaveBeenCalledWith("rl:webauthn_reg_opts:user-1");
+  });
+
+  // ── D5 (#959): step-up required while passkey enforcement blocks ────────
+
+  describe("D5 passkey-blocked step-up gate", () => {
+    const blockedState = {
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    };
+
+    it("returns SESSION_STEP_UP_REQUIRED when blocked and the session is stale", async () => {
+      mockDerivePasskeyState.mockResolvedValue(blockedState);
+      mockRequireRecentCurrentAuthMethod.mockResolvedValue(
+        new Response(JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }), { status: 403 }),
+      );
+
+      const req = createRequest("POST", ROUTE_URL);
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(403);
+      expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+      expect(mockGenerateRegistrationOpts).not.toHaveBeenCalled();
+    });
+
+    it("proceeds when blocked but the session is recent", async () => {
+      mockDerivePasskeyState.mockResolvedValue(blockedState);
+      mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
+
+      const req = createRequest("POST", ROUTE_URL);
+      const { status } = await parseResponse(await POST(req));
+
+      expect(status).toBe(200);
+      expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledWith(req, "user-1");
+      expect(mockGenerateRegistrationOpts).toHaveBeenCalledTimes(1);
+    });
+
+    it("never calls requireRecentCurrentAuthMethod when enforcement does not block", async () => {
+      // beforeEach's default derivePasskeyState already resolves "not blocked".
+      const req = createRequest("POST", ROUTE_URL);
+      const { status } = await parseResponse(await POST(req));
+
+      expect(status).toBe(200);
+      expect(mockRequireRecentCurrentAuthMethod).not.toHaveBeenCalled();
+    });
   });
 });

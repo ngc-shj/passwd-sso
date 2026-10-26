@@ -48,6 +48,7 @@ describe("team-vault-context (barrel re-exports)", () => {
         getEcdhPrivateKeyBytes={() => null}
         getUserId={() => null}
         vaultUnlocked={false}
+        pollingSuspended={false}
       >
         {children}
       </TeamVaultProvider>
@@ -70,6 +71,7 @@ describe("team-vault-context (barrel re-exports)", () => {
         getEcdhPrivateKeyBytes={() => null}
         getUserId={() => "user-1"}
         vaultUnlocked={false}
+        pollingSuspended={false}
       >
         {children}
       </TeamVaultProvider>
@@ -103,6 +105,7 @@ describe("team-vault-context (barrel re-exports)", () => {
         getEcdhPrivateKeyBytes={() => bytes}
         getUserId={() => "user-1"}
         vaultUnlocked={false}
+        pollingSuspended={false}
       >
         {children}
       </TeamVaultProvider>
@@ -127,6 +130,7 @@ describe("team-vault-context (barrel re-exports)", () => {
         getEcdhPrivateKeyBytes={() => null}
         getUserId={() => null}
         vaultUnlocked={false}
+        pollingSuspended={false}
       >
         {children}
       </TeamVaultProvider>

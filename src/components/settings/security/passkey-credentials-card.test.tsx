@@ -34,10 +34,14 @@ const {
   mockReauthenticateWithPasskey: vi.fn(),
 }));
 
+// One stable translator, as next-intl returns: a new function per render would
+// re-create the card's list fetch callback and re-fetch on every re-render.
+const { mockT } = vi.hoisted(() => ({
+  mockT: (key: string, params?: Record<string, string | number>) =>
+    params ? `${key}:${JSON.stringify(params)}` : key,
+}));
 vi.mock("next-intl", () => ({
-  useTranslations: () =>
-    (key: string, params?: Record<string, string | number>) =>
-      params ? `${key}:${JSON.stringify(params)}` : key,
+  useTranslations: () => mockT,
   useLocale: () => "en",
 }));
 
@@ -90,6 +94,14 @@ function makeSentinelSecretKey(): Uint8Array {
 
 function makeSentinelPrfOutput(): Uint8Array {
   return new Uint8Array(32).fill(SENTINEL_BYTE);
+}
+
+function listCalls(): number {
+  return mockFetch.mock.calls.filter(
+    ([url, init]: unknown[]) =>
+      String(url).includes("/api/webauthn/credentials") &&
+      ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+  ).length;
 }
 
 function setupCredentialsList(creds: unknown[]) {
@@ -157,19 +169,40 @@ describe("PasskeyCredentialsCard", () => {
     mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
   });
 
-  it("disables register button when vault is locked (R26 disabled cue)", async () => {
+  // A passkey-blocked user registers from a minimal screen with the vault
+  // locked, so the button stays enabled and only the PRF wrap is skipped.
+  it("registers while the vault is locked, without attempting the PRF wrap", async () => {
     setupCredentialsList([]);
-    mockUseVault.mockReturnValue({
-      status: "locked",
-      getSecretKey: () => null,
+    const getSecretKey = vi.fn(() => makeSentinelSecretKey());
+    mockUseVault.mockReturnValue({ status: "locked", getSecretKey });
+    const prfOutput = makeSentinelPrfOutput();
+    mockStartReg.mockResolvedValue({
+      responseJSON: { id: "cred-1", response: { transports: ["internal"] } },
+      prfOutput,
     });
+
     render(<PasskeyCredentialsCard />);
     await waitFor(() => {
       expect(screen.getByText("noPasskeys")).toBeInTheDocument();
     });
+    expect(screen.getByText("registerLockedPrfHint")).toBeInTheDocument();
     const reg = screen.getByRole("button", { name: /register/ });
-    expect(reg).toBeDisabled();
-    expect(screen.getByText("vaultMustBeUnlocked")).toBeInTheDocument();
+    expect(reg).toBeEnabled();
+
+    fireEvent.click(reg);
+    await waitFor(() => {
+      expect(mockToast.success).toHaveBeenCalledWith("registerSuccess");
+    });
+
+    expect(getSecretKey).not.toHaveBeenCalled();
+    expect(capturedSecretKey.value).toBeNull();
+    const verifyCall = mockFetch.mock.calls.find((args: unknown[]) =>
+      String(args[0]).includes("/register/verify"),
+    );
+    const verifyBody = JSON.parse(String((verifyCall?.[1] as RequestInit).body));
+    expect(verifyBody).not.toHaveProperty("prfEncryptedSecretKey");
+    // The PRF output the ceremony produced is still zeroized.
+    expect(prfOutput.every((b) => b === 0)).toBe(true);
   });
 
   it("renders the no-passkeys empty state", async () => {
@@ -318,11 +351,9 @@ describe("PasskeyCredentialsCard", () => {
         });
       }
       if (u.includes("/register/verify")) {
-        return Promise.resolve({
-          ok: false,
-          status: 400,
-          json: () => Promise.resolve({ error: "BAD_REQUEST" }),
-        });
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "BAD_REQUEST" }), { status: 400 }),
+        );
       }
       return Promise.resolve({
         ok: true,
@@ -435,5 +466,144 @@ describe("PasskeyCredentialsCard", () => {
     });
     expect(mockToast.success).not.toHaveBeenCalledWith("deleteSuccess");
     expect(mockToast.error).not.toHaveBeenCalled();
+  });
+  it("calls onRegistered instead of refreshing the list when given", async () => {
+    setupCredentialsList([]);
+    mockStartReg.mockResolvedValue({
+      responseJSON: { id: "cred-1", response: { transports: ["internal"] } },
+      prfOutput: null,
+    });
+    const onRegistered = vi.fn(async () => {});
+
+    render(<PasskeyCredentialsCard onRegistered={onRegistered} />);
+    await waitFor(() => {
+      expect(screen.getByText("noPasskeys")).toBeInTheDocument();
+    });
+    const listCallsBefore = listCalls();
+
+    fireEvent.click(screen.getByRole("button", { name: /register/ }));
+    await waitFor(() => {
+      expect(onRegistered).toHaveBeenCalledTimes(1);
+    });
+    expect(listCalls()).toBe(listCallsBefore);
+  });
+
+  it("refreshes the list and calls nothing else when onRegistered is absent", async () => {
+    setupCredentialsList([]);
+    mockStartReg.mockResolvedValue({
+      responseJSON: { id: "cred-1", response: { transports: ["internal"] } },
+      prfOutput: null,
+    });
+
+    render(<PasskeyCredentialsCard />);
+    await waitFor(() => {
+      expect(screen.getByText("noPasskeys")).toBeInTheDocument();
+    });
+    const listCallsBefore = listCalls();
+
+    fireEvent.click(screen.getByRole("button", { name: /register/ }));
+    await waitFor(() => {
+      expect(listCalls()).toBe(listCallsBefore + 1);
+    });
+  });
+
+  // Registration is step-up-gated while the passkey requirement blocks the
+  // session (D5): a stale sign-in must open the reauth path, not registerError.
+  it.each([
+    ["options", "/register/options"],
+    ["verify", "/register/verify"],
+  ])(
+    "opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED %s call",
+    async (_label, gatedPath) => {
+      setupCredentialsList([]);
+      const base = mockFetch.getMockImplementation()!;
+      mockFetch.mockImplementation((url: string, init?: RequestInit) =>
+        String(url).includes(gatedPath)
+          ? Promise.resolve(
+              new Response(JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }), {
+                status: 403,
+              }),
+            )
+          : base(url, init),
+      );
+      mockStartReg.mockResolvedValue({
+        responseJSON: { id: "cred-1", response: { transports: ["internal"] } },
+        prfOutput: null,
+      });
+
+      render(<PasskeyCredentialsCard />);
+      await waitFor(() => {
+        expect(screen.getByText("noPasskeys")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole("button", { name: /register/ }));
+
+      expect(await screen.findByTestId("recent-session-dialog")).toBeInTheDocument();
+      expect(mockToast.error).not.toHaveBeenCalled();
+      expect(mockToast.success).not.toHaveBeenCalled();
+    },
+  );
+
+  it("replays the registration after a passkey reauth on a step-up refusal", async () => {
+    setupCredentialsList([]);
+    const base = mockFetch.getMockImplementation()!;
+    let optionsCalls = 0;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes("/register/options")) {
+        optionsCalls += 1;
+        if (optionsCalls === 1) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }), {
+              status: 403,
+            }),
+          );
+        }
+      }
+      return base(url, init);
+    });
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
+    mockStartReg.mockResolvedValue({
+      responseJSON: { id: "cred-1", response: { transports: ["internal"] } },
+      prfOutput: null,
+    });
+
+    render(<PasskeyCredentialsCard />);
+    await waitFor(() => {
+      expect(screen.getByText("noPasskeys")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /register/ }));
+    fireEvent.click(await screen.findByTestId("passkey-reauth-action"));
+
+    await waitFor(() => {
+      expect(mockToast.success).toHaveBeenCalledWith("registerSuccess");
+    });
+    expect(optionsCalls).toBe(2);
+  });
+
+  // A credential registered while the vault was locked holds no wrap; once the
+  // vault is unlocked the card offers to set up auto-unlock for it (T23).
+  it("offers PRF re-bootstrap for a PRF-capable credential with no wrap once unlocked", async () => {
+    const cred = {
+      id: "cred-nowrap",
+      credentialId: "cid-nowrap",
+      nickname: "Locked-time Key",
+      deviceType: "multiDevice",
+      backedUp: true,
+      discoverable: true,
+      minPinLength: null,
+      largeBlobSupported: null,
+      transports: ["internal"],
+      prfSupported: true,
+      prfWrappingPresent: false,
+      registeredDevice: null,
+      lastUsedDevice: null,
+      createdAt: "2026-05-04",
+      lastUsedAt: null,
+    };
+    setupCredentialsList([cred]);
+
+    render(<PasskeyCredentialsCard />);
+    const offer = await screen.findByRole("button", { name: /rebootstrapButton/ });
+    expect(offer).toBeEnabled();
+    expect(offer).toHaveAttribute("title", "rebootstrapHint");
   });
 });

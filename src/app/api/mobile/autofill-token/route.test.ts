@@ -4,10 +4,10 @@ import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
-const { mockCheckAuth, mockIssueAutofill, mockLogAudit, mockWarn, mockError, mockCheck, mockCreateRateLimiter, mockEnforceAccessRestriction } = vi.hoisted(() => {
+const { mockValidateExtensionToken, mockIssueAutofill, mockLogAudit, mockWarn, mockError, mockCheck, mockCreateRateLimiter, mockEnforceAccessRestriction } = vi.hoisted(() => {
   const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
   return {
-  mockCheckAuth: vi.fn(),
+  mockValidateExtensionToken: vi.fn(),
   mockIssueAutofill: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWarn: vi.fn(),
@@ -21,7 +21,16 @@ const { mockCheckAuth, mockIssueAutofill, mockLogAudit, mockWarn, mockError, moc
 });
 
 vi.mock("@/lib/auth/policy/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
-vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
+// #959: the route is bearer-only via validateExtensionToken (no more
+// checkAuth/authOrToken session fallback). `hasScope` is re-implemented
+// inline (not `importOriginal`) — pulling in the real module would also load
+// its real `passkey-gate.ts` import, which constructs its OWN rate limiter
+// at module scope and pollutes `mockCreateRateLimiter`'s call order ahead of
+// this route's own `mintLimiter`.
+vi.mock("@/lib/auth/tokens/extension-token", () => ({
+  validateExtensionToken: mockValidateExtensionToken,
+  hasScope: (scopes: string[], required: string) => scopes.includes(required),
+}));
 vi.mock("@/lib/auth/tokens/mobile-token", () => ({ issueAutofillToken: mockIssueAutofill }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -44,7 +53,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST } from "./route";
 
-// Module-scope snapshot (route.ts:26 `const mintLimiter = createRateLimiter(...)`
+// Module-scope snapshot (route.ts:27 `const mintLimiter = createRateLimiter(...)`
 // runs at import time, above). See fail-closed.ts module doc.
 const mintLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
 const mintLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
@@ -57,6 +66,24 @@ function post(body: unknown) {
   return createRequest("POST", "http://localhost/api/mobile/autofill-token", { body });
 }
 
+function authOk(overrides: Record<string, unknown> = {}) {
+  return {
+    ok: true as const,
+    data: {
+      tokenId: "token-1",
+      userId: "u1",
+      tenantId: "t1",
+      clientKind: "IOS_APP" as const,
+      scopes: ["passwords:read", "passwords:write", "vault:unlock-data"],
+      expiresAt: new Date("2099-01-01"),
+      familyId: "fam-1",
+      familyCreatedAt: new Date(),
+      cnfJkt: "host-jkt",
+      ...overrides,
+    },
+  };
+}
+
 describe("POST /api/mobile/autofill-token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -65,10 +92,11 @@ describe("POST /api/mobile/autofill-token", () => {
     mockCheck.mockResolvedValue({ allowed: true });
     // Default: tenant IP access restriction allows (helper returns null).
     mockEnforceAccessRestriction.mockResolvedValue(null);
+    // Default: a valid IOS_APP host token with passwords:write.
+    mockValidateExtensionToken.mockResolvedValue(authOk());
   });
 
   it("mints a token bound to the supplied jwk for an authenticated host token", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_APP" } });
     mockIssueAutofill.mockResolvedValue({
       token: "secret-token",
       expiresAt: new Date("2026-06-13T00:05:00.000Z"),
@@ -92,32 +120,53 @@ describe("POST /api/mobile/autofill-token", () => {
     expect(json.cnfJkt).toBe(passed.cnfJkt);
   });
 
-  it("returns the auth failure response when checkAuth fails", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: false, response: new Response(null, { status: 401 }) });
+  // #959: the route no longer reads the session cookie, so a session-only
+  // caller (no bearer token) is "no token" to validateExtensionToken. It still
+  // gets the bare 401 UNAUTHORIZED the former checkAuth path answered.
+  it("returns 401 UNAUTHORIZED when the extension token is invalid (covers a session-only / no-bearer caller)", async () => {
+    mockValidateExtensionToken.mockResolvedValue({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
     const res = await POST(post({ jwk: VALID_JWK }));
-    expect(res.status).toBe(401);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(401);
+    expect(json.error).toBe("UNAUTHORIZED");
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
-  it("rejects a session caller (only the host token may broker an AutoFill token)", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "u1" } });
+  // #965: the per-use passkey gate lives inside validateExtensionToken; this
+  // route maps its PASSKEY_REQUIRED refusal to 403 (not the generic 401).
+  it("returns 403 PASSKEY_REQUIRED when the validator refuses on the passkey gate", async () => {
+    mockValidateExtensionToken.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
     const res = await POST(post({ jwk: VALID_JWK }));
-    expect(res.status).toBe(401);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
   it("rejects a non-IOS_APP token (BROWSER_EXTENSION shares the scope but may not mint)", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "BROWSER_EXTENSION" },
-    });
+    mockValidateExtensionToken.mockResolvedValue(authOk({ clientKind: "BROWSER_EXTENSION" }));
     const res = await POST(post({ jwk: VALID_JWK }));
     expect(res.status).toBe(401);
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
+  it("rejects an IOS_AUTOFILL token (cannot rotate its own kind)", async () => {
+    mockValidateExtensionToken.mockResolvedValue(authOk({ clientKind: "IOS_AUTOFILL" }));
+    const res = await POST(post({ jwk: VALID_JWK }));
+    expect(res.status).toBe(401);
+    expect(mockIssueAutofill).not.toHaveBeenCalled();
+  });
+
+  it("returns EXTENSION_TOKEN_SCOPE_INSUFFICIENT when the host token lacks passwords:write", async () => {
+    mockValidateExtensionToken.mockResolvedValue(authOk({ scopes: ["passwords:read"] }));
+    const res = await POST(post({ jwk: VALID_JWK }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("EXTENSION_TOKEN_SCOPE_INSUFFICIENT");
+    expect(mockIssueAutofill).not.toHaveBeenCalled();
+  });
+
   it("denies an off-network IP before minting (tenant IP restriction)", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_APP" } });
     mockEnforceAccessRestriction.mockResolvedValue(
       Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
     );
@@ -137,35 +186,20 @@ describe("POST /api/mobile/autofill-token", () => {
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
-  it("rejects an IOS_AUTOFILL token (cannot rotate its own kind)", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_AUTOFILL" },
-    });
-    const res = await POST(post({ jwk: VALID_JWK }));
-    expect(res.status).toBe(401);
-    expect(mockIssueAutofill).not.toHaveBeenCalled();
-  });
-
   it("400 on a malformed jwk (missing coordinates)", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_APP" } });
     const res = await POST(post({ jwk: { kty: "EC", crv: "P-256" } }));
     expect(res.status).toBe(400);
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
   it("400 on a non-P-256 jwk", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_APP" } });
     const res = await POST(post({ jwk: { kty: "EC", crv: "P-384", x: "a", y: "b" } }));
     expect(res.status).toBe(400);
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
   it("429 when the per-user mint budget is exhausted (does NOT mint)", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: { type: "token", userId: "u-rl", tenantId: "t1", clientKind: "IOS_APP" },
-    });
+    mockValidateExtensionToken.mockResolvedValue(authOk({ userId: "u-rl" }));
     mockCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 5_000 });
 
     const res = await POST(post({ jwk: VALID_JWK }));
@@ -174,10 +208,7 @@ describe("POST /api/mobile/autofill-token", () => {
   });
 
   it("fails closed (503, no mutation) when Redis is unavailable", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: { type: "token", userId: "u-rl", tenantId: "t1", clientKind: "IOS_APP" },
-    });
+    mockValidateExtensionToken.mockResolvedValue(authOk({ userId: "u-rl" }));
 
     await assertRedisFailClosed({
       invoke: () => POST(post({ jwk: VALID_JWK })),

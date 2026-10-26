@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 import { resolveWebServerCommand } from "./helpers/web-server-command";
+import { E2E_BASE_URL, E2E_WEBAUTHN_SERVER_ENV } from "./helpers/webauthn";
 
 // E2E_BASE_URL allows pointing at an already-running dev server
 // (e.g. E2E_BASE_URL=https://localhost:3001).
@@ -12,7 +13,7 @@ import { resolveWebServerCommand } from "./helpers/web-server-command";
 //
 // Tests use absolute paths (/ja/dashboard) so the dev server must run
 // WITHOUT basePath. CI runs without basePath by default.
-const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+const baseURL = E2E_BASE_URL;
 
 export default defineConfig({
   testDir: "./tests",
@@ -93,6 +94,9 @@ export default defineConfig({
           //   E2E_CSP_SERVER=prod npx playwright test --config e2e/playwright.config.ts
           command: resolveWebServerCommand(),
           cwd: "..",
+          // The WebAuthn RP is the E2E origin, whatever the developer's .env
+          // names (helpers/webauthn.ts). Merged over process.env.
+          env: E2E_WEBAUTHN_SERVER_ENV,
           url: baseURL,
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,

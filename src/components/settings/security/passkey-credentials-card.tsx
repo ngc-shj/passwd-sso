@@ -27,6 +27,7 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
@@ -56,7 +57,8 @@ interface Credential {
   transports: string[];
   prfSupported: boolean;
   // True when the server currently holds a PRF wrapping for this credential.
-  // Cleared by vault key rotation; the user re-bootstraps via the
+  // Cleared by vault key rotation, and absent for a credential registered
+  // while the vault was locked; the user re-bootstraps via the
   // /api/webauthn/credentials/[id]/prf flow. See plan #433 / F9.
   prfWrappingPresent: boolean;
   registeredDevice: string | null;
@@ -86,7 +88,19 @@ function CredentialIcon({ transports }: { transports: string[] }) {
   return <Monitor className="h-5 w-5 text-muted-foreground shrink-0" />;
 }
 
-export function PasskeyCredentialsCard() {
+// The step-up-gated mutations this card replays after an inline reauth.
+type ReauthRetryTarget = { kind: "delete"; credentialId: string } | { kind: "register" };
+
+interface PasskeyCredentialsCardProps {
+  /**
+   * Called after a successful registration instead of refreshing the list.
+   * Only the passkey-required screen passes it, to leave the blocked state;
+   * the settings page keeps refreshing in place.
+   */
+  onRegistered?: () => Promise<void>;
+}
+
+export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardProps = {}) {
   const t = useTranslations("WebAuthn");
   const locale = useLocale();
   const { status, getSecretKey, getKeyVersion } = useVault();
@@ -110,11 +124,14 @@ export function PasskeyCredentialsCard() {
   const [rebootstrappingId, setRebootstrappingId] = useState<string | null>(null);
 
   // Inline step-up reauth — deleting a credential is server-side
-  // step-up-gated. The retry arg (owned by the hook) carries the credential id
-  // so the post-reauth retry replays the same delete. (Rename/PATCH is not
-  // step-up-gated, so only delete needs this recovery path.)
-  const handleDeleteRetryRef = useRef<(id: string) => Promise<void>>(async () => {});
-  const inlineReauth = useInlineReauth<string>((id) => handleDeleteRetryRef.current(id));
+  // step-up-gated, and so is registering while the tenant's passkey
+  // requirement blocks the session. The retry arg (owned by the hook) names
+  // the mutation so the post-reauth retry replays it. (Rename/PATCH is not
+  // step-up-gated, so it needs no recovery path.)
+  const handleReauthRetryRef = useRef<(target: ReauthRetryTarget) => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<ReauthRetryTarget>((target) =>
+    handleReauthRetryRef.current(target),
+  );
 
   const vaultUnlocked = status === VAULT_STATUS.UNLOCKED;
   const webAuthnAvailable = isWebAuthnSupported();
@@ -154,7 +171,11 @@ export function PasskeyCredentialsCard() {
   }, []);
 
   const handleRegister = async () => {
-    if (!webAuthnAvailable || !vaultUnlocked || registering) return;
+    // Registration works with the vault locked: a passkey-blocked user must be
+    // able to register without unlocking. Only the PRF wrap (step 3) needs the
+    // unlocked secret key; it is skipped otherwise and can be added later
+    // through the re-bootstrap offer.
+    if (!webAuthnAvailable || registering) return;
 
     setRegistering(true);
     // Declared outside try so finally can zeroize on every code path including
@@ -164,10 +185,15 @@ export function PasskeyCredentialsCard() {
     let prfOutput: Uint8Array | null = null;
     try {
       // 1. Get registration options from server
+      // @stepup id:webauthn-register-options-post
       const optionsRes = await fetchApi(API_PATH.WEBAUTHN_REGISTER_OPTIONS, {
         method: "POST",
       });
       if (!optionsRes.ok) {
+        // A clone, so the body is still readable for the branches below.
+        if (await handleStepUpError(optionsRes.clone(), inlineReauth.triggerOnStaleError, { kind: "register" })) {
+          return;
+        }
         const err = await readApiErrorBody(optionsRes);
         if (err?.error === API_ERROR.RATE_LIMIT_EXCEEDED) {
           toast.error(t("serviceUnavailable"));
@@ -188,7 +214,7 @@ export function PasskeyCredentialsCard() {
 
       // 3. If PRF supported and vault unlocked, encrypt secretKey
       let prfData: Record<string, string> = {};
-      if (prfOutput) {
+      if (prfOutput && vaultUnlocked) {
         secretKey = getSecretKey();
         if (secretKey) {
           const wrapped = await wrapSecretKeyWithPrf(secretKey, prfOutput);
@@ -215,6 +241,7 @@ export function PasskeyCredentialsCard() {
       const resolvedNickname = generateDefaultNickname(transports);
 
       // 5. Send to server
+      // @stepup id:webauthn-register-verify-post
       const verifyRes = await fetchApi(API_PATH.WEBAUTHN_REGISTER_VERIFY, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -239,8 +266,16 @@ export function PasskeyCredentialsCard() {
           toast.warning(t("prfNotSupportedWarning"));
         }
 
-        fetchCredentials();
+        if (onRegistered) {
+          await onRegistered();
+        } else {
+          fetchCredentials();
+        }
       } else {
+        // A clone, so the body is still readable for the branches below.
+        if (await handleStepUpError(verifyRes.clone(), inlineReauth.triggerOnStaleError, { kind: "register" })) {
+          return;
+        }
         const err = await verifyRes.json().catch(() => ({}));
         if (err.error === "PIN_LENGTH_POLICY_NOT_SATISFIED") {
           toast.error(t("pinPolicyError"));
@@ -288,7 +323,7 @@ export function PasskeyCredentialsCard() {
       } else if (res.status === 403) {
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          await inlineReauth.triggerOnStaleError(credentialId);
+          await inlineReauth.triggerOnStaleError({ kind: "delete", credentialId });
         } else {
           toast.error(t("deleteError"));
         }
@@ -301,7 +336,8 @@ export function PasskeyCredentialsCard() {
   };
 
   useEffect(() => {
-    handleDeleteRetryRef.current = (id) => handleDelete(id);
+    handleReauthRetryRef.current = (target) =>
+      target.kind === "delete" ? handleDelete(target.credentialId) : handleRegister();
   });
 
   const handleRename = async (id: string) => {
@@ -377,8 +413,9 @@ export function PasskeyCredentialsCard() {
   const prfCount = credentials.filter((c) => c.prfSupported).length;
 
   /**
-   * Re-bootstrap PRF wrapping for a credential whose wrapping was cleared by
-   * vault key rotation. Requires the vault to be unlocked (we need the
+   * Re-bootstrap PRF wrapping for a PRF-capable credential that holds none —
+   * cleared by a vault key rotation, or never written because the credential
+   * was registered while the vault was locked. Requires the vault to be unlocked (we need the
    * current secretKey to wrap) AND a fresh WebAuthn ceremony against the
    * dedicated PRF rebootstrap challenge namespace (#433/F3 + S3+S-N1).
    */
@@ -473,7 +510,7 @@ export function PasskeyCredentialsCard() {
           <section className="space-y-3">
             <Button
               onClick={handleRegister}
-              disabled={registering || !vaultUnlocked}
+              disabled={registering}
               size="sm"
             >
               {registering ? (
@@ -486,7 +523,7 @@ export function PasskeyCredentialsCard() {
             <p className="text-xs text-muted-foreground">{t("registerHint")}</p>
             {!vaultUnlocked && (
               <p className="text-xs text-muted-foreground">
-                {t("vaultMustBeUnlocked")}
+                {t("registerLockedPrfHint")}
               </p>
             )}
           </section>

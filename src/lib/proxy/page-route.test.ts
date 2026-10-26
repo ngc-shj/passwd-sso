@@ -37,6 +37,12 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 import { handlePageRoute } from "./page-route";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 import {
+  dispatchFetch,
+  fetchCallsTo,
+  sessionResponseBody,
+  sessionRoute,
+} from "@/__tests__/helpers/proxy-session-fixtures";
+import {
   recordPasskeyAuditEmit,
   PASSKEY_AUDIT_DEDUP_MS,
   PASSKEY_AUDIT_MAP_MAX,
@@ -567,6 +573,54 @@ describe("handlePageRoute — passkey enforcement", () => {
       dummyOptions,
     );
     expect(res.status).toBe(200);
+  });
+
+  // D7: the session callback's catch bundle (requirePasskey + no passkey +
+  // null enabledAt) blocks on its raw fields. Marked degraded, it is an
+  // outage: no redirect to the passkey page and no blocked audit row; the
+  // layouts re-check with a fresh auth().
+  describe("degraded passkey state", () => {
+    const CATCH_BUNDLE = {
+      hasPasskey: false,
+      requirePasskey: true,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    };
+
+    function answer(passkeyStateDegraded: boolean) {
+      fetchSpy.mockImplementation(
+        dispatchFetch({
+          ...sessionRoute(sessionResponseBody("u-pk-degraded", CATCH_BUNDLE, { passkeyStateDegraded })),
+          "/api/internal/audit-emit": () => new Response("{}", { status: 200 }),
+        }),
+      );
+    }
+
+    async function navigate(token: string) {
+      const res = await handlePageRoute(
+        makePageRequest("/ja/dashboard/passwords", { cookie: `authjs.session-token=${token}` }),
+        dummyOptions,
+      );
+      // Let the fire-and-forget audit fetch enqueue.
+      await new Promise((r) => setImmediate(r));
+      return res;
+    }
+
+    it("control: the same bundle unmarked redirects and fires the audit self-fetch", async () => {
+      answer(false);
+      const res = await navigate("5e55-0106");
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location") ?? "").toContain("/dashboard/settings/auth/passkey");
+      expect(fetchCallsTo(fetchSpy, "/api/internal/audit-emit")).toHaveLength(1);
+    });
+
+    it("marked degraded, neither redirects nor fires the audit self-fetch", async () => {
+      answer(true);
+      const res = await navigate("5e55-0107");
+      expect(res.status).toBe(200);
+      expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
+      expect(fetchCallsTo(fetchSpy, "/api/internal/audit-emit")).toHaveLength(0);
+    });
   });
 });
 

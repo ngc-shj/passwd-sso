@@ -26,7 +26,9 @@ import {
   seedVaultKey,
   seedTenantMember,
   cleanup,
+  setTenantPasskeyRequirement,
   E2E_TENANT,
+  E2E_PASSKEY_TENANT,
 } from "./db";
 // Same function the seeder and the app use — asserting against a re-implemented
 // digest here would let the two drift without failing.
@@ -261,6 +263,54 @@ describe("seedSession", () => {
   });
 });
 
+describe("tenantId parameters", () => {
+  beforeEach(() => {
+    mockQuery.mockClear();
+  });
+
+  it("seedSession writes the given tenantId", async () => {
+    await seedSession("user-1", "token", 8, E2E_PASSKEY_TENANT.id);
+    const [, params] = getCall(0);
+    expect(params).toContain(E2E_PASSKEY_TENANT.id);
+    expect(params).not.toContain(E2E_TENANT.id);
+  });
+
+  it("seedUser writes the given tenantId to the user and its membership", async () => {
+    await seedUser({ id: "u", email: "e2e-x@test.local", name: "x", tenantId: E2E_PASSKEY_TENANT.id });
+    for (const index of [0, 1]) {
+      const [, params] = getCall(index);
+      expect(params).toContain(E2E_PASSKEY_TENANT.id);
+      expect(params).not.toContain(E2E_TENANT.id);
+    }
+  });
+
+  it("seedVaultKey writes the given tenantId", async () => {
+    await seedVaultKey("u", { ciphertext: "c", iv: "i", authTag: "a" }, E2E_PASSKEY_TENANT.id);
+    const [, params] = getCall(0);
+    expect(params).toContain(E2E_PASSKEY_TENANT.id);
+    expect(params).not.toContain(E2E_TENANT.id);
+  });
+});
+
+describe("setTenantPasskeyRequirement", () => {
+  beforeEach(() => {
+    mockQuery.mockClear();
+  });
+
+  it("turns the requirement on with the enabled-at and grace period", async () => {
+    const enabledAt = new Date("2026-01-01T00:00:00.000Z");
+    await setTenantPasskeyRequirement(E2E_PASSKEY_TENANT.id, { enabledAt, graceDays: 7 });
+    const [sql, params] = getCall(0);
+    expect(sql).toMatch(/UPDATE tenants/i);
+    expect(params).toEqual([E2E_PASSKEY_TENANT.id, true, enabledAt.toISOString(), 7]);
+  });
+
+  it("turns it off when enabledAt is null", async () => {
+    await setTenantPasskeyRequirement(E2E_PASSKEY_TENANT.id, { enabledAt: null, graceDays: null });
+    expect(getCall(0)[1]).toEqual([E2E_PASSKEY_TENANT.id, false, null, null]);
+  });
+});
+
 describe("seedVaultKey", () => {
   beforeEach(() => {
     mockQuery.mockClear();
@@ -359,16 +409,14 @@ describe("cleanup", () => {
       expect(allSql.some((s) => /DELETE FROM tenants/i.test(s))).toBe(true);
     });
 
-    it("uses E2E_TENANT.id when cleaning tenant tables", async () => {
+    it("cleans the tenant tables of E2E_TENANT and E2E_PASSKEY_TENANT, and nothing else", async () => {
       mockQuery.mockResolvedValue({ rows: [] });
       await cleanup();
-      const tenantCalls = mockQuery.mock.calls.filter(
-        (c) =>
-          /DELETE FROM tenant_members/i.test(c[0] as string) ||
-          /DELETE FROM tenants/i.test(c[0] as string)
-      );
-      for (const call of tenantCalls) {
-        expect(call[1]).toContain(E2E_TENANT.id);
+      for (const table of [/DELETE FROM audit_outbox/i, /DELETE FROM tenant_members/i, /DELETE FROM tenants/i]) {
+        const ids = mockQuery.mock.calls
+          .filter((c) => table.test(c[0] as string))
+          .map((c) => (c[1] as unknown[])[0]);
+        expect(ids).toEqual([E2E_TENANT.id, E2E_PASSKEY_TENANT.id]);
       }
     });
   });

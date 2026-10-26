@@ -13,6 +13,7 @@ import { API_PATH } from "@/lib/constants";
 import {
   getCachedSession,
   setCachedSession,
+  NEGATIVE_CACHE_TTL_MS,
   SESSION_CACHE_TTL_MS,
   type SessionInfo,
 } from "@/lib/auth/session/session-cache";
@@ -112,14 +113,13 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
     // fallback set could land in "still in grace" and fail to block (see the
     // bundle-substitution comment in src/auth.ts's own catch path). Instead,
     // any missing field substitutes the ENTIRE fail-closed bundle so this
-    // consumer never recombines a partial safe/unsafe mix. This only fires on
-    // producer-contract drift and is positive-cached (valid: true) up to
-    // session TTL by design — a sticky fail-closed block until TTL/invalidation,
-    // mirroring what happens today when auth.ts's own catch bundle flows through.
+    // consumer never recombines a partial safe/unsafe mix, and marks it
+    // degraded like auth.ts's own catch bundle: the state could not be read.
     let passkeyFields: Pick<
       SessionInfo,
       "hasPasskey" | "requirePasskey" | "requirePasskeyEnabledAt" | "passkeyGracePeriodDays"
     >;
+    let passkeyStateDegraded = false;
     if (valid) {
       const missing = (
         ["hasPasskey", "requirePasskey", "requirePasskeyEnabledAt", "passkeyGracePeriodDays"] as const
@@ -139,6 +139,7 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
           requirePasskeyEnabledAt: null,
           passkeyGracePeriodDays: null,
         };
+        passkeyStateDegraded = true;
       } else {
         passkeyFields = {
           hasPasskey: data.user.hasPasskey,
@@ -146,6 +147,7 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
           requirePasskeyEnabledAt: data.user.requirePasskeyEnabledAt,
           passkeyGracePeriodDays: data.user.passkeyGracePeriodDays,
         };
+        passkeyStateDegraded = data.user.passkeyStateDegraded === true;
       }
     } else {
       passkeyFields = {
@@ -161,6 +163,7 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
       userId,
       tenantId,
       ...passkeyFields,
+      passkeyStateDegraded,
     };
 
     // Derive ttlMs from data.expires (ISO 8601). Clamp downward only;
@@ -174,6 +177,12 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
       if (Number.isFinite(expiresMs)) {
         ttlMs = expiresMs - Date.now();
       }
+    }
+    // A degraded bundle is cached only as long as a negative entry, so a
+    // transient session-callback fault is re-read within seconds instead of
+    // refusing the user for the positive TTL.
+    if (passkeyStateDegraded) {
+      ttlMs = Math.min(ttlMs, NEGATIVE_CACHE_TTL_MS);
     }
     await setCachedSession(token, info, ttlMs);
     return info;

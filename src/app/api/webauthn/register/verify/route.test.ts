@@ -25,6 +25,9 @@ const {
   mockWithUserTenantRls,
   mockSendEmail,
   mockParseDeviceFromUserAgent,
+  mockDerivePasskeyState,
+  mockRequireRecentCurrentAuthMethod,
+  mockInvalidateUserSessionsCache,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
   return {
@@ -44,6 +47,9 @@ const {
     mockWithUserTenantRls: vi.fn(),
     mockSendEmail: vi.fn(),
     mockParseDeviceFromUserAgent: vi.fn(),
+    mockDerivePasskeyState: vi.fn(),
+    mockRequireRecentCurrentAuthMethod: vi.fn(),
+    mockInvalidateUserSessionsCache: vi.fn(),
   };
 });
 
@@ -88,6 +94,24 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+
+// D5 (#959): the real `passkeyEnforcementBlocks` predicate stays live (pure,
+// no I/O); only the DB re-derivation is mocked.
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
+  return {
+    ...real,
+    derivePasskeyState: mockDerivePasskeyState,
+  };
+});
+
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
+}));
+
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessionsCache: mockInvalidateUserSessionsCache,
 }));
 
 vi.mock("@/lib/parse-user-agent", () => ({
@@ -242,8 +266,21 @@ describe("POST /api/webauthn/register/verify", () => {
     mockParseDeviceFromUserAgent.mockReturnValue("Chrome on macOS");
     // withUserTenantRls: execute the callback directly
     mockWithUserTenantRls.mockImplementation(
-      (_userId: string, fn: () => unknown) => fn(),
+      (_userId: string, fn: (tenantId?: string) => unknown) => fn("tenant-1"),
     );
+    // Default: passkey enforcement off (does not block) — the step-up gate
+    // is a no-op and requireRecentCurrentAuthMethod is never reached.
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
+    mockInvalidateUserSessionsCache.mockResolvedValue({
+      totalSessions: 0,
+      cacheTombstoneFailures: 0,
+    });
   });
 
   // ── credProps.rk extraction tests ───────────────────────────
@@ -923,6 +960,175 @@ describe("POST /api/webauthn/register/verify", () => {
       });
       await expect(POST(req)).rejects.toThrow(/tenant-gone not found/);
       expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── D5 (#959): step-up required while passkey enforcement blocks ────────
+
+  describe("D5 passkey-blocked step-up gate", () => {
+    const blockedState = {
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    };
+
+    it("returns SESSION_STEP_UP_REQUIRED when blocked and the session is stale", async () => {
+      mockDerivePasskeyState.mockResolvedValue(blockedState);
+      mockRequireRecentCurrentAuthMethod.mockResolvedValue(
+        new Response(JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }), { status: 403 }),
+      );
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(403);
+      expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+      // The one-time challenge is not consumed on a rejected stale attempt.
+      expect(mockRedisGetdel).not.toHaveBeenCalled();
+      expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
+    });
+
+    it("proceeds when blocked but the session is recent", async () => {
+      mockDerivePasskeyState.mockResolvedValue(blockedState);
+      mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const { status } = await parseResponse(await POST(req));
+
+      expect(status).toBe(201);
+      expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledWith(req, "user-1");
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it("never calls requireRecentCurrentAuthMethod when enforcement does not block", async () => {
+      // beforeEach's default derivePasskeyState already resolves "not blocked".
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const { status } = await parseResponse(await POST(req));
+
+      expect(status).toBe(201);
+      expect(mockRequireRecentCurrentAuthMethod).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── PRF capability derived from clientExtensionResults.prf ──────────────
+
+  describe("PRF extension-output derivation", () => {
+    it("stores prfSupported=true from clientExtensionResults.prf.enabled, with no wrap fields sent", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue({
+        ...makeCreatedCredential(null),
+        prfSupported: true,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ prf: { enabled: true } }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      const data = mockPrismaCredentialCreate.mock.calls[0][0].data;
+      expect(data.prfSupported).toBe(true);
+      // No wrap fields in the request → nothing to persist yet.
+      expect(data).not.toHaveProperty("prfEncryptedSecretKey");
+    });
+
+    it("stores prfSupported=true from clientExtensionResults.prf.results without an explicit enabled flag", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue({
+        ...makeCreatedCredential(null),
+        prfSupported: true,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ prf: { results: { first: "AAAA" } } }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ prfSupported: true }),
+        }),
+      );
+    });
+
+    it("persists the per-credential salt from the extension-reported capability alone (no wrap fields)", async () => {
+      const PER_CRED_SALT = "b".repeat(64);
+      mockRedisGetdel.mockResolvedValue(
+        JSON.stringify({ challenge: "test-challenge", prfSalt: PER_CRED_SALT }),
+      );
+      mockPrismaCredentialCreate.mockResolvedValue({
+        ...makeCreatedCredential(null),
+        prfSupported: true,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ prf: { enabled: true } }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ prfSalt: PER_CRED_SALT }),
+        }),
+      );
+    });
+
+    it("stores prfSupported=false when clientExtensionResults.prf is absent and no wrap fields are sent", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ prfSupported: false, prfSalt: null }),
+        }),
+      );
+    });
+  });
+
+  // ── Session cache invalidation (#959 F5/F19) ─────────────────────────────
+
+  describe("invalidateUserSessionsCache on success", () => {
+    it("invalidates the user's cached sessions after a successful registration", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+
+      expect(res.status).toBe(201);
+      expect(mockInvalidateUserSessionsCache).toHaveBeenCalledWith("user-1");
+      expect(mockInvalidateUserSessionsCache).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not invalidate when registration fails validation (verification not verified)", async () => {
+      mockVerifyRegistration.mockResolvedValue({
+        verified: false,
+        registrationInfo: undefined,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+
+      expect(res.status).toBe(400);
+      expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
+    });
+
+    it("logs and does not fail the response when cache invalidation throws", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+      mockInvalidateUserSessionsCache.mockRejectedValue(new Error("redis down"));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+
+      // The credential already committed — a cache-invalidation failure
+      // must not turn a successful registration into an error response.
+      expect(res.status).toBe(201);
     });
   });
 });

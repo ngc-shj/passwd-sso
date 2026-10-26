@@ -10,6 +10,7 @@ const {
   mockOperatorToken,
   mockWithBypassRls,
   mockInvalidateCachedSessions,
+  mockInvalidateCachedSessionsBulkByDigest,
 } = vi.hoisted(() => ({
   mockSession: { deleteMany: vi.fn(), findMany: vi.fn() },
   mockExtensionToken: { updateMany: vi.fn() },
@@ -20,6 +21,9 @@ const {
   mockOperatorToken: { updateMany: vi.fn() },
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockInvalidateCachedSessions: vi
+    .fn<(tokens: ReadonlyArray<string>) => Promise<{ total: number; failed: number }>>()
+    .mockResolvedValue({ total: 0, failed: 0 }),
+  mockInvalidateCachedSessionsBulkByDigest: vi
     .fn<(tokens: ReadonlyArray<string>) => Promise<{ total: number; failed: number }>>()
     .mockResolvedValue({ total: 0, failed: 0 }),
 }));
@@ -41,9 +45,14 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
+vi.mock("@/lib/auth/session/session-cache", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/session/session-cache")>()),
+  invalidateCachedSessionsBulkByDigest: mockInvalidateCachedSessionsBulkByDigest,
+}));
 
 import {
   invalidateUserSessions,
+  invalidateUserSessionsCache,
   type InvalidateUserSessionsOptions,
 } from "./user-session-invalidation";
 import {
@@ -323,5 +332,56 @@ describe("invalidateUserSessions", () => {
       // @ts-expect-error mutually exclusive: tenantId and allTenants cannot both be set
       invalidateUserSessions("user-1", { tenantId: "x", allTenants: true });
     expect(typeof _typeCheckOnly).toBe("function");
+  });
+});
+
+// #959 F5/F19: sibling of invalidateTenantSessionsCache, scoped by userId
+// instead of tenantId — called by every writer of `hasPasskey`.
+describe("invalidateUserSessionsCache", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("is deliberately cross-tenant: queries by userId with no tenant filter", async () => {
+    mockSession.findMany.mockResolvedValue([
+      { sessionToken: "tok-a" },
+      { sessionToken: "tok-b" },
+    ]);
+    mockInvalidateCachedSessionsBulkByDigest.mockResolvedValue({ total: 2, failed: 0 });
+
+    const result = await invalidateUserSessionsCache("user-1");
+
+    expect(mockSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "user-1", expires: { gt: expect.any(Date) } },
+      }),
+    );
+    expect(mockInvalidateCachedSessionsBulkByDigest).toHaveBeenCalledWith(["tok-a", "tok-b"]);
+    expect(result).toEqual({ totalSessions: 2, cacheTombstoneFailures: 0 });
+  });
+
+  it("returns zero counts without calling the bulk tombstone when the user has no live sessions", async () => {
+    mockSession.findMany.mockResolvedValue([]);
+
+    const result = await invalidateUserSessionsCache("user-1");
+
+    expect(result).toEqual({ totalSessions: 0, cacheTombstoneFailures: 0 });
+    expect(mockInvalidateCachedSessionsBulkByDigest).not.toHaveBeenCalled();
+  });
+
+  it("surfaces tombstone failures so the caller can log a Redis outage", async () => {
+    mockSession.findMany.mockResolvedValue([{ sessionToken: "tok-a" }]);
+    mockInvalidateCachedSessionsBulkByDigest.mockResolvedValue({ total: 1, failed: 1 });
+
+    const result = await invalidateUserSessionsCache("user-1");
+
+    expect(result).toEqual({ totalSessions: 1, cacheTombstoneFailures: 1 });
+  });
+
+  it("propagates a DB failure (fail-closed — the caller decides how to handle it)", async () => {
+    mockSession.findMany.mockRejectedValue(new Error("db down"));
+
+    await expect(invalidateUserSessionsCache("user-1")).rejects.toThrow("db down");
+    expect(mockInvalidateCachedSessionsBulkByDigest).not.toHaveBeenCalled();
   });
 });

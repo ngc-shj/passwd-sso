@@ -425,3 +425,224 @@ describe("resolveBasePath", () => {
   });
 });
 
+
+// ─── fetchApi PASSKEY_REQUIRED reaction ──────────────────────
+
+describe("fetchApi PASSKEY_REQUIRED reaction", () => {
+  const ORIGIN = "https://app.example.com";
+  let location: { origin: string; pathname: string; search: string; href: string };
+  let originalLocation: Location;
+
+  function placeAt(pathname: string) {
+    location.pathname = pathname;
+    location.href = `${ORIGIN}${pathname}`;
+  }
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const passkeyRequired = () => jsonResponse(403, { error: "PASSKEY_REQUIRED" });
+
+  async function loadHelpers() {
+    const mod = await import("@/lib/url-helpers");
+    mod._resetPasskeyRequiredReactionForTests();
+    return mod;
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    originalLocation = window.location;
+    // jsdom refuses a real navigation, so href is a plain writable property —
+    // its value after the call IS the navigation assertion.
+    location = { origin: ORIGIN, pathname: "/", search: "", href: `${ORIGIN}/` };
+    Object.defineProperty(window, "location", {
+      value: location,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("navigates to the passkey page once per load under /dashboard", async () => {
+    placeAt("/ja/dashboard/favorites");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => passkeyRequired());
+    const { fetchApi } = await loadHelpers();
+
+    await fetchApi("/api/passwords");
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard/settings/auth/passkey`);
+
+    // The latch: a second refusal on the same load does not navigate again.
+    location.href = "sentinel";
+    await fetchApi("/api/tags");
+    expect(location.href).toBe("sentinel");
+  });
+
+  it("navigates under /admin, keeping the locale", async () => {
+    placeAt("/en/admin/tenant/members");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => passkeyRequired());
+    const { fetchApi } = await loadHelpers();
+
+    await fetchApi("/api/tenant/members");
+    expect(location.href).toBe(`${ORIGIN}/en/dashboard/settings/auth/passkey`);
+  });
+
+  it.each([
+    ["another 403 code", () => jsonResponse(403, { error: "FORBIDDEN" })],
+    ["a 503 (degraded session)", () => jsonResponse(503, { error: "SERVICE_UNAVAILABLE" })],
+    ["an unreadable 403 body", () => new Response("<html>not json</html>", { status: 403 })],
+  ])("does not navigate on %s", async (_label, makeResponse) => {
+    placeAt("/ja/dashboard");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => makeResponse());
+    const { fetchApi } = await loadHelpers();
+
+    await expect(fetchApi("/api/passwords")).resolves.toBeInstanceOf(Response);
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+  });
+
+  it.each(["/ja/auth/signin", "/ja/dashboards", "/en/vault-reset", "/"])(
+    "does not bounce a page outside /dashboard and /admin (%s)",
+    async (pathname) => {
+      placeAt(pathname);
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => passkeyRequired());
+      const { fetchApi } = await loadHelpers();
+
+      await fetchApi("/api/passwords");
+      expect(location.href).toBe(`${ORIGIN}${pathname}`);
+    },
+  );
+
+  it("does not navigate while the passkey-required screen is mounted", async () => {
+    placeAt("/ja/dashboard/settings/auth/passkey");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => passkeyRequired());
+    const { fetchApi, setPasskeyRequiredScreenMounted } = await loadHelpers();
+
+    setPasskeyRequiredScreenMounted(true);
+    await fetchApi("/api/passwords");
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard/settings/auth/passkey`);
+
+    // Positive control: once the screen unmounts, the same refusal navigates.
+    setPasskeyRequiredScreenMounted(false);
+    location.href = "sentinel";
+    await fetchApi("/api/passwords");
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard/settings/auth/passkey`);
+  });
+
+  it("on the passkey URL with the flag unset (a stale shell) navigates exactly once", async () => {
+    placeAt("/ja/dashboard/settings/auth/passkey");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => passkeyRequired());
+    const { fetchApi } = await loadHelpers();
+
+    const hrefWrites: string[] = [];
+    let href = location.href;
+    Object.defineProperty(location, "href", {
+      get: () => href,
+      set: (value: string) => {
+        hrefWrites.push(value);
+        href = value;
+      },
+      configurable: true,
+    });
+
+    await fetchApi("/api/passwords");
+    await fetchApi("/api/tags");
+    await fetchApi("/api/folders");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(hrefWrites).toEqual([`${ORIGIN}/ja/dashboard/settings/auth/passkey`]);
+  });
+
+  it("returns the response unchanged: the caller can still read the body", async () => {
+    placeAt("/ja/dashboard");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => passkeyRequired());
+    const { fetchApi } = await loadHelpers();
+
+    const res = await fetchApi("/api/passwords");
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({ error: "PASSKEY_REQUIRED" });
+  });
+
+  it("never throws on a plain-object 403 without clone()", async () => {
+    placeAt("/ja/dashboard");
+    const plain = { ok: false, status: 403, json: async () => ({ error: "PASSKEY_REQUIRED" }) };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => plain as unknown as Response,
+    );
+    const { fetchApi } = await loadHelpers();
+
+    await expect(fetchApi("/api/passwords")).resolves.toBe(plain);
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+  });
+
+  it("strips and re-applies basePath", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    placeAt("/passwd-sso/en/dashboard/tags");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => passkeyRequired());
+    const { fetchApi } = await loadHelpers();
+
+    await fetchApi("/api/tags");
+    expect(location.href).toBe(`${ORIGIN}/passwd-sso/en/dashboard/settings/auth/passkey`);
+  });
+});
+
+// ─── currentAppPath ──────────────────────────────────────────
+
+describe("currentAppPath", () => {
+  let originalLocation: Location;
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    originalLocation = window.location;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
+    vi.unstubAllEnvs();
+  });
+
+  function placeAt(pathname: string, search = "") {
+    Object.defineProperty(window, "location", {
+      value: { origin: "https://app.example.com", pathname, search },
+      writable: true,
+      configurable: true,
+    });
+  }
+
+  it("returns the pathname and query without basePath", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    placeAt("/passwd-sso/ja/dashboard", "?q=1");
+    const { currentAppPath } = await import("@/lib/url-helpers");
+    expect(currentAppPath()).toBe("/ja/dashboard?q=1");
+  });
+
+  it("leaves a pathname that only shares a prefix with basePath alone", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    placeAt("/passwd-sso-other/ja");
+    const { currentAppPath } = await import("@/lib/url-helpers");
+    expect(currentAppPath()).toBe("/passwd-sso-other/ja");
+  });
+
+  it("returns the pathname unchanged with no basePath", async () => {
+    placeAt("/en/admin");
+    const { currentAppPath } = await import("@/lib/url-helpers");
+    expect(currentAppPath()).toBe("/en/admin");
+  });
+});

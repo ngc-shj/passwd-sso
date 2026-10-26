@@ -4,8 +4,9 @@ import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { parseBody } from "@/lib/http/parse-body";
-import { checkAuth } from "@/lib/auth/session/check-auth";
-import { unauthorized } from "@/lib/http/api-response";
+import { validateExtensionToken, hasScope } from "@/lib/auth/tokens/extension-token";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_HOUR } from "@/lib/constants/time";
@@ -52,20 +53,42 @@ const BodySchema = z
  * (already paired, holding an IOS_APP token) authenticates with its own token +
  * DPoP; the body carries the EXTENSION's public JWK, which the server binds the
  * new token to. Returns the bearer once; never refreshable.
+ *
+ * Bearer-only (#959 D1): validates the host's extension-token row directly
+ * via `validateExtensionToken`, like `favicon-pref`, instead of `checkAuth`'s
+ * session-aware `authOrToken` path — this route never reads the session
+ * cookie, so a stale cookie is simply ignored and a valid IOS_APP token still
+ * mints (it was never actually reachable via a session anyway: the type/
+ * clientKind check below always refused one). This also keeps the route off
+ * the proxy's `API_DEFAULT_SESSION_READERS` list. `validateExtensionToken`
+ * runs the host's DPoP check and the per-use passkey gate (`passkeyGateBlocks`,
+ * `#965`) before returning.
  */
 export const POST = withRequestLog(async (req: NextRequest) => {
-  // Gate on passwords:write — the same scope POST /api/passwords requires, which
-  // the host's token already carries. This also runs the host's DPoP check.
-  const authed = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE });
-  if (!authed.ok) return authed.response;
-  // Only the host app's own bearer token (clientKind IOS_APP) may broker an
-  // AutoFill upload token. A bare session / API key is not a "token", and a
-  // BROWSER_EXTENSION / IOS_AUTOFILL token — which shares the passwords:write
-  // scope — must not be able to mint or rotate the AutoFill token either.
-  if (authed.auth.type !== "token" || authed.auth.clientKind !== "IOS_APP") {
+  // Outcomes match the former checkAuth path: any failure is a bare 401, the
+  // passkey gate answers PASSKEY_REQUIRED, and scope is checked before the
+  // client kind.
+  const authed = await validateExtensionToken(req);
+  if (!authed.ok) {
+    if (authed.error === "PASSKEY_REQUIRED") {
+      return errorResponse(API_ERROR.PASSKEY_REQUIRED);
+    }
     return unauthorized();
   }
-  const { userId, tenantId } = authed.auth;
+  const { userId, tenantId, clientKind, scopes } = authed.data;
+
+  // Gate on passwords:write — the same scope POST /api/passwords requires,
+  // which the host's token already carries.
+  if (!hasScope(scopes, EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE)) {
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT);
+  }
+  // Only the host app's own bearer token (clientKind IOS_APP) may broker an
+  // AutoFill upload token. A BROWSER_EXTENSION / IOS_AUTOFILL token — which
+  // shares the passwords:write scope — must not be able to mint or rotate the
+  // AutoFill token either.
+  if (clientKind !== "IOS_APP") {
+    return unauthorized();
+  }
 
   // Tenant network access restriction — a stolen IOS_APP bearer token must not
   // mint a passwords:write AutoFill token from an off-network IP. Enforced on the

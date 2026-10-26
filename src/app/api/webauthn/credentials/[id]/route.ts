@@ -10,6 +10,8 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { WEBAUTHN_NICKNAME_MAX_LENGTH } from "@/lib/validations/common";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { invalidateUserSessionsCache } from "@/lib/auth/session/user-session-invalidation";
+import { getLogger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -55,6 +57,20 @@ async function handleDELETE(
       where: { id, userId },
     }),
   );
+
+  // F5/F19 (#959): every writer of `hasPasskey` invalidates the user's cached
+  // sessions (cross-tenant — passkeys are user-global), so deleting the last
+  // passkey after grace is not still served `hasPasskey: true` from cache.
+  // The delete has already committed; a cache-invalidation failure is logged
+  // and does not fail this response (entries still expire on TTL).
+  try {
+    await invalidateUserSessionsCache(userId);
+  } catch (err) {
+    getLogger().error(
+      { err, userId, _logType: "webauthn.credential_delete_cache_invalidation_failed" },
+      "webauthn credential delete: invalidateUserSessionsCache failed",
+    );
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),

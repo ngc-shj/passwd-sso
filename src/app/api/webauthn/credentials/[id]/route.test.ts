@@ -10,6 +10,8 @@ const {
   mockPrismaUpdate,
   mockWithUserTenantRls,
   mockLogAudit,
+  mockInvalidateUserSessionsCache,
+  mockLoggerError,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaFindFirst: vi.fn(),
@@ -17,6 +19,8 @@ const {
   mockPrismaUpdate: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
+  mockInvalidateUserSessionsCache: vi.fn(),
+  mockLoggerError: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -46,6 +50,15 @@ vi.mock("@/lib/audit/audit", () => ({
 // null (allow) by default; tests covering the rejection path can override.
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+}));
+
+// #959 F5/F19: DELETE invalidates the user's cached sessions on success.
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessionsCache: mockInvalidateUserSessionsCache,
+}));
+
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
 }));
 
 import { DELETE, PATCH } from "./route";
@@ -79,6 +92,10 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaFindFirst.mockResolvedValue(EXISTING_CREDENTIAL);
     mockPrismaDelete.mockResolvedValue(EXISTING_CREDENTIAL);
+    mockInvalidateUserSessionsCache.mockResolvedValue({
+      totalSessions: 0,
+      cacheTombstoneFailures: 0,
+    });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -146,6 +163,39 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
         metadata: { credentialId: "cred-id-abc123" },
       }),
     );
+  });
+
+  // ── Session cache invalidation (#959 F5/F19) ─────────────────────────────
+
+  it("invalidates the user's cached sessions after a successful delete", async () => {
+    const req = createRequest("DELETE", ROUTE_URL);
+    const { status } = await parseResponse(await DELETE(req, CTX));
+
+    expect(status).toBe(200);
+    expect(mockInvalidateUserSessionsCache).toHaveBeenCalledWith("user-1");
+    expect(mockInvalidateUserSessionsCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not invalidate when the credential does not exist", async () => {
+    mockPrismaFindFirst.mockResolvedValue(null);
+
+    const req = createRequest("DELETE", ROUTE_URL);
+    await DELETE(req, CTX);
+
+    expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
+  });
+
+  it("logs and does not fail the response when cache invalidation throws", async () => {
+    mockInvalidateUserSessionsCache.mockRejectedValue(new Error("redis down"));
+
+    const req = createRequest("DELETE", ROUTE_URL);
+    const { status, json } = await parseResponse(await DELETE(req, CTX));
+
+    // The delete already committed — a cache-invalidation failure must not
+    // turn a successful delete into an error response.
+    expect(status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(mockLoggerError).toHaveBeenCalled();
   });
 });
 

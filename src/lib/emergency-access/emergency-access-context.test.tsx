@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act } from "@testing-library/react";
+import type { ReactElement } from "react";
 import {
   EmergencyAccessProvider,
   confirmPendingEmergencyGrants,
@@ -136,6 +137,7 @@ describe("EmergencyAccessProvider", () => {
         getSecretKey={() => new Uint8Array(32)}
         keyVersion={1}
         userId="u1"
+        pollingSuspended={false}
       >
         <div />
       </EmergencyAccessProvider>,
@@ -154,6 +156,7 @@ describe("EmergencyAccessProvider", () => {
         getSecretKey={() => new Uint8Array(32)}
         keyVersion={1}
         userId={undefined}
+        pollingSuspended={false}
       >
         <div />
       </EmergencyAccessProvider>,
@@ -173,11 +176,48 @@ describe("EmergencyAccessProvider", () => {
           getSecretKey={() => new Uint8Array(32).fill(3)}
           keyVersion={2}
           userId="u1"
+          pollingSuspended={false}
         >
           <div />
         </EmergencyAccessProvider>,
       );
       // flush microtasks so the synchronous run() inside the effect fires fetch
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/emergency-access/pending-confirmations",
+    );
+  });
+
+  // A passkey-blocked or degraded session is refused by the proxy on the
+  // confirm endpoints, so the unlocked poller must not run — not on unlock,
+  // not on the interval, not on focus or reconnect.
+  it("does not poll while polling is suspended, and polls once resumed", async () => {
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const element = (suspended: boolean) => (
+      <EmergencyAccessProvider
+        vaultStatus={VAULT_STATUS.UNLOCKED}
+        getSecretKey={() => new Uint8Array(32)}
+        keyVersion={1}
+        userId="u1"
+        pollingSuspended={suspended}
+      >
+        <div />
+      </EmergencyAccessProvider>
+    );
+    let rerender: (ui: ReactElement) => void = () => {};
+    await act(async () => {
+      rerender = render(element(true)).rerender;
+      vi.advanceTimersByTime(5 * 60_000);
+      window.dispatchEvent(new Event("online"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Positive control: the same provider polls once the suspension lifts.
+    await act(async () => {
+      rerender(element(false));
       await Promise.resolve();
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -193,6 +233,7 @@ describe("EmergencyAccessProvider", () => {
         getSecretKey={() => null}
         keyVersion={1}
         userId="u1"
+        pollingSuspended={false}
       >
         <div />
       </EmergencyAccessProvider>,
@@ -217,6 +258,7 @@ describe("EmergencyAccessProvider", () => {
           getSecretKey={() => new Uint8Array(32)}
           keyVersion={1}
           userId="u1"
+          pollingSuspended={false}
         >
           <div />
         </EmergencyAccessProvider>,

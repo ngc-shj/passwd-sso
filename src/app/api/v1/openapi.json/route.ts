@@ -5,6 +5,16 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
+import { withUserTenantRls } from "@/lib/tenant-context";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/constants";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+  recordPasskeyAuditEmit,
+} from "@/lib/auth/policy/passkey-enforcement";
+
+const OPENAPI_PASSKEY_BLOCKED_PATH = "/api/v1/openapi.json";
 
 // GET /api/v1/openapi.json — OpenAPI 3.1 specification
 async function handleGET(req: NextRequest) {
@@ -20,6 +30,26 @@ async function handleGET(req: NextRequest) {
     }
     if (result.type === "passkey_required") {
       return errorResponse(API_ERROR.PASSKEY_REQUIRED, undefined, undefined, { "Cache-Control": "no-store" });
+    }
+    // Own-gate route (#959 S7): this early return never reaches the proxy's
+    // session passkey gate, so a session result re-derives the block itself
+    // instead of trusting the proxy to have already checked it. A Bearer
+    // result is already covered above — authOrToken's token validators each
+    // run their own per-use passkey gate (passkeyGateBlocks, #965).
+    if (result.type === "session") {
+      const tenantId = await withUserTenantRls(result.userId, async (tid) => tid);
+      const pkState = await derivePasskeyState({ userId: result.userId, tenantId });
+      if (passkeyEnforcementBlocks(pkState)) {
+        if (recordPasskeyAuditEmit(result.userId, OPENAPI_PASSKEY_BLOCKED_PATH, Date.now())) {
+          await logAuditAsync({
+            ...personalAuditBase(req, result.userId),
+            tenantId,
+            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+            metadata: { blockedPath: OPENAPI_PASSKEY_BLOCKED_PATH },
+          });
+        }
+        return errorResponse(API_ERROR.PASSKEY_REQUIRED, undefined, undefined, { "Cache-Control": "no-store" });
+      }
     }
   }
 

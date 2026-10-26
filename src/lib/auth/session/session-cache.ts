@@ -25,6 +25,9 @@ export interface SessionInfo {
   requirePasskey?: boolean;
   requirePasskeyEnabledAt?: string | null;
   passkeyGracePeriodDays?: number | null;
+  // True when the session callback could not read the passkey state and the
+  // four fields above are its fail-closed bundle: an outage, not a requirement.
+  passkeyStateDegraded?: boolean;
 }
 
 // Positive cache shape. Mutually exclusive with NegativeCacheSchema and
@@ -40,6 +43,9 @@ export interface SessionInfo {
 // miss → the fetch path re-populates a complete, substituted entry. This is the
 // read-side counterpart to the bundle substitution in auth-gate; the two
 // together close the fail-open gap on both cache-miss and cache-hit paths.
+// `passkeyStateDegraded` is required for the same reason: a z.object strips an
+// undeclared key, so a degraded entry would otherwise come back unmarked and
+// be answered as a requirement instead of an outage.
 export const SessionInfoSchema = z.object({
   valid: z.literal(true),
   userId: z.string(),
@@ -48,6 +54,7 @@ export const SessionInfoSchema = z.object({
   requirePasskey: z.boolean(),
   requirePasskeyEnabledAt: z.string().nullable(),
   passkeyGracePeriodDays: z.number().nullable(),
+  passkeyStateDegraded: z.boolean(),
 });
 
 // Negative cache: `{ valid: false }` only. Bounded to NEGATIVE_CACHE_TTL_MS

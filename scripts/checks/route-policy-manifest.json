@@ -1,5 +1,5 @@
 {
-  "$schema-note": "verified fields (kind, methods, bearerBypass, destructive, sideEffectingGet floor, operatorGated) are asserted by src/__tests__/proxy/route-policy-manifest.test.ts; auth and handlerAuthReason are doc fields, review-enforced (handlerAuthReason presence is verified for api-default/public-share/public-receiver kinds; its prose accuracy is not).",
+  "$schema-note": "verified fields (kind, methods, bearerBypass, destructive, sideEffectingGet floor, operatorGated, sessionPasskeyGate, concretePaths) are asserted by src/__tests__/proxy/route-policy-manifest.test.ts; auth and handlerAuthReason are doc fields, review-enforced (handlerAuthReason presence is verified for api-default/public-share/public-receiver kinds; its prose accuracy is not). sessionPasskeyGate is required per declared method as { value, reason? }: value is gated | tier-a | tier-b | own-gate | early-return (the proxy session passkey gate's outcome for a blocked session cookie), and every non-gated value carries a reason. A route under a catch-all ([...x]) directory also declares concretePaths [{ path, method, outcome }], covering every declared method with positive and negative spellings; the outcome table evaluates only those.",
   "$documented-exclusions": [
     "Destructive-class membership is route-file-scoped by construction. The retention-gc worker (src/workers/retention-gc-worker/sweep.ts) performs the same hard-delete primitives as a background sweep with no per-request step-up -- architecturally correct, there is no requesting user. Covered by the Deletion/Retention Matrix (C5) and the worker review (C4); its raw SQL is allowlisted by C2.",
     "src/app/s/[token]/page.tsx (server component with raw SQL) is covered by C2 but not this route.ts-only manifest."
@@ -14,7 +14,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "verifyAdminToken requires a Bearer op_-prefixed per-operator DB-backed token, then requireMaintenanceOperator re-confirms active OWNER/ADMIN tenant membership at request time before the CAS approve write proceeds.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts": {
       "kind": "api-default",
@@ -25,7 +30,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "verifyAdminToken validates the op_ Bearer token and requireMaintenanceOperator re-verifies OWNER/ADMIN membership; the destructive cross-tenant PasswordShare revocation only runs after this operator identity and eligibility CAS both succeed.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/admin/rotate-master-key/[rotationId]/revoke/route.ts": {
       "kind": "api-default",
@@ -36,7 +46,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "Same verifyAdminToken + requireMaintenanceOperator gate as approve/execute; self-revoke by the initiator is intentionally allowed since cancellation is non-destructive, but caller identity is still bound to an active tenant OWNER/ADMIN via the op_ token.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/admin/rotate-master-key/initiate/route.ts": {
       "kind": "api-default",
@@ -47,7 +62,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "verifyAdminToken validates the op_ Bearer token before any DB write, and requireMaintenanceOperator re-confirms the token's bound subject is an active OWNER/ADMIN of its tenant before a MasterKeyRotation row can be created.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/admin/rotate-master-key/route.ts": {
       "kind": "api-default",
@@ -58,7 +78,12 @@
         "none-410-stub"
       ],
       "handlerAuthReason": "Legacy single-actor rotation endpoint, now a 410 Gone stub with no auth check by design -- the 410 response itself is the answer, and it contains neither verifyAdminToken( nor requireMaintenanceOperator(.",
-      "operatorGated": false
+      "operatorGated": false,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/api-keys/[id]/route.ts": {
       "kind": "api-session-required",
@@ -67,7 +92,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/api-keys/route.ts": {
       "kind": "api-session-required",
@@ -77,7 +107,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/audit-logs/download/route.ts": {
       "kind": "api-session-required",
@@ -86,7 +124,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/audit-logs/export/route.ts": {
       "kind": "api-session-required",
@@ -95,7 +138,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/audit-logs/import/route.ts": {
       "kind": "api-session-required",
@@ -104,7 +152,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/audit-logs/route.ts": {
       "kind": "api-session-required",
@@ -113,7 +166,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/auth/[...nextauth]/route.ts": {
       "kind": "api-default",
@@ -124,7 +182,134 @@
       "auth": [
         "pre-auth"
       ],
-      "handlerAuthReason": "This is the Auth.js v5 catch-all handler itself (handlers.GET/POST) that issues and validates sessions for OAuth/SAML/email/credentials flows; it runs before any session exists and is protected only by IP-based rate limiting on callback and magic-link-signin paths, not session or token auth."
+      "handlerAuthReason": "This is the Auth.js v5 catch-all handler itself (handlers.GET/POST) that issues and validates sessions for OAuth/SAML/email/credentials flows; it runs before any session exists and is protected only by IP-based rate limiting on callback and magic-link-signin paths, not session or token auth.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "tier-a",
+          "reason": "Auth.js catch-all; each action's outcome is declared in concretePaths (Tier A enumerates the Auth.js actions)"
+        },
+        "POST": {
+          "value": "tier-a",
+          "reason": "Auth.js catch-all; each action's outcome is declared in concretePaths (Tier A enumerates the Auth.js actions)"
+        }
+      },
+      "concretePaths": [
+        {
+          "path": "/api/auth/session",
+          "method": "GET",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/session",
+          "method": "POST",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/csrf",
+          "method": "GET",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/providers",
+          "method": "GET",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/error",
+          "method": "GET",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/verify-request",
+          "method": "GET",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/signin",
+          "method": "GET",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/signin",
+          "method": "POST",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/signin/google",
+          "method": "POST",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/callback/google",
+          "method": "GET",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/callback/google",
+          "method": "POST",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/signout",
+          "method": "GET",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/signout",
+          "method": "POST",
+          "outcome": "tier-a"
+        },
+        {
+          "path": "/api/auth/signin/google",
+          "method": "GET",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/signin/google/extra",
+          "method": "POST",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/callback",
+          "method": "GET",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/callback",
+          "method": "POST",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/callback/google/extra",
+          "method": "GET",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/session/extra",
+          "method": "GET",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/csrf",
+          "method": "POST",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/providers",
+          "method": "POST",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/passkey/reauth",
+          "method": "POST",
+          "outcome": "gated"
+        },
+        {
+          "path": "/api/auth/unknown-action",
+          "method": "GET",
+          "outcome": "gated"
+        }
+      ]
     },
     "src/app/api/auth/passkey/options/email/route.ts": {
       "kind": "api-default",
@@ -134,7 +319,13 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "Deliberately unauthenticated pre-session WebAuthn challenge-issuance endpoint; it is defended by Origin validation (assertOrigin), IP rate limiting, and timing-equalized dummy credentials/queries to prevent user enumeration, with the real security boundary enforced later at the verify route via challenge binding."
+      "handlerAuthReason": "Deliberately unauthenticated pre-session WebAuthn challenge-issuance endpoint; it is defended by Origin validation (assertOrigin), IP rate limiting, and timing-equalized dummy credentials/queries to prevent user enumeration, with the real security boundary enforced later at the verify route via challenge binding.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "tier-a",
+          "reason": "pre-auth passkey sign-in challenge (email)"
+        }
+      }
     },
     "src/app/api/auth/passkey/options/route.ts": {
       "kind": "api-default",
@@ -144,7 +335,13 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "Explicitly documented as an unauthenticated endpoint generating discoverable WebAuthn authentication options; defense is Origin header validation plus IP rate limiting, since no user identity is known yet and the challenge itself is the security artifact bound at verify time."
+      "handlerAuthReason": "Explicitly documented as an unauthenticated endpoint generating discoverable WebAuthn authentication options; defense is Origin header validation plus IP rate limiting, since no user identity is known yet and the challenge itself is the security artifact bound at verify time.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "tier-a",
+          "reason": "pre-auth passkey sign-in challenge"
+        }
+      }
     },
     "src/app/api/auth/passkey/reauth/options/route.ts": {
       "kind": "api-default",
@@ -154,7 +351,12 @@
       "auth": [
         "session"
       ],
-      "handlerAuthReason": "Calls auth() and returns unauthorized() if session.user.id is absent, so a valid Auth.js session cookie is required before issuing a re-authentication WebAuthn challenge scoped to that session's user credentials."
+      "handlerAuthReason": "Calls auth() and returns unauthorized() if session.user.id is absent, so a valid Auth.js session cookie is required before issuing a re-authentication WebAuthn challenge scoped to that session's user credentials.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/auth/passkey/reauth/verify/route.ts": {
       "kind": "api-default",
@@ -164,7 +366,12 @@
       "auth": [
         "session"
       ],
-      "handlerAuthReason": "Requires both an active Auth.js session (auth()) and the session cookie token via getSessionToken, then verifies the WebAuthn assertion against a challenge namespaced to that specific session's userId, updating passkeyVerifiedAt only on that session row."
+      "handlerAuthReason": "Requires both an active Auth.js session (auth()) and the session cookie token via getSessionToken, then verifies the WebAuthn assertion against a challenge namespaced to that specific session's userId, updating passkeyVerifiedAt only on that session row.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/auth/passkey/verify/route.ts": {
       "kind": "api-default",
@@ -174,7 +381,13 @@
       "auth": [
         "pre-auth"
       ],
-      "handlerAuthReason": "Runs before any session exists -- explicitly commented 'Unauthenticated endpoint' -- and its real defense is authorizeWebAuthn's cryptographic verification of the signed assertion against the Redis-stored challenge plus Origin validation; on success it mints a brand-new database session itself."
+      "handlerAuthReason": "Runs before any session exists -- explicitly commented 'Unauthenticated endpoint' -- and its real defense is authorizeWebAuthn's cryptographic verification of the signed assertion against the Redis-stored challenge plus Origin validation; on success it mints a brand-new database session itself.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "tier-a",
+          "reason": "pre-auth passkey sign-in verification"
+        }
+      }
     },
     "src/app/api/csp-report/route.ts": {
       "kind": "public-receiver",
@@ -184,7 +397,13 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "Public-by-design CSP violation report intake required by the Content-Security-Policy report-uri/report-to spec, which browsers POST to with no credentials; protected only by IP rate limiting and strict allowlist sanitization of the logged fields, always returning 204 regardless of outcome."
+      "handlerAuthReason": "Public-by-design CSP violation report intake required by the Content-Security-Policy report-uri/report-to spec, which browsers POST to with no credentials; protected only by IP rate limiting and strict allowlist sanitization of the logged fields, always returning 204 regardless of outcome.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "early-return",
+          "reason": "public-receiver early return: never reaches the session gate"
+        }
+      }
     },
     "src/app/api/directory-sync/[id]/logs/route.ts": {
       "kind": "api-session-required",
@@ -193,7 +412,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/directory-sync/[id]/route.ts": {
       "kind": "api-session-required",
@@ -204,7 +428,18 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/directory-sync/[id]/run/route.ts": {
       "kind": "api-session-required",
@@ -213,7 +448,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/directory-sync/route.ts": {
       "kind": "api-session-required",
@@ -223,7 +463,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/[id]/accept/route.ts": {
       "kind": "api-session-required",
@@ -232,7 +480,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/[id]/approve/route.ts": {
       "kind": "api-session-required",
@@ -241,7 +494,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/[id]/confirm/route.ts": {
       "kind": "api-session-required",
@@ -250,7 +508,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/[id]/decline/route.ts": {
       "kind": "api-session-required",
@@ -259,7 +522,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/[id]/request/route.ts": {
       "kind": "api-session-required",
@@ -268,7 +536,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/[id]/revoke/route.ts": {
       "kind": "api-session-required",
@@ -277,7 +550,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/[id]/vault/entries/route.ts": {
       "kind": "api-session-required",
@@ -286,7 +564,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/[id]/vault/route.ts": {
       "kind": "api-session-required",
@@ -295,7 +578,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/accept/route.ts": {
       "kind": "api-session-required",
@@ -304,7 +592,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/pending-confirmations/route.ts": {
       "kind": "api-session-required",
@@ -313,7 +606,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/reject/route.ts": {
       "kind": "api-session-required",
@@ -322,7 +620,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/emergency-access/route.ts": {
       "kind": "api-session-required",
@@ -332,7 +635,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/extension/bridge-code/route.ts": {
       "kind": "api-extension-bridge-code",
@@ -341,7 +652,13 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "early-return",
+          "reason": "bridge-code early return; the route runs auth() and its own passkeyEnforcementBlocks check"
+        }
+      }
     },
     "src/app/api/extension/key/reset/route.ts": {
       "kind": "api-session-required",
@@ -354,7 +671,12 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/extension/token/exchange/route.ts": {
       "kind": "api-extension-exchange",
@@ -364,7 +686,13 @@
       "auth": [
         "bridge-code",
         "dpop"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "early-return",
+          "reason": "token-exchange early return: bootstraps from a one-time bridge code, no session"
+        }
+      }
     },
     "src/app/api/extension/token/refresh/route.ts": {
       "kind": "api-session-required",
@@ -377,7 +705,12 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/extension/token/route.ts": {
       "kind": "api-session-required",
@@ -391,7 +724,15 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/folders/[id]/route.ts": {
       "kind": "api-session-required",
@@ -401,7 +742,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/folders/route.ts": {
       "kind": "api-session-required",
@@ -411,7 +760,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/health/live/route.ts": {
       "kind": "api-default",
@@ -421,7 +778,12 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "Kubernetes liveness probe intentionally exposed without auth so orchestrators can check process health pre-authentication; it returns only a static {status:\"alive\"} with no internal state, so there is nothing sensitive to protect."
+      "handlerAuthReason": "Kubernetes liveness probe intentionally exposed without auth so orchestrators can check process health pre-authentication; it returns only a static {status:\"alive\"} with no internal state, so there is nothing sensitive to protect.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/health/ready/route.ts": {
       "kind": "api-default",
@@ -431,7 +793,12 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "Readiness probe deliberately left public for orchestrator polling; hardened to return only a minimal status field after detailed metrics like audit-outbox backlog were removed to avoid leaking operational data to unauthenticated callers -- detailed metrics moved to an operator-token-gated endpoint instead."
+      "handlerAuthReason": "Readiness probe deliberately left public for orchestrator polling; hardened to return only a minimal status field after detailed metrics like audit-outbox backlog were removed to avoid leaking operational data to unauthenticated callers -- detailed metrics moved to an operator-token-gated endpoint instead.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/internal/audit-emit/route.ts": {
       "kind": "api-default",
@@ -441,7 +808,13 @@
       "auth": [
         "session"
       ],
-      "handlerAuthReason": "checkAuth(request) is called with no scope option, so it takes the session-only branch requiring a valid Auth.js session; the proxy's internal self-fetch forwards the original blocked request's session cookie and sets Origin to self to pass the proxy's baseline CSRF gate, and the endpoint further restricts writes to a fixed ALLOWED_ACTIONS allowlist so it cannot become a generic audit-write proxy."
+      "handlerAuthReason": "checkAuth(request) is called with no scope option, so it takes the session-only branch requiring a valid Auth.js session; the proxy's internal self-fetch forwards the original blocked request's session cookie and sets Origin to self to pass the proxy's baseline CSRF gate, and the endpoint further restricts writes to a fixed ALLOWED_ACTIONS allowlist so it cannot become a generic audit-write proxy.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "tier-a",
+          "reason": "the page proxy's own audit self-fetch"
+        }
+      }
     },
     "src/app/api/maintenance/audit-chain-verify/route.ts": {
       "kind": "api-default",
@@ -452,7 +825,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "verifyAdminToken() requires a valid op_-prefixed bearer token and requireMaintenanceOperator() then confirms the token's bound subject still holds an active OWNER/ADMIN membership in the exact tenantId being chain-verified, rejecting cross-tenant reads with 403.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/maintenance/audit-outbox-metrics/route.ts": {
       "kind": "api-default",
@@ -463,7 +841,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "verifyAdminToken() validates the op_ bearer token and requireMaintenanceOperator() re-checks active OWNER/ADMIN membership for auth.tenantId before the outbox aggregate query is scoped with a tenant-id predicate, so no other tenant's queue metrics can leak.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/maintenance/audit-outbox-purge-failed/route.ts": {
       "kind": "api-default",
@@ -474,7 +857,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "verifyAdminToken() plus requireMaintenanceOperator() gate the destructive purge; any body-supplied tenantId is only accepted if it equals auth.tenantId (else 403), so the operator-token's own tenant binding is what actually scopes which rows can be deleted.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/maintenance/dcr-cleanup/route.ts": {
       "kind": "api-default",
@@ -485,7 +873,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "Although the handler is a deprecated 410 Gone stub, it still calls verifyAdminToken() and requireMaintenanceOperator() before responding, deliberately preserving full operator auth so any stale cron job still hitting this endpoint is captured under a real operator identity rather than being trivially discoverable by anonymous probing.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/maintenance/purge-audit-logs/route.ts": {
       "kind": "api-default",
@@ -496,7 +889,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "verifyAdminToken() validates the op_ token and requireMaintenanceOperator() confirms active OWNER/ADMIN status in auth.tenantId; the subsequent purge query is hard-scoped to auth.tenantId (not a caller-supplied id), so a token minted in tenant A cannot erase tenant B's audit evidence.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/maintenance/purge-history/route.ts": {
       "kind": "api-default",
@@ -507,7 +905,12 @@
         "operator-token"
       ],
       "handlerAuthReason": "verifyAdminToken() validates the op_ bearer token and requireMaintenanceOperator() re-verifies active OWNER/ADMIN membership before the passwordEntryHistory deleteMany is executed with a whereClause pinned to auth.tenantId, preventing cross-tenant history deletion.",
-      "operatorGated": true
+      "operatorGated": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mcp/.well-known/oauth-authorization-server/route.ts": {
       "kind": "api-default",
@@ -517,7 +920,12 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "The GET handler takes no request input and returns only static OAuth 2.0 authorization-server metadata; RFC 8414 discovery documents must be fetchable by any client before it has credentials, so no auth check exists or is needed."
+      "handlerAuthReason": "The GET handler takes no request input and returns only static OAuth 2.0 authorization-server metadata; RFC 8414 discovery documents must be fetchable by any client before it has credentials, so no auth check exists or is needed.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mcp/authorize/consent/route.ts": {
       "kind": "api-session-required",
@@ -526,7 +934,13 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "own-gate",
+          "reason": "OAuth error-redirect shape; the route refuses via passkeyEnforcementBlocks"
+        }
+      }
     },
     "src/app/api/mcp/authorize/route.ts": {
       "kind": "api-session-required",
@@ -535,7 +949,13 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "own-gate",
+          "reason": "OAuth error-redirect shape; the route refuses via passkeyEnforcementBlocks"
+        }
+      }
     },
     "src/app/api/mcp/register/route.ts": {
       "kind": "api-default",
@@ -545,7 +965,12 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "This is RFC 7591 Dynamic Client Registration: the handler only rate-limits by IP and validates the request body with Zod (forcing token_endpoint_auth_method to \"none\"), then creates an unclaimed public mcpClient row with no bearer/session check at all, by design, so new MCP clients can self-register before they hold any credential."
+      "handlerAuthReason": "This is RFC 7591 Dynamic Client Registration: the handler only rate-limits by IP and validates the request body with Zod (forcing token_endpoint_auth_method to \"none\"), then creates an unclaimed public mcpClient row with no bearer/session check at all, by design, so new MCP clients can self-register before they hold any credential.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mcp/revoke/route.ts": {
       "kind": "api-default",
@@ -555,7 +980,12 @@
       "auth": [
         "mcp-client-credential"
       ],
-      "handlerAuthReason": "The handler accepts token + client_id (+ optional client_secret) from the request body and passes them into revokeToken(), which is the RFC 7009 revocation endpoint; client_secret is hashed and checked only for confidential clients, and per RFC 7009 the route always returns 200 regardless of token validity, self-enforcing client-credential checks inside revokeToken() rather than a route-level auth gate."
+      "handlerAuthReason": "The handler accepts token + client_id (+ optional client_secret) from the request body and passes them into revokeToken(), which is the RFC 7009 revocation endpoint; client_secret is hashed and checked only for confidential clients, and per RFC 7009 the route always returns 200 regardless of token validity, self-enforcing client-credential checks inside revokeToken() rather than a route-level auth gate.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mcp/route.ts": {
       "kind": "api-default",
@@ -566,7 +996,15 @@
       "auth": [
         "mcp-token"
       ],
-      "handlerAuthReason": "Both handlePOST and handleGET require an Authorization Bearer header, reject requests with no bearer, and call validateMcpToken(bearer) (returning 401 on failure) before dispatching, so every MCP JSON-RPC call and the SSE stream both require a validated mcp_ access token."
+      "handlerAuthReason": "Both handlePOST and handleGET require an Authorization Bearer header, reject requests with no bearer, and call validateMcpToken(bearer) (returning 401 on failure) before dispatching, so every MCP JSON-RPC call and the SSE stream both require a validated mcp_ access token.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mcp/token/route.ts": {
       "kind": "api-default",
@@ -576,7 +1014,12 @@
       "auth": [
         "mcp-client-credential"
       ],
-      "handlerAuthReason": "The token endpoint itself has no bearer/session precondition (it is the credential-issuing endpoint), but for both grant types it requires client_id (+ optional client_secret for confidential clients) and delegates real authentication to the code/refresh exchange functions, which validate the PKCE code_verifier or refresh token against the stored client record before ever minting an access token. The handler additionally enforces the tenant's IP-access policy (allowedCidrs / Tailscale) on the resolved tenantId BEFORE the side-effecting exchange for both grant types, so a stolen authorization code or refresh token cannot be redeemed / rotated from an off-network IP (matching the MCP gateway). Exception: a replayed (already-rotated) refresh token skips the IP gate and falls through to the exchange, which revokes the whole token family on replay — gating a replay on IP would suppress that theft-revocation for an off-network attacker."
+      "handlerAuthReason": "The token endpoint itself has no bearer/session precondition (it is the credential-issuing endpoint), but for both grant types it requires client_id (+ optional client_secret for confidential clients) and delegates real authentication to the code/refresh exchange functions, which validate the PKCE code_verifier or refresh token against the stored client record before ever minting an access token. The handler additionally enforces the tenant's IP-access policy (allowedCidrs / Tailscale) on the resolved tenantId BEFORE the side-effecting exchange for both grant types, so a stolen authorization code or refresh token cannot be redeemed / rotated from an off-network IP (matching the MCP gateway). Exception: a replayed (already-rotated) refresh token skips the IP gate and falls through to the exchange, which revokes the whole token family on replay — gating a replay on IP would suppress that theft-revocation for an off-network attacker.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mobile/.well-known/apple-app-site-association/route.ts": {
       "kind": "api-default",
@@ -586,7 +1029,12 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "The GET handler only reads server-side env vars to build a static AASA JSON document with no user/session/token involved; Apple's Universal Links spec requires this file be served unauthenticated at a well-known path for iOS to fetch it during app installation."
+      "handlerAuthReason": "The GET handler only reads server-side env vars to build a static AASA JSON document with no user/session/token involved; Apple's Universal Links spec requires this file be served unauthenticated at a well-known path for iOS to fetch it during app installation.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mobile/authorize/redirect/route.ts": {
       "kind": "api-default",
@@ -596,7 +1044,12 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "The handler does no DB access, no auth, and no audit -- it just returns a static fallback HTML string for the rare case a Universal Link is opened outside the iOS app instead of being intercepted by the OS, so there is nothing sensitive to protect."
+      "handlerAuthReason": "The handler does no DB access, no auth, and no audit -- it just returns a static fallback HTML string for the rare case a Universal Link is opened outside the iOS app instead of being intercepted by the OS, so there is nothing sensitive to protect.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mobile/authorize/route.ts": {
       "kind": "api-default",
@@ -607,7 +1060,13 @@
         "session"
       ],
       "handlerAuthReason": "handleGET calls auth() to require an active Auth.js session, redirecting unauthenticated callers to sign-in (self-enforced auth per route-policy.ts's api-default classification) and also runs step-up plus tenant IP access restriction before minting a single-use mobileBridgeCode row that the iOS app later redeems.",
-      "sideEffectingGet": "mints a single-use mobileBridgeCode row (tx.mobileBridgeCode.create) on GET as part of the iOS pairing handshake redirect."
+      "sideEffectingGet": "mints a single-use mobileBridgeCode row (tx.mobileBridgeCode.create) on GET as part of the iOS pairing handshake redirect.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "own-gate",
+          "reason": "iOS redirect shape; the route refuses via passkeyEnforcementBlocks"
+        }
+      }
     },
     "src/app/api/mobile/autofill-token/route.ts": {
       "kind": "api-default",
@@ -617,7 +1076,12 @@
       "auth": [
         "mobile-bearer-token"
       ],
-      "handlerAuthReason": "checkAuth(req, { scope: PASSWORDS_WRITE }) validates a bearer token (via authOrToken) and DPoP proof, and the handler further requires the auth type to be a token with clientKind IOS_APP, meaning only the paired iOS host app's own mobile bearer token may mint the AutoFill extension's token."
+      "handlerAuthReason": "Bearer-only: validateExtensionToken validates the host's extension-token row (DPoP and the per-use passkey gate included), hasScope requires PASSWORDS_WRITE, and the handler requires clientKind IOS_APP, so only the paired iOS host app's own bearer token may mint the AutoFill extension's token. The session cookie is never read.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mobile/cache-rollback-report/route.ts": {
       "kind": "api-default",
@@ -627,7 +1091,12 @@
       "auth": [
         "mobile-bearer-token"
       ],
-      "handlerAuthReason": "Calls validateExtensionToken which requires a valid iOS DPoP-bound access-token bearer (ath hash, cnf.jkt matched to the stored device key) before any body parsing or audit emission occurs."
+      "handlerAuthReason": "Calls validateExtensionToken which requires a valid iOS DPoP-bound access-token bearer (ath hash, cnf.jkt matched to the stored device key) before any body parsing or audit emission occurs.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mobile/favicon-pref/route.ts": {
       "kind": "api-default",
@@ -638,7 +1107,15 @@
       "auth": [
         "mobile-bearer-token"
       ],
-      "handlerAuthReason": "GET/PUT both call validateExtensionToken and additionally require clientKind IOS_APP, so only the DPoP-authenticated iOS host app (not other extension-token client kinds) can read or update the favicon preference."
+      "handlerAuthReason": "GET/PUT both call validateExtensionToken and additionally require clientKind IOS_APP, so only the DPoP-authenticated iOS host app (not other extension-token client kinds) can read or update the favicon preference.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mobile/favicon/route.ts": {
       "kind": "api-default",
@@ -648,7 +1125,12 @@
       "auth": [
         "mobile-bearer-token"
       ],
-      "handlerAuthReason": "validateExtensionToken enforces the DPoP-bound bearer plus an explicit IOS_APP clientKind check before the opt-in fetchFavicons flag is read, so only the authenticated host app can trigger the proxy fetch."
+      "handlerAuthReason": "validateExtensionToken enforces the DPoP-bound bearer plus an explicit IOS_APP clientKind check before the opt-in fetchFavicons flag is read, so only the authenticated host app can trigger the proxy fetch.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mobile/token/refresh/route.ts": {
       "kind": "api-default",
@@ -658,7 +1140,12 @@
       "auth": [
         "mobile-bearer-token"
       ],
-      "handlerAuthReason": "The bearer is the refresh token itself: it must equal the body's refresh_token (constant-time), hash-match a stored IOS_APP ExtensionToken row, and the DPoP proof's ath/cnf.jkt must match that row before rotation is attempted, so possession of the refresh token plus the bound device key is what authenticates the call."
+      "handlerAuthReason": "The bearer is the refresh token itself: it must equal the body's refresh_token (constant-time), hash-match a stored IOS_APP ExtensionToken row, and the DPoP proof's ath/cnf.jkt must match that row before rotation is attempted, so possession of the refresh token plus the bound device key is what authenticates the call.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/mobile/token/route.ts": {
       "kind": "api-default",
@@ -668,7 +1155,12 @@
       "auth": [
         "none"
       ],
-      "handlerAuthReason": "Deliberately has no session or bearer token because it is the pairing handshake's token-issuance step; safety instead comes from a 256-bit single-use bridge code with 60s TTL, PKCE S256 verifier binding, and a DPoP proof binding the exchange to the device's own key, all checked with uniform errors before the one-time code is CAS-consumed."
+      "handlerAuthReason": "Deliberately has no session or bearer token because it is the pairing handshake's token-issuance step; safety instead comes from a 256-bit single-use bridge code with 60s TTL, PKCE S256 verifier binding, and a DPoP proof binding the exchange to the device's own key, all checked with uniform errors before the one-time code is CAS-consumed.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/notifications/[id]/route.ts": {
       "kind": "api-session-required",
@@ -678,7 +1170,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PATCH": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/notifications/count/route.ts": {
       "kind": "api-session-required",
@@ -687,7 +1187,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/notifications/route.ts": {
       "kind": "api-session-required",
@@ -697,7 +1202,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PATCH": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/[id]/attachments/[attachmentId]/migrate/route.ts": {
       "kind": "api-session-required",
@@ -706,7 +1219,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/[id]/attachments/[attachmentId]/route.ts": {
       "kind": "api-session-required",
@@ -716,7 +1234,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/[id]/attachments/route.ts": {
       "kind": "api-session-required",
@@ -726,7 +1252,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/[id]/history/[historyId]/restore/route.ts": {
       "kind": "api-session-required",
@@ -735,7 +1269,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/[id]/history/[historyId]/route.ts": {
       "kind": "api-session-required",
@@ -744,7 +1283,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/[id]/history/route.ts": {
       "kind": "api-session-required",
@@ -753,7 +1297,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/[id]/restore/route.ts": {
       "kind": "api-session-required",
@@ -762,7 +1311,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/[id]/route.ts": {
       "kind": "api-session-required",
@@ -780,7 +1334,18 @@
         "session",
         "extension-token"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/bulk-archive/route.ts": {
       "kind": "api-session-required",
@@ -789,7 +1354,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/bulk-import/route.ts": {
       "kind": "api-session-required",
@@ -798,7 +1368,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/bulk-purge/route.ts": {
       "kind": "api-session-required",
@@ -808,7 +1383,12 @@
       "auth": [
         "session"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/bulk-restore/route.ts": {
       "kind": "api-session-required",
@@ -817,7 +1397,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/bulk-trash/route.ts": {
       "kind": "api-session-required",
@@ -826,7 +1411,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/empty-trash/route.ts": {
       "kind": "api-session-required",
@@ -836,7 +1426,12 @@
       "auth": [
         "session"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/generate/route.ts": {
       "kind": "api-session-required",
@@ -845,7 +1440,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/passwords/route.ts": {
       "kind": "api-session-required",
@@ -860,7 +1460,15 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/scim/v2/Groups/[id]/route.ts": {
       "kind": "api-default",
@@ -873,7 +1481,21 @@
       "auth": [
         "scim-bearer"
       ],
-      "handlerAuthReason": "Every handler (GET/PUT/PATCH/DELETE) calls authorizeScim, which requires a scim_-prefixed bearer token that hashes to a non-revoked, non-expired ScimToken row for that tenant, so only the IdP's provisioned SCIM credential can manage group membership."
+      "handlerAuthReason": "Every handler (GET/PUT/PATCH/DELETE) calls authorizeScim, which requires a scim_-prefixed bearer token that hashes to a non-revoked, non-expired ScimToken row for that tenant, so only the IdP's provisioned SCIM credential can manage group membership.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        },
+        "PATCH": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/scim/v2/Groups/route.ts": {
       "kind": "api-default",
@@ -884,7 +1506,15 @@
       "auth": [
         "scim-bearer"
       ],
-      "handlerAuthReason": "GET and POST both call authorizeScim (validateScimToken), so listing or creating tenant group mappings requires the tenant's own scim_ bearer token validated against the ScimToken table."
+      "handlerAuthReason": "GET and POST both call authorizeScim (validateScimToken), so listing or creating tenant group mappings requires the tenant's own scim_ bearer token validated against the ScimToken table.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/scim/v2/ResourceTypes/route.ts": {
       "kind": "api-default",
@@ -894,7 +1524,12 @@
       "auth": [
         "scim-bearer"
       ],
-      "handlerAuthReason": "Although this is a SCIM metadata-discovery endpoint typically fetched during IdP setup, the code still calls authorizeScim before returning the static ResourceType list, so it is not intentionally open and requires the same tenant SCIM bearer token as the provisioning endpoints."
+      "handlerAuthReason": "Although this is a SCIM metadata-discovery endpoint typically fetched during IdP setup, the code still calls authorizeScim before returning the static ResourceType list, so it is not intentionally open and requires the same tenant SCIM bearer token as the provisioning endpoints.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/scim/v2/Schemas/route.ts": {
       "kind": "api-default",
@@ -904,7 +1539,12 @@
       "auth": [
         "scim-bearer"
       ],
-      "handlerAuthReason": "Like ResourceTypes, this metadata endpoint calls authorizeScim first, so serving the static User/Group schema definitions still requires a valid per-tenant scim_ bearer token rather than being left open."
+      "handlerAuthReason": "Like ResourceTypes, this metadata endpoint calls authorizeScim first, so serving the static User/Group schema definitions still requires a valid per-tenant scim_ bearer token rather than being left open.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/scim/v2/ServiceProviderConfig/route.ts": {
       "kind": "api-default",
@@ -914,7 +1554,12 @@
       "auth": [
         "scim-bearer"
       ],
-      "handlerAuthReason": "This discovery endpoint also gates on authorizeScim before returning the static ServiceProviderConfig document, so IdP setup tooling must already present the tenant's valid SCIM bearer token to see it."
+      "handlerAuthReason": "This discovery endpoint also gates on authorizeScim before returning the static ServiceProviderConfig document, so IdP setup tooling must already present the tenant's valid SCIM bearer token to see it.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/scim/v2/Users/[id]/route.ts": {
       "kind": "api-default",
@@ -927,7 +1572,21 @@
       "auth": [
         "scim-bearer"
       ],
-      "handlerAuthReason": "GET/PUT/PATCH/DELETE all call authorizeScim, requiring the tenant-scoped scim_ bearer token to be valid (hash lookup, not revoked/expired) before any user resource is read, replaced, patched, or deactivated."
+      "handlerAuthReason": "GET/PUT/PATCH/DELETE all call authorizeScim, requiring the tenant-scoped scim_ bearer token to be valid (hash lookup, not revoked/expired) before any user resource is read, replaced, patched, or deactivated.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        },
+        "PATCH": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/scim/v2/Users/route.ts": {
       "kind": "api-default",
@@ -938,7 +1597,15 @@
       "auth": [
         "scim-bearer"
       ],
-      "handlerAuthReason": "GET (list/filter) and POST (create) both start with authorizeScim, so only the tenant's provisioned SCIM bearer token can enumerate or create tenant members via directory sync."
+      "handlerAuthReason": "GET (list/filter) and POST (create) both start with authorizeScim, so only the tenant's provisioned SCIM bearer token can enumerate or create tenant members via directory sync.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/sends/file/route.ts": {
       "kind": "api-session-required",
@@ -947,7 +1614,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/sends/route.ts": {
       "kind": "api-session-required",
@@ -956,7 +1628,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/sessions/[id]/route.ts": {
       "kind": "api-session-required",
@@ -965,7 +1642,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/sessions/route.ts": {
       "kind": "api-session-required",
@@ -975,7 +1657,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/share-links/[id]/access-logs/route.ts": {
       "kind": "api-session-required",
@@ -984,7 +1674,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/share-links/[id]/content/route.ts": {
       "kind": "public-share",
@@ -995,7 +1690,13 @@
         "share-token"
       ],
       "handlerAuthReason": "There is no session or SCIM check at all; instead the Authorization Bearer value must pass verifyShareAccessToken, an HMAC-signed, share-ID-bound, 5-minute-TTL token issued only after the verify-access password check, and all DB access explicitly uses withBypassRls because this route is meant to be reachable by an unauthenticated link recipient.",
-      "sideEffectingGet": "atomically increments view_count via $executeRaw and writes a shareAccessLog.create row on every successful content fetch."
+      "sideEffectingGet": "atomically increments view_count via $executeRaw and writes a shareAccessLog.create row on every successful content fetch.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "early-return",
+          "reason": "public-share early return: never reaches the session gate"
+        }
+      }
     },
     "src/app/api/share-links/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1004,7 +1705,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/share-links/mine/route.ts": {
       "kind": "api-session-required",
@@ -1013,7 +1719,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/share-links/route.ts": {
       "kind": "api-session-required",
@@ -1023,7 +1734,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/share-links/verify-access/route.ts": {
       "kind": "public-share",
@@ -1033,7 +1752,13 @@
       "auth": [
         "share-verify-token"
       ],
-      "handlerAuthReason": "This is the public, session-free endpoint recipients hit with the share-link URL token plus the access password; it hashes the supplied token to look up the passwordShare (bypassing RLS) and only after validating the password does it mint the short-lived share-access-token used by the content route, so the URL token plus password together are the entire auth model here."
+      "handlerAuthReason": "This is the public, session-free endpoint recipients hit with the share-link URL token plus the access password; it hashes the supplied token to look up the passwordShare (bypassing RLS) and only after validating the password does it mint the short-lived share-access-token used by the content route, so the URL token plus password together are the entire auth model here.",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "early-return",
+          "reason": "public-share early return: never reaches the session gate"
+        }
+      }
     },
     "src/app/api/tags/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1043,7 +1768,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tags/route.ts": {
       "kind": "api-session-required",
@@ -1053,7 +1786,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/audit-logs/download/route.ts": {
       "kind": "api-session-required",
@@ -1062,7 +1803,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/audit-logs/route.ts": {
       "kind": "api-session-required",
@@ -1071,7 +1817,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/folders/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1081,7 +1832,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/folders/route.ts": {
       "kind": "api-session-required",
@@ -1091,7 +1850,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/invitations/[invId]/route.ts": {
       "kind": "api-session-required",
@@ -1100,7 +1867,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/invitations/route.ts": {
       "kind": "api-session-required",
@@ -1110,7 +1882,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/member-key/route.ts": {
       "kind": "api-session-required",
@@ -1123,7 +1903,12 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts": {
       "kind": "api-session-required",
@@ -1132,7 +1917,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/members/[memberId]/route.ts": {
       "kind": "api-session-required",
@@ -1142,7 +1932,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/members/route.ts": {
       "kind": "api-session-required",
@@ -1152,7 +1950,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/members/search/route.ts": {
       "kind": "api-session-required",
@@ -1161,7 +1967,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route.ts": {
       "kind": "api-session-required",
@@ -1171,7 +1982,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/[id]/attachments/route.ts": {
       "kind": "api-session-required",
@@ -1181,7 +2000,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/[id]/favorite/route.ts": {
       "kind": "api-session-required",
@@ -1190,7 +2017,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts": {
       "kind": "api-session-required",
@@ -1199,7 +2031,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/route.ts": {
       "kind": "api-session-required",
@@ -1208,7 +2045,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/[id]/history/route.ts": {
       "kind": "api-session-required",
@@ -1217,7 +2059,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/[id]/restore/route.ts": {
       "kind": "api-session-required",
@@ -1226,7 +2073,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1242,7 +2094,18 @@
         "session",
         "extension-token"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/bulk-archive/route.ts": {
       "kind": "api-session-required",
@@ -1251,7 +2114,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/bulk-import/route.ts": {
       "kind": "api-session-required",
@@ -1260,7 +2128,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/bulk-purge/route.ts": {
       "kind": "api-session-required",
@@ -1270,7 +2143,12 @@
       "auth": [
         "session"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/bulk-restore/route.ts": {
       "kind": "api-session-required",
@@ -1279,7 +2157,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/bulk-trash/route.ts": {
       "kind": "api-session-required",
@@ -1288,7 +2171,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/empty-trash/route.ts": {
       "kind": "api-session-required",
@@ -1298,7 +2186,12 @@
       "auth": [
         "session"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/passwords/route.ts": {
       "kind": "api-session-required",
@@ -1312,7 +2205,15 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/policy/route.ts": {
       "kind": "api-session-required",
@@ -1322,7 +2223,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/rotate-key/data/route.ts": {
       "kind": "api-session-required",
@@ -1331,7 +2240,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/rotate-key/route.ts": {
       "kind": "api-session-required",
@@ -1340,7 +2254,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/route.ts": {
       "kind": "api-session-required",
@@ -1352,7 +2271,18 @@
       "auth": [
         "session"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/tags/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1362,7 +2292,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/tags/route.ts": {
       "kind": "api-session-required",
@@ -1372,7 +2310,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/webhooks/[webhookId]/route.ts": {
       "kind": "api-session-required",
@@ -1381,7 +2327,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/[teamId]/webhooks/route.ts": {
       "kind": "api-session-required",
@@ -1391,7 +2342,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/invitations/accept/route.ts": {
       "kind": "api-session-required",
@@ -1400,7 +2359,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/pending-key-distributions/route.ts": {
       "kind": "api-session-required",
@@ -1409,7 +2373,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/teams/route.ts": {
       "kind": "api-session-required",
@@ -1423,7 +2392,15 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/access-requests/[id]/approve/route.ts": {
       "kind": "api-session-required",
@@ -1432,7 +2409,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/access-requests/[id]/deny/route.ts": {
       "kind": "api-session-required",
@@ -1441,7 +2423,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/access-requests/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1450,7 +2437,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/access-requests/route.ts": {
       "kind": "api-session-required",
@@ -1464,7 +2456,15 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/audit-delivery-targets/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1473,7 +2473,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PATCH": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/audit-delivery-targets/route.ts": {
       "kind": "api-session-required",
@@ -1483,7 +2488,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/audit-logs/download/route.ts": {
       "kind": "api-session-required",
@@ -1492,7 +2505,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/audit-logs/route.ts": {
       "kind": "api-session-required",
@@ -1501,7 +2519,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/breakglass/[id]/logs/route.ts": {
       "kind": "api-session-required",
@@ -1511,7 +2534,12 @@
       "auth": [
         "session"
       ],
-      "sideEffectingGet": "writes a non-repudiation auditLog.create (PERSONAL_LOG_ACCESS_VIEW) at most once per grant per hour on GET."
+      "sideEffectingGet": "writes a non-repudiation auditLog.create (PERSONAL_LOG_ACCESS_VIEW) at most once per grant per hour on GET.",
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/breakglass/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1520,7 +2548,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/breakglass/route.ts": {
       "kind": "api-session-required",
@@ -1530,7 +2563,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/mcp-clients/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1541,7 +2582,18 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/mcp-clients/route.ts": {
       "kind": "api-session-required",
@@ -1551,7 +2603,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/members/[userId]/clear-lockout/route.ts": {
       "kind": "api-session-required",
@@ -1560,7 +2620,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts": {
       "kind": "api-session-required",
@@ -1569,7 +2634,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/members/[userId]/reset-vault/[resetId]/revoke/route.ts": {
       "kind": "api-session-required",
@@ -1578,7 +2648,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/members/[userId]/reset-vault/route.ts": {
       "kind": "api-session-required",
@@ -1588,7 +2663,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/members/[userId]/route.ts": {
       "kind": "api-session-required",
@@ -1597,7 +2680,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/members/route.ts": {
       "kind": "api-session-required",
@@ -1606,7 +2694,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/operator-tokens/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1615,7 +2708,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/operator-tokens/route.ts": {
       "kind": "api-session-required",
@@ -1625,7 +2723,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/policy/route.ts": {
       "kind": "api-session-required",
@@ -1635,7 +2741,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PATCH": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/role/route.ts": {
       "kind": "api-session-required",
@@ -1644,7 +2758,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/scim-tokens/[tokenId]/route.ts": {
       "kind": "api-session-required",
@@ -1653,7 +2772,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/scim-tokens/route.ts": {
       "kind": "api-session-required",
@@ -1663,7 +2787,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/service-accounts/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1674,7 +2806,18 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "PUT": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/service-accounts/[id]/tokens/[tokenId]/route.ts": {
       "kind": "api-session-required",
@@ -1683,7 +2826,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/service-accounts/[id]/tokens/route.ts": {
       "kind": "api-session-required",
@@ -1693,7 +2841,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/service-accounts/route.ts": {
       "kind": "api-session-required",
@@ -1703,7 +2859,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/webhooks/[webhookId]/route.ts": {
       "kind": "api-session-required",
@@ -1712,7 +2876,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/tenant/webhooks/route.ts": {
       "kind": "api-session-required",
@@ -1722,7 +2891,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/travel-mode/disable/route.ts": {
       "kind": "api-session-required",
@@ -1731,7 +2908,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/travel-mode/enable/route.ts": {
       "kind": "api-session-required",
@@ -1740,7 +2922,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/travel-mode/route.ts": {
       "kind": "api-session-required",
@@ -1749,7 +2936,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/user/auth-provider/route.ts": {
       "kind": "api-session-required",
@@ -1758,7 +2950,13 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "tier-b",
+          "reason": "registration screen picks the step-up method"
+        }
+      }
     },
     "src/app/api/user/favicon-pref/route.ts": {
       "kind": "api-session-required",
@@ -1767,7 +2965,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/user/favicon/route.ts": {
       "kind": "api-session-required",
@@ -1776,7 +2979,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/user/locale/route.ts": {
       "kind": "api-session-required",
@@ -1785,7 +2993,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PUT": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/user/mcp-tokens/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1794,7 +3007,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/user/mcp-tokens/route.ts": {
       "kind": "api-session-required",
@@ -1804,7 +3022,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/user/passkey-status/route.ts": {
       "kind": "api-session-required",
@@ -1813,7 +3039,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/v1/openapi.json/route.ts": {
       "kind": "api-v1",
@@ -1823,7 +3054,13 @@
       "auth": [
         "api-key",
         "service-account-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "early-return",
+          "reason": "api-v1 early return (API-key surface); a session-accepting v1 route gates the passkey itself"
+        }
+      }
     },
     "src/app/api/v1/passwords/[id]/route.ts": {
       "kind": "api-v1",
@@ -1835,7 +3072,21 @@
       "auth": [
         "api-key",
         "service-account-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "early-return",
+          "reason": "api-v1 early return (API-key surface); a session-accepting v1 route gates the passkey itself"
+        },
+        "PUT": {
+          "value": "early-return",
+          "reason": "api-v1 early return (API-key surface); a session-accepting v1 route gates the passkey itself"
+        },
+        "DELETE": {
+          "value": "early-return",
+          "reason": "api-v1 early return (API-key surface); a session-accepting v1 route gates the passkey itself"
+        }
+      }
     },
     "src/app/api/v1/passwords/route.ts": {
       "kind": "api-v1",
@@ -1846,7 +3097,17 @@
       "auth": [
         "api-key",
         "service-account-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "early-return",
+          "reason": "api-v1 early return (API-key surface); a session-accepting v1 route gates the passkey itself"
+        },
+        "POST": {
+          "value": "early-return",
+          "reason": "api-v1 early return (API-key surface); a session-accepting v1 route gates the passkey itself"
+        }
+      }
     },
     "src/app/api/v1/tags/route.ts": {
       "kind": "api-v1",
@@ -1856,7 +3117,13 @@
       "auth": [
         "api-key",
         "service-account-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "early-return",
+          "reason": "api-v1 early return (API-key surface); a session-accepting v1 route gates the passkey itself"
+        }
+      }
     },
     "src/app/api/v1/vault/status/route.ts": {
       "kind": "api-v1",
@@ -1866,7 +3133,13 @@
       "auth": [
         "api-key",
         "service-account-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "early-return",
+          "reason": "api-v1 early return (API-key surface); a session-accepting v1 route gates the passkey itself"
+        }
+      }
     },
     "src/app/api/vault/admin-reset/route.ts": {
       "kind": "api-session-required",
@@ -1876,7 +3149,12 @@
       "auth": [
         "session"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/change-passphrase/route.ts": {
       "kind": "api-session-required",
@@ -1885,7 +3163,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/delegation/[id]/route.ts": {
       "kind": "api-session-required",
@@ -1894,7 +3177,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/delegation/check/route.ts": {
       "kind": "api-session-required",
@@ -1907,7 +3195,12 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/delegation/route.ts": {
       "kind": "api-session-required",
@@ -1918,7 +3211,19 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        },
+        "POST": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "tier-b",
+          "reason": "VaultProvider's lock and pagehide revoke delegation"
+        }
+      }
     },
     "src/app/api/vault/recovery-key/generate/route.ts": {
       "kind": "api-session-required",
@@ -1927,7 +3232,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/recovery-key/recover/route.ts": {
       "kind": "api-session-required",
@@ -1936,7 +3246,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/reset/route.ts": {
       "kind": "api-session-required",
@@ -1946,7 +3261,12 @@
       "auth": [
         "session"
       ],
-      "destructive": true
+      "destructive": true,
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/rotate-key/data/route.ts": {
       "kind": "api-session-required",
@@ -1955,7 +3275,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/rotate-key/route.ts": {
       "kind": "api-session-required",
@@ -1964,7 +3289,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/setup/route.ts": {
       "kind": "api-session-required",
@@ -1973,7 +3303,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/ssh/sign-authorize/route.ts": {
       "kind": "api-session-required",
@@ -1986,7 +3321,12 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/status/route.ts": {
       "kind": "api-session-required",
@@ -1999,7 +3339,12 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/unlock/data/route.ts": {
       "kind": "api-session-required",
@@ -2012,7 +3357,12 @@
       "auth": [
         "session",
         "extension-token"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/unlock/route.ts": {
       "kind": "api-session-required",
@@ -2021,7 +3371,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/vault/unlock/verify/route.ts": {
       "kind": "api-session-required",
@@ -2034,7 +3389,12 @@
       "auth": [
         "extension-token"
       ],
-      "handlerAuthReason": "session-cookie callers have no token row to record presence against; only a BROWSER_EXTENSION/IOS_APP client token proceeds (C2)"
+      "handlerAuthReason": "session-cookie callers have no token row to record presence against; only a BROWSER_EXTENSION/IOS_APP client token proceeds (C2)",
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/watchtower/alert/route.ts": {
       "kind": "api-session-required",
@@ -2043,7 +3403,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/watchtower/hibp/route.ts": {
       "kind": "api-session-required",
@@ -2052,7 +3417,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/watchtower/start/route.ts": {
       "kind": "api-session-required",
@@ -2061,7 +3431,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/webauthn/authenticate/options/route.ts": {
       "kind": "api-session-required",
@@ -2070,7 +3445,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/webauthn/authenticate/verify/route.ts": {
       "kind": "api-session-required",
@@ -2079,7 +3459,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/webauthn/credentials/[id]/prf/options/route.ts": {
       "kind": "api-session-required",
@@ -2088,7 +3473,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/webauthn/credentials/[id]/prf/route.ts": {
       "kind": "api-session-required",
@@ -2097,7 +3487,12 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/webauthn/credentials/[id]/route.ts": {
       "kind": "api-session-required",
@@ -2107,7 +3502,15 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "PATCH": {
+          "value": "gated"
+        },
+        "DELETE": {
+          "value": "gated"
+        }
+      }
     },
     "src/app/api/webauthn/credentials/route.ts": {
       "kind": "api-session-required",
@@ -2116,7 +3519,13 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "GET": {
+          "value": "tier-b",
+          "reason": "registration screen lists the credentials"
+        }
+      }
     },
     "src/app/api/webauthn/register/options/route.ts": {
       "kind": "api-session-required",
@@ -2125,7 +3534,13 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "tier-b",
+          "reason": "registration challenge; recency-bound while blocked"
+        }
+      }
     },
     "src/app/api/webauthn/register/verify/route.ts": {
       "kind": "api-session-required",
@@ -2134,7 +3549,13 @@
       ],
       "auth": [
         "session"
-      ]
+      ],
+      "sessionPasskeyGate": {
+        "POST": {
+          "value": "tier-b",
+          "reason": "registration; recency-bound while blocked"
+        }
+      }
     }
   }
 }

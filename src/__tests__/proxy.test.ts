@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 import { PERMISSIONS_POLICY } from "../lib/security/security-headers";
 
-const { mockCheckAccessWithAudit, mockResolveUserTenantId } = vi.hoisted(() => ({
+const { mockCheckAccessWithAudit, mockResolveUserTenantId, mockLogAuditAsync } = vi.hoisted(() => ({
   mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
   mockResolveUserTenantId: vi.fn().mockResolvedValue(null),
+  mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("next-intl/middleware", async () => {
@@ -16,6 +17,10 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: mockResolveUserTenantId,
+}));
+vi.mock("@/lib/audit/audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  logAuditAsync: mockLogAuditAsync,
 }));
 vi.mock("@/lib/auth/session/session-cache", async () => {
   const actual = await vi.importActual<
@@ -41,6 +46,15 @@ import {
   _passkeyAuditHasForTests,
   _passkeyAuditFirstKeyForTests,
 } from "../lib/auth/policy/passkey-enforcement";
+import {
+  cachedSessionInfo,
+  dispatchFetch,
+  fetchCallsTo,
+  sessionResponseBody,
+  sessionRoute,
+  PASSKEY_BLOCKED,
+} from "./helpers/proxy-session-fixtures";
+import { _resetSessionPasskeyAuditForTests } from "../lib/proxy/session-passkey-gate";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
 
@@ -276,7 +290,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     // fetch was called to check session
-    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
     // returns 401 because mock returns no user
     expect(res.status).toBe(401);
   });
@@ -386,7 +400,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     // returns { user: null } so the middleware rejects with 401.
     expect(res.status).toBe(401);
     // The session lookup MUST have run (proves we did not bypass).
-    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
   });
 
   it("does NOT bypass when session cookie is present alongside Bearer + /api/api-keys", async () => {
@@ -398,7 +412,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     expect(res.status).toBe(401);
-    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
   });
 
   it("does NOT bypass when session cookie is present alongside Bearer + /api/vault/delegation", async () => {
@@ -410,7 +424,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     expect(res.status).toBe(401);
-    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
   });
 
   it("returns 401 for /api/sends without session", async () => {
@@ -645,8 +659,8 @@ describe("proxy — CORS preflight and headers", () => {
 
   beforeEach(() => {
     vi.stubEnv("APP_URL", APP_ORIGIN);
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ user: { id: "u1" } }), { status: 200 }),
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      dispatchFetch(sessionRoute(sessionResponseBody("u1"))),
     );
   });
 
@@ -821,8 +835,8 @@ describe("proxy — access restriction", () => {
     // instead of short-circuiting at INVALID_ORIGIN.
     vi.stubEnv("APP_URL", APP_ORIGIN);
     // Session returns valid user with ID
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ user: { id: "u1" } }), { status: 200 }),
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      dispatchFetch(sessionRoute(sessionResponseBody("u1"))),
     );
     // Default: no tenant → access restriction skipped
     mockResolveUserTenantId.mockResolvedValue(null);
@@ -927,7 +941,7 @@ describe("proxy — access restriction", () => {
       fetchSpy.mockImplementation(async (_url: RequestInfo | URL, init?: RequestInit) => {
         const cookie = new Headers(init?.headers).get("cookie") ?? "";
         const userId = cookie.includes(SESSION_RESTRICTED) ? "u-restricted" : "u-open";
-        return new Response(JSON.stringify({ user: { id: userId } }), { status: 200 });
+        return new Response(JSON.stringify(sessionResponseBody(userId)), { status: 200 });
       });
       mockResolveUserTenantId.mockImplementation(async (userId: string) =>
         userId === "u-restricted" ? "tenant-restricted" : "tenant-open",
@@ -1000,8 +1014,8 @@ describe("proxy — CSRF gate", () => {
     // getSessionInfo's internal fetch returns a valid session by default,
     // so requests that pass the CSRF gate proceed to the route handler
     // (where we stop and just inspect status / pass-through).
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ user: { id: "u1" } }), { status: 200 }),
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      dispatchFetch(sessionRoute(sessionResponseBody("u1"))),
     );
     // A normal user WITH an active membership (a null return now fails session
     // validation, which these CSRF-gate tests don't intend to exercise).
@@ -1159,6 +1173,80 @@ describe("proxy — CSRF gate", () => {
 });
 
 // =============================================================================
+// Session passkey gate through the orchestrator. The full C1 matrix lives in
+// src/lib/proxy/api-route-passkey-gate.test.ts; these pin the wiring.
+// =============================================================================
+
+describe("proxy — session passkey gate", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetSessionPasskeyAuditForTests();
+    vi.stubEnv("APP_URL", APP_ORIGIN);
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      dispatchFetch(sessionRoute(sessionResponseBody("u-blocked", PASSKEY_BLOCKED))),
+    );
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("refuses a blocked session's API call with PASSKEY_REQUIRED, CORS-wrapped, and audits it", async () => {
+    const res = await proxy(
+      createApiRequest("/api/passwords", {
+        Cookie: "authjs.session-token=5e55-0020",
+        origin: APP_ORIGIN,
+      }),
+      dummyOptions,
+    );
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("PASSKEY_REQUIRED");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(APP_ORIGIN);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "PASSKEY_ENFORCEMENT_BLOCKED",
+        userId: "u-blocked",
+        tenantId: "tenant1",
+        metadata: { blockedPath: "GET /api/passwords" },
+      }),
+    );
+  });
+
+  it("answers OPTIONS with a blocked cookie with 204 and no session read", async () => {
+    const res = await proxy(
+      createApiRequest(
+        "/api/passwords",
+        { Cookie: "authjs.session-token=5e55-0021", origin: APP_ORIGIN },
+        "OPTIONS",
+      ),
+      dummyOptions,
+    );
+
+    expect(res.status).toBe(204);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("passes the proxy's own session read (Tier A) without reading the session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/auth/session", { Cookie: "authjs.session-token=5e55-0022" }),
+      dummyOptions,
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
 // auth-gate cache miss path test — Redis TTL expiry surfaces as a cache miss.
 // =============================================================================
 
@@ -1167,8 +1255,8 @@ describe("auth-gate session cache miss path", () => {
 
   beforeEach(() => {
     vi.stubEnv("APP_URL", APP_ORIGIN);
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ user: { id: "u-miss" } }), { status: 200 }),
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      dispatchFetch(sessionRoute(sessionResponseBody("u-miss"))),
     );
     mockResolveUserTenantId.mockResolvedValue("tenant1");
   });
@@ -1183,7 +1271,7 @@ describe("auth-gate session cache miss path", () => {
     // Arrange: getCachedSession returns hit on first call, miss on second.
     const { getCachedSession } = await import("../lib/auth/session/session-cache");
     const cacheSpy = vi.mocked(getCachedSession)
-      .mockResolvedValueOnce({ valid: true, userId: "u-miss" })
+      .mockResolvedValueOnce(cachedSessionInfo("u-miss", "tenant1"))
       .mockResolvedValue(null);
 
     const buildReq = () =>
@@ -1193,11 +1281,12 @@ describe("auth-gate session cache miss path", () => {
       } as ConstructorParameters<typeof NextRequest>[1]);
 
     // Hit path: cache returns SessionInfo, no upstream fetch.
-    await proxy(buildReq(), dummyOptions);
+    expect((await proxy(buildReq(), dummyOptions)).status).toBe(200);
     expect(fetchSpy).toHaveBeenCalledTimes(0);
 
     // Miss path: cache returns null, upstream fetch fires once.
-    await proxy(buildReq(), dummyOptions);
+    expect((await proxy(buildReq(), dummyOptions)).status).toBe(200);
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     expect(cacheSpy).toHaveBeenCalledTimes(2);

@@ -637,6 +637,13 @@ jobs:
       AUDIT_ANCHOR_SIGNING_KEY: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       AUDIT_ANCHOR_TAG_SECRET: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       AUDIT_ANCHOR_DESTINATION_FS_PATH: "/tmp/ci-anchors"
+      # WebAuthn RP for session-passkey-gate.spec.ts's virtual authenticator.
+      # The web server also gets it from e2e/helpers/webauthn.ts (the one
+      # source, derived from the base URL); set here so the job's own env
+      # cannot name another RP. The PRF secret makes registration request the
+      # PRF extension, which the re-bootstrap offer depends on.
+      WEBAUTHN_RP_ID: "localhost"
+      WEBAUTHN_PRF_SECRET: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

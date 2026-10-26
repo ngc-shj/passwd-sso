@@ -32,6 +32,8 @@ vi.mock("@/lib/tenant-context", () => ({
 
 import { hasSessionCookie, getSessionInfo } from "./auth-gate";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import { cachedSessionInfo, PASSKEY_BLOCKED } from "@/__tests__/helpers/proxy-session-fixtures";
+import { NEGATIVE_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
 
 const APP_ORIGIN = "http://localhost:3000";
 
@@ -206,17 +208,14 @@ describe("getSessionInfo", () => {
   });
 
   it("returns cached SessionInfo without firing fetch (cache-hit)", async () => {
-    mockGetCachedSession.mockResolvedValueOnce({
-      valid: true,
-      userId: "u-1",
-      tenantId: "t-1",
-    });
+    const cached = cachedSessionInfo("u-1", "t-1", PASSKEY_BLOCKED);
+    mockGetCachedSession.mockResolvedValueOnce(cached);
 
     const result = await getSessionInfo(
       makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
-    expect(result).toEqual({ valid: true, userId: "u-1", tenantId: "t-1" });
+    expect(result).toEqual(cached);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
@@ -332,6 +331,13 @@ describe("getSessionInfo", () => {
       expect(result.hasPasskey).toBe(false);
       expect(result.requirePasskeyEnabledAt).toBeNull();
       expect(result.passkeyGracePeriodDays).toBeNull();
+      // The substituted bundle is an outage, and is cached only briefly.
+      expect(result.passkeyStateDegraded).toBe(true);
+      expect(mockSetCachedSession).toHaveBeenCalledWith(
+        TEST_SESSION_TOKEN,
+        expect.objectContaining({ passkeyStateDegraded: true }),
+        NEGATIVE_CACHE_TTL_MS,
+      );
 
       // The substitution must stay observable. Without this the bundle could be
       // swapped in silently and the whole suite would still pass — a
@@ -342,6 +348,67 @@ describe("getSessionInfo", () => {
           missing: expect.arrayContaining([omittedField]),
         }),
       );
+    });
+  });
+
+  // D7: the session callback marks its own catch bundle. The mark must reach
+  // SessionInfo, and the entry must be cached for the negative TTL, not the
+  // session's lifetime, so a transient fault is re-read within seconds.
+  describe("degraded passkey state", () => {
+    const catchBundleUser = {
+      id: "u-degraded",
+      hasPasskey: false,
+      requirePasskey: true,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    };
+
+    function respond(user: Record<string, unknown>) {
+      mockGetCachedSession.mockResolvedValueOnce(null);
+      mockResolveUserTenantId.mockResolvedValueOnce("t-1");
+      fetchSpy.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ user, expires: new Date(Date.now() + 3_600_000).toISOString() }),
+          { status: 200 },
+        ),
+      );
+    }
+
+    it("carries passkeyStateDegraded from the response and caches it for the negative TTL", async () => {
+      respond({ ...catchBundleUser, passkeyStateDegraded: true });
+
+      const result = await getSessionInfo(
+        makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
+      );
+
+      expect(result.passkeyStateDegraded).toBe(true);
+      expect(mockSetCachedSession).toHaveBeenCalledWith(
+        TEST_SESSION_TOKEN,
+        expect.objectContaining({ passkeyStateDegraded: true }),
+        NEGATIVE_CACHE_TTL_MS,
+      );
+    });
+
+    it("control: an unmarked response is not degraded and keeps the session-lifetime TTL", async () => {
+      respond({ ...catchBundleUser, passkeyStateDegraded: false });
+
+      const result = await getSessionInfo(
+        makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
+      );
+
+      expect(result.passkeyStateDegraded).toBe(false);
+      const ttlMs = mockSetCachedSession.mock.calls[0][2] as number;
+      expect(ttlMs).toBeGreaterThan(NEGATIVE_CACHE_TTL_MS);
+    });
+
+    it("reads only a literal true as degraded", async () => {
+      respond({ ...catchBundleUser, passkeyStateDegraded: "true" });
+
+      const result = await getSessionInfo(
+        makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
+      );
+
+      expect(result.passkeyStateDegraded).toBe(false);
     });
   });
 

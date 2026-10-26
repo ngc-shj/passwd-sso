@@ -114,6 +114,8 @@ type ManifestRouteEntry = {
   destructive?: boolean;
   sideEffectingGet?: string;
   operatorGated?: boolean;
+  sessionPasskeyGate?: Readonly<Record<string, { value: string; reason?: string }>>;
+  concretePaths?: readonly { path: string; method: string; outcome: string }[];
 };
 
 type Manifest = {
@@ -138,6 +140,24 @@ function flagsCell(entry: ManifestRouteEntry): string {
   if (entry.operatorGated === true) flags.push("operatorGated");
   if (entry.operatorGated === false) flags.push("operatorGated=false");
   return flags.length > 0 ? flags.join(", ") : "-";
+}
+
+/**
+ * The session passkey gate's outcome per method, in `methods` order. A
+ * catch-all route's per-path outcomes live in its `concretePaths`, which the
+ * cell points to rather than repeats.
+ */
+function sessionPasskeyGateCell(entry: ManifestRouteEntry): string {
+  const gate = entry.sessionPasskeyGate;
+  if (!gate) return "-";
+  const perMethod = entry.methods
+    .filter((m) => gate[m] !== undefined)
+    .map((m) => `${m} ${gate[m].value}`)
+    .join(", ");
+  const concrete = entry.concretePaths?.length
+    ? ` (per path: ${entry.concretePaths.length} concretePaths)`
+    : "";
+  return cell(`${perMethod}${concrete}`);
 }
 
 function reasonCell(entry: ManifestRouteEntry): string {
@@ -170,7 +190,7 @@ export function renderRoutePolicyMatrix(manifest: Manifest): string {
     "One row per `src/app/api/**/route.ts` file, sourced from " +
       "`scripts/checks/route-policy-manifest.json` (C1). Verified fields " +
       "(`kind`, `methods`, `bearerBypass`, `destructive`, `sideEffectingGet` " +
-      "floor, `operatorGated`) are asserted by " +
+      "floor, `operatorGated`, `sessionPasskeyGate`, `concretePaths`) are asserted by " +
       "`src/__tests__/proxy/route-policy-manifest.test.ts`; `auth` and " +
       "`handlerAuthReason` are doc fields, review-enforced.",
   );
@@ -200,15 +220,15 @@ export function renderRoutePolicyMatrix(manifest: Manifest): string {
     lines.push(`## ${area}`);
     lines.push("");
     lines.push(
-      "| Path | Kind | Methods | Auth | Bearer bypass | Flags | Reason |",
+      "| Path | Kind | Methods | Auth | Bearer bypass | Session passkey gate | Flags | Reason |",
     );
     lines.push(
-      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
     );
     for (const routePath of byArea.get(area) ?? []) {
       const entry = manifest.routes[routePath];
       lines.push(
-        `| \`${routePath}\` | ${cell(entry.kind)} | ${cell(entry.methods.join(", "))} | ${cell(entry.auth?.join(", "))} | ${cell(entry.bearerBypass?.join(", "))} | ${flagsCell(entry)} | ${reasonCell(entry)} |`,
+        `| \`${routePath}\` | ${cell(entry.kind)} | ${cell(entry.methods.join(", "))} | ${cell(entry.auth?.join(", "))} | ${cell(entry.bearerBypass?.join(", "))} | ${sessionPasskeyGateCell(entry)} | ${flagsCell(entry)} | ${reasonCell(entry)} |`,
       );
     }
     lines.push("");

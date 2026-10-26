@@ -220,6 +220,7 @@ export const BYPASS_GRANT = Object.freeze({
   TENANT_WEBHOOK_DISPATCH: defineGrant(BYPASS_PURPOSE.WEBHOOK_DISPATCH, ["tenantWebhook"]),
   TOKEN_TENANT_LOOKUP: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenant"]),
   TOKEN_TENANT_MEMBERSHIP_CHECK: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["tenantMember"]),
+  USER_SESSION_CACHE_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["session"]),
   USER_SESSION_INVALIDATION: defineGrant(BYPASS_PURPOSE.TOKEN_LIFECYCLE, ["apiKey", "delegationSession", "extensionToken", "mcpAccessToken", "mcpRefreshToken", "operatorToken", "session"]),
   VAULT_ENTRY_CROSS_TENANT_READ: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["passwordEntry"]),
   VAULT_RESET_COUNT: defineGrant(BYPASS_PURPOSE.CROSS_TENANT_LOOKUP, ["attachment", "passwordEntry"]),
