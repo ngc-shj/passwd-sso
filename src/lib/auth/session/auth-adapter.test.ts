@@ -105,7 +105,7 @@ vi.mock("@/lib/auth/session/session-cache", () => ({
   hashSessionToken: (token: string) => `hashed:${token}`,
 }));
 
-import { createCustomAdapter, deleteSessionByToken } from "./auth-adapter";
+import { createCustomAdapter } from "./auth-adapter";
 import type { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
 import type { ClaimTenantResolution } from "@/lib/tenant/tenant-management";
@@ -122,7 +122,6 @@ import {
   expectInvalidatedAfterCommit,
   expectNotInvalidatedOnDbThrow,
 } from "@/__tests__/helpers/session-cache-assertions";
-import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 
 describe("createCustomAdapter", () => {
   const expires = new Date("2025-06-01T00:00:00Z");
@@ -764,6 +763,66 @@ describe("createCustomAdapter", () => {
       // membership tenant alone, so the eviction is unreachable from the column.
       expect(mockTxSession.deleteMany).toHaveBeenCalledWith({
         where: { id: { in: ["old-s1"] } },
+      });
+    });
+
+    describe("replacing the session the callback stripped", () => {
+      // Stateful so the cap's count sees the deletes that ran before it. The
+      // other device's session is the OLDER one: counting the replaced session
+      // would evict it.
+      function sessionRows() {
+        const rows = [
+          { id: "s-other", sessionToken: "hashed:other-tok", ipAddress: null, userAgent: "other" },
+          { id: "s-prev", sessionToken: "hashed:prev-tok", ipAddress: null, userAgent: "prev" },
+        ];
+        mockTxSession.findMany.mockImplementation(async () => [...rows]);
+        mockTxSession.deleteMany.mockImplementation(
+          async ({ where }: { where: { sessionToken?: string; id?: { in: string[] } } }) => {
+            const before = rows.length;
+            for (let i = rows.length - 1; i >= 0; i--) {
+              const row = rows[i];
+              if (row.sessionToken === where.sessionToken || where.id?.in.includes(row.id)) {
+                rows.splice(i, 1);
+              }
+            }
+            return { count: before - rows.length };
+          },
+        );
+        return rows;
+      }
+
+      beforeEach(() => {
+        mockPrismaUser.findUnique.mockResolvedValue({
+          tenantId: "tenant-1",
+          tenantMemberships: [{ tenantId: "tenant-1" }],
+        });
+        mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
+        mockTxSession.create.mockResolvedValue({ userId: "u-1", expires });
+      });
+
+      it("deletes the replaced session before the cap counts, so no other device is evicted", async () => {
+        mockSessionMetaGetStore.mockReturnValue({
+          ip: null,
+          userAgent: null,
+          replacesSessionToken: "prev-tok",
+        });
+        const rows = sessionRows();
+
+        await createCustomAdapter().createSession!({ sessionToken: "new-tok", userId: "u-1", expires });
+
+        expect(rows.map((row) => row.id)).toEqual(["s-other"]);
+        expect(mockCreateNotification).not.toHaveBeenCalled();
+        expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["hashed:prev-tok"]);
+      });
+
+      it("control: without a replaced session the cap evicts the oldest device", async () => {
+        mockSessionMetaGetStore.mockReturnValue({ ip: null, userAgent: null });
+        const rows = sessionRows();
+
+        await createCustomAdapter().createSession!({ sessionToken: "new-tok", userId: "u-1", expires });
+
+        expect(rows.map((row) => row.id)).toEqual(["s-prev"]);
+        expect(mockCreateNotification).toHaveBeenCalled();
       });
     });
 
@@ -1597,21 +1656,39 @@ describe("createCustomAdapter", () => {
 
   describe("deleteSession", () => {
     it("deletes session with withBypassRls", async () => {
-      mockPrismaSession.delete.mockResolvedValue({});
+      mockPrismaSession.delete.mockResolvedValue({ userId: "u-1", expires });
       const adapter = createCustomAdapter();
       await adapter.deleteSession!("tok-1");
       expect(mockWithBypassRls).toHaveBeenCalled();
       // H4: DB row keyed by digest.
-      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "hashed:tok-1" } });
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { sessionToken: "hashed:tok-1" } }),
+      );
     });
 
     it("invalidates cache for the deleted token after DB commits", async () => {
-      mockPrismaSession.delete.mockResolvedValue({});
+      mockPrismaSession.delete.mockResolvedValue({ userId: "u-1", expires });
       const adapter = createCustomAdapter();
       await adapter.deleteSession!("tok-1");
 
       // H4: invalidation is by digest.
       expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["hashed:tok-1"]);
+    });
+
+    // Auth.js passes this to events.signOut, which audits AUTH_LOGOUT only
+    // when the session carries its userId.
+    it("returns the deleted session with its userId", async () => {
+      mockPrismaSession.delete.mockResolvedValue({ userId: "u-1", expires });
+      const adapter = createCustomAdapter();
+      await expect(adapter.deleteSession!("tok-1")).resolves.toEqual({
+        sessionToken: "tok-1",
+        userId: "u-1",
+        expires,
+      });
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({
+        where: { sessionToken: "hashed:tok-1" },
+        select: { userId: true, expires: true },
+      });
     });
 
     it("does not invalidate cache when DB delete throws (sequencing invariant)", async () => {
@@ -1972,44 +2049,5 @@ describe("createCustomAdapter", () => {
         spy.mockRestore();
       }
     });
-  });
-});
-
-describe("deleteSessionByToken", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockWithBypassRls.mockImplementation(
-      async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
-    );
-  });
-
-  it("deletes the row keyed by the token digest under the session-lifecycle grant", async () => {
-    mockPrismaSession.deleteMany.mockResolvedValue({ count: 1 });
-    await deleteSessionByToken("tok-1");
-    expect(mockPrismaSession.deleteMany).toHaveBeenCalledWith({ where: { sessionToken: "hashed:tok-1" } });
-    expect(mockWithBypassRls).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.any(Function),
-      BYPASS_GRANT.AUTH_SESSION_LIFECYCLE,
-    );
-  });
-
-  it("evicts the cached session by digest after the delete", async () => {
-    mockPrismaSession.deleteMany.mockResolvedValue({ count: 1 });
-    await deleteSessionByToken("tok-1");
-    expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["hashed:tok-1"], mockPrismaSession.deleteMany);
-  });
-
-  it("resolves when no row matches", async () => {
-    // What Prisma's `delete` does on a missing row (P2025).
-    mockPrismaSession.delete.mockRejectedValue(new Error("Record to delete does not exist"));
-    mockPrismaSession.deleteMany.mockResolvedValue({ count: 0 });
-    await expect(deleteSessionByToken("gone")).resolves.toBeUndefined();
-  });
-
-  it("does not evict the cache when the delete throws", async () => {
-    mockPrismaSession.deleteMany.mockRejectedValue(new Error("db down"));
-    await expect(deleteSessionByToken("tok-1")).rejects.toThrow("db down");
-    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
   });
 });

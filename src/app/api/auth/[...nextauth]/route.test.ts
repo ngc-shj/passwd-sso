@@ -25,9 +25,6 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/auth/session/session-meta", () => ({
-  sessionMetaStorage: { run: (_meta: unknown, fn: () => unknown) => fn() },
-}));
 
 // Controllable rate-limit mock used by the callback rate-limit tests.
 // Recording factory returns a DISTINCT object per createRateLimiter call
@@ -52,14 +49,8 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
 }));
 
 const mockLoggerWarn = vi.fn();
-const mockLoggerError = vi.fn();
 vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ warn: mockLoggerWarn, error: mockLoggerError, info: vi.fn() }),
-}));
-
-const mockDeleteSessionByToken = vi.fn<(token: string) => Promise<void>>();
-vi.mock("@/lib/auth/session/auth-adapter", () => ({
-  deleteSessionByToken: (token: string) => mockDeleteSessionByToken(token),
+  getLogger: () => ({ warn: mockLoggerWarn, error: vi.fn(), info: vi.fn() }),
 }));
 
 describe("withAuthBasePath", () => {
@@ -828,13 +819,9 @@ describe("exported handlers reach Auth.js without a session cookie on callback",
   });
 });
 
-describe("withoutSessionCookieOnCallback revokes the session a callback replaces", () => {
+describe("withoutSessionCookieOnCallback hands the replaced session to the sign-in", () => {
   beforeEach(() => {
-    mockDeleteSessionByToken.mockReset();
-    mockDeleteSessionByToken.mockResolvedValue(undefined);
-    mockLoggerError.mockReset();
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
-    vi.stubEnv("AUTH_URL", "http://localhost:3000");
   });
 
   afterEach(() => {
@@ -842,73 +829,76 @@ describe("withoutSessionCookieOnCallback revokes the session a callback replaces
     vi.resetModules();
   });
 
-  async function complete(cookie: string | null, setCookies: string[], status = 302) {
+  const OUTER_META = { ip: "203.0.113.7", userAgent: "ua", acceptLanguage: "ja" };
+
+  // What the adapter's createSession would read from the session meta while
+  // the wrapped handler runs.
+  async function metaSeen(path: string, cookie: string | null) {
     const { _withoutSessionCookieOnCallback } = await import(
       "@/app/api/auth/[...nextauth]/route"
     );
-    const headers = new Headers({ location: "http://localhost:3000/dashboard" });
-    for (const line of setCookies) headers.append("set-cookie", line);
-    const inner = vi.fn<RouteHandler>(async () => new Response(null, { status, headers }));
-    return _withoutSessionCookieOnCallback(inner)(
-      new NextRequest("http://localhost:3000/api/auth/callback/google", {
-        headers: cookie === null ? {} : { cookie },
-      }),
+    const { sessionMetaStorage } = await import("@/lib/auth/session/session-meta");
+    let seen: unknown;
+    const inner = vi.fn<RouteHandler>(async () => {
+      seen = sessionMetaStorage.getStore();
+      return new Response(null, { status: 302 });
+    });
+    await sessionMetaStorage.run({ ...OUTER_META }, () =>
+      _withoutSessionCookieOnCallback(inner)(
+        new NextRequest(`http://localhost:3000${path}`, {
+          headers: cookie === null ? {} : { cookie },
+        }),
+      ),
     );
+    expect(inner).toHaveBeenCalledTimes(1);
+    return seen;
   }
 
-  const NEW_SESSION = "authjs.session-token=bbbb-cccc; Path=/; HttpOnly; SameSite=Lax";
-
-  it("deletes the previous session when the callback sets a new session cookie", async () => {
-    await complete("authjs.session-token=aaaa; authjs.state=st", [
-      "authjs.state=; Max-Age=0; Path=/",
-      NEW_SESSION,
-    ]);
-    expect(mockDeleteSessionByToken).toHaveBeenCalledTimes(1);
-    expect(mockDeleteSessionByToken).toHaveBeenCalledWith("aaaa");
+  it("passes the stripped session token, keeping the request meta", async () => {
+    expect(
+      await metaSeen("/api/auth/callback/google", "authjs.session-token=aaaa; authjs.state=st"),
+    ).toEqual({ ...OUTER_META, replacesSessionToken: "aaaa" });
   });
 
-  it("deletes nothing when the callback sets no session cookie", async () => {
-    await complete("authjs.session-token=aaaa; authjs.state=st", ["authjs.state=; Max-Age=0; Path=/"]);
-    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  // On https the configured name carries a prefix: __Host- without a
+  // basePath, __Secure- with one.
+  it("passes the token of the configured https cookie name", async () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    expect(
+      await metaSeen("/api/auth/callback/google", "__Host-authjs.session-token=bbbb"),
+    ).toMatchObject({ replacesSessionToken: "bbbb" });
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    expect(
+      await metaSeen("/passwd-sso/api/auth/callback/google", "__Secure-authjs.session-token=cccc"),
+    ).toMatchObject({ replacesSessionToken: "cccc" });
   });
 
-  it("deletes nothing when the callback sets the same session token", async () => {
-    await complete("authjs.session-token=aaaa", ["authjs.session-token=aaaa; Path=/; HttpOnly"]);
-    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  // Auth.js reads only the configured name, so a cookie under another name
+  // names no session it would have replaced.
+  it("names no session for a stripped cookie that is not the configured name", async () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    expect(
+      await metaSeen("/api/auth/callback/google", "authjs.session-token=aaaa"),
+    ).toMatchObject({ replacesSessionToken: null });
   });
 
-  it("deletes nothing when a failed callback clears the session cookie", async () => {
-    await complete("authjs.session-token=aaaa", ["authjs.session-token=; Max-Age=0; Path=/"]);
-    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
-  });
-
-  it("deletes nothing when the new cookie is not the configured session cookie", async () => {
-    await complete("authjs.session-token=aaaa", ["__Secure-authjs.session-token=bbbb; Path=/; Secure"]);
-    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
-  });
-
-  it("deletes nothing when the request carried no session token", async () => {
-    await complete("authjs.state=st", [NEW_SESSION]);
-    await complete(null, [NEW_SESSION]);
-    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  it("names no session when the request carried no session cookie", async () => {
+    expect(await metaSeen("/api/auth/callback/google", "authjs.state=st")).toEqual(OUTER_META);
+    expect(await metaSeen("/api/auth/callback/google", null)).toEqual(OUTER_META);
   });
 
   // An ambiguous header (a second session-name cookie) names no one session.
-  it("deletes nothing when the session cookie read is ambiguous", async () => {
-    await complete("authjs.session-token=aaaa; authjs.session-token.0=dddd", [NEW_SESSION]);
-    expect(mockDeleteSessionByToken).not.toHaveBeenCalled();
+  it("names no session when the session cookie read is ambiguous", async () => {
+    expect(
+      await metaSeen(
+        "/api/auth/callback/google",
+        "authjs.session-token=aaaa; authjs.session-token.0=dddd",
+      ),
+    ).toMatchObject({ replacesSessionToken: null });
   });
 
-  it("returns the sign-in response and logs without the token when the delete fails", async () => {
-    mockDeleteSessionByToken.mockRejectedValue(new TypeError("db down aaaa"));
-    const res = await complete("authjs.session-token=aaaa", [NEW_SESSION]);
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("http://localhost:3000/dashboard");
-    expect(res.headers.getSetCookie()).toContain(NEW_SESSION);
-    expect(mockLoggerError).toHaveBeenCalledWith(
-      { errClass: "TypeError" },
-      "auth.callback.previous_session_revoke_failed",
-    );
-    expect(JSON.stringify(mockLoggerError.mock.calls)).not.toContain("aaaa");
+  it("names no session outside a callback", async () => {
+    expect(await metaSeen("/api/auth/session", "authjs.session-token=aaaa")).toEqual(OUTER_META);
   });
 });

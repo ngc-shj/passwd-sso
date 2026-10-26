@@ -8,23 +8,21 @@
  * the link happening, so the fixture is one Auth.js would act on.
  *
  * `fetch` is mocked only at the network boundary (discovery, token, jwks);
- * the adapter is an in-memory fake.
+ * the adapter is an in-memory fake that records which session its
+ * createSession is told it replaces.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { NextRequest } from "next/server";
 import { Auth, skipCSRFCheck, type AuthConfig } from "@auth/core";
 import type { Adapter, AdapterSession, AdapterUser } from "@auth/core/adapters";
+import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 
 vi.mock("@/auth", () => ({ handlers: { GET: vi.fn(), POST: vi.fn() } }));
 vi.mock("@/lib/http/with-request-log", () => ({ withRequestLog: <T>(h: T) => h }));
 vi.mock("@/lib/audit/audit", () => ({ extractRequestMeta: () => ({}) }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: vi.fn(async () => ({ allowed: true })) }),
-}));
-const mockDeleteSessionByToken = vi.fn(async (_token: string) => {});
-vi.mock("@/lib/auth/session/auth-adapter", () => ({
-  deleteSessionByToken: (token: string) => mockDeleteSessionByToken(token),
 }));
 
 const APP = "http://app.test:3000";
@@ -102,6 +100,9 @@ function fakeAdapter() {
     [VICTIM_TOKEN, { sessionToken: VICTIM_TOKEN, userId: VICTIM.id, expires: new Date(Date.now() + 60_000) }],
   ]);
   const users = new Map<string, AdapterUser>([[VICTIM.id, VICTIM]]);
+  // The real adapter's createSession deletes the session its meta names in
+  // the transaction that creates the new one; record what it would read.
+  const replaced: (string | null | undefined)[] = [];
   const adapter = {
     createUser: vi.fn(async (data: AdapterUser) => {
       const user = { ...data, id: "new-user" };
@@ -114,6 +115,7 @@ function fakeAdapter() {
     updateUser: vi.fn(async (data: Partial<AdapterUser> & { id: string }) => ({ ...VICTIM, ...data })),
     linkAccount: vi.fn(async () => undefined),
     createSession: vi.fn(async (session: AdapterSession) => {
+      replaced.push(sessionMetaStorage.getStore()?.replacesSessionToken);
       sessions.set(session.sessionToken, session);
       return session;
     }),
@@ -125,7 +127,7 @@ function fakeAdapter() {
     updateSession: vi.fn(async () => null),
     deleteSession: vi.fn(async () => null),
   } satisfies Adapter;
-  return adapter;
+  return { adapter, replaced };
 }
 
 function authConfig(adapter: Adapter): AuthConfig {
@@ -181,7 +183,6 @@ describe("callback through withoutSessionCookieOnCallback (@auth/core)", () => {
   beforeEach(() => {
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
     vi.stubEnv("AUTH_URL", APP);
-    mockDeleteSessionByToken.mockClear();
     installFetch();
   });
 
@@ -191,7 +192,7 @@ describe("callback through withoutSessionCookieOnCallback (@auth/core)", () => {
   });
 
   it("signs in fresh: the victim's session is never read and nothing is linked to the victim", async () => {
-    const adapter = fakeAdapter();
+    const { adapter, replaced } = fakeAdapter();
     const config = authConfig(adapter);
     const { _withoutSessionCookieOnCallback } = await import("@/app/api/auth/[...nextauth]/route");
 
@@ -204,12 +205,13 @@ describe("callback through withoutSessionCookieOnCallback (@auth/core)", () => {
     // Positive control: the callback completed as a new user's sign-in.
     expect(adapter.linkAccount).toHaveBeenCalledWith(expect.objectContaining({ userId: "new-user" }));
     expect(response.headers.get("location")).toBe(`${APP}/dashboard`);
-    // ...and the session the browser held is revoked, not left alive.
-    expect(mockDeleteSessionByToken).toHaveBeenCalledWith(VICTIM_TOKEN);
+    // ...and the new session is created as the replacement of the one the
+    // browser held, so that session is deleted rather than left alive.
+    expect(replaced).toEqual([VICTIM_TOKEN]);
   });
 
   it("control: Auth.js called directly links the IdP account to the signed-in victim", async () => {
-    const adapter = fakeAdapter();
+    const { adapter } = fakeAdapter();
     const config = authConfig(adapter);
 
     await Auth(await callbackRequest(config), config);

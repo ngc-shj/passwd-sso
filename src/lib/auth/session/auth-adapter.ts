@@ -101,19 +101,6 @@ export class TenantClaimUnusableError extends Error {
 }
 
 /**
- * Revokes the session a raw cookie token names, in the adapter's deleteSession
- * order (digest, delete, then cache eviction), for callers outside Auth.js.
- * A row that is already gone is not an error.
- */
-export async function deleteSessionByToken(sessionToken: string): Promise<void> {
-  const digest = hashSessionToken(sessionToken);
-  await withBypassRls(prisma, async (tx) =>
-    tx.session.deleteMany({ where: { sessionToken: digest } }),
-  BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
-  await invalidateCachedSessions([digest]);
-}
-
-/**
  * Custom Auth.js adapter that extends PrismaAdapter with:
  * - createSession: captures IP/UA from AsyncLocalStorage
  * - updateSession: updates lastActiveAt on session refresh
@@ -573,6 +560,7 @@ export function createCustomAdapter(): Adapter {
         userAgent: meta?.userAgent ?? null,
         acceptLanguage: meta?.acceptLanguage ?? null,
         provider: meta?.provider ?? null,
+        replacesSessionToken: meta?.replacesSessionToken ?? undefined,
       });
 
       return {
@@ -630,16 +618,22 @@ export function createCustomAdapter(): Adapter {
       BYPASS_GRANT.AUTH_ACCOUNT_LOOKUP);
     },
 
-    async deleteSession(sessionToken: string) {
+    async deleteSession(sessionToken: string): Promise<AdapterSession> {
       // H4: input is the raw cookie token; the DB row and the cache are both
       // keyed by its digest.
       const digest = hashSessionToken(sessionToken);
-      await withBypassRls(prisma, async (tx) =>
-        tx.session.delete({ where: { sessionToken: digest } }),
+      const deleted = await withBypassRls(prisma, async (tx) =>
+        tx.session.delete({
+          where: { sessionToken: digest },
+          select: { userId: true, expires: true },
+        }),
       BYPASS_GRANT.AUTH_SESSION_LIFECYCLE);
       // R3: invalidation runs only if the delete didn't throw — preserves
       // the "DB write commits before cache evict" invariant.
       await invalidateCachedSessions([digest]);
+      // Auth.js hands this to events.signOut, which audits AUTH_LOGOUT only
+      // when it carries the userId.
+      return { sessionToken, userId: deleted.userId, expires: deleted.expires };
     },
 
     async getAccount(providerAccountId: string, provider: string): Promise<AdapterAccount | null> {

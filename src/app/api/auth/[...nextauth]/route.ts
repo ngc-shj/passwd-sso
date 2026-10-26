@@ -9,17 +9,12 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import {
-  ALL_KNOWN_SESSION_COOKIE_NAMES,
-  configuredSessionCookieName,
-} from "@/lib/auth/session/cookie-name";
+import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
 import {
   parseCookiePairs,
   readSessionCookie,
   SESSION_COOKIE_READ,
 } from "@/lib/auth/session/session-cookie";
-import { deleteSessionByToken } from "@/lib/auth/session/auth-adapter";
-import { getLogger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -221,19 +216,12 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
 //
 // A fresh sign-in no longer replaces the session the browser held, as Auth.js
 // would have; it only overwrites the cookie, which would leave that session
-// alive server-side. So when the callback sets a new session cookie, the
-// session the request carried is revoked. A failed revocation is logged and
-// does not fail the sign-in that already succeeded.
+// alive server-side. So the token the request carried rides along in the
+// session meta, and the adapter's createSession deletes that session in the
+// transaction that creates the new one — only once a sign-in succeeds, and
+// before the concurrent-session cap counts it.
 function isSessionCookieKey(key: string): boolean {
   return ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => key.startsWith(name));
-}
-
-function setsNewSessionCookie(response: Response, previousToken: string): boolean {
-  const name = configuredSessionCookieName();
-  return response.headers.getSetCookie().some((line) => {
-    const [pair] = parseCookiePairs(line.split(";")[0] ?? "");
-    return pair !== undefined && pair.key === name && pair.value !== "" && pair.value !== previousToken;
-  });
 }
 
 function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
@@ -261,18 +249,11 @@ function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
       body: request.body,
       duplex: "half",
     });
-    const response = await handler(stripped, ...rest);
-    if (previousToken && setsNewSessionCookie(response, previousToken)) {
-      try {
-        await deleteSessionByToken(previousToken);
-      } catch (err) {
-        getLogger().error(
-          { errClass: err instanceof Error ? err.name : typeof err },
-          "auth.callback.previous_session_revoke_failed",
-        );
-      }
-    }
-    return response;
+    const meta = sessionMetaStorage.getStore() ?? extractRequestMeta(request);
+    return sessionMetaStorage.run(
+      { ...meta, replacesSessionToken: previousToken },
+      () => handler(stripped, ...rest),
+    );
   };
   return wrapped as unknown as H;
 }

@@ -36,6 +36,8 @@ export type CappedSessionInput = {
   provider: string | null;
   passkeyVerifiedAt?: Date;
   authCredentialId?: string;
+  /** Raw token of a session this sign-in replaces; deleted before the cap counts. */
+  replacesSessionToken?: string;
 };
 
 export type SessionEviction = {
@@ -71,6 +73,16 @@ export async function createSessionUnderConcurrencyCap(
   // Advisory lock is transaction-scoped; matches the codebase idiom
   // (attachments, vault rotate-key).
   await advisoryXactLock(tx, input.userId);
+
+  // The session this sign-in replaces is not one of the user's other devices:
+  // delete it before counting, or at the cap it would push out a session that
+  // is still in use. It may belong to another user (a sign-in that switches
+  // users), and may already be gone.
+  if (input.replacesSessionToken) {
+    await tx.session.deleteMany({
+      where: { sessionToken: hashSessionToken(input.replacesSessionToken) },
+    });
+  }
 
   // Check tenant's concurrent session limit
   const tenant = await tx.tenant.findUnique({
@@ -211,6 +223,10 @@ export async function createCappedSession(
     async (tx) => createSessionUnderConcurrencyCap(tx, input),
     BYPASS_GRANT.AUTH_SESSION_CAPPING,
   );
+
+  if (input.replacesSessionToken) {
+    await invalidateCachedSessions([hashSessionToken(input.replacesSessionToken)]);
+  }
 
   // Fire-and-forget: check for new device and notify user
   void checkNewDeviceAndNotify(input.userId, {
