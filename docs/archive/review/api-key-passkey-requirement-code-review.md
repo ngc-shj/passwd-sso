@@ -124,7 +124,7 @@ tripwire.
 
 ### Resolution Status (round 2)
 - **C1/N1:** lookup detection is receiver-independent. A digest key anywhere in a filter
-  position counts, so `Reflect.get`, computed and parameter-passed delegates are all covered:
+  position counts, so `Reflect.get`, computed and parameter-passed delegates are covered where the filter is readable (corrected in round 3: an unreadable filter on such a receiver is a declared residual):
   - top-level `where`/`cursor`/`having`;
   - relation `where` under `include`/`select`/`_count`;
   - nested-write filters.
@@ -138,7 +138,9 @@ tripwire.
 - **N2:**
   - `U&`/`UESCAPE` are refused.
   - `renderSql` throws at run time on `token_hash`/`code_hash`, which closes identifier
-    splicing. It has two callers, neither affected.
+    splicing. It has three callers, none affected (corrected in round 3, NF4): the retention-GC
+    sweep and the audit-outbox worker render no digest column, and
+    `scripts/migrate-account-tokens-to-encrypted.ts` touches only the `accounts` token columns.
   - Whole-row projections, dynamic SQL inside the statement, and migration-defined objects are
     declared residuals.
 - **R49:** the gate header and the plan's C7 now state the control class, its adjudicated
@@ -154,3 +156,63 @@ tripwire.
 - **Verification:** lint, full vitest (1092 files, 18881 tests), build, the C7 gate (39/39) and
   the raw-SQL gate all pass.
 - **Runtime:** the gate takes about 6.5–7 s.
+
+## Round 3
+Scope: `52f783a0e..cd7187242`. No round-2 fix widened a predicate (R43, all three experts).
+
+### Findings
+- **Functionality**
+  - F6, F9 and F10 are resolved. F7 is partly resolved and became NF1.
+  - NF1 Minor: the idle/absolute rows' behaviour text was extension-only after F7 added the iOS
+    token.
+  - NF2 Minor: the renderSql refusal had no error code, and validateRegistry did not catch a
+    digest identifier at boot.
+  - NF3 Minor [Adjacent]: same as S3-1.
+  - NF4 Minor: three renderSql callers, not two.
+- **Security**
+  - N1 and M1 are resolved. C1 and N2 are partly resolved.
+  - S3-1 Major: `u&` assembled across a `sqlIdentifier` splice bypassed the renderSql refusal.
+  - S3-2 Major: a digest key hidden in a spread, `&&` or helper return inside an unresolved or
+    non-token filter is not seen, and the declared residual misstated it.
+  - S3-3 Major: raw SQL through the pg driver's `.query` is outside C7, and is undeclared.
+  - S3-4 Minor: same-file `const` computed keys were cheaply resolvable.
+  - S3-5 Minor: `replacedByHash` is a digest column outside the class.
+- **Testing**
+  - N-1 to N-5 are resolved.
+  - T3-1 Minor: the renderSql captured-exec has no tamper cell.
+  - T3-2 Minor: the gate's case-insensitivity is unpinned.
+  - T3-3 Minor: one unguarded replace remains.
+  - T3-4 Minor: the lookup count is unanchored.
+  - T3-5 Minor: the "writes nothing" negative cannot see a deferred write.
+
+### User decision
+After three rounds of escape spellings in C7, with no runtime-control defect since round 2, the
+user chose to draw the line:
+- fix our own overstated claims and the cheap items;
+- declare C7 a best-effort detection gate (R49 tripwire class);
+- record the rest as residuals with Anti-Deferral entries;
+- give exhaustive coverage its own follow-up issue;
+- confirm in round 4, then open the PR.
+
+### Resolution Status (round 3)
+- **S3-1/NF3:** renderSql also refuses `u&`/`uescape`, through a captured exec, with deny and
+  allow cells.
+- **NF2:** the refusals carry stable codes (`RAW_SQL_DIGEST_COLUMN`, `RAW_SQL_UNICODE_ESCAPE`),
+  and validateRegistry refuses a digest identifier at boot.
+- **T3-1:** tamper cells added.
+- **S3-5:** `replacedByHash` was added to the gate's key and column sets, the pre-filter, and
+  renderSql.
+- **S3-4:** same-file `const` computed keys resolve.
+- **T3-2/T3-3/T3-4:** fixed.
+- **T3-5:** a structural no-DB-import cell, with a control import, red-proved by adding the
+  import.
+- **NF1:** the iOS precedence and error code are written out per client.
+- **NF4:** both records list three callers.
+- **S3-2/S3-3:** declared as residuals in the gate header, the plan's C7 and the deviation log
+  ("Code review round 3 — residuals"), with measured costs:
+  - refusing unreadable filters on every model surfaces 326 new functions;
+  - more than one hop surfaces 7.
+  
+  The round-2 claims that overstated coverage are corrected in this file and in the deviation
+  log.
+- **Red proofs:** each new rule was mutated on a scratch copy, and each turned its cells red.

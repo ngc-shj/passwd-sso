@@ -195,32 +195,44 @@ and its red proofs settle them. Phase 3 reviews the built gate.
   repo. Built after reading `check-session-token-hashed.mjs`, `check-passkey-mint-gate.sh` and
   their self-tests. Wired into `scripts/pre-pr.sh` and the static-checks CI job. The scan root,
   the schema and the manifest sit under one fixture-root override.
-- **Control class (R49):** a syntactic gate. It adjudicates Prisma query-builder digest
-  lookups by the AST shape of a call's argument, and raw SQL by the text of its literals,
-  backed at run time by `renderSql`. It does not follow values across files or through types.
-  The residuals are enumerated in the gate header and in the deviation log, each with an
-  Anti-Deferral entry:
-  - delegates reached by a reflective spelling the gate does not resolve, whose opaque
-    positions go unrefused (their lookups are still found);
-  - an opaque value more than one relation hop from a token model, and a spread in a non-token
-    model's `where`;
-  - a computed key under a filter of a call that does not resolve to a token model;
-  - raw SQL that never names the column: whole-row projections, dynamic SQL inside the
-    statement, and database objects defined in migrations.
-
-  Recovery for a residual is the validators' own gate (this one, on their spelling), their unit
-  and integration tests, and review. The gate is not a proof that no other lookup exists.
+- **Control class (R49):** a best-effort detection gate (the tripwire class), not an
+  enforceable boundary. The enforcement is the per-use gate inside each validator, pinned by
+  the validators' unit and integration tests and by review. The gate catches the common
+  spellings of a new digest lookup and of a skipped gate, and it is not a proof that no other
+  lookup exists.
+  - It adjudicates two things by syntax alone: Prisma query-builder digest lookups, by the AST
+    shape of a call's argument; and raw SQL, by the text of its literals, backed at run time by
+    `renderSql`. It does not follow values across files or through types.
+  - The residuals are the spellings it does not see. They are enumerated in the gate header
+    and in the deviation log ("Code review round 3 — residuals"), each with an Anti-Deferral
+    entry:
+    - a digest key inside a filter value the gate cannot read (a spread, a `&&` / `||` / `??`
+      expression, a helper's return, a computed key not pinned to a string), in a filter whose
+      model is unresolved or not a token model;
+    - delegates reached by a spelling the gate does not resolve: their lookups are found only
+      where the filter is readable, and their opaque positions go unrefused;
+    - an opaque value more than one relation hop from a token model;
+    - raw SQL that never names the column: whole-row projections, dynamic SQL inside the
+      statement, and database objects defined in migrations;
+    - raw SQL through the pg driver (`createPool` / `createClient` `.query`), where a column
+      name split across a concatenation is not seen and `renderSql` is not on the path.
 - **What the class is (adjudicated by the code, not a list):** a digest lookup is any call,
-  whatever its receiver, an argument of which holds a `tokenHash` or `codeHash` key under a
-  filter position. Filter positions are:
+  whatever its receiver, an argument of which holds a digest key (`tokenHash`, `codeHash`, or
+  `replacedByHash`) in a readable value under a filter position. Readable is an object
+  literal, a conditional of readable values, or a `const` bound to an object literal; a
+  computed key is read when it names a string literal or a `const` bound to one. Filter
+  positions are:
   - the top-level `where` / `cursor` / `having`;
   - the relation `where`s under `include` / `select` / `_count.select`;
   - the nested-write filters under `data`.
 
   The token models are the ones that declare such a column in `prisma/schema.prisma` (read
   through `lib/prisma-relation-reach.mjs`; an empty set fails). For raw SQL, any literal
-  naming `token_hash` / `code_hash` or holding `U&` / `UESCAPE` fails, and so does a SQL
-  argument that is not a literal. `renderSql` throws on rendered text naming the column.
+  naming `token_hash` / `code_hash` / `replaced_by_hash` (any case) or holding `U&` /
+  `UESCAPE` fails, and so does an Unsafe SQL argument that is not a literal. `renderSql`
+  throws on rendered text naming the column or holding `U&` / `UESCAPE`, each with a stable
+  error `code`, and the retention-GC worker refuses a registry identifier naming the column at
+  boot.
 - **Refuse rather than guess:** where the receiver resolves to a model, some positions are
   unreadable (not an object literal, or holding a spread or a computed key):
   - a filter on a token model;

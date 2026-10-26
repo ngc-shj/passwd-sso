@@ -1,7 +1,7 @@
 /**
  * Self-test for scripts/checks/check-bearer-passkey-gate.mjs — the C7 gate
  * (plan: docs/archive/review/api-key-passkey-requirement-plan.md) that every
- * tokenHash/codeHash lookup is classified, that `per-use-gated` validators
+ * tokenHash/codeHash/replacedByHash lookup is classified, that `per-use-gated` validators
  * really gate per use, and that only the three pinned call sites pass
  * `passkeyExemption`.
  *
@@ -203,8 +203,8 @@ describe.concurrent("check-bearer-passkey-gate.mjs — inputs", { timeout: 60_00
     expect(out).toMatch(/analysed=2 /);
   });
 
-  it("FAILS when the schema declares no tokenHash/codeHash model", async () => {
-    await expectFail({ files: { "prisma/schema.prisma": "model Note {\n  id String @id\n}\n" } }, /no model with a tokenHash\/codeHash field/);
+  it("FAILS when the schema declares no digest-field model", async () => {
+    await expectFail({ files: { "prisma/schema.prisma": "model Note {\n  id String @id\n}\n" } }, /no model with a tokenHash\/codeHash\/replacedByHash field/);
   });
 
   it("FAILS when the manifest is missing", async () => {
@@ -339,7 +339,8 @@ describe.concurrent("digest lookup detection", { timeout: 60_000 }, () => {
 // Whether a call is a lookup does not depend on its receiver: each spelling and each filter
 // position is a deny cell with `tokenHash`, paired with the same call filtering by `id`.
 describe.concurrent("lookups, whatever the receiver", { timeout: 60_000 }, () => {
-  const LOOKUP_IN_OTHER = /UNLISTED: src\/lib\/other\.ts#lookup.*1 digest lookup/;
+  // The whole message, so "11 digest lookup(s)" or an opaque site does not match.
+  const LOOKUP_IN_OTHER = /UNLISTED: src\/lib\/other\.ts#lookup \(lines \d+\) — 1 digest lookup\(s\), 0 opaque site\(s\)\./;
   const other = (code) => ({ files: { "src/lib/other.ts": NOTE_FN(`  ${code}`) } });
   const cells = (code) => [other(code.replaceAll("%K%", "tokenHash")), other(code.replaceAll("%K%", "id"))];
 
@@ -399,6 +400,30 @@ describe.concurrent("lookups, whatever the receiver", { timeout: 60_000 }, () =>
 
   it("passes on a digest written as data (a write, not a lookup)", async () => {
     await expectPass(other(`await x.create({ data: { tokenHash: t } });\n  return x.update({ where: { id: t }, data: { tokenHash: t } });`));
+  });
+
+  it("FAILS on a replacedByHash key in a where (the rotation successor's digest)", async () => {
+    await expectFail(other(`return x.findFirst({ where: { replacedByHash: t } });`), LOOKUP_IN_OTHER);
+  });
+
+  it("passes on a replacedByHash written as data (the rotation CAS, a write)", async () => {
+    await expectPass(other(`return x.updateMany({ where: { id: t, rotatedAt: null }, data: { replacedByHash: t } });`));
+  });
+
+  // A computed key is read when the file pins its name: a string literal, or a const bound to one.
+  const COMPUTED = [
+    ["a const-bound name", `const k = "%K%";\n  return x.findFirst({ where: { [k]: t } });`],
+    ["a string literal", `return x.findFirst({ where: { ["%K%"]: t } });`],
+  ];
+  it.each(COMPUTED)("FAILS on a computed digest key spelled through %s", async (_label, code) => {
+    await expectFail(cells(code)[0], LOOKUP_IN_OTHER);
+  });
+  it.each(COMPUTED)("passes on the same computed key naming id through %s", async (_label, code) => {
+    await expectPass(cells(code)[1]);
+  });
+
+  it("passes on a computed key bound by let on an unresolved receiver (declared residual: unread)", async () => {
+    await expectPass(other(`let k = "tokenHash";\n  return x.findFirst({ where: { [k]: t } });`));
   });
 
   it("passes on a digest key outside any filter position", async () => {
@@ -518,6 +543,14 @@ describe.concurrent("raw SQL", { timeout: 60_000 }, () => {
         ),
       },
     });
+  });
+
+  it("FAILS on raw SQL naming TOKEN_HASH in upper case (the column rule is case-insensitive)", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile("await tx.$executeRawUnsafe(\"SELECT id FROM api_keys WHERE TOKEN_HASH = $1\");") } }, /names a digest column/);
+  });
+
+  it("FAILS on raw SQL naming replaced_by_hash", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile("await tx.$executeRawUnsafe(\"SELECT id FROM mcp_refresh_tokens WHERE replaced_by_hash = $1\");") } }, /names a digest column/);
   });
 
   it("FAILS on tagged raw SQL naming token_hash", async () => {
@@ -821,7 +854,7 @@ describe.concurrent("manifest entries", { timeout: 60_000 }, () => {
     });
 
     it("passes when the inline gate key names an overloaded function (signatures have no body)", async () => {
-      const overloaded = `${ENFORCEMENT_IMPORT}\nexport function rotate(s: string): unknown;\nexport function rotate(s: number): unknown;\n${ROTATE_BODY.replace("export function rotate(s: unknown) {", "export function rotate(s: unknown): unknown {")}`;
+      const overloaded = `${ENFORCEMENT_IMPORT}\nexport function rotate(s: string): unknown;\nexport function rotate(s: number): unknown;\n${swap(ROTATE_BODY, "export function rotate(s: unknown) {", "export function rotate(s: unknown): unknown {")}`;
       await expectPass({ files: { ...refreshFiles, "src/lib/rotate.ts": overloaded }, manifest: entry({}) });
     });
 

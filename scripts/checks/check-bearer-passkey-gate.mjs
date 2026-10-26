@@ -5,27 +5,37 @@
  * lifetime (I1), and only the three self-protection call sites skip the gate
  * (I3). Plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7.
  *
+ * Control class (R49): a best-effort DETECTION gate — a tripwire — not an
+ * enforceable boundary. The enforcement is the per-use gate inside each
+ * validator (passkeyGateBlocks), pinned by the validators' unit and
+ * integration tests and by review; this gate catches the common spellings of
+ * a new digest lookup and of a skipped gate, and the residuals below are
+ * spellings it does not see. It is not a proof that no other lookup exists.
+ *
  * What it adjudicates, by syntax alone: Prisma query-builder digest lookups,
  * by the shape of a call's argument; and raw SQL, by the text of its literals
  * (backed at run time by renderSql). It does not follow values across files or
- * through types; the residuals below are what that leaves, and the recovery
- * for them is the validators' own unit and integration tests and review.
+ * through types.
  *
- *   - Token models: every model in prisma/schema.prisma declaring a `tokenHash`
- *     or `codeHash` field (read as source through lib/prisma-relation-reach.mjs
- *     — the static-checks job need not have a generated client). An empty set
- *     fails.
+ *   - Digest fields: `tokenHash`, `codeHash`, and `replacedByHash` (the MCP
+ *     refresh row's rotation successor); columns `token_hash`, `code_hash`,
+ *     `replaced_by_hash`.
+ *   - Token models: every model in prisma/schema.prisma declaring a digest
+ *     field (read as source through lib/prisma-relation-reach.mjs — the
+ *     static-checks job need not have a generated client). An empty set fails.
  *   - A digest lookup: ANY call — whatever its receiver (`Reflect.get(tx,
  *     "apiKey")`, `tx[k]`, a delegate passed as a parameter, `$parent`) —
- *     an argument of which holds a `tokenHash`/`codeHash` property (plain,
- *     shorthand, string-literal or escaped key) anywhere under a filter
+ *     an argument of which holds a digest-field property (plain, shorthand,
+ *     string-literal, escaped, or a computed key naming a string literal or a
+ *     `const` bound to one) in a value this file can read under a filter
  *     position: the top-level `where` / `cursor` / `having`; the `where` of a
  *     relation under `include` / `select` / `_count.select`, recursively; and
  *     the nested writes under `data` (or an upsert's `create` / `update`):
  *     `connect`, `disconnect`, `set`, `delete`, `deleteMany`, and the `where`
- *     of `update`, `updateMany`, `upsert`, `connectOrCreate`. A `const` bound
- *     to an object literal is followed, scope-aware. A `data: { tokenHash }`
- *     is a write, not a lookup.
+ *     of `update`, `updateMany`, `upsert`, `connectOrCreate`. Readable is an
+ *     object literal, a conditional of readable values, or a `const` bound to
+ *     an object literal (followed, scope-aware); a filter's spread is never
+ *     read. A `data: { tokenHash }` is a write, not a lookup.
  *   - Model coverage: every token model has an analysed lookup whose position
  *     resolves to it, or a manifest `models` entry with a reason; an entry for
  *     a model that has one is stale.
@@ -57,8 +67,10 @@
  *     anywhere.
  *   - Raw SQL: in ANY string, template (head, middle, tail) or regular
  *     expression literal of non-test src, as written or as cooked
- *     (`token\x5fhash`), the column names `token_hash` / `code_hash` fail, and
- *     so do `U&` / `UESCAPE` (a Unicode-escaped identifier, `U&"token\005fhash"`).
+ *     (`token\x5fhash`), the digest column names fail (any case), and so do
+ *     `U&` / `UESCAPE` (a Unicode-escaped identifier, `U&"token\005fhash"`;
+ *     no-space only: PostgreSQL reads the prefix only with the ampersand
+ *     directly after the U).
  *     An Unsafe call's SQL argument must be a string literal, a
  *     no-substitution template, or `renderSql(trustedSql`...`)` with both
  *     names resolving, scope-aware, to imports from src/lib/prisma/raw-sql;
@@ -67,26 +79,41 @@
  *     a raw method fails. The literal parts of a trustedSql template are
  *     scanned here; the identifiers and fragments spliced into it
  *     (`sqlIdentifier`, `joinSql`) exist only as rendered text, so renderSql
- *     throws at run time when that text names a digest column
- *     (src/lib/prisma/raw-sql.ts). check-raw-sql-usage refuses every other
- *     way to splice text (Prisma.raw / Prisma.sql / Prisma.join).
+ *     throws at run time when that text names a digest column or holds a
+ *     Unicode-escape form (src/lib/prisma/raw-sql.ts; code
+ *     RAW_SQL_DIGEST_COLUMN / RAW_SQL_UNICODE_ESCAPE), and the retention-GC
+ *     worker refuses a digest-column registry identifier at boot.
+ *     check-raw-sql-usage refuses every other way to splice text through
+ *     Prisma (Prisma.raw / Prisma.sql / Prisma.join).
  *
- * Residuals (Anti-Deferral entries: the plan's deviation log, C7):
- *   - A delegate reached by a reflective spelling the model resolution does not
- *     follow (`Reflect.get(tx, "apiKey")`, `Object.values(tx)`, a delegate a
- *     function returns or a parameter not named by its handle): a lookup
- *     through it is still found, but its opaque positions are not refused.
- *   - An opaque value one relation hop further than the rule above (a
- *     `data` on a model with no token relation that hides a nested write
- *     through a model that has one), and a spread in a `where` of a model
- *     that is not a token model — the same scoping, applied to every position.
- *   - A computed key (`{ [k]: h }`) under a filter position of a call whose
- *     receiver does not resolve to a token model: the key's name is not read.
+ * Residuals — spellings this gate does not see (Anti-Deferral entries: the
+ * plan's deviation log, "Code review round 3 — residuals"):
+ *   - A digest key inside a filter value this file cannot read — a spread
+ *     (whatever its operand: `...(c && {k})`, `...(c ? {k} : {})`, a
+ *     `const`-bound literal), a `&&` / `||` / `??` expression, a helper's
+ *     return, or a computed key whose name is not a pinned string — in a filter
+ *     whose model is unresolved (any receiver the model resolution does not
+ *     follow, including a relation filter under such a call's top-level
+ *     `where`) or is not a token model (including a relation filter to a model
+ *     that is not one). There it is neither a lookup nor refused as opaque.
+ *   - A delegate reached by a spelling the model resolution does not follow
+ *     (`Reflect.get(tx, "apiKey")`, `Object.values(tx)`, a delegate a function
+ *     returns, a parameter not named by its handle): its lookups are found only
+ *     where the filter is readable (above), and its opaque positions are not
+ *     refused.
+ *   - An opaque value more than one relation hop from a token model (a `data`
+ *     or projection on a model with no token relation that hides a nested
+ *     write or filter through one that has).
  *   - Raw SQL whose text never names the column: a whole-row projection
  *     compared or searched as a value (`to_jsonb(t)`, `row_to_json(t)`,
  *     `t::text`, `t.*`), dynamic SQL built inside the statement (`EXECUTE
  *     format(...)` in a DO block or a function), and database objects defined
  *     outside src (a view, function or trigger in prisma/migrations).
+ *   - Raw SQL through the pg driver (a `createPool` / `createClient` result's
+ *     `.query(...)`): its SQL argument is not constrained, so a column name
+ *     split across a concatenation (`"token_" + "hash"`) is not seen, and
+ *     renderSql is not on that path. A literal naming the column is still
+ *     refused by the literal rule above.
  *
  * Each lookup or opaque site is attributed to the nearest named function,
  * method, `const`-bound function, or exported `const`; the key is
@@ -159,7 +186,9 @@ const EXT_MODULE = "src/lib/auth/tokens/extension-token";
 const EXT_TYPES_MODULE = "src/lib/auth/tokens/extension-token-types";
 const EXT_FN = "validateExtensionToken";
 const EXEMPTION_CONST = "PASSKEY_EXEMPTION";
-const DIGEST_KEYS = new Set(["tokenHash", "codeHash"]);
+// Bearer-token digest fields: a token's own digest, and the rotation successor's digest an
+// MCP refresh row records (a lookup by it finds a row from a presented token too).
+const DIGEST_KEYS = new Set(["tokenHash", "codeHash", "replacedByHash"]);
 const FORBIDDEN_READS = new Set(["requirePasskey", "hasPasskey"]);
 // [module, export] pairs an inline gate's `if` condition may call.
 const INLINE_GATES = [[ENFORCEMENT_MODULE, "passkeyEnforcementBlocks"], [GATE_MODULE, GATE_FN]];
@@ -196,7 +225,7 @@ const SCALAR_WRITE_OPS = new Set(["createMany", "updateMany"]);
 // denies a "$extends" literal in scripts/ too.
 const EXTENDS_RE = /^\$extends$/;
 const RAW_METHOD = /^\$(query|execute)Raw(Unsafe)?$/;
-const DIGEST_COLUMN = /token_hash|code_hash/i;
+const DIGEST_COLUMN = /token_hash|code_hash|replaced_by_hash/i;
 // PostgreSQL's Unicode-escape forms (`U&"token\005fhash"`, `UESCAPE`) spell an identifier
 // without its plain text; refused in any literal, like the column names.
 const UNICODE_ESCAPE_SQL = /u&|uescape/i;
@@ -234,7 +263,7 @@ const { models: MODELS, handles: HANDLES } = schema;
 const TOKEN_MODELS = new Set(
   [...MODELS].filter(([, fields]) => [...DIGEST_KEYS].some((k) => fields.has(k))).map(([m]) => m),
 );
-if (TOKEN_MODELS.size === 0) fatal(`${SCHEMA_PATH} declares no model with a tokenHash/codeHash field, so no lookup can be classified.`);
+if (TOKEN_MODELS.size === 0) fatal(`${SCHEMA_PATH} declares no model with a ${[...DIGEST_KEYS].join("/")} field, so no lookup can be classified.`);
 const TOKEN_HANDLES = new Set([...HANDLES].filter(([, m]) => TOKEN_MODELS.has(m)).map(([h]) => h));
 // Token models and the models with a relation field to one: a projection or a write on one of
 // these can name a token model's relation and put a filter on it. One hop, like the `where`
@@ -470,7 +499,9 @@ function literalProps(lit, ctx, onOpaque, followSpreads) {
   for (const prop of lit.getProperties()) {
     const k = prop.getKind();
     if (k === SyntaxKind.PropertyAssignment || k === SyntaxKind.ShorthandPropertyAssignment) {
-      const name = literalName(prop.getNameNode());
+      const nameNode = prop.getNameNode();
+      // A computed key the file pins (`[k]` with `const k = "tokenHash"`, `["tokenHash"]`) is read.
+      const name = nameNode.getKind() === SyntaxKind.ComputedPropertyName ? constString(nameNode.getExpression(), ctx) : literalName(nameNode);
       if (name === null) {
         onOpaque("computed key");
         continue;
@@ -734,10 +765,10 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
   let bindings;
   const file = { sf, rel, bindingsFor: () => (bindings ??= bindingIndex(sf)), imports: importsOf(sf, rel) };
   files.set(rel, file);
-  // A digest key is a property name spelled `tokenHash`/`codeHash`, or one an escape spells
+  // A digest key is a property name spelled as a DIGEST_KEYS member, or one an escape spells
   // (`"token\x48ash"`, `token\u0048ash`, a line continuation): a file with neither has no
   // lookup, and a call on no known delegate there need not be walked.
-  const ctx = { bindingsFor: file.bindingsFor, mayHoldDigestKey: /tokenHash|codeHash|\\/.test(sf.getFullText()) };
+  const ctx = { bindingsFor: file.bindingsFor, mayHoldDigestKey: /tokenHash|codeHash|replacedByHash|\\/.test(sf.getFullText()) };
 
 
   // Digest lookups (any call) and opaque positions (calls on a resolved delegate).
@@ -826,7 +857,7 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     // Source spelling and cooked value both: `token\x5fhash` spells the column only once cooked.
     const texts = [lit.getText(), lit.compilerNode.text ?? ""];
     if (texts.some((t) => DIGEST_COLUMN.test(t))) {
-      failAt(rel, lit, `literal text names a digest column (token_hash/code_hash): raw SQL digest lookups are refused`);
+      failAt(rel, lit, `literal text names a digest column (token_hash/code_hash/replaced_by_hash): raw SQL digest lookups are refused`);
     }
     if (texts.some((t) => UNICODE_ESCAPE_SQL.test(t))) {
       failAt(rel, lit, `literal text holds U& / UESCAPE: a Unicode-escaped SQL identifier can spell a digest column the scan cannot read`);
@@ -1108,7 +1139,7 @@ for (const model of [...TOKEN_MODELS].sort()) {
   }
 }
 for (const [model, entry] of MODEL_ENTRIES) {
-  if (!TOKEN_MODELS.has(model)) failures.push(`BAD_ENTRY: "models" names ${model}, which is not a model declaring tokenHash/codeHash.`);
+  if (!TOKEN_MODELS.has(model)) failures.push(`BAD_ENTRY: "models" names ${model}, which is not a model declaring ${[...DIGEST_KEYS].join("/")}.`);
   else if (typeof entry?.reason !== "string" || entry.reason.trim().length < MIN_REASON) {
     failures.push(`BAD_ENTRY: "models" entry ${model} needs a reason of at least ${MIN_REASON} characters.`);
   }

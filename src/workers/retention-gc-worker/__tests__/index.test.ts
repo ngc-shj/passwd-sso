@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 import { validateRegistry } from "../index";
+import { RAW_SQL_REFUSAL_CODE } from "@/lib/prisma/raw-sql";
 import {
   RETENTION_REGISTRY,
   RLS_FREE_EXPIRY_TABLES,
@@ -73,6 +74,33 @@ describe("validateRegistry — bad identifier throws (INV-C2a/INV-C1c)", () => {
       globalDelete: true,
     } as unknown as RetentionEntry;
     expect(() => validateRegistry([badEntry])).toThrow(/must match/);
+  });
+});
+
+describe("validateRegistry — digest-column identifier throws at boot (C7)", () => {
+  // renderSql would refuse these only once a sweep renders them; the boot
+  // check refuses the registry before any DB connection.
+  const entryWith = (keyColumns: string[], predicateColumn = "is_dcr") =>
+    ({
+      kind: "EXPIRY",
+      table: "mcp_clients",
+      cutoffColumn: "dcr_expires_at",
+      keyColumns,
+      predicate: [{ column: predicateColumn, op: "IS NULL" }],
+      globalDelete: true,
+    }) as unknown as RetentionEntry;
+
+  it.each([
+    ["a key column", entryWith(["id", "token_hash"])],
+    ["a predicate column", entryWith(["id"], "replaced_by_hash")],
+  ])("throws when %s names a digest column", (_label, entry) => {
+    expect(() => validateRegistry([entry])).toThrow(
+      expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.DIGEST_COLUMN }),
+    );
+  });
+
+  it("does NOT throw on the same entry whose columns name no digest column", () => {
+    expect(() => validateRegistry([entryWith(["id", "token"], "hash")])).not.toThrow();
   });
 });
 
