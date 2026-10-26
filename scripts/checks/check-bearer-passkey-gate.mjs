@@ -224,7 +224,9 @@ function enclosingFunction(node) {
   return null;
 }
 
-const isExportedVar = (decl) => decl.getVariableStatement?.()?.isExported?.() ?? false;
+// hasExportKeyword, not isExported: the latter asks the type checker, which builds a
+// Program and resolves every module — the difference between ~1 s and ~40 s here.
+const isExportedVar = (decl) => decl.getVariableStatement?.()?.hasExportKeyword?.() ?? false;
 
 /** `{ name, fn }`: nearest named function, method, const-bound function, or exported const. */
 function attribute(node) {
@@ -447,7 +449,7 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
   const ctx = { bindingsFor: file.bindingsFor };
 
   for (const stmt of sf.getVariableStatements()) {
-    if (stmt.isExported()) for (const d of stmt.getDeclarations()) exportedConsts.add(d.getName());
+    if (stmt.hasExportKeyword()) for (const d of stmt.getDeclarations()) exportedConsts.add(d.getName());
   }
 
   // Digest lookups and opaque wheres.
@@ -624,9 +626,9 @@ if (files.size === 0) fatal(`scanned zero source files under ${join(ROOT, SCAN_R
 // The modules the predicate and the pin resolve against must exist as declared.
 const fileByModule = (m) => [...files.values()].find((f) => moduleOf(f.rel) === m);
 const gateFile = fileByModule(GATE_MODULE);
-if (!gateFile?.sf.getFunction(GATE_FN)?.isExported()) fatal(`${GATE_MODULE}.ts does not export function ${GATE_FN}.`);
+if (!gateFile?.sf.getFunction(GATE_FN)?.hasExportKeyword()) fatal(`${GATE_MODULE}.ts does not export function ${GATE_FN}.`);
 const extFile = fileByModule(EXT_MODULE);
-if (!extFile?.sf.getFunction(EXT_FN)?.isExported()) fatal(`${EXT_MODULE}.ts does not export function ${EXT_FN}.`);
+if (!extFile?.sf.getFunction(EXT_FN)?.hasExportKeyword()) fatal(`${EXT_MODULE}.ts does not export function ${EXT_FN}.`);
 if (!fileByModule(EXT_TYPES_MODULE)?.sf.getVariableDeclaration(EXEMPTION_CONST)) fatal(`${EXT_TYPES_MODULE}.ts does not declare ${EXEMPTION_CONST}.`);
 
 // ─── Manifest adjudication ───────────────────────────────────

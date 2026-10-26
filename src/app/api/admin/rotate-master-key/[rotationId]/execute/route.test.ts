@@ -166,6 +166,8 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/execute", () => {
     const res = await callPOST();
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "PASSKEY_REQUIRED" });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+    expect(mockShareUpdateMany).not.toHaveBeenCalled();
   });
 
   it("returns 404 when rotation not found", async () => {

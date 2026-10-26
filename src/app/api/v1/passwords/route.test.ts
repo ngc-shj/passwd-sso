@@ -421,6 +421,7 @@ describe("POST /api/v1/passwords", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(403);
     expect(json.error).toBe("PASSKEY_REQUIRED");
+    expect(mockEntryCreate).not.toHaveBeenCalled();
   });
 
   it("returns 429 when rate limit exceeded", async () => {

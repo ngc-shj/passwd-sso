@@ -121,7 +121,16 @@ export async function validateApiKey(
     return { ok: false, error: "API_KEY_INVALID" };
   }
 
-  if (await passkeyGateBlocks({ req, userId: key.userId, tenantId: key.tenantId, credential: PASSKEY_GATE_CREDENTIAL.API_KEY, credentialId: key.id })) return { ok: false, error: "PASSKEY_REQUIRED" };
+  if (
+    await passkeyGateBlocks({
+      req,
+      userId: key.userId,
+      tenantId: key.tenantId,
+      credential: PASSKEY_GATE_CREDENTIAL.API_KEY,
+      credentialId: key.id,
+    })
+  )
+    return { ok: false, error: "PASSKEY_REQUIRED" };
 
   // Throttled lastUsedAt update (non-blocking) — parity with SA token
   const shouldUpdate =

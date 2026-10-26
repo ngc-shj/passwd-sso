@@ -68,6 +68,8 @@ export function hasMcpScope(scopes: McpScope[], required: McpScope): boolean {
  * - Bearer with other known prefix (e.g. `scim_`) → null (handled by dedicated routes).
  * - Bearer without known prefix → extension token validation.
  * - Returns `{ type: "scope_insufficient" }` when token is valid but lacks scope.
+ * - Returns `{ type: "passkey_required" }` when an API key or extension token is
+ *   refused by the tenant's passkey requirement (the per-use bearer gate).
  * - Returns `null` when neither auth method succeeds.
  */
 export async function authOrToken(

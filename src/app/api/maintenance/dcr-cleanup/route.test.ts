@@ -125,6 +125,10 @@ describe("POST /api/maintenance/dcr-cleanup (410 deprecation stub)", () => {
     const res = await POST(req);
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "PASSKEY_REQUIRED" });
+    // dcr-cleanup has no DB-write mock (its only effect past auth is the
+    // deprecated-call audit emission) — logAuditAsync stands in for the
+    // guarded mutation here.
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   // ─── Rate Limit ────────────────────────────────────────────

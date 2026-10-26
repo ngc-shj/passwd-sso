@@ -52,3 +52,33 @@ The plan left fixture construction and exact spellings to Phase 2.
 `check-npm-audit.mjs` and `check-terraform-test-count.mjs`. This diff touches neither
 dependencies nor Terraform. Anti-Deferral: they cannot be affected by this change, and they are
 pre-existing CI-only gates, not gaps this PR opens.
+
+## Step 2-4 / 2-5 fixes
+
+- **`check-raw-sql-usage` measured exemption:** the C7 gate spells `renderSql` and `trustedSql`
+  as data to recognise the accepted unsafe-raw argument shape, and `check-raw-sql-usage`'s
+  RAW_SQL_NAMES literal clause refused them. That clause gains a per-(file, literal, exact
+  count) exemption table, mirroring its existing `UNSCANNED_LITERAL_EXEMPTIONS`. It has one entry
+  (this gate, one of each name). An unmeasured name or a count drift still denies. Self-test
+  cells cover allow, unmeasured and drift, and the allow cell was red-proved by removing the entry.
+- **C7 runtime:** the gate took about 37 s because ts-morph's `isExported()` consults the type
+  checker, which builds a Program and resolves every module. It now uses the syntactic
+  `hasExportKeyword()` and takes about 5 s, with an identical result (28/28).
+  - Cost: an `export { name }` list does not count as exported for attribution. Such a const
+    then attributes to its enclosing function, or fails as unattributable; it never passes
+    silently.
+- **Self-check findings fixed:**
+  - auth-surface-matrix rows cite subjects instead of stale line ranges (R29);
+  - the `V1Forbidden` comment no longer claims SA tokens are gated (R49);
+  - deny cells on mutating handlers assert that the write did not run (RT8);
+  - the CLI passkey message lives in one helper (R2);
+  - the `authOrToken` doc comment lists the new variant.
+- **Unit red proofs** (scratch copy), each turning its suite red:
+  - the helper returning `false`;
+  - the gate removed from `validateApiKey`, from `validateOperatorToken`, and from
+    `validateExtensionToken`;
+  - `lastUsedAt` written before the gate, in `validateApiKey` and in `validateExtensionToken`;
+  - the write put back into the DPoP helper;
+  - the exemption ignored.
+- **Integration red proofs:** the agent ran two, both red: the gate removed from
+  `validateApiKey`, and the audit limiter check deleted.

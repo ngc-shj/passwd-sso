@@ -436,9 +436,10 @@ export function buildOpenApiSpec(baseUrl: string) {
           description: "Insufficient API key scope",
           content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } },
         },
-        // v1-specific: every bearer credential reaching a v1 route is gated
-        // per use for the tenant's passkey requirement (PASSKEY_REQUIRED), on
-        // top of the existing scope check. Session routes keep the shared
+        // v1-specific: every API key reaching a v1 route is gated per use for
+        // the tenant's passkey requirement (PASSKEY_REQUIRED), on top of the
+        // existing scope check. Service-account tokens are not user-bound and
+        // are not gated. Session routes keep the shared
         // `Forbidden` response above — this gate does not apply to them.
         V1Forbidden: {
           description:

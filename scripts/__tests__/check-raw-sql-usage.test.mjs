@@ -249,6 +249,29 @@ describe("check-raw-sql-usage Layer 2 — RAW_SQL_NAMES", () => {
       expectCode: 1,
       expectReason: "RAW_SQL_NAMES",
     },
+    // A measured (file, literal, count) exemption: another gate that spells
+    // the names as data. Exactly the measured literals pass; an extra one, or
+    // a count drift, denies.
+    {
+      name: "allow: the measured renderSql/trustedSql literals in check-bearer-passkey-gate.mjs",
+      src: `export const a = "renderSql";\nexport const b = "trustedSql";\n`,
+      path: "scripts/checks/check-bearer-passkey-gate.mjs",
+      expectCode: 0,
+    },
+    {
+      name: "deny: an unmeasured name literal in check-bearer-passkey-gate.mjs",
+      src: `export const a = "renderSql";\nexport const b = "trustedSql";\nexport const c = "joinSql";\n`,
+      path: "scripts/checks/check-bearer-passkey-gate.mjs",
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
+    {
+      name: "deny: a measured literal whose count drifted in check-bearer-passkey-gate.mjs",
+      src: `export const a = "renderSql";\nexport const b = "trustedSql";\nexport const d = "renderSql";\n`,
+      path: "scripts/checks/check-bearer-passkey-gate.mjs",
+      expectCode: 1,
+      expectReason: "RAW_SQL_NAMES",
+    },
     // F4-c: a scanned file that SHADOWS raw-sql.ts's own module-resolution
     // candidate paths denies unconditionally — Node's real resolver would
     // load the shadow, not the TS source, for any specifier reaching it.

@@ -157,6 +157,9 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     const res = await POST(req);
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "PASSKEY_REQUIRED" });
+    expect(mockQueryRaw).not.toHaveBeenCalled();
+    expect(mockDeleteMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   // ─── Rate Limit ────────────────────────────────────────────

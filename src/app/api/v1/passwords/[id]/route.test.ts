@@ -337,6 +337,7 @@ describe("PUT /api/v1/passwords/[id]", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(403);
     expect(json.error).toBe("PASSKEY_REQUIRED");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 404 when entry not found", async () => {
@@ -738,6 +739,7 @@ describe("DELETE /api/v1/passwords/[id]", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(403);
     expect(json.error).toBe("PASSKEY_REQUIRED");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 404 when entry not found", async () => {
