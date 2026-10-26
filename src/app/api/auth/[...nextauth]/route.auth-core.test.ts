@@ -63,7 +63,7 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
 }
 
-function installFetch() {
+function installFetch({ tokenFails = false } = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string | URL | Request) => {
@@ -83,6 +83,12 @@ function installFetch() {
       }
       if (url.pathname === "/jwks") return json({ keys: [JWK] });
       if (url.pathname === "/token") {
+        if (tokenFails) {
+          return new Response(JSON.stringify({ error: "invalid_grant" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
         return json({
           access_token: "access-token-1",
           token_type: "Bearer",
@@ -127,7 +133,7 @@ function fakeAdapter() {
     updateSession: vi.fn(async () => null),
     deleteSession: vi.fn(async () => null),
   } satisfies Adapter;
-  return { adapter, replaced };
+  return { adapter, replaced, sessions };
 }
 
 function authConfig(adapter: Adapter): AuthConfig {
@@ -208,6 +214,24 @@ describe("callback through withoutSessionCookieOnCallback (@auth/core)", () => {
     // ...and the new session is created as the replacement of the one the
     // browser held, so that session is deleted rather than left alive.
     expect(replaced).toEqual([VICTIM_TOKEN]);
+  });
+
+  // The replaced session goes only with a session the sign-in creates.
+  it("keeps the session the browser held when the callback fails", async () => {
+    installFetch({ tokenFails: true });
+    const { adapter, replaced, sessions } = fakeAdapter();
+    const config = authConfig(adapter);
+    const { _withoutSessionCookieOnCallback } = await import("@/app/api/auth/[...nextauth]/route");
+
+    const response = await _withoutSessionCookieOnCallback((req: NextRequest) => Auth(req, config))(
+      await callbackRequest(config),
+    );
+
+    expect(response.headers.get("location")).toContain("error=");
+    expect(adapter.createSession).not.toHaveBeenCalled();
+    expect(adapter.deleteSession).not.toHaveBeenCalled();
+    expect(replaced).toEqual([]);
+    expect(sessions.has(VICTIM_TOKEN)).toBe(true);
   });
 
   it("control: Auth.js called directly links the IdP account to the signed-in victim", async () => {

@@ -145,3 +145,65 @@ Minor finding:
   - `deleteSession` returns nothing;
   - no cache eviction.
 - **Verification:** lint, full vitest (1093 files), and build all pass.
+
+## Round 3 (e4c069bcc)
+
+### Security
+No findings.
+- `replacesSessionToken` has one writer: the callback wrapper's `run()`, scoped to the request.
+- Passkey verify never sets it.
+- The delete stays under the same `AUTH_SESSION_CAPPING` grant as cap eviction.
+- The new `AUTH_LOGOUT` row carries only `userId`, ip and UA.
+
+### Functionality
+- FN-R3-1, Minor: the `src/auth.ts` signIn-callback comment still described the mutated meta
+  as the one `withSessionMeta` establishes.
+- FN-R3-2, Minor: deleting the replaced session before the fire-and-forget new-device check
+  hid this browser's UA from it.
+  - A same-user re-sign-in could then email a spurious "new device" alert.
+  - Upstream ran no check here, because it reused the session.
+
+### Testing
+- T-R3-1, Major: the adapter's stateful fake ignored `where` semantics.
+  - A delete scoped to `userId` (which breaks the user switch) stayed green.
+  - So did a delete with an undefined filter.
+- T-R3-2, Major: the replaced session's cache eviction was asserted by arguments only, not
+  as happening after commit, and nothing pinned the rollback case.
+- T-R3-3, Minor: no direct cells covered lock → delete → count order or a single transaction.
+- T-R3-4, Minor: nothing pinned that a failed callback keeps the replaced session.
+
+## Resolution Status (round 3)
+- **FN-R3-1:** comment reworded to "the innermost `sessionMetaStorage.run`"; it notes that the
+  outer store does not see the mutation.
+- **FN-R3-2:** `createSessionUnderConcurrencyCap` reads the replaced row's `userId` before
+  deleting it and returns `replacedOwnSession`. `createCappedSession` skips the new-device check
+  when that is true, because the browser presented this user's own session.
+  - A user switch still runs the check.
+  - So does a replaced session that is already gone.
+- **T-R3-1:** three real-DB cells in `session-concurrency-cap.integration.test.ts` make
+  Prisma's own `where` semantics authoritative:
+  - a re-sign-in at the cap keeps the other device;
+  - a user switch deletes the other user's replaced session but not that user's other
+    session;
+  - a sign-in that replaces nothing leaves other users' sessions alone.
+- **T-R3-2/T-R3-3:** new `session-concurrency.test.ts` cells:
+  - `$executeRaw` lock < `deleteMany(digest)` < tenant read and count;
+  - one `withBypassRls`;
+  - delete while the transaction is open, cache eviction after it closes;
+  - no eviction when the create rejects;
+  - the new-device skip, the user switch, and the already-gone cells.
+- **T-R3-4:** an auth-core cell where the IdP token exchange fails.
+  - Neither `createSession` nor `deleteSession` runs.
+  - No replaced token is recorded.
+  - The victim's session stays in the store.
+- **Red proofs** (scratch worktree; base green 90 unit / 6 integration); each mutant turns at
+  least one cell red:
+  - delete scoped to `userId` (integration);
+  - cache eviction inside the transaction;
+  - delete in a separate bypass transaction;
+  - skip regardless of owner;
+  - never skip;
+  - delete moved after the count (unit and integration).
+- **Not run:** a guard-dropping mutant that deletes with an undefined filter. Against the shared
+  dev DB it would delete every session row. The `findUnique` on the digest now runs first, and
+  Prisma rejects an undefined unique key.

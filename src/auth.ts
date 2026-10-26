@@ -906,9 +906,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       // Propagate provider to the adapter via sessionMetaStorage so
       // createSession can record Session.provider for AAL3 enforcement.
-      // The meta object is the one established by withSessionMeta at the
-      // route handler entry; AsyncLocalStorage returns the same reference
-      // throughout the async chain, so mutating it is the intended pattern.
+      // The meta object is the innermost sessionMetaStorage.run: the one
+      // withSessionMeta establishes, or on a callback that carried a session
+      // cookie, the copy the callback wrapper makes with replacesSessionToken
+      // (the outer store does not see this mutation). AsyncLocalStorage
+      // returns the same reference throughout the handler, so mutating it is
+      // the intended pattern.
       const meta = sessionMetaStorage.getStore();
       if (meta) meta.provider = provider ?? null;
       if (provider === "nodemailer") {

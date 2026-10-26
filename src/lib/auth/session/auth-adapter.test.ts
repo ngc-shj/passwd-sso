@@ -35,6 +35,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
   mockTxSession: {
+    findUnique: vi.fn(),
     create: vi.fn(),
     findMany: vi.fn(),
     deleteMany: vi.fn(),
@@ -775,6 +776,10 @@ describe("createCustomAdapter", () => {
           { id: "s-other", sessionToken: "hashed:other-tok", ipAddress: null, userAgent: "other" },
           { id: "s-prev", sessionToken: "hashed:prev-tok", ipAddress: null, userAgent: "prev" },
         ];
+        mockTxSession.findUnique.mockImplementation(
+          async ({ where }: { where: { sessionToken: string } }) =>
+            rows.find((row) => row.sessionToken === where.sessionToken) ? { userId: "u-1" } : null,
+        );
         mockTxSession.findMany.mockImplementation(async () => [...rows]);
         mockTxSession.deleteMany.mockImplementation(
           async ({ where }: { where: { sessionToken?: string; id?: { in: string[] } } }) => {

@@ -234,6 +234,78 @@ describe("session-concurrency-cap — real-DB integration (C1)", () => {
     expect(await sessionDigestExists(ctx, hashSessionToken(sessionB.raw))).toBe(true);
     expect(await sessionDigestExists(ctx, hashSessionToken(newRaw))).toBe(true);
   });
+
+  // An OAuth callback's sign-in replaces the session the browser held
+  // (issue #966). That row is deleted before the cap counts, so at the cap
+  // it does not push out the user's other device; it may belong to another
+  // user when the sign-in switches users.
+  async function seedSession(ownerId: string, createdAt: Date): Promise<string> {
+    const raw = `seed-${randomUUID()}`;
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires, created_at, last_active_at)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, now() + interval '1 day', $5, $5)`,
+        randomUUID(),
+        hashSessionToken(raw),
+        ownerId,
+        tenantId,
+        createdAt,
+      );
+    });
+    return raw;
+  }
+
+  function signIn(sessionToken: string, replacesSessionToken?: string) {
+    return createCappedSession({
+      userId,
+      tenantId,
+      sessionToken,
+      expires: new Date(Date.now() + 3_600_000),
+      ip: null,
+      userAgent: null,
+      acceptLanguage: null,
+      provider: "google",
+      replacesSessionToken,
+    });
+  }
+
+  it("a re-sign-in at the cap replaces its own session and keeps the other device", async () => {
+    await setMaxConcurrentSessions(ctx, tenantId, 2);
+    const now = Date.now();
+    const otherDevice = await seedSession(userId, new Date(now - 10 * 60_000));
+    const replaced = await seedSession(userId, new Date(now - 5 * 60_000));
+
+    const newRaw = `new-${randomUUID()}`;
+    await signIn(newRaw, replaced);
+
+    expect(await sessionDigestExists(ctx, hashSessionToken(replaced))).toBe(false);
+    expect(await sessionDigestExists(ctx, hashSessionToken(otherDevice))).toBe(true);
+    expect(await sessionDigestExists(ctx, hashSessionToken(newRaw))).toBe(true);
+  });
+
+  it("a sign-in that switches users deletes the other user's replaced session", async () => {
+    await setMaxConcurrentSessions(ctx, tenantId, 2);
+    const previousUserId = await ctx.createUser(tenantId);
+    const replaced = await seedSession(previousUserId, new Date(Date.now() - 60_000));
+    const previousUserOtherDevice = await seedSession(previousUserId, new Date(Date.now() - 120_000));
+
+    const newRaw = `new-${randomUUID()}`;
+    await signIn(newRaw, replaced);
+
+    expect(await sessionDigestExists(ctx, hashSessionToken(replaced))).toBe(false);
+    expect(await sessionDigestExists(ctx, hashSessionToken(previousUserOtherDevice))).toBe(true);
+    expect(await sessionDigestExists(ctx, hashSessionToken(newRaw))).toBe(true);
+  });
+
+  it("a sign-in that replaces nothing leaves every other user's session alone", async () => {
+    const otherUserId = await ctx.createUser(tenantId);
+    const otherUserSession = await seedSession(otherUserId, new Date(Date.now() - 60_000));
+
+    await signIn(`new-${randomUUID()}`);
+
+    expect(await sessionDigestExists(ctx, hashSessionToken(otherUserSession))).toBe(true);
+  });
 });
 
 describe("POST /api/auth/passkey/verify — real-DB integration (C2, no cascade)", () => {

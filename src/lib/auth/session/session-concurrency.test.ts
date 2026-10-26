@@ -48,6 +48,7 @@ function makeTx() {
     $executeRaw: vi.fn().mockResolvedValue(1),
     tenant: { findUnique: vi.fn() },
     session: {
+      findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       create: vi.fn(),
@@ -80,6 +81,35 @@ describe("createSessionUnderConcurrencyCap", () => {
     expect(
       tx.$executeRaw.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
     ).toBe(true);
+  });
+
+  it("deletes the replaced session by digest after the lock and before the cap is read", async () => {
+    const tx = makeTx();
+    tx.session.findUnique.mockResolvedValue({ userId: "u-2" });
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+
+    await createSessionUnderConcurrencyCap(tx as never, {
+      userId: "u-1",
+      tenantId: "tenant-1",
+      sessionToken: "raw-token",
+      expires,
+      ip: null,
+      userAgent: null,
+      provider: null,
+      replacesSessionToken: "prev-token",
+    });
+
+    expect(tx.session.deleteMany).toHaveBeenCalledWith({
+      where: { sessionToken: "hashed:prev-token" },
+    });
+    const [lock] = tx.$executeRaw.mock.invocationCallOrder;
+    const [replacedDelete] = tx.session.deleteMany.mock.invocationCallOrder;
+    const [capRead] = tx.tenant.findUnique.mock.invocationCallOrder;
+    const [count] = tx.session.findMany.mock.invocationCallOrder;
+    expect(lock).toBeLessThan(replacedDelete);
+    expect(replacedDelete).toBeLessThan(capRead);
+    expect(replacedDelete).toBeLessThan(count);
   });
 
   it("fails closed when the tenant row is missing", async () => {
@@ -322,5 +352,81 @@ describe("createCappedSession", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "SESSION_EVICTED", targetId: "old-s1", userId: "u-1" }),
     );
+  });
+
+  it("deletes the replaced session in the creating transaction and evicts its cache entry after commit", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-2" });
+    const state = openTxAround(tx);
+    let deletedWhileOpen: boolean | null = null;
+    tx.session.deleteMany.mockImplementation(async () => {
+      deletedWhileOpen = state.open;
+      return { count: 1 };
+    });
+    let evictedWhileOpen: boolean | null = null;
+    mockInvalidateCachedSessions.mockImplementation(async () => {
+      evictedWhileOpen = state.open;
+    });
+
+    await createCappedSession({ ...input, replacesSessionToken: "prev-token" });
+
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(deletedWhileOpen).toBe(true);
+    expect(mockInvalidateCachedSessions).toHaveBeenCalledWith(["hashed:prev-token"]);
+    expect(evictedWhileOpen).toBe(false);
+  });
+
+  it("keeps the replaced session's cache entry when the creating transaction fails", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockRejectedValue(new Error("db down"));
+    tx.session.findUnique.mockResolvedValue({ userId: "u-1" });
+    openTxAround(tx);
+
+    await expect(
+      createCappedSession({ ...input, replacesSessionToken: "prev-token" }),
+    ).rejects.toThrow("db down");
+
+    expect(mockInvalidateCachedSessions).not.toHaveBeenCalled();
+  });
+
+  // The browser presented this user's own session, so it is a known device;
+  // the deleted row would otherwise be missing from the new-device check.
+  it("skips the new-device check when the replaced session was the user's own", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-1" });
+    openTxAround(tx);
+
+    await createCappedSession({ ...input, replacesSessionToken: "prev-token" });
+
+    expect(mockCheckNewDeviceAndNotify).not.toHaveBeenCalled();
+  });
+
+  it("still checks for a new device when the replaced session was another user's", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+    tx.session.findUnique.mockResolvedValue({ userId: "u-2" });
+    openTxAround(tx);
+
+    await createCappedSession({ ...input, replacesSessionToken: "prev-token" });
+
+    expect(mockCheckNewDeviceAndNotify).toHaveBeenCalledTimes(1);
+  });
+
+  it("still checks for a new device when the replaced session is already gone", async () => {
+    const tx = makeTx();
+    tx.tenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    tx.session.create.mockResolvedValue({ userId: "u-1", expires });
+    openTxAround(tx);
+
+    await createCappedSession({ ...input, replacesSessionToken: "prev-token" });
+
+    expect(tx.session.deleteMany).not.toHaveBeenCalled();
+    expect(mockCheckNewDeviceAndNotify).toHaveBeenCalledTimes(1);
   });
 });
