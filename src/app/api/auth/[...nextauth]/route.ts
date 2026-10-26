@@ -9,6 +9,8 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
+import { parseCookiePairs } from "@/lib/auth/session/session-cookie";
 
 export const runtime = "nodejs";
 
@@ -43,6 +45,16 @@ function withAuthBasePath<H extends RouteHandler>(handler: H): H {
     return handler(patched, ...rest);
   };
   return wrapped as unknown as H;
+}
+
+/**
+ * The Auth.js action path with any basePath removed. The wrappers below run
+ * inside withAuthBasePath, whose rebuilt request carries the basePath, so a
+ * check against "/api/auth/..." must not depend on whether it is there.
+ */
+function authActionPath(pathname: string): string {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  return basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) : pathname;
 }
 
 function withSessionMeta<H extends RouteHandler>(handler: H): H {
@@ -81,7 +93,7 @@ const callbackRateLimiter = createRateLimiter({
 });
 
 function isCallbackRoute(pathname: string): boolean {
-  return pathname.startsWith("/api/auth/callback/");
+  return authActionPath(pathname).startsWith("/api/auth/callback/");
 }
 
 function withCallbackRateLimit<H extends RouteHandler>(handler: H): H {
@@ -134,10 +146,11 @@ const magicLinkIpLimiter = createRateLimiter({
 function isMagicLinkSigninRoute(pathname: string, method: string): boolean {
   // Auth.js v5 routes: POST /api/auth/signin/{providerId}
   // (nodemailer provider's POST entrypoint)
+  const path = authActionPath(pathname);
   return (
     method === "POST" &&
-    (pathname === "/api/auth/signin/nodemailer" ||
-      pathname === "/api/auth/signin/email")
+    (path === "/api/auth/signin/nodemailer" ||
+      path === "/api/auth/signin/email")
   );
 }
 
@@ -170,19 +183,65 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
   return wrapped as unknown as H;
 }
 
+// ─── No signed-in account linking on callback ────────────────
+//
+// On an OAuth/OIDC callback, Auth.js reads the current session and, when the
+// incoming provider account is linked to no one, links it to the signed-in
+// user (handleLoginOrRegister). Nothing in this app links accounts while
+// signed in — sign-in is only started from the sign-in page — so that branch
+// only serves someone holding a stolen session cookie: they would complete
+// the IdP flow with an account they control and walk away with a login that
+// outlives the stolen session. Dropping the session cookies from callback
+// requests makes every callback a fresh sign-in. The other Auth.js cookies
+// (state, PKCE, nonce, callback URL, CSRF) are kept.
+function isSessionCookieKey(key: string): boolean {
+  return ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => key.startsWith(name));
+}
+
+function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
+  const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
+    const cookie = request.headers.get("cookie");
+    if (!cookie || !isCallbackRoute(request.nextUrl.pathname)) {
+      return handler(request, ...rest);
+    }
+    const kept = parseCookiePairs(cookie).filter((pair) => !isSessionCookieKey(pair.key));
+    const headers = new Headers(request.headers);
+    if (kept.length > 0) {
+      headers.set("cookie", kept.map((pair) => `${pair.key}=${pair.value}`).join("; "));
+    } else {
+      headers.delete("cookie");
+    }
+    const stripped = new NextRequest(request.url, {
+      headers,
+      method: request.method,
+      body: request.body,
+      duplex: "half",
+    });
+    return handler(stripped, ...rest);
+  };
+  return wrapped as unknown as H;
+}
+
 // Exported for testing
 export { withAuthBasePath as _withAuthBasePath };
 export { withCallbackRateLimit as _withCallbackRateLimit };
 export { withMagicLinkIpRateLimit as _withMagicLinkIpRateLimit };
 export { isCallbackRoute as _isCallbackRoute };
+export { withoutSessionCookieOnCallback as _withoutSessionCookieOnCallback };
 
 export const GET = withRequestLog(
-  withSessionMeta(withAuthBasePath(withCallbackRateLimit(handlers.GET))),
+  withSessionMeta(
+    withAuthBasePath(
+      withCallbackRateLimit(withoutSessionCookieOnCallback(handlers.GET)),
+    ),
+  ),
 );
 export const POST = withRequestLog(
   withSessionMeta(
     withAuthBasePath(
-      withCallbackRateLimit(withMagicLinkIpRateLimit(handlers.POST)),
+      withCallbackRateLimit(
+        withMagicLinkIpRateLimit(withoutSessionCookieOnCallback(handlers.POST)),
+      ),
     ),
   ),
 );

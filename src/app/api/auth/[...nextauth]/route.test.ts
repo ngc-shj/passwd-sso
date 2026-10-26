@@ -540,3 +540,161 @@ describe("fail-closed contract (Redis unavailable → 503)", () => {
     });
   });
 });
+
+describe("basePath: the path checks see the Auth.js action, not the prefix", () => {
+  beforeEach(() => {
+    mockRateLimitCheck.mockReset();
+    mockExtractClientIp.mockReset();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockExtractClientIp.mockReturnValue("203.0.113.5");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  // withAuthBasePath rebuilds the request with the basePath before the
+  // limiters run, so they used to see "/passwd-sso/api/auth/..." and skip.
+  it("rate-limits a callback whose path carries the basePath", async () => {
+    const { _withCallbackRateLimit, _isCallbackRoute } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    expect(_isCallbackRoute("/passwd-sso/api/auth/callback/google")).toBe(true);
+    expect(_isCallbackRoute("/passwd-sso/api/auth/session")).toBe(false);
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    await _withCallbackRateLimit(inner)(
+      new NextRequest("http://localhost:3000/passwd-sso/api/auth/callback/google"),
+    );
+    expect(mockRateLimitCheck).toHaveBeenCalledWith("rl:auth_callback:203.0.113.5");
+  });
+
+  it("rate-limits a magic-link sign-in whose path carries the basePath", async () => {
+    const { _withMagicLinkIpRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    await _withMagicLinkIpRateLimit(inner)(
+      new NextRequest("http://localhost:3000/passwd-sso/api/auth/signin/nodemailer", {
+        method: "POST",
+      }),
+    );
+    expect(mockRateLimitCheck).toHaveBeenCalledTimes(1);
+  });
+
+  // Whether the basePath is on the path depends on which wrapper saw the
+  // request first; both spellings must classify the same.
+  it("still classifies a callback path that arrives without the basePath", async () => {
+    const { _isCallbackRoute } = await import("@/app/api/auth/[...nextauth]/route");
+    expect(_isCallbackRoute("/api/auth/callback/google")).toBe(true);
+  });
+});
+
+describe("withoutSessionCookieOnCallback", () => {
+  const SESSION_COOKIES = [
+    "authjs.session-token=aaaa",
+    "__Secure-authjs.session-token=bbbb",
+    "__Host-authjs.session-token=cccc",
+    "authjs.session-token.0=dddd",
+    "next-auth.session-token=eeee",
+  ];
+  const OTHER_COOKIES = [
+    "authjs.pkce.code_verifier=pk",
+    "authjs.state=st",
+    "authjs.callback-url=cb",
+    "authjs.csrf-token=cs",
+    "NEXT_LOCALE=ja",
+  ];
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function forward(path: string, cookie: string | null, init: { method?: string; body?: string } = {}) {
+    const { _withoutSessionCookieOnCallback } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    let seen: NextRequest | undefined;
+    const inner = vi.fn<RouteHandler>(async (req) => {
+      seen = req;
+      return new Response("ok");
+    });
+    await _withoutSessionCookieOnCallback(inner)(
+      new NextRequest(`http://localhost:3000${path}`, {
+        method: init.method ?? "GET",
+        body: init.body,
+        headers: cookie === null ? {} : { cookie },
+      }),
+    );
+    expect(inner).toHaveBeenCalledTimes(1);
+    return seen as NextRequest;
+  }
+
+  it("drops every session cookie on a callback and keeps the others", async () => {
+    const req = await forward(
+      "/api/auth/callback/google",
+      [...SESSION_COOKIES, ...OTHER_COOKIES].join("; "),
+    );
+    expect(req.headers.get("cookie")).toBe(OTHER_COOKIES.join("; "));
+  });
+
+  it("removes the cookie header when only session cookies were sent", async () => {
+    const req = await forward("/api/auth/callback/google", SESSION_COOKIES.join("; "));
+    expect(req.headers.get("cookie")).toBeNull();
+  });
+
+  // The control: outside callback/* the session is what the action needs.
+  it.each(["/api/auth/session", "/api/auth/signout", "/api/auth/signin/google", "/api/auth/csrf"])(
+    "leaves the cookie header untouched on %s",
+    async (path) => {
+      const cookie = [...SESSION_COOKIES, ...OTHER_COOKIES].join("; ");
+      const req = await forward(path, cookie);
+      expect(req.headers.get("cookie")).toBe(cookie);
+    },
+  );
+
+  it("strips on a basePath-prefixed callback too", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    const req = await forward(
+      "/passwd-sso/api/auth/callback/google",
+      ["authjs.session-token=aaaa", "authjs.state=st"].join("; "),
+    );
+    expect(req.headers.get("cookie")).toBe("authjs.state=st");
+  });
+
+  it("keeps the method and body of a form_post callback", async () => {
+    const req = await forward("/api/auth/callback/jackson", "authjs.session-token=aaaa", {
+      method: "POST",
+      body: "code=abc&state=st",
+    });
+    expect(req.method).toBe("POST");
+    expect(await req.text()).toBe("code=abc&state=st");
+  });
+});
+
+describe("exported handlers reach Auth.js without a session cookie on callback", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it.each(["GET", "POST"] as const)("%s callback", async (method) => {
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockExtractClientIp.mockReturnValue("203.0.113.5");
+    const route = await import("@/app/api/auth/[...nextauth]/route");
+    const { handlers } = await import("@/auth");
+    const handler = vi.mocked(handlers[method]);
+    handler.mockClear();
+    await route[method](
+      new NextRequest("http://localhost:3000/api/auth/callback/google", {
+        method,
+        headers: { cookie: "authjs.session-token=aaaa; authjs.state=st" },
+      }),
+    );
+    expect(handler).toHaveBeenCalledTimes(1);
+    const reached = handler.mock.calls[0][0] as NextRequest;
+    expect(reached.headers.get("cookie")).toBe("authjs.state=st");
+  });
+});
