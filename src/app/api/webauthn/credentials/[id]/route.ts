@@ -17,6 +17,7 @@ import {
 } from "@/lib/auth/policy/passkey-enforcement";
 import { invalidateUserSessionsCache } from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -104,7 +105,7 @@ async function handleDELETE(
     cacheInvalidation = await invalidateUserSessionsCache(userId);
   } catch (err) {
     getLogger().error(
-      { err, userId, _logType: "webauthn.credential_delete_cache_invalidation_failed" },
+      { error: errorLogFields(err), userId, _logType: "webauthn.credential_delete_cache_invalidation_failed" },
       "webauthn credential delete: invalidateUserSessionsCache failed",
     );
   }

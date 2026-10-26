@@ -15,6 +15,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { invalidateUserSessionsCache } from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   PIN_LENGTH_MIN,
   PIN_LENGTH_MAX,
@@ -321,7 +322,7 @@ async function handlePOST(req: NextRequest) {
     cacheInvalidation = await invalidateUserSessionsCache(userId);
   } catch (err) {
     getLogger().error(
-      { err, userId, _logType: "webauthn.register_verify_cache_invalidation_failed" },
+      { error: errorLogFields(err), userId, _logType: "webauthn.register_verify_cache_invalidation_failed" },
       "webauthn register/verify: invalidateUserSessionsCache failed",
     );
   }
