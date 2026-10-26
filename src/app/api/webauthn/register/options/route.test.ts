@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import { STEP_UP_WINDOW_MS } from "@/lib/auth/session/step-up";
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
@@ -15,8 +17,8 @@ const {
   mockGenerateRegistrationOpts,
   mockDerivePrfSalt,
   mockDerivePrfSaltV2,
-  mockDerivePasskeyState,
   mockRequireRecentCurrentAuthMethod,
+  mockSessionFindUnique,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
   return {
@@ -32,8 +34,8 @@ const {
     mockGenerateRegistrationOpts: vi.fn(),
     mockDerivePrfSalt: vi.fn(),
     mockDerivePrfSaltV2: vi.fn(),
-    mockDerivePasskeyState: vi.fn(),
     mockRequireRecentCurrentAuthMethod: vi.fn(),
+    mockSessionFindUnique: vi.fn(),
   };
 });
 
@@ -50,6 +52,8 @@ vi.mock("@/lib/redis", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     webAuthnCredential: { findMany: mockPrismaFindMany },
+    // Read only by the real step-up helper the D5 cells run.
+    session: { findUnique: mockSessionFindUnique },
   },
 }));
 
@@ -57,15 +61,10 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
-// D5 (#959): the real `passkeyEnforcementBlocks` predicate stays live
-// (pure, no I/O); only the DB re-derivation is mocked.
-vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
-  return {
-    ...real,
-    derivePasskeyState: mockDerivePasskeyState,
-  };
-});
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tenant-rls")>()),
+  withBypassRls: (client: unknown, fn: (tx: unknown) => unknown) => fn(client),
+}));
 
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
@@ -140,14 +139,8 @@ describe("POST /api/webauthn/register/options", () => {
     mockWithUserTenantRls.mockImplementation(
       (_userId: string, fn: (tenantId?: string) => unknown) => fn("tenant-1"),
     );
-    // Default: passkey enforcement off (does not block) — the step-up gate
-    // is a no-op and requireRecentCurrentAuthMethod is never reached.
-    mockDerivePasskeyState.mockResolvedValue({
-      requirePasskey: false,
-      hasPasskey: false,
-      requirePasskeyEnabledAt: null,
-      passkeyGracePeriodDays: null,
-    });
+    // Default: a recent session — the step-up gate passes. The D5 cells below
+    // run the real helper instead.
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
   });
 
@@ -327,49 +320,86 @@ describe("POST /api/webauthn/register/options", () => {
     expect(mockRateLimiterCheck).toHaveBeenCalledWith("rl:webauthn_reg_opts:user-1");
   });
 
-  // ── D5 (#959): step-up required while passkey enforcement blocks ────────
+  // ── D5 (#959): registration always requires a recent sign-in ─────────
+  // Runs the real requireRecentCurrentAuthMethod over a mocked session row, so
+  // the window comparison itself is exercised. The route no longer reads the
+  // passkey state, so every cell is a member the tenant does not block.
 
-  describe("D5 passkey-blocked step-up gate", () => {
-    const blockedState = {
-      requirePasskey: true,
-      hasPasskey: false,
-      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
-      passkeyGracePeriodDays: 7,
-    };
+  describe("D5 step-up gate (always required)", () => {
+    const NOW = new Date("2026-10-27T12:00:00.000Z").getTime();
+    const COOKIE = { cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` };
 
-    it("returns SESSION_STEP_UP_REQUIRED when blocked and the session is stale", async () => {
-      mockDerivePasskeyState.mockResolvedValue(blockedState);
-      mockRequireRecentCurrentAuthMethod.mockResolvedValue(
-        new Response(JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }), { status: 403 }),
+    beforeEach(async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      vi.stubEnv("AUTH_URL", "http://localhost:3000");
+      const real = await vi.importActual<
+        typeof import("@/lib/auth/session/recent-current-auth-method")
+      >("@/lib/auth/session/recent-current-auth-method");
+      mockRequireRecentCurrentAuthMethod.mockImplementation(real.requireRecentCurrentAuthMethod);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    });
+
+    function sessionRow(row: Record<string, unknown>) {
+      mockSessionFindUnique.mockResolvedValue({
+        userId: "user-1",
+        provider: "google",
+        passkeyVerifiedAt: null,
+        authCredentialId: null,
+        ...row,
+      });
+    }
+
+    it("refuses a sign-in 1 ms past STEP_UP_WINDOW_MS with SESSION_STEP_UP_REQUIRED, minting no challenge", async () => {
+      sessionRow({ createdAt: new Date(NOW - STEP_UP_WINDOW_MS - 1) });
+
+      const { status, json } = await parseResponse(
+        await POST(createRequest("POST", ROUTE_URL, { headers: COOKIE })),
       );
-
-      const req = createRequest("POST", ROUTE_URL);
-      const { status, json } = await parseResponse(await POST(req));
 
       expect(status).toBe(403);
       expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
       expect(mockGenerateRegistrationOpts).not.toHaveBeenCalled();
+      expect(mockRedisSet).not.toHaveBeenCalled();
     });
 
-    it("proceeds when blocked but the session is recent", async () => {
-      mockDerivePasskeyState.mockResolvedValue(blockedState);
-      mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
+    it("allows a sign-in exactly STEP_UP_WINDOW_MS old (the window is inclusive)", async () => {
+      sessionRow({ createdAt: new Date(NOW - STEP_UP_WINDOW_MS) });
 
-      const req = createRequest("POST", ROUTE_URL);
-      const { status } = await parseResponse(await POST(req));
+      const { status } = await parseResponse(
+        await POST(createRequest("POST", ROUTE_URL, { headers: COOKIE })),
+      );
 
       expect(status).toBe(200);
-      expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledWith(req, "user-1");
-      expect(mockGenerateRegistrationOpts).toHaveBeenCalledTimes(1);
+      expect(mockRedisSet).toHaveBeenCalledTimes(1);
     });
 
-    it("never calls requireRecentCurrentAuthMethod when enforcement does not block", async () => {
-      // beforeEach's default derivePasskeyState already resolves "not blocked".
-      const req = createRequest("POST", ROUTE_URL);
-      const { status } = await parseResponse(await POST(req));
+    it("allows an old webauthn session whose passkey was verified recently", async () => {
+      sessionRow({
+        provider: "webauthn",
+        createdAt: new Date(NOW - 10 * STEP_UP_WINDOW_MS),
+        passkeyVerifiedAt: new Date(NOW - 60_000),
+        authCredentialId: "cred-row-1",
+      });
+
+      const { status } = await parseResponse(
+        await POST(createRequest("POST", ROUTE_URL, { headers: COOKIE })),
+      );
 
       expect(status).toBe(200);
-      expect(mockRequireRecentCurrentAuthMethod).not.toHaveBeenCalled();
+      expect(mockRedisSet).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers 401 when the request carries no session cookie, minting no challenge", async () => {
+      const { status } = await parseResponse(await POST(createRequest("POST", ROUTE_URL)));
+
+      expect(status).toBe(401);
+      expect(mockSessionFindUnique).not.toHaveBeenCalled();
+      expect(mockRedisSet).not.toHaveBeenCalled();
     });
   });
 });

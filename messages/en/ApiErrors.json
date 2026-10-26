@@ -75,6 +75,7 @@
   "extensionTokenScopeInsufficient": "Client app token does not have the required scope.",
   "extensionTokenLegacyIssuanceDeprecated": "This endpoint is not available. Update the extension, or use 'passwd-sso login' for CLI access.",
   "invalidChallenge": "Security key registration could not be completed. Please retry.",
+  "cannotDeleteLastPasskey": "Your organization requires a passkey, so your last passkey cannot be deleted. Register a new passkey first.",
   "auditChainSeedNotFound": "The starting point for partial audit-chain verification was not found. Specify a different starting sequence number.",
   "auditLogRetentionIndefinite": "This tenant's audit log retention is set to keep forever. Purging is not permitted.",
   "historyRetentionIndefinite": "This tenant's history retention is set to keep forever. Purging is not permitted.",

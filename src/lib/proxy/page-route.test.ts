@@ -741,9 +741,9 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
     expect(_passkeyAuditSizeForTests()).toBe(1);
   });
 
-  // F18: same user + SAME blocked path within the window → one emit;
-  // same user + DIFFERENT blocked page path within the window → TWO emits.
-  it("F18: same user + same path deduped; same user + different path emits a second audit", async () => {
+  // F18 + SEC-2: the dedup key is the closed blockedPath, so two dashboard
+  // pages share one emit within the window, while the admin area emits its own.
+  it("F18: same user + same area deduped (even on another page); a different area emits a second audit", async () => {
     const sessionUser = {
       id: "u-f18",
       requirePasskey: true,
@@ -772,13 +772,54 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
     ).length;
     expect(auditAfterSamePath).toBe(1);
 
-    // Third request to a DIFFERENT path → NOT deduped, second emit fires.
+    // Another dashboard page → same closed blockedPath → still deduped.
     mockValidSession(fetchSpy, sessionUser);
     await handlePageRoute(makePageRequest("/ja/dashboard/settings", headers), dummyOptions);
     await new Promise((r) => setImmediate(r));
-    const auditAfterDiffPath = fetchSpy.mock.calls.filter(
+    const auditAfterSameArea = fetchSpy.mock.calls.filter(
       (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
     ).length;
-    expect(auditAfterDiffPath).toBe(2);
+    expect(auditAfterSameArea).toBe(1);
+
+    // The admin area → a different blockedPath → NOT deduped, second emit fires.
+    mockValidSession(fetchSpy, sessionUser);
+    await handlePageRoute(makePageRequest("/ja/admin/tenant/members", headers), dummyOptions);
+    await new Promise((r) => setImmediate(r));
+    const auditAfterDiffArea = fetchSpy.mock.calls.filter(
+      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
+    ).length;
+    expect(auditAfterDiffArea).toBe(2);
+  });
+
+  // SEC-2: the row's blockedPath comes from a closed set, never the requested
+  // path, whose suffix is caller-chosen.
+  it.each([
+    ["/ja/dashboard/passwords/0d6f6b4e-attacker-chosen-text", "PAGE /dashboard", "5e55-0108"],
+    ["/ja/admin/x%20y/<script>", "PAGE /admin", "5e55-0109"],
+  ])("writes exactly one audit-emit for %s, with blockedPath %s", async (path, expected, token) => {
+    mockValidSession(fetchSpy, {
+      id: `u-closed-${expected}`,
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      passkeyGracePeriodDays: 1,
+    });
+
+    const res = await handlePageRoute(
+      makePageRequest(path, { cookie: `authjs.session-token=${token}` }),
+      dummyOptions,
+    );
+    await new Promise((r) => setImmediate(r));
+
+    expect(res.status).toBe(307);
+    const auditCalls = fetchCallsTo(fetchSpy, "/api/internal/audit-emit");
+    expect(auditCalls).toHaveLength(1);
+    const body = JSON.parse(String((auditCalls[0][1] as RequestInit).body));
+    expect(body).toEqual({
+      action: "PASSKEY_ENFORCEMENT_BLOCKED",
+      metadata: { blockedPath: expected },
+    });
+    expect(_passkeyAuditHasForTests(`u-closed-${expected}`, expected)).toBe(true);
+    expect(_passkeyAuditSizeForTests()).toBe(1);
   });
 });

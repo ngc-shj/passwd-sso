@@ -51,11 +51,14 @@ passkey.
   - No row is written for a degraded bundle (D7).
   - Page navigations keep their existing path, except that they also write no row for a
     degraded bundle.
-- **D5 — enrollment is bound to recency (S2).** While `passkeyEnforcementBlocks` holds,
-  `webauthn/register/options` and `register/verify` require `requireRecentCurrentAuthMethod`.
+- **D5 — enrollment is bound to recency (S2).** Registration always requires a recent
+  sign-in (user decision 2026-10-27, code review round 1 SEC-1): `webauthn/register/options`
+  and `register/verify` require `requireRecentCurrentAuthMethod` unconditionally, not only
+  while `passkeyEnforcementBlocks` holds, as credential delete already does.
   That is the provider-aware freshness check every other step-up route and the sign-in reauth
   panel use, so the gate and the page cannot disagree and loop (R5-3). A session
-  cookie alone cannot clear the gate or mint a durable credential. The minimal screen answers
+  cookie alone (older than `STEP_UP_WINDOW_MS`) cannot mint a durable credential, so it cannot
+  clear the gate with one either. The minimal screen answers
   `SESSION_STEP_UP_REQUIRED` through `handleStepUpError`, which offers a fresh sign-in.
   - Both server calls carry `@stepup id:… method:POST` markers, and the card's two calls carry
     the matching client markers, so `check-step-up-client-coverage.sh` stays green (N3).
@@ -66,9 +69,10 @@ passkey.
   - `passkeyBlocked` is false for a degraded bundle; the separate `passkeyStateDegraded` flag
     carries that state (D7).
   - `passkeyBlocked` is a display verdict only (S-R4-2/N-R4-4). No server code authorizes on
-    it. Server decisions (the API gate, D5, the admin layout redirect, own-gate routes) use
+    it. Server decisions (the API gate, the admin layout redirect, own-gate routes) use
     `passkeyEnforcementBlocks` over the raw fields, or `derivePasskeyState`. Both stay closed
-    for a degraded bundle, so D5 still requires recency during an outage.
+    for a degraded bundle. D5 reads no passkey state at all (it always requires recency), so
+    it requires recency during an outage too.
 - **D7 — a degraded passkey state is an outage, not a requirement (N-R3-1).**
   - **The marker:** when the session callback cannot read the passkey state, the `auth.ts` catch
     path keeps the fail-closed bundle, adds `passkeyStateDegraded: true`, and sets
@@ -263,7 +267,7 @@ passkey.
   No entry in them has a method on a vault, tenant, key-minting or webauthn-delete route, apart
   from `DELETE /api/vault/delegation`.
 - I3: a Tier A target never triggers `getSessionInfo`.
-- I4: while blocked, registration requires a recent sign-in.
+- I4: registration always requires a recent sign-in (user decision 2026-10-27).
 - I5: the client never re-derives the blocked verdict; it reads `passkeyBlocked`.
 
 ## Acceptance criteria
@@ -421,8 +425,8 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
   - for the catch path, `passkeyStateDegraded: true` with `passkeyBlocked: false`;
   - the existing "passkey enforcement fail-closed" block in `auth.test.ts` joins the
     inventory.
-- **Route unit:** `register/options` and `register/verify` require recency when blocked (and not
-  when allowed); `register/verify` derives `prfSupported` from `clientExtensionResults.prf`
+- **Route unit:** `register/options` and `register/verify` always require recency (user
+  decision 2026-10-27; stale, boundary and webauthn-verified cells over the real helper); `register/verify` derives `prfSupported` from `clientExtensionResults.prf`
   (T-R3-5); the credential `DELETE` invalidates the user's sessions; with a degraded bundle and a
   stale sign-in, both register calls answer `SESSION_STEP_UP_REQUIRED` (S-R4-2/N-R4-4);
   `mobile/autofill-token` keeps its outcomes with `validateExtensionToken`. Those are a session

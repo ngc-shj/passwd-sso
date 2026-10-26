@@ -28,6 +28,7 @@
   "deleteConfirmPrf": "Are you sure you want to delete this passkey? You will no longer be able to use it for sign-in or vault unlock.",
   "deleteSuccess": "Passkey deleted",
   "deleteError": "Failed to delete passkey.",
+  "deleteLastPasskeyRefused": "Your organization requires a passkey, so this last passkey cannot be deleted. Register a new passkey first, then delete this one.",
   "cancel": "Cancel",
   "confirm": "Confirm",
   "noPasskeys": "No passkeys registered yet.",

@@ -3538,7 +3538,7 @@
       "sessionPasskeyGate": {
         "POST": {
           "value": "tier-b",
-          "reason": "registration challenge; recency-bound while blocked"
+          "reason": "registration challenge; always recency-bound"
         }
       }
     },
@@ -3553,7 +3553,7 @@
       "sessionPasskeyGate": {
         "POST": {
           "value": "tier-b",
-          "reason": "registration; recency-bound while blocked"
+          "reason": "registration; always recency-bound"
         }
       }
     }

@@ -22,6 +22,10 @@ vi.mock("@/lib/audit/audit", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   logAuditAsync: mockLogAuditAsync,
 }));
+// No Redis: the session gate's audit limiter falls back to its in-memory
+// counter, which `_resetSessionPasskeyAuditForTests` clears. A real Redis
+// (REDIS_URL is set in app-ci) would keep the key across runs.
+vi.mock("@/lib/redis", () => ({ getRedis: () => null }));
 vi.mock("@/lib/auth/session/session-cache", async () => {
   const actual = await vi.importActual<
     typeof import("@/lib/auth/session/session-cache")
@@ -1232,6 +1236,33 @@ describe("proxy — session passkey gate", () => {
 
     expect(res.status).toBe(204);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // SEC-2: a page navigation's blocked row names the area, never the
+  // caller-chosen path, and is written once.
+  it("redirects a blocked page navigation and audits it once, with a closed blockedPath", async () => {
+    _resetPasskeyAuditForTests();
+    fetchSpy.mockImplementation(
+      dispatchFetch({
+        ...sessionRoute(sessionResponseBody("u-blocked-page", PASSKEY_BLOCKED)),
+        "/api/internal/audit-emit": () => new Response("{}", { status: 200 }),
+      }),
+    );
+
+    const res = await proxy(
+      new NextRequest(`${APP_ORIGIN}/ja/dashboard/passwords/attacker-chosen-0123`, {
+        headers: { Cookie: "authjs.session-token=5e55-0023" },
+      }),
+      dummyOptions,
+    );
+    await new Promise((r) => setImmediate(r));
+
+    expect(res.status).toBe(307);
+    const auditCalls = fetchCallsTo(fetchSpy, "/api/internal/audit-emit");
+    expect(auditCalls).toHaveLength(1);
+    expect(JSON.parse(String((auditCalls[0][1] as RequestInit).body)).metadata).toEqual({
+      blockedPath: "PAGE /dashboard",
+    });
   });
 
   it("passes the proxy's own session read (Tier A) without reading the session", async () => {

@@ -12,7 +12,6 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { derivePasskeyState, passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { invalidateUserSessionsCache } from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
@@ -84,18 +83,14 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
-  // D5 (#959): while the tenant's passkey requirement blocks this member, a
-  // session cookie alone must not be able to clear the gate AND mint a
-  // durable credential — require the same recent-sign-in proof the other
-  // step-up routes do. Checked before the challenge is consumed, so a stale
-  // session's rejected attempt does not burn the one-time challenge.
-  const gateTenantId = await withUserTenantRls(userId, async (tid) => tid);
-  const pkState = await derivePasskeyState({ userId, tenantId: gateTenantId });
-  if (passkeyEnforcementBlocks(pkState)) {
-    // @stepup id:webauthn-register-verify-post method:POST
-    const stepUp = await requireRecentCurrentAuthMethod(req, userId);
-    if (stepUp) return stepUp;
-  }
+  // D5 (#959): a session cookie alone must not be able to mint a durable
+  // credential — registration always requires the same recent-sign-in proof
+  // the other step-up routes (and credential delete) do. Checked before the
+  // challenge is consumed, so a stale session's rejected attempt does not
+  // burn the one-time challenge.
+  // @stepup id:webauthn-register-verify-post method:POST
+  const stepUp = await requireRecentCurrentAuthMethod(req, userId);
+  if (stepUp) return stepUp;
 
   const result = await parseBody(req, verifyRegistrationSchema);
   if (!result.ok) return result.response;

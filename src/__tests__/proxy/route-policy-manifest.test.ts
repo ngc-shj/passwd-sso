@@ -53,7 +53,10 @@ import { NextRequest } from "next/server";
 // The outcome table (assertion 10) runs the real handleApiAuth and the real
 // getSessionInfo. Mocked: the session cache (always a miss), the tenant lookup
 // (a non-null tenant), the IP restriction (allowed) and the audit write —
-// nothing else on the session path.
+// nothing else on the session path. Redis is absent, so the gate's real audit
+// limiter counts in memory, which _resetSessionPasskeyAuditForTests clears; a
+// REDIS_URL in the environment (app-ci sets one) would otherwise carry its
+// dedup keys across runs.
 const { mockCheckAccessWithAudit, mockResolveUserTenantId, mockLogAuditAsync } = vi.hoisted(() => ({
   mockCheckAccessWithAudit: vi.fn(),
   mockResolveUserTenantId: vi.fn(),
@@ -64,6 +67,10 @@ vi.mock("@/lib/auth/session/session-cache", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   getCachedSession: async () => null,
   setCachedSession: async () => {},
+}));
+vi.mock("@/lib/redis", () => ({
+  getRedis: () => null,
+  validateRedisConfig: () => {},
 }));
 vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: mockResolveUserTenantId,

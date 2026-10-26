@@ -189,6 +189,8 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
   it("passes on the base fixture and counts what it examined", async () => {
     const out = await expectPass();
     // reauth, own-gate, openapi, nextauth, audit-emit, passwords; NOT the v1 shadow or health.
+    // openapi.json is the early-return reader that adjudicates itself; its
+    // FAIL counterpart (the call removed) is under Rule 1.
     expect(out).toMatch(/routes=8 readers=6 api-default-readers=1 own-gate=1 exemptions=2/);
   });
 
@@ -269,9 +271,29 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
     await expectPass({ files: { "src/app/api/health/route.ts": typeOnly } });
   });
 
-  it("does not make the catch-all a list member through its gated spellings (R5-4)", async () => {
-    // [...nextauth] reads the session and is tier-a; the base passes with it off the list.
-    await expectPass();
+  describe("the tier-a catch-all's gated concretePaths spellings (R5-4)", () => {
+    // The real [...nextauth] entry: tier-a per method, and spellings the proxy
+    // gates. Those spellings reach the proxy's gate before the handler, so they
+    // must not make the catch-all an API_DEFAULT_SESSION_READERS member.
+    const NEXTAUTH_KEY = "src/app/api/auth/[...nextauth]/route.ts";
+    const GATED_SPELLINGS = [
+      { path: "/api/auth/session/extra", method: "GET", outcome: "gated" },
+      { path: "/api/auth/csrf", method: "POST", outcome: "gated" },
+      { path: "/api/auth/unknown-action", method: "GET", outcome: "gated" },
+    ];
+    const withSpellings = (methods) => ({
+      ...route("api-default", methods),
+      concretePaths: [{ path: "/api/auth/session", method: "GET", outcome: "tier-a" }, ...GATED_SPELLINGS],
+    });
+
+    it("passes and counts no extra api-default reader", async () => {
+      const out = await expectPass({ manifest: { [NEXTAUTH_KEY]: withSpellings({ GET: "tier-a", POST: "tier-a" }) } });
+      expect(out).toMatch(/api-default-readers=1 /);
+    });
+
+    it("control: the same file declared gated per method FAILS as an unlisted reader", async () => {
+      await expectFail({ manifest: { [NEXTAUTH_KEY]: withSpellings({ GET: "gated", POST: "tier-a" }) } }, MISSING_FROM_LIST);
+    });
   });
 
   // ─── Local shadow ───
@@ -295,11 +317,6 @@ describe.concurrent("check-session-passkey-readers.mjs", { timeout: 60_000 }, ()
       { files: { "src/app/api/health/route.ts": REAUTH.replace("POST", "GET") }, manifest: { "src/app/api/health/route.ts": route("api-default", { GET: "tier-a" }) } },
       UNCHECKED_BYPASS,
     );
-  });
-
-  it("passes an early-return reader that calls passkeyEnforcementBlocks itself", async () => {
-    // openapi.json in the base.
-    await expectPass();
   });
 
   it("FAILS when the early-return reader's passkeyEnforcementBlocks call is removed", async () => {

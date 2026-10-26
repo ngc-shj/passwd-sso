@@ -71,8 +71,8 @@ export const SESSION_GATE_TIER_A: readonly SessionGateEntry[] = [
  */
 export const SESSION_GATE_TIER_B: readonly SessionGateEntry[] = [
   { method: "GET", path: "/api/webauthn/credentials", reason: "registration screen lists the credentials" },
-  { method: "POST", path: "/api/webauthn/register/options", reason: "registration challenge; recency-bound while blocked" },
-  { method: "POST", path: "/api/webauthn/register/verify", reason: "registration; recency-bound while blocked" },
+  { method: "POST", path: "/api/webauthn/register/options", reason: "registration challenge; always recency-bound" },
+  { method: "POST", path: "/api/webauthn/register/verify", reason: "registration; always recency-bound" },
   { method: "GET", path: "/api/user/auth-provider", reason: "registration screen picks the step-up method" },
   { method: "DELETE", path: "/api/vault/delegation", reason: "VaultProvider's lock and pagehide revoke delegation" },
 ];
@@ -204,7 +204,12 @@ const AUDIT_LIMITER_OPTIONS = { windowMs: PASSKEY_AUDIT_DEDUP_MS, max: 1 } as co
 // a Redis outage falls back to memory and keeps writing rows instead of none.
 let auditLimiter = createRateLimiter(AUDIT_LIMITER_OPTIONS);
 
-/** @internal Test-only — drops the limiter's in-memory fallback counters. */
+/**
+ * @internal Test-only — drops the limiter's in-memory fallback counters, and
+ * only those: keys already held in Redis survive. A test that needs a clean
+ * window per run must also run without Redis (mock `@/lib/redis`'s
+ * `getRedis` to return null).
+ */
 export function _resetSessionPasskeyAuditForTests(): void {
   auditLimiter = createRateLimiter(AUDIT_LIMITER_OPTIONS);
 }

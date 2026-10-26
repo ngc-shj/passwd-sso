@@ -65,9 +65,12 @@ const BodySchema = z
  * `#965`) before returning.
  */
 export const POST = withRequestLog(async (req: NextRequest) => {
-  // Outcomes match the former checkAuth path: any failure is a bare 401, the
-  // passkey gate answers PASSKEY_REQUIRED, and scope is checked before the
-  // client kind.
+  // Any extension-token failure is a bare 401 and the passkey gate answers
+  // PASSKEY_REQUIRED, as on the former checkAuth path; scope is checked before
+  // the client kind. One outcome differs: an `api_` key is not an extension
+  // token, so a passkey-blocked one now gets 401 where checkAuth gave 403.
+  // Harmless — an `api_` key never passed the IOS_APP check, so it could never
+  // mint here either way.
   const authed = await validateExtensionToken(req);
   if (!authed.ok) {
     if (authed.error === "PASSKEY_REQUIRED") {

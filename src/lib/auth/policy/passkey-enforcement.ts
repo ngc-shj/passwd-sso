@@ -119,6 +119,19 @@ export async function derivePasskeyState(params: {
   };
 }
 
+/**
+ * How many passkeys the user holds, across every tenant — the same user-global
+ * count `derivePasskeyState` reduces to `hasPasskey`. Fail-closed like it: a
+ * DB error throws.
+ */
+export async function countUserPasskeys(userId: string): Promise<number> {
+  return withBypassRls(
+    prisma,
+    async (tx) => tx.webAuthnCredential.count({ where: { userId } }),
+    BYPASS_GRANT.PASSKEY_ENFORCEMENT_STATE,
+  );
+}
+
 // ─── Audit dedup ──────────────────────────────────────────────────────────────
 
 // Deduplicate passkey audit emit — track composite key (userId:blockedPath) +

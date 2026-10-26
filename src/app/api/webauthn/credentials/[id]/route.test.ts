@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, createParams, parseResponse } from "@/__tests__/helpers/request-builder";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
@@ -12,15 +13,19 @@ const {
   mockLogAudit,
   mockInvalidateUserSessionsCache,
   mockLoggerError,
+  mockDerivePasskeyState,
+  mockCountUserPasskeys,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaFindFirst: vi.fn(),
   mockPrismaDelete: vi.fn(),
   mockPrismaUpdate: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
   mockLogAudit: vi.fn(),
   mockInvalidateUserSessionsCache: vi.fn(),
   mockLoggerError: vi.fn(),
+  mockDerivePasskeyState: vi.fn(),
+  mockCountUserPasskeys: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -55,6 +60,14 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 // #959 F5/F19: DELETE invalidates the user's cached sessions on success.
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   invalidateUserSessionsCache: mockInvalidateUserSessionsCache,
+}));
+
+// FN-2: the DB reads are mocked; the real `passkeyEnforcementBlocks` (and the
+// grace-period comparison under it) stays live.
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>()),
+  derivePasskeyState: mockDerivePasskeyState,
+  countUserPasskeys: mockCountUserPasskeys,
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -96,6 +109,14 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
       totalSessions: 0,
       cacheTombstoneFailures: 0,
     });
+    // Default: the tenant does not require a passkey.
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: true,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    mockCountUserPasskeys.mockResolvedValue(1);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -228,6 +249,90 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: { credentialId: "cred-id-abc123" } }),
     );
+  });
+});
+
+// ── DELETE: last passkey in a passkey-required tenant (#959 FN-2) ───────────
+
+describe("DELETE /api/webauthn/credentials/[id] — last passkey", () => {
+  const NOW = new Date("2026-10-27T12:00:00.000Z").getTime();
+  const GRACE_DAYS = 7;
+  const GRACE_END = NOW - GRACE_DAYS * MS_PER_DAY;
+
+  function requirement(enabledAtMs: number, requirePasskey = true) {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey,
+      hasPasskey: true,
+      requirePasskeyEnabledAt: new Date(enabledAtMs).toISOString(),
+      passkeyGracePeriodDays: GRACE_DAYS,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mockPrismaFindFirst.mockResolvedValue(EXISTING_CREDENTIAL);
+    mockPrismaDelete.mockResolvedValue(EXISTING_CREDENTIAL);
+    mockInvalidateUserSessionsCache.mockResolvedValue({ totalSessions: 0, cacheTombstoneFailures: 0 });
+    mockCountUserPasskeys.mockResolvedValue(1);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("refuses the last passkey 1 ms past the grace period, deleting nothing", async () => {
+    requirement(GRACE_END - 1);
+
+    const { status, json } = await parseResponse(await DELETE(createRequest("DELETE", ROUTE_URL), CTX));
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("CANNOT_DELETE_LAST_PASSKEY");
+    expect(mockDerivePasskeyState).toHaveBeenCalledWith({ userId: "user-1", tenantId: "tenant-1" });
+    expect(mockCountUserPasskeys).toHaveBeenCalledWith("user-1");
+    expect(mockPrismaDelete).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("deletes the last passkey at the exact end of the grace period (still within it)", async () => {
+    requirement(GRACE_END);
+
+    const { status } = await parseResponse(await DELETE(createRequest("DELETE", ROUTE_URL), CTX));
+
+    expect(status).toBe(200);
+    expect(mockPrismaDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes a passkey that is not the last one past the grace period", async () => {
+    requirement(GRACE_END - 1);
+    mockCountUserPasskeys.mockResolvedValue(2);
+
+    const { status } = await parseResponse(await DELETE(createRequest("DELETE", ROUTE_URL), CTX));
+
+    expect(status).toBe(200);
+    expect(mockPrismaDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes the last passkey when the tenant does not require one", async () => {
+    requirement(GRACE_END - 1, false);
+
+    const { status } = await parseResponse(await DELETE(createRequest("DELETE", ROUTE_URL), CTX));
+
+    expect(status).toBe(200);
+    expect(mockPrismaDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks nothing for a credential the user does not own (404 first)", async () => {
+    requirement(GRACE_END - 1);
+    mockPrismaFindFirst.mockResolvedValue(null);
+
+    const { status } = await parseResponse(await DELETE(createRequest("DELETE", ROUTE_URL), CTX));
+
+    expect(status).toBe(404);
+    expect(mockDerivePasskeyState).not.toHaveBeenCalled();
   });
 });
 

@@ -324,6 +324,8 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           await inlineReauth.triggerOnStaleError({ kind: "delete", credentialId });
+        } else if (body?.error === API_ERROR.CANNOT_DELETE_LAST_PASSKEY) {
+          toast.error(t("deleteLastPasskeyRefused"));
         } else {
           toast.error(t("deleteError"));
         }
@@ -410,7 +412,10 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
     }
   };
 
-  const prfCount = credentials.filter((c) => c.prfSupported).length;
+  // Vault unlock needs both the PRF capability and a stored wrapping; a
+  // PRF-capable credential without one unlocks nothing until re-bootstrapped.
+  const unlocksVault = (c: Credential) => c.prfSupported && c.prfWrappingPresent;
+  const prfCount = credentials.filter(unlocksVault).length;
 
   /**
    * Re-bootstrap PRF wrapping for a PRF-capable credential that holds none —
@@ -751,8 +756,8 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
                           {t("deleteConfirmTitle")}
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                          {cred.prfSupported ? t("deleteConfirmPrf") : t("deleteConfirm")}
-                          {cred.prfSupported && prfCount === 1 && (
+                          {unlocksVault(cred) ? t("deleteConfirmPrf") : t("deleteConfirm")}
+                          {unlocksVault(cred) && prfCount === 1 && (
                             <>
                               <br />
                               <br />

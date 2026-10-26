@@ -13,13 +13,16 @@
   be cached and does not reach the gate in practice.
 
 ## Batch 1b — routes
-- **`mobile/autofill-token` outcomes match the former `checkAuth` path.**
+- **`mobile/autofill-token` keeps the former `checkAuth` outcomes for extension tokens.**
   - The batch first answered a client-kind mismatch with 403 and an invalid token with the
     validator's error code.
   - Both were restored, matching the plan's "keeps its outcomes":
-    - a failure gives a bare 401 `UNAUTHORIZED`;
+    - any extension-token failure gives a bare 401 `UNAUTHORIZED`;
     - scope is checked before client kind;
     - a non-`IOS_APP` token gives 401.
+  - One outcome differs (code review round 1 FN-5): an `api_` key is not an extension token,
+    so a passkey-blocked one now gets 401 instead of `checkAuth`'s 403 `PASSKEY_REQUIRED`.
+    This is harmless: an `api_` key never passed the `IOS_APP` check, so it could never mint.
 - **`v1/openapi.json` audits a blocked session through the API gate's own writer.** It calls
   `auditSessionPasskeyBlock` with `blockedPath("GET", "/api/v1/openapi.json")`, so the row
   reads `"GET /api/v1"` and is deduped by the same Redis-shared limiter as the proxy's rows.
@@ -64,3 +67,64 @@
     permitted.
   - What would settle it: a green CI e2e job, or a local run on a free port with the e2e
     prerequisites.
+
+## Code review round 1 — server and client fixes
+- **D5 always requires recency (SEC-1, user decision 2026-10-27).**
+  - `register/options` and `register/verify` call `requireRecentCurrentAuthMethod`
+    unconditionally, before the challenge is minted or consumed, as credential delete does.
+  - Their `derivePasskeyState` read is gone, so neither route reads the passkey state any more.
+    The plan's red-proof items "let D5 read `passkeyBlocked`" and "make D5 use the createdAt-only
+    `requireRecentSession`" now concern only the helper choice, since there is no blocked branch.
+  - T-5 is moot: with no DB derivation left on these routes, there is no rejection to pin.
+  - The Tier B reasons for both routes read "always recency-bound" in `session-passkey-gate.ts`
+    and `route-policy-manifest.json`.
+  - The route cells run the real helper over a mocked session row, so the `STEP_UP_WINDOW_MS`
+    boundary is exercised at the route.
+- **The last passkey cannot be deleted past grace (FN-2, user decision 2026-10-27).**
+  - The credential `DELETE` answers 403 `CANNOT_DELETE_LAST_PASSKEY` when the requirement is on,
+    its grace period has expired, and the user holds one passkey across all tenants.
+  - 403 follows the file's `CANNOT_*` convention, where a policy denial is 403
+    (`CANNOT_REMOVE_OWNER`). It is not 409.
+  - The count comes from a new `countUserPasskeys` in `passkey-enforcement.ts`. It is the same
+    user-global count, read under the same bypass grant.
+  - Not serialized: two parallel deletes of a user's last two passkeys can both pass.
+    - The cross-tenant count needs a bypass read, and a bypass cannot nest inside the
+      tenant-scoped delete transaction. So no single advisory-lock transaction covers both.
+    - The race needs two fresh step-ups by the user themselves. It ends where the refusal would
+      otherwise have left them (blocked, and re-registering after a fresh sign-in), so it opens no
+      bypass of the requirement.
+  - The manual test's step 8 had expected "delete the last passkey, then the next API call
+    returns `PASSKEY_REQUIRED`". That flow is no longer reachable, and the step now tests the
+    refusal.
+- **Page-navigation `blockedPath` is `"PAGE /dashboard"` or `"PAGE /admin"` (SEC-2).** The
+  closed value is also the dedup key. Two pages in one area therefore share one row per window,
+  where they used to write one row each.
+- **`/api/internal/audit-emit` itself still accepts caller-supplied metadata** for its
+  allowlisted actions, within the size bounds. Closing the page proxy's path does not stop an
+  authenticated caller from posting a `PASSKEY_ENFORCEMENT_BLOCKED` row with free-text metadata
+  directly. Not changed here; noted for follow-up.
+
+## Round 1 — tests/CI
+- **The `auth.ts` cross-tenant cell (T-4/T13) is a new file,
+  `session-passkey-cross-tenant.integration.test.ts`.**
+  - `session-passkey-gate.integration.test.ts` mocks `@/auth`, so it cannot hold the cell.
+  - The new file drives the real `callbacks.session`, captured from the config `src/auth.ts`
+    hands a mocked `next-auth`. This is the `tenant-claim-binding` pattern, used for the same
+    module-resolution reason.
+- **T-2 did not reproduce as a failing re-run.**
+  - No cell in `route-policy-manifest.test.ts` asserts audit rows, and two unmocked runs in a
+    row against the dev Redis both passed.
+  - The defect that does show is the write itself: an unmocked run left 72
+    `rl:passkey_session_gate_audit:u-1:*` keys in the real Redis, and a mocked run leaves none.
+- **The E2E minimal-screen cell cannot see the mounted-flag mutation on its own.** Nothing the
+  screen calls is refused, so `reactToPasskeyRequired` never fires there. The cell sees it only
+  together with a 403 on the screen. It now fails on any `/api/*` 403, unreadable bodies
+  included, and on any main-frame navigation once the screen is up.
+- **The WebAuthn E2E env has a single source.**
+  - `WEBAUTHN_RP_ID` and `WEBAUTHN_PRF_SECRET` were removed from the CI `e2e` job.
+  - The PRF secret (a dummy) joined `E2E_WEBAUTHN_SERVER_ENV`. Playwright merges `webServer.env`
+    over `process.env`, and `load-env` never overwrites a variable that is already set.
+  - With `E2E_BASE_URL` set, no web server is started, so the external server must carry these
+    values itself, as before.
+- **Still deferred:** the E2E spec has not been run locally (same reasons as Batch 3). It
+  type-checks and lints clean.

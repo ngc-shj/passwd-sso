@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -10,6 +11,11 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { WEBAUTHN_NICKNAME_MAX_LENGTH } from "@/lib/validations/common";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import {
+  countUserPasskeys,
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+} from "@/lib/auth/policy/passkey-enforcement";
 import { invalidateUserSessionsCache } from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 
@@ -41,15 +47,37 @@ async function handleDELETE(
   const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id);
   if (stepUp) return stepUp;
 
-  const existing = await withUserTenantRls(userId, async () =>
-    prisma.webAuthnCredential.findFirst({
+  const { tenantId, existing } = await withUserTenantRls(userId, async (tid) => ({
+    tenantId: tid,
+    existing: await prisma.webAuthnCredential.findFirst({
       where: { id, userId },
       select: { id: true, credentialId: true },
     }),
-  );
+  }));
 
   if (!existing) {
     return notFound();
+  }
+
+  // FN-2 (#959): in a tenant whose passkey requirement is past its grace
+  // period, deleting the last passkey would block the member, and this
+  // session could not recover in place: a webauthn session loses its bound
+  // credential (authCredentialId is SetNull), so its step-up stays stale and
+  // registering a replacement needs a full sign-out. Refuse instead, and let
+  // the member register the replacement first. The count is user-global,
+  // like `hasPasskey`.
+  //
+  // Not serialized against a concurrent delete: two parallel deletes of the
+  // user's last two passkeys can both pass. That needs two fresh step-ups by
+  // the user themselves, and lands where this check would otherwise have
+  // left them (blocked, re-register after signing in again), so it opens no
+  // bypass of the requirement.
+  const pkState = await derivePasskeyState({ userId, tenantId });
+  if (
+    passkeyEnforcementBlocks({ ...pkState, hasPasskey: false }) &&
+    (await countUserPasskeys(userId)) <= 1
+  ) {
+    return errorResponse(API_ERROR.CANNOT_DELETE_LAST_PASSKEY);
   }
 
   await withUserTenantRls(userId, async () =>

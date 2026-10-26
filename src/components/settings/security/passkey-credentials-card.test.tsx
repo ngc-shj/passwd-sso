@@ -606,4 +606,106 @@ describe("PasskeyCredentialsCard", () => {
     expect(offer).toBeEnabled();
     expect(offer).toHaveAttribute("title", "rebootstrapHint");
   });
+
+  // FN-1: only a credential that can actually unlock the vault (PRF-capable
+  // AND holding a wrap) counts toward the "last vault-unlock passkey" warning.
+  describe("delete confirmation: vault-unlock wording", () => {
+    function makeCred(id: string, prfWrappingPresent: boolean) {
+      return {
+        id,
+        credentialId: `cid-${id}`,
+        nickname: `Key ${id}`,
+        deviceType: "multiDevice",
+        backedUp: true,
+        discoverable: true,
+        minPinLength: null,
+        largeBlobSupported: null,
+        transports: ["internal"],
+        prfSupported: true,
+        prfWrappingPresent,
+        registeredDevice: null,
+        lastUsedDevice: null,
+        createdAt: "2026-05-04",
+        lastUsedAt: null,
+      };
+    }
+
+    async function openDeleteDialog(creds: ReturnType<typeof makeCred>[], index: number) {
+      setupCredentialsList(creds);
+      render(<PasskeyCredentialsCard />);
+      await screen.findByText(creds[index].nickname);
+      fireEvent.click(screen.getAllByRole("button", { name: "delete" })[index]);
+      await screen.findByRole("button", { name: "confirm" });
+    }
+
+    it("warns when deleting the only wrapped passkey, even with an unwrapped PRF-capable one left", async () => {
+      await openDeleteDialog([makeCred("wrapped", true), makeCred("unwrapped", false)], 0);
+
+      expect(screen.getByText("deleteConfirmPrf")).toBeInTheDocument();
+      expect(screen.getByText("lastPrfDeleteWarning")).toBeInTheDocument();
+    });
+
+    it("does not warn when another wrapped passkey remains", async () => {
+      await openDeleteDialog([makeCred("a", true), makeCred("b", true)], 0);
+
+      expect(screen.getByText("deleteConfirmPrf")).toBeInTheDocument();
+      expect(screen.queryByText("lastPrfDeleteWarning")).not.toBeInTheDocument();
+    });
+
+    it("uses the plain wording and no warning for a lone unwrapped PRF-capable passkey", async () => {
+      await openDeleteDialog([makeCred("unwrapped", false)], 0);
+
+      expect(screen.getByText("deleteConfirm")).toBeInTheDocument();
+      expect(screen.queryByText("deleteConfirmPrf")).not.toBeInTheDocument();
+      expect(screen.queryByText("lastPrfDeleteWarning")).not.toBeInTheDocument();
+    });
+  });
+
+  // FN-2: the server refuses deleting the last passkey in a passkey-required
+  // tenant past grace; the card says to register a replacement first.
+  it("explains a CANNOT_DELETE_LAST_PASSKEY refusal instead of the generic delete error", async () => {
+    const cred = {
+      id: "cred-last",
+      credentialId: "cid-last",
+      nickname: "Only Key",
+      deviceType: "multiDevice",
+      backedUp: true,
+      discoverable: true,
+      minPinLength: null,
+      largeBlobSupported: null,
+      transports: ["internal"],
+      prfSupported: false,
+      prfWrappingPresent: false,
+      registeredDevice: null,
+      lastUsedDevice: null,
+      createdAt: "2026-05-04",
+      lastUsedAt: null,
+    };
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/webauthn/credentials") && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([cred]) });
+      }
+      if (init?.method === "DELETE") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "CANNOT_DELETE_LAST_PASSKEY" }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    });
+
+    render(<PasskeyCredentialsCard />);
+    await screen.findByText("Only Key");
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "confirm" }));
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("deleteLastPasskeyRefused");
+    });
+    expect(mockToast.error).not.toHaveBeenCalledWith("deleteError");
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("recent-session-dialog")).not.toBeInTheDocument();
+  });
 });

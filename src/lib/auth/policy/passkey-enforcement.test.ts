@@ -36,6 +36,7 @@ import {
   isPasskeyGracePeriodExpired,
   passkeyEnforcementBlocks,
   derivePasskeyState,
+  countUserPasskeys,
   recordPasskeyAuditEmit,
   PASSKEY_AUDIT_DEDUP_MS,
   PASSKEY_AUDIT_MAP_MAX,
@@ -299,6 +300,25 @@ describe("derivePasskeyState", () => {
 });
 
 // ─── recordPasskeyAuditEmit ───────────────────────────────────────────────────
+
+describe("countUserPasskeys", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("counts the user's passkeys by userId alone (user-global, across tenants)", async () => {
+    mockWebAuthnCredentialCount.mockResolvedValue(2);
+
+    await expect(countUserPasskeys("user-1")).resolves.toBe(2);
+    expect(mockWebAuthnCredentialCount).toHaveBeenCalledWith({ where: { userId: "user-1" } });
+  });
+
+  it("throws when the count fails (fail-closed)", async () => {
+    mockWebAuthnCredentialCount.mockRejectedValue(new Error("db down"));
+
+    await expect(countUserPasskeys("user-1")).rejects.toThrow("db down");
+  });
+});
 
 describe("recordPasskeyAuditEmit", () => {
   beforeEach(() => {

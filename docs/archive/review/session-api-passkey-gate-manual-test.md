@@ -30,6 +30,9 @@ change (`WEBAUTHN_RP_ID`, `WEBAUTHN_PRF_SECRET`).
    - As A, with a sign-in older than the step-up window (or after waiting it out), press
      register. Expect the "sign in again" dialog (`SESSION_STEP_UP_REQUIRED`).
    - Sign in again and press register: the passkey registers with the vault still locked.
+   - Registration always needs a recent sign-in, not only while blocked. As B (tenant N), with
+     a sign-in older than the step-up window, press register on the passkey settings page:
+     expect the same "sign in again" dialog, and no credential is created.
 4. **After registration.**
    - The page reloads into the normal dashboard, and the vault asks to unlock.
    - `GET /api/passwords` now returns 200.
@@ -41,9 +44,18 @@ change (`WEBAUTHN_RP_ID`, `WEBAUTHN_PRF_SECRET`).
 7. **Unaffected users.** B (tenant N), and A during the grace period, use every API and page as
    before.
 8. **Credential deletion.**
-   - Delete A's only passkey from settings.
-   - The next API call (within seconds, with no 30-second cached allow) returns
-     `PASSKEY_REQUIRED`.
+   - As A (tenant P, past grace) with a recent sign-in, delete A's only passkey from settings.
+     Expect the refusal toast saying to register a new passkey first. The response is 403
+     `CANNOT_DELETE_LAST_PASSKEY`, the passkey is still listed, and `GET /api/passwords` still
+     returns 200.
+   - Register a second passkey, then delete either one: the delete succeeds and
+     `GET /api/passwords` stays 200. Deleting the remaining one is refused again.
+   - As B (tenant N), and as A while tenant P is still within its grace period, deleting the
+     only passkey succeeds.
+   - A delete through the route can no longer leave a past-grace member without a passkey, so
+     the former "next API call returns `PASSKEY_REQUIRED` within seconds" check is not
+     reachable here. The delete's session-cache invalidation is still covered by the route's
+     unit test and the integration suite.
 9. **Outage (D7).**
    - Make the session callback's passkey read fail, for example by briefly revoking the app
      role's read on `webauthn_credentials` in a scratch DB, or by stopping the DB for a moment.

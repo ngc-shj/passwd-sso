@@ -321,9 +321,13 @@ describe("session passkey gate — invalid sessions on API_DEFAULT", () => {
   // cookie; `arrange` sets up the source.
   const sources: [string, (token: string) => string, () => void][] = [
     ["an ambiguous cookie", (t) => `authjs.session-token.0=${t}`, () => {}],
-    ["a 200-null for a dead token", (t) => `authjs.session-token=${t}`, () => answerSession(null)],
-    // Auth.js answers a swallowed adapter error with the same 200-null.
-    ["a 200-null for a swallowed adapter fault", (t) => `authjs.session-token=${t}`, () => answerSession(null)],
+    // Auth.js answers a dead token and a swallowed adapter error with the
+    // same 200-null, so one cell covers both.
+    [
+      "a 200-null (a dead token, or an adapter fault Auth.js swallows)",
+      (t) => `authjs.session-token=${t}`,
+      () => answerSession(null),
+    ],
     [
       "a non-ok session fetch",
       (t) => `authjs.session-token=${t}`,

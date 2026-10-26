@@ -159,6 +159,7 @@ export const API_ERROR = {
 
   // ── WebAuthn / Passkey ──────────────────────────────────
   INVALID_CHALLENGE: "INVALID_CHALLENGE",
+  CANNOT_DELETE_LAST_PASSKEY: "CANNOT_DELETE_LAST_PASSKEY",
 
   // ── Extension Token ─────────────────────────────────────
   EXTENSION_TOKEN_EXPIRED: "EXTENSION_TOKEN_EXPIRED",
@@ -448,6 +449,7 @@ export const API_ERROR_STATUS = {
 
   // ── WebAuthn / Passkey ────────────────────────────────────
   INVALID_CHALLENGE: 400,
+  CANNOT_DELETE_LAST_PASSKEY: 403,
 
   // ── Extension Token ───────────────────────────────────────
   EXTENSION_TOKEN_EXPIRED: 401,
@@ -640,6 +642,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   SESSION_NOT_FOUND: "sessionNotFound",
   CANNOT_REVOKE_CURRENT_SESSION: "cannotRevokeCurrentSession",
   INVALID_CHALLENGE: "invalidChallenge",
+  CANNOT_DELETE_LAST_PASSKEY: "cannotDeleteLastPasskey",
   EXTENSION_TOKEN_EXPIRED: "extensionTokenExpired",
   EXTENSION_TOKEN_REVOKED: "extensionTokenRevoked",
   EXTENSION_TOKEN_INVALID: "extensionTokenInvalid",

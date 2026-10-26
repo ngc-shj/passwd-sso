@@ -16,10 +16,19 @@ export const E2E_BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 export const E2E_WEBAUTHN_RP_ID = new URL(E2E_BASE_URL).hostname;
 export const E2E_WEBAUTHN_RP_ORIGIN = new URL(E2E_BASE_URL).origin;
 
-/** Environment the E2E web server is started with. */
+/**
+ * Environment the E2E web server is started with, merged over the runner's
+ * own environment (so it wins over the CI job env and over `.env`, which
+ * load-env never lets overwrite a set variable).
+ *
+ * The PRF secret is a dummy: with none, registration never requests the PRF
+ * extension and the auto-unlock re-bootstrap offer cannot appear. Fixed here
+ * so a local run does not depend on whether a developer `.env` sets one.
+ */
 export const E2E_WEBAUTHN_SERVER_ENV = {
   WEBAUTHN_RP_ID: E2E_WEBAUTHN_RP_ID,
   WEBAUTHN_RP_ORIGIN: E2E_WEBAUTHN_RP_ORIGIN,
+  WEBAUTHN_PRF_SECRET: "e".repeat(64),
 };
 
 /**

@@ -24,6 +24,7 @@ import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 import {
   isPasskeyGracePeriodExpired,
+  passkeyEnforcementBlocks,
   recordPasskeyAuditEmit,
   PASSKEY_AUDIT_DEDUP_MS,
   PASSKEY_AUDIT_MAP_MAX,
@@ -65,6 +66,16 @@ const PASSKEY_EXEMPT_PATHS: ReadonlySet<string> = new Set([
 
 function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
   return PASSKEY_EXEMPT_PATHS.has(pathWithoutLocale);
+}
+
+/**
+ * The page-navigation `PASSKEY_ENFORCEMENT_BLOCKED` row's `blockedPath`, and
+ * its dedup key. A closed set, never the requested path: the path past the
+ * area prefix is caller-chosen text (and may carry IDs), which must not reach
+ * a tenant-readable audit row or grow the dedup map.
+ */
+function pageBlockedPath(pathWithoutLocale: string): string {
+  return pathWithoutLocale.startsWith("/admin") ? "PAGE /admin" : "PAGE /dashboard";
 }
 
 function clearAuthSessionCookies(
@@ -212,42 +223,39 @@ export async function handlePageRoute(
     // auth() and render a retry state.
     if (
       !session.passkeyStateDegraded &&
-      session.requirePasskey &&
-      !session.hasPasskey &&
+      passkeyEnforcementBlocks(session) &&
       !isPasskeyExemptPath(pathWithoutLocale)
     ) {
-      if (isPasskeyGracePeriodExpired(session.requirePasskeyEnabledAt, session.passkeyGracePeriodDays)) {
-        const securityUrl = request.nextUrl.clone();
-        securityUrl.pathname = `/${locale}${PASSKEY_PAGE_PATH}`;
+      const securityUrl = request.nextUrl.clone();
+      securityUrl.pathname = `/${locale}${PASSKEY_PAGE_PATH}`;
 
-        // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
-        const userId = session.userId ?? "";
-        if (recordPasskeyAuditEmit(userId, pathWithoutLocale, Date.now())) {
-          // Internal self-fetch: declare same-origin explicitly. Node
-          // fetch (undici) does not auto-set Origin; without it the new
-          // proxy CSRF gate would 403 this request.
-          const selfOrigin = new URL(request.url).origin;
-          void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Origin": selfOrigin,
-              cookie: request.headers.get("cookie") ?? "",
-            },
-            body: JSON.stringify({
-              action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-              metadata: { blockedPath: pathWithoutLocale },
-            }),
-          }).catch(() => {});
-        }
-
-        return applySecurityHeaders(
-          NextResponse.redirect(securityUrl),
-          options,
-          basePath,
-        );
+      // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
+      const userId = session.userId ?? "";
+      const blockedPath = pageBlockedPath(pathWithoutLocale);
+      if (recordPasskeyAuditEmit(userId, blockedPath, Date.now())) {
+        // Internal self-fetch: declare same-origin explicitly. Node
+        // fetch (undici) does not auto-set Origin; without it the new
+        // proxy CSRF gate would 403 this request.
+        const selfOrigin = new URL(request.url).origin;
+        void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Origin": selfOrigin,
+            cookie: request.headers.get("cookie") ?? "",
+          },
+          body: JSON.stringify({
+            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+            metadata: { blockedPath },
+          }),
+        }).catch(() => {});
       }
-      // Within grace period: allow through.
+
+      return applySecurityHeaders(
+        NextResponse.redirect(securityUrl),
+        options,
+        basePath,
+      );
     }
   }
 

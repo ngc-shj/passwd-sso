@@ -13,6 +13,7 @@ import {
 import { seedVaultReadyUser } from "../helpers/vault-user";
 import { addPrfVirtualAuthenticator, E2E_WEBAUTHN_RP_ID } from "../helpers/webauthn";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 /**
  * The session passkey gate end to end (plan session-api-passkey-gate, E2E
@@ -25,7 +26,6 @@ import { VaultLockPage } from "../page-objects/vault-lock.page";
  */
 
 const GRACE_DAYS = 7;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DASHBOARD = "/ja/dashboard";
 const PASSKEY_PAGE = "/ja/dashboard/settings/auth/passkey";
 
@@ -87,14 +87,31 @@ test.describe("Session passkey gate", () => {
       .toEqual(["GET /api/passwords"]);
   });
 
-  test("the registration screen issues no PASSKEY_REQUIRED and never asks for the vault status", async () => {
-    const refused: Response[] = [];
+  test("the registration screen issues no 403 and never reloads", async () => {
+    // Each /api/* body is read as its response arrives: a reload evicts the
+    // bodies of the page it replaces, so a read deferred to the end would
+    // come back empty for exactly the refusal that caused the reload.
+    const UNREADABLE = "<unreadable>";
+    const apiResponses: Promise<{ url: string; status: number; body: string }>[] = [];
     const vaultStatusRequests: string[] = [];
+    let screenUp = false;
+    let navigationsWhileScreenUp = 0;
     page.on("response", (r) => {
-      if (r.status() === 403) refused.push(r);
+      if (!pathnameOf(r).startsWith("/api/")) return;
+      const url = r.url();
+      const status = r.status();
+      apiResponses.push(
+        r.text().then(
+          (body) => ({ url, status, body }),
+          () => ({ url, status, body: UNREADABLE }),
+        ),
+      );
     });
     page.on("request", (r) => {
       if (new URL(r.url()).pathname === "/api/vault/status") vaultStatusRequests.push(r.url());
+    });
+    page.on("framenavigated", (frame) => {
+      if (screenUp && frame === page.mainFrame()) navigationsWhileScreenUp += 1;
     });
 
     const credentialsLoaded = page.waitForResponse(
@@ -106,14 +123,15 @@ test.describe("Session passkey gate", () => {
     expect((await credentialsLoaded).status()).toBe(200);
     await expect(page.getByRole("heading", { name: SCREEN_TITLE })).toBeVisible();
     await expect(page.getByRole("button", { name: REGISTER_BUTTON })).toBeVisible();
+    screenUp = true;
     await page.waitForLoadState("networkidle");
 
-    const passkeyRefusals: string[] = [];
-    for (const r of refused) {
-      const body = await r.json().catch(() => null);
-      if (body?.error === "PASSKEY_REQUIRED") passkeyRefusals.push(r.url());
-    }
-    expect(passkeyRefusals).toEqual([]);
+    const responses = await Promise.all(apiResponses);
+    expect(responses.length, "the screen's own API calls were observed").toBeGreaterThan(0);
+    // Any 403 fails, an unreadable one included: its body cannot show it was
+    // not PASSKEY_REQUIRED, and nothing the screen calls is refused at all.
+    expect(responses.filter((r) => r.status === 403)).toEqual([]);
+    expect(navigationsWhileScreenUp, "the screen reloaded the tab").toBe(0);
     expect(vaultStatusRequests).toEqual([]);
   });
 
@@ -140,18 +158,36 @@ test.describe("Session passkey gate", () => {
     await expect(register).toBeVisible({ timeout: 20_000 });
 
     const options = page.waitForResponse((r) => pathnameOf(r) === "/api/webauthn/register/options");
-    const verify = page.waitForResponse((r) => pathnameOf(r) === "/api/webauthn/register/verify");
+    let verified = false;
+    const verify = page
+      .waitForResponse((r) => pathnameOf(r) === "/api/webauthn/register/verify")
+      .then((r) => {
+        verified = true;
+        return r;
+      });
+    // The reload the screen issues once registration succeeds: a main-frame
+    // navigation that starts after the verify response. The URL alone cannot
+    // show it — the tab is on the passkey page before the reload as well.
+    const reloaded = page.waitForEvent("framenavigated", {
+      predicate: (frame) => verified && frame === page.mainFrame(),
+      timeout: 20_000,
+    });
     await register.click();
     const optionsBody = await (await options).json();
     expect(optionsBody.options?.rp?.id, "the server's WEBAUTHN_RP_ID must be the E2E origin's host").toBe(
       E2E_WEBAUTHN_RP_ID,
     );
+    expect(
+      optionsBody.prfSupported,
+      "the E2E server needs WEBAUTHN_PRF_SECRET (e2e/helpers/webauthn.ts) for registration to request PRF",
+    ).toBe(true);
     expect((await verify).status()).toBe(201);
 
     // The minimal screen reloads the page it was shown on (the page proxy sent
     // the blocked navigation to the passkey settings page) into the dashboard,
     // whose vault is locked.
-    await expect(page).toHaveURL(new RegExp(`${PASSKEY_PAGE}$`), { timeout: 20_000 });
+    await reloaded;
+    await expect(page).toHaveURL(new RegExp(`${PASSKEY_PAGE}$`));
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 20_000 });
 
