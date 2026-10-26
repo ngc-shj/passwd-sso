@@ -58,8 +58,10 @@ export function passkeyEnforcementBlocks(p: {
  * Called by every TOKEN-ISSUANCE gate (C2/C3/C6/C8) instead of reading the
  * possibly-stale session snapshot.
  *
- * - `hasPasskey`: derived from `webAuthnCredential.count({ where: { userId } })`.
+ * - `passkeyCount`: `webAuthnCredential.count({ where: { userId } })`.
  *   Counted by userId ONLY — passkeys are user-global, not tenant-scoped.
+ * - `hasPasskey`: `passkeyCount > 0`, from the same read, so a caller that
+ *   needs both (the last-passkey refusal) decides on one snapshot.
  * - `requirePasskey`, `requirePasskeyEnabledAt`, `passkeyGracePeriodDays`: read
  *   from `tenant.findUnique({ where: { id: tenantId } })`.
  * - `requirePasskeyEnabledAt` is converted via `.toISOString()` (Prisma returns
@@ -81,6 +83,7 @@ export async function derivePasskeyState(params: {
 }): Promise<{
   requirePasskey: boolean;
   hasPasskey: boolean;
+  passkeyCount: number;
   requirePasskeyEnabledAt: string | null;
   passkeyGracePeriodDays: number | null;
 }> {
@@ -113,23 +116,11 @@ export async function derivePasskeyState(params: {
 
   return {
     hasPasskey: credCount > 0,
+    passkeyCount: credCount,
     requirePasskey: tenant.requirePasskey,
     requirePasskeyEnabledAt: tenant.requirePasskeyEnabledAt?.toISOString() ?? null,
     passkeyGracePeriodDays: tenant.passkeyGracePeriodDays,
   };
-}
-
-/**
- * How many passkeys the user holds, across every tenant — the same user-global
- * count `derivePasskeyState` reduces to `hasPasskey`. Fail-closed like it: a
- * DB error throws.
- */
-export async function countUserPasskeys(userId: string): Promise<number> {
-  return withBypassRls(
-    prisma,
-    async (tx) => tx.webAuthnCredential.count({ where: { userId } }),
-    BYPASS_GRANT.PASSKEY_ENFORCEMENT_STATE,
-  );
 }
 
 // ─── Audit dedup ──────────────────────────────────────────────────────────────

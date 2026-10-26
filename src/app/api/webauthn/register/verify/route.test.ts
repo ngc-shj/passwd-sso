@@ -3,6 +3,7 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 import type { verifyRegistration } from "@/lib/auth/webauthn/webauthn-server";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { STEP_UP_WINDOW_MS } from "@/lib/auth/session/step-up";
 
 // T6 (Round-1 plan): mockVerifyRegistration typed against verifyRegistration's
@@ -981,14 +982,21 @@ describe("POST /api/webauthn/register/verify", () => {
       vi.unstubAllEnvs();
     });
 
+    // Answers only the lookup keyed by this request's cookie digest, so a
+    // helper that looked up any other key would read no row (401), not this one.
     function sessionRow(row: Record<string, unknown>) {
-      mockSessionFindUnique.mockResolvedValue({
-        userId: "user-1",
-        provider: "google",
-        passkeyVerifiedAt: null,
-        authCredentialId: null,
-        ...row,
-      });
+      mockSessionFindUnique.mockImplementation(
+        async ({ where }: { where: { sessionToken: string } }) =>
+          where.sessionToken === hashSessionToken(TEST_SESSION_TOKEN)
+            ? {
+                userId: "user-1",
+                provider: "google",
+                passkeyVerifiedAt: null,
+                authCredentialId: null,
+                ...row,
+              }
+            : null,
+      );
     }
 
     function send(headers: Record<string, string> = COOKIE) {

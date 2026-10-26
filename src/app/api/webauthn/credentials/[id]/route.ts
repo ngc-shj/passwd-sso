@@ -12,7 +12,6 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { WEBAUTHN_NICKNAME_MAX_LENGTH } from "@/lib/validations/common";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import {
-  countUserPasskeys,
   derivePasskeyState,
   passkeyEnforcementBlocks,
 } from "@/lib/auth/policy/passkey-enforcement";
@@ -37,16 +36,6 @@ async function handleDELETE(
   const userId = session.user.id;
   const { id } = await params;
 
-  // C9 (OWASP A01-2): step-up required. Passkey deletion removes an
-  // AAL3 credential — a stolen session cookie alone must not suffice.
-  // requireRecentCurrentAuthMethod re-asserts the SAME auth method
-  // (passkey users re-prove passkey; password users re-prove password)
-  // within the last 15 minutes, preventing a password-based session
-  // from being used to delete a passkey.
-  // @stepup id:webauthn-credential-delete method:DELETE
-  const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id);
-  if (stepUp) return stepUp;
-
   const { tenantId, existing } = await withUserTenantRls(userId, async (tid) => ({
     tenantId: tid,
     existing: await prisma.webAuthnCredential.findFirst({
@@ -65,7 +54,14 @@ async function handleDELETE(
   // credential (authCredentialId is SetNull), so its step-up stays stale and
   // registering a replacement needs a full sign-out. Refuse instead, and let
   // the member register the replacement first. The count is user-global,
-  // like `hasPasskey`.
+  // like `hasPasskey`, and comes from the same read.
+  //
+  // Runs before the step-up (FN-7): a refusal deletes nothing, and it tells
+  // the caller only about their own credentials and their tenant's policy,
+  // both already readable by this session (GET /api/webauthn/credentials and
+  // the session payload's requirePasskey fields). A foreign id stops at the
+  // 404 above, before the policy read. Asking a stale session to
+  // re-authenticate first would only lead to this refusal.
   //
   // Not serialized against a concurrent delete: two parallel deletes of the
   // user's last two passkeys can both pass. That needs two fresh step-ups by
@@ -75,10 +71,20 @@ async function handleDELETE(
   const pkState = await derivePasskeyState({ userId, tenantId });
   if (
     passkeyEnforcementBlocks({ ...pkState, hasPasskey: false }) &&
-    (await countUserPasskeys(userId)) <= 1
+    pkState.passkeyCount <= 1
   ) {
     return errorResponse(API_ERROR.CANNOT_DELETE_LAST_PASSKEY);
   }
+
+  // C9 (OWASP A01-2): step-up required. Passkey deletion removes an
+  // AAL3 credential — a stolen session cookie alone must not suffice.
+  // requireRecentCurrentAuthMethod re-asserts the SAME auth method
+  // (passkey users re-prove passkey; password users re-prove password)
+  // within the last 15 minutes, preventing a password-based session
+  // from being used to delete a passkey.
+  // @stepup id:webauthn-credential-delete method:DELETE
+  const stepUp = await requireRecentCurrentAuthMethod(req, session.user.id);
+  if (stepUp) return stepUp;
 
   await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.delete({

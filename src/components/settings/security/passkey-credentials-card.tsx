@@ -123,9 +123,9 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
   // re-bootstrapped after vault rotation cleared its wrapping (#433/F3).
   const [rebootstrappingId, setRebootstrappingId] = useState<string | null>(null);
 
-  // Inline step-up reauth — deleting a credential is server-side
-  // step-up-gated, and so is registering while the tenant's passkey
-  // requirement blocks the session. The retry arg (owned by the hook) names
+  // Inline step-up reauth — deleting and registering a credential are both
+  // server-side step-up-gated, whatever the tenant's passkey policy. The
+  // retry arg (owned by the hook) names
   // the mutation so the post-reauth retry replays it. (Rename/PATCH is not
   // step-up-gated, so it needs no recovery path.)
   const handleReauthRetryRef = useRef<(target: ReauthRetryTarget) => Promise<void>>(async () => {});

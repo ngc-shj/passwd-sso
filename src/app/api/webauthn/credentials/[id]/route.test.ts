@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, createParams, parseResponse } from "@/__tests__/helpers/request-builder";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
+import { STEP_UP_WINDOW_MS } from "@/lib/auth/session/step-up";
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
@@ -14,7 +17,8 @@ const {
   mockInvalidateUserSessionsCache,
   mockLoggerError,
   mockDerivePasskeyState,
-  mockCountUserPasskeys,
+  mockRequireRecentCurrentAuthMethod,
+  mockSessionFindUnique,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaFindFirst: vi.fn(),
@@ -25,7 +29,8 @@ const {
   mockInvalidateUserSessionsCache: vi.fn(),
   mockLoggerError: vi.fn(),
   mockDerivePasskeyState: vi.fn(),
-  mockCountUserPasskeys: vi.fn(),
+  mockRequireRecentCurrentAuthMethod: vi.fn(),
+  mockSessionFindUnique: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -36,10 +41,16 @@ vi.mock("@/lib/prisma", () => ({
       delete: mockPrismaDelete,
       update: mockPrismaUpdate,
     },
+    // Read only by the real step-up helper the FN-7 cells run.
+    session: { findUnique: mockSessionFindUnique },
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tenant-rls")>()),
+  withBypassRls: (client: unknown, fn: (tx: unknown) => unknown) => fn(client),
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,10 +62,10 @@ vi.mock("@/lib/audit/audit", () => ({
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 
-// C9: DELETE now gates on requireRecentCurrentAuthMethod. Stub returns
-// null (allow) by default; tests covering the rejection path can override.
+// C9: DELETE gates on requireRecentCurrentAuthMethod. Each describe sets the
+// stub: allow (null) by default; the FN-7 cells swap in the real helper.
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
-  requireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 // #959 F5/F19: DELETE invalidates the user's cached sessions on success.
@@ -67,7 +78,6 @@ vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
 vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>()),
   derivePasskeyState: mockDerivePasskeyState,
-  countUserPasskeys: mockCountUserPasskeys,
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -102,6 +112,7 @@ const CTX = createParams({ id: "cred-1" });
 describe("DELETE /api/webauthn/credentials/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaFindFirst.mockResolvedValue(EXISTING_CREDENTIAL);
     mockPrismaDelete.mockResolvedValue(EXISTING_CREDENTIAL);
@@ -113,10 +124,10 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     mockDerivePasskeyState.mockResolvedValue({
       requirePasskey: false,
       hasPasskey: true,
+      passkeyCount: 1,
       requirePasskeyEnabledAt: null,
       passkeyGracePeriodDays: null,
     });
-    mockCountUserPasskeys.mockResolvedValue(1);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -259,10 +270,11 @@ describe("DELETE /api/webauthn/credentials/[id] — last passkey", () => {
   const GRACE_DAYS = 7;
   const GRACE_END = NOW - GRACE_DAYS * MS_PER_DAY;
 
-  function requirement(enabledAtMs: number, requirePasskey = true) {
+  function requirement(enabledAtMs: number, requirePasskey = true, passkeyCount = 1) {
     mockDerivePasskeyState.mockResolvedValue({
       requirePasskey,
-      hasPasskey: true,
+      hasPasskey: passkeyCount > 0,
+      passkeyCount,
       requirePasskeyEnabledAt: new Date(enabledAtMs).toISOString(),
       passkeyGracePeriodDays: GRACE_DAYS,
     });
@@ -272,11 +284,11 @@ describe("DELETE /api/webauthn/credentials/[id] — last passkey", () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaFindFirst.mockResolvedValue(EXISTING_CREDENTIAL);
     mockPrismaDelete.mockResolvedValue(EXISTING_CREDENTIAL);
     mockInvalidateUserSessionsCache.mockResolvedValue({ totalSessions: 0, cacheTombstoneFailures: 0 });
-    mockCountUserPasskeys.mockResolvedValue(1);
   });
 
   afterEach(() => {
@@ -291,7 +303,6 @@ describe("DELETE /api/webauthn/credentials/[id] — last passkey", () => {
     expect(status).toBe(403);
     expect(json.error).toBe("CANNOT_DELETE_LAST_PASSKEY");
     expect(mockDerivePasskeyState).toHaveBeenCalledWith({ userId: "user-1", tenantId: "tenant-1" });
-    expect(mockCountUserPasskeys).toHaveBeenCalledWith("user-1");
     expect(mockPrismaDelete).not.toHaveBeenCalled();
     expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
@@ -307,8 +318,7 @@ describe("DELETE /api/webauthn/credentials/[id] — last passkey", () => {
   });
 
   it("deletes a passkey that is not the last one past the grace period", async () => {
-    requirement(GRACE_END - 1);
-    mockCountUserPasskeys.mockResolvedValue(2);
+    requirement(GRACE_END - 1, true, 2);
 
     const { status } = await parseResponse(await DELETE(createRequest("DELETE", ROUTE_URL), CTX));
 
@@ -333,6 +343,104 @@ describe("DELETE /api/webauthn/credentials/[id] — last passkey", () => {
 
     expect(status).toBe(404);
     expect(mockDerivePasskeyState).not.toHaveBeenCalled();
+  });
+
+  it("fails the request, deleting nothing, when the passkey state read rejects (fail-closed)", async () => {
+    mockDerivePasskeyState.mockRejectedValue(new Error("db down"));
+
+    await expect(DELETE(createRequest("DELETE", ROUTE_URL), CTX)).rejects.toThrow("db down");
+
+    expect(mockRequireRecentCurrentAuthMethod).not.toHaveBeenCalled();
+    expect(mockPrismaDelete).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  // ── FN-7: the refusal runs before the step-up ──────────────────────────
+  // Runs the real requireRecentCurrentAuthMethod over a session row keyed by
+  // this request's cookie digest, so "stale" is the window comparison itself.
+
+  describe("ordering against the step-up", () => {
+    const COOKIE = { cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` };
+
+    beforeEach(async () => {
+      vi.stubEnv("AUTH_URL", "http://localhost:3000");
+      const real = await vi.importActual<
+        typeof import("@/lib/auth/session/recent-current-auth-method")
+      >("@/lib/auth/session/recent-current-auth-method");
+      mockRequireRecentCurrentAuthMethod.mockImplementation(real.requireRecentCurrentAuthMethod);
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function signedInAgo(ageMs: number) {
+      mockSessionFindUnique.mockImplementation(
+        async ({ where }: { where: { sessionToken: string } }) =>
+          where.sessionToken === hashSessionToken(TEST_SESSION_TOKEN)
+            ? {
+                userId: "user-1",
+                provider: "google",
+                createdAt: new Date(NOW - ageMs),
+                passkeyVerifiedAt: null,
+                authCredentialId: null,
+              }
+            : null,
+      );
+    }
+
+    function send() {
+      return DELETE(createRequest("DELETE", ROUTE_URL, { headers: COOKIE }), CTX);
+    }
+
+    it("refuses the last passkey on a stale session without asking for a step-up", async () => {
+      requirement(GRACE_END - 1);
+      signedInAgo(STEP_UP_WINDOW_MS + 1);
+
+      const { status, json } = await parseResponse(await send());
+
+      expect(status).toBe(403);
+      expect(json.error).toBe("CANNOT_DELETE_LAST_PASSKEY");
+      expect(mockSessionFindUnique).not.toHaveBeenCalled();
+      expect(mockPrismaDelete).not.toHaveBeenCalled();
+    });
+
+    it("still requires the step-up to delete a passkey that is not the last one", async () => {
+      requirement(GRACE_END - 1, true, 2);
+      signedInAgo(STEP_UP_WINDOW_MS + 1);
+
+      const { status, json } = await parseResponse(await send());
+
+      expect(status).toBe(403);
+      expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+      expect(mockPrismaDelete).not.toHaveBeenCalled();
+      expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+
+    it("deletes a passkey that is not the last one on a fresh session", async () => {
+      requirement(GRACE_END - 1, true, 2);
+      signedInAgo(STEP_UP_WINDOW_MS);
+
+      const { status } = await parseResponse(await send());
+
+      expect(status).toBe(200);
+      expect(mockPrismaDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers 404 for a foreign credential id on a stale session, reading no policy", async () => {
+      requirement(GRACE_END - 1);
+      signedInAgo(STEP_UP_WINDOW_MS + 1);
+      mockPrismaFindFirst.mockResolvedValue(null);
+
+      const { status, json } = await parseResponse(await send());
+
+      expect(status).toBe(404);
+      expect(json.error).toBe("NOT_FOUND");
+      expect(mockDerivePasskeyState).not.toHaveBeenCalled();
+      expect(mockSessionFindUnique).not.toHaveBeenCalled();
+    });
   });
 });
 

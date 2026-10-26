@@ -52,6 +52,17 @@ change (`WEBAUTHN_RP_ID`, `WEBAUTHN_PRF_SECRET`).
      `GET /api/passwords` stays 200. Deleting the remaining one is refused again.
    - As B (tenant N), and as A while tenant P is still within its grace period, deleting the
      only passkey succeeds.
+   - As A with only one passkey and a sign-in older than the step-up window, delete it. Expect
+     the same `CANNOT_DELETE_LAST_PASSKEY` refusal, not the "sign in again" dialog: the refusal
+     is answered before the step-up. With two passkeys and the same stale sign-in, deleting one
+     shows the "sign in again" dialog (`SESSION_STEP_UP_REQUIRED`).
+   - **Compromised sole passkey (incident response).** As A with one passkey, treat it as
+     compromised: sign in again, register a replacement, then delete the compromised one.
+     Expect the delete to succeed and the replacement to stay listed.
+   - For a member with no second authenticator, a tenant-P admin turns `requirePasskey` off;
+     the member can then delete the compromised passkey (it is no longer refused). The admin
+     turns the requirement back on once the member has registered a replacement. There is no
+     admin-side credential revoke yet (follow-up).
    - A delete through the route can no longer leave a past-grace member without a passkey, so
      the former "next API call returns `PASSKEY_REQUIRED` within seconds" check is not
      reachable here. The delete's session-cache invalidation is still covered by the route's

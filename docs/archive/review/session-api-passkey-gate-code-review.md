@@ -1,6 +1,6 @@
 # Code Review: session-api-passkey-gate
 Date: 2026-10-27
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 Initial review, on top of the Phase 2 self-R-check (fixed in 32b8e376f).
@@ -89,4 +89,63 @@ None.
 - **N/A:** the rest; RT4, RT9.
 
 ## Resolution Status
-(pending)
+
+### Round 1 (fixed in c729aa68e)
+- **SEC-1 Major:** both register routes call `requireRecentCurrentAuthMethod` unconditionally,
+  before the challenge is minted or consumed. This was the user's decision. Plan D5 and I4 are
+  updated.
+- **FN-2 Minor:**
+  - The `DELETE` route refuses deleting the last passkey past grace with 403
+    `CANNOT_DELETE_LAST_PASSKEY`. This was the user's decision.
+  - The card maps the code, and the manual-test step was rewritten.
+- **FN-1 Major:** the card's PRF count, confirm text and warning use
+  `prfSupported && prfWrappingPresent`.
+- **SEC-2 / FN-3:** `page-route.ts` uses `passkeyEnforcementBlocks`. Its audit `blockedPath` is
+  from a closed set (`PAGE /dashboard`, `PAGE /admin`).
+- **SEC-3 / FN-4 / FN-5:** the policy doc and the autofill-token comment are corrected.
+- **T-1:**
+  - The E2E body is read on arrival, and any `/api/*` 403 fails.
+  - Main-frame navigations are counted.
+- **T-8:** a post-verify navigation waiter, and a precondition naming `WEBAUTHN_PRF_SECRET`.
+- **T-2:** the `getRedis` mocks.
+- **T-3:** the `ci-integration` path filter.
+- **T-4:** a real-DB cross-tenant session-callback cell (new file).
+- **T-6:** the reader-scan fixture gains `concretePaths`.
+- **T-7:** the duplicate cells are merged.
+- **T-9 / A1:** a single E2E env source with the PRF secret, and `MS_PER_DAY` is imported.
+- **T-5:** moot. The register routes no longer derive the passkey state.
+
+## Round 2 (incremental, 32b8e376f..c729aa68e)
+No Critical or Major findings. The R43 checks found no widening.
+- **Functionality:**
+  - FN-6: a stale card comment.
+  - FN-7: the last-passkey refusal ran after step-up.
+  - FN-8: `countUserPasskeys` duplicated `derivePasskeyState`'s count.
+- **Security:**
+  - S2-1: a compromised sole passkey needs a replacement first.
+  - S2-2 [Adjacent]: there is no admin credential revoke.
+- **Testing:**
+  - T2-1: no e2e cell for the mounted flag.
+  - T2-2: `networkidle` bound.
+  - T2-3: the cross-tenant integration run is unrecorded.
+  - T2-4: no real-DB count cell.
+  - T2-5: no fail-closed cell.
+  - T2-6: the session double ignores `where`.
+
+### Round 2 resolution
+- **FN-8:** `derivePasskeyState` returns `passkeyCount`, and `countUserPasskeys` is removed.
+- **FN-7:** the 404 and the last-passkey refusal now come before step-up. Step-up still guards
+  every delete that proceeds.
+- **FN-6:** the comment is fixed.
+- **S2-1:** the incident path is documented in the policy doc and the manual-test plan.
+- **S2-2:** follow-up; it predates this branch.
+- **T2-1:** a `page.route` cell refuses the mount credentials call and asserts no navigation. Not
+  executed: E1 is still blocked.
+- **T2-2:** waits on the named mount responses and asserts the set is equal.
+- **T2-3 / T2-4:** cross-tenant integration cells. `passkeyCount` = 2 across tenants, a real
+  `DELETE` is allowed, and the control is refused. The run exited 0 (5/5). Red-proved with a
+  tenant-scoped count.
+- **T2-5:** fail-closed cell.
+- **T2-6:** the session double matches on the token digest.
+- **Red proofs:** step-up moved back first, step-up result ignored, fail-open on a derivation
+  error, count collapsed, raw-token lookup, tenant-scoped count. Each turned its cells red.

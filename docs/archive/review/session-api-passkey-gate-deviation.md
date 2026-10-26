@@ -116,10 +116,11 @@
     row against the dev Redis both passed.
   - The defect that does show is the write itself: an unmocked run left 72
     `rl:passkey_session_gate_audit:u-1:*` keys in the real Redis, and a mocked run leaves none.
-- **The E2E minimal-screen cell cannot see the mounted-flag mutation on its own.** Nothing the
-  screen calls is refused, so `reactToPasskeyRequired` never fires there. The cell sees it only
-  together with a 403 on the screen. It now fails on any `/api/*` 403, unreadable bodies
-  included, and on any main-frame navigation once the screen is up.
+- **The un-intercepted E2E minimal-screen cell cannot see the mounted-flag mutation on its own.**
+  Nothing the screen calls is refused there, so `reactToPasskeyRequired` never fires. It fails on
+  any `/api/*` 403, unreadable bodies included, and on any main-frame navigation once the screen
+  is up. (Corrected in round 2: an E2E cell can see the mutation when it refuses a screen call
+  itself — see "Code review round 2".)
 - **The WebAuthn E2E env has a single source.**
   - `WEBAUTHN_RP_ID` and `WEBAUTHN_PRF_SECRET` were removed from the CI `e2e` job.
   - The PRF secret (a dummy) joined `E2E_WEBAUTHN_SERVER_ENV`. Playwright merges `webServer.env`
@@ -128,3 +129,60 @@
     values itself, as before.
 - **Still deferred:** the E2E spec has not been run locally (same reasons as Batch 3). It
   type-checks and lints clean.
+
+## Code review round 2
+- **One read for the last-passkey refusal (FN-8).** `derivePasskeyState` also returns
+  `passkeyCount`, the same user-global count it reduces to `hasPasskey`; the credential `DELETE`
+  decides on `passkeyCount <= 1` from that one snapshot. `countUserPasskeys` and its two unit
+  cells are deleted. Every other caller only passes the result to `passkeyEnforcementBlocks`,
+  which ignores the extra field, so their behaviour is unchanged.
+- **The refusal runs before the step-up (FN-7).** Order in `DELETE`: ownership lookup (404), the
+  last-passkey refusal, then `requireRecentCurrentAuthMethod`. A stale session deleting its last
+  passkey past grace gets `CANNOT_DELETE_LAST_PASSKEY`, not a re-authentication prompt that would
+  only lead to it. The refusal discloses only the caller's own credential list and tenant policy
+  (both readable by the session already); a foreign id still stops at the 404 before the policy
+  read. A delete that proceeds still needs the step-up.
+- **S2-2 (an admin-side revoke of a member's credential) is a follow-up, not done here.** Until
+  it exists, the incident path for a member with a compromised sole passkey and no second
+  authenticator is the tenant admin turning `requirePasskey` off (S2-1, documented in
+  `docs/security/policy-enforcement.md` and manual-test step 8). No issue was filed from this
+  round.
+- **T2-1: the refused-call E2E cell refuses `GET /api/webauthn/credentials`, at mount.**
+  - The screen calls two endpoints on mount, the credential list and `GET /api/user/auth-provider`.
+    Neither is retried; the list is fetched again only after a register or delete.
+  - The list is refused because its failure is observable: the card's "failed to load" toast
+    appears only after `fetchApi` returned, i.e. after the reaction finished. That toast bounds
+    the observation without a sleep. The auth-provider probe fails silently, so nothing would
+    bound it.
+  - "With the screen up" is the mount itself: no refetch can be triggered without registering,
+    which reloads the tab by design. The mount fetch is also exactly the case the layout effect
+    exists for.
+  - Not run here (same reasons as Batch 3); it type-checks and lints clean. Its red proof — drop
+    `setPasskeyRequiredScreenMounted(true)` and expect one main-frame navigation — is owed to the
+    first environment that can run the E2E spec.
+- **T2-2: the observation bound is the screen's named mount calls.** Each of
+  `GET /api/auth/session` (the session provider), `GET /api/webauthn/credentials` and
+  `GET /api/user/auth-provider` is awaited by name, and the set of `fetch`/`xhr` calls observed
+  under `/api/` must equal that set. Calls are compared as a set, since the session provider may
+  read the session more than once. Non-fetch requests (a CSP report) are not part of the set.
+- **T2-6: the register cells' session double answers only the cookie's digest.** It returns the
+  row only when `where.sessionToken === hashSessionToken(TEST_SESSION_TOKEN)`, and null
+  otherwise. The credential `DELETE` cells that run the real step-up use the same double.
+- **T2-3/T2-4: integration.** `session-passkey-cross-tenant.integration.test.ts` gains three
+  cells: `passkeyCount` is 2 with one credential in the requiring tenant and one in another; the
+  real `DELETE` route deletes the requiring tenant's credential in that state; control, the
+  requiring tenant's credential alone counts 1 and its delete is refused. The route cell stubs
+  only `auth()` (through the mocked `next-auth`) and signs in with a real fresh Session row.
+- **Observation, not changed:** the integration run prints pg's "client is already executing a
+  query" deprecation once. The trace stops inside Prisma, so its source is not attributed.
+  `derivePasskeyState` runs its two reads with `Promise.all` on one transaction client, which
+  matches it, but the session-callback cells in the same file run first.
+- **Follow-up candidate (not fixed here): `Promise.all` over one interactive transaction
+  client.**
+  - **Where:** `derivePasskeyState`, `src/auth.ts`'s session callback and about 15 other
+    pre-existing sites (`rg -n -U 'Promise\.all\(\[\s*\n?\s*tx\.' src`).
+  - **Effect:** two queries are issued concurrently on one pg client. pg queues them today but
+    prints the deprecation "client is already executing a query", and it will refuse them in a
+    future major version.
+  - **Why not here:** the class predates this branch, spans unrelated features, and its fix
+    (sequential awaits) belongs in its own change.

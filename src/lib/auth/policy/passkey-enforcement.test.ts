@@ -36,7 +36,6 @@ import {
   isPasskeyGracePeriodExpired,
   passkeyEnforcementBlocks,
   derivePasskeyState,
-  countUserPasskeys,
   recordPasskeyAuditEmit,
   PASSKEY_AUDIT_DEDUP_MS,
   PASSKEY_AUDIT_MAP_MAX,
@@ -226,6 +225,20 @@ describe("derivePasskeyState", () => {
     expect(result.hasPasskey).toBe(false);
   });
 
+  it("returns the user-global count as passkeyCount, from the same read as hasPasskey", async () => {
+    mockWebAuthnCredentialCount.mockResolvedValue(2);
+    mockTenantFindUnique.mockResolvedValue({
+      requirePasskey: true,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+
+    const result = await derivePasskeyState({ userId: "u-6", tenantId: "t-6" });
+    expect(result.passkeyCount).toBe(2);
+    expect(result.hasPasskey).toBe(true);
+    expect(mockWebAuthnCredentialCount).toHaveBeenCalledTimes(1);
+  });
+
   it("converts requirePasskeyEnabledAt Date to ISO string", async () => {
     const date = new Date("2025-06-01T12:00:00Z");
     mockWebAuthnCredentialCount.mockResolvedValue(0);
@@ -300,25 +313,6 @@ describe("derivePasskeyState", () => {
 });
 
 // ─── recordPasskeyAuditEmit ───────────────────────────────────────────────────
-
-describe("countUserPasskeys", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("counts the user's passkeys by userId alone (user-global, across tenants)", async () => {
-    mockWebAuthnCredentialCount.mockResolvedValue(2);
-
-    await expect(countUserPasskeys("user-1")).resolves.toBe(2);
-    expect(mockWebAuthnCredentialCount).toHaveBeenCalledWith({ where: { userId: "user-1" } });
-  });
-
-  it("throws when the count fails (fail-closed)", async () => {
-    mockWebAuthnCredentialCount.mockRejectedValue(new Error("db down"));
-
-    await expect(countUserPasskeys("user-1")).rejects.toThrow("db down");
-  });
-});
 
 describe("recordPasskeyAuditEmit", () => {
   beforeEach(() => {

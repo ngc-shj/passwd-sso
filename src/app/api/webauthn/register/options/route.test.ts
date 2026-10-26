@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { STEP_UP_WINDOW_MS } from "@/lib/auth/session/step-up";
 
 // ── Hoisted mocks ────────────────────────────────────────────
@@ -344,14 +345,21 @@ describe("POST /api/webauthn/register/options", () => {
       vi.unstubAllEnvs();
     });
 
+    // Answers only the lookup keyed by this request's cookie digest, so a
+    // helper that looked up any other key would read no row (401), not this one.
     function sessionRow(row: Record<string, unknown>) {
-      mockSessionFindUnique.mockResolvedValue({
-        userId: "user-1",
-        provider: "google",
-        passkeyVerifiedAt: null,
-        authCredentialId: null,
-        ...row,
-      });
+      mockSessionFindUnique.mockImplementation(
+        async ({ where }: { where: { sessionToken: string } }) =>
+          where.sessionToken === hashSessionToken(TEST_SESSION_TOKEN)
+            ? {
+                userId: "user-1",
+                provider: "google",
+                passkeyVerifiedAt: null,
+                authCredentialId: null,
+                ...row,
+              }
+            : null,
+      );
     }
 
     it("refuses a sign-in 1 ms past STEP_UP_WINDOW_MS with SESSION_STEP_UP_REQUIRED, minting no challenge", async () => {

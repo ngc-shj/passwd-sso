@@ -34,7 +34,27 @@ const REGISTER_BUTTON = /新しいパスキーを登録|Register new passkey/;
 const SIGN_IN_AGAIN_DIALOG = /Sign in again to continue|再サインインが必要です/i;
 const REBOOTSTRAP_BUTTON = /^有効化$|^Enable$/;
 
+const CREDENTIALS_FETCH_ERROR = /パスキーの読み込みに失敗しました|Failed to load passkeys/;
+
 const pathnameOf = (r: Response) => new URL(r.url()).pathname;
+const callKey = (r: Response) => `${r.request().method()} ${pathnameOf(r)}`;
+const isFetch = (r: Response) => ["fetch", "xhr"].includes(r.request().resourceType());
+
+// What the minimal screen fetches on mount: the session provider's session
+// read, and the passkey card's credential list and auth-provider probe.
+const SCREEN_MOUNT_CALLS = [
+  "GET /api/auth/session",
+  "GET /api/webauthn/credentials",
+  "GET /api/user/auth-provider",
+] as const;
+
+function waitForMountCalls(page: Page): Promise<Response[]> {
+  return Promise.all(
+    SCREEN_MOUNT_CALLS.map((key) =>
+      page.waitForResponse((r) => isFetch(r) && callKey(r) === key),
+    ),
+  );
+}
 
 test.describe("Session passkey gate", () => {
   let context: BrowserContext;
@@ -93,11 +113,13 @@ test.describe("Session passkey gate", () => {
     // come back empty for exactly the refusal that caused the reload.
     const UNREADABLE = "<unreadable>";
     const apiResponses: Promise<{ url: string; status: number; body: string }>[] = [];
+    const observedCalls = new Set<string>();
     const vaultStatusRequests: string[] = [];
     let screenUp = false;
     let navigationsWhileScreenUp = 0;
     page.on("response", (r) => {
       if (!pathnameOf(r).startsWith("/api/")) return;
+      if (isFetch(r)) observedCalls.add(callKey(r));
       const url = r.url();
       const status = r.status();
       apiResponses.push(
@@ -114,25 +136,71 @@ test.describe("Session passkey gate", () => {
       if (screenUp && frame === page.mainFrame()) navigationsWhileScreenUp += 1;
     });
 
-    const credentialsLoaded = page.waitForResponse(
-      (r) => pathnameOf(r) === "/api/webauthn/credentials" && r.request().method() === "GET",
-    );
+    // The observation bound is the screen's own mount calls, each awaited by
+    // name, rather than an idle network.
+    const mountCalls = waitForMountCalls(page);
     await page.goto(DASHBOARD);
 
-    // Positive control: the card's Tier B call answered and the card rendered.
-    expect((await credentialsLoaded).status()).toBe(200);
+    // Positive control: every mount call answered 200 and the card rendered.
+    for (const res of await mountCalls) {
+      expect(res.status(), callKey(res)).toBe(200);
+    }
     await expect(page.getByRole("heading", { name: SCREEN_TITLE })).toBeVisible();
     await expect(page.getByRole("button", { name: REGISTER_BUTTON })).toBeVisible();
     screenUp = true;
-    await page.waitForLoadState("networkidle");
 
+    // Nothing beyond the named set was fetched while the screen mounted.
+    expect([...observedCalls].sort()).toEqual([...SCREEN_MOUNT_CALLS].sort());
     const responses = await Promise.all(apiResponses);
-    expect(responses.length, "the screen's own API calls were observed").toBeGreaterThan(0);
     // Any 403 fails, an unreadable one included: its body cannot show it was
     // not PASSKEY_REQUIRED, and nothing the screen calls is refused at all.
     expect(responses.filter((r) => r.status === 403)).toEqual([]);
     expect(navigationsWhileScreenUp, "the screen reloaded the tab").toBe(0);
     expect(vaultStatusRequests).toEqual([]);
+  });
+
+  test("a PASSKEY_REQUIRED refusal seen on the mounted screen does not reload the tab", async () => {
+    // The un-intercepted cell above is the allow side; here one screen call is
+    // refused, so fetchApi's PASSKEY_REQUIRED reaction runs and only the
+    // screen-mounted flag keeps it from reloading. The credential list is the
+    // call refused: the card fetches it once on mount (no retry), and its
+    // failure toast shows only after fetchApi returned, i.e. after the
+    // reaction finished — that toast bounds the observation.
+    let refusalServed = false;
+    let navigationsAfterRefusal = 0;
+    page.on("framenavigated", (frame) => {
+      if (refusalServed && frame === page.mainFrame()) navigationsAfterRefusal += 1;
+    });
+    page.on("request", (r) => {
+      if (refusalServed && r.isNavigationRequest() && r.frame() === page.mainFrame()) {
+        navigationsAfterRefusal += 1;
+      }
+    });
+    await page.route(
+      (url) => url.pathname === "/api/webauthn/credentials",
+      async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        refusalServed = true;
+        await route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "PASSKEY_REQUIRED" }),
+        });
+      },
+      { times: 1 },
+    );
+
+    const refused = page.waitForResponse(
+      (r) => pathnameOf(r) === "/api/webauthn/credentials" && r.request().method() === "GET",
+    );
+    await page.goto(DASHBOARD);
+    expect((await refused).status()).toBe(403);
+    const urlAtRefusal = page.url();
+
+    await expect(page.getByText(CREDENTIALS_FETCH_ERROR)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: SCREEN_TITLE })).toBeVisible();
+    expect(navigationsAfterRefusal, "the refusal reloaded the tab").toBe(0);
+    expect(page.url()).toBe(urlAtRefusal);
   });
 
   test("a stale sign-in is asked to sign in again before registering", async () => {
