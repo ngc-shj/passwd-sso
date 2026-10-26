@@ -1,6 +1,6 @@
 # Code Review: session-api-passkey-gate
 Date: 2026-10-27
-Review round: 4
+Review round: 5
 
 ## Changes from Previous Round
 Initial review, on top of the Phase 2 self-R-check (fixed in 32b8e376f).
@@ -195,3 +195,42 @@ No Critical or Major findings. The R43 checks found no widening.
 - **T4-3:** the init script runs in the top frame only.
 - **F4-1 / S4-1:** the policy doc and manual-test step 8 are updated.
 - **E1:** still blocked-deferred. Type-check and lint are clean.
+
+## Round 5 (incremental, b6065a2fa..54aba9caf, testing with a doc check)
+- T4-1, T4-2, T4-3, F4-1 and S4-1 are resolved. No production-code change.
+- **Detector checks:**
+  - Navigation API semantics hold. The same-URL `location.href` reload is cross-document and
+    fires in the observed document.
+  - No other cross-document navigate is reachable on the screen.
+  - The evaluate is not at risk of "context destroyed".
+  - The guards and the top-frame check hold.
+- **Findings (all Minor):**
+  - T5-1: the owed red proof should require showing the recorded entry, because the mutation can
+    fail at the toast wait.
+  - T5-2: record `url` and `type` so an unrelated dev HMR reload is diagnosable.
+  - D5-1: "refresh is refused" holds only once the member is blocked.
+
+## Tightening-only skip — Round 5
+Findings applied directly (no Round 6 review):
+- [T5-1] [Minor] the owed red-proof wording requires the recorded cross-document entry to the
+  passkey page — `session-api-passkey-gate-deviation.md` — applied verbatim.
+- [T5-2] [Minor] the navigate record keeps `url` and `type`, and failures print the
+  cross-document entries — `e2e/tests/session-passkey-gate.spec.ts` (detector helper) — applied
+  verbatim.
+- [D5-1] [Minor] the MCP refresh refusal is conditioned on the member being blocked —
+  `docs/security/policy-enforcement.md` (`requirePasskey` row) — applied verbatim.
+
+Justification: every finding is within Round 4's fix range (the same E2E cell and doc
+sentences). Each is a diagnostic or wording change with no change to what the cell asserts or to
+any production code, and none touches a security boundary in code.
+
+## Environment Verification Report
+- **E1 (WebAuthn E2E):** blocked-deferred.
+  - Phase 1 constraint: plan "Verification environment constraints" E1.
+  - Deviation-log entries: "Deferred: the E2E spec has not been run locally" (Batch 3), plus the
+    owed red proofs (T2-1 entry).
+  - It becomes verified-CI on a green `e2e` job for this branch. The owed red proofs need the
+    first environment that can run the spec.
+- **Integration (real DB and Redis):** verified-local. `session-passkey-gate`,
+  `session-passkey-cross-tenant`, `bearer-passkey-requirement` and `session-revocation-cache`
+  ran with exit 0, as recorded in the deviation log.

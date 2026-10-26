@@ -161,7 +161,10 @@
   - Its red proof is owed to the first environment that can run the E2E spec. It reads the
     in-page record of cross-document navigate events (code review round 4, T4-1), not
     `framenavigated`:
-    - drop `setPasskeyRequiredScreenMounted(true)` and expect at least one cross-document entry;
+    - drop `setPasskeyRequiredScreenMounted(true)`: the cell must fail. Under the mutation it can
+      fail at the toast wait or at the cross-document check, depending on timing. So read the
+      recorded entries in the failing run and confirm one cross-document entry whose `url` is
+      the passkey page (`PASSKEY_PAGE_PATH`);
     - drop the listener install and expect the allow side to fail. The allow side is a
       `location.href` reload that must record exactly one cross-document entry.
 - **T2-2: the observation bound is the screen's named mount calls.** Each of

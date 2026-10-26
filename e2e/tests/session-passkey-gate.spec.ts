@@ -188,21 +188,31 @@ test.describe("Session passkey gate", () => {
         }
         if (sessionStorage.getItem(key) === null) sessionStorage.setItem(key, "[]");
         nav.addEventListener("navigate", (event) => {
-          const e = event as Event & { destination: { sameDocument: boolean } };
-          const entries = JSON.parse(sessionStorage.getItem(key) ?? "[]") as boolean[];
-          entries.push(e.destination.sameDocument);
+          const e = event as Event & {
+            navigationType: string;
+            destination: { sameDocument: boolean; url: string };
+          };
+          const entries = JSON.parse(sessionStorage.getItem(key) ?? "[]") as unknown[];
+          entries.push({
+            sameDocument: e.destination.sameDocument,
+            url: e.destination.url,
+            type: e.navigationType,
+          });
           sessionStorage.setItem(key, JSON.stringify(entries));
         });
       } catch {
         // Documents without sessionStorage (about:blank) are not the app.
       }
     }, navKey);
+    // The cross-document entries, each with its destination and type, so a
+    // failure shows where it went (e.g. an unrelated `next dev` HMR reload).
     const crossDocumentNavigations = async () => {
       const raw = await page.evaluate((key) => sessionStorage.getItem(key), navKey);
       // "unsupported" or a missing key fails here rather than reading as none.
       expect(raw, "Navigation API listener not installed").not.toBe("unsupported");
       expect(raw, "Navigation API listener not installed").not.toBeNull();
-      return (JSON.parse(raw as string) as boolean[]).filter((same) => !same).length;
+      const entries = JSON.parse(raw as string) as Array<{ sameDocument: boolean }>;
+      return entries.filter((entry) => !entry.sameDocument);
     };
 
     let refusalServed = false;
@@ -238,7 +248,7 @@ test.describe("Session passkey gate", () => {
     await expect(page.getByRole("heading", { name: SCREEN_TITLE })).toBeVisible();
     // The browser-initiated goto fires no navigate event, so no cross-document
     // entry may exist.
-    expect(await crossDocumentNavigations(), "the refusal started a reload").toBe(0);
+    expect(await crossDocumentNavigations(), "the refusal started a reload").toEqual([]);
     expect(navigationsAfterRefusal, "the refusal reloaded the tab").toBe(0);
     expect(page.url()).toBe(urlAtRefusal);
 
@@ -250,7 +260,7 @@ test.describe("Session passkey gate", () => {
         window.location.href = window.location.href;
       }),
     ]);
-    expect(await crossDocumentNavigations()).toBe(1);
+    expect(await crossDocumentNavigations()).toHaveLength(1);
   });
 
   test("a stale sign-in is asked to sign in again before registering", async () => {
