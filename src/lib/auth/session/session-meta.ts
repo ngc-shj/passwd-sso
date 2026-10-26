@@ -16,6 +16,15 @@ export interface SessionMeta {
    * we rely on.
    */
   provider?: string | null;
+  /**
+   * Raw token of the session the browser held when it reached an OAuth/OIDC
+   * callback. The callback route strips that cookie so Auth.js signs in fresh
+   * instead of linking to the signed-in user; the session it would have
+   * replaced is deleted inside the transaction that creates the new one
+   * (`createSessionUnderConcurrencyCap`), before the concurrent-session cap
+   * counts it.
+   */
+  replacesSessionToken?: string | null;
 }
 
 export const sessionMetaStorage = new AsyncLocalStorage<SessionMeta>();

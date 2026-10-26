@@ -36,6 +36,8 @@ export type CappedSessionInput = {
   provider: string | null;
   passkeyVerifiedAt?: Date;
   authCredentialId?: string;
+  /** Raw token of a session this sign-in replaces; deleted before the cap counts. */
+  replacesSessionToken?: string;
 };
 
 export type SessionEviction = {
@@ -64,6 +66,8 @@ export async function createSessionUnderConcurrencyCap(
 ): Promise<{
   session: { userId: string; expires: Date };
   eviction: SessionEviction | null;
+  /** The replaced session was this user's, so the browser is a known device. */
+  replacedOwnSession: boolean;
 }> {
   // Serialize concurrent session creation for this user so the
   // count-then-evict-then-create sequence cannot race past the concurrent
@@ -71,6 +75,26 @@ export async function createSessionUnderConcurrencyCap(
   // Advisory lock is transaction-scoped; matches the codebase idiom
   // (attachments, vault rotate-key).
   await advisoryXactLock(tx, input.userId);
+
+  // The session this sign-in replaces is not one of the user's other devices:
+  // delete it before counting, or at the cap it would push out a session that
+  // is still in use. It may belong to another user (a sign-in that switches
+  // users), and may already be gone.
+  let replacedOwnSession = false;
+  if (input.replacesSessionToken) {
+    const digest = hashSessionToken(input.replacesSessionToken);
+    const replaced = await tx.session.findUnique({
+      where: { sessionToken: digest },
+      select: { userId: true, expires: true },
+    });
+    if (replaced) {
+      await tx.session.deleteMany({ where: { sessionToken: digest } });
+      // Only a live session proves the browser is a known device; an expired
+      // row lingers until the retention sweep removes it.
+      replacedOwnSession =
+        replaced.userId === input.userId && replaced.expires > new Date();
+    }
+  }
 
   // Check tenant's concurrent session limit
   const tenant = await tx.tenant.findUnique({
@@ -143,7 +167,7 @@ export async function createSessionUnderConcurrencyCap(
     },
   });
 
-  return { session, eviction };
+  return { session, eviction, replacedOwnSession };
 }
 
 /**
@@ -206,19 +230,27 @@ export async function reportSessionEviction(
 export async function createCappedSession(
   input: CappedSessionInput & { acceptLanguage: string | null },
 ): Promise<{ userId: string; expires: Date }> {
-  const { session, eviction } = await withBypassRls(
+  const { session, eviction, replacedOwnSession } = await withBypassRls(
     prisma,
     async (tx) => createSessionUnderConcurrencyCap(tx, input),
     BYPASS_GRANT.AUTH_SESSION_CAPPING,
   );
 
-  // Fire-and-forget: check for new device and notify user
-  void checkNewDeviceAndNotify(input.userId, {
-    ip: input.ip,
-    userAgent: input.userAgent,
-    acceptLanguage: input.acceptLanguage,
-    currentSessionToken: input.sessionToken,
-  });
+  if (input.replacesSessionToken) {
+    await invalidateCachedSessions([hashSessionToken(input.replacesSessionToken)]);
+  }
+
+  // Fire-and-forget: check for new device and notify user. A browser that
+  // held this user's own session is a known device, but with that session
+  // deleted the check could no longer see it.
+  if (!replacedOwnSession) {
+    void checkNewDeviceAndNotify(input.userId, {
+      ip: input.ip,
+      userAgent: input.userAgent,
+      acceptLanguage: input.acceptLanguage,
+      currentSessionToken: input.sessionToken,
+    });
+  }
 
   if (eviction) {
     await reportSessionEviction(eviction, {

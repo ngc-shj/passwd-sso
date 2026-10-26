@@ -9,6 +9,12 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
+import {
+  parseCookiePairs,
+  readSessionCookie,
+  SESSION_COOKIE_READ,
+} from "@/lib/auth/session/session-cookie";
 
 export const runtime = "nodejs";
 
@@ -43,6 +49,24 @@ function withAuthBasePath<H extends RouteHandler>(handler: H): H {
     return handler(patched, ...rest);
   };
   return wrapped as unknown as H;
+}
+
+/**
+ * The non-empty path segments Auth.js could be acting on, split the way its
+ * parseActionAndProviderId splits them (on "/", empty segments dropped, so
+ * "/api/auth//callback/x" is a callback). Two readings: the path as given,
+ * and the path with a leading basePath removed. The wrappers below run inside
+ * withAuthBasePath, whose rebuilt request carries the basePath unless the path
+ * already started with it — as "/api/auth/..." does for a basePath of "/api".
+ */
+function authPathReadings(pathname: string): string[][] {
+  const segments = (path: string) => path.split("/").filter(Boolean);
+  const readings = [segments(pathname)];
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  if (basePath && pathname.startsWith(`${basePath}/`)) {
+    readings.push(segments(pathname.slice(basePath.length)));
+  }
+  return readings;
 }
 
 function withSessionMeta<H extends RouteHandler>(handler: H): H {
@@ -81,7 +105,9 @@ const callbackRateLimiter = createRateLimiter({
 });
 
 function isCallbackRoute(pathname: string): boolean {
-  return pathname.startsWith("/api/auth/callback/");
+  return authPathReadings(pathname).some(
+    (segs) => segs.length >= 4 && segs[0] === "api" && segs[1] === "auth" && segs[2] === "callback",
+  );
 }
 
 function withCallbackRateLimit<H extends RouteHandler>(handler: H): H {
@@ -136,8 +162,14 @@ function isMagicLinkSigninRoute(pathname: string, method: string): boolean {
   // (nodemailer provider's POST entrypoint)
   return (
     method === "POST" &&
-    (pathname === "/api/auth/signin/nodemailer" ||
-      pathname === "/api/auth/signin/email")
+    authPathReadings(pathname).some(
+      (segs) =>
+        segs.length === 4 &&
+        segs[0] === "api" &&
+        segs[1] === "auth" &&
+        segs[2] === "signin" &&
+        (segs[3] === "nodemailer" || segs[3] === "email"),
+    )
   );
 }
 
@@ -170,19 +202,82 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
   return wrapped as unknown as H;
 }
 
+// ─── No signed-in account linking on callback ────────────────
+//
+// On an OAuth/OIDC callback, Auth.js reads the current session and, when the
+// incoming provider account is linked to no one, links it to the signed-in
+// user (handleLoginOrRegister). Nothing in this app links accounts while
+// signed in — sign-in is only started from the sign-in page — so that branch
+// only serves someone holding a stolen session cookie: they would complete
+// the IdP flow with an account they control and walk away with a login that
+// outlives the stolen session. Dropping the session cookies from callback
+// requests makes every callback a fresh sign-in. The other Auth.js cookies
+// (state, PKCE, nonce, callback URL, CSRF) are kept.
+//
+// A fresh sign-in no longer replaces the session the browser held, as Auth.js
+// would have; it only overwrites the cookie, which would leave that session
+// alive server-side. So the token the request carried rides along in the
+// session meta, and the adapter's createSession deletes that session in the
+// transaction that creates the new one — only once a sign-in succeeds, and
+// before the concurrent-session cap counts it.
+function isSessionCookieKey(key: string): boolean {
+  return ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => key.startsWith(name));
+}
+
+function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
+  const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
+    const cookie = request.headers.get("cookie");
+    if (!cookie || !isCallbackRoute(request.nextUrl.pathname)) {
+      return handler(request, ...rest);
+    }
+    const pairs = parseCookiePairs(cookie);
+    const kept = pairs.filter((pair) => !isSessionCookieKey(pair.key));
+    if (kept.length === pairs.length) {
+      return handler(request, ...rest);
+    }
+    const read = readSessionCookie(cookie);
+    const previousToken = read.kind === SESSION_COOKIE_READ.TOKEN ? read.token : null;
+    const headers = new Headers(request.headers);
+    if (kept.length > 0) {
+      headers.set("cookie", kept.map((pair) => `${pair.key}=${pair.value}`).join("; "));
+    } else {
+      headers.delete("cookie");
+    }
+    const stripped = new NextRequest(request.url, {
+      headers,
+      method: request.method,
+      body: request.body,
+      duplex: "half",
+    });
+    const meta = sessionMetaStorage.getStore() ?? extractRequestMeta(request);
+    return sessionMetaStorage.run(
+      { ...meta, replacesSessionToken: previousToken },
+      () => handler(stripped, ...rest),
+    );
+  };
+  return wrapped as unknown as H;
+}
+
 // Exported for testing
 export { withAuthBasePath as _withAuthBasePath };
 export { withCallbackRateLimit as _withCallbackRateLimit };
 export { withMagicLinkIpRateLimit as _withMagicLinkIpRateLimit };
 export { isCallbackRoute as _isCallbackRoute };
+export { withoutSessionCookieOnCallback as _withoutSessionCookieOnCallback };
 
 export const GET = withRequestLog(
-  withSessionMeta(withAuthBasePath(withCallbackRateLimit(handlers.GET))),
+  withSessionMeta(
+    withAuthBasePath(
+      withCallbackRateLimit(withoutSessionCookieOnCallback(handlers.GET)),
+    ),
+  ),
 );
 export const POST = withRequestLog(
   withSessionMeta(
     withAuthBasePath(
-      withCallbackRateLimit(withMagicLinkIpRateLimit(handlers.POST)),
+      withCallbackRateLimit(
+        withMagicLinkIpRateLimit(withoutSessionCookieOnCallback(handlers.POST)),
+      ),
     ),
   ),
 );
