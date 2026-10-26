@@ -84,3 +84,61 @@ Date: 2026-10-26
   RS6 N/A.
 - **Testing:** RT1 T5, T6; RT2 checked; RT3 partial; RT4 N/A; RT5 T9, T14; RT6 OK; RT7 T1, T10;
   RT8 T2; RT9 not observed; RT10 T12, T2; RT11 T8.
+
+## Round 2 (plan revision 2)
+
+### Functionality (N1–N2 Major, N3–N8 Minor)
+- F1–F8 resolved. D5 is feasible: the step-up dialog signs out first, so "sign in again" creates
+  a fresh session row. D4 is feasible: the proxy graph already reaches `logAuditAsync`.
+- N1 Major: VaultProvider's distinct blocked state.
+  - VaultGate falls through on an unknown status and renders the full dashboard.
+  - Auto-lock stops when a user is blocked while unlocked.
+  - The verdict uses the client clock.
+
+  Fix: keep `VaultStatus`, and suppress only the status fetch by a server-rendered marker.
+- N2 Major: the 5 s TTL covers only the missing-field substitution. The `auth.ts` catch bundle
+  from a transient fault is still cached for 30 s.
+- Minor:
+  - N3: `requireRecentSession` in register trips the step-up client-coverage gate.
+  - N4: `/admin` is not covered.
+  - N5: the PRF capability signal is unnamed, and the re-bootstrap copy claims a key rotation.
+  - N6: the invalidation helper is misnamed, and its cross-tenant scope unstated.
+  - N7: the audit metadata diverges from `{ blockedPath }`.
+  - N8: the Tier A Auth.js methods are not enumerated.
+
+### Security (S9 Major, S10–S13 Minor)
+- S1, S3, S4, S5 and S7 resolved.
+- S9 Major: a `callback/*` request carrying a signed-in cookie links an unlinked OAuth identity
+  to the current user (Auth.js `handleLoginOrRegister` signed-in linking). Holding a stolen
+  blocked cookie, an attacker links their own Google account, signs in fresh (which satisfies
+  D5), and registers a passkey. Independently of this plan, a stolen cookie can thereby become
+  a durable login.
+- S10 Minor: same as N2.
+- S11 Minor: `routeKey` is attacker-controlled; take it from a closed set.
+- S12 Minor: on API_DEFAULT, an ambiguous or chunked cookie gives `valid:false` and passes
+  through, while the route's `auth()` still authenticates.
+- S13 Minor: the handler scan should match by import binding.
+
+### Testing (T16–T24 Major, T25–T29 Minor)
+- T16: own-gate has no proxy-observable outcome.
+- T17: the `[...nextauth]` catch-all row cannot express the Tier A sub-paths.
+- T18: the existing parity assertion does not force the new field.
+- T19: the handler scan should be AST with import binding.
+- T20: same as N2.
+- T21: the E2E audit delta is suppressed on retry.
+- T22: the E2E "no 403" check has no positive control.
+- T23: the local RP ID and the authenticator's PRF option are missing.
+- T24: red proofs are still missing.
+- T25–T29: smaller harness details.
+
+### User decision
+S9 is fixed first, in its own PR. This plan continues after it lands, with S9's fix as a
+precondition of D5.
+
+## Recurring Issue Check (round 2)
+- **Functionality:** R13 N1; R3 N1; R22 N5; R29 N6; R41 N4, N5; R42 N3; R43 N8; R48 N2, N6;
+  R49 N7; R25 checked.
+- **Security:** R42 S13; R43 no widening; R3 S9; RS1 N/A; RS2 OK; RS3 S11; RS4 OK; RS5 N/A;
+  RS6 N/A.
+- **Testing:** RT1 T25, T27; RT2 OK; RT3 T18, T19; RT5 T20, T25, T29; RT7 T24; RT8 T16;
+  RT9 T21; RT10 T17, T26; RT11 T21, T28.
