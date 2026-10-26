@@ -104,6 +104,39 @@ describe("validateRegistry — digest-column identifier throws at boot (C7)", ()
   });
 });
 
+describe("validateRegistry — digest refusal on every identifier field of every kind", () => {
+  // One real entry per kind, with one free identifier swapped for a digest
+  // column. Each base entry passes on its own, so each throw is the swap's.
+  const FIELDS = ["table", "cutoffColumn", "keyColumns", "provenanceColumns"] as const;
+  // PER_TENANT_FN's table is a literal-union type, not a free identifier.
+  const cases = RETENTION_REGISTRY.filter(
+    (e, i, all) => e.kind !== "PER_TENANT_FN" && all.findIndex((o) => o.kind === e.kind) === i,
+  ).flatMap((entry) =>
+    FIELDS.filter((f) => f in entry).map((field) => {
+      const value = (entry as unknown as Record<string, unknown>)[field];
+      const swapped = Array.isArray(value) ? ["token_hash", ...value.slice(1)] : "token_hash";
+      return [
+        `${entry.kind}.${field}`,
+        entry,
+        { ...entry, [field]: swapped } as unknown as RetentionEntry,
+      ] as const;
+    }),
+  );
+
+  it("covers every kind that has a free identifier", () => {
+    expect(new Set(cases.map(([label]) => label.split(".")[0]))).toEqual(
+      new Set(RETENTION_REGISTRY.filter((e) => e.kind !== "PER_TENANT_FN").map((e) => e.kind)),
+    );
+  });
+
+  it.each(cases)("%s: the real entry passes and the digest swap throws", (_label, base, swapped) => {
+    expect(() => validateRegistry([base])).not.toThrow();
+    expect(() => validateRegistry([swapped])).toThrow(
+      expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.DIGEST_COLUMN }),
+    );
+  });
+});
+
 describe("RETENTION_REGISTRY structural invariants (C1 acceptance)", () => {
   it("has exactly 6 EXPIRY + 1 PER_TENANT_FN entries", () => {
     const expiry = RETENTION_REGISTRY.filter((e) => e.kind === "EXPIRY");

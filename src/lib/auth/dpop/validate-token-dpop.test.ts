@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { DPOP_VERIFY_ERROR } from "@/lib/auth/dpop/verify";
 
@@ -167,13 +168,20 @@ describe("validateExtensionTokenDpop", () => {
 
   // The call-count negatives above only see a write dispatched in the same
   // tick; a deferred one would slip past them. The helper cannot write at all
-  // without a DB import, so pin that, against an import it must keep.
-  it("imports no DB module (the write lives in validateExtensionToken)", () => {
+  // without reaching a DB module, directly or through one that writes (audit,
+  // tenant-rls), so pin its whole import set: any new import — static,
+  // side-effect, dynamic, or require — fails here and goes to review.
+  it("imports only its DPoP and type dependencies (the write lives in validateExtensionToken)", () => {
     const source = readFileSync(join(__dirname, "validate-token-dpop.ts"), "utf8");
-    const specifiers = [...source.matchAll(/^import[^;]*?from\s+"([^"]+)";/gms)].map((m) => m[1]);
-    expect(specifiers).toContain("@/lib/auth/dpop/verify");
-    expect(specifiers).not.toContain("@/lib/prisma");
-    expect(specifiers).not.toContain("@/lib/tenant-rls");
+    const { importedFiles } = ts.preProcessFile(source, true, true);
+    expect([...new Set(importedFiles.map((f) => f.fileName))].sort()).toEqual([
+      "@/lib/auth/dpop/htu-canonical",
+      "@/lib/auth/dpop/jti-cache",
+      "@/lib/auth/dpop/verify",
+      "@/lib/auth/tokens/extension-token-types",
+      "@prisma/client",
+      "next/server",
+    ]);
   });
 
   describe("failure paths — all 15 DPOP_VERIFY_ERROR codes", () => {

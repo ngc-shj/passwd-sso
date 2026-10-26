@@ -343,6 +343,9 @@ per-use gate, their tests, and review.
       `renderSql` from registry cutoff and key columns, which `validateRegistry` now checks
       against the digest predicate at boot;
     - three files' `password_shares` view-count `UPDATE`s, each `WHERE "id" = ${share.id}`.
+    - the EXPIRY_GUARDED `MCP_TOKEN_FAMILY_DEAD` guard's `NOT EXISTS` subquery on
+      `mcp_refresh_tokens`, by `access_token_id`: a compile-time literal rendered through
+      `renderSql` (missed in round 3, code review S4-1).
   - Cost to fix: a SQL parser over every raw literal plus the migrations, which is a
     different control.
 - **Raw SQL through the pg driver (S3-3).** A `createPool` / `createClient` result's

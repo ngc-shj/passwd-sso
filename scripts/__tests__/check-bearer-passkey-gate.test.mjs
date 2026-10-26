@@ -635,6 +635,12 @@ describe.concurrent("raw SQL", { timeout: 60_000 }, () => {
     await expectPass({ files: { "src/lib/raw.ts": rawFile(`return "SELECT a & b, 'escape' FROM t";`) } });
   });
 
+  // Same set as renderSql: PostgreSQL reads the prefix only when `&` follows
+  // the `U` directly, so a spaced `u &` is an operator, not U&.
+  it("passes on a spaced u & that is no U& prefix", async () => {
+    await expectPass({ files: { "src/lib/raw.ts": rawFile(`return "SELECT u & b FROM t";`) } });
+  });
+
   it("FAILS on a raw method reached by element access", async () => {
     await expectFail({ files: { "src/lib/raw.ts": rawFile('return tx["$executeRawUnsafe"]("SELECT 1");') } }, /reached by element access/);
   });

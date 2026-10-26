@@ -216,3 +216,50 @@ user chose to draw the line:
   The round-2 claims that overstated coverage are corrected in this file and in the deviation
   log.
 - **Red proofs:** each new rule was mutated on a scratch copy, and each turned its cells red.
+
+## Round 4
+Scope: `cd7187242..0541c6e20`.
+- No Critical or Major finding.
+- No new runtime-enforcement defect.
+- No round-3 fix widened a predicate (R43, all three experts).
+- The residuals' grep-checkable facts were re-measured and hold, apart from the S4-1 omission.
+
+### Findings
+- **Functionality:** NF1–NF4 resolved. F4-1 Minor: the boot registry check pre-empts only the
+  digest refusal, not `u&`/`uescape`.
+- **Security:** S3-1, S3-4 and S3-5 fixed; S3-2 and S3-3 declared truthfully. The renderSql
+  refusal fails closed: per entry, `{table, code}` only, no SQL in the logs.
+  - S4-1 Minor: the residual's inventory of raw SQL touching token tables omits the
+    `MCP_TOKEN_FAMILY_DEAD` guard's subquery.
+- **Testing:** T3-1–T3-4 resolved; T3-5 partly resolved.
+  - T4-1 Minor: the no-DB-import negative misses side-effect, dynamic, `require` and transitive
+    imports.
+  - T4-2 Minor: the boot digest refusal is covered for two fields only.
+  - T4-3 Minor: C7 lacks the spaced `u &` allow cell that renderSql has.
+
+### Resolution Status (round 4)
+- **F4-1:** documented in `registryIdentifier`. An identifier matches `^[a-z_]+$` and so cannot
+  hold `&`, and a `uescape` substring is still refused, closed, at sweep time. The security
+  expert independently judged this "no issue".
+- **S4-1:** the inventory gains the guard subquery.
+- **T4-1:** the cell pins the helper's whole import set through `ts.preProcessFile`, which sees
+  static, side-effect, dynamic and `require` imports. Red-proved by a side-effect import of
+  `@/lib/audit/audit` and by a dynamic import of `@/lib/prisma`.
+- **T4-2:** `it.each` over one real entry per kind and every identifier field. It pins that the
+  base passes and the digest swap throws, plus a coverage cell over the kinds. Red-proved by
+  reverting `PER_TENANT_AGE`'s cutoff check to `sqlIdentifier`.
+- **T4-3:** a spaced `u &` allow cell. Red-proved by widening the rule to `u\s*&`.
+
+## Tightening-only skip — Round 4
+Findings applied directly (no Round 5 review):
+- F4-1 [Minor]: comment on why boot checks only the digest predicate.
+  `src/workers/retention-gc-worker/index.ts` (`registryIdentifier`). Applied as documentation;
+  no behaviour change.
+- S4-1 [Minor]: residual inventory line, deviation log. Documentation.
+- T4-1, T4-2, T4-3 [Minor]: test cells, each red-proved on a scratch copy.
+
+Justification:
+- Every finding sits inside round 3's fix scope.
+- None changes production behaviour.
+- None moves a security boundary: the boot check, renderSql and the gate are unchanged, and
+  only their tests and their documentation grew.

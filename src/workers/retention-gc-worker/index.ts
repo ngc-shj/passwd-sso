@@ -34,7 +34,12 @@ export interface WorkerConfig {
   emitHeartbeatAudit: boolean;
 }
 
-/** sqlIdentifier's allowlist, plus renderSql's digest-column refusal moved to boot. */
+/**
+ * sqlIdentifier's allowlist, plus renderSql's digest-column refusal moved to
+ * boot. renderSql's other refusal, a `u&` / `uescape` substring, is left to
+ * sweep time: an identifier here matches ^[a-z_]+$, so it cannot hold `&`,
+ * and a `uescape` substring is still refused, closed, when the entry renders.
+ */
 function registryIdentifier(name: string): void {
   sqlIdentifier(name);
   if (namesDigestColumn(name)) {
