@@ -16,7 +16,7 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { dedupeTagIds, tagConnect } from "@/lib/services/tag-relation";
 import type { EntryType } from "@prisma/client";
-import { errorResponse, errorResponseWithMessage, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage } from "@/lib/http/api-response";
 import { assertCurrentKeyVersion, KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
@@ -25,12 +25,7 @@ const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 // GET /api/v1/passwords — List passwords (API key or SA token)
 async function handleGET(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.PASSWORDS_READ);
-  if (!authResult.ok) {
-    if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT);
-    }
-    return unauthorized();
-  }
+  if (!authResult.ok) return authResult.response;
 
   const { userId, tenantId, rateLimitKey } = authResult.data;
 
@@ -116,12 +111,7 @@ async function handleGET(req: NextRequest) {
 // POST /api/v1/passwords — Create password (API key or SA token)
 async function handlePOST(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
-  if (!authResult.ok) {
-    if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT);
-    }
-    return unauthorized();
-  }
+  if (!authResult.ok) return authResult.response;
 
   const { userId, tenantId, rateLimitKey } = authResult.data;
 

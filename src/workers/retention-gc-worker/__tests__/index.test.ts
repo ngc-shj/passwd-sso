@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 import { validateRegistry } from "../index";
+import { RAW_SQL_REFUSAL_CODE } from "@/lib/prisma/raw-sql";
 import {
   RETENTION_REGISTRY,
   RLS_FREE_EXPIRY_TABLES,
@@ -73,6 +74,66 @@ describe("validateRegistry — bad identifier throws (INV-C2a/INV-C1c)", () => {
       globalDelete: true,
     } as unknown as RetentionEntry;
     expect(() => validateRegistry([badEntry])).toThrow(/must match/);
+  });
+});
+
+describe("validateRegistry — digest-column identifier throws at boot (C7)", () => {
+  // renderSql would refuse these only once a sweep renders them; the boot
+  // check refuses the registry before any DB connection.
+  const entryWith = (keyColumns: string[], predicateColumn = "is_dcr") =>
+    ({
+      kind: "EXPIRY",
+      table: "mcp_clients",
+      cutoffColumn: "dcr_expires_at",
+      keyColumns,
+      predicate: [{ column: predicateColumn, op: "IS NULL" }],
+      globalDelete: true,
+    }) as unknown as RetentionEntry;
+
+  it.each([
+    ["a key column", entryWith(["id", "token_hash"])],
+    ["a predicate column", entryWith(["id"], "replaced_by_hash")],
+  ])("throws when %s names a digest column", (_label, entry) => {
+    expect(() => validateRegistry([entry])).toThrow(
+      expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.DIGEST_COLUMN }),
+    );
+  });
+
+  it("does NOT throw on the same entry whose columns name no digest column", () => {
+    expect(() => validateRegistry([entryWith(["id", "token"], "hash")])).not.toThrow();
+  });
+});
+
+describe("validateRegistry — digest refusal on every identifier field of every kind", () => {
+  // One real entry per kind, with one free identifier swapped for a digest
+  // column. Each base entry passes on its own, so each throw is the swap's.
+  const FIELDS = ["table", "cutoffColumn", "keyColumns", "provenanceColumns"] as const;
+  // PER_TENANT_FN's table is a literal-union type, not a free identifier.
+  const cases = RETENTION_REGISTRY.filter(
+    (e, i, all) => e.kind !== "PER_TENANT_FN" && all.findIndex((o) => o.kind === e.kind) === i,
+  ).flatMap((entry) =>
+    FIELDS.filter((f) => f in entry).map((field) => {
+      const value = (entry as unknown as Record<string, unknown>)[field];
+      const swapped = Array.isArray(value) ? ["token_hash", ...value.slice(1)] : "token_hash";
+      return [
+        `${entry.kind}.${field}`,
+        entry,
+        { ...entry, [field]: swapped } as unknown as RetentionEntry,
+      ] as const;
+    }),
+  );
+
+  it("covers every kind that has a free identifier", () => {
+    expect(new Set(cases.map(([label]) => label.split(".")[0]))).toEqual(
+      new Set(RETENTION_REGISTRY.filter((e) => e.kind !== "PER_TENANT_FN").map((e) => e.kind)),
+    );
+  });
+
+  it.each(cases)("%s: the real entry passes and the digest swap throws", (_label, base, swapped) => {
+    expect(() => validateRegistry([base])).not.toThrow();
+    expect(() => validateRegistry([swapped])).toThrow(
+      expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.DIGEST_COLUMN }),
+    );
   });
 });
 

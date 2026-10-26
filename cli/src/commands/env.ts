@@ -14,6 +14,7 @@ import { autoUnlockIfNeeded } from "./unlock.js";
 import { getToken } from "../lib/api-client.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
+import { describeEntryFetchFailure } from "../lib/v1-entry-failure.js";
 import { BLOCKED_KEYS } from "../lib/blocked-keys.js";
 import { shellQuote } from "../lib/shell-quote.js";
 import * as output from "../lib/output.js";
@@ -77,7 +78,7 @@ export async function envCommand(opts: EnvOptions): Promise<void> {
       headers: { Authorization: authHeader },
     });
     if (!res.ok) {
-      output.error(`Failed to fetch entry ${mapping.entry}: HTTP ${res.status}`);
+      output.error(await describeEntryFetchFailure(res, mapping.entry));
       process.exit(1);
     }
 

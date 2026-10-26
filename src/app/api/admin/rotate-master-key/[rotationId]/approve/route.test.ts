@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { unauthorized, errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
 
@@ -125,9 +127,25 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/approve", () => {
     POST(makeRequest(), { params: Promise.resolve({ rotationId: ROTATION_ID }) });
 
   it("returns 401 when auth fails", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: false, reason: "INVALID" });
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: false,
+      reason: "INVALID",
+      response: unauthorized(),
+    });
     const res = await callPOST();
     expect(res.status).toBe(401);
+  });
+
+  it("returns 403 PASSKEY_REQUIRED when auth reports the passkey gate", async () => {
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: false,
+      reason: "PASSKEY_REQUIRED",
+      response: errorResponse(API_ERROR.PASSKEY_REQUIRED),
+    });
+    const res = await callPOST();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "PASSKEY_REQUIRED" });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
   });
 
   it("returns 404 when rotation does not exist in this tenant", async () => {

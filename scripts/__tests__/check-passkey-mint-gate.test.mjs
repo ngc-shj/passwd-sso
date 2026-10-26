@@ -150,7 +150,7 @@ describe("check-passkey-mint-gate.sh", () => {
 
   it("passes when a tampered MINT-route is on the allowlist with a reason", () => {
     const rel = writeRoute("mobile/autofill-token", `${MINT_LINE}\n`);
-    writeFileSync(exemptFile, `${rel}  # transitively gated via host token; direct gate deadlocks first-passkey-save\n`, "utf8");
+    writeFileSync(exemptFile, `${rel}  # gated per use via the IOS_APP host token in validateExtensionToken (C5; supersedes C9)\n`, "utf8");
     const { exitCode } = runGuard();
     expect(exitCode).toBe(0);
   });

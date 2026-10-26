@@ -29,6 +29,7 @@ import {
 } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
+import { PASSKEY_EXEMPTION } from "@/lib/auth/tokens/extension-token-types";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -104,7 +105,11 @@ const ReportRequestSchema = z
 async function handlePOST(req: NextRequest): Promise<Response> {
   // 1. Validate token via the unified entry point — dispatches to DPoP for
   // IOS_APP rows. The DPoP proof's `ath` and `cnf.jkt` are checked there.
-  const auth = await validateExtensionToken(req);
+  // Exempt from the per-use passkey gate (C5/S12): this report only emits
+  // one rate-limited audit row, never touches credentials.
+  const auth = await validateExtensionToken(req, {
+    passkeyExemption: PASSKEY_EXEMPTION.TAMPER_REPORT,
+  });
   if (!auth.ok) {
     return errorResponse(API_ERROR[auth.error], 401);
   }

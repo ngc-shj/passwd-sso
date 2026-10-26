@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -122,7 +123,32 @@ import { POST } from "./route";
 // executes) so `assertRedisFailClosed`'s factory-attribution check still has
 // the original call/result to inspect after clearAllMocks runs.
 const refreshLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
-const refreshLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+// Attributed by content, not position: importing refreshIosToken
+// transitively imports the C5 passkey gate, which constructs its OWN
+// module-level limiter (opted out of the fail-closed option) as part of
+// evaluating this file's dependency graph — ES modules evaluate every
+// (transitive) import before the importing module's own body runs, so the
+// gate's limiter is not reliably call index 0. Only refreshLimiter among
+// this module's limiters opts into the fail-closed option (the gate counts
+// the literal option text, so this comment deliberately avoids it).
+// T-8: match on this route's own windowMs/max too — failClosedOnRedisError
+// alone is ambiguous if a second fail-closed limiter is ever added, and
+// must resolve to exactly one call.
+const refreshLimiterMatches = mockCreateRateLimiter.mock.calls.filter((args) => {
+  const opts = args[0] as { windowMs?: number; max?: number; failClosedOnRedisError?: boolean } | undefined;
+  return (
+    opts?.windowMs === 15 * MS_PER_MINUTE &&
+    opts?.max === 20 &&
+    opts?.failClosedOnRedisError === true
+  );
+});
+if (refreshLimiterMatches.length !== 1) {
+  throw new Error(
+    `expected exactly one refreshLimiter factory call matching (windowMs/max/failClosedOnRedisError), found ${refreshLimiterMatches.length} — route.ts's limiter options drifted from this test's match criteria`,
+  );
+}
+const refreshLimiterCallIndex = mockCreateRateLimiter.mock.calls.indexOf(refreshLimiterMatches[0]!);
+const refreshLimiter = mockCreateRateLimiter.mock.results[refreshLimiterCallIndex]!.value as {
   check: typeof mockCheck;
 };
 

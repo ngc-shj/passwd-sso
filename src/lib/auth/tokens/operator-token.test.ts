@@ -7,9 +7,17 @@ const { mockPrisma, mockHashToken, mockWithBypassRls } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    tenantMember: {
+      findUnique: vi.fn(),
+    },
   },
   mockHashToken: vi.fn(),
   mockWithBypassRls: vi.fn(),
+}));
+
+const { mockPasskeyGateBlocks } = vi.hoisted(() => ({
+  // Allow by default — most cells here exercise unrelated behavior.
+  mockPasskeyGateBlocks: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: mockPrisma }));
@@ -17,6 +25,10 @@ vi.mock("@/lib/crypto/crypto-server", () => ({ hashToken: mockHashToken }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
+}));
+vi.mock("@/lib/auth/policy/passkey-gate", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  passkeyGateBlocks: mockPasskeyGateBlocks,
 }));
 
 import {
@@ -28,6 +40,7 @@ import {
   OPERATOR_TOKEN_PREFIX,
   OPERATOR_TOKEN_LAST_USED_THROTTLE_MS,
 } from "@/lib/constants/auth/operator-token";
+import { PASSKEY_GATE_CREDENTIAL } from "@/lib/auth/policy/passkey-gate";
 
 // A valid 46-char plaintext: op_ + 43 base64url chars
 const VALID_PLAINTEXT = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
@@ -94,6 +107,9 @@ describe("validateOperatorToken", () => {
     vi.clearAllMocks();
     mockHashToken.mockReturnValue("hashed_token");
     mockWithBypassRls.mockImplementation((p: unknown, fn: (tx: unknown) => unknown) => fn(p));
+    // Default: active membership, gate allows. Overridden per-cell below.
+    mockPrisma.tenantMember.findUnique.mockResolvedValue({ deactivatedAt: null });
+    mockPasskeyGateBlocks.mockResolvedValue(false);
   });
 
   it("returns INVALID_TOKEN_TYPE when Authorization header is missing", async () => {
@@ -140,6 +156,37 @@ describe("validateOperatorToken", () => {
 
     const result = await validateOperatorToken(makeRequest(VALID_PLAINTEXT));
     expect(result).toEqual({ ok: false, error: "OPERATOR_TOKEN_EXPIRED" });
+  });
+
+  it("returns OPERATOR_TOKEN_INVALID when the operator has departed the tenant (S4), and the gate is not called", async () => {
+    mockPrisma.operatorToken.findUnique.mockResolvedValue(makeTokenRow());
+    mockPrisma.tenantMember.findUnique.mockResolvedValue({ deactivatedAt: new Date("2025-01-01") });
+
+    const result = await validateOperatorToken(makeRequest(VALID_PLAINTEXT));
+    expect(result).toEqual({ ok: false, error: "OPERATOR_TOKEN_INVALID" });
+    expect(mockPasskeyGateBlocks).not.toHaveBeenCalled();
+    expect(mockPrisma.operatorToken.update).not.toHaveBeenCalled();
+  });
+
+  it("returns OPERATOR_TOKEN_INVALID when no membership row exists (fail-closed, S4)", async () => {
+    mockPrisma.operatorToken.findUnique.mockResolvedValue(makeTokenRow());
+    mockPrisma.tenantMember.findUnique.mockResolvedValue(null);
+
+    const result = await validateOperatorToken(makeRequest(VALID_PLAINTEXT));
+    expect(result).toEqual({ ok: false, error: "OPERATOR_TOKEN_INVALID" });
+    expect(mockPasskeyGateBlocks).not.toHaveBeenCalled();
+  });
+
+  it("scopes the membership lookup to the token's own tenantId", async () => {
+    mockPrisma.operatorToken.findUnique.mockResolvedValue(makeTokenRow());
+
+    await validateOperatorToken(makeRequest(VALID_PLAINTEXT));
+
+    expect(mockPrisma.tenantMember.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId_userId: { tenantId: "tenant-1", userId: "user-1" } },
+      }),
+    );
   });
 
   it("returns valid result for a valid token and fires lastUsedAt update when null", async () => {
@@ -211,5 +258,58 @@ describe("validateOperatorToken", () => {
     expect(OPERATOR_TOKEN_PREFIX).toBe("op_");
     expect(typeof OPERATOR_TOKEN_LAST_USED_THROTTLE_MS).toBe("number");
     expect(OPERATOR_TOKEN_LAST_USED_THROTTLE_MS).toBeGreaterThan(0);
+  });
+});
+
+// ─── validateOperatorToken — passkey gate (C2) ───────────────
+
+describe("validateOperatorToken — passkey gate (C2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHashToken.mockReturnValue("hashed_token");
+    mockWithBypassRls.mockImplementation((p: unknown, fn: (tx: unknown) => unknown) => fn(p));
+    mockPrisma.tenantMember.findUnique.mockResolvedValue({ deactivatedAt: null });
+    // I2: lastUsedAt null in both the deny and allow cell, so the throttle
+    // guard (which would also skip the update on a recent lastUsedAt) cannot
+    // make the deny assertion pass vacuously.
+    mockPrisma.operatorToken.findUnique.mockResolvedValue(makeTokenRow({ lastUsedAt: null }));
+    mockPrisma.operatorToken.update.mockResolvedValue({});
+  });
+
+  it("gate blocks ⇒ PASSKEY_REQUIRED and lastUsedAt is not updated", async () => {
+    mockPasskeyGateBlocks.mockResolvedValue(true);
+
+    const result = await validateOperatorToken(makeRequest(VALID_PLAINTEXT));
+
+    expect(result).toEqual({ ok: false, error: "PASSKEY_REQUIRED" });
+    expect(mockPrisma.operatorToken.update).not.toHaveBeenCalled();
+    expect(mockPasskeyGateBlocks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        tenantId: "tenant-1",
+        credential: PASSKEY_GATE_CREDENTIAL.OPERATOR_TOKEN,
+        credentialId: "token-1",
+      }),
+    );
+  });
+
+  it("gate allows ⇒ ok, and lastUsedAt IS updated (paired with the deny above)", async () => {
+    mockPasskeyGateBlocks.mockResolvedValue(false);
+
+    const result = await validateOperatorToken(makeRequest(VALID_PLAINTEXT));
+
+    expect(result.ok).toBe(true);
+    await vi.waitFor(() =>
+      expect(mockPrisma.operatorToken.update).toHaveBeenCalledTimes(1),
+    );
+  });
+
+  it("fail-closed: a derivation error propagates rather than being swallowed", async () => {
+    mockPasskeyGateBlocks.mockRejectedValue(new Error("derivation failed"));
+
+    await expect(validateOperatorToken(makeRequest(VALID_PLAINTEXT))).rejects.toThrow(
+      "derivation failed",
+    );
+    expect(mockPrisma.operatorToken.update).not.toHaveBeenCalled();
   });
 });

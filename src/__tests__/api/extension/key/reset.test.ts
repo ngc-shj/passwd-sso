@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "../../../helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { PASSKEY_EXEMPTION } from "@/lib/auth/tokens/extension-token-types";
 
 const VALID_CNF_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
 const OTHER_CNF_JKT  = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc";
@@ -105,6 +106,17 @@ describe("POST /api/extension/key/reset (C12)", () => {
         fn({ extensionToken: { updateMany: mockTokenUpdateMany } }),
     );
     mockTokenUpdateMany.mockResolvedValue({ count: 2 });
+  });
+
+  // C5/S12: self-revocation is a self-protection exemption — it only
+  // revokes the caller's own key-bound tokens, so it skips the per-use
+  // passkey gate.
+  it("validates the token with the SELF_REVOCATION passkey exemption", async () => {
+    await POST(makeReq({ cnfJkt: VALID_CNF_JKT }));
+    expect(mockValidateExtensionToken).toHaveBeenCalledWith(
+      expect.anything(),
+      { passkeyExemption: PASSKEY_EXEMPTION.SELF_REVOCATION },
+    );
   });
 
   it("returns 200 with revoked count when valid Bearer+DPoP+matching cnfJkt", async () => {

@@ -4,6 +4,10 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
+  passkeyGateBlocks,
+  PASSKEY_GATE_CREDENTIAL,
+} from "@/lib/auth/policy/passkey-gate";
+import {
   API_KEY_PREFIX,
   API_KEY_SCOPE,
   API_KEY_LAST_USED_THROTTLE_MS,
@@ -23,7 +27,8 @@ export type ApiKeyValidationError =
   | "INVALID_TOKEN_TYPE"
   | "API_KEY_INVALID"
   | "API_KEY_REVOKED"
-  | "API_KEY_EXPIRED";
+  | "API_KEY_EXPIRED"
+  | "PASSKEY_REQUIRED";
 
 export type ApiKeyValidationResult =
   | { ok: true; data: ValidatedApiKey }
@@ -116,6 +121,17 @@ export async function validateApiKey(
     return { ok: false, error: "API_KEY_INVALID" };
   }
 
+  if (
+    await passkeyGateBlocks({
+      req,
+      userId: key.userId,
+      tenantId: key.tenantId,
+      credential: PASSKEY_GATE_CREDENTIAL.API_KEY,
+      credentialId: key.id,
+    })
+  )
+    return { ok: false, error: "PASSKEY_REQUIRED" };
+
   // Throttled lastUsedAt update (non-blocking) — parity with SA token
   const shouldUpdate =
     !key.lastUsedAt ||
@@ -145,7 +161,8 @@ export async function validateApiKey(
  * For use in /api/v1/* routes (CSRF prevention).
  *
  * @param requiredScope - If provided, checks that the key has this scope.
- * Returns 401-type errors for auth failures, 403-type for scope mismatch.
+ * Returns 401-type errors for auth failures, 403-type for scope mismatch and
+ * for PASSKEY_REQUIRED.
  */
 export async function validateApiKeyOnly(
   req: NextRequest,
@@ -157,7 +174,8 @@ export async function validateApiKeyOnly(
   const result = await validateApiKey(req);
 
   if (!result.ok) {
-    return { ok: false, error: result.error, status: 401 };
+    const status = result.error === "PASSKEY_REQUIRED" ? 403 : 401;
+    return { ok: false, error: result.error, status };
   }
 
   if (requiredScope && !hasApiKeyScope(result.data.scopes, requiredScope)) {

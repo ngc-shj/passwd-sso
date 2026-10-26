@@ -212,11 +212,76 @@ export function joinSql(
   return obj as unknown as SqlFragment;
 }
 
-/** The only way out: text for a genuine `SqlFragment`. An identifier alone is not a fragment. */
+// Stable `code` values on renderSql's refusals, so a caller can tell a refusal
+// from a programming error without parsing the message.
+export const RAW_SQL_REFUSAL_CODE = freeze({
+  DIGEST_COLUMN: "RAW_SQL_DIGEST_COLUMN",
+  UNICODE_ESCAPE: "RAW_SQL_UNICODE_ESCAPE",
+} as const);
+
+type RawSqlRefusalCode = (typeof RAW_SQL_REFUSAL_CODE)[keyof typeof RAW_SQL_REFUSAL_CODE];
+
+function refusal(code: RawSqlRefusalCode, message: string): Error {
+  const error = new Error(message) as Error & { code: RawSqlRefusalCode };
+  error.code = code;
+  return error;
+}
+
+// Bearer-token digest columns. The bearer passkey gate (C7,
+// check-bearer-passkey-gate.mjs) refuses their names in any source literal, but
+// identifiers spliced here (`token_${sqlIdentifier("hash")}`, a joinSql of
+// parts) only exist as rendered text, so renderSql refuses them at run time: a
+// digest lookup must go through the Prisma query builder, where C7 classifies
+// it. Spelled with a group so this pattern is not itself such a literal.
+const DIGEST_COLUMN_RE = /(?:token|code|replaced_by)_hash/i;
+const digestColumnExec = RegExp.prototype.exec.bind(DIGEST_COLUMN_RE) as (
+  input: string,
+) => RegExpExecArray | null;
+
+// PostgreSQL's Unicode-escape forms: the U-ampersand prefix of an identifier
+// or string (`U&"token\005fhash"` spells a digest column without its plain
+// text) and its escape-character clause. C7 refuses both in source literals;
+// an identifier spliced before a literal `&"..."` only forms one once rendered.
+// No-space only, the static rule's set: PostgreSQL reads the prefix only when
+// the ampersand directly follows the U, so `u &` is an identifier and an
+// operator. Spelled with a group so this pattern is not itself such a literal.
+const UNICODE_ESCAPE_RE = /u(?:&|escape)/i;
+const unicodeEscapeExec = RegExp.prototype.exec.bind(UNICODE_ESCAPE_RE) as (
+  input: string,
+) => RegExpExecArray | null;
+
+/**
+ * Does `text` name a bearer-token digest column? The predicate renderSql
+ * refuses on, for other boundaries that hold SQL text (the retention-GC
+ * registry's identifiers).
+ */
+export function namesDigestColumn(text: string): boolean {
+  return digestColumnExec(text) !== null;
+}
+
+/**
+ * The only way out: text for a genuine `SqlFragment`. An identifier alone is
+ * not a fragment. Throws (with a RAW_SQL_REFUSAL_CODE `code`) when the text
+ * names a bearer-token digest column or holds a Unicode-escape form.
+ */
 export function renderSql(fragment: SqlFragment): string {
   const text = fragmentGet(fragment);
   if (text === undefined) {
     throw new TypeError("renderSql: argument must be a genuine SqlFragment");
+  }
+  if (namesDigestColumn(text)) {
+    throw refusal(
+      RAW_SQL_REFUSAL_CODE.DIGEST_COLUMN,
+      "renderSql: rendered SQL names a bearer-token digest column (the tokenHash / codeHash / replacedByHash fields); " +
+        "look the digest up through the Prisma query builder",
+    );
+  }
+  if (unicodeEscapeExec(text) !== null) {
+    throw refusal(
+      RAW_SQL_REFUSAL_CODE.UNICODE_ESCAPE,
+      "renderSql: rendered SQL holds a Unicode-escape prefix or its escape clause, " +
+        "which can spell a digest column without its plain text",
+    );
   }
   return text;
 }

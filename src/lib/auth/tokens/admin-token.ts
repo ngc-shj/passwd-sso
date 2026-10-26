@@ -6,9 +6,11 @@
  * a token via the tenant dashboard (session-authed Auth.js UI).
  */
 
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { OPERATOR_TOKEN_PREFIX, type OperatorTokenScope } from "@/lib/constants/auth/operator-token";
 import { validateOperatorToken } from "@/lib/auth/tokens/operator-token";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -25,11 +27,11 @@ export interface AdminAuth {
   scopes: readonly OperatorTokenScope[];
 }
 
-export type VerifyAdminFailReason = "MISSING_OR_MALFORMED" | "INVALID";
+export type VerifyAdminFailReason = "MISSING_OR_MALFORMED" | "INVALID" | "PASSKEY_REQUIRED";
 
 export type VerifyAdminResult =
   | { ok: true; auth: AdminAuth }
-  | { ok: false; reason: VerifyAdminFailReason };
+  | { ok: false; reason: VerifyAdminFailReason; response: NextResponse };
 
 // ─── Verification ─────────────────────────────────────────────
 
@@ -43,17 +45,24 @@ export async function verifyAdminToken(
 ): Promise<VerifyAdminResult> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return { ok: false, reason: "MISSING_OR_MALFORMED" };
+    return { ok: false, reason: "MISSING_OR_MALFORMED", response: unauthorized() };
   }
 
   const plaintext = authHeader.slice(7).trim();
   if (!plaintext.startsWith(OPERATOR_TOKEN_PREFIX)) {
-    return { ok: false, reason: "MISSING_OR_MALFORMED" };
+    return { ok: false, reason: "MISSING_OR_MALFORMED", response: unauthorized() };
   }
 
   const result = await validateOperatorToken(req);
   if (!result.ok) {
-    return { ok: false, reason: "INVALID" };
+    if (result.error === "PASSKEY_REQUIRED") {
+      return {
+        ok: false,
+        reason: "PASSKEY_REQUIRED",
+        response: errorResponse(API_ERROR.PASSKEY_REQUIRED),
+      };
+    }
+    return { ok: false, reason: "INVALID", response: unauthorized() };
   }
   return {
     ok: true,

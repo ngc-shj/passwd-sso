@@ -5,6 +5,8 @@ import {
   trustedSql,
   joinSql,
   renderSql,
+  namesDigestColumn,
+  RAW_SQL_REFUSAL_CODE,
   type SqlIdentifier,
   type SqlFragment,
 } from "./raw-sql";
@@ -116,6 +118,44 @@ describe("renderSql", () => {
   it("rejects a genuine SqlIdentifier — an identifier is not a fragment", () => {
     const id = sqlIdentifier("users");
     expect(() => renderSql(id as unknown as SqlFragment)).toThrow(TypeError);
+  });
+
+  // The bearer passkey gate (C7) refuses the digest column names in source
+  // literals; a name spliced from identifiers only exists once rendered.
+  it.each([
+    ["an identifier spliced after a literal prefix", () => trustedSql`SELECT id FROM api_keys WHERE token_${sqlIdentifier("hash")} = $1`],
+    ["the code column, upper-case prefix", () => trustedSql`SELECT id FROM mcp_authorization_codes WHERE CODE_${sqlIdentifier("hash")} = $1`],
+    ["a joinSql of identifiers", () => joinSql([sqlIdentifier("token"), sqlIdentifier("hash")], trustedSql`_`)],
+    ["the refresh-rotation column", () => trustedSql`SELECT id FROM mcp_refresh_tokens WHERE replaced_by_${sqlIdentifier("hash")} = $1`],
+  ])("refuses rendered text naming a digest column: %s", (_label, build) => {
+    expect(() => renderSql(build())).toThrow(
+      expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.DIGEST_COLUMN }),
+    );
+  });
+
+  // C7 refuses the Unicode-escape forms in source literals; an identifier
+  // spliced in front of a literal ampersand forms one only once rendered.
+  it.each([
+    ["the U-ampersand prefix spliced from an identifier", () => trustedSql`SELECT id FROM api_keys WHERE ${sqlIdentifier("u")}&"token\\005fhash" = $1`],
+    ["the escape clause spliced from an identifier", () => trustedSql`SELECT id FROM t WHERE x = 'a' ${sqlIdentifier("uescape")} '!'`],
+    ["the escape clause, upper-case", () => trustedSql`SELECT id FROM t WHERE ${sqlIdentifier("u")}ESCAPE`],
+  ])("refuses rendered text holding a Unicode-escape form: %s", (_label, build) => {
+    expect(() => renderSql(build())).toThrow(
+      expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.UNICODE_ESCAPE }),
+    );
+  });
+
+  it.each([
+    ["a bitwise and", trustedSql`SELECT a & b FROM t`],
+    ["an ampersand after a spaced u (no prefix)", trustedSql`SELECT ${sqlIdentifier("u")} & b FROM t`],
+    ["a literal 'escape'", trustedSql`SELECT 'escape' FROM t`],
+  ])("renders text with no Unicode-escape form: %s", (_label, fragment) => {
+    expect(() => renderSql(fragment)).not.toThrow();
+  });
+
+  it("renders spliced identifiers that do not form a digest column name", () => {
+    const fragment = trustedSql`SELECT ${sqlIdentifier("token")}, ${sqlIdentifier("hash")} FROM notes`;
+    expect(renderSql(fragment)).toBe("SELECT token, hash FROM notes");
   });
 
   it.each([
@@ -321,10 +361,68 @@ describe("tamper resistance of captured validation built-ins (F5)", () => {
   });
 });
 
+describe("tamper resistance of renderSql's refusal patterns", () => {
+  it("still refuses a digest splice when RegExp.prototype.exec/test report no match", () => {
+    const originalExec = RegExp.prototype.exec;
+    const originalTest = RegExp.prototype.test;
+    let refused: unknown;
+    try {
+      RegExp.prototype.exec = function () {
+        return null;
+      };
+      RegExp.prototype.test = function () {
+        return false;
+      };
+      try {
+        renderSql(trustedSql`SELECT id FROM api_keys WHERE token_${sqlIdentifier("hash")} = $1`);
+      } catch (e) {
+        refused = e;
+      }
+    } finally {
+      RegExp.prototype.exec = originalExec;
+      RegExp.prototype.test = originalTest;
+    }
+    expect(refused).toEqual(
+      expect.objectContaining({ code: RAW_SQL_REFUSAL_CODE.DIGEST_COLUMN }),
+    );
+  });
+
+  it("still renders SELECT 1 when RegExp.prototype.exec/test report a match", () => {
+    const originalExec = RegExp.prototype.exec;
+    const originalTest = RegExp.prototype.test;
+    let rendered: unknown;
+    try {
+      RegExp.prototype.exec = function () {
+        return ["forged"] as unknown as RegExpExecArray;
+      };
+      RegExp.prototype.test = function () {
+        return true;
+      };
+      rendered = renderSql(trustedSql`SELECT 1`);
+    } finally {
+      RegExp.prototype.exec = originalExec;
+      RegExp.prototype.test = originalTest;
+    }
+    expect(rendered).toBe("SELECT 1");
+  });
+});
+
+describe("namesDigestColumn", () => {
+  it.each(["token_hash", "CODE_HASH", "replaced_by_hash"])("is true for %j", (text) => {
+    expect(namesDigestColumn(text)).toBe(true);
+  });
+
+  it.each(["token", "hash", "tokenhash", "token hash"])("is false for %j", (text) => {
+    expect(namesDigestColumn(text)).toBe(false);
+  });
+});
+
 describe("export surface", () => {
-  it("exports exactly sqlIdentifier, trustedSql, joinSql, renderSql", () => {
+  it("exports exactly the builders, renderSql, and the digest predicate with its refusal codes", () => {
     expect(Object.keys(RawSql).sort()).toEqual([
+      "RAW_SQL_REFUSAL_CODE",
       "joinSql",
+      "namesDigestColumn",
       "renderSql",
       "sqlIdentifier",
       "trustedSql",

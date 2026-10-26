@@ -188,6 +188,17 @@ describe("GET /api/v1/passwords/[id]", () => {
     expect(status).toBe(403);
   });
 
+  it("returns 403 PASSKEY_REQUIRED when the tenant requires a passkey the caller lacks", async () => {
+    mockValidateApiKeyOnly.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/v1/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+  });
+
   it("returns 429 when rate limit exceeded (no DB access)", async () => {
     mockCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
     const res = await GET(
@@ -315,6 +326,18 @@ describe("PUT /api/v1/passwords/[id]", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
+  });
+
+  it("returns 403 PASSKEY_REQUIRED when the tenant requires a passkey the caller lacks", async () => {
+    mockValidateApiKeyOnly.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 404 when entry not found", async () => {
@@ -705,6 +728,18 @@ describe("DELETE /api/v1/passwords/[id]", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
+  });
+
+  it("returns 403 PASSKEY_REQUIRED when the tenant requires a passkey the caller lacks", async () => {
+    mockValidateApiKeyOnly.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost/api/v1/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 404 when entry not found", async () => {

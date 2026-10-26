@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { unauthorized, errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
@@ -108,7 +110,11 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
-    mockVerifyAdminToken.mockResolvedValue({ ok: false, reason: "MISSING_OR_MALFORMED" });
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: false,
+      reason: "MISSING_OR_MALFORMED",
+      response: unauthorized(),
+    });
     mockRequireMaintenanceOperator.mockResolvedValue({
       ok: true,
       operator: { tenantId: TENANT_ID, role: "ADMIN" },
@@ -131,10 +137,29 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
   });
 
   it("returns 401 when verifyAdminToken returns INVALID", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: false, reason: "INVALID" });
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: false,
+      reason: "INVALID",
+      response: unauthorized(),
+    });
     const req = createRequest({}, VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(401);
+  });
+
+  it("returns 403 PASSKEY_REQUIRED when verifyAdminToken returns PASSKEY_REQUIRED", async () => {
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: false,
+      reason: "PASSKEY_REQUIRED",
+      response: errorResponse(API_ERROR.PASSKEY_REQUIRED),
+    });
+    const req = createRequest({}, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "PASSKEY_REQUIRED" });
+    expect(mockQueryRaw).not.toHaveBeenCalled();
+    expect(mockDeleteMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   // ─── Rate Limit ────────────────────────────────────────────

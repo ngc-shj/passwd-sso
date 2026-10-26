@@ -5,6 +5,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
+import { PASSKEY_EXEMPTION } from "@/lib/auth/tokens/extension-token-types";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -96,7 +97,11 @@ async function handlePOST(req: NextRequest) {
  * The Bearer token identifies which token to revoke.
  */
 async function handleDELETE(req: NextRequest) {
-  const result = await validateExtensionToken(req);
+  // Self-revocation is exempt from the per-use passkey gate (C5/S12): it
+  // only ever revokes the caller's own token.
+  const result = await validateExtensionToken(req, {
+    passkeyExemption: PASSKEY_EXEMPTION.SELF_REVOCATION,
+  });
 
   if (!result.ok) {
     const statusMap: Record<string, number> = {

@@ -20,6 +20,11 @@ const { mockWithBypassRls } = vi.hoisted(() => ({
   })),
 }));
 
+const { mockPasskeyGateBlocks } = vi.hoisted(() => ({
+  // Allow by default — most cells here exercise unrelated behavior.
+  mockPasskeyGateBlocks: vi.fn().mockResolvedValue(false),
+}));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {},
 }));
@@ -29,6 +34,11 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   withBypassRls: mockWithBypassRls,
 }));
 
+vi.mock("@/lib/auth/policy/passkey-gate", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  passkeyGateBlocks: mockPasskeyGateBlocks,
+}));
+
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
 }));
@@ -36,6 +46,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { parseApiKeyScopes, hasApiKeyScope, validateApiKey } from "./api-key";
 import { API_KEY_LAST_USED_THROTTLE_MS } from "@/lib/constants/auth/api-key";
+import { PASSKEY_GATE_CREDENTIAL } from "@/lib/auth/policy/passkey-gate";
 
 // ─── parseApiKeyScopes ───────────────────────────────────────
 
@@ -112,6 +123,7 @@ function makeReq(token = VALID_KEY) {
 describe("validateApiKey — deactivated-user (C13)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPasskeyGateBlocks.mockResolvedValue(false);
   });
 
   it("(a) deactivated-in-token-tenant ⇒ API_KEY_INVALID", async () => {
@@ -185,6 +197,7 @@ describe("validateApiKey — lastUsedAt throttle (C4)", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockTenantMemberFindUnique.mockResolvedValue(ACTIVE_MEMBER);
+    mockPasskeyGateBlocks.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -240,6 +253,54 @@ describe("validateApiKey — lastUsedAt throttle (C4)", () => {
 
     await validateApiKey(makeReq());
 
+    expect(mockApiKeyUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// ─── validateApiKey — passkey gate (C1) ──────────────────────
+
+describe("validateApiKey — passkey gate (C1)", () => {
+  const ACTIVE_MEMBER = { deactivatedAt: null };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTenantMemberFindUnique.mockResolvedValue(ACTIVE_MEMBER);
+    // I2: lastUsedAt null in both the deny and allow cell, so the throttle
+    // guard (which would also skip the update on a recent lastUsedAt) cannot
+    // make the deny assertion pass vacuously.
+    mockApiKeyFindUnique.mockResolvedValue({ ...VALID_KEY_ROW, lastUsedAt: null });
+  });
+
+  it("gate blocks ⇒ PASSKEY_REQUIRED and lastUsedAt is not updated", async () => {
+    mockPasskeyGateBlocks.mockResolvedValue(true);
+
+    const result = await validateApiKey(makeReq());
+
+    expect(result).toEqual({ ok: false, error: "PASSKEY_REQUIRED" });
+    expect(mockApiKeyUpdate).not.toHaveBeenCalled();
+    expect(mockPasskeyGateBlocks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+        credential: PASSKEY_GATE_CREDENTIAL.API_KEY,
+        credentialId: VALID_KEY_ROW.id,
+      }),
+    );
+  });
+
+  it("gate allows ⇒ ok, and lastUsedAt IS updated (paired with the deny above)", async () => {
+    mockPasskeyGateBlocks.mockResolvedValue(false);
+
+    const result = await validateApiKey(makeReq());
+
+    expect(result.ok).toBe(true);
+    expect(mockApiKeyUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("fail-closed: a derivation error propagates rather than being swallowed", async () => {
+    mockPasskeyGateBlocks.mockRejectedValue(new Error("derivation failed"));
+
+    await expect(validateApiKey(makeReq())).rejects.toThrow("derivation failed");
     expect(mockApiKeyUpdate).not.toHaveBeenCalled();
   });
 });

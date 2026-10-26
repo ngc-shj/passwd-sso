@@ -24,7 +24,7 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { unauthorized, forbidden } from "@/lib/http/api-response";
+import { forbidden } from "@/lib/http/api-response";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 // Fail-closed on Redis error and keyed per-tenant so one tenant's operator
@@ -43,7 +43,7 @@ const bodySchema = z.object({
 async function handlePOST(req: NextRequest) {
   const authResult = await verifyAdminToken(req);
   if (!authResult.ok) {
-    return unauthorized();
+    return authResult.response;
   }
   const { auth } = authResult;
 

@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import ts from "typescript";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { DPOP_VERIFY_ERROR } from "@/lib/auth/dpop/verify";
 
@@ -123,7 +126,10 @@ describe("validateExtensionTokenDpop", () => {
       }
     });
 
-    it("updates lastUsedAt but NOT lastUsedIp/UA for BROWSER_EXTENSION", async () => {
+    // C5: the lastUsedAt/IP/UA write moved into validateExtensionToken, this
+    // helper's only caller — the IP/UA-by-clientKind assertions moved to
+    // extension-token.test.ts along with it.
+    it("writes nothing to the DB on success", async () => {
       mockVerifyDpop.mockResolvedValue({
         ok: true,
         claims: { jti: "j1", htm: "GET", htu: "x", iat: 1, cnf: { jkt: CNF_JKT } },
@@ -136,22 +142,14 @@ describe("validateExtensionTokenDpop", () => {
         accessToken: ACCESS_TOKEN,
       });
 
-      // Allow the void promise to settle.
-      await new Promise((r) => setTimeout(r, 10));
-
-      expect(mockExtUpdate).toHaveBeenCalledTimes(1);
-      const call = mockExtUpdate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
-      expect(call.data.lastUsedAt).toBeInstanceOf(Date);
-      // IP and UA must NOT be updated for BROWSER_EXTENSION.
-      expect(call.data).not.toHaveProperty("lastUsedIp");
-      expect(call.data).not.toHaveProperty("lastUsedUserAgent");
+      expect(mockExtUpdate).not.toHaveBeenCalled();
     });
   });
 
   describe("success path — IOS_APP", () => {
     const iosRow = { ...baseRow, clientKind: "IOS_APP" as const };
 
-    it("updates lastUsedIp and lastUsedUserAgent for IOS_APP", async () => {
+    it("writes nothing to the DB on success", async () => {
       mockVerifyDpop.mockResolvedValue({
         ok: true,
         claims: { jti: "j1", htm: "GET", htu: "x", iat: 1, cnf: { jkt: CNF_JKT } },
@@ -164,14 +162,26 @@ describe("validateExtensionTokenDpop", () => {
         accessToken: ACCESS_TOKEN,
       });
 
-      await new Promise((r) => setTimeout(r, 10));
-
-      expect(mockExtUpdate).toHaveBeenCalledTimes(1);
-      const call = mockExtUpdate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
-      expect(call.data.lastUsedAt).toBeInstanceOf(Date);
-      expect(call.data.lastUsedIp).toBe("10.0.0.1");
-      expect(call.data.lastUsedUserAgent).toBe("iOS-Test/1.0");
+      expect(mockExtUpdate).not.toHaveBeenCalled();
     });
+  });
+
+  // The call-count negatives above only see a write dispatched in the same
+  // tick; a deferred one would slip past them. The helper cannot write at all
+  // without reaching a DB module, directly or through one that writes (audit,
+  // tenant-rls), so pin its whole import set: any new import — static,
+  // side-effect, dynamic, or require — fails here and goes to review.
+  it("imports only its DPoP and type dependencies (the write lives in validateExtensionToken)", () => {
+    const source = readFileSync(join(__dirname, "validate-token-dpop.ts"), "utf8");
+    const { importedFiles } = ts.preProcessFile(source, true, true);
+    expect([...new Set(importedFiles.map((f) => f.fileName))].sort()).toEqual([
+      "@/lib/auth/dpop/htu-canonical",
+      "@/lib/auth/dpop/jti-cache",
+      "@/lib/auth/dpop/verify",
+      "@/lib/auth/tokens/extension-token-types",
+      "@prisma/client",
+      "next/server",
+    ]);
   });
 
   describe("failure paths — all 15 DPOP_VERIFY_ERROR codes", () => {

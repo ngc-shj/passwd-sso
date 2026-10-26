@@ -18,6 +18,9 @@ async function handleGET(req: NextRequest) {
     if (!result) {
       return errorResponse(API_ERROR.UNAUTHORIZED, undefined, undefined, { "Cache-Control": "no-store" });
     }
+    if (result.type === "passkey_required") {
+      return errorResponse(API_ERROR.PASSKEY_REQUIRED, undefined, undefined, { "Cache-Control": "no-store" });
+    }
   }
 
   // Derive the servers[].url from the configured canonical origin

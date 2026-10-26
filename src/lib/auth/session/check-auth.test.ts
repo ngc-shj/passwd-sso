@@ -110,6 +110,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-2",
+        tenantId: "tenant-2",
         scopes: ["passwords:read"],
       });
 
@@ -122,13 +123,14 @@ describe("checkAuth", () => {
         auth: {
           type: "token",
           userId: "user-2",
+          tenantId: "tenant-2",
           scopes: ["passwords:read"],
         },
       });
       expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
         req,
         "user-2",
-        undefined,
+        "tenant-2",
       );
     });
 
@@ -178,6 +180,33 @@ describe("checkAuth", () => {
       }
     });
 
+    it("returns 403 PASSKEY_REQUIRED when the bearer validator refuses for a missing passkey (C8)", async () => {
+      mockAuthOrToken.mockResolvedValue({ type: "passkey_required" });
+
+      const result = await checkAuth(makeRequest(), {
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        const json = await result.response.json();
+        expect(result.response.status).toBe(403);
+        expect(json.error).toBe("PASSKEY_REQUIRED");
+      }
+      expect(mockEnforceAccessRestriction).not.toHaveBeenCalled();
+    });
+
+    // T-2: fail-closed propagation — a derivation error from authOrToken
+    // must not be swallowed into a 401/403 response (paired with the
+    // PASSKEY_REQUIRED cell above).
+    it("propagates a derivation error from authOrToken rather than swallowing it", async () => {
+      mockAuthOrToken.mockRejectedValue(new Error("derivation failed"));
+
+      await expect(
+        checkAuth(makeRequest(), { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ }),
+      ).rejects.toThrow("derivation failed");
+    });
+
     it("returns 401 when no auth succeeds", async () => {
       mockAuthOrToken.mockResolvedValue(null);
 
@@ -198,6 +227,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-4",
+        tenantId: "tenant-4",
         scopes: ["passwords:read"],
       });
       const deniedResponse = NextResponse.json(
@@ -214,6 +244,24 @@ describe("checkAuth", () => {
       if (!result.ok) {
         expect(result.response).toBe(deniedResponse);
       }
+    });
+
+    it("passes the extension token's own tenantId to access restriction", async () => {
+      const req = makeRequest("ext_token");
+      mockAuthOrToken.mockResolvedValue({
+        type: "token",
+        userId: "user-5",
+        tenantId: "tenant-tok",
+        scopes: ["passwords:read"],
+      });
+      mockEnforceAccessRestriction.mockResolvedValue(null);
+
+      const result = await checkAuth(req, {
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(req, "user-5", "tenant-tok");
     });
 
     it("returns access denied for api_key with tenantId passed to access restriction", async () => {
@@ -251,6 +299,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-5",
+        tenantId: "tenant-5",
         scopes: ["passwords:read"],
       });
 
@@ -316,6 +365,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-8",
+        tenantId: "tenant-8",
         scopes: [EXTENSION_TOKEN_SCOPE.PASSWORDS_READ],
       });
 

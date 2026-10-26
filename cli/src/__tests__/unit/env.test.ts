@@ -31,9 +31,10 @@ vi.mock("../../lib/output.js", () => ({
   masked: vi.fn(),
 }));
 
-const { loadSecretsConfig, getSecretsServerUrl } = await import("../../lib/secrets-config.js");
+const { loadSecretsConfig, getSecretsServerUrl, getPasswordPath } = await import("../../lib/secrets-config.js");
 const { getToken } = await import("../../lib/api-client.js");
 const { autoUnlockIfNeeded } = await import("../../commands/unlock.js");
+const { getEncryptionKey, getUserId } = await import("../../lib/vault-state.js");
 const output = await import("../../lib/output.js");
 const { envCommand } = await import("../../commands/env.js");
 
@@ -45,10 +46,14 @@ describe("envCommand", () => {
     exitCode = undefined;
     vi.mocked(loadSecretsConfig).mockReset();
     vi.mocked(getSecretsServerUrl).mockReset();
+    vi.mocked(getPasswordPath).mockReset();
     vi.mocked(getToken).mockReset();
     vi.mocked(autoUnlockIfNeeded).mockReset();
+    vi.mocked(getEncryptionKey).mockReset();
+    vi.mocked(getUserId).mockReset();
     vi.mocked(output.error).mockReset();
     vi.mocked(output.warn).mockReset();
+    vi.unstubAllGlobals();
 
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       exitCode = code;
@@ -58,6 +63,7 @@ describe("envCommand", () => {
 
   afterEach(() => {
     exitSpy.mockRestore();
+    vi.unstubAllGlobals();
   });
 
   it("exits with code 1 when loadSecretsConfig throws", async () => {
@@ -118,6 +124,99 @@ describe("envCommand", () => {
     expect(exitCode).toBe(1);
     expect(vi.mocked(output.error)).toHaveBeenCalledWith(
       expect.stringContaining("Vault is not unlocked"),
+    );
+  });
+
+  // C1: a 403 PASSKEY_REQUIRED body from the v1 entry fetch prints a
+  // dedicated message rather than the generic "HTTP <status>" line.
+  it("prints the passkey message when the entry fetch answers 403 PASSKEY_REQUIRED", async () => {
+    vi.mocked(loadSecretsConfig).mockReturnValue({
+      apiKey: "api_test",
+      secrets: { FOO: { entry: "entry-1", field: "password" } },
+    });
+    vi.mocked(getSecretsServerUrl).mockReturnValue("https://example.com");
+    vi.mocked(getPasswordPath).mockReturnValue("/api/v1/passwords/entry-1");
+    vi.mocked(autoUnlockIfNeeded).mockResolvedValue(true);
+    vi.mocked(getEncryptionKey).mockReturnValue({} as never);
+    vi.mocked(getUserId).mockReturnValue("user-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "PASSKEY_REQUIRED" }),
+      }),
+    );
+
+    await expect(envCommand({ format: "shell" })).rejects.toThrow();
+
+    expect(exitCode).toBe(1);
+    expect(vi.mocked(output.error)).toHaveBeenCalledWith(
+      expect.stringContaining("requires a passkey"),
+    );
+    expect(vi.mocked(output.error)).not.toHaveBeenCalledWith(
+      expect.stringContaining("HTTP 403"),
+    );
+  });
+
+  // T-4: a non-passkey 403 (e.g. insufficient API key scope) must NOT be
+  // mistaken for the passkey message — only the generic "HTTP 403" line.
+  it("prints the generic HTTP status for a 403 that is not PASSKEY_REQUIRED", async () => {
+    vi.mocked(loadSecretsConfig).mockReturnValue({
+      apiKey: "api_test",
+      secrets: { FOO: { entry: "entry-1", field: "password" } },
+    });
+    vi.mocked(getSecretsServerUrl).mockReturnValue("https://example.com");
+    vi.mocked(getPasswordPath).mockReturnValue("/api/v1/passwords/entry-1");
+    vi.mocked(autoUnlockIfNeeded).mockResolvedValue(true);
+    vi.mocked(getEncryptionKey).mockReturnValue({} as never);
+    vi.mocked(getUserId).mockReturnValue("user-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "API_KEY_SCOPE_INSUFFICIENT" }),
+      }),
+    );
+
+    await expect(envCommand({ format: "shell" })).rejects.toThrow();
+
+    expect(exitCode).toBe(1);
+    expect(vi.mocked(output.error)).toHaveBeenCalledWith(
+      expect.stringContaining("HTTP 403"),
+    );
+    expect(vi.mocked(output.error)).not.toHaveBeenCalledWith(
+      expect.stringContaining("requires a passkey"),
+    );
+  });
+
+  // Paired with the cell above: a generic (non-passkey) failure still prints
+  // the HTTP status, unchanged.
+  it("prints the HTTP status for a generic entry-fetch failure", async () => {
+    vi.mocked(loadSecretsConfig).mockReturnValue({
+      apiKey: "api_test",
+      secrets: { FOO: { entry: "entry-1", field: "password" } },
+    });
+    vi.mocked(getSecretsServerUrl).mockReturnValue("https://example.com");
+    vi.mocked(getPasswordPath).mockReturnValue("/api/v1/passwords/entry-1");
+    vi.mocked(autoUnlockIfNeeded).mockResolvedValue(true);
+    vi.mocked(getEncryptionKey).mockReturnValue({} as never);
+    vi.mocked(getUserId).mockReturnValue("user-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: "NOT_FOUND" }),
+      }),
+    );
+
+    await expect(envCommand({ format: "shell" })).rejects.toThrow();
+
+    expect(exitCode).toBe(1);
+    expect(vi.mocked(output.error)).toHaveBeenCalledWith(
+      expect.stringContaining("HTTP 404"),
     );
   });
 });

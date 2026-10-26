@@ -32,6 +32,9 @@ const updateFaviconPrefSchema = z.object({ fetchFavicons: z.boolean() }).strict(
 async function handleGET(req: NextRequest): Promise<Response> {
   const auth = await validateExtensionToken(req);
   if (!auth.ok) {
+    if (auth.error === "PASSKEY_REQUIRED") {
+      return errorResponse(API_ERROR.PASSKEY_REQUIRED);
+    }
     return errorResponse(API_ERROR[auth.error], 401);
   }
   const { userId, tenantId, clientKind } = auth.data;
@@ -56,6 +59,9 @@ async function handleGET(req: NextRequest): Promise<Response> {
 async function handlePUT(req: NextRequest): Promise<Response> {
   const auth = await validateExtensionToken(req);
   if (!auth.ok) {
+    if (auth.error === "PASSKEY_REQUIRED") {
+      return errorResponse(API_ERROR.PASSKEY_REQUIRED);
+    }
     return errorResponse(API_ERROR[auth.error], 401);
   }
   const { userId, tenantId, clientKind } = auth.data;

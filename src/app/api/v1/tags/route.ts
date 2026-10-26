@@ -9,18 +9,13 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
-import { errorResponse, errorResponseWithMessage, unauthorized } from "@/lib/http/api-response";
+import { errorResponseWithMessage } from "@/lib/http/api-response";
 
 
 // GET /api/v1/tags — List tags (API key or SA token)
 async function handleGET(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.TAGS_READ);
-  if (!authResult.ok) {
-    if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT);
-    }
-    return unauthorized();
-  }
+  if (!authResult.ok) return authResult.response;
 
   const { userId, tenantId, rateLimitKey } = authResult.data;
 

@@ -21,13 +21,6 @@ import {
   EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
 } from "@/lib/validations/common";
-import {
-  derivePasskeyState,
-  passkeyEnforcementBlocks,
-  recordPasskeyAuditEmit,
-} from "@/lib/auth/policy/passkey-enforcement";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
 export const runtime = "nodejs";
 
@@ -85,6 +78,11 @@ async function detectRefreshReplay(req: NextRequest): Promise<void> {
  * Decoupled from the Auth.js web session (C5, FR1): the token's own row
  * carries its tenant, and its family's presence timestamp (C4) — not session
  * liveness — bounds how long it may keep refreshing.
+ *
+ * Passkey enforcement (C5): the per-use gate now lives inside
+ * validateExtensionToken itself, so a blocked member is refused
+ * PASSKEY_REQUIRED there, before replay detection or any family check below
+ * ever runs — there is no separate inline gate here any more.
  */
 async function handlePOST(req: NextRequest) {
   const result = await validateExtensionToken(req);
@@ -92,6 +90,9 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) {
     if (result.error === "EXTENSION_TOKEN_REVOKED") {
       await detectRefreshReplay(req);
+    }
+    if (result.error === "PASSKEY_REQUIRED") {
+      return errorResponse(API_ERROR.PASSKEY_REQUIRED);
     }
     return errorResponse(API_ERROR[result.error], 401);
   }
@@ -178,21 +179,6 @@ async function handlePOST(req: NextRequest) {
       reason: EXTENSION_TOKEN_REVOKE_REASON.PRESENCE_EXPIRED,
     });
     return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED);
-  }
-
-  // C8: Passkey enforcement gate — re-derive fresh from DB, fail closed.
-  // Tenant source = the tenant the refreshed token will be bound to (tenantId).
-  const passkeyState = await derivePasskeyState({ userId, tenantId });
-  if (passkeyEnforcementBlocks(passkeyState)) {
-    if (recordPasskeyAuditEmit(userId, "/api/extension/token/refresh", Date.now())) {
-      await logAuditAsync({
-        ...personalAuditBase(req, userId),
-        tenantId,
-        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-        metadata: { blockedPath: "/api/extension/token/refresh" },
-      });
-    }
-    return errorResponse(API_ERROR.PASSKEY_REQUIRED);
   }
 
   // Interactive transaction: revoke old (optimistic lock), then create new only if revoke succeeded

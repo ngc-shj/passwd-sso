@@ -31,9 +31,7 @@ async function checkAuth(
 ): Promise<AuthCheckResult> {
   const authResult = await validateV1Auth(req, scope);
   if (!authResult.ok) {
-    const status = authResult.error === "SCOPE_INSUFFICIENT" ? 403 : 401;
-    const error = status === 403 ? API_ERROR.API_KEY_SCOPE_INSUFFICIENT : API_ERROR.UNAUTHORIZED;
-    return { ok: false, error: errorResponse(error, status) };
+    return { ok: false, error: authResult.response };
   }
 
   const blocked = await checkRateLimitOrFail({

@@ -13,13 +13,6 @@ import {
   EXTENSION_TOKEN_SCOPE,
 } from "@/lib/constants/auth/extension-token";
 import { MS_PER_DAY, MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
-import {
-  verifyDpopProof,
-  computeAth,
-  DPOP_VERIFY_ERROR,
-  type DpopVerifyError,
-} from "@/lib/auth/dpop/verify";
-import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import {
   derivePasskeyState,
@@ -31,8 +24,6 @@ import {
   emitRevokedFamilyAudits,
   type RevokedFamily,
   EXTENSION_TOKEN_REVOKE_REASON,
-  parseScopes,
-  type ValidatedExtensionToken,
 } from "./extension-token";
 import { computeClientTokenExpiry, getFamilyPresenceAt } from "./client-token-expiry";
 import {
@@ -341,7 +332,7 @@ export async function issueAutofillToken(
   return { token: plaintext, expiresAt, cnfJkt, scope: scopeCsv };
 }
 
-// ─── Validation (DPoP) ──────────────────────────────────────────
+// ─── iOS token row shape ──────────────────────────────────────
 
 export interface IosTokenRow {
   id: string;
@@ -352,107 +343,6 @@ export interface IosTokenRow {
   expiresAt: Date;
   familyId: string;
   familyCreatedAt: Date;
-}
-
-export interface ValidateIosTokenContext {
-  req: NextRequest;
-  /** Request method (uppercase). */
-  expectedHtm: string;
-  /** Canonical URL via `canonicalHtu`. */
-  expectedHtu: string;
-  /** The plaintext access token used as Bearer (for ath check). */
-  accessToken: string;
-  /** Loaded ExtensionToken row (already passed revoke / expiry gate). */
-  row: IosTokenRow;
-  /** Optional override for the DPoP nonce check. `null` disables. */
-  expectedNonce?: string | null;
-}
-
-export type ValidateIosTokenResult =
-  | { ok: true; data: ValidatedExtensionToken }
-  | {
-      ok: false;
-      error: "EXTENSION_TOKEN_INVALID" | "EXTENSION_TOKEN_DPOP_INVALID";
-      dpopError?: DpopVerifyError;
-    };
-
-/**
- * iOS-specific variant of DPoP validation. Distinct from the shared
- * `validateExtensionTokenDpop` because the iOS caller (mobile/token route)
- * derives `expectedHtm`/`expectedHtu` explicitly from the route signature
- * (not from req.url). The shared helper at
- * `src/lib/auth/dpop/validate-token-dpop.ts` is used by `validateExtensionToken`'s
- * dispatch for BOTH iOS_APP and BROWSER_EXTENSION rows — that path is the
- * preferred consumer. Future refactor: extend the shared helper to accept
- * optional expectedHtm/Htu overrides, enabling a re-export here.
- *
- * Caller has already loaded the row and confirmed `clientKind === 'IOS_APP'`,
- * `revokedAt === null`, and `expiresAt > now`.
- *
- * On success: best-effort updates `lastUsedIp` and `lastUsedUserAgent`
- * (fire-and-forget; never throws).
- */
-export async function validateIosTokenDpop(
-  ctx: ValidateIosTokenContext,
-): Promise<ValidateIosTokenResult> {
-  const { req, expectedHtm, expectedHtu, accessToken, row, expectedNonce } = ctx;
-
-  const cnfJkt = row.cnfJkt;
-  if (!cnfJkt) {
-    // Defensive: an IOS_APP row without cnfJkt cannot be DPoP-validated.
-    // Treat as invalid rather than crashing.
-    return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
-  }
-
-  const dpopHeader = req.headers.get("dpop");
-  const result = await verifyDpopProof(dpopHeader, {
-    expectedHtm,
-    expectedHtu,
-    expectedAth: computeAth(accessToken),
-    expectedCnfJkt: cnfJkt,
-    expectedNonce: expectedNonce ?? null,
-    jtiCache: getJtiCache(),
-  });
-
-  if (!result.ok) {
-    return {
-      ok: false,
-      error: "EXTENSION_TOKEN_DPOP_INVALID",
-      dpopError: result.error,
-    };
-  }
-
-  // Best-effort `lastUsedIp` / `lastUsedUserAgent` update. Fire-and-forget.
-  const ip = extractClientIp(req);
-  const userAgent = req.headers.get("user-agent")?.slice(0, 512) ?? null;
-  void withBypassRls(prisma, async (tx) =>
-    tx.extensionToken.update({
-      where: { id: row.id },
-      data: {
-        lastUsedAt: new Date(),
-        lastUsedIp: ip?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
-        lastUsedUserAgent: userAgent,
-      },
-    }),
-  BYPASS_GRANT.EXTENSION_TOKEN_LIFECYCLE).catch(() => {});
-
-  return {
-    ok: true,
-    data: {
-      tokenId: row.id,
-      userId: row.userId,
-      tenantId: row.tenantId,
-      scopes: parseScopes(row.scope),
-      expiresAt: row.expiresAt,
-      familyId: row.familyId,
-      familyCreatedAt: row.familyCreatedAt,
-      // cnfJkt is guaranteed non-null here: null guard above returned early.
-      cnfJkt,
-      // This validator is the IOS_APP-only DPoP path (the IOS_AUTOFILL kind is
-      // validated via validateExtensionTokenDpop, not here).
-      clientKind: "IOS_APP",
-    },
-  };
 }
 
 // ─── Refresh + replay disambiguation ───────────────────────────
@@ -720,6 +610,3 @@ async function emitReplayDetected(params: EmitReplayParams): Promise<void> {
     },
   });
 }
-
-// Re-export for tests / callers that want to assert on the symbol set.
-export { DPOP_VERIFY_ERROR };

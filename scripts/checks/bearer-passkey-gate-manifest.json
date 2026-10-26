@@ -1,0 +1,213 @@
+{
+  "$comment": "Classification of every function holding a tokenHash/codeHash digest lookup (any call whose argument has the key under a filter position, whatever its receiver) or a position this gate cannot read (opaque-where: a where on a token model, or an argument / select / include / data on a token model or a model with a relation to one). Enforced by scripts/checks/check-bearer-passkey-gate.mjs (plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7). calls = the number of calls in the function that are a lookup or opaque. Keys are <repo path>#<function>. refresh-bound entries name lifetime as <repo path>#<exported const> and at least one inlineGate. models: a token model (tokenHash/codeHash column) that no analysed lookup reaches, keyed by model name with a reason; empty while every token model has one.",
+  "models": {},
+  "functions": {
+    "src/lib/auth/tokens/api-key.ts#validateApiKey": {
+      "class": "per-use-gated",
+      "calls": 1,
+      "reason": "API key validator; every use passes the C3 gate after revocation, expiry and membership (C1)."
+    },
+    "src/lib/auth/tokens/operator-token.ts#validateOperatorToken": {
+      "class": "per-use-gated",
+      "calls": 1,
+      "reason": "Operator token validator; every use passes the C3 gate after membership (C2)."
+    },
+    "src/lib/auth/tokens/extension-token.ts#validateExtensionToken": {
+      "class": "per-use-gated",
+      "calls": 1,
+      "reason": "Extension-row token validator (BROWSER_EXTENSION, IOS_APP, IOS_AUTOFILL); every use passes the C3 gate after DPoP, except the three pinned passkeyExemption call sites (C5)."
+    },
+    "src/lib/mcp/oauth-server.ts#validateMcpToken": {
+      "class": "refresh-bound",
+      "calls": 1,
+      "refreshRoute": "src/app/api/mcp/token/route.ts",
+      "lifetime": "src/lib/constants/auth/mcp.ts#MCP_TOKEN_EXPIRY_SEC",
+      "inlineGate": ["src/lib/mcp/oauth-server.ts#exchangeRefreshToken", "src/lib/mcp/oauth-server.ts#exchangeCodeForToken"],
+      "reason": "MCP access token validator; not gated per use (SC1): the token lives MCP_TOKEN_EXPIRY_SEC (1 h) and every mint, by code exchange or refresh rotation, is gated inline."
+    },
+    "src/lib/mcp/oauth-server.ts#resolveRefreshTokenGate": {
+      "class": "refresh-bound",
+      "calls": 1,
+      "refreshRoute": "src/app/api/mcp/token/route.ts",
+      "lifetime": "src/lib/constants/auth/mcp.ts#MCP_TOKEN_EXPIRY_SEC",
+      "inlineGate": "src/lib/mcp/oauth-server.ts#exchangeRefreshToken",
+      "reason": "Pre-rotation tenant lookup for the IP gate on the MCP refresh grant; authenticates nothing itself — the rotation it precedes is gated inline in exchangeRefreshToken."
+    },
+    "src/lib/mcp/oauth-server.ts#exchangeRefreshToken": {
+      "class": "refresh-bound",
+      "calls": 1,
+      "refreshRoute": "src/app/api/mcp/token/route.ts",
+      "lifetime": "src/lib/constants/auth/mcp.ts#MCP_TOKEN_EXPIRY_SEC",
+      "inlineGate": "src/lib/mcp/oauth-server.ts#exchangeRefreshToken",
+      "reason": "MCP refresh rotation; passkeyEnforcementBlocks runs inline at the mint point, after replay detection, so a blocked user's 1 h access token cannot be renewed."
+    },
+    "src/app/api/mobile/token/refresh/route.ts#handlePOST": {
+      "class": "refresh-bound",
+      "calls": 1,
+      "refreshRoute": "src/app/api/mobile/token/refresh/route.ts",
+      "lifetime": "src/lib/validations/common.ts#EXTENSION_TOKEN_IDLE_TIMEOUT_MAX",
+      "inlineGate": "src/lib/auth/tokens/mobile-token.ts#refreshIosToken",
+      "reason": "iOS host refresh-token lookup; the rotation is gated inline in refreshIosToken (SC3), the refresh row lives at most the tenant idle limit, and the access row it mints is gated per use by validateExtensionToken."
+    },
+    "src/app/api/extension/token/refresh/route.ts#detectRefreshReplay": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "Revocation-only replay detection: reads an already-revoked row and can only revoke its family; it grants nothing (the refresh itself goes through validateExtensionToken)."
+    },
+    "src/lib/mcp/oauth-server.ts#revokeToken": {
+      "class": "exempt",
+      "calls": 2,
+      "reason": "RFC 7009 revocation: the lookup can only revoke the presented token or its family; it grants nothing."
+    },
+    "src/lib/auth/tokens/service-account-token.ts#validateServiceAccountToken": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "Service account tokens are not user-bound; a passkey is a human-identity requirement."
+    },
+    "src/lib/auth/tokens/scim-token.ts#validateScimToken": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "SCIM tokens are tenant provisioning credentials, not user-bound."
+    },
+    "src/app/api/vault/admin-reset/route.ts#handlePOST": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "One-time admin vault reset action token, presented by a signed-in user; not a reusable bearer API credential."
+    },
+    "src/app/api/emergency-access/accept/route.ts#handlePOST": {
+      "class": "exempt",
+      "calls": 2,
+      "reason": "One-time emergency access invitation token, accepted under a session: the digest lookup and the CAS transition({ where: { id, tokenHash } }) on the row it found; not a reusable bearer API credential."
+    },
+    "src/app/api/emergency-access/reject/route.ts#handlePOST": {
+      "class": "exempt",
+      "calls": 2,
+      "reason": "One-time emergency access invitation token, rejected under a session: the digest lookup and the CAS transition({ where: { id, tokenHash } }) on the row it found; not a reusable bearer API credential."
+    },
+    "src/app/api/share-links/verify-access/route.ts#handlePOST": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "Share link token: an anonymous recipient capability, not a user-bound credential."
+    },
+    "src/app/s/[token]/download/route.ts#GET": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "Share link token: an anonymous recipient capability, not a user-bound credential."
+    },
+    "src/app/s/[token]/page.tsx#SharePage": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "Share link token: an anonymous recipient capability, not a user-bound credential."
+    },
+    "src/app/api/extension/token/exchange/route.ts#handlePOST": {
+      "class": "exempt",
+      "calls": 2,
+      "reason": "One-time extension bridge code (read, then CAS-consumed); the code's mint is gated and the minted extension token is gated per use by validateExtensionToken (C5)."
+    },
+    "src/app/api/mobile/token/route.ts#handlePOST": {
+      "class": "exempt",
+      "calls": 2,
+      "reason": "One-time mobile bridge code (read, then CAS-consumed); the code's mint is gated and the minted IOS_APP token is gated per use by validateExtensionToken (C5)."
+    },
+    "src/lib/mcp/oauth-server.ts#resolveCodeTenantId": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "One-time MCP authorization code, read only to pick the tenant for the IP gate; the exchange is gated inline and the token is refresh-bound (SC1)."
+    },
+    "src/lib/mcp/oauth-server.ts#exchangeCodeForToken": {
+      "class": "exempt",
+      "calls": 1,
+      "reason": "One-time MCP authorization code exchange, gated inline by passkeyEnforcementBlocks before the mint; the minted token is refresh-bound (SC1)."
+    },
+    "src/lib/emergency-access/emergency-access-state.ts#transition": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "where is the caller's args.where spread; the digest arrives through it from the accept/reject routes, whose own lookups are classified above. Revocation-style state change, grants no API access."
+    },
+    "src/lib/emergency-access/emergency-access-state.ts#bulkTransition": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "where is the caller's args.where spread (same as transition); a grant state change that grants no API access."
+    },
+    "src/lib/auth/session/user-session-invalidation.ts#invalidateUserSessions": {
+      "class": "opaque-where",
+      "calls": 5,
+      "reason": "Revokes every token row of a user; the spread is a tenantFilter keyed by userId/tenantId, not a digest. Revocation only."
+    },
+    "src/app/api/user/mcp-tokens/[id]/route.ts#handleDELETE": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Revokes a session user's own MCP refresh family; the spread is a familyId/userId/tenantId scope, not a digest. Revocation only."
+    },
+    "src/app/api/share-links/route.ts#handleGET": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Session-authenticated listing of the user's own share links; where is a record built from creator and entry ids, never a digest."
+    },
+    "src/app/api/share-links/mine/route.ts#handleGET": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Session-authenticated listing of the user's own share links; where is built from creator/type/status filters and the spread is a cursor, never a digest."
+    },
+    "src/app/api/vault/delegation/check/route.ts#GET": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "DelegationSession lookup whose McpAccessToken relation filter spreads tokenBinding ({ id } of the caller's own already-validated MCP token, or {}); filters by row id, never by digest."
+    },
+    "src/app/api/passwords/[id]/route.ts#handlePUT": {
+      "class": "opaque-where",
+      "calls": 2,
+      "reason": "PasswordEntry update (both the history-snapshot and the plain branch): data is a Record<string, unknown> built by assigning scalar columns plus tags: tagSet(ids) (a Tag relation by id); it names no share-link relation and filters by no digest."
+    },
+    "src/app/api/v1/passwords/[id]/route.ts#handlePUT": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "PasswordEntry update over API v1: data is a Record<string, unknown> built by assigning scalar columns plus tags: tagSet(ids) (a Tag relation by id); it names no share-link relation and filters by no digest."
+    },
+    "src/app/api/v1/passwords/route.ts#handlePOST": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "PasswordEntry create over API v1: the unreadable spreads are toBlobColumns/toOverviewColumns (src/lib/crypto/crypto-blob.ts), which return the three ciphertext/iv/authTag scalar columns each; no relation, no digest."
+    },
+    "src/lib/services/personal-password-service.ts#createPersonalPasswordEntry": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "PasswordEntry create: the unreadable spreads are toBlobColumns/toOverviewColumns (src/lib/crypto/crypto-blob.ts), which return scalar ciphertext/iv/authTag columns; no relation, no digest."
+    },
+    "src/lib/services/team-password-service.ts#createTeamPassword": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "TeamPasswordEntry create: the unreadable spreads are toBlobColumns/toOverviewColumns (src/lib/crypto/crypto-blob.ts), which return scalar ciphertext/iv/authTag columns; no relation, no digest."
+    },
+    "src/lib/services/team-password-service.ts#updateTeamPassword": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "TeamPasswordEntry update: data is a Record<string, unknown> built by assigning scalar columns plus tags: tagSet(ids) (a TeamTag relation by id); no share-link relation, no digest."
+    },
+    "src/app/api/teams/[teamId]/route.ts#handlePUT": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Team update: data is a Record<string, unknown> built by assigning scalar columns (name, description); no token relation, no digest."
+    },
+    "src/app/api/tenant/mcp-clients/[id]/route.ts#handlePUT": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "McpClient update: data is a Record<string, unknown> built by assigning scalar columns (name, redirectUris, allowedScopes, isActive); it names no token relation and filters by no digest."
+    },
+    "src/app/api/tenant/policy/route.ts#handlePATCH": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Tenant policy update: data is a Record<string, unknown> built by assigning scalar columns (session, token-timeout, passkey, retention and network policy fields); no token relation, no digest."
+    },
+    "src/lib/auth/session/auth-adapter.ts#updateUser": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Auth.js adapter updateUser: data is the rest of Partial<AdapterUser> (name, email, image, emailVerified) that Auth.js passes in, keyed by the user id; it is not a bearer lookup and carries no relation."
+    },
+    "src/workers/retention-gc-worker/sweep.ts#sweepPerTenantAge": {
+      "class": "opaque-where",
+      "calls": 1,
+      "reason": "Retention sweep: the computed select key is the entry's tenantRetentionColumn, a closed union of Tenant retention-day scalar columns from the retention registry; it selects, it never filters by a digest."
+    }
+  }
+}

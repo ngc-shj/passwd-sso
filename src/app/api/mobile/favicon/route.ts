@@ -69,6 +69,9 @@ async function handleGET(req: NextRequest): Promise<Response> {
   // 1. Token authentication (DPoP for IOS_APP rows)
   const auth = await validateExtensionToken(req);
   if (!auth.ok) {
+    if (auth.error === "PASSKEY_REQUIRED") {
+      return errorResponse(API_ERROR.PASSKEY_REQUIRED);
+    }
     return errorResponse(API_ERROR[auth.error], 401);
   }
   const { userId, tenantId, clientKind } = auth.data;

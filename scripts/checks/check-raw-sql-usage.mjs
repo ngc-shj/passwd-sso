@@ -1169,9 +1169,23 @@ function collectCanonicallyImportedRawSqlNames(sf, rel) {
 // `Object.defineProperty(globalThis, 'trustedSql', …)`) spells the name
 // without ever producing an Identifier occurrence the scan above would see.
 // raw-sql.ts itself and this gate's own source (which spells the four names
-// as RAW_SQL_NAMES array data) are exempt.
+// as RAW_SQL_NAMES array data) are exempt, and so is each measured
+// (file, literal value, exact count) entry below: another gate that has to
+// recognise these names as data. Any other such literal in an exempted file,
+// or a count drift, still denies.
+const RAW_SQL_NAME_LITERAL_EXEMPTIONS = new Map([
+  [
+    "scripts/checks/check-bearer-passkey-gate.mjs",
+    // accepts `$queryRawUnsafe(renderSql(trustedSql`…`))` as a literal-SQL
+    // argument shape; it never calls either name.
+    new Map([["renderSql", 1], ["trustedSql", 1]]),
+  ],
+]);
+
 function checkRawSqlNameLiterals(sf, rel) {
   if (rel === RAW_SQL_MODULE_REL || rel === GATE_SELF_REL) return;
+  const exemptions = RAW_SQL_NAME_LITERAL_EXEMPTIONS.get(rel);
+  const seen = new Map();
   const literals = [
     ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
     ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
@@ -1179,8 +1193,23 @@ function checkRawSqlNameLiterals(sf, rel) {
   for (const lit of literals) {
     if (isLiteralTypePosition(lit)) continue;
     const value = literalValue(lit);
-    if (value !== undefined && RAW_SQL_NAMES.includes(value)) {
-      violate("RAW_SQL_NAMES", rel, lineOf(lit), `literal value "${value}"`);
+    if (value === undefined || !RAW_SQL_NAMES.includes(value)) continue;
+    if (exemptions?.has(value)) {
+      seen.set(value, (seen.get(value) ?? 0) + 1);
+      continue;
+    }
+    violate("RAW_SQL_NAMES", rel, lineOf(lit), `literal value "${value}"`);
+  }
+  if (exemptions === undefined) return;
+  for (const [value, expectedCount] of exemptions) {
+    const actualCount = seen.get(value) ?? 0;
+    if (actualCount !== expectedCount) {
+      violate(
+        "RAW_SQL_NAMES",
+        rel,
+        1,
+        `"${value}" appears ${actualCount} time(s) in ${rel}; the measured exemption expects ${expectedCount} — update RAW_SQL_NAME_LITERAL_EXEMPTIONS in scripts/checks/check-raw-sql-usage.mjs if intentional`,
+      );
     }
   }
 }

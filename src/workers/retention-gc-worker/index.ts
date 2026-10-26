@@ -19,7 +19,7 @@ import {
   WORKER_POOL_STATEMENT_TIMEOUT_MS,
 } from "@/workers/worker-pool-config";
 import { renderPredicate } from "./predicate";
-import { sqlIdentifier } from "@/lib/prisma/raw-sql";
+import { namesDigestColumn, RAW_SQL_REFUSAL_CODE, sqlIdentifier } from "@/lib/prisma/raw-sql";
 import {
   RETENTION_REGISTRY,
   RLS_FREE_EXPIRY_TABLES,
@@ -35,11 +35,29 @@ export interface WorkerConfig {
 }
 
 /**
+ * sqlIdentifier's allowlist, plus renderSql's digest-column refusal moved to
+ * boot. renderSql's other refusal, a `u&` / `uescape` substring, is left to
+ * sweep time: an identifier here matches ^[a-z_]+$, so it cannot hold `&`,
+ * and a `uescape` substring is still refused, closed, when the entry renders.
+ */
+function registryIdentifier(name: string): void {
+  sqlIdentifier(name);
+  if (namesDigestColumn(name)) {
+    throw Object.assign(
+      new Error(`retention-gc: registry identifier "${name}" names a bearer-token digest column`),
+      { code: RAW_SQL_REFUSAL_CODE.DIGEST_COLUMN },
+    );
+  }
+}
+
+/**
  * Validate all registry entries at boot time.
  *
  * Called once inside createWorker before the loop starts. Throws on:
  *   - Any identifier (table, cutoffColumn, keyColumns, predicate column) that
  *     fails the ^[a-z_]+$ allowlist (INV-C2a, INV-C1c).
+ *   - Any identifier that names a bearer-token digest column (code
+ *     RAW_SQL_DIGEST_COLUMN): renderSql would refuse it only at sweep time.
  *   - Any EXPIRY entry that is missing globalDelete AND whose table is NOT
  *     "verification_tokens" (INV-C2b / boot-throw of S10).
  *
@@ -63,12 +81,15 @@ export function validateRegistry(
 ): void {
   for (const entry of registry) {
     if (entry.kind === "EXPIRY") {
-      sqlIdentifier(entry.table);
-      sqlIdentifier(entry.cutoffColumn);
+      registryIdentifier(entry.table);
+      registryIdentifier(entry.cutoffColumn);
       for (const col of entry.keyColumns) {
-        sqlIdentifier(col);
+        registryIdentifier(col);
       }
       if (entry.predicate && entry.predicate.length > 0) {
+        for (const clause of entry.predicate) {
+          registryIdentifier(clause.column);
+        }
         // renderPredicate validates every column via sqlIdentifier internally.
         renderPredicate(entry.predicate);
       }
@@ -81,10 +102,10 @@ export function validateRegistry(
         );
       }
     } else if (entry.kind === "EXPIRY_GUARDED") {
-      sqlIdentifier(entry.table);
-      sqlIdentifier(entry.cutoffColumn);
+      registryIdentifier(entry.table);
+      registryIdentifier(entry.cutoffColumn);
       for (const col of entry.keyColumns) {
-        sqlIdentifier(col);
+        registryIdentifier(col);
       }
       // `guard` is a closed GuardName enum (compile-time checked) → no runtime
       // SQL validation needed. Same globalDelete enforcement as EXPIRY.
@@ -95,12 +116,12 @@ export function validateRegistry(
         );
       }
     } else if (entry.kind === "EXPIRY_AUDIT_PROVENANCE") {
-      sqlIdentifier(entry.table);
-      sqlIdentifier(entry.cutoffColumn);
+      registryIdentifier(entry.table);
+      registryIdentifier(entry.cutoffColumn);
       // provenanceColumns are interpolated into the SELECT projection — validate
       // every one (defense-in-depth before any SQL is built; S1/S3).
       for (const col of entry.provenanceColumns) {
-        sqlIdentifier(col);
+        registryIdentifier(col);
       }
       // tenant_id is required for the per-row audit emit.
       if (!entry.provenanceColumns.includes("tenant_id")) {
@@ -118,13 +139,13 @@ export function validateRegistry(
       // `table` is the only free identifier; scopeKind and tenantRetentionColumn
       // are literal-union types. Its transactions always run with bypass_rls
       // (sweep.ts inSweepTx), so there is no globalDelete flag to enforce.
-      sqlIdentifier(entry.table);
+      registryIdentifier(entry.table);
     } else if (entry.kind === "PER_TENANT_AGE") {
       // table + cutoffColumn are interpolated into the DELETE SQL → allowlist
       // both at boot (S1). tenantRetentionColumn is a literal-union type. The
       // dispatcher always runs it with bypass_rls, so no globalDelete flag to enforce.
-      sqlIdentifier(entry.table);
-      sqlIdentifier(entry.cutoffColumn);
+      registryIdentifier(entry.table);
+      registryIdentifier(entry.cutoffColumn);
     }
     // PER_TENANT_FN entries have no free identifiers to validate — the table,
     // fn, and tenantRetentionColumn fields are literal union types.

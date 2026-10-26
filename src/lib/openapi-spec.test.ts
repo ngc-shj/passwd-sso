@@ -212,6 +212,33 @@ describe("buildOpenApiSpec", () => {
       expect(rl).toBeDefined();
       expect(rl.headers["Retry-After"]).toBeDefined();
     });
+
+    it("defines V1Forbidden response naming both the scope refusal and PASSKEY_REQUIRED", () => {
+      const v1Forbidden = spec.components.responses.V1Forbidden;
+      expect(v1Forbidden).toBeDefined();
+      const examples = v1Forbidden.content["application/json"].examples;
+      expect(examples.scopeInsufficient.value.error).toBe(API_ERROR.API_KEY_SCOPE_INSUFFICIENT);
+      expect(examples.passkeyRequired.value.error).toBe(API_ERROR.PASSKEY_REQUIRED);
+    });
+
+    // Every bearer credential reaching a v1 route is gated per use for the
+    // tenant's passkey requirement (C1) — the v1-specific 403 response must
+    // be listed on every v1 operation, not just the ones that already had a
+    // scope-insufficient 403 before this change (passwords/{id} GET/PUT/DELETE
+    // listed no 403 at all previously).
+    it("every /api/v1 operation lists 403 with the V1Forbidden response", () => {
+      const v1Paths = Object.entries(spec.paths).filter(([path]) => path.startsWith("/api/v1"));
+      expect(v1Paths.length).toBeGreaterThan(0);
+
+      for (const [path, methods] of v1Paths) {
+        for (const [method, op] of Object.entries(methods as Record<string, { responses?: Record<string, unknown> }>)) {
+          const forbidden = op.responses?.["403"];
+          expect(forbidden, `${method.toUpperCase()} ${path} is missing a 403 response`).toEqual({
+            $ref: "#/components/responses/V1Forbidden",
+          });
+        }
+      }
+    });
   });
 
   describe("different base URLs", () => {

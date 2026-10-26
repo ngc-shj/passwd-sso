@@ -169,12 +169,13 @@ describe("invalidateUserSessions", () => {
   //     deactivatedAt — so the MCP-token path is backstopped. The session-auth
   //     path relies on session invalidation succeeding OR route-level tenant
   //     membership checks; this PR does not pin that path.
-  //   - OperatorToken: validateOperatorToken itself does not check membership,
-  //     but the maintenance/admin routes call requireMaintenanceOperator(), which
-  //     re-checks active OWNER/ADMIN membership with deactivatedAt:null
-  //     (maintenance-auth.ts; tested in maintenance-auth.test.ts "filters out
-  //     deactivated members"). Do NOT rely on token expiry as the backstop:
-  //     operator tokens live 30–90 days (operator-token.ts constants).
+  //   - OperatorToken: validateOperatorToken now re-checks active tenantMember
+  //     membership itself (S4, operator-token.ts), and the maintenance/admin
+  //     routes additionally call requireMaintenanceOperator(), which re-checks
+  //     active OWNER/ADMIN membership with deactivatedAt:null (maintenance-auth.ts;
+  //     tested in maintenance-auth.test.ts "filters out deactivated members").
+  //     Do NOT rely on token expiry as the backstop: operator tokens live
+  //     30–90 days (operator-token.ts constants).
   //
   // This test pins the producer half — invalidateUserSessions attempts to revoke
   // both artifacts; if that DB write fails, the residual exposure is covered by

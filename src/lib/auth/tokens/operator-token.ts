@@ -4,6 +4,10 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import {
+  passkeyGateBlocks,
+  PASSKEY_GATE_CREDENTIAL,
+} from "@/lib/auth/policy/passkey-gate";
+import {
   OPERATOR_TOKEN_PREFIX,
   OPERATOR_TOKEN_SCOPE,
   OPERATOR_TOKEN_LAST_USED_THROTTLE_MS,
@@ -24,7 +28,8 @@ export type OperatorTokenValidationError =
   | "INVALID_TOKEN_TYPE"
   | "OPERATOR_TOKEN_INVALID"
   | "OPERATOR_TOKEN_REVOKED"
-  | "OPERATOR_TOKEN_EXPIRED";
+  | "OPERATOR_TOKEN_EXPIRED"
+  | "PASSKEY_REQUIRED";
 
 export type OperatorTokenValidationResult =
   | { ok: true; data: ValidatedOperatorToken }
@@ -65,7 +70,8 @@ export function hasOperatorTokenScope(
 /**
  * Validate an operator token from the Authorization header.
  * Only accepts tokens with the `op_` prefix and correct format.
- * Does NOT re-check OWNER/ADMIN membership — that is the caller's job.
+ * Rejects a departed or deactivated member (S4), but does NOT re-check the
+ * OWNER/ADMIN role — that is still the caller's job.
  */
 export async function validateOperatorToken(
   req: NextRequest,
@@ -113,6 +119,34 @@ export async function validateOperatorToken(
   if (token.expiresAt.getTime() <= Date.now()) {
     return { ok: false, error: "OPERATOR_TOKEN_EXPIRED" };
   }
+
+  // S4: reject deactivated operators — tenant-scoped to the token's own tenant.
+  // Fail-closed: no active membership row ⇒ invalid (cross-tenant bypass guard).
+  const member = await withBypassRls(
+    prisma,
+    async (tx) =>
+      tx.tenantMember.findUnique({
+        where: {
+          tenantId_userId: { tenantId: token.tenantId, userId: token.subjectUserId },
+        },
+        select: { deactivatedAt: true },
+      }),
+    BYPASS_GRANT.TOKEN_TENANT_MEMBERSHIP_CHECK,
+  );
+  if (!member || member.deactivatedAt !== null) {
+    return { ok: false, error: "OPERATOR_TOKEN_INVALID" };
+  }
+
+  if (
+    await passkeyGateBlocks({
+      req,
+      userId: token.subjectUserId,
+      tenantId: token.tenantId,
+      credential: PASSKEY_GATE_CREDENTIAL.OPERATOR_TOKEN,
+      credentialId: token.id,
+    })
+  )
+    return { ok: false, error: "PASSKEY_REQUIRED" };
 
   // Throttled lastUsedAt update (non-blocking)
   const shouldUpdate =

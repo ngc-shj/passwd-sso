@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const {
   mockValidateApiKeyOnly,
@@ -30,6 +30,16 @@ function makeRequest(bearerToken?: string): NextRequest {
     headers.Authorization = `Bearer ${bearerToken}`;
   }
   return new NextRequest("http://localhost:3000/api/v1/passwords", { headers });
+}
+
+/** Helper: assert a failure result's ready-made response has this status + error code. */
+async function expectFailureBody(
+  result: { ok: false; response: NextResponse },
+  status: number,
+  error: string,
+) {
+  expect(result.response.status).toBe(status);
+  await expect(result.response.json()).resolves.toEqual({ error });
 }
 
 describe("validateV1Auth", () => {
@@ -64,7 +74,7 @@ describe("validateV1Auth", () => {
     expect(mockValidateServiceAccountToken).not.toHaveBeenCalled();
   });
 
-  it("returns SCOPE_INSUFFICIENT 403 when API key scope is insufficient", async () => {
+  it("returns API_KEY_SCOPE_INSUFFICIENT 403 when API key scope is insufficient", async () => {
     mockValidateApiKeyOnly.mockResolvedValue({
       ok: false,
       error: "SCOPE_INSUFFICIENT",
@@ -73,8 +83,33 @@ describe("validateV1Auth", () => {
 
     const result = await validateV1Auth(makeRequest("api_validtoken"), "passwords:write");
 
-    expect(result).toEqual({ ok: false, error: "SCOPE_INSUFFICIENT", status: 403 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) await expectFailureBody(result, 403, "API_KEY_SCOPE_INSUFFICIENT");
     expect(mockValidateServiceAccountToken).not.toHaveBeenCalled();
+  });
+
+  it("returns PASSKEY_REQUIRED 403 and never falls through to the SA branch", async () => {
+    mockValidateApiKeyOnly.mockResolvedValue({
+      ok: false,
+      error: "PASSKEY_REQUIRED",
+      status: 403,
+    });
+
+    const result = await validateV1Auth(makeRequest("api_validtoken"), "passwords:read");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) await expectFailureBody(result, 403, "PASSKEY_REQUIRED");
+    expect(mockValidateServiceAccountToken).not.toHaveBeenCalled();
+  });
+
+  // T-2: fail-closed propagation — a derivation error from validateApiKeyOnly
+  // must not be swallowed (paired with the api_key success cell above).
+  it("propagates a derivation error from validateApiKeyOnly rather than swallowing it", async () => {
+    mockValidateApiKeyOnly.mockRejectedValue(new Error("derivation failed"));
+
+    await expect(
+      validateV1Auth(makeRequest("api_validtoken"), "passwords:read"),
+    ).rejects.toThrow("derivation failed");
   });
 
   it("returns ok with service_account actorType when SA token is valid with required scope", async () => {
@@ -107,7 +142,7 @@ describe("validateV1Auth", () => {
     });
   });
 
-  it("returns SCOPE_INSUFFICIENT 403 when SA token scope is insufficient", async () => {
+  it("returns API_KEY_SCOPE_INSUFFICIENT 403 when SA token scope is insufficient", async () => {
     mockValidateApiKeyOnly.mockResolvedValue({
       ok: false,
       error: "INVALID_TOKEN_TYPE",
@@ -126,10 +161,11 @@ describe("validateV1Auth", () => {
 
     const result = await validateV1Auth(makeRequest("sa_validtoken"), "passwords:write");
 
-    expect(result).toEqual({ ok: false, error: "SCOPE_INSUFFICIENT", status: 403 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) await expectFailureBody(result, 403, "API_KEY_SCOPE_INSUFFICIENT");
   });
 
-  it("returns 401 when no bearer token is present", async () => {
+  it("returns UNAUTHORIZED 401 when no bearer token is present", async () => {
     mockValidateApiKeyOnly.mockResolvedValue({
       ok: false,
       error: "INVALID_TOKEN_TYPE",
@@ -138,7 +174,8 @@ describe("validateV1Auth", () => {
 
     const result = await validateV1Auth(makeRequest(), "passwords:read");
 
-    expect(result).toEqual(expect.objectContaining({ ok: false, status: 401 }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) await expectFailureBody(result, 401, "UNAUTHORIZED");
     expect(mockValidateServiceAccountToken).not.toHaveBeenCalled();
   });
 
@@ -152,7 +189,8 @@ describe("validateV1Auth", () => {
 
     const result = await validateV1Auth(makeRequest("api_revokedtoken"), "passwords:read");
 
-    expect(result).toEqual(expect.objectContaining({ ok: false, status: 401 }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) await expectFailureBody(result, 401, "UNAUTHORIZED");
     expect(mockValidateServiceAccountToken).not.toHaveBeenCalled();
   });
 });
