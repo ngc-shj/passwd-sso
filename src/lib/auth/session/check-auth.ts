@@ -94,7 +94,10 @@ export async function checkAuth(
       const denied = await enforceAccessRestriction(
         req,
         authResult.userId,
-        authResult.type === "api_key" || authResult.type === "mcp_token"
+        // The credential's own tenant, never one re-resolved from the user: a
+        // null resolution would skip the check, and the passkey gate already
+        // judged this token against its row's tenant.
+        authResult.type === "api_key" || authResult.type === "mcp_token" || authResult.type === "token"
           ? authResult.tenantId
           : undefined,
       );

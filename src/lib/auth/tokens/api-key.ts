@@ -161,7 +161,8 @@ export async function validateApiKey(
  * For use in /api/v1/* routes (CSRF prevention).
  *
  * @param requiredScope - If provided, checks that the key has this scope.
- * Returns 401-type errors for auth failures, 403-type for scope mismatch.
+ * Returns 401-type errors for auth failures, 403-type for scope mismatch and
+ * for PASSKEY_REQUIRED.
  */
 export async function validateApiKeyOnly(
   req: NextRequest,

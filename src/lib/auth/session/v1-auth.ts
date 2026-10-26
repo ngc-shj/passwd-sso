@@ -39,7 +39,10 @@ function extractBearer(req: NextRequest): string | null {
  * Strategy:
  * 1. Try validateApiKeyOnly — handles the `api_` prefix case (and returns INVALID_TOKEN_TYPE for others).
  * 2. If the token type is wrong (not an api_ token), check for SA token prefix and validate.
- * 3. All other failures (no token, bad token, wrong type) → 401.
+ * 3. A recognized api_ key refused by the tenant passkey requirement → 403
+ *    PASSKEY_REQUIRED; scope refusals → 403; all other failures (no token, bad
+ *    token, wrong type) → 401. The response is built here from the error;
+ *    validateApiKeyOnly's `status` is not consulted.
  */
 export async function validateV1Auth(
   req: NextRequest,

@@ -232,6 +232,24 @@ describe("checkAuth", () => {
       }
     });
 
+    it("passes the extension token's own tenantId to access restriction", async () => {
+      const req = makeRequest("ext_token");
+      mockAuthOrToken.mockResolvedValue({
+        type: "token",
+        userId: "user-5",
+        tenantId: "tenant-tok",
+        scopes: ["passwords:read"],
+      });
+      mockEnforceAccessRestriction.mockResolvedValue(null);
+
+      const result = await checkAuth(req, {
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(req, "user-5", "tenant-tok");
+    });
+
     it("returns access denied for api_key with tenantId passed to access restriction", async () => {
       const req = makeRequest("api_key_xyz");
       mockAuthOrToken.mockResolvedValue({
