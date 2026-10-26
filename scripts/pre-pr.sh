@@ -393,6 +393,7 @@ queue_step "Static: critical-audit-atomic" node scripts/checks/check-critical-au
 queue_step "Static: tenant-claim-event-coverage" node scripts/checks/check-tenant-claim-event-coverage.mjs
 queue_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
 queue_step "Static: bound-unknown-ip" node scripts/checks/check-bound-unknown-ip.mjs
+queue_step "Static: bearer-passkey-gate" node scripts/checks/check-bearer-passkey-gate.mjs
 queue_step "Static: publish-toolchain" bash scripts/checks/check-publish-toolchain.sh
 queue_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
 queue_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
