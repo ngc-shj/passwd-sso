@@ -170,28 +170,40 @@ test.describe("Session passkey gate", () => {
     //
     // A reload would be started by hardNavigate's `location.href` assignment,
     // which fires the Navigation API's navigate event synchronously, before
-    // fetchApi returns and so before the toast. The count is kept in
-    // sessionStorage, which survives a same-origin reload. framenavigated and
-    // page.url() only change once a new document commits, which nothing orders
-    // before the toast, so they are secondary checks here.
-    const counterKey = `e2e-navigate-${randomUUID()}`;
+    // fetchApi returns and so before the toast. Each event is recorded in
+    // sessionStorage, which survives a same-origin reload, with whether it is
+    // same-document: Next's router writes history on hydration
+    // (replaceState), which is a same-document navigate, so only
+    // cross-document entries mean a reload. framenavigated and page.url() only
+    // change once a new document commits, which nothing orders before the
+    // toast, so they are secondary checks here.
+    const navKey = `e2e-navigate-${randomUUID()}`;
     await page.addInitScript((key) => {
+      if (window !== window.top) return;
       try {
         const nav = (window as unknown as { navigation?: EventTarget }).navigation;
         if (!nav) {
           sessionStorage.setItem(key, "unsupported");
           return;
         }
-        if (sessionStorage.getItem(key) === null) sessionStorage.setItem(key, "0");
-        nav.addEventListener("navigate", () => {
-          sessionStorage.setItem(key, String(Number(sessionStorage.getItem(key)) + 1));
+        if (sessionStorage.getItem(key) === null) sessionStorage.setItem(key, "[]");
+        nav.addEventListener("navigate", (event) => {
+          const e = event as Event & { destination: { sameDocument: boolean } };
+          const entries = JSON.parse(sessionStorage.getItem(key) ?? "[]") as boolean[];
+          entries.push(e.destination.sameDocument);
+          sessionStorage.setItem(key, JSON.stringify(entries));
         });
       } catch {
         // Documents without sessionStorage (about:blank) are not the app.
       }
-    }, counterKey);
-    const navigateCount = () =>
-      page.evaluate((key) => sessionStorage.getItem(key), counterKey);
+    }, navKey);
+    const crossDocumentNavigations = async () => {
+      const raw = await page.evaluate((key) => sessionStorage.getItem(key), navKey);
+      // "unsupported" or a missing key fails here rather than reading as none.
+      expect(raw, "Navigation API listener not installed").not.toBe("unsupported");
+      expect(raw, "Navigation API listener not installed").not.toBeNull();
+      return (JSON.parse(raw as string) as boolean[]).filter((same) => !same).length;
+    };
 
     let refusalServed = false;
     let navigationsAfterRefusal = 0;
@@ -224,15 +236,21 @@ test.describe("Session passkey gate", () => {
 
     await expect(page.getByText(CREDENTIALS_FETCH_ERROR)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("heading", { name: SCREEN_TITLE })).toBeVisible();
-    // A browser-initiated goto fires no navigate event, so exactly 0 is the
-    // expectation; "unsupported" fails here rather than reading as 0.
-    expect(await navigateCount(), "the refusal started a reload").toBe("0");
+    // The browser-initiated goto fires no navigate event, so no cross-document
+    // entry may exist.
+    expect(await crossDocumentNavigations(), "the refusal started a reload").toBe(0);
     expect(navigationsAfterRefusal, "the refusal reloaded the tab").toBe(0);
     expect(page.url()).toBe(urlAtRefusal);
 
-    // Allow side: the listener is live, so the 0 above is not "not listening".
-    await page.evaluate(() => history.replaceState(null, "", location.href));
-    expect(await navigateCount()).toBe("1");
+    // Allow side: the same mechanism hardNavigate uses is detected, and the
+    // record survives the reload it causes.
+    await Promise.all([
+      page.waitForEvent("load"),
+      page.evaluate(() => {
+        window.location.href = window.location.href;
+      }),
+    ]);
+    expect(await crossDocumentNavigations()).toBe(1);
   });
 
   test("a stale sign-in is asked to sign in again before registering", async () => {

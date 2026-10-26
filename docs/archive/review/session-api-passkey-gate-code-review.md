@@ -1,6 +1,6 @@
 # Code Review: session-api-passkey-gate
 Date: 2026-10-27
-Review round: 3
+Review round: 4
 
 ## Changes from Previous Round
 Initial review, on top of the Phase 2 self-R-check (fixed in 32b8e376f).
@@ -169,10 +169,29 @@ No Critical or Major findings. The R43 checks found no widening.
 - **F3-1:** the policy doc and manual-test step 8 state the tenant-wide suspension and the grace
   restart. Immediate re-enforcement uses `passkeyGracePeriodDays` = null, which `tenant/policy`
   accepts as immediate enforcement.
-- **T3-1:** an in-page Navigation API counter in `sessionStorage`.
-  - It must read exactly "0" after the toast; "unsupported" fails.
-  - Allow side: `replaceState` reads "1".
-  - `framenavigated` and the URL are secondary.
+- **T3-1:** an in-page Navigation API counter in `sessionStorage`. Superseded in round 4: Next's
+  hydration `replaceState` fires `navigate`, so a bare count cannot read 0.
 - **T3-2:** the refused wait matches status 403, and the comment notes the dev double fetch.
 - **T3-3:** the owed red proof is restated against the counter.
 - **E1:** still blocked-deferred. The spec type-checks and lints clean.
+
+## Round 4 (incremental, caa3f3f7d..b6065a2fa)
+- **Functionality:** F4-1 Minor. The incident note did not say that the policy card clears the
+  grace period when the requirement is switched off.
+- **Security:** S4-1 Minor. MCP access tokens issued while the requirement was off live up to 1 h
+  after re-enable. No production-code change.
+- **Testing:**
+  - T4-1 Major: Next's `HistoryUpdater` `replaceState` on hydration fires `navigate`, so the
+    counter reads at least 1 on a passing build, and the owed red proof does not discriminate.
+  - T4-2 Major: the allow-side `replaceState` is racy and covers the same-document axis only.
+  - T4-3 Minor: the init script runs in iframes.
+
+### Round 4 resolution
+- **T4-1:** entries record `destination.sameDocument`, and only cross-document entries mean a
+  reload; none may exist.
+- **T4-2:** the allow side is a real `location.href` reload that must record exactly one
+  cross-document entry. That is `hardNavigate`'s mechanism, and it shows the record survives the
+  reload.
+- **T4-3:** the init script runs in the top frame only.
+- **F4-1 / S4-1:** the policy doc and manual-test step 8 are updated.
+- **E1:** still blocked-deferred. Type-check and lint are clean.

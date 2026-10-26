@@ -67,8 +67,12 @@ change (`WEBAUTHN_RP_ID`, `WEBAUTHN_PRF_SECRET`).
        passkey-less member's API calls to succeed during that window.
      - Turning it back on restarts the grace period for everyone. With a non-zero grace period,
        expect a passkey-less member to stay allowed until the new window expires.
-     - With `passkeyGracePeriodDays` set to null (immediate enforcement) before re-enabling,
-       expect that member to be blocked at once.
+     - In the tenant policy card, switching the requirement off clears the grace field.
+       Re-enabling with the field left blank should block that member at once.
+     - Over the API, `PATCH {requirePasskey: true, passkeyGracePeriodDays: null}` should do the
+       same.
+     - An MCP access token obtained while the requirement was off should keep working until it
+       expires (up to 1 h). Its refresh should be refused.
    - A delete through the route can no longer leave a past-grace member without a passkey, so
      the former "next API call returns `PASSKEY_REQUIRED` within seconds" check is not
      reachable here. The delete's session-cache invalidation is still covered by the route's

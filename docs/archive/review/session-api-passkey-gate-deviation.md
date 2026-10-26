@@ -159,10 +159,11 @@
     exists for.
   - Not run here (same reasons as Batch 3); it type-checks and lints clean.
   - Its red proof is owed to the first environment that can run the E2E spec. It reads the
-    in-page navigate counter (code review round 3, T3-1), not `framenavigated`:
-    - drop `setPasskeyRequiredScreenMounted(true)` and expect the counter at least 1;
-    - drop the listener install and expect the allow-side check (exactly 1 after
-      `replaceState`) to fail.
+    in-page record of cross-document navigate events (code review round 4, T4-1), not
+    `framenavigated`:
+    - drop `setPasskeyRequiredScreenMounted(true)` and expect at least one cross-document entry;
+    - drop the listener install and expect the allow side to fail. The allow side is a
+      `location.href` reload that must record exactly one cross-document entry.
 - **T2-2: the observation bound is the screen's named mount calls.** Each of
   `GET /api/auth/session` (the session provider), `GET /api/webauthn/credentials` and
   `GET /api/user/auth-provider` is awaited by name, and the set of `fetch`/`xhr` calls observed
@@ -192,15 +193,28 @@
 
 ## Code review round 3
 - **T3-1: the no-reload E2E cell detects a reload attempt in the page, not by event ordering.**
-  - An init script counts Navigation API `navigate` events in `sessionStorage`, which survives
-    a same-origin reload. `hardNavigate`'s `location.href` assignment fires that event before
-    `fetchApi` returns, so before the toast that ends the observation.
-  - The expected count is exactly 0, because a browser-initiated `goto` fires none. A missing
-    Navigation API reads `"unsupported"` and fails.
-  - An allow-side `replaceState` must read exactly 1.
+  - An init script, top frame only, records Navigation API `navigate` events in
+    `sessionStorage`, which survives a same-origin reload. `hardNavigate`'s `location.href`
+    assignment fires that event before `fetchApi` returns, so before the toast that ends the
+    observation.
+  - Each entry keeps `destination.sameDocument`. Next's router calls `replaceState` on
+    hydration, which is a same-document navigate (round 4, T4-1), so only cross-document entries
+    count as a reload, and none may exist.
+  - A missing Navigation API fails.
+  - The allow side is a real cross-document `location.href` reload that must record exactly one
+    entry (round 4, T4-2).
   - `framenavigated` and the URL stay as secondary checks.
 - **T3-2:** the refused-response wait matches status 403, since `next dev` StrictMode mounts the
   card twice and the second fetch passes through.
 - **F3-1:** the incident procedure now states that turning `requirePasskey` off is tenant-wide,
   and that re-enabling restarts the grace period. Immediate re-enforcement needs
   `passkeyGracePeriodDays` set to null first.
+
+## Code review round 4
+- **T4-1, T4-2, T4-3:** the round-3 counter could not read 0 on a passing build, because Next's
+  `HistoryUpdater` `replaceState` fires `navigate` on hydration. It is replaced by the
+  cross-document record described under T3-1, with a cross-document reload as the allow side
+  and the init script limited to the top frame.
+- **F4-1, S4-1:** the incident note distinguishes the policy card (which clears the grace period
+  on switch-off) from the API (send null in the same request). It also states the up-to-1 h tail
+  of MCP access tokens issued while the requirement was off.
