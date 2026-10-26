@@ -142,3 +142,39 @@ precondition of D5.
   RS6 N/A.
 - **Testing:** RT1 T25, T27; RT2 OK; RT3 T18, T19; RT5 T20, T25, T29; RT7 T24; RT8 T16;
   RT9 T21; RT10 T17, T26; RT11 T21, T28.
+
+### Revision 3
+- **Precondition:** S9 is fixed by `#966` (merged), which is a precondition of D5.
+- **N1 → D6:**
+  - The session callback adds a server-computed `passkeyBlocked`.
+  - `VaultProvider` keeps `VaultStatus` and only skips the initial status fetch, leaving any
+    unlocked state and auto-lock untouched.
+  - The client never re-derives the verdict (I5).
+- **N2/S10/T20:** the `auth.ts` catch bundle carries `passkeyStateDegraded`. `getSessionInfo`
+  caches both a substituted bundle and a marked one for 5 s.
+- **N3:** `@stepup` markers on both register routes and the card's two calls, through
+  `handleStepUpError`.
+- **N4:** the admin layout redirects blocked sessions; the `fetchApi` reaction also covers
+  `/admin`.
+- **N5:** the client sends `prfCapable` (from `getClientExtensionResults().prf?.enabled`), and
+  `prfSupported = hasWrap || prfCapable`. The offer copy no longer claims a key rotation.
+- **N6:** a new cross-tenant `invalidateUserSessionsCache(userId)` with its own grant.
+- **N7/S11:**
+  - The metadata is `{ blockedPath: "<METHOD> /api/<routeKey>" }`.
+  - `routeKey` comes from a closed set pinned to `src/app/api/`; anything else becomes `other`.
+- **N8/T17:** Tier A enumerates Auth.js actions with their methods. `signin/<id>` and
+  `callback/<id>` match exactly one segment, and catch-all routes declare `concretePaths`.
+- **S12:** an ambiguous or chunked session cookie on API_DEFAULT gets 401.
+- **S13/T19:** the handler scan is an AST scan with import binding and a reader set defined by
+  module.
+- **T16:** the own-gate step is explicit in the C1 order. Each manifest value maps to a
+  (response, session fetch) outcome. `bridge-code` and `openapi.json` are early returns.
+- **T18:** a new parity assertion for `sessionPasskeyGate`.
+- **T21–T23:** E2E obligations instead of harness specifics:
+  - one RP ID source;
+  - a PRF-capable authenticator;
+  - a user per attempt;
+  - polling;
+  - a positive control before the no-403 assertion.
+- **T24:** red-proof list completed, each naming its expected red cell.
+- **T25–T29:** recorded as Phase 2 harness obligations.
