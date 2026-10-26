@@ -544,3 +544,84 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
 | C1 | proxy gate, two-tier exemption, order with invalid-reason handling, own-gate routes with route-level adjudication, degraded 503, fail-closed TTL, Redis-bounded audit | pending |
 | C2 | minimal screen, admin layout, degraded retry state, VaultProvider + pollers, server verdict, fetchApi reaction (mounted flag), card, server-derived PRF signal, user cache invalidation on register and delete, recency + step-up markers | pending |
 | C3 | stale comments and policy doc | pending |
+
+## Implementation Checklist
+
+### Batch 1a — proxy and session plumbing
+- **Session callback (`src/auth.ts`):**
+  - adds `passkeyBlocked` and `passkeyStateDegraded`;
+  - its catch path sets degraded and `passkeyBlocked: false`;
+  - C3 tenant-move comment.
+- **Types:** `src/types/next-auth.d.ts` gains both fields.
+- **Session cache:** `src/lib/auth/session/session-cache.ts`: `SessionInfo` and
+  `SessionInfoSchema` gain `passkeyStateDegraded`.
+- **`src/lib/proxy/auth-gate.ts`:**
+  - carries the flag;
+  - a substituted or marked bundle gets `NEGATIVE_CACHE_TTL_MS`;
+  - stale "positive-cached by design" comment.
+- **New `src/lib/proxy/session-passkey-gate.ts`:**
+  - Tier A, Tier B, own-gate and `API_DEFAULT_SESSION_READERS` as literal method-aware
+    entries;
+  - the `routeKey` and method closed sets;
+  - `blockedPath`;
+  - the Redis-limited audit write.
+- **`src/lib/proxy/api-route.ts`:** the C1 order.
+- **`src/lib/proxy/page-route.ts`:** degraded means no redirect and no audit; F8 comment.
+- **Reuse:**
+  - `passkeyEnforcementBlocks`, `isPasskeyGracePeriodExpired` (`passkey-enforcement.ts`);
+  - `createRateLimiter` (see the `passkey-gate.ts` audit limiter);
+  - `logAuditAsync` and `personalAuditBase`;
+  - `AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED`;
+  - `errorResponse`, `API_ERROR.PASSKEY_REQUIRED` and `API_ERROR.SERVICE_UNAVAILABLE`;
+  - `applyCorsHeaders`;
+  - `NEGATIVE_CACHE_TTL_MS`;
+  - `PASSKEY_AUDIT_DEDUP_MS`.
+
+### Batch 1b — routes and invalidation
+- **`register/options` and `register/verify`:**
+  - `requireRecentCurrentAuthMethod` when `derivePasskeyState` blocks, with `@stepup`
+    markers and `stepup-route-paths.json`;
+  - `register/verify` also gets the PRF derivation from `clientExtensionResults.prf` and the
+    user cache invalidation.
+- **`src/app/api/webauthn/credentials/[id]/route.ts`:** `DELETE` invalidates the user cache.
+- **`src/app/api/mobile/autofill-token/route.ts`:** bearer-only through
+  `validateExtensionToken`.
+- **`src/app/api/v1/openapi.json/route.ts`:** session passkey check.
+- **`src/lib/auth/session/user-session-invalidation.ts`:** `invalidateUserSessionsCache`, with
+  a new grant in `tenant-rls-grants.ts` (`session` only) and the bypass allowlist.
+- **`docs/security/policy-enforcement.md`:** C3.
+
+### Batch 2 — client
+- **Layouts:**
+  - `src/app/[locale]/dashboard/layout.tsx` and `admin/layout.tsx` decide on the raw fields,
+    degraded first;
+  - `PasskeyRequiredScreen` and a retry state.
+- **Providers:**
+  - `src/lib/vault/vault-context.tsx`;
+  - `team-vault-core.tsx` and `emergency-access-context.tsx` suspend while blocked or degraded.
+- **`src/lib/url-helpers.ts` / `fetchApi`:** the reaction, the screen-mounted flag, and a test
+  reset for the latch.
+- **`passkey-credentials-card.tsx`:**
+  - register while locked;
+  - `onRegistered` (`update()`, then `hardNavigate`);
+  - client `@stepup` markers with `handleStepUpError`.
+- **Messages:** `messages/{en,ja}/*`, with copy that claims no key rotation.
+
+### Batch 3 — gates and tests
+- **Manifest:**
+  - `scripts/checks/route-policy-manifest.json` gains `sessionPasskeyGate` and
+    `concretePaths`;
+  - `src/__tests__/proxy/route-policy-manifest.test.ts` gets parity, the outcome table and the
+    I2 snapshot;
+  - the security-matrix generator is updated with it.
+- **Handler scan:** an AST scan with import binding (reader set, `API_DEFAULT_SESSION_READERS`
+  equality, own-gate adjudicator).
+- **Integration:**
+  - `register/verify` cross-tenant invalidation;
+  - the two-instance Redis audit bound.
+- **E2E:** `e2e/` spec with RP ID, a PRF virtual authenticator, a user per attempt, and the
+  positive control.
+
+### CI parity
+- `scripts/pre-pr.sh` ran all 86 gates green on PR `#967`, and its gate list matches CI.
+- New gates join through the existing manifest test and vitest, so no new CI-only gate is added.
