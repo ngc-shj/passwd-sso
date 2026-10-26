@@ -2,7 +2,7 @@
 
 Issue `#959`. It was split out of the `#956` plan review (session findings S1, S8–S10, S12–S14,
 F9–F12, F15–F17, F19, TQ1–TQ4). It depends on `#961` and on issue `#966` (fixed by PR `#967`,
-merged). The bearer side is `#965`. Revision 5 follows plan review round 4. Findings are cited by ID from the review
+merged). The bearer side is `#965`. Revision 6 follows plan review round 5. Findings are cited by ID from the review
 record.
 
 `#966` (round-2 S9) is a precondition of D5: an OAuth callback no longer links an IdP account
@@ -52,7 +52,9 @@ passkey.
   - Page navigations keep their existing path, except that they also write no row for a
     degraded bundle.
 - **D5 — enrollment is bound to recency (S2).** While `passkeyEnforcementBlocks` holds,
-  `webauthn/register/options` and `register/verify` require `requireRecentSession`. A session
+  `webauthn/register/options` and `register/verify` require `requireRecentCurrentAuthMethod`.
+  That is the provider-aware freshness check every other step-up route and the sign-in reauth
+  panel use, so the gate and the page cannot disagree and loop (R5-3). A session
   cookie alone cannot clear the gate or mint a durable credential. The minimal screen answers
   `SESSION_STEP_UP_REQUIRED` through `handleStepUpError`, which offers a fresh sign-in.
   - Both server calls carry `@stepup id:… method:POST` markers, and the card's two calls carry
@@ -135,6 +137,12 @@ passkey.
        is invalid at the proxy while the route's `auth()` still resolves the session.
      - **Session readers:** a literal `API_DEFAULT_SESSION_READERS` list in the proxy (today
        `POST /api/auth/passkey/reauth/options` and `POST /api/auth/passkey/reauth/verify`).
+       - `mobile/autofill-token` read the session through `checkAuth` → `authOrToken`, but
+         only ever authorized an `IOS_APP` token.
+       - It becomes bearer-only through `validateExtensionToken` (scope and `clientKind`
+         checked), like its sibling mobile routes. It keeps its `PASSKEY_REQUIRED` mapping and
+         leaves the reader set (R5-1).
+       - A session-only request still gets 401, as today.
        There, any invalid session (missing, ambiguous, dead, faulted or deactivated) gets 401.
        The route's `auth()` never sees a session this gate did not evaluate.
      - **Own-gate routes** pass through to their own auth, which re-derives the passkey state
@@ -170,10 +178,11 @@ passkey.
 
 ### C2 — the recovery screen and client
 
-- **Dashboard layout:** `src/app/[locale]/dashboard/layout.tsx` already calls `auth()`. When
-  `session.passkeyBlocked` holds, it renders `PasskeyRequiredScreen` instead of
-  `<VaultGate><DashboardShell>`: a registration card and sign-out. When the session is
-  degraded, it renders the retry state (D7).
+- **Dashboard layout:** `src/app/[locale]/dashboard/layout.tsx` already calls `auth()`, and it
+  decides on the raw fields, as the admin layout does (D6, R5-2):
+  - degraded first: it renders the retry state (D7);
+  - otherwise, when `passkeyEnforcementBlocks` holds, it renders `PasskeyRequiredScreen` (a
+    registration card and sign-out) instead of `<VaultGate><DashboardShell>`.
 - **Admin layout (N4):** `src/app/[locale]/admin/layout.tsx` redirects a blocked session to the
   passkey page, matching the page proxy. Its own `auth()` is fresh where the proxy's view may be
   cached.
@@ -321,9 +330,13 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
     adjudicator itself (`openapi.json`, `bridge-code`). `own-gate` readers pass.
     - A `gated` API_DEFAULT reader must be in `API_DEFAULT_SESSION_READERS`, and the list must
       hold nothing else. `gated` API_SESSION_REQUIRED readers pass.
+    - A catch-all reader (`[...nextauth]`) is classified by its reader-exemption entry, with a
+      reason. Its `gated` negative spellings do not make it a list member (R5-4).
     - It is an AST scan that resolves each call to its import declaration, scope-aware.
     - The reader set is defined by defining module: `@/auth#auth`, `checkAuth`, `authOrToken`,
-      the `session-cookie` / `getSessionToken*` exports, and `requireRecentSession`.
+      the `session-cookie` / `getSessionToken*` exports, `requireRecentSession`,
+      `requireRecentCurrentAuthMethod`, `evaluateStepUpFreshness` and
+      `canRecoverSessionWithPasskey` (R5-3).
     - Wrappers are not followed transitively; that floor is documented.
     - Red-proved with an aliased import and a local shadow.
 - **Proxy unit:**
@@ -411,7 +424,11 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
 - **Route unit:** `register/options` and `register/verify` require recency when blocked (and not
   when allowed); `register/verify` derives `prfSupported` from `clientExtensionResults.prf`
   (T-R3-5); the credential `DELETE` invalidates the user's sessions; with a degraded bundle and a
-  stale sign-in, both register calls answer `SESSION_STEP_UP_REQUIRED` (S-R4-2/N-R4-4); `register/verify` bulk-invalidates the user's sessions on success only and
+  stale sign-in, both register calls answer `SESSION_STEP_UP_REQUIRED` (S-R4-2/N-R4-4);
+  `mobile/autofill-token` keeps its outcomes with `validateExtensionToken`. Those are a session
+  alone gives 401, an `IOS_APP` token mints, other client kinds and missing scope are refused,
+  and a blocked member gets `PASSKEY_REQUIRED`. A stale cookie plus a valid `IOS_APP` token
+  still mints (R5-1); `register/verify` bulk-invalidates the user's sessions on success only and
   stores the PRF capability without the wrap; `v1/openapi.json`'s session passkey check.
 - **Integration (real DB and Redis; a skip is not a pass) (T9):** `register/verify` with
   `verifyRegistration` stubbed:
@@ -477,6 +494,9 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
   - make `invalidateUserSessionsCache` tenant-scoped;
   - skip invalidation on the credential `DELETE`;
   - drop a route from `API_DEFAULT_SESSION_READERS`;
+  - restore `checkAuth` in `mobile/autofill-token` (the scan goes red);
+  - make the dashboard layout read `passkeyBlocked`, or check degraded after blocked;
+  - make D5 use the createdAt-only `requireRecentSession`;
   - pass a 200-`null` through on a reader route;
   - let D5 read `passkeyBlocked`;
   - redirect a degraded page navigation;

@@ -344,3 +344,33 @@ precondition of D5.
 - **Security:** R43 own-gate ambiguous pass (covered) and Tier B while degraded (S-R4-2);
   RS2 OK.
 - **Testing:** RT2 T-R4-5; RT5 T-R4-2, T-R4-3; RT7 T-R4-6; RT8 T-R4-1.
+
+## Round 5 (plan revision 5, combined review)
+- **Resolved:** N-R4-3, N-R4-5, N-R4-6, T-R4-2–T-R4-7.
+- **Resolved in design:** N-R4-1, S-R4-1, N-R4-2, T-R4-1. The "reader" axis is right.
+- **Checked:** all 41 API_DEFAULT routes and helpers one level deep. No other page relies on the
+  page proxy's passkey redirect, and no raw-field reader is missed.
+- R5-1 Major: `mobile/autofill-token` is an API_DEFAULT session reader the plan left out
+  (`checkAuth` → `authOrToken` → `auth()` first). Listing it would refuse a stale cookie plus a
+  valid `IOS_APP` token, which works today.
+- R5-2 Minor: the dashboard layout authorized on `passkeyBlocked`, contradicting D6.
+- R5-3 Minor: the reader set named the unused `requireRecentSession` and missed
+  `requireRecentCurrentAuthMethod`, `evaluateStepUpFreshness` and
+  `canRecoverSessionWithPasskey`. D5 used the createdAt-only primitive, while every other
+  step-up route uses provider-aware freshness.
+- R5-4 Minor: the scan rule was undefined for the `[...nextauth]` catch-all reader.
+
+### Revision 6
+- **R5-1:** `mobile/autofill-token` becomes bearer-only through `validateExtensionToken`, like
+  its sibling mobile routes. It leaves the reader set with its outcomes unchanged; a cell pins
+  that a stale cookie plus a valid token still mints.
+- **R5-2:** the dashboard layout decides on the raw fields, checking degraded first.
+- **R5-3:** the reader set gains the three step-up readers, and D5 uses
+  `requireRecentCurrentAuthMethod`.
+- **R5-4:** a catch-all reader is classified by its reader-exemption entry.
+
+### Plan status
+- No Critical or Major findings remain open.
+- The last two rounds' findings were enumeration and mechanism detail, not design. Following
+  the de-specification rule, the plan moves to Phase 2. Code review (Phase 3) checks the
+  implementation against it.
