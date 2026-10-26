@@ -178,3 +178,101 @@ precondition of D5.
   - a positive control before the no-403 assertion.
 - **T24:** red-proof list completed, each naming its expected red cell.
 - **T25–T29:** recorded as Phase 2 harness obligations.
+
+## Round 3 (plan revision 3)
+
+### Functionality (N-R3-1, N-R3-2 Major; N-R3-3–N-R3-8 Minor)
+- N1–N8 are resolved in design. `useSession` receives `passkeyBlocked` and refetches on every
+  navigation.
+- N-R3-1 Major: the degraded bundle blocks every tenant.
+  - It now produces API `PASSKEY_REQUIRED`, mass vault locks, false audit rows, and the minimal
+    screen for tenants that never required a passkey.
+- N-R3-2 Major: the API audit dedup is a 1000-entry per-process map.
+  - About 240 keys per user thrash it, so refusals write a durable row per request.
+- Minor:
+  - N-R3-3: the `VaultProvider` effect re-runs on every session update, `LOADING` arms the
+    timers, and the pollers keep hitting gated routes.
+  - N-R3-4: the reaction's path-based exclusion meets a dashboard layout that persists across
+    soft navigation.
+  - N-R3-5: the S12 401 precedes own-gate, which breaks `mobile/authorize`'s redirect.
+  - N-R3-6: `prfCapable` duplicates `clientExtensionResults.prf`.
+  - N-R3-7: the handler scan contradicts reauth being gated.
+  - N-R3-8: a transient `valid:false` on API_DEFAULT still passes through.
+
+### Security (S-R3-1, S-R3-2 Minor)
+- S9–S13 are resolved.
+- Rev-3 additions checked:
+  - `POST session` in Tier A is equivalent to GET: CSRF-checked, and the callback ignores
+    `newSession`.
+  - `signin/<id>` is safe.
+  - `prfCapable` has no security consumer.
+  - The new grant only narrows.
+  - R43: nothing widened beyond `prfSupported`.
+- S-R3-1: a non-definitive `valid:false` on API_DEFAULT bypasses the gate for the gated session
+  readers (reauth). I1 overclaims.
+- S-R3-2: deleting a credential does not invalidate the cache, so the gates fail open for up to
+  30 s.
+
+### Testing (T-R3-1–T-R3-6 Major; T-R3-7–T-R3-10 Minor)
+- T16–T29 are resolved or correctly deferred.
+- Major:
+  - T-R3-1: own-gate is unpinned and indistinguishable from `tier-b`.
+  - T-R3-2: the scan rule fails on HEAD for reauth.
+  - T-R3-3: the `auth.ts` producer of `passkeyBlocked` and the marker is untested.
+  - T-R3-4: the E2E audit delta cannot tell the API gate from the page proxy.
+  - T-R3-5: the `prfCapable` chain is tested only at its ends.
+  - T-R3-6: the S12 cell cannot tell "ambiguous" from "any invalid".
+- Minor:
+  - T-R3-7: I5 has no distinguishing fixture.
+  - T-R3-8: catch-all per-method semantics.
+  - T-R3-9: the invalidation cell sits in a single tenant.
+  - T-R3-10: no direct test that the next API call is allowed.
+
+### Revision 4
+- **N-R3-1 → D7:**
+  - a degraded bundle sets `passkeyBlocked: false` plus `passkeyStateDegraded`, carried through
+    `SessionInfo` and the session type;
+  - the gate answers 503 with no audit;
+  - the layouts show a retry state;
+  - the reaction ignores 503;
+  - the page proxy writes no row for it.
+- **N-R3-2:** the audit write is bounded by a Redis limiter
+  (`rl:passkey_session_gate_audit:<userId>:<blockedPath>`); methods come from a closed set.
+- **N-R3-8/S-R3-1/S12/N-R3-5/T-R3-6:**
+  - `getSessionInfo` returns an invalid reason (`none` / `ambiguous` / `transient`).
+  - On API_DEFAULT:
+    - own-gate passes;
+    - only a definitive `none` passes through;
+    - `ambiguous` gets 401 and `transient` gets 503.
+  - This closes the class at the root, so reauth stays `gated` (resolving the S-R3-1 / T-R3-2
+    tension without moving reauth to own-gate).
+  - A control cell covers `none`.
+- **T-R3-1:**
+  - the own-gate set is in the I2 snapshot under the denylist;
+  - each own-gate route must call the adjudicator (AST, import-bound);
+  - a red proof adds a vault route to own-gate.
+- **T-R3-2/N-R3-7:** the scan covers readers declared `tier-a` / `early-return` only, through a
+  literal reader-exemption list or a route-level adjudicator.
+- **N-R3-3:**
+  - the `VaultProvider` condition applies on every run;
+  - `LOADING` moves to `LOCKED`;
+  - the team and emergency-access pollers suspend while blocked.
+- **N-R3-4:** the reaction's exclusion is the screen-mounted flag.
+- **N-R3-6/T-R3-5:** the PRF capability is derived server-side from `clientExtensionResults.prf`,
+  with no new body field. E2E asserts the re-bootstrap offer.
+- **S-R3-2:** the credential DELETE invalidates too, and the `hasPasskey` writers are listed.
+- **T-R3-3:** `auth.ts` producer cells.
+- **T-R3-4:** the E2E audit matches `blockedPath`.
+- **T-R3-7:** the verdict fixture disagrees with the raw fields.
+- **T-R3-8:** catch-all routes are evaluated through `concretePaths` only.
+- **T-R3-9:** two tenants.
+- **T-R3-10:** E2E checks `/api/passwords` → 200.
+- **Citation:** issue `#966`, PR `#967`.
+
+## Recurring Issue Check (round 3)
+- **Functionality:** R3 N-R3-3; R13 N-R3-1; R43 N-R3-5; R48 N-R3-6; R49 N-R3-2;
+  R42 N-R3-7.
+- **Security:** R42 S-R3-1, S-R3-2; R43 `prfSupported` only (no security consumer);
+  RS2 OK; RS3 OK.
+- **Testing:** RT2 T-R3-6, T-R3-7; RT3 T-R3-1, T-R3-2; RT5 T-R3-3, T-R3-5;
+  RT8 T-R3-1, T-R3-4; RT10 T-R3-8.

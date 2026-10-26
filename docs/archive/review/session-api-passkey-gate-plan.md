@@ -1,8 +1,8 @@
 # Plan: session-api-passkey-gate
 
 Issue `#959`. It was split out of the `#956` plan review (session findings S1, S8–S10, S12–S14,
-F9–F12, F15–F17, F19, TQ1–TQ4). It depends on `#961` and `#966` (both merged). The bearer side
-is `#965`. Revision 3 follows plan review round 2. Findings are cited by ID from the review
+F9–F12, F15–F17, F19, TQ1–TQ4). It depends on `#961` and on issue `#966` (fixed by PR `#967`,
+merged). The bearer side is `#965`. Revision 4 follows plan review round 3. Findings are cited by ID from the review
 record.
 
 `#966` (round-2 S9) is a precondition of D5: an OAuth callback no longer links an IdP account
@@ -42,8 +42,15 @@ passkey.
   - `routeKey` comes from a closed set (S11): the top-level directory names under
     `src/app/api/`, held as a constant and pinned against the filesystem by a test. Any other
     first segment becomes `other`. It never holds an ID or caller-chosen text.
-  - The dedup key is `userId:blockedPath`.
-  - Page navigations keep their existing path.
+  - `<METHOD>` comes from a closed set too: `GET`, `POST`, `PUT`, `PATCH` and `DELETE`, with
+    anything else written as `OTHER`.
+  - The write is bounded by the Redis-shared limiter `passkey-gate.ts` already uses (N-R3-2):
+    key `rl:passkey_session_gate_audit:<userId>:<blockedPath>`, `max: 1`, window
+    `PASSKEY_AUDIT_DEDUP_MS`. It is not bounded by the per-process dedup map, which ordinary
+    traffic would thrash at this cardinality.
+  - No row is written for a degraded bundle (D7).
+  - Page navigations keep their existing path, except that they also write no row for a
+    degraded bundle.
 - **D5 — enrollment is bound to recency (S2).** While `passkeyEnforcementBlocks` holds,
   `webauthn/register/options` and `register/verify` require `requireRecentSession`. A session
   cookie alone cannot clear the gate or mint a durable credential. The minimal screen answers
@@ -54,6 +61,21 @@ passkey.
   adds `passkeyBlocked: boolean`, from `passkeyEnforcementBlocks` on the server clock, next to
   the four passkey fields. Client code reads that verdict and never re-derives it from the raw
   fields with the browser clock.
+  - `passkeyBlocked` is false for a degraded bundle; the separate `passkeyStateDegraded` flag
+    carries that state (D7).
+- **D7 — a degraded passkey state is an outage, not a requirement (N-R3-1).**
+  - **The marker:** when the session callback cannot read the passkey state, the `auth.ts` catch
+    path keeps the fail-closed bundle, adds `passkeyStateDegraded: true`, and sets
+    `passkeyBlocked: false`.
+  - **Who carries it:** `SessionInfo`, `SessionInfoSchema` and the session type all carry the
+    flag.
+  - **API gate:** it still fails closed, but answers 503 `SERVICE_UNAVAILABLE` (no-store, no
+    audit row). A transient fault therefore neither shows "register a passkey" to tenants that
+    never required one, nor reloads their tabs and locks their vaults, nor writes false audit
+    rows.
+  - **Layouts:** they render a "temporarily unavailable, retry" state instead of the dashboard or
+    the minimal screen.
+  - **The `fetchApi` reaction:** it ignores 503.
 
 ## Contracts
 
@@ -97,27 +119,37 @@ passkey.
 - **Order:**
   1. Tier A.
   2. `getSessionInfo`.
-  3. An invalid session gives 401 for API_SESSION_REQUIRED. For API_DEFAULT it passes through
-     to the route's own auth, except when the request carries a session-name cookie that
-     `readSessionCookie` refuses (ambiguous or chunked). That gets 401 too, because the route's
-     `auth()` could still resolve a session the gate never evaluated (S12). Legitimate clients
-     never send such a cookie.
+  3. An invalid session gives 401 for API_SESSION_REQUIRED, as today. `getSessionInfo` now
+     returns why a session is invalid: `none`, `ambiguous` or `transient` (S12/N-R3-8/S-R3-1).
+     For API_DEFAULT:
+     - an own-gate route passes through to its own auth, which re-derives the passkey state
+       itself (N-R3-5);
+     - otherwise only a definitive `none` (the cookie names no live session) passes through,
+       where the route's `auth()` resolves the same nothing;
+     - `ambiguous` gets 401 and `transient` gets 503, because there the route's `auth()` could
+       still resolve a session this gate never evaluated.
   4. The IP restriction (API_SESSION_REQUIRED, unchanged).
   5. Tier B.
   6. The own-gate set (T16): passes through, the route answers in its own shape.
-  7. `passkeyEnforcementBlocks(session)` → 403 (D3) with audit (D4).
+  7. A degraded bundle → 503 (D7).
+  8. `passkeyEnforcementBlocks(session)` → 403 (D3) with audit (D4).
 - **Own-gate routes**, each with its reason recorded. The proxy fetches the session and passes
   the request through, and the route refuses in its own shape:
   - `mobile/authorize` (iOS redirect);
   - `mcp/authorize` and `mcp/authorize/consent` (OAuth error shape).
+  - Every own-gate route must call the passkey adjudicator itself (`passkeyEnforcementBlocks`
+    or `derivePasskeyState`, import-bound), so an own-gate entry cannot wave a route through
+    (T-R3-1).
+  - Passkey reauth (`/api/auth/passkey/reauth/*`) stays `gated`. Step 3 no longer lets a
+    non-definitive invalid session reach its `auth()`.
 - **Early returns that read a session:** `extension/bridge-code` and `v1/openapi.json` never
   reach C1 (T16). `v1/openapi.json`, when private, accepts a session, so it gains its own
   session passkey check (S7), tested at the route level.
-- **Fail-closed bundle (S8/N2):** the `auth.ts` catch path marks the bundle it substitutes on a
-  transient fault (`passkeyStateDegraded: true`). `getSessionInfo` caches a bundle only for
-  `NEGATIVE_CACHE_TTL_MS` (5 s), not the positive TTL, when it substituted the bundle itself
-  (missing fields) or when the response carries that marker. So a transient session-callback
-  fault does not lock every tenant out for 30 s.
+- **Fail-closed bundle (S8/N2):** `getSessionInfo` caches a bundle only for
+  `NEGATIVE_CACHE_TTL_MS` (5 s), not the positive TTL, in two cases: when it substituted the
+  bundle itself (missing fields, also marked degraded), or when the response carries
+  `passkeyStateDegraded`. So a transient session-callback fault is short-lived and is answered
+  as an outage (D7).
 - **Control class:** enforceable boundary for cookie-bearing `/api/*` requests. The adjudicators
   are `classifyRoute`, the two exemption tiers, and `getSessionInfo`'s fail-closed state.
 
@@ -125,20 +157,28 @@ passkey.
 
 - **Dashboard layout:** `src/app/[locale]/dashboard/layout.tsx` already calls `auth()`. When
   `session.passkeyBlocked` holds, it renders `PasskeyRequiredScreen` instead of
-  `<VaultGate><DashboardShell>`: a registration card and sign-out.
+  `<VaultGate><DashboardShell>`: a registration card and sign-out. When the session is
+  degraded, it renders the retry state (D7).
 - **Admin layout (N4):** `src/app/[locale]/admin/layout.tsx` redirects a blocked session to the
   passkey page, matching the page proxy. Its own `auth()` is fresh where the proxy's view may be
   cached.
-- **`VaultProvider` (F1/S3/N1):** `VaultStatus` keeps its existing values. When the session
-  reports `passkeyBlocked`, the provider only skips the initial `/api/vault/status` fetch. So
-  the root provider issues no gated call on the minimal screen or any other page.
-  - It does not change an existing unlocked state, and auto-lock keeps running for a user who
-    becomes blocked while unlocked.
-  - `VaultGate` never renders on the minimal screen, so it never sees the unfetched status.
+- **`VaultProvider` (F1/S3/N1/N-R3-3):** `VaultStatus` keeps its existing values. On every run
+  of its status effect (which re-runs on each session update), while the session reports
+  `passkeyBlocked` or is degraded:
+  - it skips `/api/vault/status`;
+  - it moves `LOADING` to `LOCKED`, so the retry and fallback timers never arm;
+  - it never changes an existing unlocked state; auto-lock keeps running for a user who becomes
+    blocked while unlocked.
+- **Pollers:** `TeamVaultProvider` and `EmergencyAccessProvider` suspend their gated polling
+  while `passkeyBlocked`. So the root providers issue no gated call on any page, whether the
+  user started locked or unlocked.
 - **`fetchApi` reaction (F16, F1):**
   - On a 403 whose JSON `error` is `PASSKEY_REQUIRED`, it calls `hardNavigate` to the passkey
     page. It does this only when the current locale-stripped path is under `/dashboard` or
-    `/admin` and is not already the passkey page, and at most once per page load.
+    `/admin`, `PasskeyRequiredScreen` is not mounted, and at most once per page load.
+  - The exclusion is keyed on a flag the mounted screen sets, not on the pathname (N-R3-4). A
+    soft navigation keeps the old dashboard layout on the passkey URL, so that stale shell
+    hard-reloads once into the minimal screen, and the latch prevents a loop.
   - The body is read from a clone inside a try/catch. The reaction never throws (T5), and the
     response reaches the caller unchanged.
   - Non-dashboard pages are not bounced.
@@ -146,15 +186,22 @@ passkey.
   - `PasskeyCredentialsCard` registers while the vault is locked, skipping the PRF wrap.
   - Navigation after success is an `onRegistered` callback that only the minimal screen passes.
     The settings page keeps today's behaviour.
-  - **PRF signal (N5):** the client sends `prfCapable`, taken from the registration
-    ceremony's `getClientExtensionResults().prf?.enabled`. `register/verify` stores
-    `prfSupported = hasWrap || prfCapable` and keeps the salt, so the existing re-bootstrap is
-    offered once the vault is unlocked.
-    - The flag is an unsigned client hint that only decides whether the offer appears;
-      re-bootstrap runs its own PRF ceremony.
+  - **PRF signal (N5/N-R3-6):** `register/verify` derives the PRF capability from the
+    `clientExtensionResults.prf` it already receives (`enabled === true`, or `results`
+    present), the same way it reads `credProps`. It adds no separate body field.
+    - It stores `prfSupported = hasWrap || prfEnabled` and keeps the salt, still checked by
+      `PER_CRED_SALT_HEX_RE`, under that same condition. So the existing re-bootstrap is offered
+      once the vault is unlocked.
+    - The value is client-supplied and decides only whether the offer appears. Re-bootstrap
+      runs its own verified PRF ceremony.
     - The offer's copy for a credential with no wrap does not claim a key rotation (en and ja).
-- **Session cache (F5/F19/N6):** on success, `register/verify` calls a new
-  `invalidateUserSessionsCache(userId)` in `user-session-invalidation.ts`. It is the sibling of
+- **Session cache (F5/F19/N6/S-R3-2):** every writer of `hasPasskey` calls a new
+  `invalidateUserSessionsCache(userId)` in `user-session-invalidation.ts` once it succeeds:
+  - `register/verify`;
+  - the credential `DELETE` (`webauthn/credentials/[id]`), so deleting the last passkey after
+    grace is not served `hasPasskey: true` from cache.
+  
+  User deletion cascades the sessions away with the user. It is the sibling of
   `invalidateTenantSessionsCache` and tombstones every live session of the user through
   `invalidateCachedSessionsBulkByDigest`.
   - It is deliberately cross-tenant, because `hasPasskey` counts a passkey under any tenant.
@@ -175,11 +222,16 @@ passkey.
 ## Invariants
 
 - I1 (app-enforced, gated by the C4 manifest table): every cookie-bearing `/api/*` request from a
-  blocked session gets 403 `PASSKEY_REQUIRED`, unless it is a Tier A or Tier B entry, an
-  own-gate route, or an early-return kind.
-- I2 (pinned by C4): the exempt sets equal a literal list in the test. No exempt entry has a
-  method on a vault, tenant, key-minting or webauthn-delete route, apart from
-  `DELETE /api/vault/delegation`.
+  blocked session gets 403 `PASSKEY_REQUIRED`. The exceptions:
+  - a Tier A or Tier B entry;
+  - an own-gate route, which refuses in its own shape;
+  - an early-return kind;
+  - a degraded bundle (503).
+
+  On API_DEFAULT, an invalid session reaches the route only as a definitive `none`.
+- I2 (pinned by C4): Tier A, Tier B and the own-gate set each equal a literal list in the test.
+  No entry in them has a method on a vault, tenant, key-minting or webauthn-delete route, apart
+  from `DELETE /api/vault/delegation`.
 - I3: a Tier A target never triggers `getSessionInfo`.
 - I4: while blocked, registration requires a recent sign-in.
 - I5: the client never re-derives the blocked verdict; it reads `passkeyBlocked`.
@@ -188,8 +240,8 @@ passkey.
 
 In a tenant past its grace period, for a member without a passkey, with a session cookie:
 
-- Refused with body `PASSKEY_REQUIRED`, plus one blocked audit row per
-  `userId:method:routeKey` window, for:
+- Refused with body `PASSKEY_REQUIRED`, plus one blocked audit row per `userId:blockedPath`
+  window across processes, for:
   - `GET /api/passwords`;
   - `GET /api/vault/status`;
   - `PUT /api/tenant/policy`, sent with a matching Origin so CSRF passes.
@@ -209,7 +261,7 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
 
 ## Testing strategy
 
-- **Manifest-declared oracle (T1/T3/T4/S7/T16–T18):**
+- **Manifest-declared oracle (T1/T3/T4/S7/T16–T18, T-R3-1, T-R3-8):**
   - Each route in `scripts/checks/route-policy-manifest.json` gains a required per-method
     `sessionPasskeyGate` field. Its values are `gated`, `tier-a`, `tier-b`, `own-gate` or
     `early-return`, each with a reason where it is not `gated`.
@@ -226,6 +278,11 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
   - Catch-all routes declare `concretePaths` (`{ path, method, outcome }`), required whenever the
     route directory has a `[...x]` segment. The table iterates them, including negative
     spellings next to each wildcard entry (T17).
+    - For such routes the table evaluates only `concretePaths` and skips the derived UUID path.
+    - Parity requires `concretePaths` to cover every declared method (T-R3-8).
+  - `tier-b` and `own-gate` look the same at the proxy. So the own-gate set is pinned in I2, and
+    each own-gate route is required to call the passkey adjudicator, checked by AST with
+    import binding (T-R3-1).
   - A new parity assertion: the declared methods equal `methods` in both directions, every value
     is in the enum, and every non-`gated` value has a reason. A missing declaration fails; it is
     not skipped (T18). `ManifestEntry`, the `$schema-note`, and the security-matrix generator are
@@ -237,8 +294,10 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
   - The fixture stubs `APP_URL`, sends a matching `Origin`, and allows the IP restriction.
     Every deny asserts the body `PASSKEY_REQUIRED` and that the session fetch happened (T2).
   - I2 is a literal snapshot of both tiers plus the denylist.
-  - A handler scan pins every API_DEFAULT or early-return route that reads a session as an
-    own-gate route or an exemption (S13/T19).
+  - A handler scan pins every session reader that the proxy does not gate (S13/T19, T-R3-2,
+    N-R3-7). A reader declared `tier-a` or `early-return` is either in a literal
+    reader-exemption list with a reason (for example `audit-emit`), or calls the passkey
+    adjudicator itself (`openapi.json`, `bridge-code`). `gated` and `own-gate` readers pass.
     - It is an AST scan that resolves each call to its import declaration, scope-aware.
     - The reader set is defined by defining module: `@/auth#auth`, `checkAuth`, `authOrToken`,
       the `session-cookie` / `getSessionToken*` exports, and `requireRecentSession`.
@@ -258,7 +317,11 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
     - audit dedup and bounded metadata;
     - the fail-closed bundle cached for 5 s, both when substituted and when marked
       `passkeyStateDegraded` (N2/T20);
-    - an ambiguous session cookie on API_DEFAULT gives 401 (S12);
+    - on API_DEFAULT, an ambiguous cookie gives 401 and a transient fault gives 503;
+    - a control: a definitive `none` (expired or unknown, unambiguous cookie) passes through;
+    - an own-gate route passes even with an ambiguous cookie (S12/N-R3-5/N-R3-8, T-R3-6);
+    - a degraded bundle gives 503 with no audit row;
+    - the audit write is bounded by the Redis limiter, not the in-process map (N-R3-2);
     - OPTIONS with a blocked cookie gives 204 with no session fetch (T26);
     - `routeKey` collapses an unknown segment to `other` (S11).
   - Exempt-predicate cells for spellings no route has (T12).
@@ -279,18 +342,34 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
   - `fetchApi`: navigates once on `PASSKEY_REQUIRED` under `/dashboard`; does not navigate on
     other 403s, on the passkey page, off `/dashboard`, or on an unreadable body; the caller can
     still read the body.
-  - Layouts: both branches of the dashboard and admin layouts (T13, N4).
-  - `VaultProvider`: skips the status fetch when `passkeyBlocked`, and keeps an existing
-    unlocked state and auto-lock (N1).
+  - Layouts: the blocked, allowed and degraded branches of the dashboard and admin layouts
+    (T13, N4, D7).
+  - `VaultProvider`:
+    - skips the status fetch on every run while `passkeyBlocked`;
+    - moves `LOADING` to `LOCKED`;
+    - keeps an existing unlocked state and auto-lock (N1/N-R3-3).
+
+    The team and emergency-access pollers suspend while blocked.
+  - Every client verdict cell sets `passkeyBlocked` opposite to what the raw fields would give
+    under the test clock, so re-deriving the verdict goes red (I5, T-R3-7).
+  - `fetchApi`: ignores 503. The exclusion follows the screen-mounted flag, not the path.
   - Card: offers PRF re-bootstrap after unlock for a credential with `prfSupported` and no wrap
     (T23).
   - Card: registers while locked; calls `onRegistered` only when given.
+- **`auth.ts` producer (T-R3-3):**
+  - session-callback cells for `passkeyBlocked` equal to `passkeyEnforcementBlocks` at the grace
+    boundary on a fixed clock;
+  - for the catch path, `passkeyStateDegraded: true` with `passkeyBlocked: false`;
+  - the existing "passkey enforcement fail-closed" block in `auth.test.ts` joins the
+    inventory.
 - **Route unit:** `register/options` and `register/verify` require recency when blocked (and not
-  when allowed); `register/verify` bulk-invalidates the user's sessions on success only and
+  when allowed); `register/verify` derives `prfSupported` from `clientExtensionResults.prf`
+  (T-R3-5); the credential `DELETE` invalidates the user's sessions; `register/verify` bulk-invalidates the user's sessions on success only and
   stores the PRF capability without the wrap; `v1/openapi.json`'s session passkey check.
 - **Integration (real DB and Redis; a skip is not a pass) (T9):** `register/verify` with
   `verifyRegistration` stubbed:
-  - primed cache entries for two of the user's sessions are tombstoned on success;
+  - primed cache entries for two of the user's sessions, under different tenants, are tombstoned
+    on success (T-R3-9);
   - they are untouched on failure;
   - another user's entry is untouched.
   
@@ -306,6 +385,10 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
   - "No 403 on the minimal screen" has a positive control: the card's Tier B fetch answering 200
     and the card rendered. Only after that does it assert zero `PASSKEY_REQUIRED` and no request
     to `/api/vault/status`.
+  - The audit check matches `metadata.blockedPath === "GET /api/passwords"`, taken after the API
+    call, because the page proxy writes the same action (T-R3-4).
+  - After registration, `/api/passwords` answers 200 (T-R3-10). After unlock, the PRF
+    re-bootstrap offer appears for the PRF authenticator (T-R3-5).
   - The seed helpers take a `tenantId`, and cleanup covers a dedicated tenant seeded past grace.
   - `beforeEach` deletes the user's credentials and uses a fresh session.
   - The spec covers:
@@ -337,7 +420,15 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
   - remove the `v1/openapi.json` session check;
   - drop the own-gate step;
   - revert the 5 s TTL for the marked bundle;
-  - let an ambiguous cookie pass through on API_DEFAULT.
+  - let an ambiguous cookie pass through on API_DEFAULT;
+  - answer 401 to a definitive `none` on API_DEFAULT (the control cell goes red);
+  - add a vault route to the own-gate set;
+  - drop the degraded marker from the `auth.ts` catch bundle, or set `passkeyBlocked` true there;
+  - answer a degraded bundle with `PASSKEY_REQUIRED`;
+  - bound the audit write with the in-process map only;
+  - re-derive the verdict in `VaultProvider`;
+  - make `invalidateUserSessionsCache` tenant-scoped;
+  - skip invalidation on the credential `DELETE`.
   
   Each red proof names the cell expected to go red (T24).
 - **Harness obligations for Phase 2** (T25, T27–T29):
@@ -374,6 +465,6 @@ In a tenant past its grace period, for a member without a passkey, with a sessio
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | proxy gate, two-tier exemption, order, own-gate routes, fail-closed TTL | pending |
-| C2 | minimal screen, admin layout, VaultProvider skip, server verdict, fetchApi reaction, card, PRF signal, user cache invalidation, recency + step-up markers | pending |
+| C1 | proxy gate, two-tier exemption, order with invalid-reason handling, own-gate routes with route-level adjudication, degraded 503, fail-closed TTL, Redis-bounded audit | pending |
+| C2 | minimal screen, admin layout, degraded retry state, VaultProvider + pollers, server verdict, fetchApi reaction (mounted flag), card, server-derived PRF signal, user cache invalidation on register and delete, recency + step-up markers | pending |
 | C3 | stale comments and policy doc | pending |
