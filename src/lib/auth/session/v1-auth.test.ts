@@ -102,6 +102,16 @@ describe("validateV1Auth", () => {
     expect(mockValidateServiceAccountToken).not.toHaveBeenCalled();
   });
 
+  // T-2: fail-closed propagation — a derivation error from validateApiKeyOnly
+  // must not be swallowed (paired with the api_key success cell above).
+  it("propagates a derivation error from validateApiKeyOnly rather than swallowing it", async () => {
+    mockValidateApiKeyOnly.mockRejectedValue(new Error("derivation failed"));
+
+    await expect(
+      validateV1Auth(makeRequest("api_validtoken"), "passwords:read"),
+    ).rejects.toThrow("derivation failed");
+  });
+
   it("returns ok with service_account actorType when SA token is valid with required scope", async () => {
     mockValidateApiKeyOnly.mockResolvedValue({
       ok: false,

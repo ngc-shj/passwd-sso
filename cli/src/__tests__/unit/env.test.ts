@@ -159,6 +159,38 @@ describe("envCommand", () => {
     );
   });
 
+  // T-4: a non-passkey 403 (e.g. insufficient API key scope) must NOT be
+  // mistaken for the passkey message — only the generic "HTTP 403" line.
+  it("prints the generic HTTP status for a 403 that is not PASSKEY_REQUIRED", async () => {
+    vi.mocked(loadSecretsConfig).mockReturnValue({
+      apiKey: "api_test",
+      secrets: { FOO: { entry: "entry-1", field: "password" } },
+    });
+    vi.mocked(getSecretsServerUrl).mockReturnValue("https://example.com");
+    vi.mocked(getPasswordPath).mockReturnValue("/api/v1/passwords/entry-1");
+    vi.mocked(autoUnlockIfNeeded).mockResolvedValue(true);
+    vi.mocked(getEncryptionKey).mockReturnValue({} as never);
+    vi.mocked(getUserId).mockReturnValue("user-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "API_KEY_SCOPE_INSUFFICIENT" }),
+      }),
+    );
+
+    await expect(envCommand({ format: "shell" })).rejects.toThrow();
+
+    expect(exitCode).toBe(1);
+    expect(vi.mocked(output.error)).toHaveBeenCalledWith(
+      expect.stringContaining("HTTP 403"),
+    );
+    expect(vi.mocked(output.error)).not.toHaveBeenCalledWith(
+      expect.stringContaining("requires a passkey"),
+    );
+  });
+
   // Paired with the cell above: a generic (non-passkey) failure still prints
   // the HTTP status, unchanged.
   it("prints the HTTP status for a generic entry-fetch failure", async () => {

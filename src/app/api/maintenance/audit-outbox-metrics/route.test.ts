@@ -216,6 +216,16 @@ describe("GET /api/maintenance/audit-outbox-metrics", () => {
     expect(typeof body.asOf).toBe("string");
   });
 
+  // T-2: fail-closed propagation — a derivation error from verifyAdminToken
+  // must not be swallowed into a 200/4xx response (withRequestLog rethrows;
+  // paired with the 200 cell above).
+  it("propagates a derivation error from verifyAdminToken rather than swallowing it", async () => {
+    mockVerifyAdminToken.mockRejectedValue(new Error("derivation failed"));
+
+    const req = createRequest(VALID_OP_TOKEN);
+    await expect(GET(req)).rejects.toThrow("derivation failed");
+  });
+
   it("scopes the SQL aggregate to the operator-token's tenantId", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
 

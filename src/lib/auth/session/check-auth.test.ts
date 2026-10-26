@@ -194,6 +194,17 @@ describe("checkAuth", () => {
       expect(mockEnforceAccessRestriction).not.toHaveBeenCalled();
     });
 
+    // T-2: fail-closed propagation — a derivation error from authOrToken
+    // must not be swallowed into a 401/403 response (paired with the
+    // PASSKEY_REQUIRED cell above).
+    it("propagates a derivation error from authOrToken rather than swallowing it", async () => {
+      mockAuthOrToken.mockRejectedValue(new Error("derivation failed"));
+
+      await expect(
+        checkAuth(makeRequest(), { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ }),
+      ).rejects.toThrow("derivation failed");
+    });
+
     it("returns 401 when no auth succeeds", async () => {
       mockAuthOrToken.mockResolvedValue(null);
 

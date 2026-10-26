@@ -7,7 +7,8 @@
  *
  * Every refusal rule has a fixture the gate must FAIL on, paired with the
  * passing base fixture (or a named good variant) it differs from by that rule
- * alone, so each cell is able to fail for the reason it names. The gate is
+ * alone, so each cell is able to fail for the reason it names. Where a variant
+ * is built by `.replace` on the base, the cell asserts the replace took effect. The gate is
  * driven against fixtures through BEARER_PASSKEY_GATE_ROOT (scan root, schema
  * and manifest together); tracked files are never mutated.
  */
@@ -112,9 +113,15 @@ const BASE_MANIFEST = {
   "src/lib/auth/tokens/api-key.ts#validateApiKey": { class: "per-use-gated", calls: 1, reason: REASON },
   "src/lib/auth/tokens/extension-token.ts#validateExtensionToken": { class: "per-use-gated", calls: 1, reason: REASON },
 };
+// The base fixture has no AuthCode lookup, so the model is listed; a cell adding one deletes it.
+const BASE_MODELS = { AuthCode: { reason: REASON } };
+const NO_AUTHCODE_ENTRY = { AuthCode: null };
 
-/** Write the base fixture into `root`, `files` overriding (null deletes) and `manifest` merged (null deletes). */
-function fixture(root, { files = {}, manifest = {}, rawManifest } = {}) {
+/**
+ * Write the base fixture into `root`, `files` overriding (null deletes), and `manifest` /
+ * `models` merged over the base functions / models (null deletes).
+ */
+function fixture(root, { files = {}, manifest = {}, models = {}, rawManifest } = {}) {
   const all = { ...BASE_FILES, ...files };
   for (const [rel, contents] of Object.entries(all)) {
     if (contents === null) continue;
@@ -122,11 +129,11 @@ function fixture(root, { files = {}, manifest = {}, rawManifest } = {}) {
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, contents, "utf8");
   }
-  const entries = { ...BASE_MANIFEST, ...manifest };
-  for (const [k, v] of Object.entries(entries)) if (v === null) delete entries[k];
+  const merged = (base, over) => Object.fromEntries(Object.entries({ ...base, ...over }).filter(([, v]) => v !== null));
   const full = join(root, MANIFEST);
   mkdirSync(dirname(full), { recursive: true });
-  if (rawManifest !== null) writeFileSync(full, rawManifest ?? JSON.stringify({ functions: entries }, null, 2), "utf8");
+  const body = { functions: merged(BASE_MANIFEST, manifest), models: merged(BASE_MODELS, models) };
+  if (rawManifest !== null) writeFileSync(full, rawManifest ?? JSON.stringify(body, null, 2), "utf8");
 }
 
 /** Run the gate (async, so concurrent cells overlap) with `env` merged over process.env. */
@@ -167,6 +174,11 @@ async function expectPass(options) {
 
 const NOTE_FN = (body) => `export async function lookup(t: string) {\n${body}\n}\n`;
 const LISTED_LOOKUP = { "src/lib/other.ts#lookup": { class: "exempt", calls: 1, reason: REASON } };
+const RAW_SQL_IMPORT = `import { renderSql, trustedSql } from "@/lib/prisma/raw-sql";`;
+const ENFORCEMENT_IMPORT = `import { passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";`;
+const ROTATE_BODY =
+  "export function rotate(s: unknown) {\n  return withBypassRls(prisma, async () => {\n    if (passkeyEnforcementBlocks(s)) return null;\n  });\n}\nexport function ungated() {\n  return null;\n}\n";
+const ROTATE = `${ENFORCEMENT_IMPORT}\n${ROTATE_BODY}`;
 
 describe.concurrent("check-bearer-passkey-gate.mjs — inputs", { timeout: 60_000 }, () => {
   it("passes on the base fixture and prints the analysed count", async () => {
@@ -181,6 +193,43 @@ describe.concurrent("check-bearer-passkey-gate.mjs — inputs", { timeout: 60_00
 
   it("FAILS when the manifest is missing", async () => {
     await expectFail({ rawManifest: null }, /manifest not found/);
+  });
+
+  it("FAILS when the schema is missing", async () => {
+    await expectFail({ files: { "prisma/schema.prisma": null } }, /prisma schema not found/);
+  });
+
+  it("FAILS when the manifest is not valid JSON", async () => {
+    await expectFail({ rawManifest: "{" }, /is not valid JSON/);
+  });
+
+  it("FAILS when the manifest has no functions object", async () => {
+    await expectFail({ rawManifest: JSON.stringify({ models: BASE_MODELS }) }, /has no "functions" object/);
+  });
+
+  it("FAILS when the manifest's models is not an object", async () => {
+    await expectFail({ rawManifest: JSON.stringify({ functions: BASE_MANIFEST, models: [] }) }, /"models" that is not an object/);
+  });
+
+  it("FAILS when no source file is scanned", async () => {
+    const files = Object.fromEntries(Object.keys(BASE_FILES).filter((k) => k.startsWith("src/")).map((k) => [k, null]));
+    await expectFail({ files: { ...files, "src/README.md": "no sources\n" } }, /scanned zero source files/);
+  });
+
+  it("FAILS when passkey-gate does not export passkeyGateBlocks", async () => {
+    const gate = BASE_FILES["src/lib/auth/policy/passkey-gate.ts"].replace("export async function", "async function");
+    expect(gate).not.toBe(BASE_FILES["src/lib/auth/policy/passkey-gate.ts"]);
+    await expectFail({ files: { "src/lib/auth/policy/passkey-gate.ts": gate } }, /does not export function passkeyGateBlocks/);
+  });
+
+  it("FAILS when extension-token does not export validateExtensionToken", async () => {
+    const ext = EXT_TOKEN.replace("export async function validateExtensionToken", "async function validateExtensionToken");
+    expect(ext).not.toBe(EXT_TOKEN);
+    await expectFail({ files: { "src/lib/auth/tokens/extension-token.ts": ext } }, /does not export function validateExtensionToken/);
+  });
+
+  it("FAILS when extension-token-types does not declare PASSKEY_EXEMPTION", async () => {
+    await expectFail({ files: { "src/lib/auth/tokens/extension-token-types.ts": "export const OTHER = {};\n" } }, /does not declare PASSKEY_EXEMPTION/);
   });
 
   it("FAILS when no digest lookup is analysed at all", async () => {
@@ -245,7 +294,27 @@ describe.concurrent("digest lookup detection", { timeout: 60_000 }, () => {
         "src/lib/other.ts#helper": { class: "exempt", calls: 1, reason: REASON },
         "src/lib/other.ts#find": { class: "exempt", calls: 1, reason: REASON },
       },
+      models: NO_AUTHCODE_ENTRY,
     });
+  });
+
+  it("FAILS on a digest key in a cursor (a cursor is a unique where)", async () => {
+    await expectFail({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.apiKey.findMany({ cursor: { tokenHash: t } });`) } }, /UNLISTED: src\/lib\/other\.ts#lookup.*1 digest lookup/);
+  });
+
+  it("does not analyse a cursor without a digest key (passes unlisted)", async () => {
+    await expectPass({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.apiKey.findMany({ cursor: { id: t } });`) } });
+  });
+
+  const EXPORT_LIST = (exported) =>
+    `${exported ? "export " : ""}const X = { find: (t: string) => tx.apiKey.findFirst({ where: { tokenHash: t } }) };\n${exported ? "" : "export { X };\n"}`;
+
+  it("FAILS on a lookup in a const exported only through an export list (not attributed to it)", async () => {
+    await expectFail({ files: { "src/lib/other.ts": EXPORT_LIST(false) }, manifest: { "src/lib/other.ts#X": { class: "exempt", calls: 1, reason: REASON } } }, /cannot be attributed/);
+  });
+
+  it("passes on the same lookup in an `export const`, attributed to it", async () => {
+    await expectPass({ files: { "src/lib/other.ts": EXPORT_LIST(true) }, manifest: { "src/lib/other.ts#X": { class: "exempt", calls: 1, reason: REASON } } });
   });
 
   it("FAILS on a lookup at module scope (cannot be attributed)", async () => {
@@ -254,13 +323,14 @@ describe.concurrent("digest lookup detection", { timeout: 60_000 }, () => {
 });
 
 describe.concurrent("raw SQL", { timeout: 60_000 }, () => {
-  const rawFile = (stmt) => `export async function q(tx: any, t: string) {\n  ${stmt}\n}\n`;
+  const rawFile = (stmt, header = "") => `${header}\nexport async function q(tx: any, t: string) {\n  ${stmt}\n}\n`;
 
   it("passes on literal raw SQL that does not name a digest column", async () => {
     await expectPass({
       files: {
         "src/lib/raw.ts": rawFile(
           "await tx.$queryRaw`SELECT id FROM notes WHERE id = ${t}`; await tx.$executeRawUnsafe(\"SELECT 1\"); await tx.$executeRawUnsafe(renderSql(trustedSql`DELETE FROM notes`));",
+          RAW_SQL_IMPORT,
         ),
       },
     });
@@ -268,6 +338,34 @@ describe.concurrent("raw SQL", { timeout: 60_000 }, () => {
 
   it("FAILS on tagged raw SQL naming token_hash", async () => {
     await expectFail({ files: { "src/lib/raw.ts": rawFile("await tx.$queryRaw`SELECT id FROM api_keys WHERE token_hash = ${t}`;") } }, /names a digest column/);
+  });
+
+  it("FAILS on a string literal naming token_hash only once cooked (an escape)", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile("const frag = \"token\\x5fhash = $1\"; return frag;") } }, /names a digest column/);
+  });
+
+  it("FAILS on a template head naming code_hash only once cooked (an escape)", async () => {
+    await expectFail({ files: { "src/lib/raw.ts": rawFile("const frag = Prisma.sql`code\\u005fhash = ${t}`; return frag;") } }, /names a digest column/);
+  });
+
+  const RENDER = "await tx.$executeRawUnsafe(renderSql(trustedSql`DELETE FROM notes`));";
+
+  it("passes on renderSql(trustedSql`...`) imported from raw-sql", async () => {
+    await expectPass({ files: { "src/lib/raw.ts": rawFile(RENDER, RAW_SQL_IMPORT) } });
+  });
+
+  it("FAILS on renderSql(trustedSql`...`) when renderSql is a local function", async () => {
+    await expectFail(
+      { files: { "src/lib/raw.ts": rawFile(RENDER, `import { trustedSql } from "@/lib/prisma/raw-sql";\nconst renderSql = (f: unknown) => String(f);`) } },
+      /SQL argument is not a literal/,
+    );
+  });
+
+  it("FAILS on renderSql(trustedSql`...`) when trustedSql comes from another module", async () => {
+    await expectFail(
+      { files: { "src/lib/raw.ts": rawFile(RENDER, `import { renderSql } from "@/lib/prisma/raw-sql";\nimport { trustedSql } from "@/lib/fake-sql";`) } },
+      /SQL argument is not a literal/,
+    );
   });
 
   it("FAILS on a SQL fragment literal naming code_hash anywhere", async () => {
@@ -316,6 +414,34 @@ describe.concurrent("opaque where", { timeout: 60_000 }, () => {
     );
   });
 
+  it("FAILS on an opaque cursor on a token model", async () => {
+    await expectFail({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.apiKey.findMany({ cursor: t });`) } }, /ApiKey cursor: not an object literal/);
+  });
+
+  it("ignores an opaque cursor on a model without a digest column", async () => {
+    await expectPass({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.note.findMany({ cursor: t });`) } });
+  });
+
+  it("FAILS on a computed key in a token-model where", async () => {
+    await expectFail({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.apiKey.findFirst({ where: { [t]: "x" } });`) } }, /ApiKey where: computed key/);
+  });
+
+  it("FAILS on an accessor in a token-model where", async () => {
+    await expectFail({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.apiKey.findFirst({ where: { get tokenHash() { return t; } } });`) } }, /ApiKey where: accessor\/method/);
+  });
+
+  it("FAILS on a spread under OR in a token-model where", async () => {
+    await expectFail({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.apiKey.findFirst({ where: { OR: [...t] } });`) } }, /ApiKey where: OR spread/);
+  });
+
+  it("FAILS on a spread argument to a token-model call", async () => {
+    await expectFail({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.apiKey.findFirst(...t);`) } }, /ApiKey argument: spread/);
+  });
+
+  it("FAILS on a non-literal relation filter into a token model", async () => {
+    await expectFail({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.user.findFirst({ where: { apiKeys: t } });`) } }, /ApiKey relation filter: not an object literal/);
+  });
+
   it("FAILS on a non-literal argument to a token-model call", async () => {
     await expectFail({ files: { "src/lib/other.ts": NOTE_FN(`  return tx.apiKey.findFirst(t);`) } }, /ApiKey argument: not an object literal/);
   });
@@ -351,11 +477,56 @@ describe.concurrent("manifest entries", { timeout: 60_000 }, () => {
     await expectFail({ files, manifest: { "src/lib/other.ts#lookup": { class: "exempt", calls: 2, reason: REASON } } }, /COUNT_MISMATCH/);
   });
 
+  // A second, ungated function sharing the gated validator's key: only one of them can be adjudicated.
+  const shadowMethod = (name) =>
+    apiKey(GATED_BODY) + `class Shadow {\n  ${name}(t: string) {\n    return tx.apiKey.findFirst({ where: { tokenHash: t } });\n  }\n}\n`;
+
+  it("FAILS when two functions of one file share a key (AMBIGUOUS_KEY)", async () => {
+    await expectFail(
+      {
+        files: { "src/lib/auth/tokens/api-key.ts": shadowMethod("validateApiKey") },
+        manifest: { "src/lib/auth/tokens/api-key.ts#validateApiKey": { class: "per-use-gated", calls: 2, reason: REASON } },
+      },
+      /AMBIGUOUS_KEY: src\/lib\/auth\/tokens\/api-key\.ts#validateApiKey/,
+    );
+  });
+
+  it("passes when the second function has its own name and entry", async () => {
+    await expectPass({
+      files: { "src/lib/auth/tokens/api-key.ts": shadowMethod("other") },
+      manifest: { "src/lib/auth/tokens/api-key.ts#other": { class: "exempt", calls: 1, reason: REASON } },
+    });
+  });
+
+  describe("model coverage", () => {
+    const authCodeLookup = { "src/lib/other.ts": NOTE_FN(`  return tx.authCode.findFirst({ where: { codeHash: t } });`) };
+
+    it("FAILS on a token model no analysed lookup reaches and the manifest does not list", async () => {
+      await expectFail({ models: NO_AUTHCODE_ENTRY }, /UNCOVERED_MODEL: AuthCode/);
+    });
+
+    it("passes once a lookup reaches that model and its entry is gone", async () => {
+      await expectPass({ files: authCodeLookup, manifest: LISTED_LOOKUP, models: NO_AUTHCODE_ENTRY });
+    });
+
+    it("FAILS on a models entry for a model that has an analysed lookup (stale)", async () => {
+      await expectFail({ files: authCodeLookup, manifest: LISTED_LOOKUP }, /STALE_MODEL: AuthCode/);
+    });
+
+    it("FAILS on a models entry naming a model without a digest column", async () => {
+      await expectFail({ models: { Note: { reason: REASON } } }, /"models" names Note/);
+    });
+
+    it("FAILS on a models entry without a reason", async () => {
+      await expectFail({ models: { AuthCode: { reason: "short" } } }, /"models" entry AuthCode needs a reason/);
+    });
+  });
+
   describe("refresh-bound", () => {
     const refreshFiles = {
       ...files,
       "src/lib/ttl.ts": "export const TOKEN_TTL = 3600;\nconst LOCAL_TTL = 1;\n",
-      "src/lib/rotate.ts": "export function rotate(s: unknown) {\n  return withBypassRls(prisma, async () => {\n    if (passkeyEnforcementBlocks(s)) return null;\n  });\n}\nexport function ungated() {\n  return null;\n}\n",
+      "src/lib/rotate.ts": ROTATE,
       "src/app/api/token/route.ts": "export const POST = () => null;\n",
     };
     const entry = (over) => ({
@@ -364,7 +535,7 @@ describe.concurrent("manifest entries", { timeout: 60_000 }, () => {
         calls: 1,
         reason: REASON,
         refreshRoute: "src/app/api/token/route.ts",
-        lifetime: "TOKEN_TTL",
+        lifetime: "src/lib/ttl.ts#TOKEN_TTL",
         inlineGate: "src/lib/rotate.ts#rotate",
         ...over,
       },
@@ -379,11 +550,47 @@ describe.concurrent("manifest entries", { timeout: 60_000 }, () => {
     });
 
     it("FAILS when the lifetime is not an exported const", async () => {
-      await expectFail({ files: refreshFiles, manifest: entry({ lifetime: "LOCAL_TTL" }) }, /lifetime "LOCAL_TTL" is not an exported const/);
+      await expectFail({ files: refreshFiles, manifest: entry({ lifetime: "src/lib/ttl.ts#LOCAL_TTL" }) }, /lifetime "src\/lib\/ttl\.ts#LOCAL_TTL" is not a <path>#<name>/);
     });
 
     it("FAILS when the inline gate does not call the passkey gate", async () => {
       await expectFail({ files: refreshFiles, manifest: entry({ inlineGate: "src/lib/rotate.ts#ungated" }) }, /relies on inline gate/);
+    });
+
+    it("FAILS when no inlineGate is named", async () => {
+      await expectFail({ files: refreshFiles, manifest: entry({ inlineGate: undefined }) }, /names no inlineGate/);
+    });
+
+    it("FAILS when the lifetime is a bare name, not <path>#<name>", async () => {
+      await expectFail({ files: refreshFiles, manifest: entry({ lifetime: "TOKEN_TTL" }) }, /lifetime "TOKEN_TTL" is not a <path>#<name>/);
+    });
+
+    it("FAILS when the lifetime has a trailing #segment", async () => {
+      await expectFail({ files: refreshFiles, manifest: entry({ lifetime: "src/lib/ttl.ts#TOKEN_TTL#x" }) }, /is not a <path>#<name>/);
+    });
+
+    it("FAILS when the lifetime names an exported const of another file", async () => {
+      await expectFail({ files: refreshFiles, manifest: entry({ lifetime: "src/lib/rotate.ts#TOKEN_TTL" }) }, /is not a <path>#<name>/);
+    });
+
+    it("FAILS when the inline gate calls a local function of the gate's name", async () => {
+      const local = `${ROTATE_BODY}function passkeyEnforcementBlocks(_: unknown) {\n  return false;\n}\n`;
+      await expectFail({ files: { ...refreshFiles, "src/lib/rotate.ts": local }, manifest: entry({}) }, /relies on inline gate/);
+    });
+
+    it("FAILS when the inline gate's call is not an if condition", async () => {
+      const assigned = `${ENFORCEMENT_IMPORT}\nexport function rotate(s: unknown) {\n  const blocked = passkeyEnforcementBlocks(s);\n  if (blocked) return null;\n  return 1;\n}\n`;
+      await expectFail({ files: { ...refreshFiles, "src/lib/rotate.ts": assigned }, manifest: entry({}) }, /relies on inline gate/);
+    });
+
+    it("passes with passkeyGateBlocks from passkey-gate as the inline gate", async () => {
+      const viaGate = `${GATE_IMPORT}\nexport async function rotate(u: string) {\n  if (await passkeyGateBlocks({ userId: u })) return null;\n  return 1;\n}\n`;
+      await expectPass({ files: { ...refreshFiles, "src/lib/rotate.ts": viaGate }, manifest: entry({}) });
+    });
+
+    it("FAILS when the inline gate key names two functions (AMBIGUOUS_KEY)", async () => {
+      const twice = `${ROTATE}class R {\n  rotate(s: unknown) {\n    return s;\n  }\n}\n`;
+      await expectFail({ files: { ...refreshFiles, "src/lib/rotate.ts": twice }, manifest: entry({}) }, /AMBIGUOUS_KEY: inline gate "src\/lib\/rotate\.ts#rotate"/);
     });
   });
 });
@@ -418,6 +625,65 @@ describe.concurrent("per-use-gated predicate", { timeout: 60_000 }, () => {
 
   it("FAILS when the gate's consequent does not return ok: false", async () => {
     await expectFail(withBody([LOOKUP, `  if (await passkeyGateBlocks({ userId: key.userId })) {}`, `  return { ok: true, data: key };`].join("\n")), NOT_GATED);
+  });
+
+  // Each variant changes the gate's consequent literal and nothing else.
+  const consequent = (literal) => {
+    const variant = GATED_BODY.replace(`{ ok: false, error: "PASSKEY_REQUIRED" }`, literal);
+    expect(variant).not.toBe(GATED_BODY);
+    return variant;
+  };
+
+  it("FAILS when the gate's consequent returns ok: true", async () => {
+    await expectFail(withBody(consequent(`{ ok: true, error: "PASSKEY_REQUIRED" }`)), NOT_GATED);
+  });
+
+  it("FAILS when the gate's consequent literal has a duplicate ok key", async () => {
+    await expectFail(withBody(consequent(`{ ok: false, error: "PASSKEY_REQUIRED", ok: true }`)), NOT_GATED);
+  });
+
+  it("FAILS when the gate's consequent literal has a shorthand ok", async () => {
+    await expectFail(withBody(consequent(`{ ok, error: "PASSKEY_REQUIRED" }`)), NOT_GATED);
+  });
+
+  it("FAILS when the gate's consequent literal has a computed key", async () => {
+    await expectFail(withBody(consequent(`{ ok: false, error: "PASSKEY_REQUIRED", ["ok"]: true }`)), NOT_GATED);
+  });
+
+  it("FAILS when the gate if has an else", async () => {
+    const variant = GATED_BODY.replace(GATE, `${GATE} else void 0;`);
+    expect(variant).not.toBe(GATED_BODY);
+    await expectFail(withBody(variant), NOT_GATED);
+  });
+
+  it("FAILS on two gates", async () => {
+    await expectFail(withBody(GATED_BODY.replace(GATE, `${GATE}\n${GATE}`)), /found 2/);
+  });
+
+  it("FAILS on an expression-bodied arrow (no block body)", async () => {
+    const arrow = `${GATE_IMPORT}\nexport const validateApiKey = async (req: Request) => tx.apiKey.findUnique({ where: { tokenHash: h(req) } });\n`;
+    await expectFail({ files: { "src/lib/auth/tokens/api-key.ts": arrow } }, /validateApiKey is per-use-gated but has no block body/);
+  });
+
+  // An exported const whose initializer is not a function: each site attributes to the const,
+  // but the predicate can only read one function. (A direct lookup: inside the expression-bodied
+  // withBypassRls callback of LOOKUP, the innermost function would be that callback.)
+  const DIRECT_LOOKUP = `  const key = await tx.apiKey.findUnique({ where: { tokenHash: h(req) } });`;
+  const twoFns = (second) =>
+    `${GATE_IMPORT}\nexport const validateApiKey = {\n  a: async (req: Request) => {\n${GATED_BODY.replace(LOOKUP, DIRECT_LOOKUP)}\n  },\n${second ? `  b: async (req: Request) => {\n${DIRECT_LOOKUP}\n    return { ok: true, data: key };\n  },\n` : ""}};\n`;
+
+  it("FAILS when a per-use-gated key's sites sit in two functions", async () => {
+    await expectFail(
+      {
+        files: { "src/lib/auth/tokens/api-key.ts": twoFns(true) },
+        manifest: { "src/lib/auth/tokens/api-key.ts#validateApiKey": { class: "per-use-gated", calls: 2, reason: REASON } },
+      },
+      /its sites sit in 2 functions/,
+    );
+  });
+
+  it("passes when that key's one site sits in a gated function", async () => {
+    await expectPass({ files: { "src/lib/auth/tokens/api-key.ts": twoFns(false) } });
   });
 
   it("FAILS when no return follows the gate", async () => {
@@ -474,6 +740,48 @@ describe.concurrent("exemption pin", { timeout: 60_000 }, () => {
     );
   });
 
+  it("FAILS on a spread argument to validateExtensionToken", async () => {
+    await expectFail({ files: { "src/app/api/plain/route.ts": plainRoute(`  return validateExtensionToken(...[req]);`) } }, /called with a spread argument/);
+  });
+
+  it("FAILS on three arguments to validateExtensionToken", async () => {
+    await expectFail({ files: { "src/app/api/plain/route.ts": plainRoute(`  return validateExtensionToken(req, undefined, 1);`) } }, /called with 3 arguments/);
+  });
+
+  it("FAILS when a pinned site's options literal has an extra property", async () => {
+    const base = exemptRoute("handleDELETE", "SELF_REVOCATION");
+    const variant = base.replace("PASSKEY_EXEMPTION.SELF_REVOCATION }", "PASSKEY_EXEMPTION.SELF_REVOCATION, extra: 1 }");
+    expect(variant).not.toBe(base);
+    await expectFail({ files: { "src/app/api/extension/token/route.ts": variant } }, /options must be the inline literal/);
+  });
+
+  it("FAILS on an exempt call that cannot be attributed to a handler", async () => {
+    await expectFail(
+      { files: { "src/app/api/extra/route.ts": `${ROUTE_IMPORTS}\nconst r = validateExtensionToken(req, { passkeyExemption: PASSKEY_EXEMPTION.SELF_REVOCATION });\nvoid r;\n` } },
+      /cannot be attributed to a named handler/,
+    );
+  });
+
+  it("FAILS on a default import", async () => {
+    await expectFail({ files: { "src/lib/def.ts": `import ext from "@/lib/auth/tokens/extension-token";\nexport const f = ext;\n` } }, /default import of extension-token/);
+  });
+
+  it("FAILS on an import-equals of the module", async () => {
+    await expectFail({ files: { "src/lib/ie.ts": `import ext = require("@/lib/auth/tokens/extension-token");\nexport const f = ext;\n` } }, /import-equals of a module/);
+  });
+
+  it("passes on an import-equals of a package", async () => {
+    await expectPass({ files: { "src/lib/ie.ts": `import fs = require("node:fs");\nexport const f = fs;\n` } });
+  });
+
+  it("FAILS on require() of the module", async () => {
+    await expectFail({ files: { "src/lib/req.ts": `export function f() {\n  return require("@/lib/auth/tokens/extension-token");\n}\n` } }, /dynamic import\/require of extension-token/);
+  });
+
+  it("passes on require() of a package", async () => {
+    await expectPass({ files: { "src/lib/req.ts": `export function f() {\n  return require("node:fs");\n}\n` } });
+  });
+
   it("FAILS on a value reference", async () => {
     await expectFail({ files: { "src/app/api/plain/route.ts": plainRoute(`  const v = validateExtensionToken;\n  return v(req);`) } }, /used as a value/);
   });
@@ -523,6 +831,83 @@ describe.concurrent("exemption pin", { timeout: 60_000 }, () => {
 
   it("FAILS on the same value reference once the shadowing parameter is gone", async () => {
     await expectFail({ files: { "src/app/api/plain/route.ts": shadowed("") } }, /used as a value/);
+  });
+});
+
+describe.concurrent("token-model delegate references", { timeout: 60_000 }, () => {
+  const other = (body) => ({ files: { "src/lib/other.ts": NOTE_FN(body) } });
+  const REF = /token-model delegate referenced other than as/;
+
+  it("passes on a direct delegate call (listed)", async () => {
+    await expectPass({ ...other(`  return tx.apiKey.findFirst({ where: { tokenHash: t } });`), manifest: LISTED_LOOKUP });
+  });
+
+  it("FAILS on a delegate bound to a variable", async () => {
+    await expectFail({ ...other(`  const d = tx.apiKey;\n  return d.findFirst({ where: { tokenHash: t } });`), manifest: LISTED_LOOKUP }, REF);
+  });
+
+  it("FAILS on a delegate reached by string element access and bound", async () => {
+    await expectFail(other(`  const d = tx["apiKey"];\n  return run(d);`), REF);
+  });
+
+  it("FAILS on an element-access method call", async () => {
+    await expectFail(other(`  return tx.apiKey["findFirst"]({ where: { tokenHash: t } });`), REF);
+  });
+
+  it("FAILS on .call of a delegate method", async () => {
+    await expectFail(other(`  return tx.apiKey.findFirst.call(null, { where: { tokenHash: t } });`), REF);
+  });
+
+  it("FAILS on .apply of a delegate method", async () => {
+    await expectFail(other(`  return tx.apiKey.findFirst.apply(null, [{ where: { tokenHash: t } }]);`), REF);
+  });
+
+  it("FAILS on a delegate passed as an argument", async () => {
+    await expectFail(other(`  return run(tx.apiKey);`), REF);
+  });
+
+  it("FAILS on a delegate method read without a call", async () => {
+    await expectFail(other(`  return tx.apiKey.findFirst;`), REF);
+  });
+
+  it("passes on a row's relation field read (a name no delegate has)", async () => {
+    await expectPass(other(`  return row.apiKey.userId;`));
+  });
+
+  it("FAILS on a lookup through a renamed destructured delegate (it is analysed)", async () => {
+    await expectFail(other(`  const { apiKey: k } = tx;\n  return k.findFirst({ where: { tokenHash: t } });`), /UNLISTED: src\/lib\/other\.ts#lookup.*1 digest lookup/);
+  });
+
+  it("passes on that lookup once listed", async () => {
+    await expectPass({ ...other(`  const { apiKey: k } = tx;\n  return k.findFirst({ where: { tokenHash: t } });`), manifest: LISTED_LOOKUP });
+  });
+
+  it("FAILS on a renamed destructured delegate used as a value", async () => {
+    await expectFail(other(`  const { apiKey: k } = tx;\n  return run(k);`), REF);
+  });
+
+  it("FAILS on a destructured delegate (string-literal computed key) used as a value", async () => {
+    await expectFail(other(`  const { ["apiKey"]: k } = tx;\n  return run(k);`), REF);
+  });
+
+  it("FAILS on a destructured delegate parameter used as a value", async () => {
+    await expectFail({ files: { "src/lib/other.ts": `export function f({ apiKey }: any) {\n  return run(apiKey);\n}\n` } }, REF);
+  });
+
+  it("FAILS on a delegate destructured into a nested pattern", async () => {
+    await expectFail(other(`  const { apiKey: { findFirst } } = tx;\n  return findFirst({ where: { tokenHash: t } });`), /nested pattern/);
+  });
+
+  it("FAILS on $extends", async () => {
+    await expectFail({ files: { "src/lib/client.ts": `export const x = prisma.$extends({});\n` } }, /\$extends: a client extension/);
+  });
+
+  it("FAILS on $extends by element access", async () => {
+    await expectFail({ files: { "src/lib/client.ts": `export const x = prisma["$extends"]({});\n` } }, /\$extends: a client extension/);
+  });
+
+  it("ignores the same references to a model without a digest column", async () => {
+    await expectPass(other(`  const d = tx.note;\n  return run(d, tx.note.findFirst);`));
   });
 });
 

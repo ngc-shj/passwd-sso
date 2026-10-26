@@ -164,5 +164,16 @@ describe("verifyAdminToken", () => {
         },
       });
     });
+
+    // T-2: fail-closed propagation — a derivation error from the validator
+    // must not be swallowed into a success/deny result (paired with the
+    // success cell above).
+    it("propagates a derivation error from validateOperatorToken rather than swallowing it", async () => {
+      mockValidateOperatorToken.mockRejectedValue(new Error("derivation failed"));
+
+      await expect(
+        verifyAdminToken(makeRequest(`Bearer ${VALID_OP_TOKEN}`)),
+      ).rejects.toThrow("derivation failed");
+    });
   });
 });

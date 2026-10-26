@@ -12,32 +12,46 @@
  *     — the static-checks job need not have a generated client). An empty set
  *     fails.
  *   - A digest lookup: a delegate call (`<recv>.<handle>.<method>(...)`, the
- *     handle also as a bare identifier or a string element access) whose
- *     argument's `where` contains a `tokenHash`/`codeHash` key — directly,
- *     under AND/OR/NOT, or under a relation filter.
+ *     handle also as a bare identifier, a string element access, or a name
+ *     bound by destructuring it, renamed or not) whose argument's `where` or
+ *     `cursor` contains a `tokenHash`/`codeHash` key — directly, under
+ *     AND/OR/NOT, or under a relation filter.
+ *   - Delegates the scan cannot follow fail: a token-model delegate (`x.<handle>`,
+ *     `x["<handle>"]`, or a destructured alias) referenced other than as the
+ *     receiver of a direct call with a literal method name — a value
+ *     reference, an argument, `x.<handle>["findUnique"](...)`, `.call`/`.apply`
+ *     — or destructured into a nested pattern. `x.<handle>.<name>` for a name
+ *     no delegate has is a row's relation field, not a delegate; `$extends`
+ *     (which could add such names) fails anywhere.
+ *   - Model coverage: every token model has an analysed lookup, or a manifest
+ *     `models` entry with a reason; an entry for a model that has one is stale.
  *   - Refuse rather than guess: where the position's model is a token model, a
  *     `where` (or the argument holding it) that is not an object literal — a
  *     `const` bound to one is followed, scope-aware — or that holds a spread,
  *     a computed key or an accessor, is "opaque". A function with an opaque
  *     site needs an `opaque-where` manifest entry; its count pins the sites.
  *   - Raw SQL: the column names `token_hash` / `code_hash` in ANY string or
- *     template literal text fail outright — a fragment interpolated into a
- *     tagged template is invisible at the call, so the name is refused wherever
- *     it is written. An Unsafe call's SQL argument must be a string literal, a
- *     no-substitution template, or `renderSql(trustedSql`...`)` (whose text is
- *     literal and scanned by the rule above); `$queryRaw`/`$executeRaw` must be
- *     tag of a template. Any other spelling of a raw method fails.
+ *     template literal text, as written or as cooked (`token\x5fhash`), fail
+ *     outright — a fragment interpolated into a tagged template is invisible at
+ *     the call, so the name is refused wherever it is written. An Unsafe call's
+ *     SQL argument must be a string literal, a no-substitution template, or
+ *     `renderSql(trustedSql`...`)` with both names resolving, scope-aware, to
+ *     imports from src/lib/prisma/raw-sql (its text is literal and scanned by
+ *     the rule above); `$queryRaw`/`$executeRaw` must be tag of a template.
+ *     Any other spelling of a raw method fails.
  *
  * Each lookup or opaque site is attributed to the nearest named function,
  * method, `const`-bound function, or exported `const`; the key is
- * `<repo path>#<name>`. Every key needs a manifest entry
+ * `<repo path>#<name>`; a key that two functions of one file share fails as
+ * AMBIGUOUS_KEY. Every key needs a manifest entry
  * (bearer-passkey-gate-manifest.json) with a class, a reason, and `calls` (the
- * number of calls in it that are a lookup or opaque, each counted once). Unlisted key, stale entry, count mismatch, and
- * zero analysed all fail.
+ * number of calls in it that are a lookup or opaque, each counted once).
+ * Unlisted key, stale entry, count mismatch, and zero analysed all fail.
  *
  *   - per-use-gated: adjudicated on the AST. The function's own body (nested
  *     blocks included, nested functions excluded) returns nothing but an
- *     `ok: false` object literal (no spread, one `ok`) before exactly one `if`
+ *     `ok: false` object literal (no spread, no computed key, one non-shorthand
+ *     `ok`) before exactly one `if`
  *     that is a direct statement of the body, whose condition is
  *     `await passkeyGateBlocks(...)` — the identifier resolving, scope-aware, to
  *     the named import from src/lib/auth/policy/passkey-gate (not shadowed) —
@@ -45,10 +59,12 @@
  *     no-`else` `if (!<param>.passkeyExemption)` / `!<param>?.passkeyExemption`
  *     on one of the function's own parameters whose only statement is that
  *     gate `if`. At least one return follows it.
- *   - refresh-bound: names `refreshRoute` (a file that exists), `lifetime` (an
- *     exported const declared under src/), and optionally `inlineGate`
- *     (`<path>#<fn>` keys whose bodies, callbacks included, call
- *     passkeyEnforcementBlocks or passkeyGateBlocks).
+ *   - refresh-bound: names `refreshRoute` (a file that exists), `lifetime`
+ *     (`<path>#<name>`: an exported top-level const of that file), and at
+ *     least one `inlineGate` (`<path>#<fn>` keys, each designating one
+ *     function whose body, callbacks included, calls passkeyEnforcementBlocks
+ *     from src/lib/auth/policy/passkey-enforcement or passkeyGateBlocks from
+ *     passkey-gate — resolved scope-aware — as (part of) an `if` condition).
  *   - exempt: a reason.
  *   - opaque-where: a reason; the function must still have an opaque site.
  *
@@ -73,7 +89,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAstProject, sourceFiles } from "./lib/ast-project.mjs";
-import { FILTERING, RELATION_FILTERS, SchemaReadError, loadPrismaSchema, objectLiterals } from "./lib/prisma-relation-reach.mjs";
+import { FILTERING, RELATION_FILTERS, SchemaReadError, WRITING, loadPrismaSchema, objectLiterals } from "./lib/prisma-relation-reach.mjs";
 import { bindingIndex, unwrapExpression, visibleBinding } from "./lib/scope-bindings.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -85,13 +101,16 @@ const MANIFEST_PATH = "scripts/checks/bearer-passkey-gate-manifest.json";
 const TOKEN_DIR = "src/lib/auth/tokens/";
 const GATE_MODULE = "src/lib/auth/policy/passkey-gate";
 const GATE_FN = "passkeyGateBlocks";
+const ENFORCEMENT_MODULE = "src/lib/auth/policy/passkey-enforcement";
+const RAW_SQL_MODULE = "src/lib/prisma/raw-sql";
 const EXT_MODULE = "src/lib/auth/tokens/extension-token";
 const EXT_TYPES_MODULE = "src/lib/auth/tokens/extension-token-types";
 const EXT_FN = "validateExtensionToken";
 const EXEMPTION_CONST = "PASSKEY_EXEMPTION";
 const DIGEST_KEYS = new Set(["tokenHash", "codeHash"]);
 const FORBIDDEN_READS = new Set(["requirePasskey", "hasPasskey"]);
-const INLINE_GATE_FNS = new Set(["passkeyEnforcementBlocks", GATE_FN]);
+// [module, export] pairs an inline gate's `if` condition may call.
+const INLINE_GATES = [[ENFORCEMENT_MODULE, "passkeyEnforcementBlocks"], [GATE_MODULE, GATE_FN]];
 const CLASSES = new Set(["per-use-gated", "refresh-bound", "exempt", "opaque-where"]);
 const MIN_REASON = 20;
 
@@ -105,6 +124,11 @@ const EXEMPTION_PIN = [
 
 // Delegate methods that take a `where` (FILTERING minus the create family).
 const WHERE_METHODS = new Set([...FILTERING].filter((m) => !m.startsWith("create")));
+// Every member a model delegate has. A client extension could add more, so `$extends` is refused.
+const DELEGATE_MEMBERS = new Set([...FILTERING, ...WRITING.keys(), "fields"]);
+// A RegExp, not a string literal: check-raw-sql-usage's PRISMA_EXTENDS (the repo-wide control)
+// denies a "$extends" literal in scripts/ too.
+const EXTENDS_RE = /^\$extends$/;
 const RAW_METHOD = /^\$(query|execute)Raw(Unsafe)?$/;
 const DIGEST_COLUMN = /token_hash|code_hash/i;
 const LOGICAL = new Set(["AND", "OR", "NOT"]);
@@ -142,6 +166,7 @@ const TOKEN_MODELS = new Set(
   [...MODELS].filter(([, fields]) => [...DIGEST_KEYS].some((k) => fields.has(k))).map(([m]) => m),
 );
 if (TOKEN_MODELS.size === 0) fatal(`${SCHEMA_PATH} declares no model with a tokenHash/codeHash field, so no lookup can be classified.`);
+const TOKEN_HANDLES = new Set([...HANDLES].filter(([, m]) => TOKEN_MODELS.has(m)).map(([h]) => h));
 
 const manifestAbs = join(ROOT, MANIFEST_PATH);
 if (!existsSync(manifestAbs)) fatal(`manifest not found at ${manifestAbs}.`);
@@ -155,6 +180,9 @@ if (!manifest || typeof manifest.functions !== "object" || Array.isArray(manifes
   fatal(`manifest at ${manifestAbs} has no "functions" object.`);
 }
 const ENTRIES = new Map(Object.entries(manifest.functions));
+const isPlainObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+if (manifest.models !== undefined && !isPlainObject(manifest.models)) fatal(`manifest at ${manifestAbs} has a "models" that is not an object.`);
+const MODEL_ENTRIES = new Map(Object.entries(manifest.models ?? {}));
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -225,30 +253,36 @@ function enclosingFunction(node) {
 }
 
 // hasExportKeyword, not isExported: the latter asks the type checker, which builds a
-// Program and resolves every module — the difference between ~1 s and ~40 s here.
+// Program and resolves every module. Measured over the real repo (1044 files): the whole
+// gate takes ~5.2 s with hasExportKeyword, ~7.8 s with isExported here only, and ~36 s
+// with isExported at every export test.
 const isExportedVar = (decl) => decl.getVariableStatement?.()?.hasExportKeyword?.() ?? false;
 
-/** `{ name, fn }`: nearest named function, method, const-bound function, or exported const. */
+/**
+ * `{ name, fn, owner }`: nearest named function, method, const-bound function, or exported
+ * const. `owner` is the declaration the name belongs to — two owners under one key are two
+ * functions sharing a name; `fn` is the function a per-use predicate reads.
+ */
 function attribute(node) {
   let innermostFn = null;
   for (let p = node.getParent(); p; p = p.getParent()) {
     const k = p.getKind();
     if (FN_LIKE.has(k) && !innermostFn) innermostFn = p;
-    if (k === SyntaxKind.FunctionDeclaration && p.getName()) return { name: p.getName(), fn: p };
+    if (k === SyntaxKind.FunctionDeclaration && p.getName()) return { name: p.getName(), fn: p, owner: p };
     if (k === SyntaxKind.MethodDeclaration || k === SyntaxKind.GetAccessor || k === SyntaxKind.SetAccessor) {
       const n = literalName(p.getNameNode());
-      if (n) return { name: n, fn: p };
+      if (n) return { name: n, fn: p, owner: p };
     }
-    if (k === SyntaxKind.FunctionExpression && p.getName()) return { name: p.getName(), fn: p };
+    if (k === SyntaxKind.FunctionExpression && p.getName()) return { name: p.getName(), fn: p, owner: p };
     if (k === SyntaxKind.ArrowFunction || k === SyntaxKind.FunctionExpression) {
       const parent = p.getParent();
       if (parent?.getKind() === SyntaxKind.VariableDeclaration && unwrapExpression(parent.getInitializer()) === p) {
-        if (parent.getNameNode().getKind() === SyntaxKind.Identifier) return { name: parent.getName(), fn: p };
+        if (parent.getNameNode().getKind() === SyntaxKind.Identifier) return { name: parent.getName(), fn: p, owner: p };
       }
     }
     if (k === SyntaxKind.VariableDeclaration && isExportedVar(p) && p.getNameNode().getKind() === SyntaxKind.Identifier) {
       const init = unwrapExpression(p.getInitializer());
-      return { name: p.getName(), fn: init && FN_LIKE.has(init.getKind()) ? init : innermostFn };
+      return { name: p.getName(), fn: init && FN_LIKE.has(init.getKind()) ? init : innermostFn, owner: p };
     }
   }
   return null;
@@ -256,20 +290,61 @@ function attribute(node) {
 
 // ─── Digest lookups and opaque wheres ────────────────────────
 
+/** The property an object-binding element reads (`{ a }`, `{ a: b }`, `{ ["a"]: b }`), or null. */
+function bindingKey(el) {
+  const pn = el.getPropertyNameNode();
+  if (!pn) return el.getNameNode().getKind() === SyntaxKind.Identifier ? el.getName() : null;
+  if (pn.getKind() === SyntaxKind.ComputedPropertyName) {
+    const e = unwrapExpression(pn.getExpression());
+    return isStringish(e) ? e.getLiteralText() : null;
+  }
+  return literalName(pn);
+}
+
+/** The model whose delegate `id` names when it is bound by destructuring a handle (`const { apiKey: k } = tx`). */
+function destructuredModel(id, file) {
+  const decl = visibleBinding(id.getText(), id, file.bindingsFor);
+  const pattern = decl?.getNameNode?.();
+  if (!pattern || pattern.getKind() === SyntaxKind.Identifier) return null;
+  for (const el of pattern.getDescendantsOfKind(SyntaxKind.BindingElement)) {
+    if (el.getNameNode().getKind() !== SyntaxKind.Identifier || el.getName() !== id.getText()) continue;
+    if (el.getParent().getKind() !== SyntaxKind.ObjectBindingPattern) return null;
+    const key = bindingKey(el);
+    return (key && HANDLES.get(key)) || null;
+  }
+  return null;
+}
+
 /** The model a delegate call targets, if it is a where-taking delegate method. */
-function delegateModel(call) {
+function delegateModel(call, file) {
   const callee = unwrapExpression(call.getExpression());
   if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return null;
   if (!WHERE_METHODS.has(callee.getName())) return null;
   const recv = unwrapExpression(callee.getExpression());
   let handle = null;
   if (recv.getKind() === SyntaxKind.PropertyAccessExpression) handle = recv.getName();
-  else if (recv.getKind() === SyntaxKind.Identifier) handle = recv.getText();
-  else if (recv.getKind() === SyntaxKind.ElementAccessExpression) {
+  else if (recv.getKind() === SyntaxKind.Identifier) {
+    const aliased = destructuredModel(recv, file);
+    if (aliased) return aliased;
+    handle = recv.getText();
+  } else if (recv.getKind() === SyntaxKind.ElementAccessExpression) {
     const a = unwrapExpression(recv.getArgumentExpression());
     if (isStringish(a)) handle = a.getLiteralText();
   }
   return (handle && HANDLES.get(handle)) || null;
+}
+
+/**
+ * Is this token-model delegate reference `<ref>.<method>(...)` with a literal method name?
+ * `<ref>.<name>` for a name no delegate has (`row.apiKey.userId`) reads a row's relation
+ * field, not a delegate, and is not a use of one.
+ */
+function isDirectDelegateUse(ref) {
+  const parent = ref.getParent();
+  if (parent?.getKind() !== SyntaxKind.PropertyAccessExpression || parent.getExpression() !== ref) return false;
+  if (!DELEGATE_MEMBERS.has(parent.getName())) return true;
+  const call = parent.getParent();
+  return call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === parent;
 }
 
 const isNullish = (n) => {
@@ -305,9 +380,9 @@ const opaqueFor = (model, res, what) => (detail) => {
   if (TOKEN_MODELS.has(model)) res.opaque.push(`${model} ${what}: ${detail}`);
 };
 
-function readWhere(node, model, res, ctx) {
+function readWhere(node, model, res, ctx, what = "where") {
   if (isNullish(node)) return;
-  const opaque = opaqueFor(model, res, "where");
+  const opaque = opaqueFor(model, res, what);
   const props = readProps(node, ctx, opaque);
   if (!props) return opaque("not an object literal");
   walkWhereProps(props, model, res, ctx);
@@ -318,6 +393,7 @@ function walkWhereProps(props, model, res, ctx) {
   for (const { name, value } of props) {
     if (DIGEST_KEYS.has(name)) {
       res.lookup = true;
+      res.lookupModels.add(model);
       continue;
     }
     if (LOGICAL.has(name)) {
@@ -349,7 +425,7 @@ function readRelationFilter(node, related, res, ctx) {
 
 /** { lookup, opaque[] } for one delegate call on `model`. */
 function readCall(call, model, ctx) {
-  const res = { lookup: false, opaque: [] };
+  const res = { lookup: false, lookupModels: new Set(), opaque: [] };
   const args = call.getArguments();
   if (args.length === 0) return res;
   const opaque = opaqueFor(model, res, "argument");
@@ -362,7 +438,8 @@ function readCall(call, model, ctx) {
     opaque("not an object literal");
     return res;
   }
-  for (const { name, value } of props) if (name === "where") readWhere(value, model, res, ctx);
+  // A `cursor` is a unique-where input too: a digest in it is a lookup.
+  for (const { name, value } of props) if (name === "where" || name === "cursor") readWhere(value, model, res, ctx, name);
   return res;
 }
 
@@ -373,6 +450,8 @@ function isOkFalseLiteral(expr) {
   if (v?.getKind() !== SyntaxKind.ObjectLiteralExpression) return false;
   const props = v.getProperties();
   if (props.some((p) => p.getKind() !== SyntaxKind.PropertyAssignment && p.getKind() !== SyntaxKind.ShorthandPropertyAssignment)) return false;
+  // A computed key could be a second `ok` (`["ok"]: true`) that literalName cannot see.
+  if (props.some((p) => p.getNameNode().getKind() === SyntaxKind.ComputedPropertyName)) return false;
   const oks = props.filter((p) => literalName(p.getNameNode()) === "ok");
   if (oks.length !== 1 || oks[0].getKind() !== SyntaxKind.PropertyAssignment) return false;
   return unwrapExpression(oks[0].getInitializer())?.getKind() === SyntaxKind.FalseKeyword;
@@ -413,6 +492,16 @@ function isGateStatement(stmt, fn, file) {
   return isGateIf(soleStatement(stmt.getThenStatement()), file);
 }
 
+/** Is `call` (part of) the condition of an `if`, within the same function? */
+function inIfCondition(call) {
+  let child = call;
+  for (let p = call.getParent(); p && !FN_LIKE.has(p.getKind()); child = p, p = p.getParent()) {
+    if (p.getKind() === SyntaxKind.IfStatement) return p.getExpression() === child;
+    if (p.getKind() === SyntaxKind.Block || p.getKind() === SyntaxKind.SourceFile) return false;
+  }
+  return false;
+}
+
 /** Null when `fn` satisfies per-use-gated, else why not. */
 function perUseGatedViolation(fn, file) {
   const body = fn?.getBody?.();
@@ -436,8 +525,8 @@ function perUseGatedViolation(fn, file) {
 
 const project = createAstProject();
 const files = new Map(); // rel -> { sf, rel, bindingsFor, imports }
-const analysed = new Map(); // key -> { rel, name, fn, lookups, opaque: [], lines: [] }
-const exportedConsts = new Set();
+const analysed = new Map(); // key -> { rel, name, fn, fns, owners, file, sites, lookups, opaque: [], lines: [] }
+const lookedUpModels = new Set();
 const exemptionPairs = [];
 
 const EXT_FILE_REL = (rel) => moduleOf(rel) === EXT_MODULE;
@@ -448,29 +537,69 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
   files.set(rel, file);
   const ctx = { bindingsFor: file.bindingsFor };
 
-  for (const stmt of sf.getVariableStatements()) {
-    if (stmt.hasExportKeyword()) for (const d of stmt.getDeclarations()) exportedConsts.add(d.getName());
-  }
-
   // Digest lookups and opaque wheres.
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const model = delegateModel(call);
+    const model = delegateModel(call, file);
     if (!model) continue;
     const res = readCall(call, model, ctx);
     if (!res.lookup && res.opaque.length === 0) continue;
+    for (const m of res.lookupModels) lookedUpModels.add(m);
     const at = attribute(call);
     if (!at) {
       failAt(rel, call, `token-model lookup cannot be attributed to a named function, method or exported const`);
       continue;
     }
     const key = `${rel}#${at.name}`;
-    if (!analysed.has(key)) analysed.set(key, { rel, name: at.name, fn: at.fn, file, sites: 0, lookups: 0, opaque: [], lines: [] });
+    if (!analysed.has(key)) analysed.set(key, { rel, name: at.name, fn: at.fn, fns: new Set(), owners: new Set(), file, sites: 0, lookups: 0, opaque: [], lines: [] });
     const a = analysed.get(key);
+    a.fns.add(at.fn);
+    a.owners.add(at.owner);
     // One site per call: a call that is both a lookup and opaque counts once.
     a.sites += 1;
     if (res.lookup) a.lookups += 1;
     if (res.opaque.length > 0) a.opaque.push(`line ${call.getStartLineNumber()}: ${res.opaque.join(", ")}`);
     a.lines.push(call.getStartLineNumber());
+  }
+
+  // Token-model delegates reached other than as `<recv>.<handle>.<method>(...)` are invisible
+  // to the lookup scan above: a value reference, an element-access or `.call`/`.apply` method,
+  // a delegate passed as an argument, or an alias bound by destructuring a handle.
+  const delegateRefs = [];
+  for (const pa of sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+    if (TOKEN_HANDLES.has(pa.getName())) delegateRefs.push(pa);
+    if (EXTENDS_RE.test(pa.getName())) failAt(rel, pa, `$extends: a client extension can add delegate members this gate cannot read`);
+  }
+  for (const ea of sf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
+    const a = unwrapExpression(ea.getArgumentExpression());
+    if (!isStringish(a)) continue;
+    if (TOKEN_HANDLES.has(a.getLiteralText())) delegateRefs.push(ea);
+    if (EXTENDS_RE.test(a.getLiteralText())) failAt(rel, ea, `$extends: a client extension can add delegate members this gate cannot read`);
+  }
+  for (const el of sf.getDescendantsOfKind(SyntaxKind.BindingElement)) {
+    if (el.getParent()?.getKind() !== SyntaxKind.ObjectBindingPattern) continue;
+    const handle = bindingKey(el);
+    if (!handle || !TOKEN_HANDLES.has(handle)) continue;
+    const nameNode = el.getNameNode();
+    if (nameNode.getKind() !== SyntaxKind.Identifier) {
+      failAt(rel, el, `destructures the ${HANDLES.get(handle)} delegate into a nested pattern: its methods cannot be followed`);
+      continue;
+    }
+    const decl = visibleBinding(el.getName(), nameNode, file.bindingsFor);
+    for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      if (id === nameNode || id.getText() !== el.getName()) continue;
+      const parent = id.getParent();
+      const pk = parent.getKind();
+      if (pk === SyntaxKind.PropertyAccessExpression && parent.getNameNode() === id) continue;
+      if ((pk === SyntaxKind.PropertyAssignment || pk === SyntaxKind.MethodDeclaration || pk === SyntaxKind.PropertySignature || pk === SyntaxKind.PropertyDeclaration) && parent.getNameNode() === id) continue;
+      if (pk === SyntaxKind.BindingElement && parent.getPropertyNameNode() === id) continue;
+      if (pk === SyntaxKind.TypeQuery || pk === SyntaxKind.QualifiedName) continue;
+      if (visibleBinding(id.getText(), id, file.bindingsFor) === decl) delegateRefs.push(id);
+    }
+  }
+  for (const ref of delegateRefs) {
+    if (!isDirectDelegateUse(ref)) {
+      failAt(rel, ref, `token-model delegate referenced other than as \`<delegate>.<method>(...)\` (${ref.getParent().getKindName()}): its lookups cannot be read`);
+    }
   }
 
   // Raw SQL: the digest columns in any literal text, and unreadable SQL arguments.
@@ -481,7 +610,10 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
     ...sf.getDescendantsOfKind(SyntaxKind.TemplateMiddle),
     ...sf.getDescendantsOfKind(SyntaxKind.TemplateTail),
   ]) {
-    if (DIGEST_COLUMN.test(lit.getText())) failAt(rel, lit, `literal text names a digest column (token_hash/code_hash): raw SQL digest lookups are refused`);
+    // Source spelling and cooked value both: `token\x5fhash` spells the column only once cooked.
+    if (DIGEST_COLUMN.test(lit.getText()) || DIGEST_COLUMN.test(lit.compilerNode.text ?? "")) {
+      failAt(rel, lit, `literal text names a digest column (token_hash/code_hash): raw SQL digest lookups are refused`);
+    }
   }
   for (const pa of sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
     const method = pa.getName();
@@ -493,12 +625,13 @@ for (const { rel, sf } of sourceFiles(project, join(ROOT, SCAN_ROOT), ROOT)) {
       const arg = parent.getArguments()[0];
       if (isStringish(arg)) continue;
       const a = unwrapExpression(arg);
+      // Both names must be the raw-sql module's own exports, resolved where they are written.
       if (
         a?.getKind() === SyntaxKind.CallExpression &&
-        a.getExpression().getText() === "renderSql" &&
+        refersToImport(a.getExpression(), file, RAW_SQL_MODULE, "renderSql") &&
         a.getArguments().length === 1 &&
         a.getArguments()[0].getKind() === SyntaxKind.TaggedTemplateExpression &&
-        a.getArguments()[0].getTag().getText() === "trustedSql"
+        refersToImport(a.getArguments()[0].getTag(), file, RAW_SQL_MODULE, "trustedSql")
       ) continue;
       failAt(rel, pa, `${method}'s SQL argument is not a literal (nor renderSql(trustedSql\`...\`)): its text cannot be read`);
       continue;
@@ -633,17 +766,35 @@ if (!fileByModule(EXT_TYPES_MODULE)?.sf.getVariableDeclaration(EXEMPTION_CONST))
 
 // ─── Manifest adjudication ───────────────────────────────────
 
-/** The named function `key` (`<path>#<name>`) designates, if it exists. */
-function findNamedFunction(key) {
+/** Every function with a body that `key` (`<path>#<name>`) designates: more than one is ambiguous. */
+function findNamedFunctions(key) {
   const [rel, name] = key.split("#");
   const file = files.get(rel);
-  if (!file || !name) return null;
+  if (!file || !name) return [];
+  const found = [];
   for (const node of file.sf.getDescendants()) {
-    if (!FN_LIKE.has(node.getKind())) continue;
+    if (!FN_LIKE.has(node.getKind()) || !node.getBody?.()) continue;
     const at = attribute(node.getFirstDescendant() ?? node);
-    if (at?.name === name && at.fn === node) return { node, file };
+    if (at?.name === name && at.fn === node) found.push({ node, file });
   }
-  return null;
+  return found;
+}
+
+/** Does `fn` call an INLINE_GATES function, resolved scope-aware, as (part of) an `if` condition? */
+function callsInlineGate({ node, file }) {
+  return node
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .some((c) => INLINE_GATES.some(([m, n]) => refersToImport(c.getExpression(), file, m, n)) && inIfCondition(c));
+}
+
+/** Is `ref` (`<path>#<name>`) an exported top-level `const` of that file? */
+function isExportedConstRef(ref) {
+  if (typeof ref !== "string" || !/^[^#]+#[^#]+$/.test(ref)) return false;
+  const [rel, name] = ref.split("#");
+  const sf = files.get(rel)?.sf;
+  return !!sf?.getVariableStatements().some(
+    (st) => st.hasExportKeyword() && st.getDeclarationKind() === "const" && st.getDeclarations().some((d) => d.getName() === name),
+  );
 }
 
 for (const [key, a] of analysed) {
@@ -652,6 +803,10 @@ for (const [key, a] of analysed) {
   const where = `${key} (lines ${a.lines.join(", ")})`;
   if (!entry) {
     failures.push(`UNLISTED: ${where} — ${a.lookups} digest lookup(s), ${a.opaque.length} opaque site(s)${a.opaque.length ? `: ${a.opaque.join("; ")}` : ""}. Classify it in ${MANIFEST_PATH}.`);
+    continue;
+  }
+  if (a.owners.size > 1) {
+    failures.push(`AMBIGUOUS_KEY: ${where} — ${a.owners.size} distinct functions share the name; rename one so each key designates one function.`);
     continue;
   }
   if (!CLASSES.has(entry.class)) {
@@ -671,27 +826,49 @@ for (const [key, a] of analysed) {
     failures.push(`STALE_OPAQUE: ${key} is opaque-where but every where it has is now readable — reclassify it.`);
   }
   if (entry.class === "per-use-gated") {
-    const why = perUseGatedViolation(a.fn, a.file);
+    const why = a.fns.size > 1 ? `its sites sit in ${a.fns.size} functions` : perUseGatedViolation(a.fn, a.file);
     if (why) failures.push(`NOT_GATED: ${key} is per-use-gated but ${why}.`);
   }
   if (entry.class === "refresh-bound") {
     if (typeof entry.refreshRoute !== "string" || !existsSync(join(ROOT, entry.refreshRoute))) {
       failures.push(`BAD_ENTRY: ${key} is refresh-bound but its refreshRoute ${JSON.stringify(entry.refreshRoute)} does not exist.`);
     }
-    if (typeof entry.lifetime !== "string" || !exportedConsts.has(entry.lifetime)) {
-      failures.push(`BAD_ENTRY: ${key} is refresh-bound but its lifetime ${JSON.stringify(entry.lifetime)} is not an exported const under ${SCAN_ROOT}/.`);
+    if (!isExportedConstRef(entry.lifetime)) {
+      failures.push(`BAD_ENTRY: ${key} is refresh-bound but its lifetime ${JSON.stringify(entry.lifetime)} is not a <path>#<name> naming an exported const of that file.`);
     }
-    for (const g of entry.inlineGate === undefined ? [] : [].concat(entry.inlineGate)) {
-      const found = typeof g === "string" ? findNamedFunction(g) : null;
-      const gated = found?.node
-        .getDescendantsOfKind(SyntaxKind.CallExpression)
-        .some((c) => INLINE_GATE_FNS.has(c.getExpression().getText()));
-      if (!gated) failures.push(`BAD_ENTRY: ${key} relies on inline gate ${JSON.stringify(g)}, which does not exist or does not call ${[...INLINE_GATE_FNS].join("/")}.`);
+    const gates = entry.inlineGate === undefined ? [] : [].concat(entry.inlineGate);
+    if (gates.length === 0) failures.push(`BAD_ENTRY: ${key} is refresh-bound but names no inlineGate: the mint it relies on must be gated.`);
+    for (const g of gates) {
+      const found = typeof g === "string" ? findNamedFunctions(g) : [];
+      if (found.length > 1) {
+        failures.push(`AMBIGUOUS_KEY: inline gate ${JSON.stringify(g)} of ${key} names ${found.length} functions.`);
+      } else if (found.length === 0 || !callsInlineGate(found[0])) {
+        failures.push(
+          `BAD_ENTRY: ${key} relies on inline gate ${JSON.stringify(g)}, which does not exist or does not call ${INLINE_GATES.map(([m, n]) => `${n} (${m})`).join(" / ")} in an if condition.`,
+        );
+      }
     }
   }
 }
 for (const key of ENTRIES.keys()) {
   if (!analysed.has(key)) failures.push(`STALE_ENTRY: ${key} is in the manifest but no digest lookup or opaque where is attributed to it.`);
+}
+
+// Model coverage: a token model no analysed lookup reaches is looked up some way this gate
+// cannot see (or not at all); a human says which, in the manifest's "models".
+for (const model of [...TOKEN_MODELS].sort()) {
+  const entry = MODEL_ENTRIES.get(model);
+  if (lookedUpModels.has(model)) {
+    if (entry !== undefined) failures.push(`STALE_MODEL: ${model} is in the manifest's "models" but has an analysed digest lookup — remove the entry.`);
+  } else if (entry === undefined) {
+    failures.push(`UNCOVERED_MODEL: ${model} declares a digest column but no analysed lookup reaches it — find its lookups, or list it in "models" with a reason.`);
+  }
+}
+for (const [model, entry] of MODEL_ENTRIES) {
+  if (!TOKEN_MODELS.has(model)) failures.push(`BAD_ENTRY: "models" names ${model}, which is not a model declaring tokenHash/codeHash.`);
+  else if (typeof entry?.reason !== "string" || entry.reason.trim().length < MIN_REASON) {
+    failures.push(`BAD_ENTRY: "models" entry ${model} needs a reason of at least ${MIN_REASON} characters.`);
+  }
 }
 
 // I3: the exemption pin, exactly.

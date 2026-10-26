@@ -1,5 +1,6 @@
 {
-  "$comment": "Classification of every function holding a tokenHash/codeHash digest lookup or an unreadable where on a token model. Enforced by scripts/checks/check-bearer-passkey-gate.mjs (plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7). calls = the number of calls in the function that are a lookup or opaque. Keys are <repo path>#<function>.",
+  "$comment": "Classification of every function holding a tokenHash/codeHash digest lookup or an unreadable where on a token model. Enforced by scripts/checks/check-bearer-passkey-gate.mjs (plan: docs/archive/review/api-key-passkey-requirement-plan.md, C7). calls = the number of calls in the function that are a lookup or opaque. Keys are <repo path>#<function>. refresh-bound entries name lifetime as <repo path>#<exported const> and at least one inlineGate. models: a token model (tokenHash/codeHash column) that no analysed lookup reaches, keyed by model name with a reason; empty while every token model has one.",
+  "models": {},
   "functions": {
     "src/lib/auth/tokens/api-key.ts#validateApiKey": {
       "class": "per-use-gated",
@@ -20,7 +21,7 @@
       "class": "refresh-bound",
       "calls": 1,
       "refreshRoute": "src/app/api/mcp/token/route.ts",
-      "lifetime": "MCP_TOKEN_EXPIRY_SEC",
+      "lifetime": "src/lib/constants/auth/mcp.ts#MCP_TOKEN_EXPIRY_SEC",
       "inlineGate": ["src/lib/mcp/oauth-server.ts#exchangeRefreshToken", "src/lib/mcp/oauth-server.ts#exchangeCodeForToken"],
       "reason": "MCP access token validator; not gated per use (SC1): the token lives MCP_TOKEN_EXPIRY_SEC (1 h) and every mint, by code exchange or refresh rotation, is gated inline."
     },
@@ -28,7 +29,7 @@
       "class": "refresh-bound",
       "calls": 1,
       "refreshRoute": "src/app/api/mcp/token/route.ts",
-      "lifetime": "MCP_TOKEN_EXPIRY_SEC",
+      "lifetime": "src/lib/constants/auth/mcp.ts#MCP_TOKEN_EXPIRY_SEC",
       "inlineGate": "src/lib/mcp/oauth-server.ts#exchangeRefreshToken",
       "reason": "Pre-rotation tenant lookup for the IP gate on the MCP refresh grant; authenticates nothing itself — the rotation it precedes is gated inline in exchangeRefreshToken."
     },
@@ -36,7 +37,7 @@
       "class": "refresh-bound",
       "calls": 1,
       "refreshRoute": "src/app/api/mcp/token/route.ts",
-      "lifetime": "MCP_TOKEN_EXPIRY_SEC",
+      "lifetime": "src/lib/constants/auth/mcp.ts#MCP_TOKEN_EXPIRY_SEC",
       "inlineGate": "src/lib/mcp/oauth-server.ts#exchangeRefreshToken",
       "reason": "MCP refresh rotation; passkeyEnforcementBlocks runs inline at the mint point, after replay detection, so a blocked user's 1 h access token cannot be renewed."
     },
@@ -44,7 +45,7 @@
       "class": "refresh-bound",
       "calls": 1,
       "refreshRoute": "src/app/api/mobile/token/refresh/route.ts",
-      "lifetime": "EXTENSION_TOKEN_IDLE_TIMEOUT_MAX",
+      "lifetime": "src/lib/validations/common.ts#EXTENSION_TOKEN_IDLE_TIMEOUT_MAX",
       "inlineGate": "src/lib/auth/tokens/mobile-token.ts#refreshIosToken",
       "reason": "iOS host refresh-token lookup; the rotation is gated inline in refreshIosToken (SC3), the refresh row lives at most the tenant idle limit, and the access row it mints is gated per use by validateExtensionToken."
     },

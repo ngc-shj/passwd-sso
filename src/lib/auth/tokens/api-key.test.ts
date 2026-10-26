@@ -46,6 +46,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { parseApiKeyScopes, hasApiKeyScope, validateApiKey } from "./api-key";
 import { API_KEY_LAST_USED_THROTTLE_MS } from "@/lib/constants/auth/api-key";
+import { PASSKEY_GATE_CREDENTIAL } from "@/lib/auth/policy/passkey-gate";
 
 // ─── parseApiKeyScopes ───────────────────────────────────────
 
@@ -281,7 +282,7 @@ describe("validateApiKey — passkey gate (C1)", () => {
       expect.objectContaining({
         userId: USER_ID,
         tenantId: TENANT_ID,
-        credential: "api_key",
+        credential: PASSKEY_GATE_CREDENTIAL.API_KEY,
         credentialId: VALID_KEY_ROW.id,
       }),
     );

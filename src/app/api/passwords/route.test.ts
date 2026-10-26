@@ -44,9 +44,9 @@ const {
   // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE`
   // — default matches this file's keyVersion: 1 fixtures so the guard passes.
   mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
-  // C5: this file exercises the real validateExtensionToken (and, through
-  // it, the real passkey-gate) — allow by default so the gate itself stays
-  // out of scope for the scope/entry-CRUD cells below.
+  // C5: this file exercises the real validateExtensionToken, with
+  // passkeyGateBlocks mocked to allow — the gate itself stays out of scope
+  // for the scope/entry-CRUD cells below.
   mockPasskeyGateBlocks: vi.fn().mockResolvedValue(false),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "../../../helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { PASSKEY_EXEMPTION } from "@/lib/auth/tokens/extension-token-types";
 
 const VALID_CNF_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
 const OTHER_CNF_JKT  = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc";
@@ -114,7 +115,7 @@ describe("POST /api/extension/key/reset (C12)", () => {
     await POST(makeReq({ cnfJkt: VALID_CNF_JKT }));
     expect(mockValidateExtensionToken).toHaveBeenCalledWith(
       expect.anything(),
-      { passkeyExemption: "self_revocation" },
+      { passkeyExemption: PASSKEY_EXEMPTION.SELF_REVOCATION },
     );
   });
 

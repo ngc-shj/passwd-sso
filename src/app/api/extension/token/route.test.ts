@@ -5,6 +5,7 @@ import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { ANONYMOUS_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -130,8 +131,26 @@ const legacyDeprecatedLimiterFactorySnapshot = snapshotFactory(mockCreateRateLim
 // legacyDeprecatedLimiter among this module's limiters opts into the
 // fail-closed option (the gate counts the literal option text, so this
 // comment deliberately avoids it).
-const legacyDeprecatedLimiterCallIndex = mockCreateRateLimiter.mock.calls.findIndex(
-  (args) => (args[0] as { failClosedOnRedisError?: boolean } | undefined)?.failClosedOnRedisError === true,
+// T-8: match on this route's own windowMs/max too — failClosedOnRedisError
+// alone is ambiguous if a second fail-closed limiter is ever added
+// (transitively or in this file), and must resolve to exactly one call.
+const legacyDeprecatedLimiterMatches = mockCreateRateLimiter.mock.calls.filter(
+  (args) => {
+    const opts = args[0] as { windowMs?: number; max?: number; failClosedOnRedisError?: boolean } | undefined;
+    return (
+      opts?.windowMs === 15 * MS_PER_MINUTE &&
+      opts?.max === 10 &&
+      opts?.failClosedOnRedisError === true
+    );
+  },
+);
+if (legacyDeprecatedLimiterMatches.length !== 1) {
+  throw new Error(
+    `expected exactly one legacyDeprecatedLimiter factory call matching (windowMs/max/failClosedOnRedisError), found ${legacyDeprecatedLimiterMatches.length} — route.ts's limiter options drifted from this test's match criteria`,
+  );
+}
+const legacyDeprecatedLimiterCallIndex = mockCreateRateLimiter.mock.calls.indexOf(
+  legacyDeprecatedLimiterMatches[0]!,
 );
 const legacyDeprecatedLimiter = mockCreateRateLimiter.mock.results[legacyDeprecatedLimiterCallIndex]!
   .value as ReturnType<typeof mockCreateRateLimiter>;

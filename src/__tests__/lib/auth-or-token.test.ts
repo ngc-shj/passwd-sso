@@ -202,6 +202,23 @@ describe("authOrToken mcp_token dispatch", () => {
 
     expect(result).toEqual({ type: "passkey_required" });
   });
+
+  // T-2: fail-closed propagation — a derivation error from either validator
+  // must not be swallowed into null/passkey_required (paired with the two
+  // passkey_required cells above).
+  it("propagates a derivation error from validateApiKey rather than swallowing it", async () => {
+    mockValidateApiKey.mockRejectedValue(new Error("derivation failed"));
+
+    const req = makeRequest("api_blockedkey");
+    await expect(authOrToken(req)).rejects.toThrow("derivation failed");
+  });
+
+  it("propagates a derivation error from validateExtensionToken rather than swallowing it", async () => {
+    mockValidateExtensionToken.mockRejectedValue(new Error("derivation failed"));
+
+    const req = makeRequest("ext_blockedtoken");
+    await expect(authOrToken(req)).rejects.toThrow("derivation failed");
+  });
 });
 
 describe("hasMcpScope", () => {

@@ -97,6 +97,18 @@ describe("authOrToken", () => {
     expect(result).toEqual({ type: "passkey_required" });
   });
 
+  // T-2: fail-closed propagation — a derivation error from the extension
+  // token validator must not be swallowed into null/passkey_required
+  // (paired with the PASSKEY_REQUIRED cell above).
+  it("propagates a derivation error from validateExtensionToken rather than swallowing it", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateExtensionToken.mockRejectedValue(new Error("derivation failed"));
+
+    await expect(authOrToken(makeRequest("ext_blocked"))).rejects.toThrow(
+      "derivation failed",
+    );
+  });
+
   it("returns scope_insufficient when token lacks required scope", async () => {
     mockAuth.mockResolvedValue(null);
     mockValidateExtensionToken.mockResolvedValue({
@@ -183,6 +195,18 @@ describe("authOrToken", () => {
     const result = await authOrToken(makeRequest("api_blocked"));
     expect(result).toEqual({ type: "passkey_required" });
     expect(mockValidateExtensionToken).not.toHaveBeenCalled();
+  });
+
+  // T-2: fail-closed propagation — a derivation error from the API key
+  // validator must not be swallowed (paired with the PASSKEY_REQUIRED cell
+  // above).
+  it("propagates a derivation error from validateApiKey rather than swallowing it", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateApiKey.mockRejectedValue(new Error("derivation failed"));
+
+    await expect(authOrToken(makeRequest("api_blocked"))).rejects.toThrow(
+      "derivation failed",
+    );
   });
 
   it("returns scope_insufficient when API key lacks required scope", async () => {

@@ -52,6 +52,7 @@ import {
 import { API_KEY_PREFIX } from "@/lib/constants/auth/api-key";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
 vi.mock("@/auth", () => ({ auth: async () => null }));
 
@@ -74,7 +75,7 @@ import { POST as autofillTokenPOST } from "@/app/api/mobile/autofill-token/route
 
 const APP_URL = "https://app.example.test";
 const GRACE_DAYS = 7;
-const BLOCKED_ACTION = "PASSKEY_ENFORCEMENT_BLOCKED";
+const BLOCKED_ACTION = AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED;
 
 type ClientKind = "BROWSER_EXTENSION" | "IOS_APP" | "IOS_AUTOFILL";
 
@@ -145,10 +146,15 @@ describe("bearer credentials under the tenant passkey requirement (real DB)", ()
 
   beforeEach(async () => {
     vi.stubEnv("APP_URL", APP_URL);
+    // T-10: reset first, then register each id immediately after it is
+    // created — a throw from createUser (after createTenant succeeded)
+    // must not leak a tenant that afterEach never learns about.
+    tenantIds = [];
+    userIds = [];
     tenantId = await ctx.createTenant();
+    tenantIds.push(tenantId);
     userId = await ctx.createUser(tenantId);
-    tenantIds = [tenantId];
-    userIds = [userId];
+    userIds.push(userId);
     // Default fixture: required, grace period expired one day ago.
     await setTenantPolicy(tenantId, {
       requirePasskey: true,
@@ -341,6 +347,17 @@ describe("bearer credentials under the tenant passkey requirement (real DB)", ()
     return rows[0].count;
   }
 
+  async function revokedAtOf(tokenId: string): Promise<Date | null> {
+    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ revoked_at: Date | null }[]>(
+        `SELECT revoked_at FROM extension_tokens WHERE id = $1::uuid`,
+        tokenId,
+      );
+    });
+    return rows[0].revoked_at;
+  }
+
   // ─── API key ─────────────────────────────────────────────────
 
   describe("API key — GET /api/v1/passwords", () => {
@@ -466,6 +483,50 @@ describe("bearer credentials under the tenant passkey requirement (real DB)", ()
       expect((await callMetrics(op.token)).status).toBe(200);
       expect(await blockedRows()).toBe(0);
     });
+
+    // T-5: the grace/off/other-tenant cells below are the API key describe
+    // block's equivalents, run for the operator token too.
+
+    it("allows an operator whose passkey is registered under another tenant", async () => {
+      const otherTenantId = await ctx.createTenant();
+      tenantIds.push(otherTenantId);
+      await seedPasskey(userId, otherTenantId);
+      const op = await seedOperatorToken(userId);
+      expect((await callMetrics(op.token)).status).toBe(200);
+      expect(await blockedRows()).toBe(0);
+    });
+
+    it("allows inside the grace period (now − (grace−1) d)", async () => {
+      await setTenantPolicy(tenantId, {
+        requirePasskey: true,
+        enabledAt: new Date(Date.now() - (GRACE_DAYS - 1) * MS_PER_DAY),
+        graceDays: GRACE_DAYS,
+      });
+      const op = await seedOperatorToken(userId);
+      expect((await callMetrics(op.token)).status).toBe(200);
+      expect(await blockedRows()).toBe(0);
+    });
+
+    it("allows when the tenant does not require a passkey", async () => {
+      await setTenantPolicy(tenantId, {
+        requirePasskey: false,
+        enabledAt: null,
+        graceDays: null,
+      });
+      const op = await seedOperatorToken(userId);
+      expect((await callMetrics(op.token)).status).toBe(200);
+      expect(await blockedRows()).toBe(0);
+    });
+
+    it("enforces immediately when require_passkey_enabled_at is NULL", async () => {
+      await setTenantPolicy(tenantId, {
+        requirePasskey: true,
+        enabledAt: null,
+        graceDays: GRACE_DAYS,
+      });
+      const op = await seedOperatorToken(userId);
+      await expectPasskeyRequired(await callMetrics(op.token));
+    });
   });
 
   // ─── Extension-row tokens ────────────────────────────────────
@@ -519,6 +580,9 @@ describe("bearer credentials under the tenant passkey requirement (real DB)", ()
       );
       await expectPasskeyRequired(res);
       expect(await extensionTokenCount(userId, "BROWSER_EXTENSION")).toBe(before);
+      // T-6: the refusal must not revoke the presented token — only the
+      // self-revocation route (below) does that.
+      expect(await revokedAtOf(ext.id)).toBeNull();
     });
 
     it("lets a blocked member revoke their own token (DELETE /api/extension/token)", async () => {
@@ -528,15 +592,7 @@ describe("bearer credentials under the tenant passkey requirement (real DB)", ()
       );
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
-
-      const rows = await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<{ revoked_at: Date | null }[]>(
-          `SELECT revoked_at FROM extension_tokens WHERE id = $1::uuid`,
-          ext.id,
-        );
-      });
-      expect(rows[0].revoked_at).not.toBeNull();
+      expect(await revokedAtOf(ext.id)).not.toBeNull();
       // The exemption skips the gate entirely, so nothing is audited as blocked.
       expect(await blockedRows()).toBe(0);
     });
@@ -551,6 +607,50 @@ describe("bearer credentials under the tenant passkey requirement (real DB)", ()
       );
       expect(res.status).toBe(200);
       expect(await blockedRows()).toBe(0);
+    });
+
+    // T-5: the grace/off/other-tenant cells below are the API key describe
+    // block's equivalents, run for the extension token too.
+
+    it("allows a member whose passkey is registered under another tenant", async () => {
+      const otherTenantId = await ctx.createTenant();
+      tenantIds.push(otherTenantId);
+      await seedPasskey(userId, otherTenantId);
+      const ext = await seedExtensionToken(userId, "BROWSER_EXTENSION", "passwords:read");
+      expect((await listPasswords(ext)).status).toBe(200);
+      expect(await blockedRows()).toBe(0);
+    });
+
+    it("allows inside the grace period (now − (grace−1) d)", async () => {
+      await setTenantPolicy(tenantId, {
+        requirePasskey: true,
+        enabledAt: new Date(Date.now() - (GRACE_DAYS - 1) * MS_PER_DAY),
+        graceDays: GRACE_DAYS,
+      });
+      const ext = await seedExtensionToken(userId, "BROWSER_EXTENSION", "passwords:read");
+      expect((await listPasswords(ext)).status).toBe(200);
+      expect(await blockedRows()).toBe(0);
+    });
+
+    it("allows when the tenant does not require a passkey", async () => {
+      await setTenantPolicy(tenantId, {
+        requirePasskey: false,
+        enabledAt: null,
+        graceDays: null,
+      });
+      const ext = await seedExtensionToken(userId, "BROWSER_EXTENSION", "passwords:read");
+      expect((await listPasswords(ext)).status).toBe(200);
+      expect(await blockedRows()).toBe(0);
+    });
+
+    it("enforces immediately when require_passkey_enabled_at is NULL", async () => {
+      await setTenantPolicy(tenantId, {
+        requirePasskey: true,
+        enabledAt: null,
+        graceDays: GRACE_DAYS,
+      });
+      const ext = await seedExtensionToken(userId, "BROWSER_EXTENSION", "passwords:read");
+      await expectPasskeyRequired(await listPasswords(ext));
     });
   });
 

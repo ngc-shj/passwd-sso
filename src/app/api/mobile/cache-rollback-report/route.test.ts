@@ -45,6 +45,7 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 
 import { POST, ROLLBACK_REJECTION_KIND } from "./route";
+import { PASSKEY_EXEMPTION } from "@/lib/auth/tokens/extension-token-types";
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const TENANT_ID = "22222222-2222-2222-2222-222222222222";
@@ -119,7 +120,7 @@ describe("POST /api/mobile/cache-rollback-report", () => {
     await POST(makeReq());
     expect(mockValidateExtensionToken).toHaveBeenCalledWith(
       expect.anything(),
-      { passkeyExemption: "tamper_report" },
+      { passkeyExemption: PASSKEY_EXEMPTION.TAMPER_REPORT },
     );
   });
 

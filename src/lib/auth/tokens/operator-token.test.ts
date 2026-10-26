@@ -40,6 +40,7 @@ import {
   OPERATOR_TOKEN_PREFIX,
   OPERATOR_TOKEN_LAST_USED_THROTTLE_MS,
 } from "@/lib/constants/auth/operator-token";
+import { PASSKEY_GATE_CREDENTIAL } from "@/lib/auth/policy/passkey-gate";
 
 // A valid 46-char plaintext: op_ + 43 base64url chars
 const VALID_PLAINTEXT = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
@@ -286,7 +287,7 @@ describe("validateOperatorToken — passkey gate (C2)", () => {
       expect.objectContaining({
         userId: "user-1",
         tenantId: "tenant-1",
-        credential: "operator_token",
+        credential: PASSKEY_GATE_CREDENTIAL.OPERATOR_TOKEN,
         credentialId: "token-1",
       }),
     );

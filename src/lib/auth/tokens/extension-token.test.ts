@@ -37,6 +37,13 @@ const { mockPasskeyGateBlocks } = vi.hoisted(() => ({
   mockPasskeyGateBlocks: vi.fn().mockResolvedValue(false),
 }));
 
+// T-1: real extractClientIp by default (delegates to the actual header
+// parser so the write-shape cells exercise the production IP extraction),
+// overridable per-test for the truncation cell.
+const { mockExtractClientIp } = vi.hoisted(() => ({
+  mockExtractClientIp: vi.fn(),
+}));
+
 const { mockTenantFindUnique } = vi.hoisted(() => ({
   mockTenantFindUnique: vi.fn().mockResolvedValue({ extensionTokenIdleTimeoutMinutes: 15 }),
 }));
@@ -88,6 +95,12 @@ vi.mock("@/lib/auth/policy/passkey-gate", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   passkeyGateBlocks: mockPasskeyGateBlocks,
 }));
+vi.mock("@/lib/auth/policy/ip-access", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  // Default: delegate to the real header parser.
+  mockExtractClientIp.mockImplementation(actual.extractClientIp as (...a: unknown[]) => unknown);
+  return { ...actual, extractClientIp: mockExtractClientIp };
+});
 
 import {
   validateExtensionToken,
@@ -97,7 +110,9 @@ import {
   PASSKEY_EXEMPTION,
 } from "./extension-token";
 import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
+import { EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { PASSKEY_GATE_CREDENTIAL } from "@/lib/auth/policy/passkey-gate";
 import { CLIENT_TOKEN_MAX_ACTIVE_FAMILIES } from "@/lib/constants";
 
 const VALID_CNF_JKT = "A".repeat(43);
@@ -685,24 +700,79 @@ describe("validateExtensionToken — passkey gate (C5)", () => {
       expect.objectContaining({
         userId: row.userId,
         tenantId: row.tenantId,
-        credential: "extension_token",
+        credential: PASSKEY_GATE_CREDENTIAL.EXTENSION_TOKEN,
         credentialId: row.id,
       }),
     );
   });
 
-  it.each([
-    ["BROWSER_EXTENSION", browserRow],
-    ["IOS_APP", iosRow],
-  ] as const)("I2 allow: gate allows ⇒ ok, and lastUsedAt IS updated (paired with the deny above) (%s)", async (_label, row) => {
-    mockFindUnique.mockResolvedValue(row);
-    mockValidateTokenDpop.mockResolvedValue(dpopSuccess(row));
+  // T-1: a request carrying IP/UA, for the write-shape cells below. Goes
+  // through the real extractClientIp (TRUST_PROXY_HEADERS=true in setup.ts).
+  const TEST_IP = "203.0.113.5";
+  const TEST_UA = "test-agent/1.0";
+  function makeReqWithIpUa() {
+    return createRequest("GET", "http://localhost/api/passwords", {
+      headers: {
+        Authorization: `Bearer ${"a".repeat(64)}`,
+        DPoP: "valid.dpop.proof",
+        "x-forwarded-for": TEST_IP,
+        "user-agent": TEST_UA,
+      },
+    });
+  }
+
+  it("I2 allow (IOS_APP): writes lastUsedAt + lastUsedIp + lastUsedUserAgent for the row's id", async () => {
+    mockFindUnique.mockResolvedValue(iosRow);
+    mockValidateTokenDpop.mockResolvedValue(dpopSuccess(iosRow));
     mockPasskeyGateBlocks.mockResolvedValue(false);
 
-    const result = await validateExtensionToken(makeReq());
+    const result = await validateExtensionToken(makeReqWithIpUa());
+
+    expect(result.ok).toBe(true);
+    expect(mockExtensionTokenUpdate).toHaveBeenCalledWith({
+      where: { id: iosRow.id },
+      data: {
+        lastUsedAt: expect.any(Date),
+        lastUsedIp: TEST_IP,
+        lastUsedUserAgent: TEST_UA,
+      },
+    });
+  });
+
+  it("I2 allow (BROWSER_EXTENSION): writes only lastUsedAt, never IP/UA (paired with the IOS_APP cell above)", async () => {
+    mockFindUnique.mockResolvedValue(browserRow);
+    mockValidateTokenDpop.mockResolvedValue(dpopSuccess(browserRow));
+    mockPasskeyGateBlocks.mockResolvedValue(false);
+
+    const result = await validateExtensionToken(makeReqWithIpUa());
 
     expect(result.ok).toBe(true);
     expect(mockExtensionTokenUpdate).toHaveBeenCalledTimes(1);
+    const { where, data } = mockExtensionTokenUpdate.mock.calls[0][0] as {
+      where: { id: string };
+      data: Record<string, unknown>;
+    };
+    expect(where).toEqual({ id: browserRow.id });
+    expect(data).toHaveProperty("lastUsedAt", expect.any(Date));
+    expect(data).not.toHaveProperty("lastUsedIp");
+    expect(data).not.toHaveProperty("lastUsedUserAgent");
+  });
+
+  it("I2 allow (IOS_APP): lastUsedIp is truncated to EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH", async () => {
+    const overlong = "9".repeat(EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH + 20);
+    mockExtractClientIp.mockReturnValueOnce(overlong);
+    mockFindUnique.mockResolvedValue(iosRow);
+    mockValidateTokenDpop.mockResolvedValue(dpopSuccess(iosRow));
+    mockPasskeyGateBlocks.mockResolvedValue(false);
+
+    const result = await validateExtensionToken(makeReqWithIpUa());
+
+    expect(result.ok).toBe(true);
+    const { data } = mockExtensionTokenUpdate.mock.calls[0][0] as {
+      data: { lastUsedIp: string };
+    };
+    expect(data.lastUsedIp).toBe(overlong.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH));
+    expect(data.lastUsedIp).toHaveLength(EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH);
   });
 
   it("DPoP failure on IOS_APP maps to EXTENSION_TOKEN_INVALID without calling the gate or writing", async () => {

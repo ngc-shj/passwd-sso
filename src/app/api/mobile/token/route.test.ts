@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextResponse } from "next/server";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -150,9 +151,23 @@ const tokenLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
 // gate's limiter is not reliably call index 0. Only tokenLimiter among this
 // module's limiters opts into the fail-closed option (the gate counts the
 // literal option text, so this comment deliberately avoids it).
-const tokenLimiterCallIndex = mockCreateRateLimiter.mock.calls.findIndex(
-  (args) => (args[0] as { failClosedOnRedisError?: boolean } | undefined)?.failClosedOnRedisError === true,
-);
+// T-8: match on this route's own windowMs/max too — failClosedOnRedisError
+// alone is ambiguous if a second fail-closed limiter is ever added, and
+// must resolve to exactly one call.
+const tokenLimiterMatches = mockCreateRateLimiter.mock.calls.filter((args) => {
+  const opts = args[0] as { windowMs?: number; max?: number; failClosedOnRedisError?: boolean } | undefined;
+  return (
+    opts?.windowMs === 15 * MS_PER_MINUTE &&
+    opts?.max === 10 &&
+    opts?.failClosedOnRedisError === true
+  );
+});
+if (tokenLimiterMatches.length !== 1) {
+  throw new Error(
+    `expected exactly one tokenLimiter factory call matching (windowMs/max/failClosedOnRedisError), found ${tokenLimiterMatches.length} — route.ts's limiter options drifted from this test's match criteria`,
+  );
+}
+const tokenLimiterCallIndex = mockCreateRateLimiter.mock.calls.indexOf(tokenLimiterMatches[0]!);
 const tokenLimiter = mockCreateRateLimiter.mock.results[tokenLimiterCallIndex]!.value as {
   check: typeof mockCheck;
 };

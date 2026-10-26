@@ -61,9 +61,11 @@ pre-existing CI-only gates, not gaps this PR opens.
   count) exemption table, mirroring its existing `UNSCANNED_LITERAL_EXEMPTIONS`. It has one entry
   (this gate, one of each name). An unmeasured name or a count drift still denies. Self-test
   cells cover allow, unmeasured and drift, and the allow cell was red-proved by removing the entry.
-- **C7 runtime:** the gate took about 37 s because ts-morph's `isExported()` consults the type
+- **C7 runtime:** the gate took about 36 s because ts-morph's `isExported()` consults the type
   checker, which builds a Program and resolves every module. It now uses the syntactic
-  `hasExportKeyword()` and takes about 5 s, with an identical result (28/28).
+  `hasExportKeyword()` and takes about 5 s, with an identical result (28/28). Measured on the
+  real repo (1044 files): `isExported` at every export test 35.8 s and 36.3 s; only in the
+  attribution helper 7.8 s; `hasExportKeyword` 5.2 s (code review F3).
   - Cost: an `export { name }` list does not count as exported for attribution. Such a const
     then attributes to its enclosing function, or fails as unattributable; it never passes
     silently.
@@ -82,3 +84,18 @@ pre-existing CI-only gates, not gaps this PR opens.
   - the exemption ignored.
 - **Integration red proofs:** the agent ran two, both red: the gate removed from
   `validateApiKey`, and the audit limiter check deleted.
+
+## Code review round 1 — C7 decisions
+
+- **Relation fields vs delegates (S1):** a token-model delegate may only be used as
+  `<ref>.<member>(...)`; any other reference fails. `x.<handle>.<name>` still passes when
+  `<name>` is not a delegate member, because a row's relation field has the same spelling as a
+  delegate handle (`s.mcpAccessToken.mcpClient` in `vault/delegation`). The member set is closed
+  (filtering and writing method names plus `fields`), and `$extends` is refused so it stays
+  closed.
+- **Residual (S1):** a computed element access with a non-literal key (`tx[name].findUnique(...)`)
+  is not refused. Refusing it would refuse every computed member access in `src`.
+  - Anti-Deferral: the worst case is a new validator written in that spelling escaping C7. The
+    likelihood is low: no such spelling exists today, and the house style names delegates
+    literally. Closing it needs a type-resolved Program, the ~36 s cost the gate was just rid of.
+    Code review sees it.
