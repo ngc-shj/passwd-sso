@@ -1,6 +1,6 @@
 # Code Review: session-api-passkey-gate
 Date: 2026-10-27
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
 Initial review, on top of the Phase 2 self-R-check (fixed in 32b8e376f).
@@ -149,3 +149,30 @@ No Critical or Major findings. The R43 checks found no widening.
 - **T2-6:** the session double matches on the token digest.
 - **Red proofs:** step-up moved back first, step-up result ignored, fail-open on a derivation
   error, count collapsed, raw-token lookup, tenant-scoped count. Each turned its cells red.
+
+## Round 3 (incremental, c729aa68e..caa3f3f7d)
+- **Security:** no findings.
+  - Every delete that proceeds passed step-up.
+  - A foreign or missing id gets the same 404 before any policy read.
+  - Errors fail closed.
+  - `passkeyCount` reaches no response or audit sink.
+- **Functionality:** F3-1 Major. The documented incident workaround omitted that turning
+  `requirePasskey` off is tenant-wide, and that re-enabling restarts the grace period for
+  everyone.
+- **Testing:**
+  - T3-1 Major: the no-reload E2E cell's toast end condition is not ordered with its
+    `framenavigated`/URL detectors.
+  - T3-2 Minor: StrictMode double fetch under `next dev`.
+  - T3-3 Minor: the owed E1 red proof named the unordered detector.
+
+### Round 3 resolution
+- **F3-1:** the policy doc and manual-test step 8 state the tenant-wide suspension and the grace
+  restart. Immediate re-enforcement uses `passkeyGracePeriodDays` = null, which `tenant/policy`
+  accepts as immediate enforcement.
+- **T3-1:** an in-page Navigation API counter in `sessionStorage`.
+  - It must read exactly "0" after the toast; "unsupported" fails.
+  - Allow side: `replaceState` reads "1".
+  - `framenavigated` and the URL are secondary.
+- **T3-2:** the refused wait matches status 403, and the comment notes the dev double fetch.
+- **T3-3:** the owed red proof is restated against the counter.
+- **E1:** still blocked-deferred. The spec type-checks and lints clean.

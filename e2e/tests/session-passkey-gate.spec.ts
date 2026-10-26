@@ -163,18 +163,40 @@ test.describe("Session passkey gate", () => {
     // The un-intercepted cell above is the allow side; here one screen call is
     // refused, so fetchApi's PASSKEY_REQUIRED reaction runs and only the
     // screen-mounted flag keeps it from reloading. The credential list is the
-    // call refused: the card fetches it once on mount (no retry), and its
-    // failure toast shows only after fetchApi returned, i.e. after the
-    // reaction finished — that toast bounds the observation.
+    // call refused: its failure toast shows only after fetchApi returned, i.e.
+    // after the reaction finished. Under `next dev` StrictMode mounts the card
+    // twice, so a second fetch passes through unrefused; the wait below matches
+    // the refused one.
+    //
+    // A reload would be started by hardNavigate's `location.href` assignment,
+    // which fires the Navigation API's navigate event synchronously, before
+    // fetchApi returns and so before the toast. The count is kept in
+    // sessionStorage, which survives a same-origin reload. framenavigated and
+    // page.url() only change once a new document commits, which nothing orders
+    // before the toast, so they are secondary checks here.
+    const counterKey = `e2e-navigate-${randomUUID()}`;
+    await page.addInitScript((key) => {
+      try {
+        const nav = (window as unknown as { navigation?: EventTarget }).navigation;
+        if (!nav) {
+          sessionStorage.setItem(key, "unsupported");
+          return;
+        }
+        if (sessionStorage.getItem(key) === null) sessionStorage.setItem(key, "0");
+        nav.addEventListener("navigate", () => {
+          sessionStorage.setItem(key, String(Number(sessionStorage.getItem(key)) + 1));
+        });
+      } catch {
+        // Documents without sessionStorage (about:blank) are not the app.
+      }
+    }, counterKey);
+    const navigateCount = () =>
+      page.evaluate((key) => sessionStorage.getItem(key), counterKey);
+
     let refusalServed = false;
     let navigationsAfterRefusal = 0;
     page.on("framenavigated", (frame) => {
       if (refusalServed && frame === page.mainFrame()) navigationsAfterRefusal += 1;
-    });
-    page.on("request", (r) => {
-      if (refusalServed && r.isNavigationRequest() && r.frame() === page.mainFrame()) {
-        navigationsAfterRefusal += 1;
-      }
     });
     await page.route(
       (url) => url.pathname === "/api/webauthn/credentials",
@@ -191,16 +213,26 @@ test.describe("Session passkey gate", () => {
     );
 
     const refused = page.waitForResponse(
-      (r) => pathnameOf(r) === "/api/webauthn/credentials" && r.request().method() === "GET",
+      (r) =>
+        pathnameOf(r) === "/api/webauthn/credentials" &&
+        r.request().method() === "GET" &&
+        r.status() === 403,
     );
     await page.goto(DASHBOARD);
-    expect((await refused).status()).toBe(403);
+    await refused;
     const urlAtRefusal = page.url();
 
     await expect(page.getByText(CREDENTIALS_FETCH_ERROR)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("heading", { name: SCREEN_TITLE })).toBeVisible();
+    // A browser-initiated goto fires no navigate event, so exactly 0 is the
+    // expectation; "unsupported" fails here rather than reading as 0.
+    expect(await navigateCount(), "the refusal started a reload").toBe("0");
     expect(navigationsAfterRefusal, "the refusal reloaded the tab").toBe(0);
     expect(page.url()).toBe(urlAtRefusal);
+
+    // Allow side: the listener is live, so the 0 above is not "not listening".
+    await page.evaluate(() => history.replaceState(null, "", location.href));
+    expect(await navigateCount()).toBe("1");
   });
 
   test("a stale sign-in is asked to sign in again before registering", async () => {

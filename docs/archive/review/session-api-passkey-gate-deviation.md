@@ -157,9 +157,12 @@
   - "With the screen up" is the mount itself: no refetch can be triggered without registering,
     which reloads the tab by design. The mount fetch is also exactly the case the layout effect
     exists for.
-  - Not run here (same reasons as Batch 3); it type-checks and lints clean. Its red proof — drop
-    `setPasskeyRequiredScreenMounted(true)` and expect one main-frame navigation — is owed to the
-    first environment that can run the E2E spec.
+  - Not run here (same reasons as Batch 3); it type-checks and lints clean.
+  - Its red proof is owed to the first environment that can run the E2E spec. It reads the
+    in-page navigate counter (code review round 3, T3-1), not `framenavigated`:
+    - drop `setPasskeyRequiredScreenMounted(true)` and expect the counter at least 1;
+    - drop the listener install and expect the allow-side check (exactly 1 after
+      `replaceState`) to fail.
 - **T2-2: the observation bound is the screen's named mount calls.** Each of
   `GET /api/auth/session` (the session provider), `GET /api/webauthn/credentials` and
   `GET /api/user/auth-provider` is awaited by name, and the set of `fetch`/`xhr` calls observed
@@ -186,3 +189,18 @@
     future major version.
   - **Why not here:** the class predates this branch, spans unrelated features, and its fix
     (sequential awaits) belongs in its own change.
+
+## Code review round 3
+- **T3-1: the no-reload E2E cell detects a reload attempt in the page, not by event ordering.**
+  - An init script counts Navigation API `navigate` events in `sessionStorage`, which survives
+    a same-origin reload. `hardNavigate`'s `location.href` assignment fires that event before
+    `fetchApi` returns, so before the toast that ends the observation.
+  - The expected count is exactly 0, because a browser-initiated `goto` fires none. A missing
+    Navigation API reads `"unsupported"` and fails.
+  - An allow-side `replaceState` must read exactly 1.
+  - `framenavigated` and the URL stay as secondary checks.
+- **T3-2:** the refused-response wait matches status 403, since `next dev` StrictMode mounts the
+  card twice and the second fetch passes through.
+- **F3-1:** the incident procedure now states that turning `requirePasskey` off is tenant-wide,
+  and that re-enabling restarts the grace period. Immediate re-enforcement needs
+  `passkeyGracePeriodDays` set to null first.
