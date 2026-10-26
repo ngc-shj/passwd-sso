@@ -276,3 +276,71 @@ precondition of D5.
   RS2 OK; RS3 OK.
 - **Testing:** RT2 T-R3-6, T-R3-7; RT3 T-R3-1, T-R3-2; RT5 T-R3-3, T-R3-5;
   RT8 T-R3-1, T-R3-4; RT10 T-R3-8.
+
+## Round 4 (plan revision 4)
+
+### Functionality (N-R4-1 Major; N-R4-2–N-R4-6 Minor)
+- N-R3-1–N-R3-7 are resolved; N-R3-8 is not.
+- N-R4-1 Major: `none` cannot be observed. With the database strategy, Auth.js answers a
+  swallowed adapter fault with 200-`null`, the same as a dead token, and the negative cache
+  stores no reason. So a transient fault still passes through to reauth's `auth()`.
+- Minor:
+  - N-R4-2: the deactivated member, the `resolveUserTenantId` throw, the outer catch and a
+    missing `userId` are unclassified.
+  - N-R4-3: the page proxy still redirects degraded sessions to the passkey page.
+  - N-R4-4: D5's input is unpinned once D7 sets `passkeyBlocked:false`.
+  - N-R4-5: the pollers' predicate differs from `VaultProvider`'s.
+  - N-R4-6: after registration the client session is not refreshed.
+
+### Security (S-R4-1, S-R4-2 Minor)
+- S-R3-2 is resolved, and the `hasPasskey` writer set is complete.
+- S-R4-1 (= N-R4-1): the reason split is unobservable.
+- S-R4-2 (= N-R4-4): `passkeyBlocked:false` on a degraded bundle is fail-open in shape for any
+  server consumer; D5 must not read it.
+- Checked:
+  - the degraded state cannot be used to escape the requirement;
+  - every own-gate route re-adjudicates;
+  - the Redis bound is correct per the refusal-arm rule;
+  - PRF has no security consumer.
+
+### Testing (T-R4-1–T-R4-4 Major; T-R4-5–T-R4-7 Minor)
+- Major:
+  - T-R4-1: about 9 `valid:false` sources against 3 reason cells; the deactivated member and the
+    negative cache are unspecified.
+  - T-R4-2: the degraded flag is tested only at its ends, through the fetch path and the
+    stripping `SessionInfoSchema`.
+  - T-R4-3: the Redis bound cannot be told from the in-memory fallback within a single process.
+  - T-R4-4: page-proxy degraded and `VaultProvider` degraded have no cells.
+- Minor:
+  - T-R4-5: a stale path-based `fetchApi` cell.
+  - T-R4-6: the own-gate AST predicate accepts `derivePasskeyState` alone and has no red proof.
+  - T-R4-7: the own-gate pass cell is satisfiable only on `mobile/authorize`.
+
+### Revision 5
+- **N-R4-1/S-R4-1/N-R4-2/T-R4-1:** the invalid-reason split is dropped.
+  - On API_DEFAULT, the rule keys on whether the route reads the session.
+  - A literal `API_DEFAULT_SESSION_READERS` list (today the two reauth routes) refuses every
+    invalid session with 401; every other API_DEFAULT route passes through.
+  - The handler scan pins the list to exactly the API_DEFAULT readers that are neither Tier A
+    nor own-gate.
+  - One cell per `valid:false` source on a reader, plus a stale-cookie control on a non-reader.
+- **S-R4-2/N-R4-4:**
+  - `passkeyBlocked` is display-only.
+  - Server decisions use the raw fields or `derivePasskeyState`.
+  - New cell: degraded plus a stale sign-in gives `SESSION_STEP_UP_REQUIRED`.
+- **N-R4-3:** the page proxy passes degraded navigations through to the layouts' retry state.
+- **N-R4-5:** the pollers use blocked-or-degraded.
+- **N-R4-6:** `onRegistered` awaits `update()`, then `hardNavigate`.
+- **T-R4-2:** the degraded flag is tested end to end through the real `getSessionInfo` and
+  `SessionInfoSchema`.
+- **T-R4-3:** a real-Redis cell with two gate instances and one row.
+- **T-R4-4:** page-proxy and `VaultProvider` degraded cells.
+- **T-R4-5:** the flag-based `fetchApi` cells.
+- **T-R4-6:** own-gate requires a `passkeyEnforcementBlocks` call; red proofs remove or alias it.
+- **T-R4-7:** `mobile/authorize` passes and `mcp/authorize` gives 401.
+
+## Recurring Issue Check (round 4)
+- **Functionality:** R13 N-R4-3; R43 N-R4-4; R3 N-R4-5; R48 N-R4-1.
+- **Security:** R43 own-gate ambiguous pass (covered) and Tier B while degraded (S-R4-2);
+  RS2 OK.
+- **Testing:** RT2 T-R4-5; RT5 T-R4-2, T-R4-3; RT7 T-R4-6; RT8 T-R4-1.
