@@ -133,7 +133,7 @@ route handlers own application-layer concerns.
 
 **Stricter route-level guard exception**: `src/app/api/vault/admin-reset/route.ts` keeps its post-baseline `if (!getAppOrigin()) return 500` check. The proxy CSRF gate (`assertOrigin`) already fails closed with a **403** when neither `APP_URL` nor `AUTH_URL` is set — there is no Host-header fallback anywhere. admin-reset goes further by returning a **500** in that case, surfacing it as a server misconfiguration (the endpoint must never run without an explicitly configured origin) rather than a generic 403.
 
-**Internal fetch from proxy → route**: `src/proxy.ts:153` fires `void fetch(...)` to `/api/internal/audit-emit` for passkey enforcement audit emission. The fetch sets `Origin: <self-origin>` explicitly (Node fetch does not auto-set Origin); without it the new CSRF gate would 403 the proxy's own self-call. Add the same pattern if you introduce another internal fetch in the proxy.
+**Internal fetch from proxy → route**: `src/lib/proxy/page-route.ts` fires `void fetch(...)` to `/api/internal/audit-emit` for passkey enforcement audit emission. The fetch sets `Origin: <self-origin>` explicitly (Node fetch does not auto-set Origin); without it the new CSRF gate would 403 the proxy's own self-call. Add the same pattern if you introduce another internal fetch in the proxy.
 
 **Test mock implication**: existing route tests that mock `@/lib/auth/session/csrf` for routes in the REMOVE list have unused mocks after this refactor — remove them when convenient. Tests that asserted "cross-origin → 403" at the route level have been deleted; the same behavior is now tested in `src/__tests__/proxy.test.ts` at the orchestrator level.
 
