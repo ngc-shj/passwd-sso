@@ -172,15 +172,19 @@ export function VaultLockScreen() {
     };
   }, [unlockWithStoredPrf, t, tw]);
 
-  // Check if user has PRF-capable passkeys
+  // Check if user has a passkey that can unlock now: PRF-capable AND holding
+  // the server-side wrapping. A passkey registered while the vault was locked,
+  // or one whose wrapping a key rotation cleared, is PRF-capable but cannot
+  // unlock until it is re-bootstrapped.
   useEffect(() => {
     let cancelled = false;
     const prfCheck = isWebAuthnSupported()
       ? fetchApi(API_PATH.WEBAUTHN_CREDENTIALS)
           .then(async (res) => {
             if (res.ok) {
-              const creds: Array<{ prfSupported: boolean }> = await res.json();
-              setHasPrfPasskeys(creds.some((c) => c.prfSupported));
+              const creds: Array<{ prfSupported: boolean; prfWrappingPresent: boolean }> =
+                await res.json();
+              setHasPrfPasskeys(creds.some((c) => c.prfSupported && c.prfWrappingPresent));
             }
           })
           .catch(() => {})

@@ -160,7 +160,11 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
         action: "WEBAUTHN_CREDENTIAL_DELETE",
         userId: "user-1",
         targetId: "cred-1",
-        metadata: { credentialId: "cred-id-abc123" },
+        metadata: {
+          credentialId: "cred-id-abc123",
+          cacheInvalidatedSessions: 0,
+          cacheTombstoneFailures: 0,
+        },
       }),
     );
   });
@@ -185,8 +189,32 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
   });
 
+  // A Redis tombstone failure does not throw: invalidateUserSessionsCache
+  // returns it as a count, which the delete audit row records.
+  it("records the tombstone failure count in the delete audit row", async () => {
+    mockInvalidateUserSessionsCache.mockResolvedValue({
+      totalSessions: 3,
+      cacheTombstoneFailures: 2,
+    });
+
+    const req = createRequest("DELETE", ROUTE_URL);
+    const { status } = await parseResponse(await DELETE(req, CTX));
+
+    expect(status).toBe(200);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "WEBAUTHN_CREDENTIAL_DELETE",
+        metadata: {
+          credentialId: "cred-id-abc123",
+          cacheInvalidatedSessions: 3,
+          cacheTombstoneFailures: 2,
+        },
+      }),
+    );
+  });
+
   it("logs and does not fail the response when cache invalidation throws", async () => {
-    mockInvalidateUserSessionsCache.mockRejectedValue(new Error("redis down"));
+    mockInvalidateUserSessionsCache.mockRejectedValue(new Error("session read failed"));
 
     const req = createRequest("DELETE", ROUTE_URL);
     const { status, json } = await parseResponse(await DELETE(req, CTX));
@@ -196,6 +224,10 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     expect(status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockLoggerError).toHaveBeenCalled();
+    // Nothing was counted, so the audit row carries only the credential.
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: { credentialId: "cred-id-abc123" } }),
+    );
   });
 });
 

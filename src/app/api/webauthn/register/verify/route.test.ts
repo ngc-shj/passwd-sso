@@ -1121,7 +1121,7 @@ describe("POST /api/webauthn/register/verify", () => {
 
     it("logs and does not fail the response when cache invalidation throws", async () => {
       mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
-      mockInvalidateUserSessionsCache.mockRejectedValue(new Error("redis down"));
+      mockInvalidateUserSessionsCache.mockRejectedValue(new Error("session read failed"));
 
       const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
       const res = await POST(req);
@@ -1129,6 +1129,32 @@ describe("POST /api/webauthn/register/verify", () => {
       // The credential already committed — a cache-invalidation failure
       // must not turn a successful registration into an error response.
       expect(res.status).toBe(201);
+      // Nothing was counted, so the audit row carries no invalidation fields.
+      expect(mockLogAudit.mock.calls[0][0].metadata).not.toHaveProperty("cacheTombstoneFailures");
+    });
+
+    // A Redis tombstone failure does not throw: invalidateUserSessionsCache
+    // returns it as a count, which the registration audit row records.
+    it("records the tombstone failure count in the registration audit row", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+      mockInvalidateUserSessionsCache.mockResolvedValue({
+        totalSessions: 3,
+        cacheTombstoneFailures: 2,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+
+      expect(res.status).toBe(201);
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "WEBAUTHN_CREDENTIAL_REGISTER",
+          metadata: expect.objectContaining({
+            cacheInvalidatedSessions: 3,
+            cacheTombstoneFailures: 2,
+          }),
+        }),
+      );
     });
   });
 });

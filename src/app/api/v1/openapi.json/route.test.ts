@@ -48,18 +48,23 @@ vi.mock("@/lib/logger", () => ({
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
+// The audit limiter falls back to its in-memory counters without Redis, so the
+// dedup cells below run through the real limiter.
+vi.mock("@/lib/redis", () => ({
+  getRedis: () => null,
+}));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
 }));
 
 import { GET } from "./route";
-import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
+import { _resetSessionPasskeyAuditForTests } from "@/lib/proxy/session-passkey-gate";
 
 describe("GET /api/v1/openapi.json", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-    _resetPasskeyAuditForTests();
+    _resetSessionPasskeyAuditForTests();
     // Default: public mode (no auth required). Empty string is not "false",
     // so the route treats it as public.
     vi.stubEnv("OPENAPI_PUBLIC", "");
@@ -140,7 +145,7 @@ describe("GET /api/v1/openapi.json", () => {
 
   // #959 S7: openapi.json is an early-return route (never reaches the proxy's
   // session passkey gate), so a session result re-derives the block itself.
-  it("returns 403 PASSKEY_REQUIRED when a blocked member authenticates via session", async () => {
+  function blockedSessionMember(): void {
     vi.stubEnv("OPENAPI_PUBLIC", "false");
     mockAuthOrToken.mockResolvedValue({ type: "session", userId: "user-1" });
     mockDerivePasskeyState.mockResolvedValue({
@@ -149,19 +154,44 @@ describe("GET /api/v1/openapi.json", () => {
       requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
       passkeyGracePeriodDays: 7,
     });
+  }
+
+  it("returns 403 PASSKEY_REQUIRED (no-store) when a blocked member authenticates via session", async () => {
+    blockedSessionMember();
     const req = createRequest("GET", "http://localhost:3000/api/v1/openapi.json");
     const res = await GET(req);
     expect(res.status).toBe(403);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     const json = await res.json();
     expect(json.error).toBe("PASSKEY_REQUIRED");
     expect(mockBuildOpenApiSpec).not.toHaveBeenCalled();
-    // Audited once, under the session's resolved tenant.
+  });
+
+  it("audits a blocked session in the API gate's blockedPath shape, under the resolved tenant", async () => {
+    blockedSessionMember();
+    await GET(createRequest("GET", "http://localhost:3000/api/v1/openapi.json"));
     expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
     expect(mockLogAuditAsync.mock.calls[0][0]).toMatchObject({
       action: "PASSKEY_ENFORCEMENT_BLOCKED",
+      userId: "user-1",
       tenantId: "tenant-1",
-      metadata: { blockedPath: "/api/v1/openapi.json" },
+      metadata: { blockedPath: "GET /api/v1" },
     });
+  });
+
+  it("writes one audit row per user and blockedPath per window through the session-gate limiter", async () => {
+    blockedSessionMember();
+    const first = await GET(createRequest("GET", "http://localhost:3000/api/v1/openapi.json"));
+    const second = await GET(createRequest("GET", "http://localhost:3000/api/v1/openapi.json"));
+    // Every request is refused; only the durable write is deduped.
+    expect(first.status).toBe(403);
+    expect(second.status).toBe(403);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "user-2" });
+    await GET(createRequest("GET", "http://localhost:3000/api/v1/openapi.json"));
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(2);
+    expect(mockLogAuditAsync.mock.calls[1][0]).toMatchObject({ userId: "user-2" });
   });
 
   it("returns spec for a session result when the tenant's passkey requirement does not block", async () => {

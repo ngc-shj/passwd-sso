@@ -7,6 +7,7 @@ import { getAdminTeamMemberships } from "@/lib/auth/access/team-auth";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { SessionStateUnavailable } from "@/components/auth/session-state-unavailable";
 import { passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";
+import { PASSKEY_PAGE_PATH } from "@/lib/constants/auth/page-path";
 import { pickMessages } from "@/i18n/pick-messages";
 import { NS_ADMIN_ALL } from "@/i18n/namespace-groups";
 
@@ -39,7 +40,7 @@ export default async function AdminLayout({
     );
   }
   if (passkeyEnforcementBlocks(session.user)) {
-    return redirect({ href: "/dashboard/settings/auth/passkey", locale });
+    return redirect({ href: PASSKEY_PAGE_PATH, locale });
   }
 
   const [tenantRole, adminTeams] = await Promise.all([

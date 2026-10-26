@@ -1,6 +1,7 @@
 import { clientLogWarn, CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getLocaleFromPathname, stripLocalePrefix } from "@/i18n/locale-utils";
+import { PASSKEY_PAGE_PATH } from "@/lib/constants/auth/page-path";
 
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -89,7 +90,6 @@ export function currentAppPath(): string {
 // reloaded once. The once-per-load latch is what stops a loop if the reload
 // lands on something that issues another gated call.
 
-const PASSKEY_PAGE_PATH = "/dashboard/settings/auth/passkey";
 const PASSKEY_REACTION_SCOPES = ["/dashboard", "/admin"] as const;
 
 let passkeyRequiredScreenMounted = false;

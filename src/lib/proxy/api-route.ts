@@ -12,6 +12,7 @@ import { shouldEnforceCsrf, assertSessionCsrf } from "./csrf-gate";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 import { errorResponse } from "@/lib/http/api-response";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { passkeyEnforcementBlocks } from "../auth/policy/passkey-enforcement";
 import {
@@ -202,5 +203,5 @@ async function gateSession(
 }
 
 function noStoreError(code: ApiErrorCode): NextResponse {
-  return errorResponse(code, undefined, undefined, { "Cache-Control": "no-store" });
+  return errorResponse(code, undefined, undefined, NO_STORE_HEADERS);
 }

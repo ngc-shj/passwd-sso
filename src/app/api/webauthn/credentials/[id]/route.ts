@@ -61,10 +61,13 @@ async function handleDELETE(
   // F5/F19 (#959): every writer of `hasPasskey` invalidates the user's cached
   // sessions (cross-tenant — passkeys are user-global), so deleting the last
   // passkey after grace is not still served `hasPasskey: true` from cache.
-  // The delete has already committed; a cache-invalidation failure is logged
-  // and does not fail this response (entries still expire on TTL).
+  // The delete has already committed, so neither failure mode fails this
+  // response (entries still expire on TTL): a Redis tombstone failure does not
+  // throw and is counted in the audit row's `cacheTombstoneFailures`; a thrown
+  // error (the session read) is logged.
+  let cacheInvalidation: { totalSessions: number; cacheTombstoneFailures: number } | null = null;
   try {
-    await invalidateUserSessionsCache(userId);
+    cacheInvalidation = await invalidateUserSessionsCache(userId);
   } catch (err) {
     getLogger().error(
       { err, userId, _logType: "webauthn.credential_delete_cache_invalidation_failed" },
@@ -77,7 +80,15 @@ async function handleDELETE(
     action: AUDIT_ACTION.WEBAUTHN_CREDENTIAL_DELETE,
     targetType: AUDIT_TARGET_TYPE.WEBAUTHN_CREDENTIAL,
     targetId: id,
-    metadata: { credentialId: existing.credentialId },
+    metadata: {
+      credentialId: existing.credentialId,
+      ...(cacheInvalidation
+        ? {
+            cacheInvalidatedSessions: cacheInvalidation.totalSessions,
+            cacheTombstoneFailures: cacheInvalidation.cacheTombstoneFailures,
+          }
+        : {}),
+    },
   });
 
   return NextResponse.json({ success: true });

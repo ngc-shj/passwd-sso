@@ -317,10 +317,13 @@ async function handlePOST(req: NextRequest) {
   // F5/F19 (#959): every writer of `hasPasskey` invalidates the user's cached
   // sessions (cross-tenant — passkeys are user-global) so the layout, page
   // proxy and API gate stop serving a stale `hasPasskey: false` snapshot. The
-  // credential row has already committed; a cache-invalidation failure is
-  // logged and does not fail this response (entries still expire on TTL).
+  // credential row has already committed, so neither failure mode fails this
+  // response (entries still expire on TTL): a Redis tombstone failure does not
+  // throw and is counted in the audit row's `cacheTombstoneFailures`; a thrown
+  // error (the session read) is logged.
+  let cacheInvalidation: { totalSessions: number; cacheTombstoneFailures: number } | null = null;
   try {
-    await invalidateUserSessionsCache(userId);
+    cacheInvalidation = await invalidateUserSessionsCache(userId);
   } catch (err) {
     getLogger().error(
       { err, userId, _logType: "webauthn.register_verify_cache_invalidation_failed" },
@@ -341,6 +344,12 @@ async function handlePOST(req: NextRequest) {
       discoverable,
       minPinLength,
       largeBlobSupported,
+      ...(cacheInvalidation
+        ? {
+            cacheInvalidatedSessions: cacheInvalidation.totalSessions,
+            cacheTombstoneFailures: cacheInvalidation.cacheTombstoneFailures,
+          }
+        : {}),
     },
   });
 

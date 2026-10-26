@@ -143,14 +143,23 @@ describe("POST /api/webauthn/authenticate/options", () => {
   // ── credentialId targeting ─────────────────────────────────
 
   describe("credentialId targeting", () => {
-    it("filters by prfSupported when no credentialId provided", async () => {
+    // The untargeted (unlock) query: PRF-capable AND holding the wrapping. A
+    // PRF credential registered while the vault was locked has no wrapping
+    // and cannot unlock yet.
+    const UNLOCK_WHERE = {
+      userId: "user-1",
+      prfSupported: true,
+      prfEncryptedSecretKey: { not: null },
+    };
+
+    it("offers only PRF credentials that hold the wrapping when no credentialId provided", async () => {
       const req = createRequest("POST", ROUTE_URL);
       const { status } = await parseResponse(await POST(req));
 
       expect(status).toBe(200);
       expect(mockPrismaFindMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId: "user-1", prfSupported: true },
+          where: UNLOCK_WHERE,
         }),
       );
     });
@@ -177,7 +186,7 @@ describe("POST /api/webauthn/authenticate/options", () => {
 
       expect(mockPrismaFindMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId: "user-1", prfSupported: true },
+          where: UNLOCK_WHERE,
         }),
       );
     });
@@ -190,7 +199,7 @@ describe("POST /api/webauthn/authenticate/options", () => {
 
       expect(mockPrismaFindMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId: "user-1", prfSupported: true },
+          where: UNLOCK_WHERE,
         }),
       );
     });
@@ -218,7 +227,7 @@ describe("POST /api/webauthn/authenticate/options", () => {
 
       expect(mockPrismaFindMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId: "user-1", prfSupported: true },
+          where: UNLOCK_WHERE,
         }),
       );
     });

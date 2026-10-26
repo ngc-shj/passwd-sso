@@ -20,9 +20,14 @@
     - a failure gives a bare 401 `UNAUTHORIZED`;
     - scope is checked before client kind;
     - a non-`IOS_APP` token gives 401.
-- **`v1/openapi.json` audits a blocked session with `blockedPath: "/api/v1/openapi.json"`.** This
-  follows the sibling own-gate routes (`mobile/authorize`, `mcp/authorize`), not the proxy's
-  `"<METHOD> /api/<routeKey>"` shape. The proxy shape is reserved for rows the API gate writes.
+- **`v1/openapi.json` audits a blocked session through the API gate's own writer.** It calls
+  `auditSessionPasskeyBlock` with `blockedPath("GET", "/api/v1/openapi.json")`, so the row
+  reads `"GET /api/v1"` and is deduped by the same Redis-shared limiter as the proxy's rows.
+  - The batch first followed the sibling own-gate routes (`mobile/authorize`, `mcp/authorize`):
+    a raw `"/api/v1/openapi.json"` path deduped by the per-process map.
+  - Changed after the Phase 2 self-check: this is a session-request refusal, the class the API
+    gate audits, so it takes that class's shape and limiter. The siblings refuse at a
+    credential-mint point and keep theirs.
 
 ## Batch 2 — client
 - **`LOADING` → `LOCKED` happens during render, not in the status effect.**

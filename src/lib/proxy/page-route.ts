@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { routing } from "../../i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "../../i18n/locale-utils";
 import { API_PATH } from "../constants";
+import { PASSKEY_PAGE_PATH } from "../constants/auth/page-path";
 import { AUDIT_ACTION } from "../constants/audit/audit";
 import { applySecurityHeaders } from "./security-headers";
 import { buildCspHeader } from "../security/csp-builder";
@@ -59,7 +60,7 @@ const intlMiddleware = createIntlMiddleware(routing);
 // `/dashboard/settings/auth/passkey-recovery` would otherwise silently
 // inherit the bypass.
 const PASSKEY_EXEMPT_PATHS: ReadonlySet<string> = new Set([
-  "/dashboard/settings/auth/passkey",
+  PASSKEY_PAGE_PATH,
 ]);
 
 function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
@@ -217,7 +218,7 @@ export async function handlePageRoute(
     ) {
       if (isPasskeyGracePeriodExpired(session.requirePasskeyEnabledAt, session.passkeyGracePeriodDays)) {
         const securityUrl = request.nextUrl.clone();
-        securityUrl.pathname = `/${locale}/dashboard/settings/auth/passkey`;
+        securityUrl.pathname = `/${locale}${PASSKEY_PAGE_PATH}`;
 
         // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
         const userId = session.userId ?? "";

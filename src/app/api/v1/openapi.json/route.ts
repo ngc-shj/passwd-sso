@@ -5,16 +5,13 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION } from "@/lib/constants";
 import {
   derivePasskeyState,
   passkeyEnforcementBlocks,
-  recordPasskeyAuditEmit,
 } from "@/lib/auth/policy/passkey-enforcement";
-
-const OPENAPI_PASSKEY_BLOCKED_PATH = "/api/v1/openapi.json";
+import { auditSessionPasskeyBlock, blockedPath } from "@/lib/proxy/session-passkey-gate";
 
 // GET /api/v1/openapi.json — OpenAPI 3.1 specification
 async function handleGET(req: NextRequest) {
@@ -40,15 +37,15 @@ async function handleGET(req: NextRequest) {
       const tenantId = await withUserTenantRls(result.userId, async (tid) => tid);
       const pkState = await derivePasskeyState({ userId: result.userId, tenantId });
       if (passkeyEnforcementBlocks(pkState)) {
-        if (recordPasskeyAuditEmit(result.userId, OPENAPI_PASSKEY_BLOCKED_PATH, Date.now())) {
-          await logAuditAsync({
-            ...personalAuditBase(req, result.userId),
-            tenantId,
-            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-            metadata: { blockedPath: OPENAPI_PASSKEY_BLOCKED_PATH },
-          });
-        }
-        return errorResponse(API_ERROR.PASSKEY_REQUIRED, undefined, undefined, { "Cache-Control": "no-store" });
+        // Same row, shape and Redis-shared limiter as the proxy's session
+        // gate: the session-request audit is one class whichever side refuses.
+        await auditSessionPasskeyBlock({
+          req,
+          userId: result.userId,
+          tenantId,
+          blockedPath: blockedPath("GET", "/api/v1/openapi.json"),
+        });
+        return errorResponse(API_ERROR.PASSKEY_REQUIRED, undefined, undefined, NO_STORE_HEADERS);
       }
     }
   }
