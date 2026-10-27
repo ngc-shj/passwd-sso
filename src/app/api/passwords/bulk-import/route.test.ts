@@ -12,6 +12,7 @@ const {
   mockRateLimiterCheck,
   mockLogAudit,
   mockQueryRaw,
+  mockExecuteRaw,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -27,6 +28,8 @@ const {
   // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE`
   // — default matches makeEntry()'s keyVersion (1) so the guard passes.
   mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
+  // SAVEPOINT / ROLLBACK TO / RELEASE around each entry (attemptInSavepoint).
+  mockExecuteRaw: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -38,6 +41,7 @@ vi.mock("@/lib/prisma", () => ({
     user: mockPrismaUser,
     auditLog: { create: mockAuditCreate },
     $queryRaw: mockQueryRaw,
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -90,6 +94,7 @@ describe("POST /api/passwords/bulk-import", () => {
       Promise.resolve({ id: data.id ?? "generated-id" }),
     );
     mockQueryRaw.mockResolvedValue([{ key_version: 1 }]);
+    mockExecuteRaw.mockResolvedValue(0);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -157,6 +162,67 @@ describe("POST /api/passwords/bulk-import", () => {
     expect(res.status).toBe(201);
     expect(json.importedCount).toBe(2);
     expect(json.failedCount).toBe(1);
+  });
+
+  it("rolls a DB-rejected entry back to its own savepoint and reports only the entries around it", async () => {
+    const order: string[] = [];
+    mockExecuteRaw.mockImplementation(async (strings: TemplateStringsArray) => {
+      order.push(strings.join(""));
+      return 0;
+    });
+    mockPrismaPasswordEntry.create.mockImplementation(({ data }: { data: { id: string } }) => {
+      order.push(`create ${data.id}`);
+      return data.id.endsWith("2")
+        ? Promise.reject(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }))
+        : Promise.resolve({ id: data.id });
+    });
+
+    const entries = [
+      makeEntry("550e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("550e8400-e29b-41d4-a716-000000000002"),
+      makeEntry("550e8400-e29b-41d4-a716-000000000003"),
+    ];
+    const res = await POST(createRequest("POST", URL, { body: { entries } }));
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ success: true, importedCount: 2, failedCount: 1 });
+    expect(order).toEqual([
+      "SAVEPOINT attempt_in_savepoint",
+      "create 550e8400-e29b-41d4-a716-000000000001",
+      "RELEASE SAVEPOINT attempt_in_savepoint",
+      "SAVEPOINT attempt_in_savepoint",
+      "create 550e8400-e29b-41d4-a716-000000000002",
+      "ROLLBACK TO SAVEPOINT attempt_in_savepoint",
+      "RELEASE SAVEPOINT attempt_in_savepoint",
+      "SAVEPOINT attempt_in_savepoint",
+      "create 550e8400-e29b-41d4-a716-000000000003",
+      "RELEASE SAVEPOINT attempt_in_savepoint",
+    ]);
+    const createdTargets = mockLogAudit.mock.calls
+      .map(([e]) => e as { action: string; targetId?: string })
+      .filter((e) => e.action === AUDIT_ACTION.ENTRY_CREATE)
+      .map((e) => e.targetId);
+    expect(createdTargets).toEqual([
+      "550e8400-e29b-41d4-a716-000000000001",
+      "550e8400-e29b-41d4-a716-000000000003",
+    ]);
+  });
+
+  it("fails the whole import instead of reporting counts when a savepoint rollback fails", async () => {
+    mockExecuteRaw.mockImplementation(async (strings: TemplateStringsArray) => {
+      if (strings.join("").startsWith("ROLLBACK TO")) throw new Error("connection lost");
+      return 0;
+    });
+    mockPrismaPasswordEntry.create.mockRejectedValueOnce(new Error("Unique constraint failed"));
+
+    const entries = [
+      makeEntry("550e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("550e8400-e29b-41d4-a716-000000000002"),
+    ];
+    await expect(POST(createRequest("POST", URL, { body: { entries } }))).rejects.toThrow(
+      "connection lost",
+    );
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   // RT7/F2: a stale keyVersion means the whole import is racing a vault

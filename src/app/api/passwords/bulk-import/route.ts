@@ -9,6 +9,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { rateLimited, unauthorized, errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
+import { attemptInSavepoint } from "@/lib/prisma/savepoint";
 
 import { parseBody } from "@/lib/http/parse-body";
 import { bulkImportSchema } from "@/lib/validations";
@@ -48,19 +49,26 @@ async function handlePOST(req: NextRequest) {
   try {
     await withUserTenantRls(userId, async (tenantId) => {
       for (const entryData of entries) {
-        try {
-          const res = await createPersonalPasswordEntry(prisma, userId, tenantId, entryData);
-          if (res.ok) createdIds.push(res.entry.id);
+        // Each entry under its own savepoint: a statement the database
+        // rejects (e.g. a duplicate client-supplied id) would otherwise abort
+        // the whole transaction and turn the final COMMIT into a silent
+        // ROLLBACK of every entry already counted as created.
+        const attempt = await attemptInSavepoint(prisma, () =>
+          createPersonalPasswordEntry(prisma, userId, tenantId, entryData),
+        );
+        if (attempt.ok) {
+          if (attempt.value.ok) createdIds.push(attempt.value.entry.id);
           else failedCount++;
-        } catch (e) {
-          // A stale keyVersion means the whole import is racing a rotation —
-          // rethrow out of the tx so it fully rolls back (no partial
-          // undecryptable rows) instead of being counted as a per-entry
-          // failure. Single-tx + first-guard FOR SHARE means mid-import
-          // rotation cannot interleave, so stale-at-start is the only case.
-          if (e instanceof KeyVersionMismatchError) throw e;
-          failedCount++;
+          continue;
         }
+        // A stale keyVersion means the whole import is racing a rotation —
+        // rethrow out of the tx so it fully rolls back (no partial
+        // undecryptable rows) instead of being counted as a per-entry
+        // failure. Every persisted entry's guard FOR SHARE is held until
+        // commit; a rolled-back entry releases its own, but it wrote nothing
+        // and the next entry's guard re-reads the version under a fresh lock.
+        if (attempt.error instanceof KeyVersionMismatchError) throw attempt.error;
+        failedCount++;
       }
     });
   } catch (e) {

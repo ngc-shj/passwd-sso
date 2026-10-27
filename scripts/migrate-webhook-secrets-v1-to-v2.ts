@@ -24,6 +24,7 @@ import {
 import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
 import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { attemptInSavepoint } from "@/lib/prisma/savepoint";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { createPool, createPrismaClient, registerBypassNoticeSink, stderrBypassNoticeSink } from "@/lib/db/pool-factory";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -142,7 +143,10 @@ async function migrateInTx(
   });
 
   for (const row of teamRows) {
-    try {
+    // Under a savepoint: a rejected UPDATE would otherwise abort the
+    // migration transaction, and its COMMIT would silently roll back every
+    // row already counted as migrated.
+    const attempt = await attemptInSavepoint(tx, async () => {
       const plaintext = decryptV1NoAad({ ...row, teamId: row.teamId });
       const currentVersion = getCurrentMasterKeyVersion();
       const aad = buildWebhookSecretAAD({
@@ -167,9 +171,11 @@ async function migrateInTx(
           },
         });
       }
+    });
+    if (attempt.ok) {
       stats.teamRowsMigrated++;
-    } catch (err) {
-      console.error(`Failed to migrate TeamWebhook ${row.id}:`, err);
+    } else {
+      console.error(`Failed to migrate TeamWebhook ${row.id}:`, attempt.error);
       stats.teamRowsSkipped++;
     }
   }
@@ -188,7 +194,7 @@ async function migrateInTx(
   });
 
   for (const row of tenantRows) {
-    try {
+    const attempt = await attemptInSavepoint(tx, async () => {
       const plaintext = decryptV1NoAad({ ...row, teamId: null });
       const currentVersion = getCurrentMasterKeyVersion();
       const aad = buildWebhookSecretAAD({
@@ -212,9 +218,11 @@ async function migrateInTx(
           },
         });
       }
+    });
+    if (attempt.ok) {
       stats.tenantRowsMigrated++;
-    } catch (err) {
-      console.error(`Failed to migrate TenantWebhook ${row.id}:`, err);
+    } else {
+      console.error(`Failed to migrate TenantWebhook ${row.id}:`, attempt.error);
       stats.tenantRowsSkipped++;
     }
   }
