@@ -8,7 +8,10 @@
  * matched import specifiers by spelling and so never saw the reference. The
  * receiver cells (dynamic import, destructured or indexed namespace, a
  * namespace passed as a value) were green on the second, which recognised a
- * reference by its receiver; the gate now anchors on the member name.
+ * reference by its receiver; the gate now anchors on the member name. The
+ * quoted / computed `scope` keys and the params-const and BothScopes cells were
+ * green on the third, which read keys by spelling and accepted any object
+ * literal holding the action.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -538,6 +541,133 @@ export const actionFor = (key: keyof typeof AUDIT_ACTION) => AUDIT_ACTION[key];
     const { exitCode, out } = runGuard();
     expect(exitCode, out).toBe(0);
     expect(out).toContain("writers=1");
+  });
+
+  it.each([
+    ['"scope"', `"scope"`],
+    ['["scope"]', `["scope"]`],
+    ["[`scope`]", "[`scope`]"],
+  ])("FAILS when %s: AUDIT_SCOPE.PERSONAL overrides the tenant base", (_label, key) => {
+    write(
+      "src/app/api/a/route.ts",
+      writer(`    ...tenantAuditBase(req, userId, tenantId),
+    action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+    ${key}: AUDIT_SCOPE.PERSONAL,`),
+    );
+    expectFail(/route\.ts:\d+ {2}writes PASSKEY_ENFORCEMENT_BLOCKED with scope PERSONAL/);
+  });
+
+  it("FAILS for a computed key the file cannot name after the tenant base", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `${IMPORTS}
+export async function refuse(req: Request, userId: string, tenantId: string, k: string) {
+  await logAuditAsync({
+    ...tenantAuditBase(req, userId, tenantId),
+    action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+    [k]: AUDIT_SCOPE.PERSONAL,
+  });
+}
+`,
+    );
+    expectFail(/route\.ts:\d+ {2}writes PASSKEY_ENFORCEMENT_BLOCKED with scope unresolved \(computed key\)/);
+  });
+
+  it('FAILS when "tenantId" overrides the one given to tenantAuditBase', () => {
+    write(
+      "src/app/api/a/route.ts",
+      writer(`    ...tenantAuditBase(req, userId, tenantId),
+    "tenantId": undefined,
+    action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,`),
+    );
+    expectFail(/overrides the tenantId given to tenantAuditBase/);
+  });
+
+  it("FAILS for a writer through logAuditAsyncBothScopes", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `import { logAuditAsyncBothScopes, tenantAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+export async function refuse(req: Request, userId: string, tenantId: string) {
+  await logAuditAsyncBothScopes({ ...tenantAuditBase(req, userId, tenantId), action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    expectFail(/route\.ts:\d+ {2}writes PASSKEY_ENFORCEMENT_BLOCKED in an object that is not the params argument/);
+  });
+
+  it("FAILS for a params const re-spread under a personal scope", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `${IMPORTS}
+export async function refuse(req: Request, userId: string, tenantId: string) {
+  const params = { ...tenantAuditBase(req, userId, tenantId), action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED };
+  await logAuditAsync({ ...params, ...personalAuditBase(req, userId) });
+}
+`,
+    );
+    expectFail(/route\.ts:\d+ {2}writes PASSKEY_ENFORCEMENT_BLOCKED in an object that is not the params argument/);
+  });
+
+  it("FAILS for a params const mutated before the write", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `${IMPORTS}
+export async function refuse(req: Request, userId: string, tenantId: string) {
+  const params: Record<string, unknown> = { ...tenantAuditBase(req, userId, tenantId), action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED };
+  params.scope = AUDIT_SCOPE.PERSONAL;
+  await logAuditAsync(params as never);
+}
+`,
+    );
+    expectFail(/route\.ts:\d+ {2}writes PASSKEY_ENFORCEMENT_BLOCKED in an object that is not the params argument/);
+  });
+
+  it("passes for logAuditAsync and tenantAuditBase imported through a barrel", () => {
+    write("src/lib/audit/index.ts", `export { logAuditAsync, tenantAuditBase } from "./audit";\n`);
+    write(
+      "src/app/api/a/route.ts",
+      `import { logAuditAsync as log, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants";
+export async function refuse(req: Request, userId: string, tenantId: string) {
+  await log({ ...tenantAuditBase(req, userId, tenantId), action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    const { exitCode, out } = runGuard();
+    expect(exitCode, out).toBe(0);
+    expect(out).toContain("writers=1");
+  });
+
+  it("passes for logAuditInTx with the params literal as its third argument", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `import { logAuditInTx, tenantAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+export async function refuse(tx: unknown, req: Request, userId: string, tenantId: string) {
+  await logAuditInTx(tx as never, tenantId, { ...tenantAuditBase(req, userId, tenantId), action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    const { exitCode, out } = runGuard();
+    expect(exitCode, out).toBe(0);
+    expect(out).toContain("writers=1");
+  });
+
+  it("FAILS for require() of a module exporting AUDIT_ACTION", () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write(
+      "src/lib/c.ts",
+      `import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+export async function refuseAll(req: Request, userId: string) {
+  const K = require("@/lib/constants");
+  for (const action of Object.values(K.AUDIT_ACTION)) {
+    await logAuditAsync({ ...personalAuditBase(req, userId), action });
+  }
+}
+`,
+    );
+    expectFail(/c\.ts:\d+ {2}loads a module exporting AUDIT_ACTION dynamically/);
   });
 
   it("FAILS when no writer is found", () => {

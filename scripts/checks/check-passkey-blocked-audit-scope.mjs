@@ -14,12 +14,20 @@
  * `<x>[`…`]` whose key is the action, every destructured
  * `{ PASSKEY_ENFORCEMENT_BLOCKED }`, and every string or no-substitution
  * template literal of the action, outside its definition file, is a reference.
- * Each must be the `action:` value of an object literal, and that literal's
+ * Each must be the `action:` value of an object literal that is itself the
+ * params argument of a writer call — the first argument of `logAuditAsync`, or
+ * the third (`params`) of `logAuditInTx(tx, tenantId, params)` — so the gate
+ * reads the very object written, not one a later spread or assignment could
+ * change. Any other holder is refused: `logAuditAsyncBothScopes` (which writes
+ * a PERSONAL row too), a wrapper, or a const passed along later. That literal's
  * effective scope, read in property order (later spreads and `scope:` override
  * earlier ones), must be TENANT:
  *   - `...tenantAuditBase(req, userId, tenantId)` with no later `tenantId:`
  *     override (a spread literal or const carries only its own properties), or
  *   - `scope: AUDIT_SCOPE.TENANT` together with a `tenantId` property.
+ * A property key is read by its value, not its spelling: `scope`, `"scope"`,
+ * `["scope"]` and `` [`scope`] `` are one key, and a computed key that is not a
+ * literal leaves the scope unresolved, which fails.
  * A member access must be on AUDIT_ACTION itself — a static named import of it,
  * or `<namespace>.AUDIT_ACTION` on a static namespace import; any other
  * receiver (a dynamic import, a destructured or aliased copy, a parameter) is
@@ -44,8 +52,10 @@
  * Runs without a Program (in-memory project). Not covered: a value built at
  * run time — a computed key that is not a literal
  * (`AUDIT_ACTION[entry.auditAction]`), a string assembled by concatenation or
- * by a template with substitutions, or a module loaded through a non-literal
- * specifier — whose result the file cannot name.
+ * by a template with substitutions, a module loaded through a non-literal
+ * specifier, or an element of a collection the definition file derives from
+ * AUDIT_ACTION (AUDIT_ACTION_VALUES, the AUDIT_ACTION_GROUPS_* maps, the
+ * *_WEBHOOK_SUBSCRIBABLE_ACTIONS lists) — whose value the file cannot name.
  */
 import { SyntaxKind } from "ts-morph";
 import { join, dirname, posix } from "node:path";
@@ -71,6 +81,13 @@ const BASE_HELPERS = new Map([
   ["personalAuditBase", "PERSONAL"],
   ["teamAuditBase", "TEAM"],
 ]);
+// The writers whose params object is checked, and that object's argument index.
+const WRITERS = new Map([
+  ["logAuditAsync", 0],
+  ["logAuditInTx", 2],
+]);
+// A computed property key the file cannot name.
+const UNRESOLVED_KEY = Symbol("unresolved key");
 
 console.log(`check-passkey-blocked-audit-scope: ROOT=${REPO_ROOT} SEARCH_DIRS=${SEARCH_DIRS.join(", ")}`);
 
@@ -186,6 +203,21 @@ function refersTo(expr, name, modules, ctx) {
     const target = ctx.imports.namespaces.get(recv.getText());
     if (!target || !modules.has(target)) return false;
     return !visibleBinding(recv.getText(), recv, ctx.bindingsFor);
+  }
+  return false;
+}
+
+/**
+ * True when `obj`, past type-level wrappers, is the params argument of a call
+ * to logAuditAsync (argument 0) or logAuditInTx (argument 2).
+ */
+function isWriterParams(obj, ctx) {
+  const outer = outerExpression(obj);
+  const call = outer.getParent();
+  if (call?.getKind() !== SyntaxKind.CallExpression) return false;
+  const callee = unwrapExpression(call.getExpression());
+  for (const [name, index] of WRITERS) {
+    if (call.getArguments()[index] === outer && refersTo(callee, name, ctx.modules.writers, ctx)) return true;
   }
   return false;
 }
@@ -384,6 +416,33 @@ function scopeValue(init, ctx) {
 }
 
 /**
+ * The key a property names, by value: an identifier's text, a string /
+ * no-substitution template / numeric literal's text, or the same literal inside
+ * `[...]`. UNRESOLVED_KEY for any other computed key.
+ */
+function propertyKey(prop) {
+  const nameNode = prop.getNameNode?.();
+  if (!nameNode) return null;
+  const literalText = (node) => {
+    const kind = node?.getKind();
+    if (
+      kind === SyntaxKind.StringLiteral ||
+      kind === SyntaxKind.NoSubstitutionTemplateLiteral ||
+      kind === SyntaxKind.NumericLiteral
+    ) {
+      return node.getLiteralText();
+    }
+    return null;
+  };
+  const kind = nameNode.getKind();
+  if (kind === SyntaxKind.Identifier || kind === SyntaxKind.PrivateIdentifier) return nameNode.getText();
+  if (kind === SyntaxKind.ComputedPropertyName) {
+    return literalText(unwrapExpression(nameNode.getExpression())) ?? UNRESOLVED_KEY;
+  }
+  return literalText(nameNode) ?? UNRESOLVED_KEY;
+}
+
+/**
  * Walk the literal's properties in order. Returns the last scope written, and
  * whether the tenant comes from tenantAuditBase without a later override or
  * from an explicit `tenantId` property.
@@ -403,8 +462,12 @@ function effectiveScope(obj, ctx, seen = new Set()) {
       if (c.hasTenantId) hasTenantId = true;
       continue;
     }
-    const name = prop.getName?.();
-    if (name === "scope") {
+    const name = propertyKey(prop);
+    if (name === UNRESOLVED_KEY) {
+      // Could be `scope` or `tenantId`; a later spread may still settle both.
+      scope = "unresolved (computed key)";
+      scopeFromHelper = false;
+    } else if (name === "scope") {
       scope =
         kind === SyntaxKind.PropertyAssignment ? scopeValue(prop.getInitializer(), ctx) ?? "unresolved" : "unresolved";
       scopeFromHelper = false;
@@ -432,6 +495,9 @@ const modules = {
   scope: exportersOf("AUDIT_SCOPE", CONSTANT_ORIGIN, files, exportProblems),
   audit: new Set(
     [...BASE_HELPERS.keys()].flatMap((name) => [...exportersOf(name, AUDIT_ORIGIN, files, exportProblems)]),
+  ),
+  writers: new Set(
+    [...WRITERS.keys()].flatMap((name) => [...exportersOf(name, AUDIT_ORIGIN, files, exportProblems)]),
   ),
 };
 failures.push(...exportProblems);
@@ -475,11 +541,15 @@ for (const { rel, sf, imports } of files) {
     if (
       !prop ||
       prop.getKind() !== SyntaxKind.PropertyAssignment ||
-      prop.getName() !== "action" ||
+      propertyKey(prop) !== "action" ||
       prop.getInitializer() !== value ||
       prop.getParent()?.getKind() !== SyntaxKind.ObjectLiteralExpression
     ) {
       failures.push(`${where}  references ${ACTION} outside an \`action:\` property of an object literal; the gate cannot tell which scope it is written with`);
+      continue;
+    }
+    if (!isWriterParams(prop.getParent(), ctx)) {
+      failures.push(`${where}  writes ${ACTION} in an object that is not the params argument of logAuditAsync / logAuditInTx; pass the literal to the writer directly`);
       continue;
     }
     writers++;
