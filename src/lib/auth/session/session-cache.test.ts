@@ -387,6 +387,14 @@ describe("getCachedSession", () => {
     expect(mockDel).toHaveBeenCalledTimes(1);
   });
 
+  it("evicts a positive entry without tenantId (a tenantless hit would skip the tenant gates)", async () => {
+    const { tenantId: _omitted, ...tenantless } = fixtureValidSession;
+    mockGet.mockResolvedValueOnce(JSON.stringify(tenantless));
+    mockDel.mockResolvedValueOnce(1);
+    expect(await getCachedSession("tok")).toBeNull();
+    expect(mockDel).toHaveBeenCalledTimes(1);
+  });
+
   it("returns null when Redis is unavailable (getRedis returns null)", async () => {
     mockGetRedis.mockReturnValueOnce(null);
     expect(await getCachedSession("tok")).toBeNull();

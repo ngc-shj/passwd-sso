@@ -10,9 +10,9 @@ import {
 
 /**
  * Per-use passkey gate for user-bound bearer credentials (API keys, operator
- * tokens, extension-row tokens). Lives outside the proxy import graph, so the
- * audit module never reaches the proxy; `passkey-enforcement.ts` stays
- * proxy-safe.
+ * tokens, extension-row tokens). This module is outside the proxy import
+ * graph; the audit module it writes through is not — the proxy reaches it via
+ * `src/lib/proxy/session-passkey-gate.ts`.
  *
  * Called from inside each validator, which is what makes the gate structural:
  * it runs before every caller's scope, clientKind and network checks, so a

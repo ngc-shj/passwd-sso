@@ -92,7 +92,7 @@ test.describe("Session passkey gate", () => {
   });
 
   test("an API call from the blocked session is refused with PASSKEY_REQUIRED and audited", async () => {
-    expect(await passkeyBlockedOutboxPaths(user.id)).toEqual([]);
+    expect(await passkeyBlockedOutboxPaths(user.id, E2E_PASSKEY_TENANT.id)).toEqual([]);
 
     const res = await context.request.get("/api/passwords");
     expect(res.status()).toBe(403);
@@ -101,10 +101,25 @@ test.describe("Session passkey gate", () => {
     // The page proxy writes the same action for page navigations; only the
     // API gate's row carries this blockedPath.
     await expect
-      .poll(async () => (await passkeyBlockedOutboxPaths(user.id)).filter((p) => p === "GET /api/passwords"), {
+      .poll(async () => (await passkeyBlockedOutboxPaths(user.id, E2E_PASSKEY_TENANT.id)).filter((p) => p === "GET /api/passwords"), {
         timeout: 10_000,
       })
       .toEqual(["GET /api/passwords"]);
+  });
+
+  test("a page navigation is redirected to the passkey page and audited for the tenant", async () => {
+    expect(await passkeyBlockedOutboxPaths(user.id, E2E_PASSKEY_TENANT.id)).toEqual([]);
+
+    // A page other than the passkey page: the page proxy answers it with a
+    // redirect and writes the row in-process.
+    await page.goto(`${DASHBOARD}/settings`);
+    await expect(page).toHaveURL(new RegExp(`${PASSKEY_PAGE}$`));
+
+    await expect
+      .poll(async () => (await passkeyBlockedOutboxPaths(user.id, E2E_PASSKEY_TENANT.id)).filter((p) => p === "PAGE /dashboard"), {
+        timeout: 10_000,
+      })
+      .toEqual(["PAGE /dashboard"]);
   });
 
   test("the registration screen issues no 403 and never reloads", async () => {

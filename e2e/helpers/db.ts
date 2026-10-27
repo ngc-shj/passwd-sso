@@ -439,18 +439,22 @@ export async function bindSessionToWebauthnCredential(
 
 /**
  * `metadata.blockedPath` of every PASSKEY_ENFORCEMENT_BLOCKED row in
- * audit_outbox for the user. Read from the outbox, not audit_logs: the row
- * exists as soon as the refusing request returns, whether or not a worker has
- * drained it yet.
+ * audit_outbox for the user that the tenant audit log can show: TENANT scope
+ * in `tenantId`. A PERSONAL-scoped row is left out, so a writer that regresses
+ * to it fails the poll. Read from the outbox, not audit_logs: the row exists
+ * as soon as the refusing request returns, whether or not a worker has drained
+ * it yet.
  */
-export async function passkeyBlockedOutboxPaths(userId: string): Promise<string[]> {
+export async function passkeyBlockedOutboxPaths(userId: string, tenantId: string): Promise<string[]> {
   const p = getPool();
   const { rows } = await p.query<{ blocked_path: string | null }>(
     `SELECT payload->'metadata'->>'blockedPath' AS blocked_path
        FROM audit_outbox
       WHERE payload->>'userId' = $1
-        AND payload->>'action' = 'PASSKEY_ENFORCEMENT_BLOCKED'`,
-    [userId]
+        AND tenant_id = $2
+        AND payload->>'action' = 'PASSKEY_ENFORCEMENT_BLOCKED'
+        AND payload->>'scope' = 'TENANT'`,
+    [userId, tenantId]
   );
   return rows.map((r) => r.blocked_path ?? "");
 }

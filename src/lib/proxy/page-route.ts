@@ -23,28 +23,7 @@ import {
 } from "../auth/session/session-cookie";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
-import {
-  isPasskeyGracePeriodExpired,
-  passkeyEnforcementBlocks,
-  recordPasskeyAuditEmit,
-  PASSKEY_AUDIT_DEDUP_MS,
-  PASSKEY_AUDIT_MAP_MAX,
-  _resetPasskeyAuditForTests,
-  _passkeyAuditSizeForTests,
-  _passkeyAuditHasForTests,
-  _passkeyAuditFirstKeyForTests,
-} from "../auth/policy/passkey-enforcement";
-
-export {
-  isPasskeyGracePeriodExpired,
-  recordPasskeyAuditEmit,
-  PASSKEY_AUDIT_DEDUP_MS,
-  PASSKEY_AUDIT_MAP_MAX,
-  _resetPasskeyAuditForTests,
-  _passkeyAuditSizeForTests,
-  _passkeyAuditHasForTests,
-  _passkeyAuditFirstKeyForTests,
-};
+import { passkeyEnforcementBlocks } from "../auth/policy/passkey-enforcement";
 
 export type ProxyOptions = {
   cspHeader: string;
@@ -233,8 +212,9 @@ export async function handlePageRoute(
       // Not awaited: the redirect waits on neither the limiter (Redis) nor the
       // outbox write, and a failed write is logged, never turned into an
       // error response. The shared limiter dedups per user and area. A valid
-      // session with a userId always carries its tenant (getSessionInfo
-      // refuses one whose tenant does not resolve); the check narrows the type.
+      // session with a userId always carries its tenant: getSessionInfo
+      // refuses one whose tenant does not resolve, and the session cache
+      // evicts a positive entry without one. The check narrows the type.
       if (session.userId && session.tenantId) {
         void auditSessionPasskeyBlock({
           req: request,

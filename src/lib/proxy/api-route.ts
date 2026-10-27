@@ -190,8 +190,9 @@ async function gateSession(
   if (session.passkeyStateDegraded) return noStoreError(API_ERROR.SERVICE_UNAVAILABLE);
 
   if (passkeyEnforcementBlocks(session)) {
-    // A valid session with a userId always carries its tenant (getSessionInfo
-    // refuses one whose tenant does not resolve); the check narrows the type.
+    // A valid session with a userId always carries its tenant: getSessionInfo
+    // refuses one whose tenant does not resolve, and the session cache evicts a
+    // positive entry without one. The check narrows the type.
     if (session.userId && session.tenantId) {
       await auditSessionPasskeyBlock({
         req: request,

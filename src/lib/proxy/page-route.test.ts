@@ -15,7 +15,8 @@ const {
   // so handlePageRoute proceeds past the redirect-shortcut.
   mockIntlMiddleware: vi.fn(),
   mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
-  // Records each limiter key; the real limiter still decides.
+  // Records each limiter key; the real limiter decides unless a cell gives
+  // this mock a return value of its own.
   mockLimiterCheck: vi.fn(),
   mockLoggerError: vi.fn(),
 }));
@@ -48,10 +49,7 @@ vi.mock("@/lib/security/rate-limit", async (importOriginal) => {
       const limiter = actual.createRateLimiter(options);
       return {
         ...limiter,
-        check: (key: string) => {
-          mockLimiterCheck(key);
-          return limiter.check(key);
-        },
+        check: (key: string) => mockLimiterCheck(key) ?? limiter.check(key),
       };
     },
   };
@@ -84,15 +82,6 @@ import {
   sessionResponseBody,
   sessionRoute,
 } from "@/__tests__/helpers/proxy-session-fixtures";
-import {
-  recordPasskeyAuditEmit,
-  PASSKEY_AUDIT_DEDUP_MS,
-  PASSKEY_AUDIT_MAP_MAX,
-  _resetPasskeyAuditForTests,
-  _passkeyAuditSizeForTests,
-  _passkeyAuditHasForTests,
-  _passkeyAuditFirstKeyForTests,
-} from "../auth/policy/passkey-enforcement";
 
 const APP_ORIGIN = "http://localhost:3000";
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
@@ -141,7 +130,6 @@ describe("handlePageRoute — public share routes (/s/...)", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    _resetPasskeyAuditForTests();
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
   afterEach(() => {
@@ -161,7 +149,6 @@ describe("handlePageRoute — protected routes auth check", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    _resetPasskeyAuditForTests();
     // Default: a normal user WITH an active tenant membership. A null return
     // (deactivated member) now fails session validation, so it is no longer a
     // valid baseline for a session that should reach access/passkey checks.
@@ -550,7 +537,6 @@ describe("handlePageRoute — passkey enforcement", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    _resetPasskeyAuditForTests();
     _resetSessionPasskeyAuditForTests();
     mockLogAuditAsync.mockReset().mockResolvedValue(undefined);
     // Default: a normal user WITH an active tenant membership. A null return
@@ -664,66 +650,6 @@ describe("handlePageRoute — passkey enforcement", () => {
       expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
       expect(mockLogAuditAsync).not.toHaveBeenCalled();
     });
-  });
-});
-
-describe("recordPasskeyAuditEmit — module-state isolated dedup", () => {
-  beforeEach(() => {
-    _resetPasskeyAuditForTests();
-  });
-
-  const PATH_A = "/dashboard/passwords";
-
-  it("records first emit for a user+path (returns true)", () => {
-    expect(recordPasskeyAuditEmit("u-a", PATH_A, 1_000)).toBe(true);
-    expect(_passkeyAuditHasForTests("u-a", PATH_A)).toBe(true);
-    expect(_passkeyAuditSizeForTests()).toBe(1);
-  });
-
-  it("dedupes a second emit within DEDUP_MS for the same user+path", () => {
-    expect(recordPasskeyAuditEmit("u-b", PATH_A, 1_000)).toBe(true);
-    expect(recordPasskeyAuditEmit("u-b", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS)).toBe(false);
-  });
-
-  it("permits a fresh emit just past DEDUP_MS boundary (1ms after the inclusive window)", () => {
-    expect(recordPasskeyAuditEmit("u-c", PATH_A, 1_000)).toBe(true);
-    expect(
-      recordPasskeyAuditEmit("u-c", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS + 1),
-    ).toBe(true);
-  });
-
-  it("evicts the staleness-oldest entry when map exceeds PASSKEY_AUDIT_MAP_MAX", () => {
-    // Fill map to exactly MAX with distinct users (each with their own path key).
-    for (let i = 0; i < PASSKEY_AUDIT_MAP_MAX; i += 1) {
-      recordPasskeyAuditEmit(`user-${i}`, PATH_A, 1_000 + i);
-    }
-    expect(_passkeyAuditSizeForTests()).toBe(PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditFirstKeyForTests()).toBe(`user-0:${PATH_A}`);
-
-    // One more accepted emit triggers eviction of the staleness head (user-0:PATH_A).
-    recordPasskeyAuditEmit("overflow-user", PATH_A, 1_000 + PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditSizeForTests()).toBe(PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditHasForTests("user-0", PATH_A)).toBe(false);
-    expect(_passkeyAuditHasForTests("overflow-user", PATH_A)).toBe(true);
-  });
-
-  it("re-emit refreshes recency: oldest key shifts to the next-oldest user", () => {
-    recordPasskeyAuditEmit("u-old", PATH_A, 1_000);
-    recordPasskeyAuditEmit("u-mid", PATH_A, 2_000);
-    recordPasskeyAuditEmit("u-new", PATH_A, 3_000);
-    expect(_passkeyAuditFirstKeyForTests()).toBe(`u-old:${PATH_A}`);
-
-    // u-old re-emits past DEDUP_MS → moves to the tail.
-    recordPasskeyAuditEmit("u-old", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS + 1);
-    expect(_passkeyAuditFirstKeyForTests()).toBe(`u-mid:${PATH_A}`);
-  });
-
-  it("same user + different blocked path within window → NOT deduped (two emits)", () => {
-    const PATH_B = "/dashboard/settings";
-    expect(recordPasskeyAuditEmit("u-d", PATH_A, 1_000)).toBe(true);
-    // Same user, different path — NOT deduped.
-    expect(recordPasskeyAuditEmit("u-d", PATH_B, 1_000)).toBe(true);
-    expect(_passkeyAuditSizeForTests()).toBe(2);
   });
 });
 
@@ -845,5 +771,17 @@ describe("handlePageRoute — passkey audit write", () => {
 
     expect(res.status).toBe(307);
     expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers the redirect without waiting for the audit limiter", async () => {
+    mockValidSession(fetchSpy, { id: "u-limiter-hangs", ...BLOCKED_USER });
+    mockLimiterCheck.mockReturnValue(new Promise(() => {}));
+
+    const res = await navigate("/ja/dashboard/passwords", "5e55-010e");
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location") ?? "").toContain("/dashboard/settings/auth/passkey");
+    expect(mockLimiterCheck).toHaveBeenCalledWith("rl:passkey_session_gate_audit:u-limiter-hangs:PAGE /dashboard");
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 });

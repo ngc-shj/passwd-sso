@@ -365,4 +365,35 @@ describe("recordPasskeyAuditEmit", () => {
     expect(_passkeyAuditHasForTests("ev-0", PATH_A)).toBe(false);
     expect(_passkeyAuditHasForTests("ev-overflow", PATH_A)).toBe(true);
   });
+
+  it("evicts the entry with the oldest lastEmitted, not the first-inserted", () => {
+    const base = 1_000_000;
+    for (let i = 0; i < PASSKEY_AUDIT_MAP_MAX; i++) {
+      expect(recordPasskeyAuditEmit(`lru-${i}`, PATH_A, base + i)).toBe(true);
+    }
+
+    // Re-emit the first-inserted entry past the window. With FIFO eviction its
+    // insertion position would still be first; with staleness eviction
+    // (delete-then-set) it moves to the tail and lru-1 becomes the candidate.
+    const refresh = base + PASSKEY_AUDIT_MAP_MAX + PASSKEY_AUDIT_DEDUP_MS + 1;
+    expect(recordPasskeyAuditEmit("lru-0", PATH_A, refresh)).toBe(true);
+    expect(recordPasskeyAuditEmit("lru-new", PATH_A, refresh + 1)).toBe(true);
+
+    expect(_passkeyAuditSizeForTests()).toBe(PASSKEY_AUDIT_MAP_MAX);
+    expect(_passkeyAuditHasForTests("lru-0", PATH_A)).toBe(true);
+    expect(_passkeyAuditHasForTests("lru-1", PATH_A)).toBe(false);
+    expect(_passkeyAuditHasForTests("lru-new", PATH_A)).toBe(true);
+  });
+
+  it("non-monotonic refreshes: the least recently emitted entry is first in line", () => {
+    const t0 = 1_000_000;
+    recordPasskeyAuditEmit("nm-0", PATH_A, t0);
+    recordPasskeyAuditEmit("nm-1", PATH_A, t0 + 1);
+    recordPasskeyAuditEmit("nm-2", PATH_A, t0 + 2);
+    // Refresh nm-1 then nm-0 past the window so both calls are accepted.
+    recordPasskeyAuditEmit("nm-1", PATH_A, t0 + PASSKEY_AUDIT_DEDUP_MS + 10);
+    recordPasskeyAuditEmit("nm-0", PATH_A, t0 + PASSKEY_AUDIT_DEDUP_MS + 20);
+
+    expect(_passkeyAuditFirstKeyForTests()).toBe(`nm-2:${PATH_A}`);
+  });
 });

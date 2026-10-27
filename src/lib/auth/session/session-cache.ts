@@ -46,10 +46,13 @@ export interface SessionInfo {
 // `passkeyStateDegraded` is required for the same reason: a z.object strips an
 // undeclared key, so a degraded entry would otherwise come back unmarked and
 // be answered as a requirement instead of an outage.
+// `tenantId` is required too: auth-gate refuses a session whose tenant does not
+// resolve, so every positive entry it writes carries one, and a hit without it
+// would skip the tenant IP restriction and the passkey-block audit row.
 export const SessionInfoSchema = z.object({
   valid: z.literal(true),
   userId: z.string(),
-  tenantId: z.string().optional(),
+  tenantId: z.string(),
   hasPasskey: z.boolean(),
   requirePasskey: z.boolean(),
   requirePasskeyEnabledAt: z.string().nullable(),
