@@ -35,6 +35,10 @@ const FIXTURE_MANIFEST = {
       kind: "api-session-required",
       methods: ["GET", "POST"],
       auth: ["session"],
+      sessionPasskeyGate: {
+        GET: { value: "tier-b", reason: "registration screen reads it" },
+        POST: { value: "gated" },
+      },
     },
     "src/app/api/alpha/[id]/route.ts": {
       kind: "api-default",
@@ -100,6 +104,31 @@ describe("renderRoutePolicyMatrix", () => {
     const out = renderRoutePolicyMatrix(FIXTURE_MANIFEST);
     expect(out).toContain("sideEffectingGet");
     expect(out).toContain("mints a one-time code");
+  });
+});
+
+describe("renderRoutePolicyMatrix — session passkey gate", () => {
+  it("renders each method's sessionPasskeyGate value in methods order", () => {
+    const out = renderRoutePolicyMatrix(FIXTURE_MANIFEST);
+    expect(out).toContain("| Session passkey gate |");
+    expect(out).toContain("| GET tier-b, POST gated |");
+  });
+
+  it("points a catch-all route to its concretePaths", () => {
+    const out = renderRoutePolicyMatrix({
+      routes: {
+        "src/app/api/auth/[...nextauth]/route.ts": {
+          kind: "api-default",
+          methods: ["GET"],
+          sessionPasskeyGate: { GET: { value: "tier-a", reason: "Auth.js catch-all" } },
+          concretePaths: [
+            { path: "/api/auth/session", method: "GET", outcome: "tier-a" },
+            { path: "/api/auth/x", method: "GET", outcome: "gated" },
+          ],
+        },
+      },
+    });
+    expect(out).toContain("| GET tier-a (per path: 2 concretePaths) |");
   });
 });
 

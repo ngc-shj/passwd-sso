@@ -12,6 +12,10 @@ on:
       - 'src/lib/prisma.ts'
       - 'src/lib/prisma/**'
       - 'src/lib/redis.ts'
+      # The session passkey gate's audit dedup is proven cross-process only in
+      # the real-Redis integration suite (two gate instances, one limiter).
+      - 'src/lib/proxy/**'
+      - 'src/lib/security/rate-limit.ts'
       - 'src/lib/tenant-rls.ts'
       - 'src/lib/tenant-rls-grants.ts'
       - 'src/lib/tenant-rls-purpose.ts'

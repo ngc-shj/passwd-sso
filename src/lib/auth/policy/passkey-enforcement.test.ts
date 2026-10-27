@@ -225,6 +225,20 @@ describe("derivePasskeyState", () => {
     expect(result.hasPasskey).toBe(false);
   });
 
+  it("returns the user-global count as passkeyCount, from the same read as hasPasskey", async () => {
+    mockWebAuthnCredentialCount.mockResolvedValue(2);
+    mockTenantFindUnique.mockResolvedValue({
+      requirePasskey: true,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+
+    const result = await derivePasskeyState({ userId: "u-6", tenantId: "t-6" });
+    expect(result.passkeyCount).toBe(2);
+    expect(result.hasPasskey).toBe(true);
+    expect(mockWebAuthnCredentialCount).toHaveBeenCalledTimes(1);
+  });
+
   it("converts requirePasskeyEnabledAt Date to ISO string", async () => {
     const date = new Date("2025-06-01T12:00:00Z");
     mockWebAuthnCredentialCount.mockResolvedValue(0);

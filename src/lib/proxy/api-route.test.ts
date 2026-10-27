@@ -26,6 +26,12 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 
 import { handleApiAuth } from "./api-route";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import {
+  dispatchFetch,
+  fetchCallsTo,
+  sessionResponseBody,
+  sessionRoute,
+} from "@/__tests__/helpers/proxy-session-fixtures";
 
 const APP_ORIGIN = "http://localhost:3000";
 
@@ -222,8 +228,8 @@ describe("handleApiAuth — session-required + access restriction", () => {
 
   beforeEach(() => {
     vi.stubEnv("APP_URL", APP_ORIGIN);
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ user: { id: "u-1" } }), { status: 200 }),
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      dispatchFetch(sessionRoute(sessionResponseBody("u-1"))),
     );
     mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
     // Default: a normal user WITH an active tenant membership. A null return
@@ -317,12 +323,14 @@ describe("handleApiAuth — session-required + access restriction", () => {
     );
   });
 
-  it("does NOT apply proxy session/IP gate to /api/mobile/authorize (api-default; handler self-enforces)", async () => {
+  it("does NOT apply proxy 401/IP gate to /api/mobile/authorize (api-default own-gate; handler self-enforces)", async () => {
     // /api/mobile/authorize is reached inside an ephemeral
     // ASWebAuthenticationSession with no session cookie on first arrival, so it
     // is classified api-default and must pass the proxy without a 401/403 gate;
-    // the route handler self-enforces auth (redirect to sign-in) and tenant IP
-    // access restriction, matching /api/mobile/token.
+    // the route handler self-enforces auth (redirect to sign-in), tenant IP
+    // access restriction and the passkey requirement, matching
+    // /api/mobile/token. As an own-gate route the proxy reads the session
+    // (a cookie is present) and passes the request through.
     mockCheckAccessWithAudit.mockResolvedValueOnce({
       allowed: false,
       reason: "IP not in allowed CIDRs",
@@ -332,9 +340,9 @@ describe("handleApiAuth — session-required + access restriction", () => {
         Cookie: "authjs.session-token=5e55",
       }),
     );
-    expect(res.status).not.toBe(401);
-    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(200);
     expect(mockCheckAccessWithAudit).not.toHaveBeenCalled();
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
   });
 });
 

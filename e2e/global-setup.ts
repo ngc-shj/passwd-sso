@@ -24,7 +24,7 @@
  *
  * Session tokens are written to .auth-state.json for test consumption.
  */
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -32,7 +32,6 @@ import Redis from "ioredis";
 import { loadEnv } from "@/lib/load-env";
 
 loadEnv(join(__dirname, ".."));
-import { setupVaultCrypto } from "./helpers/crypto";
 import {
   assertTestDatabase,
   cleanup,
@@ -41,10 +40,10 @@ import {
   seedTenantMember,
   seedUser,
   seedSession,
-  seedVaultKey,
   TEST_USERS,
   TEST_PASSPHRASE,
 } from "./helpers/db";
+import { seedVaultReadyUser } from "./helpers/vault-user";
 import { seedPasswordEntry } from "./helpers/password-entry";
 import { seedShareLink } from "./helpers/share-link";
 import { seedTeam, seedTeamMember, E2E_TEAM_ID } from "./helpers/team";
@@ -52,46 +51,6 @@ import { seedEmergencyGrant } from "./helpers/emergency-access";
 import { writeSecretFile } from "./helpers/secure-file";
 
 const AUTH_STATE_PATH = join(__dirname, ".auth-state.json");
-
-/** Seed a vault-ready user (User + VaultKey + Session). */
-async function seedVaultReadyUser(
-  user: { id: string; email: string; name: string },
-  pepper: string
-): Promise<{ sessionToken: string; encryptionKey: Buffer }> {
-  const vault = setupVaultCrypto(TEST_PASSPHRASE, pepper);
-
-  const serverSalt = randomBytes(32).toString("hex");
-  const serverHash = createHash("sha256")
-    .update(vault.authHash + serverSalt)
-    .digest("hex");
-
-  await seedUser({
-    ...user,
-    vaultFields: {
-      accountSalt: vault.accountSalt,
-      encryptedSecretKey: vault.encryptedSecretKey,
-      secretKeyIv: vault.secretKeyIv,
-      secretKeyAuthTag: vault.secretKeyAuthTag,
-      masterPasswordServerHash: serverHash,
-      masterPasswordServerSalt: serverSalt,
-      passphraseVerifierHmac: vault.verifierHmac,
-      keyVersion: 1,
-      ecdhPublicKey: vault.ecdhPublicKey,
-      encryptedEcdhPrivateKey: vault.encryptedEcdhPrivateKey,
-      ecdhPrivateKeyIv: vault.ecdhPrivateKeyIv,
-      ecdhPrivateKeyAuthTag: vault.ecdhPrivateKeyAuthTag,
-    },
-  });
-
-  await seedVaultKey(user.id, vault.verificationArtifact);
-
-  // Same shape Auth.js mints (randomUUID): the session-cookie reader refuses
-  // values outside that alphabet (src/lib/auth/session/session-cookie.ts).
-  const sessionToken = randomUUID();
-  await seedSession(user.id, sessionToken);
-
-  return { sessionToken, encryptionKey: vault.encryptionKey };
-}
 
 /** Clear Redis rate limit keys for all E2E test users to avoid cooldown failures. */
 async function clearRateLimits(): Promise<void> {

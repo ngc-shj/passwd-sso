@@ -1,7 +1,10 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import type { verifyRegistration } from "@/lib/auth/webauthn/webauthn-server";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
+import { STEP_UP_WINDOW_MS } from "@/lib/auth/session/step-up";
 
 // T6 (Round-1 plan): mockVerifyRegistration typed against verifyRegistration's
 // real signature so a future @simplewebauthn major bump that changes
@@ -25,6 +28,9 @@ const {
   mockWithUserTenantRls,
   mockSendEmail,
   mockParseDeviceFromUserAgent,
+  mockRequireRecentCurrentAuthMethod,
+  mockInvalidateUserSessionsCache,
+  mockSessionFindUnique,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
   return {
@@ -44,6 +50,9 @@ const {
     mockWithUserTenantRls: vi.fn(),
     mockSendEmail: vi.fn(),
     mockParseDeviceFromUserAgent: vi.fn(),
+    mockRequireRecentCurrentAuthMethod: vi.fn(),
+    mockInvalidateUserSessionsCache: vi.fn(),
+    mockSessionFindUnique: vi.fn(),
   };
 });
 
@@ -83,11 +92,26 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mockPrismaUserFindUnique },
     webAuthnCredential: { create: mockPrismaCredentialCreate },
+    // Read only by the real step-up helper the D5 cells run.
+    session: { findUnique: mockSessionFindUnique },
   },
 }));
 
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tenant-rls")>()),
+  withBypassRls: (client: unknown, fn: (tx: unknown) => unknown) => fn(client),
+}));
+
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
+}));
+
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessionsCache: mockInvalidateUserSessionsCache,
 }));
 
 vi.mock("@/lib/parse-user-agent", () => ({
@@ -242,8 +266,15 @@ describe("POST /api/webauthn/register/verify", () => {
     mockParseDeviceFromUserAgent.mockReturnValue("Chrome on macOS");
     // withUserTenantRls: execute the callback directly
     mockWithUserTenantRls.mockImplementation(
-      (_userId: string, fn: () => unknown) => fn(),
+      (_userId: string, fn: (tenantId?: string) => unknown) => fn("tenant-1"),
     );
+    // Default: a recent session — the step-up gate passes. The D5 cells below
+    // run the real helper instead.
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
+    mockInvalidateUserSessionsCache.mockResolvedValue({
+      totalSessions: 0,
+      cacheTombstoneFailures: 0,
+    });
   });
 
   // ── credProps.rk extraction tests ───────────────────────────
@@ -923,6 +954,241 @@ describe("POST /api/webauthn/register/verify", () => {
       });
       await expect(POST(req)).rejects.toThrow(/tenant-gone not found/);
       expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── D5 (#959): registration always requires a recent sign-in ─────────
+  // Runs the real requireRecentCurrentAuthMethod over a mocked session row, so
+  // the window comparison itself is exercised. The route no longer reads the
+  // passkey state, so every cell is a member the tenant does not block.
+
+  describe("D5 step-up gate (always required)", () => {
+    const NOW = new Date("2026-10-27T12:00:00.000Z").getTime();
+    const COOKIE = { cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` };
+
+    beforeEach(async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      vi.stubEnv("AUTH_URL", "http://localhost:3000");
+      const real = await vi.importActual<
+        typeof import("@/lib/auth/session/recent-current-auth-method")
+      >("@/lib/auth/session/recent-current-auth-method");
+      mockRequireRecentCurrentAuthMethod.mockImplementation(real.requireRecentCurrentAuthMethod);
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    });
+
+    // Answers only the lookup keyed by this request's cookie digest, so a
+    // helper that looked up any other key would read no row (401), not this one.
+    function sessionRow(row: Record<string, unknown>) {
+      mockSessionFindUnique.mockImplementation(
+        async ({ where }: { where: { sessionToken: string } }) =>
+          where.sessionToken === hashSessionToken(TEST_SESSION_TOKEN)
+            ? {
+                userId: "user-1",
+                provider: "google",
+                passkeyVerifiedAt: null,
+                authCredentialId: null,
+                ...row,
+              }
+            : null,
+      );
+    }
+
+    function send(headers: Record<string, string> = COOKIE) {
+      return POST(createRequest("POST", ROUTE_URL, { body: makeBody(), headers }));
+    }
+
+    it("refuses a sign-in 1 ms past STEP_UP_WINDOW_MS with SESSION_STEP_UP_REQUIRED, leaving the challenge unconsumed", async () => {
+      sessionRow({ createdAt: new Date(NOW - STEP_UP_WINDOW_MS - 1) });
+
+      const { status, json } = await parseResponse(await send());
+
+      expect(status).toBe(403);
+      expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+      // The one-time challenge survives the rejection, so a retry after a
+      // fresh sign-in can still complete this ceremony.
+      expect(mockRedisGetdel).not.toHaveBeenCalled();
+      expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
+    });
+
+    it("allows a sign-in exactly STEP_UP_WINDOW_MS old (the window is inclusive)", async () => {
+      sessionRow({ createdAt: new Date(NOW - STEP_UP_WINDOW_MS) });
+
+      const { status } = await parseResponse(await send());
+
+      expect(status).toBe(201);
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows an old webauthn session whose passkey was verified recently", async () => {
+      sessionRow({
+        provider: "webauthn",
+        createdAt: new Date(NOW - 10 * STEP_UP_WINDOW_MS),
+        passkeyVerifiedAt: new Date(NOW - 60_000),
+        authCredentialId: "cred-row-1",
+      });
+
+      const { status } = await parseResponse(await send());
+
+      expect(status).toBe(201);
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers 401 when the request carries no session cookie, leaving the challenge unconsumed", async () => {
+      const { status } = await parseResponse(await send({}));
+
+      expect(status).toBe(401);
+      expect(mockRedisGetdel).not.toHaveBeenCalled();
+      expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── PRF capability derived from clientExtensionResults.prf ──────────────
+
+  describe("PRF extension-output derivation", () => {
+    it("stores prfSupported=true from clientExtensionResults.prf.enabled, with no wrap fields sent", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue({
+        ...makeCreatedCredential(null),
+        prfSupported: true,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ prf: { enabled: true } }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      const data = mockPrismaCredentialCreate.mock.calls[0][0].data;
+      expect(data.prfSupported).toBe(true);
+      // No wrap fields in the request → nothing to persist yet.
+      expect(data).not.toHaveProperty("prfEncryptedSecretKey");
+    });
+
+    it("stores prfSupported=true from clientExtensionResults.prf.results without an explicit enabled flag", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue({
+        ...makeCreatedCredential(null),
+        prfSupported: true,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ prf: { results: { first: "AAAA" } } }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ prfSupported: true }),
+        }),
+      );
+    });
+
+    it("persists the per-credential salt from the extension-reported capability alone (no wrap fields)", async () => {
+      const PER_CRED_SALT = "b".repeat(64);
+      mockRedisGetdel.mockResolvedValue(
+        JSON.stringify({ challenge: "test-challenge", prfSalt: PER_CRED_SALT }),
+      );
+      mockPrismaCredentialCreate.mockResolvedValue({
+        ...makeCreatedCredential(null),
+        prfSupported: true,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ prf: { enabled: true } }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ prfSalt: PER_CRED_SALT }),
+        }),
+      );
+    });
+
+    it("stores prfSupported=false when clientExtensionResults.prf is absent and no wrap fields are sent", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ prfSupported: false, prfSalt: null }),
+        }),
+      );
+    });
+  });
+
+  // ── Session cache invalidation (#959 F5/F19) ─────────────────────────────
+
+  describe("invalidateUserSessionsCache on success", () => {
+    it("invalidates the user's cached sessions after a successful registration", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+
+      expect(res.status).toBe(201);
+      expect(mockInvalidateUserSessionsCache).toHaveBeenCalledWith("user-1");
+      expect(mockInvalidateUserSessionsCache).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not invalidate when registration fails validation (verification not verified)", async () => {
+      mockVerifyRegistration.mockResolvedValue({
+        verified: false,
+        registrationInfo: undefined,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+
+      expect(res.status).toBe(400);
+      expect(mockInvalidateUserSessionsCache).not.toHaveBeenCalled();
+    });
+
+    it("logs and does not fail the response when cache invalidation throws", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+      mockInvalidateUserSessionsCache.mockRejectedValue(new Error("session read failed"));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+
+      // The credential already committed — a cache-invalidation failure
+      // must not turn a successful registration into an error response.
+      expect(res.status).toBe(201);
+      // Nothing was counted, so the audit row carries no invalidation fields.
+      expect(mockLogAudit.mock.calls[0][0].metadata).not.toHaveProperty("cacheTombstoneFailures");
+    });
+
+    // A Redis tombstone failure does not throw: invalidateUserSessionsCache
+    // returns it as a count, which the registration audit row records.
+    it("records the tombstone failure count in the registration audit row", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+      mockInvalidateUserSessionsCache.mockResolvedValue({
+        totalSessions: 3,
+        cacheTombstoneFailures: 2,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const res = await POST(req);
+
+      expect(res.status).toBe(201);
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "WEBAUTHN_CREDENTIAL_REGISTER",
+          metadata: expect.objectContaining({
+            cacheInvalidatedSessions: 3,
+            cacheTombstoneFailures: 2,
+          }),
+        }),
+      );
     });
   });
 });

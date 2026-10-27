@@ -12,7 +12,17 @@ import { shouldEnforceCsrf, assertSessionCsrf } from "./csrf-gate";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 import { errorResponse } from "@/lib/http/api-response";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
+import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
+import { passkeyEnforcementBlocks } from "../auth/policy/passkey-enforcement";
+import {
+  auditSessionPasskeyBlock,
+  blockedPath,
+  isApiDefaultSessionReader,
+  isSessionGateOwnGate,
+  isSessionGateTierA,
+  isSessionGateTierB,
+} from "./session-passkey-gate";
 
 export async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -106,38 +116,24 @@ export async function handleApiAuth(request: NextRequest) {
     return applyCorsHeaders(request, res, { allowExtension: true });
   }
 
-  // Session-required routes. Bearer-bypass-eligible routes that didn't
+  // Session gate. Session-required routes are always evaluated; an
+  // API_DEFAULT route only when a session cookie is present, since without
+  // one there is nothing to gate. Bearer-bypass-eligible routes that didn't
   // take the bypass branch above (e.g., session-cookie-only callers to
-  // /api/passwords) flow through here too, since they're classified as
-  // api-session-required by route-policy. Note: /api/scim/v2/* is
-  // intentionally NOT in this classification — SCIM endpoints use their
-  // own Bearer token auth in each route handler.
-  if (policy.kind === ROUTE_POLICY_KIND.API_SESSION_REQUIRED) {
-    const session = await getSessionInfo(request);
-    if (!session.valid) {
-      return applyCorsHeaders(
-        request,
-        errorResponse(API_ERROR.UNAUTHORIZED, undefined, undefined, {
-          "Cache-Control": "no-store",
-        }),
-      );
-    }
-
-    if (session.tenantId) {
-      const clientIp = extractClientIp(request);
-      const accessResult = await checkAccessRestrictionWithAudit(
-        session.tenantId,
-        clientIp,
-        session.userId ?? null,
-        request,
-      );
-      if (!accessResult.allowed) {
-        return applyCorsHeaders(
-          request,
-          errorResponse(API_ERROR.ACCESS_DENIED, undefined, undefined, { "Cache-Control": "no-store" }),
-        );
-      }
-    }
+  // /api/passwords, or a cookie beside a junk Bearer) flow through here too.
+  // Note: /api/scim/v2/* is intentionally NOT session-required — SCIM
+  // endpoints use their own Bearer token auth in each route handler.
+  //
+  // Tier A is decided first, before any session read: the proxy's own
+  // requests (getSessionInfo's fetch to /api/auth/session lands here) and
+  // Auth.js's handler paths.
+  const isSessionRequired = policy.kind === ROUTE_POLICY_KIND.API_SESSION_REQUIRED;
+  if (
+    (isSessionRequired || cookiePresent) &&
+    !isSessionGateTierA(request.method, pathname)
+  ) {
+    const refusal = await gateSession(request, pathname, isSessionRequired);
+    if (refusal) return applyCorsHeaders(request, refusal);
   }
 
   // Default (api-default): prevent CDN/proxy from caching authenticated
@@ -146,4 +142,66 @@ export async function handleApiAuth(request: NextRequest) {
   const res = NextResponse.next();
   res.headers.set("Cache-Control", "private, no-store");
   return applyCorsHeaders(request, res);
+}
+
+/**
+ * The session gate after Tier A. Returns the refusal, or null to pass the
+ * request on to the route.
+ */
+async function gateSession(
+  request: NextRequest,
+  pathname: string,
+  isSessionRequired: boolean,
+): Promise<NextResponse | null> {
+  const { method } = request;
+  const session = await getSessionInfo(request);
+  if (!session.valid) {
+    if (isSessionRequired) return noStoreError(API_ERROR.UNAUTHORIZED);
+    // API_DEFAULT: keyed on whether the route reads the session, not on why
+    // the session is invalid — the proxy cannot tell "no session" from a
+    // fault. Own-gate routes run their own auth; a route that reads no
+    // session cannot be authenticated by a stale cookie.
+    if (isSessionGateOwnGate(method, pathname)) return null;
+    if (isApiDefaultSessionReader(method, pathname)) {
+      return noStoreError(API_ERROR.UNAUTHORIZED);
+    }
+    return null;
+  }
+
+  if (isSessionRequired && session.tenantId) {
+    const clientIp = extractClientIp(request);
+    const accessResult = await checkAccessRestrictionWithAudit(
+      session.tenantId,
+      clientIp,
+      session.userId ?? null,
+      request,
+    );
+    if (!accessResult.allowed) return noStoreError(API_ERROR.ACCESS_DENIED);
+  }
+
+  // Tier B and own-gate routes decide on the raw passkey fields themselves,
+  // so they stay closed while the bundle is degraded.
+  if (isSessionGateTierB(method, pathname)) return null;
+  if (isSessionGateOwnGate(method, pathname)) return null;
+
+  // The session callback could not read the passkey state: an outage, not a
+  // requirement. Still refused, but neither as PASSKEY_REQUIRED nor audited.
+  if (session.passkeyStateDegraded) return noStoreError(API_ERROR.SERVICE_UNAVAILABLE);
+
+  if (passkeyEnforcementBlocks(session)) {
+    if (session.userId) {
+      await auditSessionPasskeyBlock({
+        req: request,
+        userId: session.userId,
+        tenantId: session.tenantId,
+        blockedPath: blockedPath(method, pathname),
+      });
+    }
+    return noStoreError(API_ERROR.PASSKEY_REQUIRED);
+  }
+  return null;
+}
+
+function noStoreError(code: ApiErrorCode): NextResponse {
+  return errorResponse(code, undefined, undefined, NO_STORE_HEADERS);
 }

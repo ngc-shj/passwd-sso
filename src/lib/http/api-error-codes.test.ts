@@ -125,7 +125,8 @@ describe("API_ERROR structural invariants", () => {
     // (bind-stepup-to-session-credential C3/C4).
     // 173 = 172 + VAULT_RESET_DATA_OUTSIDE_TENANT (audit-tenant-adjudicator round 4 S1).
     // 174 = 173 + AUTH_HASH_MISMATCH (long-lived-client-login C2).
-    expect(Object.keys(API_ERROR).length).toBe(174);
+    // 175 = 174 + CANNOT_DELETE_LAST_PASSKEY (session-api-passkey-gate FN-2).
+    expect(Object.keys(API_ERROR).length).toBe(175);
   });
 });
 

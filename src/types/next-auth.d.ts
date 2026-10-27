@@ -11,6 +11,10 @@ declare module "next-auth" {
       requirePasskey?: boolean;
       requirePasskeyEnabledAt?: string | null;
       passkeyGracePeriodDays?: number | null;
+      // Display verdict only, computed on the server clock. Server code
+      // authorizes on the four raw fields, never on this.
+      passkeyBlocked?: boolean;
+      passkeyStateDegraded?: boolean;
       fetchFavicons?: boolean;
     };
   }

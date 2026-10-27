@@ -50,6 +50,7 @@ const fixtureValidSession: SessionInfo = {
   requirePasskey: false,
   requirePasskeyEnabledAt: null,
   passkeyGracePeriodDays: null,
+  passkeyStateDegraded: false,
 };
 
 type TombstoneShape = { tombstone: true };

@@ -86,6 +86,7 @@ const fixtureValidSession: SessionInfo = {
   requirePasskey: false,
   requirePasskeyEnabledAt: null,
   passkeyGracePeriodDays: null,
+  passkeyStateDegraded: false,
 };
 
 const fixtureNegativeSession: SessionInfo = {
@@ -361,6 +362,30 @@ describe("getCachedSession", () => {
       expect(mockDel).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("keeps passkeyStateDegraded on a degraded entry (the schema must not strip it)", async () => {
+    const degraded: SessionInfo = {
+      valid: true,
+      userId: "uuid-1234",
+      tenantId: "uuid-tenant",
+      hasPasskey: false,
+      requirePasskey: true,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+      passkeyStateDegraded: true,
+    };
+    mockGet.mockResolvedValueOnce(JSON.stringify(degraded));
+    expect(await getCachedSession("tok")).toStrictEqual<SessionInfo>(degraded);
+    expect(mockDel).not.toHaveBeenCalled();
+  });
+
+  it("evicts a positive entry without passkeyStateDegraded (an unmarked entry is not trusted)", async () => {
+    const { passkeyStateDegraded: _omitted, ...legacy } = fixtureValidSession;
+    mockGet.mockResolvedValueOnce(JSON.stringify(legacy));
+    mockDel.mockResolvedValueOnce(1);
+    expect(await getCachedSession("tok")).toBeNull();
+    expect(mockDel).toHaveBeenCalledTimes(1);
+  });
 
   it("returns null when Redis is unavailable (getRedis returns null)", async () => {
     mockGetRedis.mockReturnValueOnce(null);

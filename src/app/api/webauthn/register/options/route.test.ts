@@ -1,6 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
+import { STEP_UP_WINDOW_MS } from "@/lib/auth/session/step-up";
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
@@ -15,6 +18,8 @@ const {
   mockGenerateRegistrationOpts,
   mockDerivePrfSalt,
   mockDerivePrfSaltV2,
+  mockRequireRecentCurrentAuthMethod,
+  mockSessionFindUnique,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
   return {
@@ -30,6 +35,8 @@ const {
     mockGenerateRegistrationOpts: vi.fn(),
     mockDerivePrfSalt: vi.fn(),
     mockDerivePrfSaltV2: vi.fn(),
+    mockRequireRecentCurrentAuthMethod: vi.fn(),
+    mockSessionFindUnique: vi.fn(),
   };
 });
 
@@ -46,11 +53,22 @@ vi.mock("@/lib/redis", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     webAuthnCredential: { findMany: mockPrismaFindMany },
+    // Read only by the real step-up helper the D5 cells run.
+    session: { findUnique: mockSessionFindUnique },
   },
 }));
 
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tenant-rls")>()),
+  withBypassRls: (client: unknown, fn: (tx: unknown) => unknown) => fn(client),
+}));
+
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 // A02-8: route calls derivePrfSaltV2 with a random per-credential salt.
@@ -120,8 +138,11 @@ describe("POST /api/webauthn/register/options", () => {
       return "v2-" + perCredentialSalt.slice(0, 60);
     });
     mockWithUserTenantRls.mockImplementation(
-      (_userId: string, fn: () => unknown) => fn(),
+      (_userId: string, fn: (tenantId?: string) => unknown) => fn("tenant-1"),
     );
+    // Default: a recent session — the step-up gate passes. The D5 cells below
+    // run the real helper instead.
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -298,5 +319,95 @@ describe("POST /api/webauthn/register/options", () => {
     await POST(req);
 
     expect(mockRateLimiterCheck).toHaveBeenCalledWith("rl:webauthn_reg_opts:user-1");
+  });
+
+  // ── D5 (#959): registration always requires a recent sign-in ─────────
+  // Runs the real requireRecentCurrentAuthMethod over a mocked session row, so
+  // the window comparison itself is exercised. The route no longer reads the
+  // passkey state, so every cell is a member the tenant does not block.
+
+  describe("D5 step-up gate (always required)", () => {
+    const NOW = new Date("2026-10-27T12:00:00.000Z").getTime();
+    const COOKIE = { cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` };
+
+    beforeEach(async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      vi.stubEnv("AUTH_URL", "http://localhost:3000");
+      const real = await vi.importActual<
+        typeof import("@/lib/auth/session/recent-current-auth-method")
+      >("@/lib/auth/session/recent-current-auth-method");
+      mockRequireRecentCurrentAuthMethod.mockImplementation(real.requireRecentCurrentAuthMethod);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    });
+
+    // Answers only the lookup keyed by this request's cookie digest, so a
+    // helper that looked up any other key would read no row (401), not this one.
+    function sessionRow(row: Record<string, unknown>) {
+      mockSessionFindUnique.mockImplementation(
+        async ({ where }: { where: { sessionToken: string } }) =>
+          where.sessionToken === hashSessionToken(TEST_SESSION_TOKEN)
+            ? {
+                userId: "user-1",
+                provider: "google",
+                passkeyVerifiedAt: null,
+                authCredentialId: null,
+                ...row,
+              }
+            : null,
+      );
+    }
+
+    it("refuses a sign-in 1 ms past STEP_UP_WINDOW_MS with SESSION_STEP_UP_REQUIRED, minting no challenge", async () => {
+      sessionRow({ createdAt: new Date(NOW - STEP_UP_WINDOW_MS - 1) });
+
+      const { status, json } = await parseResponse(
+        await POST(createRequest("POST", ROUTE_URL, { headers: COOKIE })),
+      );
+
+      expect(status).toBe(403);
+      expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+      expect(mockGenerateRegistrationOpts).not.toHaveBeenCalled();
+      expect(mockRedisSet).not.toHaveBeenCalled();
+    });
+
+    it("allows a sign-in exactly STEP_UP_WINDOW_MS old (the window is inclusive)", async () => {
+      sessionRow({ createdAt: new Date(NOW - STEP_UP_WINDOW_MS) });
+
+      const { status } = await parseResponse(
+        await POST(createRequest("POST", ROUTE_URL, { headers: COOKIE })),
+      );
+
+      expect(status).toBe(200);
+      expect(mockRedisSet).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows an old webauthn session whose passkey was verified recently", async () => {
+      sessionRow({
+        provider: "webauthn",
+        createdAt: new Date(NOW - 10 * STEP_UP_WINDOW_MS),
+        passkeyVerifiedAt: new Date(NOW - 60_000),
+        authCredentialId: "cred-row-1",
+      });
+
+      const { status } = await parseResponse(
+        await POST(createRequest("POST", ROUTE_URL, { headers: COOKIE })),
+      );
+
+      expect(status).toBe(200);
+      expect(mockRedisSet).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers 401 when the request carries no session cookie, minting no challenge", async () => {
+      const { status } = await parseResponse(await POST(createRequest("POST", ROUTE_URL)));
+
+      expect(status).toBe(401);
+      expect(mockSessionFindUnique).not.toHaveBeenCalled();
+      expect(mockRedisSet).not.toHaveBeenCalled();
+    });
   });
 });

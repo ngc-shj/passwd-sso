@@ -8,6 +8,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import {
   generateRegistrationOpts,
   derivePrfSaltV2,
@@ -47,6 +48,15 @@ async function handlePOST(req: NextRequest) {
   if (!redis) {
     return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
+
+  // D5 (#959): a session cookie alone must not be able to mint a durable
+  // credential — registration always requires the same recent-sign-in proof
+  // the other step-up routes (and credential delete) do. Otherwise a stolen
+  // cookie could enroll an attacker's authenticator, and, for a member the
+  // tenant's passkey requirement blocks, clear the gate with it too.
+  // @stepup id:webauthn-register-options-post method:POST
+  const stepUp = await requireRecentCurrentAuthMethod(req, userId);
+  if (stepUp) return stepUp;
 
   // Fetch existing credentials to exclude re-registration
   const existingCredentials = await withUserTenantRls(userId, async () =>

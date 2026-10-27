@@ -59,6 +59,22 @@ export const E2E_TENANT = {
   slug: "e2e-test-tenant",
 } as const;
 
+/**
+ * A dedicated tenant whose passkey requirement is past its grace period
+ * (session-passkey-gate.spec.ts). Kept apart from E2E_TENANT so the
+ * requirement never blocks the shared users every other spec signs in as.
+ */
+export const E2E_PASSKEY_TENANT = {
+  id: "00000000-0000-4000-a000-00000000e2e1",
+  name: "E2E Passkey Required Tenant",
+  slug: "e2e-passkey-required-tenant",
+} as const;
+
+/** Every tenant the suite seeds; cleanup() removes each. */
+const E2E_TENANT_IDS: readonly string[] = [E2E_TENANT.id, E2E_PASSKEY_TENANT.id];
+
+type E2ETenant = { id: string; name: string; slug: string };
+
 // ─── Test User Constants ────────────────────────────────────────
 
 export const TEST_USERS = {
@@ -155,6 +171,8 @@ export interface SeedUserOptions {
   id: string;
   email: string;
   name: string;
+  /** The user's tenant; E2E_TENANT when omitted. */
+  tenantId?: string;
   vaultFields?: {
     accountSalt: string;
     encryptedSecretKey: string;
@@ -172,14 +190,35 @@ export interface SeedUserOptions {
   };
 }
 
-export async function seedTenant(): Promise<void> {
+export async function seedTenant(tenant: E2ETenant = E2E_TENANT): Promise<void> {
   const p = getPool();
   const now = new Date().toISOString();
   await p.query(
     `INSERT INTO tenants (id, name, slug, created_at, updated_at)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, updated_at = EXCLUDED.updated_at`,
-    [E2E_TENANT.id, E2E_TENANT.name, E2E_TENANT.slug, now, now]
+    [tenant.id, tenant.name, tenant.slug, now, now]
+  );
+}
+
+/** Set a tenant's passkey requirement (`enabledAt` null clears it). */
+export async function setTenantPasskeyRequirement(
+  tenantId: string,
+  requirement: { enabledAt: Date | null; graceDays: number | null }
+): Promise<void> {
+  const p = getPool();
+  await p.query(
+    `UPDATE tenants
+        SET require_passkey = $2,
+            require_passkey_enabled_at = $3,
+            passkey_grace_period_days = $4
+      WHERE id = $1`,
+    [
+      tenantId,
+      requirement.enabledAt !== null,
+      requirement.enabledAt?.toISOString() ?? null,
+      requirement.graceDays,
+    ]
   );
 }
 
@@ -200,6 +239,7 @@ export async function seedTenantMember(
 export async function seedUser(options: SeedUserOptions): Promise<void> {
   const p = getPool();
   const now = new Date().toISOString();
+  const tenantId = options.tenantId ?? E2E_TENANT.id;
 
   if (options.vaultFields) {
     const v = options.vaultFields;
@@ -238,7 +278,7 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         options.id,
         options.email,
         options.name,
-        E2E_TENANT.id,
+        tenantId,
         now, // email_verified
         now, // vault_setup_at
         now, // created_at
@@ -279,7 +319,7 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
          master_password_server_salt = NULL,
          passphrase_verifier_hmac = NULL,
          key_version = 0`,
-      [options.id, options.email, options.name, E2E_TENANT.id, now, now, now]
+      [options.id, options.email, options.name, tenantId, now, now, now]
     );
   }
 
@@ -288,14 +328,15 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
     `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
      VALUES ($1, $2, $3, 'MEMBER', $4, $5)
      ON CONFLICT (tenant_id, user_id) DO NOTHING`,
-    [crypto.randomUUID(), E2E_TENANT.id, options.id, now, now]
+    [crypto.randomUUID(), tenantId, options.id, now, now]
   );
 }
 
 export async function seedSession(
   userId: string,
   sessionToken: string,
-  expiresHours = 8
+  expiresHours = 8,
+  tenantId: string = E2E_TENANT.id
 ): Promise<void> {
   const p = getPool();
   const expires = new Date(Date.now() + expiresHours * 60 * 60 * 1000);
@@ -310,7 +351,7 @@ export async function seedSession(
       crypto.randomUUID(),
       hashSessionToken(sessionToken),
       userId,
-      E2E_TENANT.id,
+      tenantId,
       expires.toISOString(),
     ]
   );
@@ -370,6 +411,11 @@ export async function deleteWebauthnCredential(credentialRowId: string): Promise
   await p.query(`DELETE FROM webauthn_credentials WHERE id = $1`, [credentialRowId]);
 }
 
+export async function deleteUserWebauthnCredentials(userId: string): Promise<void> {
+  const p = getPool();
+  await p.query(`DELETE FROM webauthn_credentials WHERE user_id = $1`, [userId]);
+}
+
 /**
  * Put a session into the state a real passkey sign-in leaves
  * (`provider='webauthn'`, `auth_credential_id` = the verified credential's
@@ -391,13 +437,32 @@ export async function bindSessionToWebauthnCredential(
   );
 }
 
+/**
+ * `metadata.blockedPath` of every PASSKEY_ENFORCEMENT_BLOCKED row in
+ * audit_outbox for the user. Read from the outbox, not audit_logs: the row
+ * exists as soon as the refusing request returns, whether or not a worker has
+ * drained it yet.
+ */
+export async function passkeyBlockedOutboxPaths(userId: string): Promise<string[]> {
+  const p = getPool();
+  const { rows } = await p.query<{ blocked_path: string | null }>(
+    `SELECT payload->'metadata'->>'blockedPath' AS blocked_path
+       FROM audit_outbox
+      WHERE payload->>'userId' = $1
+        AND payload->>'action' = 'PASSKEY_ENFORCEMENT_BLOCKED'`,
+    [userId]
+  );
+  return rows.map((r) => r.blocked_path ?? "");
+}
+
 export async function seedVaultKey(
   userId: string,
   verificationArtifact: {
     ciphertext: string;
     iv: string;
     authTag: string;
-  }
+  },
+  tenantId: string = E2E_TENANT.id
 ): Promise<void> {
   const p = getPool();
   await p.query(
@@ -414,7 +479,7 @@ export async function seedVaultKey(
     [
       crypto.randomUUID(),
       userId,
-      E2E_TENANT.id,
+      tenantId,
       1,
       verificationArtifact.ciphertext,
       verificationArtifact.iv,
@@ -468,12 +533,7 @@ export async function cleanup(): Promise<void> {
   );
   if (rows.length === 0) {
     // Still clean up tenant even if no users found
-    await p.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [E2E_TENANT.id]);
-    await p.query(
-      `DELETE FROM tenant_members WHERE tenant_id = $1`,
-      [E2E_TENANT.id]
-    );
-    await p.query(`DELETE FROM tenants WHERE id = $1`, [E2E_TENANT.id]);
+    await cleanupTenants(p);
     return;
   }
 
@@ -566,13 +626,22 @@ export async function cleanup(): Promise<void> {
   await p.query(`DELETE FROM users WHERE id = ANY($1)`, [userIds]);
 
   // Phase 4: Tenant cleanup
-  // audit_outbox.tenant_id → tenants.id (FK). Audit events emitted during the run
-  // enqueue rows here keyed by tenant; drain them before deleting the tenant,
-  // otherwise the delete violates audit_outbox_tenant_id_fkey.
-  await p.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [E2E_TENANT.id]);
-  await p.query(
-    `DELETE FROM tenant_members WHERE tenant_id = $1`,
-    [E2E_TENANT.id]
-  );
-  await p.query(`DELETE FROM tenants WHERE id = $1`, [E2E_TENANT.id]);
+  await cleanupTenants(p);
+}
+
+/**
+ * Delete each E2E tenant's tenant-keyed rows, then the tenant.
+ * audit_outbox.tenant_id → tenants.id (FK). Audit events emitted during the run
+ * enqueue rows here keyed by tenant; drain them before deleting the tenant,
+ * otherwise the delete violates audit_outbox_tenant_id_fkey.
+ */
+async function cleanupTenants(p: pg.Pool): Promise<void> {
+  for (const tenantId of E2E_TENANT_IDS) {
+    await p.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [tenantId]);
+    await p.query(
+      `DELETE FROM tenant_members WHERE tenant_id = $1`,
+      [tenantId]
+    );
+    await p.query(`DELETE FROM tenants WHERE id = $1`, [tenantId]);
+  }
 }

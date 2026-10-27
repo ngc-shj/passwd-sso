@@ -48,5 +48,7 @@
   "tenant-webhook-delete": { "method": "DELETE", "pathTokens": ["apiPath.tenantWebhookById", "/api/tenant/webhooks/"] },
   "tenant-webhook-post": { "method": "POST", "pathTokens": ["apiPath.tenantWebhooks", "API_PATH.TENANT_WEBHOOKS", "/api/tenant/webhooks"] },
   "vault-reset-post": { "method": "POST", "pathTokens": ["API_PATH.VAULT_RESET", "/api/vault/reset"] },
-  "webauthn-credential-delete": { "method": "DELETE", "pathTokens": ["apiPath.webauthnCredentialById", "/api/webauthn/credentials/"] }
+  "webauthn-credential-delete": { "method": "DELETE", "pathTokens": ["apiPath.webauthnCredentialById", "/api/webauthn/credentials/"] },
+  "webauthn-register-options-post": { "method": "POST", "pathTokens": ["API_PATH.WEBAUTHN_REGISTER_OPTIONS", "/api/webauthn/register/options"] },
+  "webauthn-register-verify-post": { "method": "POST", "pathTokens": ["API_PATH.WEBAUTHN_REGISTER_VERIFY", "/api/webauthn/register/verify"] }
 }

@@ -65,11 +65,15 @@ async function handlePOST(req: NextRequest) {
 
   // A02-8: include prfSalt in SELECT so buildPrfExtensions can pick
   // per-credential v2 salts vs v1 fallback for this post-login unlock path.
+  // The untargeted (unlock) query offers only credentials that hold the PRF
+  // wrapping: a PRF-capable passkey registered while the vault was locked, or
+  // one whose wrapping a key rotation cleared, cannot unlock until it is
+  // re-bootstrapped. The targeted test keeps any of the user's credentials.
   const credentials = await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.findMany({
       where: targetCredentialId
         ? { userId, credentialId: targetCredentialId }
-        : { userId, prfSupported: true },
+        : { userId, prfSupported: true, prfEncryptedSecretKey: { not: null } },
       select: { credentialId: true, transports: true, prfSalt: true },
     }),
   );

@@ -84,6 +84,7 @@ describe("team-vault-core", () => {
     getBytes?: () => Uint8Array | null;
     getUserId?: () => string | null;
     vaultUnlocked?: boolean;
+    pollingSuspended?: boolean;
   }) {
     return function Wrapper({ children }: { children: ReactNode }) {
       return (
@@ -91,6 +92,7 @@ describe("team-vault-core", () => {
           getEcdhPrivateKeyBytes={options?.getBytes ?? (() => new Uint8Array([1, 2, 3, 4]))}
           getUserId={options?.getUserId ?? (() => "user-1")}
           vaultUnlocked={options?.vaultUnlocked ?? false}
+          pollingSuspended={options?.pollingSuspended ?? false}
         >
           {children}
         </TeamVaultProvider>
@@ -642,5 +644,36 @@ describe("team-vault-core", () => {
 
     expect(removeDocSpy).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
     expect(removeWinSpy).toHaveBeenCalledWith("online", expect.any(Function));
+  });
+
+  // A passkey-blocked or degraded session is refused by the proxy on every
+  // distribution call, so the poller must not run at all — not on unlock, not
+  // on the interval, not on focus or reconnect.
+  it("suspends key distribution while polling is suspended, and runs it once resumed", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => [] }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    let suspended = true;
+    const { rerender } = renderHook(() => useTeamVault(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        makeWrapper({ vaultUnlocked: true, pollingSuspended: suspended })({ children }),
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(10 * 60_000);
+      window.dispatchEvent(new Event("online"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Positive control: the same provider polls once the suspension lifts.
+    suspended = false;
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams/pending-key-distributions");
   });
 });

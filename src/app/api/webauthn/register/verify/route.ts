@@ -12,6 +12,10 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { invalidateUserSessionsCache } from "@/lib/auth/session/user-session-invalidation";
+import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   PIN_LENGTH_MIN,
   PIN_LENGTH_MAX,
@@ -80,6 +84,15 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
+  // D5 (#959): a session cookie alone must not be able to mint a durable
+  // credential — registration always requires the same recent-sign-in proof
+  // the other step-up routes (and credential delete) do. Checked before the
+  // challenge is consumed, so a stale session's rejected attempt does not
+  // burn the one-time challenge.
+  // @stepup id:webauthn-register-verify-post method:POST
+  const stepUp = await requireRecentCurrentAuthMethod(req, userId);
+  if (stepUp) return stepUp;
+
   const result = await parseBody(req, verifyRegistrationSchema);
   if (!result.ok) return result.response;
   const {
@@ -145,6 +158,7 @@ async function handlePOST(req: NextRequest) {
       credProps?: { rk?: unknown };
       minPinLength?: unknown;
       largeBlob?: { supported?: unknown };
+      prf?: { enabled?: unknown; results?: unknown };
     };
   };
 
@@ -204,13 +218,30 @@ async function handlePOST(req: NextRequest) {
 
   const hasPrf = !!(prfEncryptedSecretKey && prfSecretKeyIv && prfSecretKeyAuthTag);
 
+  // D5 side-effect (#959): the authenticator's own PRF extension output is a
+  // client-supplied value (not authenticator-signed, like credProps.rk above)
+  // — read the SAME way, no new body field. `enabled === true` is Chrome's
+  // shape; `results` present (even without `enabled`) covers browsers that
+  // skip the capability flag and report the evaluated output directly.
+  const rawPrf = responseWire.clientExtensionResults?.prf;
+  const prfExtensionEnabled =
+    typeof rawPrf === "object" && rawPrf !== null &&
+    (rawPrf.enabled === true || "results" in rawPrf);
+
+  // `prfSupported` is the credential's PRF CAPABILITY (wrap fields present, OR
+  // the extension itself reports support) — distinct from `hasPrf`, which is
+  // specifically "the client sent wrap fields to persist now". A credential
+  // with no wrap (locked-vault registration) can still be PRF-capable, which
+  // is what offers re-bootstrap later (see passkey-credentials-card.tsx).
+  const prfSupported = hasPrf || prfExtensionEnabled;
+
   // A02-8: validate the per-credential salt fetched from Redis BEFORE persisting.
   // Defense-in-depth: a tampered Redis value would silently corrupt the PRF
   // binding (we don't recompute the v2 salt at unlock; the column is just
   // looked up). Reject non-canonical hex up front. Only persist prfSalt when
-  // the credential actually reports PRF wrap fields (hasPrf=true).
+  // the credential reports PRF capability (wrap fields or the extension itself).
   let prfSaltToPersist: string | null = null;
-  if (hasPrf && perCredentialSalt !== null) {
+  if (prfSupported && perCredentialSalt !== null) {
     if (!PER_CRED_SALT_HEX_RE.test(perCredentialSalt)) {
       return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "Invalid PRF salt envelope");
     }
@@ -265,7 +296,7 @@ async function handlePOST(req: NextRequest) {
         minPinLength,
         largeBlobSupported,
         nickname: nickname ?? null,
-        prfSupported: hasPrf,
+        prfSupported,
         registeredDevice,
         prfSalt: prfSaltToPersist,
         ...(hasPrf
@@ -279,6 +310,23 @@ async function handlePOST(req: NextRequest) {
     });
   });
 
+  // F5/F19 (#959): every writer of `hasPasskey` invalidates the user's cached
+  // sessions (cross-tenant — passkeys are user-global) so the layout, page
+  // proxy and API gate stop serving a stale `hasPasskey: false` snapshot. The
+  // credential row has already committed, so neither failure mode fails this
+  // response (entries still expire on TTL): a Redis tombstone failure does not
+  // throw and is counted in the audit row's `cacheTombstoneFailures`; a thrown
+  // error (the session read) is logged.
+  let cacheInvalidation: { totalSessions: number; cacheTombstoneFailures: number } | null = null;
+  try {
+    cacheInvalidation = await invalidateUserSessionsCache(userId);
+  } catch (err) {
+    getLogger().error(
+      { error: errorLogFields(err), userId, _logType: "webauthn.register_verify_cache_invalidation_failed" },
+      "webauthn register/verify: invalidateUserSessionsCache failed",
+    );
+  }
+
   await logAuditAsync({
     ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.WEBAUTHN_CREDENTIAL_REGISTER,
@@ -288,10 +336,16 @@ async function handlePOST(req: NextRequest) {
       credentialId,
       deviceType,
       backedUp,
-      prfSupported: hasPrf,
+      prfSupported,
       discoverable,
       minPinLength,
       largeBlobSupported,
+      ...(cacheInvalidation
+        ? {
+            cacheInvalidatedSessions: cacheInvalidation.totalSessions,
+            cacheTombstoneFailures: cacheInvalidation.cacheTombstoneFailures,
+          }
+        : {}),
     },
   });
 

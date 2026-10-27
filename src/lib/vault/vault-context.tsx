@@ -165,6 +165,10 @@ const VaultContext = createContext<VaultContextValue | null>(null);
 export function VaultProvider({ children }: { children: ReactNode }) {
   const { data: session, status: sessionStatus, update } = useSession();
   const sessionUserId = session?.user?.id;
+  // Server verdicts carried on the session (passkeyBlocked is computed on the
+  // server clock). While either holds, the proxy refuses every gated call, so
+  // the root providers' background polling is suspended.
+  const passkeyGated = !!(session?.user?.passkeyBlocked || session?.user?.passkeyStateDegraded);
   const updateRef = useRef(update);
   useEffect(() => {
     updateRef.current = update;
@@ -178,6 +182,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     if (sessionStatus === "unauthenticated") {
       setVaultStatus(VAULT_STATUS.LOCKED);
     }
+  }
+  // A passkey-gated session never fetches the vault status (see the status
+  // effect), so LOADING settles to LOCKED here, during render, before the
+  // LOADING retry/fallback timers can arm. UNLOCKED and SETUP_REQUIRED are
+  // left alone. The verdict is the server's `passkeyBlocked` — never
+  // re-derived on the client from the raw fields.
+  if (passkeyGated && sessionStatus === "authenticated" && vaultStatus === VAULT_STATUS.LOADING) {
+    setVaultStatus(VAULT_STATUS.LOCKED);
   }
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const [hasRecoveryKey, setHasRecoveryKey] = useState(false);
@@ -209,6 +221,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (sessionStatus !== "authenticated" || !session?.user) return;
+
+    // A passkey-blocked or degraded session is refused by the proxy on every
+    // vault endpoint, so the status call is skipped on every run of this
+    // effect (it re-runs on each session update). LOADING has already been
+    // settled to LOCKED during render (above), and an existing UNLOCKED state
+    // is left for the auto-lock timer.
+    if (session.user.passkeyBlocked || session.user.passkeyStateDegraded) return;
 
     async function checkVaultStatus() {
       try {
@@ -1345,11 +1364,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           getSecretKey={getSecretKey}
           keyVersion={keyVersion}
           userId={session?.user?.id}
+          pollingSuspended={passkeyGated}
         >
           <TeamVaultProvider
             getEcdhPrivateKeyBytes={getEcdhPrivateKeyBytes}
             getUserId={getUserId}
             vaultUnlocked={vaultStatus === VAULT_STATUS.UNLOCKED}
+            pollingSuspended={passkeyGated}
           >
             {children}
           </TeamVaultProvider>

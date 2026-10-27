@@ -1,4 +1,7 @@
 import { clientLogWarn, CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { getLocaleFromPathname, stripLocalePrefix } from "@/i18n/locale-utils";
+import { PASSKEY_PAGE_PATH } from "@/lib/constants/auth/page-path";
 
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -62,15 +65,95 @@ export function withBasePath(path: string): string {
 }
 
 /**
+ * The current document's app path: `window.location` without basePath, with
+ * its query string. Feeding it back to `hardNavigate` reloads the same page.
+ * Client-side only.
+ */
+export function currentAppPath(): string {
+  const { pathname, search } = window.location;
+  const appPathname =
+    BASE_PATH && (pathname === BASE_PATH || pathname.startsWith(`${BASE_PATH}/`))
+      ? pathname.slice(BASE_PATH.length) || "/"
+      : pathname;
+  return `${appPathname}${search}`;
+}
+
+// ─── PASSKEY_REQUIRED reaction ─────────────────────────────────
+// The proxy refuses a passkey-blocked session's API calls with 403
+// PASSKEY_REQUIRED. A dashboard or admin tab rendered before the block took
+// effect (or a soft navigation that kept the old layout) would otherwise keep
+// failing call by call, so fetchApi reloads it once onto the passkey page,
+// where the dashboard layout renders the minimal registration screen.
+//
+// The exclusion is keyed on whether that screen is mounted, not on the
+// pathname: a stale shell can sit on the passkey URL itself and must still be
+// reloaded once. The once-per-load latch is what stops a loop if the reload
+// lands on something that issues another gated call.
+
+const PASSKEY_REACTION_SCOPES = ["/dashboard", "/admin"] as const;
+
+let passkeyRequiredScreenMounted = false;
+let passkeyRedirectLatched = false;
+
+/** Set by `PasskeyRequiredScreen` on mount, cleared on unmount. */
+export function setPasskeyRequiredScreenMounted(mounted: boolean): void {
+  passkeyRequiredScreenMounted = mounted;
+}
+
+/** @internal Test-only — clears the mounted flag and the once-per-load latch. */
+export function _resetPasskeyRequiredReactionForTests(): void {
+  passkeyRequiredScreenMounted = false;
+  passkeyRedirectLatched = false;
+}
+
+async function reactToPasskeyRequired(res: Response): Promise<void> {
+  // Never throws: the caller gets its response back whatever happens here,
+  // including a stubbed Response without clone() or an unreadable body.
+  try {
+    if (res.status !== 403) return;
+    if (passkeyRequiredScreenMounted || passkeyRedirectLatched) return;
+
+    const appPath = stripLocalePrefix(currentAppPath().split("?")[0]);
+    const inScope = PASSKEY_REACTION_SCOPES.some(
+      (scope) => appPath === scope || appPath.startsWith(`${scope}/`),
+    );
+    if (!inScope) return;
+
+    const body: unknown = await res.clone().json();
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      (body as { error?: unknown }).error !== API_ERROR.PASSKEY_REQUIRED
+    ) {
+      return;
+    }
+
+    passkeyRedirectLatched = true;
+    const locale = getLocaleFromPathname(currentAppPath());
+    hardNavigate(`/${locale}${PASSKEY_PAGE_PATH}`);
+  } catch {
+    // Best-effort UX reaction; the 403 itself still reaches the caller.
+  }
+}
+
+/**
  * Fetch wrapper that automatically prepends basePath.
  * Client-side only — do NOT use inside server-side route handlers.
+ *
+ * A 403 PASSKEY_REQUIRED on a dashboard or admin page additionally reloads the
+ * tab onto the passkey page (see the reaction above). The response is returned
+ * unchanged either way.
  */
 export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
   if (typeof window === "undefined") {
     throw new Error("fetchApi is client-only. Use absolute URLs on the server.");
   }
   const url = withBasePath(path);
-  return init !== undefined ? fetch(url, init) : fetch(url);
+  const pending = init !== undefined ? fetch(url, init) : fetch(url);
+  return pending.then(async (res) => {
+    await reactToPasskeyRequired(res);
+    return res;
+  });
 }
 
 /**

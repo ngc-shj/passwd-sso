@@ -5,6 +5,13 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
+import { withUserTenantRls } from "@/lib/tenant-context";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+} from "@/lib/auth/policy/passkey-enforcement";
+import { auditSessionPasskeyBlock, blockedPath } from "@/lib/proxy/session-passkey-gate";
 
 // GET /api/v1/openapi.json — OpenAPI 3.1 specification
 async function handleGET(req: NextRequest) {
@@ -20,6 +27,26 @@ async function handleGET(req: NextRequest) {
     }
     if (result.type === "passkey_required") {
       return errorResponse(API_ERROR.PASSKEY_REQUIRED, undefined, undefined, { "Cache-Control": "no-store" });
+    }
+    // Own-gate route (#959 S7): this early return never reaches the proxy's
+    // session passkey gate, so a session result re-derives the block itself
+    // instead of trusting the proxy to have already checked it. A Bearer
+    // result is already covered above — authOrToken's token validators each
+    // run their own per-use passkey gate (passkeyGateBlocks, #965).
+    if (result.type === "session") {
+      const tenantId = await withUserTenantRls(result.userId, async (tid) => tid);
+      const pkState = await derivePasskeyState({ userId: result.userId, tenantId });
+      if (passkeyEnforcementBlocks(pkState)) {
+        // Same row, shape and Redis-shared limiter as the proxy's session
+        // gate: the session-request audit is one class whichever side refuses.
+        await auditSessionPasskeyBlock({
+          req,
+          userId: result.userId,
+          tenantId,
+          blockedPath: blockedPath("GET", "/api/v1/openapi.json"),
+        });
+        return errorResponse(API_ERROR.PASSKEY_REQUIRED, undefined, undefined, NO_STORE_HEADERS);
+      }
     }
   }
 

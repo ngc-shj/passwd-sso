@@ -637,6 +637,9 @@ jobs:
       AUDIT_ANCHOR_SIGNING_KEY: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       AUDIT_ANCHOR_TAG_SECRET: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       AUDIT_ANCHOR_DESTINATION_FS_PATH: "/tmp/ci-anchors"
+      # WEBAUTHN_RP_ID / WEBAUTHN_RP_ORIGIN / WEBAUTHN_PRF_SECRET are not set
+      # here: the web server gets them from e2e/helpers/webauthn.ts, merged over
+      # this env, in CI and locally alike.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

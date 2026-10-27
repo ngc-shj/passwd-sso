@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   mockPrisma,
@@ -2306,6 +2306,8 @@ describe("session callback — passkey enforcement fail-closed", () => {
       requirePasskey: boolean;
       requirePasskeyEnabledAt: string | null;
       passkeyGracePeriodDays: number | null;
+      passkeyBlocked: boolean;
+      passkeyStateDegraded: boolean;
       fetchFavicons: boolean;
     };
     expires: string;
@@ -2480,6 +2482,73 @@ describe("session callback — passkey enforcement fail-closed", () => {
     expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
     );
+  });
+
+  // D7: the catch bundle blocks on its raw fields, but is marked as an outage
+  // and carries no display verdict, so the client shows a retry state rather
+  // than "register a passkey".
+  it("marks the catch bundle degraded and gives it no blocked verdict", async () => {
+    mockWithBypassRls.mockRejectedValueOnce(new Error("db down"));
+
+    const result = await sessionCallback(baseParams);
+
+    expect(result.user.passkeyStateDegraded).toBe(true);
+    expect(result.user.passkeyBlocked).toBe(false);
+    // The raw fields still refuse on the server.
+    expect(passkeyEnforcementBlocks(result.user)).toBe(true);
+  });
+
+  it("is not degraded on the happy path", async () => {
+    mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(1);
+    seedPasskeyPolicy({
+      fetchFavicons: false,
+      requirePasskey: true,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+
+    const result = await sessionCallback(baseParams);
+
+    expect(result.user.passkeyStateDegraded).toBe(false);
+    expect(result.user.passkeyBlocked).toBe(false);
+  });
+
+  // D6: passkeyBlocked is passkeyEnforcementBlocks over the four fields on the
+  // server clock, pinned at the grace boundary.
+  describe("passkeyBlocked at the grace boundary", () => {
+    const ENABLED_AT = new Date("2026-03-01T00:00:00.000Z");
+    const GRACE_DAYS = 7;
+    const GRACE_END_MS = ENABLED_AT.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);
+      seedPasskeyPolicy({
+        fetchFavicons: false,
+        requirePasskey: true,
+        requirePasskeyEnabledAt: ENABLED_AT,
+        passkeyGracePeriodDays: GRACE_DAYS,
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("is false at the last millisecond of the grace period", async () => {
+      vi.setSystemTime(GRACE_END_MS);
+      const result = await sessionCallback(baseParams);
+      expect(result.user.passkeyBlocked).toBe(false);
+      expect(result.user.passkeyBlocked).toBe(passkeyEnforcementBlocks(result.user));
+    });
+
+    it("is true one millisecond after the grace period ends", async () => {
+      vi.setSystemTime(GRACE_END_MS + 1);
+      const result = await sessionCallback(baseParams);
+      expect(result.user.passkeyBlocked).toBe(true);
+      expect(result.user.passkeyBlocked).toBe(passkeyEnforcementBlocks(result.user));
+      expect(result.user.passkeyStateDegraded).toBe(false);
+    });
   });
 
   it("still logs auth.session.passkey_data_fetch_failed on fetch failure (ops visibility)", async () => {

@@ -262,3 +262,48 @@ export async function invalidateTenantSessionsCache(
     cacheTombstoneFailures: result.failed,
   };
 }
+
+/**
+ * Invalidate the session cache for every live session of a user, across
+ * EVERY tenant they hold a session under.
+ *
+ * Sibling of {@link invalidateTenantSessionsCache}, but scoped by user
+ * instead of tenant — called by every writer of `hasPasskey`
+ * (`register/verify` on success, the credential `DELETE`) so the layout, the
+ * page proxy and the API session-passkey gate (`#959`) stop serving a stale
+ * `hasPasskey` snapshot from cache within one cache cycle
+ * (≤ `TOMBSTONE_TTL_MS`).
+ *
+ * Deliberately cross-tenant: `derivePasskeyState`'s `hasPasskey` counts a
+ * credential under ANY tenant (passkeys are user-global, not tenant-scoped —
+ * see its own doc comment), so a user signed in under two tenants must have
+ * both sessions' cached snapshots invalidated by one passkey change under
+ * either.
+ *
+ * Returns `{ totalSessions, cacheTombstoneFailures }` so the caller can log
+ * the failure count — same rationale as `invalidateTenantSessionsCache`'s
+ * doc: a Redis outage during this invalidation must be forensically visible,
+ * not a silent gap.
+ */
+export async function invalidateUserSessionsCache(
+  userId: string,
+): Promise<{ totalSessions: number; cacheTombstoneFailures: number }> {
+  const targetSessions = await withBypassRls(prisma, (tx) =>
+    tx.session.findMany({
+      where: { userId, expires: { gt: new Date() } },
+      select: { sessionToken: true },
+    }),
+  BYPASS_GRANT.USER_SESSION_CACHE_INVALIDATION);
+
+  if (targetSessions.length === 0) {
+    return { totalSessions: 0, cacheTombstoneFailures: 0 };
+  }
+
+  const result = await invalidateCachedSessionsBulkByDigest(
+    targetSessions.map((s) => s.sessionToken),
+  );
+  return {
+    totalSessions: result.total,
+    cacheTombstoneFailures: result.failed,
+  };
+}

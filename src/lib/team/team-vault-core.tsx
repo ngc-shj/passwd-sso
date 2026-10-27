@@ -181,6 +181,8 @@ interface TeamVaultProviderProps {
   getEcdhPrivateKeyBytes: () => Uint8Array | null;
   getUserId: () => string | null;
   vaultUnlocked: boolean;
+  /** True while the session is passkey-blocked or degraded: the proxy refuses the distribution calls. */
+  pollingSuspended: boolean;
 }
 
 export function TeamVaultProvider({
@@ -188,6 +190,7 @@ export function TeamVaultProvider({
   getEcdhPrivateKeyBytes,
   getUserId,
   vaultUnlocked,
+  pollingSuspended,
 }: TeamVaultProviderProps) {
   // Keyed by `${teamId}:${keyVersion}` for versioned entries, plus a
   // `${teamId}:latest` pointer (LatestPointer) recording which version number
@@ -745,7 +748,7 @@ export function TeamVaultProvider({
 
   // ─── Periodic auto key distribution (same pattern as EA auto-confirm) ──
   useEffect(() => {
-    if (!vaultUnlocked) return;
+    if (!vaultUnlocked || pollingSuspended) return;
 
     let inFlight = false;
 
@@ -773,7 +776,7 @@ export function TeamVaultProvider({
       document.removeEventListener("visibilitychange", handleVisible);
       window.removeEventListener("online", handleOnline);
     };
-  }, [vaultUnlocked, distributePendingKeys]);
+  }, [vaultUnlocked, pollingSuspended, distributePendingKeys]);
 
   const value: TeamVaultContextValue = {
     getTeamEncryptionKey,

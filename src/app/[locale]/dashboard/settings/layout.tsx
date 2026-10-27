@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { SectionLayout } from "@/components/settings/account/section-layout";
 import { useTranslations } from "next-intl";
+import { PASSKEY_PAGE_PATH } from "@/lib/constants/auth/page-path";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("Settings");
@@ -41,7 +42,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         children: [
           { href: "/dashboard/settings/auth/passphrase", label: t("subTab.passphrase"), icon: Lock },
           { href: "/dashboard/settings/auth/recovery-key", label: t("subTab.recoveryKey"), icon: KeyRound },
-          { href: "/dashboard/settings/auth/passkey", label: t("subTab.passkey"), icon: Fingerprint },
+          { href: PASSKEY_PAGE_PATH, label: t("subTab.passkey"), icon: Fingerprint },
         ],
       },
       {

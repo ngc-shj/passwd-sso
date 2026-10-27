@@ -46,6 +46,7 @@ import {
 import authConfig, { allowsDangerousEmailAccountLinking } from "./auth.config";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { errorLogFields } from "@/lib/logger/error-fields";
+import { passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";
 
 function getAuthRouteBasePath(): string {
   const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
@@ -718,10 +719,11 @@ async function claimedTenantMembership(
       // validated only against revocation, expiry and an active membership in
       // its own tenant. Revoked as invalidateUserSessions revokes both when a
       // member leaves a tenant. Sessions above do move, where
-      // invalidateUserSessions deletes them: the proxy reads the passkey
-      // requirement from the tenant of the user's ACTIVE MEMBERSHIP
-      // (resolveOwningTenantIdFromClient) on every request, and their cache is
-      // evicted below.
+      // invalidateUserSessions deletes them: the session callback reads the
+      // passkey requirement from the tenant of the user's ACTIVE MEMBERSHIP
+      // (resolveOwningTenantIdFromClient), and the proxy reads it through the
+      // session cache, so their cache is evicted below and the next request
+      // re-reads it under the target tenant.
       await tx.extensionToken.updateMany({
         where: { userId, tenantId: existingTenantId, revokedAt: null },
         data: { revokedAt },
@@ -1129,6 +1131,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       let requirePasskey = false;
       let requirePasskeyEnabledAt: string | null = null;
       let passkeyGracePeriodDays: number | null = null;
+      let passkeyStateDegraded = false;
       let fetchFavicons = false;
       try {
         const passkeyData = await withBypassRls(prisma, async (tx) => {
@@ -1189,8 +1192,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // enforcement. Leaving the initial requirePasskey=false default would
         // fail OPEN — a passkey-required tenant would lose enforcement on a
         // transient DB/Redis blip. Instead force the safe-blocking bundle so
-        // the page-route gate blocks (redirect to the exempt passkey-setup
-        // page): requirePasskey=true + hasPasskey=false +
+        // every consumer deciding on the raw fields refuses:
+        // requirePasskey=true + hasPasskey=false +
         // requirePasskeyEnabledAt=null. The null enabledAt makes
         // isPasskeyGracePeriodExpired() return true (immediate enforcement),
         // so passkeyEnforcementBlocks() === true. The four fields move as an
@@ -1201,6 +1204,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         hasPasskey = false;
         requirePasskeyEnabledAt = null;
         passkeyGracePeriodDays = null;
+        // The bundle is an outage, not a requirement: consumers still refuse
+        // on it, but answer 503 rather than PASSKEY_REQUIRED, write no audit
+        // row, and show no "register a passkey" verdict.
+        passkeyStateDegraded = true;
         // fetchFavicons stays false (cosmetic; not a security field).
 
         // Still surface to ops: a silent catch hid Redis/DB issues that
@@ -1227,6 +1234,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           requirePasskey,
           requirePasskeyEnabledAt,
           passkeyGracePeriodDays,
+          // A display verdict for the client, computed here on the server
+          // clock so the browser never re-derives it. False for a degraded
+          // bundle, which carries its own flag.
+          passkeyBlocked:
+            !passkeyStateDegraded &&
+            passkeyEnforcementBlocks({
+              hasPasskey,
+              requirePasskey,
+              requirePasskeyEnabledAt,
+              passkeyGracePeriodDays,
+            }),
+          passkeyStateDegraded,
           fetchFavicons,
         },
         expires: session.expires,
