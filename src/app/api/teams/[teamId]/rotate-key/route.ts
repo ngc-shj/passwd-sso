@@ -114,8 +114,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   // Interactive transaction with optimistic lock on teamKeyVersion (S-17)
   // Member list verification is inside transaction to prevent TOCTOU (F-26)
   try {
-    await withTeamTenantRls(teamId, async () =>
-      prisma.$transaction(async (tx) => {
+    await withTeamTenantRls(
+      teamId,
+      async (_tenantId, tx) => {
         // Re-verify teamKeyVersion hasn't changed since pre-read
         const currentTeam = await tx.team.findUnique({
           where: { id: teamId },
@@ -228,7 +229,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           where: { id: teamId },
           data: { teamKeyVersion: newTeamKeyVersion },
         });
-      }, { timeout: TEAM_ROTATE_TX_TIMEOUT_MS }),
+      },
+      { timeout: TEAM_ROTATE_TX_TIMEOUT_MS },
     );
   } catch (e) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {

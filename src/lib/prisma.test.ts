@@ -48,7 +48,7 @@ vi.mock("@/lib/tenant-rls", () => ({
   getTenantRlsContext: mockGetTenantRlsContext,
 }));
 
-import { envInt, prisma } from "./prisma";
+import { envInt, prisma, prismaBase } from "./prisma";
 
 describe("envInt", () => {
   it("returns the default when the env var is unset", () => {
@@ -137,5 +137,43 @@ describe("prisma proxy inside an RLS context", () => {
 
     expect(results).toEqual([1, 2]);
     expect(events).toEqual(["start:a", "end:a", "start:b", "end:b"]);
+  });
+
+  it("runs the function form on the context's client", async () => {
+    const active = { marker: "tx" };
+    mockGetTenantRlsContext.mockReturnValueOnce({ tx: active });
+    const fn = vi.fn(async (tx: unknown) => tx);
+
+    await expect(prisma.$transaction(fn as never)).resolves.toBe(active);
+    expect(fn).toHaveBeenCalledWith(active);
+  });
+
+  it("refuses options for the function form, which the open transaction cannot apply", async () => {
+    mockGetTenantRlsContext.mockReturnValueOnce({ tx: {} });
+    const fn = vi.fn(async () => "never");
+
+    await expect(prisma.$transaction(fn, { timeout: 60_000 })).rejects.toThrow(
+      /options are not applied inside an RLS context/,
+    );
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("refuses options for the array form too", async () => {
+    mockGetTenantRlsContext.mockReturnValueOnce({ tx: {} });
+
+    await expect(
+      prisma.$transaction([] as never, { isolationLevel: "Serializable" } as never),
+    ).rejects.toThrow(/options are not applied inside an RLS context/);
+  });
+});
+
+describe("prisma proxy outside an RLS context", () => {
+  it("forwards $transaction and its options to the base client unchanged", async () => {
+    const baseTransaction = vi.fn(async () => "base-result");
+    Object.assign(prismaBase, { $transaction: baseTransaction });
+    const fn = async () => "never-run-by-the-mock";
+
+    await expect(prisma.$transaction(fn, { timeout: 60_000 })).resolves.toBe("base-result");
+    expect(baseTransaction).toHaveBeenCalledWith(fn, { timeout: 60_000 });
   });
 });

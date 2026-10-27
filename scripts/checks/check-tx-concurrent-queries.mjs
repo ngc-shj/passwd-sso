@@ -5,53 +5,71 @@
  *
  * An interactive transaction holds one pg connection. `Promise.all([tx.a(),
  * tx.b()])` issues both statements on it concurrently; pg queues them today and
- * prints "client is already executing a query", and a future major refuses
- * them. Statements on one connection never run in parallel anyway, so
- * sequential awaits cost nothing.
+ * deprecates doing so, and pg@9 refuses them. Statements on one connection
+ * never run in parallel anyway, so sequential awaits cost nothing.
  *
- * The text grep `Promise\.all\(\[\s*tx\.` saw about half of the class. The
- * class is a combinator (`Promise.all` / `allSettled` / `any` / `race`) whose
- * argument reaches a transaction client that the argument did not open itself:
+ * The class is a combinator (`Promise.all` / `allSettled` / `any` / `race`, also
+ * spelled `Promise["all"]`) whose argument REACHES a transaction client the
+ * argument did not open itself. "Reaches" follows what the argument evaluates:
  *
- *   1. A binding that IS a transaction client, referenced anywhere inside the
- *      argument — `tx.model.op()`, `items.map((i) => tx.x.op(i))`, or `helper(tx)`
- *      (the helper queries on what it is handed). A binding is a client when:
- *        - its type annotation names `TransactionClient`, or a type alias
- *          derived from it (`TxOrPrisma`, `TxClient`, …, to a fixpoint);
- *        - it is the first parameter of a function passed in a callback
- *          position whose type is `(tx: <client>) => …` — derived from every
- *          declaration in the scanned tree (withBypassRls, withTenantRls,
- *          inSweepTx, …; an object-type property such as `inTx` likewise) — or
- *          passed to `<any>.$transaction(fn)`;
- *        - it is a `const` alias of such a binding.
- *      Names resolve to their innermost visible declaration (scope-bindings),
- *      and an import by its ORIGINAL name, so `import { withBypassRls as wb }`
- *      is still a wrapper and a shadowing `(tx) =>` that is no client is not.
- *      A client declared INSIDE the argument (each element opening its own
- *      `withBypassRls(prisma, (tx) => …)`) is a separate transaction per
- *      element, on its own connection, and is allowed.
+ *   - every identifier in it, not only a bare-identifier argument: a spread
+ *     element, `Object.values(m)`, `xs.map(load)`, `[load(a), load(b)]`;
+ *   - a local variable declared outside it, through its initializer AND every
+ *     write to it in its scope — reassignment, element/property assignment and
+ *     the arguments of any method called on it (`.push`, `.unshift`, `.splice`,
+ *     `.set`, …). A value written under `await` is settled, not a lazy query,
+ *     unless a function lies between (that body runs when called). Passing the
+ *     variable to a call that is not a known reader is a write the gate cannot
+ *     see, and is reported as such (fail closed);
+ *   - a local function or closure it names: its body, recursively, for clients
+ *     declared outside that body.
  *
- *   2. The ambient `prisma` import (src/lib/prisma.ts). Inside any RLS context
- *      — withBypassRls / withTenantRls / withUserTenantRls / withTeamTenantRls,
- *      the last two of which hand their callback no client at all — that proxy
- *      routes every call to the context's transaction client. Whether the
- *      enclosing function runs inside a context is decided by its callers,
- *      which one file does not show (createTeamPassword issues its Promise.all
- *      with no context in sight and is only ever called inside
- *      withTeamTenantRls), so the ambient client is refused in a combinator
- *      everywhere. The one exception is the client ARGUMENT of a wrapper call
- *      (`withBypassRls(prisma, …)`), which opens a new transaction.
+ * What is a client:
+ *   1. A binding that IS a transaction client: typed `TransactionClient` or a
+ *      type alias derived from it (`TxOrPrisma`, `TxClient`, … to a fixpoint);
+ *      a member of an object type, interface or object alias typed so (`params.tx`,
+ *      `{ tx }: Params`, `const { tx } = params`); or a parameter in a
+ *      client-callback position — derived from every declaration whose parameter
+ *      type is a function type with a client parameter (withBypassRls,
+ *      withTenantRls, withUserTenantRls / withTeamTenantRls's second parameter,
+ *      inSweepTx, …; also through a function-type alias), an object-type or
+ *      interface callback property (`inTx`, `__testHook`), and
+ *      `<any>.$transaction(fn)`. Names resolve to their innermost visible
+ *      declaration (scope-bindings), and an import by its ORIGINAL name.
+ *   2. The ambient `prisma` (src/lib/prisma.ts) — a named import (aliased or
+ *      not, `@/` or relative), `ns.prisma` through a namespace import, or a
+ *      local alias of either (found by following the variable). Inside any RLS
+ *      context that proxy routes every call to the context's transaction
+ *      client, and whether the enclosing function runs inside one is decided by
+ *      its callers (createTeamPassword issues its queries with no context in
+ *      sight and is only ever called inside withTeamTenantRls), so the ambient
+ *      client is refused everywhere — except as the client ARGUMENT of a wrapper
+ *      call (`withBypassRls(prisma, …)`), and inside a wrapper callback written
+ *      within the argument: that callback runs in a NEW context, one per element.
+ * A client declared INSIDE the argument (each element opening its own
+ * `withBypassRls(prisma, (tx) => …)`) is a separate transaction per element.
  *
- * Not seen: a helper that reaches the ambient client without being handed one
- * (`Promise.all([loadA(id), loadB(id)])` where loadA queries `prisma`). That is
- * a call-graph question this file-local gate cannot answer; the runtime
- * warning is the backstop there.
+ * Not seen (the runtime backstop in src/__tests__/db-integration/setup.ts
+ * fails any integration test that runs two queries at once on one pg client,
+ * whatever the spelling — Prisma's own concurrent loading of relation-join
+ * children excepted, which no application code controls):
+ *   - a helper in another module that reaches the ambient client without being
+ *     handed one (`Promise.all([loadA(id), loadB(id)])`, loadA imported) — a
+ *     call-graph question this file-local gate does not answer;
+ *   - a parameter that holds lazy queries or a client without a client type
+ *     (`function run(ps: Promise<unknown>[]) { return Promise.all(ps); }`);
+ *   - a client typed through a generic (`<C extends Prisma.TransactionClient>(
+ *     db: C)`), `typeof tx`, or an inferred type with no annotation at all;
+ *   - a client held in a class field or module-level mutable state.
  *
  * The array form `prisma.$transaction([...])` is not a combinator here: the
  * proxy in src/lib/prisma.ts runs it sequentially inside a context.
  *
- * Exit 0 = OK. Exit 1 = a violation, or nothing was scanned.
- * Env: TX_CONCURRENT_ROOT overrides the repo root (used by the self-test).
+ * Exit 0 = OK. Exit 1 = a violation, or the scan cannot vouch for itself.
+ * Env: TX_CONCURRENT_ROOT overrides the repo root (used by the self-test), which
+ * relaxes the repo-shape floors (pinned opener files, src/lib/prisma.ts and its
+ * `prisma` export, at least one resolved ambient import) unless
+ * TX_CONCURRENT_STRICT=1.
  */
 import { SyntaxKind, ts } from "ts-morph";
 import { fileURLToPath } from "node:url";
@@ -61,50 +79,89 @@ import {
   FN_KINDS,
   bindingIndex,
   resolveLocalFunction,
+  scopeOf,
   unwrapExpression,
   visibleBinding,
 } from "./lib/scope-bindings.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const ROOT = process.env.TX_CONCURRENT_ROOT ?? REPO_ROOT;
+// The repo-shape floors below hold for the real tree; a fixture root opts in
+// with TX_CONCURRENT_STRICT=1 (the self-test's floor cells).
+const REQUIRE_REPO_FLOORS =
+  process.env.TX_CONCURRENT_ROOT === undefined || process.env.TX_CONCURRENT_STRICT === "1";
 const SCAN_TARGETS = ["src", "scripts"];
 const COMBINATORS = new Set(["all", "allSettled", "any", "race"]);
 const AMBIENT_MODULE = "src/lib/prisma";
+const AMBIENT_FILE = `${AMBIENT_MODULE}.ts`;
 const AMBIENT_EXPORT = "prisma";
 // Wrappers the derivation must find whenever their defining file is scanned —
-// a floor proving the signature match still sees the real openers.
+// a floor proving the signature match still sees the real openers. Each entry
+// is [name, callback argument index, client parameter index].
 const PINNED_WRAPPERS = new Map([
-  ["src/lib/tenant-rls.ts", [["withBypassRls", 1], ["withTenantRls", 2]]],
+  ["src/lib/tenant-rls.ts", [["withBypassRls", 1, 0], ["withTenantRls", 2, 0]]],
+  ["src/lib/tenant-context.ts", [["withUserTenantRls", 1, 1], ["withTeamTenantRls", 1, 1]]],
+]);
+// Calls that only READ a followed variable, so passing it to them is no write.
+const READER_CALLS = new Set([
+  "Object.values",
+  "Object.entries",
+  "Object.keys",
+  "Array.from",
+  "Array.isArray",
+  "JSON.stringify",
+  "String",
+  "Number",
+  "Boolean",
+  ...[...COMBINATORS].map((c) => `Promise.${c}`),
 ]);
 
-const missing = unresolvedTargets(SCAN_TARGETS, ROOT);
-if (missing.length > 0) {
-  console.error(`check-tx-concurrent-queries: scan target(s) contributed no source file: ${missing.join(", ")}`);
+function fail(message) {
+  console.error(`check-tx-concurrent-queries: ${message}`);
   process.exit(1);
 }
+
+const missing = unresolvedTargets(SCAN_TARGETS, ROOT);
+if (missing.length > 0) fail(`scan target(s) contributed no source file: ${missing.join(", ")}`);
 
 const project = createAstProject();
 const files = [...sourceFilesFrom(project, SCAN_TARGETS, ROOT)];
-if (files.length === 0) {
-  console.error("check-tx-concurrent-queries: scanned 0 files — refusing to report OK");
-  process.exit(1);
-}
+if (files.length === 0) fail("scanned 0 files — refusing to report OK");
 
 const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
 const within = (node, outer) => outer.getStart() <= node.getStart() && node.getEnd() <= outer.getEnd();
+const FUNCTION_LIKE = new Set([
+  ...FN_KINDS,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.SetAccessor,
+  SyntaxKind.Constructor,
+]);
 
-// ── Pass 1: derive client type aliases, wrappers and callback properties ──
+// ── Pass 1: derive client types, wrappers, callback properties ──
+
+const typeAliases = new Map(); // alias name -> type node
+const objectTypes = new Map(); // interface / object-literal alias name -> member nodes
+for (const { sf } of files) {
+  for (const d of sf.getDescendantsOfKind(SyntaxKind.TypeAliasDeclaration)) {
+    const node = d.getTypeNode();
+    if (!node) continue;
+    typeAliases.set(d.getName(), node);
+    if (node.getKind() === SyntaxKind.TypeLiteral) objectTypes.set(d.getName(), node.getMembers());
+  }
+  for (const d of sf.getDescendantsOfKind(SyntaxKind.InterfaceDeclaration)) {
+    objectTypes.set(d.getName(), [...(objectTypes.get(d.getName()) ?? []), ...d.getMembers()]);
+  }
+}
 
 const clientAliases = new Set();
 {
-  const aliases = files.flatMap(({ sf }) =>
-    sf.getDescendantsOfKind(SyntaxKind.TypeAliasDeclaration).map((d) => [d.getName(), d.getTypeNode()?.getText() ?? ""]),
-  );
   let grew = true;
   while (grew) {
     grew = false;
-    for (const [name, text] of aliases) {
-      if (!clientAliases.has(name) && namesClientType(text)) {
+    for (const [name, node] of typeAliases) {
+      if (!clientAliases.has(name) && namesClientType(node.getText())) {
         clientAliases.add(name);
         grew = true;
       }
@@ -120,123 +177,8 @@ function namesClientType(text) {
   return false;
 }
 
-/** True when `typeNode` is (or is a union/optional holding) a function type whose first parameter is a client. */
-function isClientCallbackType(typeNode) {
-  if (!typeNode) return false;
-  const fnTypes =
-    typeNode.getKind() === SyntaxKind.FunctionType
-      ? [typeNode]
-      : typeNode.getDescendantsOfKind(SyntaxKind.FunctionType);
-  return fnTypes.some((fnType) => {
-    const first = fnType.getParameters()[0];
-    return !!first && namesClientType(first.getTypeNode()?.getText() ?? "");
-  });
-}
-
-/** Indices of a function's parameters that take a client callback. */
-function callbackIndices(fn) {
-  const out = new Set();
-  fn.getParameters().forEach((p, i) => {
-    if (isClientCallbackType(p.getTypeNode())) out.add(i);
-  });
-  return out;
-}
-
-const wrappers = new Map(); // name -> Set<callback index>, from every scanned declaration
-const callbackProps = new Set(); // object-type property names typed as a client callback
-for (const { sf } of files) {
-  const fns = [
-    ...sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration).map((f) => [f.getName(), f]),
-    ...sf.getDescendantsOfKind(SyntaxKind.MethodDeclaration).map((m) => [m.getName(), m]),
-    ...sf
-      .getDescendantsOfKind(SyntaxKind.VariableDeclaration)
-      .map((v) => [v.getName(), unwrapExpression(v.getInitializer())])
-      .filter(([, init]) => init && FN_KINDS.has(init.getKind())),
-  ];
-  for (const [name, fn] of fns) {
-    if (!name) continue;
-    const indices = callbackIndices(fn);
-    if (indices.size === 0) continue;
-    const bucket = wrappers.get(name) ?? new Set();
-    for (const i of indices) bucket.add(i);
-    wrappers.set(name, bucket);
-  }
-  for (const kind of [SyntaxKind.PropertySignature, SyntaxKind.PropertyDeclaration]) {
-    for (const prop of sf.getDescendantsOfKind(kind)) {
-      if (isClientCallbackType(prop.getTypeNode())) callbackProps.add(prop.getName());
-    }
-  }
-}
-
-for (const [path, pins] of PINNED_WRAPPERS) {
-  if (!files.some((f) => f.rel === path)) continue;
-  for (const [name, index] of pins) {
-    if (!wrappers.get(name)?.has(index)) {
-      console.error(
-        `check-tx-concurrent-queries: derivation lost ${name} (callback index ${index}) from ${path} — ` +
-          `the signature match no longer sees a real opener, so its callbacks would read as plain functions`,
-      );
-      process.exit(1);
-    }
-  }
-}
-
-// ── Pass 2: per file, judge each combinator ──
-
-/** The import a local name refers to, as { original, module } — null when not imported. */
-function importOf(name, sf, rel) {
-  for (const decl of sf.getImportDeclarations()) {
-    for (const spec of decl.getNamedImports()) {
-      const local = spec.getAliasNode()?.getText() ?? spec.getName();
-      if (local !== name) continue;
-      return { original: spec.getName(), module: moduleKey(decl.getModuleSpecifierValue(), rel) };
-    }
-  }
-  return null;
-}
-
-/** A module specifier as a repo-relative path without extension (`@/x` → `src/x`). */
-function moduleKey(specifier, rel) {
-  if (specifier.startsWith("@/")) return `src/${specifier.slice(2)}`;
-  if (specifier.startsWith(".")) return posix.normalize(posix.join(posix.dirname(rel), specifier));
-  return specifier;
-}
-
-/** Callback indices of the call `call`, or an empty set when it is no wrapper. */
-function wrapperIndicesOf(call, ctx) {
-  const callee = unwrapExpression(call.getExpression());
-  if (callee?.getKind() === SyntaxKind.PropertyAccessExpression) {
-    const name = callee.getName();
-    if (name === "$transaction") return new Set([0]);
-    return wrappers.get(name) ?? new Set();
-  }
-  if (callee?.getKind() !== SyntaxKind.Identifier) return new Set();
-  const name = callee.getText();
-  if (visibleBinding(name, callee, ctx.bindingsFor)) {
-    const fn = resolveLocalFunction(name, callee, ctx.bindingsFor);
-    return fn ? callbackIndices(fn) : new Set();
-  }
-  const imported = importOf(name, ctx.sf, ctx.rel);
-  return wrappers.get(imported ? imported.original : name) ?? new Set();
-}
-
-/** True when `param` is the first parameter of a function in a client-callback position. */
-function isCallbackClientParam(param, ctx) {
-  const fn = param.getParent();
-  if (!fn || !FN_KINDS.has(fn.getKind()) || !sameNode(fn.getParameters()[0], param)) return false;
-  // Climb past type-level wrappers to the position the function is written in.
-  let slot = fn;
-  while (slot.getParent() && sameNode(unwrapExpression(slot.getParent()), fn)) slot = slot.getParent();
-  const holder = slot.getParent();
-  if (holder?.getKind() === SyntaxKind.CallExpression) {
-    const index = holder.getArguments().findIndex((arg) => sameNode(arg, slot));
-    return index !== -1 && wrapperIndicesOf(holder, ctx).has(index);
-  }
-  if (holder?.getKind() === SyntaxKind.PropertyAssignment) {
-    return callbackProps.has(holder.getName());
-  }
-  return false;
-}
+const typeRefName = (typeNode) =>
+  typeNode?.getKind() === SyntaxKind.TypeReference ? typeNode.getTypeName().getText() : null;
 
 /**
  * True when a type annotation makes the WHOLE binding a client: `Prisma.TransactionClient`,
@@ -260,11 +202,30 @@ function annotationIsClient(typeNode) {
   }
 }
 
-/** Property names of an object-type annotation that hold a client (`{ tx?: Prisma.TransactionClient }`). */
+/** Members of an object type, an interface, an object alias, or an intersection of them. */
+function membersOf(typeNode, seen = new Set()) {
+  if (!typeNode) return [];
+  switch (typeNode.getKind()) {
+    case SyntaxKind.TypeLiteral:
+      return typeNode.getMembers();
+    case SyntaxKind.IntersectionType:
+    case SyntaxKind.UnionType:
+      return typeNode.getTypeNodes().flatMap((t) => membersOf(t, seen));
+    case SyntaxKind.ParenthesizedType:
+      return membersOf(typeNode.getTypeNode(), seen);
+    default: {
+      const name = typeRefName(typeNode);
+      if (!name || seen.has(name)) return [];
+      seen.add(name);
+      return objectTypes.get(name) ?? [];
+    }
+  }
+}
+
+/** Property names of an object-shaped annotation that hold a client (`{ tx?: Prisma.TransactionClient }`). */
 function clientMembers(typeNode) {
   const out = new Set();
-  if (typeNode?.getKind() !== SyntaxKind.TypeLiteral) return out;
-  for (const member of typeNode.getMembers()) {
+  for (const member of membersOf(typeNode)) {
     if (member.getKind() === SyntaxKind.PropertySignature && annotationIsClient(member.getTypeNode())) {
       out.add(member.getName());
     }
@@ -272,33 +233,197 @@ function clientMembers(typeNode) {
   return out;
 }
 
+/** Function types `typeNode` is, holds, or names through a type alias. */
+function functionTypesOf(typeNode, seen = new Set()) {
+  if (!typeNode) return [];
+  if (typeNode.getKind() === SyntaxKind.FunctionType) return [typeNode];
+  const name = typeRefName(typeNode);
+  if (name && typeAliases.has(name) && !seen.has(name)) {
+    seen.add(name);
+    return functionTypesOf(typeAliases.get(name), seen);
+  }
+  return typeNode.getDescendantsOfKind(SyntaxKind.FunctionType);
+}
+
+/** Indices of the parameters a callback of type `typeNode` receives a client in. */
+function clientParamIndices(typeNode) {
+  const out = new Set();
+  for (const fnType of functionTypesOf(typeNode)) {
+    fnType.getParameters().forEach((p, j) => {
+      if (annotationIsClient(p.getTypeNode())) out.add(j);
+    });
+  }
+  return out;
+}
+
+/** argIndex -> client parameter indices, for a function whose parameters take client callbacks. */
+function callbackSlots(fn) {
+  const out = new Map();
+  fn.getParameters().forEach((p, i) => {
+    const indices = clientParamIndices(p.getTypeNode());
+    if (indices.size > 0) out.set(i, indices);
+  });
+  return out;
+}
+
+const mergeSlots = (into, from) => {
+  for (const [i, js] of from) {
+    const bucket = into.get(i) ?? new Set();
+    for (const j of js) bucket.add(j);
+    into.set(i, bucket);
+  }
+  return into;
+};
+
+const wrappers = new Map(); // name -> Map<argIndex, Set<paramIndex>>, from every scanned declaration
+const callbackProps = new Map(); // object-type property name -> client parameter indices
+let ambientImports = 0;
+let ambientExportFound = false;
+for (const { sf, rel } of files) {
+  const fns = [
+    ...sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration).map((f) => [f.getName(), f]),
+    ...sf.getDescendantsOfKind(SyntaxKind.MethodDeclaration).map((m) => [m.getName(), m]),
+    ...sf
+      .getDescendantsOfKind(SyntaxKind.VariableDeclaration)
+      .map((v) => [v.getName(), unwrapExpression(v.getInitializer())])
+      .filter(([, init]) => init && FN_KINDS.has(init.getKind())),
+  ];
+  for (const [name, fn] of fns) {
+    if (!name) continue;
+    const slots = callbackSlots(fn);
+    if (slots.size > 0) wrappers.set(name, mergeSlots(wrappers.get(name) ?? new Map(), slots));
+  }
+  for (const kind of [SyntaxKind.PropertySignature, SyntaxKind.PropertyDeclaration]) {
+    for (const prop of sf.getDescendantsOfKind(kind)) {
+      const indices = clientParamIndices(prop.getTypeNode());
+      if (indices.size > 0) callbackProps.set(prop.getName(), indices);
+    }
+  }
+  for (const method of sf.getDescendantsOfKind(SyntaxKind.MethodSignature)) {
+    const indices = new Set();
+    method.getParameters().forEach((p, j) => {
+      if (annotationIsClient(p.getTypeNode())) indices.add(j);
+    });
+    if (indices.size > 0) callbackProps.set(method.getName(), indices);
+  }
+  for (const decl of sf.getImportDeclarations()) {
+    if (moduleKey(decl.getModuleSpecifierValue(), rel) !== AMBIENT_MODULE) continue;
+    if (decl.getNamedImports().some((s) => s.getName() === AMBIENT_EXPORT) || decl.getNamespaceImport()) {
+      ambientImports += 1;
+    }
+  }
+  if (rel === AMBIENT_FILE) {
+    ambientExportFound = sf
+      .getVariableStatements()
+      .some((s) => s.isExported() && s.getDeclarations().some((d) => d.getName() === AMBIENT_EXPORT));
+  }
+}
+
+for (const [path, pins] of PINNED_WRAPPERS) {
+  if (!files.some((f) => f.rel === path)) {
+    if (REQUIRE_REPO_FLOORS) fail(`${path} was not scanned — the openers it defines cannot be derived`);
+    continue;
+  }
+  for (const [name, arg, param] of pins) {
+    if (!wrappers.get(name)?.get(arg)?.has(param)) {
+      fail(
+        `derivation lost ${name} (callback argument ${arg}, client parameter ${param}) from ${path} — ` +
+          `the signature match no longer sees a real opener, so its callbacks would read as plain functions`,
+      );
+    }
+  }
+}
+if (REQUIRE_REPO_FLOORS) {
+  if (!ambientExportFound) fail(`${AMBIENT_FILE} was not scanned or no longer exports \`${AMBIENT_EXPORT}\``);
+  if (ambientImports === 0) fail(`no import of \`${AMBIENT_EXPORT}\` from ${AMBIENT_MODULE} resolved — ambient matching is blind`);
+}
+
+// ── Pass 2: per file, judge each combinator ──
+
+/** A module specifier as a repo-relative path without extension (`@/x` → `src/x`). */
+function moduleKey(specifier, rel) {
+  if (specifier.startsWith("@/")) return `src/${specifier.slice(2)}`;
+  if (specifier.startsWith(".")) return posix.normalize(posix.join(posix.dirname(rel), specifier));
+  return specifier;
+}
+
+/** The import a local name refers to: { original, module, namespace } — null when not imported. */
+function importOf(name, sf, rel) {
+  for (const decl of sf.getImportDeclarations()) {
+    const moduleId = moduleKey(decl.getModuleSpecifierValue(), rel);
+    if (decl.getNamespaceImport()?.getText() === name) return { original: null, module: moduleId, namespace: true };
+    for (const spec of decl.getNamedImports()) {
+      const local = spec.getAliasNode()?.getText() ?? spec.getName();
+      if (local === name) return { original: spec.getName(), module: moduleId, namespace: false };
+    }
+  }
+  return null;
+}
+
+/** Callback slots of the call `call` (argIndex -> client parameter indices); empty when it is no wrapper. */
+function slotsOf(call, ctx) {
+  const callee = unwrapExpression(call.getExpression());
+  if (callee?.getKind() === SyntaxKind.PropertyAccessExpression) {
+    const name = callee.getName();
+    if (name === "$transaction") return new Map([[0, new Set([0])]]);
+    return wrappers.get(name) ?? new Map();
+  }
+  if (callee?.getKind() !== SyntaxKind.Identifier) return new Map();
+  const name = callee.getText();
+  if (visibleBinding(name, callee, ctx.bindingsFor)) {
+    const fn = resolveLocalFunction(name, callee, ctx.bindingsFor);
+    return fn ? callbackSlots(fn) : new Map();
+  }
+  const imported = importOf(name, ctx.sf, ctx.rel);
+  return wrappers.get(imported?.original ?? name) ?? new Map();
+}
+
+/** The position a function expression is written in, past type-level wrappers. */
+function slotOf(fn) {
+  let slot = fn;
+  while (slot.getParent() && sameNode(unwrapExpression(slot.getParent()), fn)) slot = slot.getParent();
+  return slot;
+}
+
+/** Client parameter indices `fn` receives from where it is written, or an empty set. */
+function callbackClientParams(fn, ctx) {
+  const slot = slotOf(fn);
+  const holder = slot.getParent();
+  if (holder?.getKind() === SyntaxKind.CallExpression) {
+    const index = holder.getArguments().findIndex((arg) => sameNode(arg, slot));
+    return (index !== -1 && slotsOf(holder, ctx).get(index)) || new Set();
+  }
+  if (holder?.getKind() === SyntaxKind.PropertyAssignment) {
+    return callbackProps.get(holder.getName()) ?? new Set();
+  }
+  return new Set();
+}
+
+/** True when `fn` is the callback of a wrapper call — it runs in a context of its own. */
+function isWrapperCallback(fn, ctx) {
+  if (!FN_KINDS.has(fn.getKind())) return false;
+  const slot = slotOf(fn);
+  const holder = slot.getParent();
+  if (holder?.getKind() !== SyntaxKind.CallExpression) return false;
+  const callee = unwrapExpression(holder.getExpression());
+  if (callee?.getKind() === SyntaxKind.PropertyAccessExpression && callee.getName() === "$transaction") return false;
+  const index = holder.getArguments().findIndex((arg) => sameNode(arg, slot));
+  return index !== -1 && slotsOf(holder, ctx).has(index);
+}
+
 /** True when `decl` binds a transaction client as a whole. */
-function isClientDecl(decl, ctx, seen = new Set()) {
-  const id = `${decl.getStart()}:${decl.getEnd()}`;
-  if (seen.has(id)) return false;
-  seen.add(id);
+function isClientDecl(decl, ctx) {
   const kind = decl.getKind();
   if (kind !== SyntaxKind.Parameter && kind !== SyntaxKind.VariableDeclaration) return false;
   if (decl.getNameNode().getKind() !== SyntaxKind.Identifier) return false;
   if (annotationIsClient(decl.getTypeNode())) return true;
-  if (kind === SyntaxKind.Parameter) return isCallbackClientParam(decl, ctx);
-  if (decl.getVariableStatement?.()?.getDeclarationKind() !== "const") return false;
-  const init = unwrapExpression(decl.getInitializer());
-  if (init?.getKind() === SyntaxKind.Identifier) {
-    const target = visibleBinding(init.getText(), init, ctx.bindingsFor);
-    return !!target && isClientDecl(target, ctx, seen);
-  }
-  // `const tx = params.tx` over an object-typed binding with a client member.
-  if (init?.getKind() === SyntaxKind.PropertyAccessExpression) {
-    const object = unwrapExpression(init.getExpression());
-    if (object?.getKind() !== SyntaxKind.Identifier) return false;
-    const target = visibleBinding(object.getText(), object, ctx.bindingsFor);
-    return !!target && clientMembers(target.getTypeNode?.()).has(init.getName());
-  }
-  return false;
+  if (kind !== SyntaxKind.Parameter) return false;
+  const fn = decl.getParent();
+  if (!fn || !FN_KINDS.has(fn.getKind())) return false;
+  return callbackClientParams(fn, ctx).has(fn.getParameters().findIndex((p) => sameNode(p, decl)));
 }
 
-/** True when the reference `id`, bound by `decl`, reaches a client. */
+/** True when the reference `id`, bound by `decl`, is a client. */
 function refersToClient(id, decl, ctx) {
   const nameNode = decl.getNameNode?.();
   if (!nameNode) return false;
@@ -312,13 +437,15 @@ function refersToClient(id, decl, ctx) {
       clientMembers(decl.getTypeNode?.()).has(parent.getName())
     );
   }
-  // `{ tx }: { tx: Prisma.TransactionClient }` — the element's property name decides.
-  const element = nameNode
-    .getDescendantsOfKind(SyntaxKind.BindingElement)
-    .find((el) => el.getName() === id.getText());
+  // `{ tx }: Params` or `const { tx } = params` — the element's property name decides.
+  const element = nameNode.getDescendantsOfKind(SyntaxKind.BindingElement).find((el) => el.getName() === id.getText());
   if (!element) return false;
   const property = element.getPropertyNameNode()?.getText() ?? element.getName();
-  return clientMembers(decl.getTypeNode?.()).has(property);
+  if (clientMembers(decl.getTypeNode?.()).has(property)) return true;
+  const init = decl.getKind() === SyntaxKind.VariableDeclaration ? unwrapExpression(decl.getInitializer()) : null;
+  if (init?.getKind() !== SyntaxKind.Identifier) return false;
+  const source = visibleBinding(init.getText(), init, ctx.bindingsFor);
+  return !!source && clientMembers(source.getTypeNode?.()).has(property);
 }
 
 /** True when `id` is a name position, not a reference to a binding. */
@@ -351,34 +478,168 @@ const inTypePosition = (id, stop) => {
 
 /** True when `id` is a non-callback argument of a wrapper call — the client it opens a transaction on. */
 function isWrapperClientArgument(id, ctx) {
-  const call = id.getParent();
+  const slot = slotOf(id);
+  const call = slot.getParent();
   if (call?.getKind() !== SyntaxKind.CallExpression) return false;
-  const index = call.getArguments().findIndex((arg) => sameNode(arg, id));
+  const index = call.getArguments().findIndex((arg) => sameNode(arg, slot));
   if (index === -1) return false;
-  const indices = wrapperIndicesOf(call, ctx);
-  return indices.size > 0 && !indices.has(index);
+  const slots = slotsOf(call, ctx);
+  return slots.size > 0 && !slots.has(index);
 }
 
-/** Why `root`'s subtree reaches a shared client — one entry per offending reference. */
-function sharedClientReferences(root, ctx) {
-  const reasons = [];
-  const ids = root.getKind() === SyntaxKind.Identifier ? [root] : root.getDescendantsOfKind(SyntaxKind.Identifier);
-  for (const id of ids) {
-    if (isNamePosition(id) || inTypePosition(id, root)) continue;
-    const name = id.getText();
-    const decl = visibleBinding(name, id, ctx.bindingsFor);
-    if (decl) {
-      if (!within(decl, root) && refersToClient(id, decl, ctx)) {
-        reasons.push(`transaction client \`${name}\` (declared line ${decl.getStartLineNumber()})`);
+/** True when a wrapper callback written inside `scope` encloses `id` — a context of its own. */
+function inOwnContext(id, scope, ctx) {
+  for (let p = id.getParent(); p && !sameNode(p, scope); p = p.getParent()) {
+    if (isWrapperCallback(p, ctx)) return true;
+  }
+  return false;
+}
+
+/** True when `id`, walking up to `stop` inclusive, passes an `await` and no function boundary. */
+function settledUnderAwait(id, stop) {
+  let awaited = false;
+  for (let p = id.getParent(); p; p = p.getParent()) {
+    if (FUNCTION_LIKE.has(p.getKind())) return false;
+    if (p.getKind() === SyntaxKind.AwaitExpression) awaited = true;
+    if (sameNode(p, stop)) break;
+  }
+  return awaited;
+}
+
+/** True when `id` resolves to the ambient client: a named or namespace import of src/lib/prisma. */
+function isAmbient(id, ctx) {
+  const imported = importOf(id.getText(), ctx.sf, ctx.rel);
+  if (!imported || imported.module !== AMBIENT_MODULE) return false;
+  if (!imported.namespace) return imported.original === AMBIENT_EXPORT;
+  const parent = id.getParent();
+  return parent?.getKind() === SyntaxKind.PropertyAccessExpression && parent.getName() === AMBIENT_EXPORT;
+}
+
+const calleeText = (call) => unwrapExpression(call.getExpression())?.getText();
+
+const CONTAINER_KINDS = new Set([
+  SyntaxKind.ArrayLiteralExpression,
+  SyntaxKind.ObjectLiteralExpression,
+  SyntaxKind.NewExpression,
+]);
+
+/**
+ * True when `decl` holds a container a callee could fill: initialized to an
+ * array or object literal or a `new …`, or declared without a value. A callee
+ * handed any other value cannot change what the variable holds.
+ */
+function isContainer(decl) {
+  const init = unwrapExpression(decl.getInitializer());
+  return !init || CONTAINER_KINDS.has(init.getKind());
+}
+
+/**
+ * Every write to the variable `decl` in its scope: the expressions whose values
+ * can end up in it, plus a reason for each write the gate cannot see.
+ */
+function writesTo(decl, ctx) {
+  const values = [];
+  const opaque = [];
+  const name = decl.getName();
+  const scope = scopeOf(decl) ?? decl.getSourceFile();
+  for (const id of scope.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    if (id.getText() !== name || isNamePosition(id)) continue;
+    if (!sameNode(visibleBinding(name, id, ctx.bindingsFor), decl)) continue;
+    const parent = id.getParent();
+    const kind = parent?.getKind();
+    if (kind === SyntaxKind.BinaryExpression && sameNode(parent.getLeft(), id)) {
+      if (parent.getOperatorToken().getText().endsWith("=")) values.push(parent.getRight());
+      continue;
+    }
+    if (kind === SyntaxKind.PropertyAccessExpression || kind === SyntaxKind.ElementAccessExpression) {
+      // `x.p = v` / `x[i] = v`
+      const grand = parent.getParent();
+      if (grand?.getKind() === SyntaxKind.BinaryExpression && sameNode(grand.getLeft(), parent)) {
+        values.push(grand.getRight());
+        continue;
+      }
+      // Any method called on it may store its arguments (`push`, `unshift`, `splice`, `set`, …).
+      if (grand?.getKind() === SyntaxKind.CallExpression && sameNode(grand.getExpression(), parent)) {
+        values.push(...grand.getArguments());
       }
       continue;
     }
-    const imported = importOf(name, ctx.sf, ctx.rel);
-    if (imported?.original === AMBIENT_EXPORT && imported.module === AMBIENT_MODULE && !isWrapperClientArgument(id, ctx)) {
-      reasons.push(`ambient \`${name}\` (routes to the RLS context's transaction client)`);
+    if (kind === SyntaxKind.CallExpression && !sameNode(parent.getExpression(), id)) {
+      const callee = calleeText(parent);
+      if (isContainer(decl) && !READER_CALLS.has(callee)) opaque.push(`\`${name}\` passed to ${callee}(…) at line ${id.getStartLineNumber()}`);
     }
   }
+  return { values, opaque };
+}
+
+/**
+ * Why evaluating `node` reaches a client shared beyond `scope` — one entry per
+ * offending reference. Declarations inside `scope` are its own; a local variable
+ * or function declared outside it is followed. `settles` marks a followed
+ * VALUE, where an awaited subexpression is already settled.
+ */
+function reach(node, scope, ctx, state, settles = false) {
+  const reasons = [];
+  const ids = node.getKind() === SyntaxKind.Identifier ? [node] : node.getDescendantsOfKind(SyntaxKind.Identifier);
+  for (const id of ids) {
+    if (isNamePosition(id) || inTypePosition(id, node)) continue;
+    if (settles && settledUnderAwait(id, node)) continue;
+    if (isWrapperClientArgument(id, ctx)) continue;
+    const name = id.getText();
+    const decl = visibleBinding(name, id, ctx.bindingsFor);
+    if (!decl) {
+      if (isAmbient(id, ctx) && !inOwnContext(id, scope, ctx)) {
+        reasons.push(`ambient \`${name}\` (routes to the RLS context's transaction client)`);
+      }
+      continue;
+    }
+    if (within(decl, scope)) continue;
+    if (refersToClient(id, decl, ctx)) {
+      reasons.push(`transaction client \`${name}\` (declared line ${decl.getStartLineNumber()})`);
+      continue;
+    }
+    const key = `${decl.getStart()}:${decl.getEnd()}`;
+    if (state.seen.has(key)) continue;
+    state.seen.add(key);
+    reasons.push(...follow(decl, ctx, state).map((r) => `\`${name}\` → ${r}`));
+  }
   return reasons;
+}
+
+/** What a local variable or function declared outside the argument contributes. */
+function follow(decl, ctx, state) {
+  if (decl.getKind() === SyntaxKind.FunctionDeclaration) {
+    const body = decl.getBody();
+    return body ? reach(body, decl, ctx, state) : [];
+  }
+  if (decl.getKind() !== SyntaxKind.VariableDeclaration) return [];
+  const init = decl.getInitializer();
+  const fnInit = unwrapExpression(init);
+  if (fnInit && FN_KINDS.has(fnInit.getKind())) return reach(fnInit, fnInit, ctx, state);
+  const reasons = [];
+  if (init) reasons.push(...reach(init, init, ctx, state, true));
+  if (decl.getNameNode().getKind() !== SyntaxKind.Identifier) return reasons;
+  const { values, opaque } = writesTo(decl, ctx);
+  for (const value of values) reasons.push(...reach(value, value, ctx, state, true));
+  reasons.push(...opaque.map((o) => `unanalysable write: ${o}`));
+  return reasons;
+}
+
+/**
+ * Why the combinator argument `arg` runs two or more evaluations that reach a
+ * shared client at once. An array literal does only when two of its elements
+ * reach one (or a spread element does — it holds any number); any other
+ * argument (`xs.map(…)`, a variable, `Object.values(m)`) holds any number.
+ */
+function concurrentReasons(arg, ctx) {
+  const bare = unwrapExpression(arg);
+  if (bare?.getKind() !== SyntaxKind.ArrayLiteralExpression) return reach(arg, arg, ctx, { seen: new Set() });
+  const reaching = bare.getElements().map((el) => ({
+    spread: el.getKind() === SyntaxKind.SpreadElement,
+    reasons: reach(el, arg, ctx, { seen: new Set() }),
+  })).filter((e) => e.reasons.length > 0);
+  if (reaching.length >= 2 || reaching.some((e) => e.spread)) return reaching.flatMap((e) => e.reasons);
+  return [];
 }
 
 function combinatorName(call) {
@@ -407,26 +668,14 @@ for (const { rel, sf } of files) {
     examined += 1;
     const arg = call.getArguments()[0];
     if (!arg) continue;
-    const roots = [arg];
-    // `const ps = [tx.a(), tx.b()]; await Promise.all(ps)` — Prisma promises are
-    // lazy, so the combinator is what issues them.
-    const bare = unwrapExpression(arg);
-    if (bare?.getKind() === SyntaxKind.Identifier) {
-      const decl = visibleBinding(bare.getText(), bare, ctx.bindingsFor);
-      const init = decl?.getKind() === SyntaxKind.VariableDeclaration ? decl.getInitializer() : null;
-      if (init) roots.push(init);
-    }
-    const reasons = roots.flatMap((root) => sharedClientReferences(root, ctx));
+    const reasons = concurrentReasons(arg, ctx);
     if (reasons.length > 0) {
       violations.push(`${rel}:${call.getStartLineNumber()}: Promise.${combinator} over ${[...new Set(reasons)].join(", ")}`);
     }
   }
 }
 
-if (examined === 0) {
-  console.error(`check-tx-concurrent-queries: ${files.length} file(s) scanned but no Promise combinator found — refusing to report OK`);
-  process.exit(1);
-}
+if (examined === 0) fail(`${files.length} file(s) scanned but no Promise combinator found — refusing to report OK`);
 
 if (violations.length > 0) {
   console.error("Promise combinator issuing concurrent queries on one transaction client:");
@@ -437,5 +686,5 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `check-tx-concurrent-queries: OK (${files.length} files, ${examined} combinator calls, ${wrappers.size} derived client-callback wrappers)`,
+  `check-tx-concurrent-queries: OK (${files.length} files, ${examined} combinator calls, ${wrappers.size} derived client-callback wrappers, ${ambientImports} ambient imports)`,
 );

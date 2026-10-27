@@ -176,8 +176,9 @@ async function handlePOST(request: NextRequest) {
   // Interactive transaction with advisory lock prevents concurrent rotations for the same user.
   let txResult: Awaited<ReturnType<typeof applyVaultRotation>>;
   try {
-    txResult = await withUserTenantRls(userId, async () =>
-      prisma.$transaction(async (tx) => {
+    txResult = await withUserTenantRls(
+      userId,
+      async (_tenantId, tx) => {
         // Advisory lock prevents concurrent key rotations for the same user (S-17 equivalent)
         await advisoryXactLock(tx, userId);
 
@@ -193,7 +194,8 @@ async function handlePOST(request: NextRequest) {
           vaultSetupAt,
           accountSalt,
         );
-      }, { timeout: VAULT_ROTATE_TX_TIMEOUT_MS }),
+      },
+      { timeout: VAULT_ROTATE_TX_TIMEOUT_MS },
     );
   } catch (e) {
     if (e instanceof LegacyAttachmentsResidualError) {

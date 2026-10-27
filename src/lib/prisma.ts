@@ -172,7 +172,17 @@ export const prisma = new Proxy(baseClient, {
           arg:
             | ((tx: typeof active) => unknown)
             | Array<Promise<unknown>>,
+          options?: unknown,
         ) => {
+          // The context's transaction is already open, so a timeout, maxWait
+          // or isolationLevel given here could only be dropped. Refuse it:
+          // pass the budget to the opener (withTenantRls / withUserTenantRls /
+          // withTeamTenantRls / withBypassRls) instead.
+          if (options !== undefined) {
+            throw new Error(
+              "prisma.$transaction options are not applied inside an RLS context; pass them to the context opener",
+            );
+          }
           if (typeof arg === "function") {
             return arg(active);
           }

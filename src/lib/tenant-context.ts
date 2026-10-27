@@ -1,5 +1,6 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
+import { withBypassRls, withTenantRls, type RlsTxOptions } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { owningTenantOf } from "@/lib/tenant/owning-tenant-rule";
 
@@ -110,49 +111,62 @@ export async function resolveTeamTenantId(teamId: string): Promise<string | null
 
 export async function withUserTenantRls<T>(
   userId: string,
-  fn: (tenantId: string) => Promise<T>,
+  fn: (tenantId: string, tx: Prisma.TransactionClient) => Promise<T>,
+  options?: RlsTxOptions,
 ): Promise<T>;
 export async function withUserTenantRls<T>(
   userId: string,
   fn: () => Promise<T>,
+  options?: RlsTxOptions,
 ): Promise<T>;
 export async function withUserTenantRls<T>(
   userId: string,
-  fn: ((tenantId: string) => Promise<T>) | (() => Promise<T>),
+  fn: ((tenantId: string, tx: Prisma.TransactionClient) => Promise<T>) | (() => Promise<T>),
+  options?: RlsTxOptions,
 ): Promise<T> {
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
   }
-  // check-bypass-rls requires the (tx) callback form, but this thin wrapper
-  // delegates to a caller-supplied fn(tenantId) that takes no client — fn's own
-  // queries run inside this tenant tx via the ambient ALS/proxy. tx is therefore
-  // structurally required yet genuinely unused here. Threading tx would change
-  // the public withUserTenantRls contract (SC1 deferral, bypass-rls-tx plan).
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  return withTenantRls(prisma, tenantId, (tx) => (fn as (tenantId: string) => Promise<T>)(tenantId));
+  // fn's queries usually run on this tenant tx through the ambient ALS/proxy;
+  // tx is also handed over for a body that needs the client itself. `options`
+  // reaches the transaction withTenantRls opens — a nested
+  // `prisma.$transaction(fn, options)` inside fn cannot carry it (the proxy
+  // refuses options inside a context).
+  return withTenantRls(
+    prisma,
+    tenantId,
+    (tx) => (fn as (tenantId: string, tx: Prisma.TransactionClient) => Promise<T>)(tenantId, tx),
+    options,
+  );
 }
 
 export async function withTeamTenantRls<T>(
   teamId: string,
-  fn: (tenantId: string) => Promise<T>,
+  fn: (tenantId: string, tx: Prisma.TransactionClient) => Promise<T>,
+  options?: RlsTxOptions,
 ): Promise<T>;
 export async function withTeamTenantRls<T>(
   teamId: string,
   fn: () => Promise<T>,
+  options?: RlsTxOptions,
 ): Promise<T>;
 export async function withTeamTenantRls<T>(
   teamId: string,
-  fn: ((tenantId: string) => Promise<T>) | (() => Promise<T>),
+  fn: ((tenantId: string, tx: Prisma.TransactionClient) => Promise<T>) | (() => Promise<T>),
+  options?: RlsTxOptions,
 ): Promise<T> {
   const tenantId = await resolveTeamTenantId(teamId);
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
   }
-  // See withUserTenantRls above: same fn(tenantId) delegation, tx unthreadable
-  // without a public-contract change (SC1 deferral).
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  return withTenantRls(prisma, tenantId, (tx) => (fn as (tenantId: string) => Promise<T>)(tenantId));
+  // See withUserTenantRls above: same fn(tenantId, tx) delegation and options.
+  return withTenantRls(
+    prisma,
+    tenantId,
+    (tx) => (fn as (tenantId: string, tx: Prisma.TransactionClient) => Promise<T>)(tenantId, tx),
+    options,
+  );
 }
 
 /**

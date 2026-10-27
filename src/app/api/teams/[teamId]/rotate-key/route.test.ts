@@ -15,7 +15,12 @@ const {
   mockRequireTeamPermission: vi.fn(),
   mockTeamFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
-  mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  // The rotation body runs on the context's transaction client, handed over
+  // as fn's second argument.
+  mockWithTeamTenantRls: vi.fn(
+    async (_teamId: string, fn: (tenantId: string, tx: unknown) => unknown, _options?: unknown) =>
+      fn("tenant-1", txMock),
+  ),
   MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {
@@ -66,6 +71,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { POST } from "./route";
 import { logAuditAsync } from "@/lib/audit/audit";
+import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
 function createRequest(body: unknown) {
   return new NextRequest("http://localhost/api/teams/team-1/rotate-key", {
@@ -109,14 +115,12 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     mockTeamFindUnique.mockResolvedValue({
       teamKeyVersion: 1,
     });
-    // Interactive transaction: call the callback with tx proxy
     txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
     txMock.team.update.mockResolvedValue({});
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440100" }]);
     txMock.teamMemberKey.createMany.mockResolvedValue({ count: 1 });
-    mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -206,7 +210,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const json = await res.json();
     expect(res.status).toBe(403);
     expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(txMock.team.update).not.toHaveBeenCalled();
   });
 
   it("returns 400 when entries exceed max limit", async () => {
@@ -278,7 +282,10 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(json.teamKeyVersion).toBe(2);
-    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockWithTeamTenantRls).toHaveBeenCalledWith("team-1", expect.any(Function), {
+      timeout: TEAM_ROTATE_TX_TIMEOUT_MS,
+    });
     expect(vi.mocked(logAuditAsync)).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "TEAM_KEY_ROTATION",
