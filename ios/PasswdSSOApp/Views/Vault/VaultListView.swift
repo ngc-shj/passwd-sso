@@ -515,6 +515,9 @@ struct VaultListView: View {
     // The silent foreground refresh waits while a passkey refusal is recorded;
     // a manual sync is the user acting, so it goes through (and clears the
     // flag if the passkey has been registered meanwhile).
+    // Re-read first: the AutoFill extension (another process) may have
+    // recorded or cleared a refusal this process was not told about.
+    passkeyRequirement.refresh()
     if !surfaceErrors, !automaticServerCallsAllowed() { return }
     isSyncing = true
     defer { isSyncing = false }
@@ -522,7 +525,8 @@ struct VaultListView: View {
     // foreground auto-refresh is NOT user interaction, so it must not extend the
     // auto-lock window just because the app returned to the foreground.
     if surfaceErrors { autoLockService.recordActivity() }
-    let passkeyWasRequired = passkeyRequirement.isRequired
+    // From the store, not the monitor: the monitor republishes asynchronously.
+    let passkeyWasRequired = PasskeyRequirementStore().isRequired
     var caught: Error?
     do {
       let report = try await hostSyncService.runSync(
@@ -547,18 +551,7 @@ struct VaultListView: View {
     }
 
     if surfaceErrors, let caught {
-      if syncFailedPasskeyRequired(from: caught) {
-        // A NEW refusal raises the app-level alert (two alerts at once would
-        // drop one); a repeated one changes nothing there, so answer here.
-        if passkeyWasRequired {
-          syncError = L10n.string(
-            "Your organization requires a passkey. Register one in your browser, then try again.")
-        }
-      } else {
-        syncError = (syncFailedSessionExpired(from: caught))
-          ? L10n.string("Your session expired. Lock and unlock to sign in again.")
-          : L10n.string("Couldn't sync. Check your connection and try again.")
-      }
+      syncError = manualSyncErrorMessage(error: caught, passkeyWasRequired: passkeyWasRequired)
     }
   }
 

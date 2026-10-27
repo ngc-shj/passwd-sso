@@ -8,7 +8,7 @@
     "signIn": "拡張機能を使うには passwd-sso で接続を許可してください。",
     "disconnectedExpired": "セッションがタイムアウトしました。再接続してください。",
     "disconnectedRevoked": "サインアウトされました。再接続してください。",
-    "disconnectedPasskeyRequired": "組織のポリシーにより、パスキーの登録が必要です。passwd-sso でパスキーを登録してから再接続してください。",
+    "disconnectedPasskeyRequired": "組織の設定によりパスキーが必要です。passwd-sso でパスキーを登録してから再接続してください。",
     "registerPasskey": "パスキーを登録",
     "reauthHint": "セキュリティのため、再認証（パスキーなど）を求められる場合があります。",
     "openApp": "接続",

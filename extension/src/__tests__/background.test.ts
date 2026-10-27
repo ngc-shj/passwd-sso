@@ -19,6 +19,7 @@ import { DEBOUNCE_MS } from "../background/context-menu";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
 import {
+  deferred,
   holdBundleInjection,
   holdDecrypt,
   holdFetch,
@@ -7822,6 +7823,23 @@ describe("PASSKEY_REQUIRED refusal ends the connection", () => {
     verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
   };
 
+  // A refusal that reports when the classifier's read of its body (from the
+  // clone) has finished. Everything the extension does with the verdict after
+  // that read is microtasks, so one macrotask later the decision has been made.
+  function trackedRefusal(error: string): { res: Response; bodyRead: Promise<void> } {
+    const bodyRead = deferred<void>();
+    const res = new Response(JSON.stringify({ error }), { status: 403 });
+    const clone = res.clone.bind(res);
+    res.clone = () => {
+      const copy = clone();
+      const json = copy.json.bind(copy);
+      copy.json = () => json().finally(() => bodyRead.resolve());
+      return copy;
+    };
+    return { res, bodyRead: bodyRead.promise };
+  }
+  const afterMicrotasks = () => new Promise((r) => setTimeout(r, 0));
+
   function revokeCalls(mock: { mock: { calls: unknown[][] } }, token: string): number {
     return mock.mock.calls.filter(
       ([url, init]) =>
@@ -7861,7 +7879,8 @@ describe("PASSKEY_REQUIRED refusal ends the connection", () => {
     // The TTL alarm would otherwise later overwrite the reason with EXPIRED.
     expect(chromeMock!.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_TTL);
 
-    await new Promise((r) => setTimeout(r, 20)); // let a (wrong) retry, if any, be issued
+    // swFetch's only retry branch runs before the classification, and the
+    // revoke awaited above is issued after it: any retry would be counted here.
     expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "tok-pk")).toBe(1);
     expect(callsWith(fetchMock, EXT_API_PATH.EXTENSION_TOKEN_REFRESH, "tok-pk")).toBe(0);
   });
@@ -7873,19 +7892,16 @@ describe("PASSKEY_REQUIRED refusal ends the connection", () => {
       userId: "u-1",
       tokenCnfJkt: STATIC_TEST_JKT,
     });
+    const refusal = trackedRefusal("FORBIDDEN");
     const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
-      if (url.includes(EXT_API_PATH.VAULT_STATUS)) {
-        return new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403 });
-      }
+      if (url.includes(EXT_API_PATH.VAULT_STATUS)) return refusal.res;
       return new Response("{}", { status: 500 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     await loadBackground();
-    await vi.waitFor(() =>
-      expect(callsWith(fetchMock, EXT_API_PATH.VAULT_STATUS, "tok-403")).toBe(1),
-    );
-    await new Promise((r) => setTimeout(r, 20));
+    await refusal.bodyRead;
+    await afterMicrotasks();
 
     expect((await status()).hasToken).toBe(true);
     expect(revokeCalls(fetchMock, "tok-403")).toBe(0);
@@ -7961,10 +7977,11 @@ describe("PASSKEY_REQUIRED refusal ends the connection", () => {
       userId: "u-1",
       tokenCnfJkt: STATIC_TEST_JKT,
     });
+    const refusal = trackedRefusal("PASSKEY_REQUIRED");
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes(EXT_API_PATH.VAULT_STATUS) && bearerOf(init).includes("tok-old")) {
         await statusGate;
-        return passkeyRequired();
+        return refusal.res;
       }
       return new Response("{}", { status: 500 });
     });
@@ -7976,7 +7993,10 @@ describe("PASSKEY_REQUIRED refusal ends the connection", () => {
     );
     applyToken("tok-new", Date.now() + 600_000, STATIC_TEST_JKT);
     releaseStatus();
-    await new Promise((r) => setTimeout(r, 20));
+    // The refusal was read and judged; only the generation guard keeps it from
+    // ending tok-new.
+    await refusal.bodyRead;
+    await afterMicrotasks();
 
     expect((await status()).hasToken).toBe(true);
     expect(revokeCalls(fetchMock, "tok-new")).toBe(0);
@@ -8008,5 +8028,95 @@ describe("PASSKEY_REQUIRED refusal ends the connection", () => {
       expect(stored[DISCONNECT_REASON_KEY]).toBeUndefined();
     });
     expect((await status()).hasToken).toBe(true);
+  });
+});
+
+describe("a stale TTL alarm keeps the recorded disconnect reason", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+  });
+
+  async function reason(): Promise<string | null | undefined> {
+    const res = (await sendMessage({ type: "GET_STATUS" })) as {
+      hasToken: boolean;
+      disconnectReason?: string | null;
+    };
+    expect(res.hasToken).toBe(false);
+    return res.disconnectReason;
+  }
+
+  // The alarm handler awaits the (settled) hydration promise and then acts
+  // synchronously; a macrotask later its effect, if any, has been recorded.
+  const alarmHandled = () => new Promise((r) => setTimeout(r, 0));
+
+  it("a refresh refused as FORBIDDEN clears the TTL alarm and stays REVOKED if it fires anyway", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403 });
+        }
+        return new Response("{}", { status: 500 });
+      }),
+    );
+    await loadBackground();
+    applyToken("tok-ttl-revoked", Date.now() + 600_000, STATIC_TEST_JKT);
+    chromeMock!.alarms.clear.mockClear();
+    alarmHandlers[0]({ name: ALARM_TOKEN_REFRESH });
+    await vi.waitFor(async () => expect(await reason()).toBe(DISCONNECT_REASON.REVOKED));
+    expect(chromeMock!.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_TTL);
+
+    // A TTL alarm whose removal raced the clear still fires.
+    alarmHandlers[0]({ name: ALARM_TOKEN_TTL });
+    await alarmHandled();
+
+    expect(await reason()).toBe(DISCONNECT_REASON.REVOKED);
+  });
+
+  it("a timeout logout clears the TTL alarm and stays TIMEOUT_LOGOUT if it fires anyway", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return new Response(
+            JSON.stringify({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+              requireVaultTimeoutLogout: true,
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response("{}", { status: 500 });
+      }),
+    );
+    await loadBackground();
+    applyToken("tok-ttl-logout", Date.now() + 600_000, STATIC_TEST_JKT);
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    chromeMock!.alarms.clear.mockClear();
+    alarmHandlers[0]({ name: ALARM_VAULT_LOCK });
+    await vi.waitFor(async () => expect(await reason()).toBe(DISCONNECT_REASON.TIMEOUT_LOGOUT));
+    expect(chromeMock!.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_TTL);
+
+    alarmHandlers[0]({ name: ALARM_TOKEN_TTL });
+    await alarmHandled();
+
+    expect(await reason()).toBe(DISCONNECT_REASON.TIMEOUT_LOGOUT);
+  });
+
+  it("control: the TTL alarm still ends a live connection as EXPIRED", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })));
+    await loadBackground();
+    applyToken("tok-ttl-live", Date.now() + 600_000, STATIC_TEST_JKT);
+
+    alarmHandlers[0]({ name: ALARM_TOKEN_TTL });
+
+    await vi.waitFor(async () => expect(await reason()).toBe(DISCONNECT_REASON.EXPIRED));
   });
 });

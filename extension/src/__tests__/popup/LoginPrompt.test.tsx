@@ -3,7 +3,8 @@
  */
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { deferred } from "../helpers/deferred";
 
 const storageMocks = vi.hoisted(() => ({
   getSettings: vi.fn().mockResolvedValue({ serverUrl: "https://vault.example.com" }),
@@ -80,10 +81,16 @@ describe("LoginPrompt", () => {
   });
 
   it("offers no passkey link when the server URL is refused", async () => {
-    storageMocks.getSettings.mockResolvedValueOnce({ serverUrl: "http://server.example" });
+    // A refused URL leaves nothing new on screen, so wait on the settings read
+    // itself: the component's handler is attached before this test's await, so
+    // it has run once the act settles.
+    const settings = deferred<{ serverUrl: string }>();
+    storageMocks.getSettings.mockReturnValueOnce(settings.promise);
     render(<LoginPrompt reason="passkey_required" />);
-    await waitFor(() => expect(storageMocks.getSettings).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 0));
+    await act(async () => {
+      settings.resolve({ serverUrl: "http://server.example" });
+      await settings.promise;
+    });
     expect(screen.queryByRole("button", { name: "Register a passkey" })).toBeNull();
   });
 

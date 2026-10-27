@@ -149,6 +149,22 @@ public func failClosedResult(sessionExpired: Bool, passkeyRequired: Bool = false
   return sessionExpired ? .failedSessionExpired : .failedOffline
 }
 
+/// The alert text for a failed MANUAL sync (button / pull-to-refresh), or nil
+/// for no alert. `passkeyWasRequired` is the recorded refusal read BEFORE the
+/// sync: a NEW passkey refusal raises the app-level alert instead (two alerts
+/// at once would drop one), while a repeated one changes nothing there, so the
+/// sync alert answers it.
+public func manualSyncErrorMessage(error: Error, passkeyWasRequired: Bool) -> String? {
+  if syncFailedPasskeyRequired(from: error) {
+    return passkeyWasRequired
+      ? L10n.string("Your organization requires a passkey. Register one in your browser, then try again.")
+      : nil
+  }
+  return syncFailedSessionExpired(from: error)
+    ? L10n.string("Your session expired. Lock and unlock to sign in again.")
+    : L10n.string("Couldn't sync. Check your connection and try again.")
+}
+
 /// Why a vault view is read-only. The mutating-control affordance differs by
 /// reason (see `editAffordance` / `canCreate`): Demo Mode hides Edit entirely
 /// (the "Demo Mode" chip already explains the browse-only state), whereas a

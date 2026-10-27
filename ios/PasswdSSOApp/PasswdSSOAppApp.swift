@@ -70,47 +70,39 @@ struct PasswdSSOAppApp: App {
         switch newPhase {
         case .active:
           // Per plan §"Foreground sync (primary path)": drain flags then re-sync.
+          // The extension may have recorded (or cleared) a passkey refusal
+          // while we were away — re-read it before the gate decides.
+          PasskeyRequirementMonitor.shared.refresh()
           Task {
             guard let vaultKey = currentVaultKey else { return }
-            // Refused for a missing passkey: every call below would be refused
-            // the same way. Wait for the user (passkey page / manual sync).
-            guard automaticServerCallsAllowed() else { return }
-            // 0. Re-mint the short-lived AutoFill upload token (plan C6) so a
-            // passkey registration started soon after foregrounding finds a
-            // live token. Best-effort; independent of the sync result below.
-            if let refresher = activeTokenRefresher {
-              await refresher.refresh()
-            }
-            // 1. Drain any rollback flags written by the AutoFill extension.
-            if let drain = activeDrain {
-              await drain.drainPendingFlags(vaultKey: vaultKey)
-            }
-            // 2. Re-sync the encrypted-entries cache.
-            guard let syncService = activeSyncService,
-                  let userId = currentUserId else { return }
-            let report: SyncReport?
-            do {
-              report = try await syncService.runSync(
-                vaultKey: vaultKey, userId: userId, cacheKey: currentCacheKey)
-            } catch MobileAPIError.authenticationRequired {
-              // Refresh token dead — no recovery in background; just stop.
-              return
-            } catch MobileAPIError.passkeyRequired {
-              // Recorded by the client; the alert explains, the gate above
-              // stops the next automatic attempt.
-              return
-            } catch {
-              // Transient error — keep using cached data; do nothing.
-              return
-            }
-            // 3. Re-register QuickType identities for the freshly-synced set
-            //    (personal + team via cacheKey-unwrapped team keys).
-            if let cacheData = report?.cacheData {
-              await refreshCredentialIdentities(
-                from: cacheData, vaultKey: vaultKey, userId: userId,
-                cacheKey: currentCacheKey, wrappedKeyStore: AppGroupWrappedKeyStore()
-              )
-            }
+            let refresher = activeTokenRefresher
+            let drain = activeDrain
+            let syncService = activeSyncService
+            let userId = currentUserId
+            let cacheKey = currentCacheKey
+            await ForegroundRefresh.run(
+              passkeyRequirement: PasskeyRequirementStore(),
+              drain: {
+                // Rollback flags written by the AutoFill extension.
+                await drain?.drainPendingFlags(vaultKey: vaultKey)
+              },
+              remint: {
+                await refresher?.refresh()
+              },
+              sync: {
+                guard let syncService, let userId else { return }
+                let report = try await syncService.runSync(
+                  vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
+                // Re-register QuickType identities for the freshly-synced set
+                // (personal + team via cacheKey-unwrapped team keys).
+                if let cacheData = report.cacheData {
+                  await refreshCredentialIdentities(
+                    from: cacheData, vaultKey: vaultKey, userId: userId,
+                    cacheKey: cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore()
+                  )
+                }
+              }
+            )
           }
         case .background:
           // Do NOT clear credential identities on background. Using a passkey

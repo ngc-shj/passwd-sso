@@ -16,6 +16,14 @@ public struct PasskeyRequirementStore: @unchecked Sendable {
   public static let defaultsKey = "passkeyRequired"
   /// Posted (on the writing thread) when the stored value changes.
   public static let didChange = Notification.Name("PasskeyRequirementStore.didChange")
+  /// Posted locally when ANY process (the host app or the AutoFill extension)
+  /// changed the value — relayed from the Darwin notification below, so a
+  /// listener in one process hears the other's write. Requires
+  /// `observeOtherProcesses()` to have run in the listening process.
+  public static let didChangeInAnyProcess = Notification.Name("PasskeyRequirementStore.didChangeInAnyProcess")
+  /// Darwin (cross-process) notification name. Carries no payload; listeners
+  /// re-read the shared suite.
+  static let darwinName = "jp.jpng.passwd-sso.passkey-requirement-changed"
 
   // UserDefaults is thread-safe but not Sendable.
   private let defaults: UserDefaults
@@ -46,6 +54,25 @@ public struct PasskeyRequirementStore: @unchecked Sendable {
       defaults.removeObject(forKey: Self.defaultsKey)
     }
     NotificationCenter.default.post(name: Self.didChange, object: nil)
+    CFNotificationCenterPostNotification(
+      CFNotificationCenterGetDarwinNotifyCenter(),
+      CFNotificationName(Self.darwinName as CFString), nil, nil, true)
+  }
+
+  /// Relay the cross-process Darwin notification to a local
+  /// `didChangeInAnyProcess` post. Call once per process that listens (the
+  /// host app's monitor). The C callback captures nothing.
+  public static func observeOtherProcesses(observer: UnsafeRawPointer) {
+    CFNotificationCenterAddObserver(
+      CFNotificationCenterGetDarwinNotifyCenter(),
+      observer,
+      { _, _, _, _, _ in
+        NotificationCenter.default.post(
+          name: PasskeyRequirementStore.didChangeInAnyProcess, object: nil)
+      },
+      darwinName as CFString,
+      nil,
+      .deliverImmediately)
   }
 }
 

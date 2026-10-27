@@ -406,6 +406,9 @@ describe("GET /api/mobile/authorize", () => {
     const u = new URL(loc);
     expect(`${u.protocol}//${u.host}${u.pathname}`).toBe("passwd-sso://auth/callback");
     expect(u.searchParams.get("error")).toBe("passkey_required");
+    // RFC 6749 §4.1.2.1: the error response echoes the request's state so the
+    // app can bind the refusal to the authorization request it started.
+    expect(u.searchParams.get("state")).toBe(VALID.state);
     expect(res.headers.get("cache-control")).toBe("no-store");
     // Non-vacuity: bridge code must NOT have been created.
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();

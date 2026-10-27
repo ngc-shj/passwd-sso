@@ -440,7 +440,11 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
-    try await performVoidHTTP(request, staleToken: accessToken) { nonce, freshToken in
+    // The server exempts this tamper report from the passkey gate, so its 2xx
+    // says nothing about the requirement — it must not clear a recorded refusal.
+    try await performVoidHTTP(
+      request, staleToken: accessToken, clearsPasskeyRequirement: false
+    ) { nonce, freshToken in
       let token = freshToken ?? accessToken
       let retryProof = try await buildDPoPProof(
         htm: HTTPMethod.post,
@@ -657,7 +661,9 @@ public actor MobileAPIClient: VaultUnlockDataSource {
         throw MobileAPIError.networkError(urlError)
       }
       let http = response as! HTTPURLResponse
-      try observePasskeyRequirement(status: http.statusCode, body: data)
+      // A 200 here can be served from the favicon URLCache with no server
+      // round trip, so it proves nothing: mark only, never clear.
+      try observePasskeyRequirement(status: http.statusCode, body: data, clearsOnSuccess: false)
 
       let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
       if let n = freshNonce {
@@ -988,7 +994,13 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// Every request except favicons (which use the caller's session) goes
   /// through here, so a `PASSKEY_REQUIRED` refusal throws `.passkeyRequired`
   /// before any per-route status mapping can read it as something else.
-  func performHTTP(_ request: URLRequest) async throws -> (Data, URLResponse) {
+  ///
+  /// `clearsPasskeyRequirement`: whether a 2xx from this endpoint proves the
+  /// requirement is met. True only for passkey-gated endpoints — every caller
+  /// except the gate-exempt cache-rollback report (see `postCacheRollbackReport`).
+  func performHTTP(
+    _ request: URLRequest, clearsPasskeyRequirement: Bool = true
+  ) async throws -> (Data, URLResponse) {
     let result: (Data, URLResponse)
     do {
       result = try await urlSession.data(for: request)
@@ -996,21 +1008,24 @@ public actor MobileAPIClient: VaultUnlockDataSource {
       throw MobileAPIError.networkError(urlError)
     }
     if let http = result.1 as? HTTPURLResponse {
-      try observePasskeyRequirement(status: http.statusCode, body: result.0)
+      try observePasskeyRequirement(
+        status: http.statusCode, body: result.0, clearsOnSuccess: clearsPasskeyRequirement)
     }
     return result
   }
 
   /// Records the passkey requirement from one response: a 403
   /// `PASSKEY_REQUIRED` marks it and throws `.passkeyRequired`; any 2xx clears
-  /// it (the server accepted this member's bearer token again). Other statuses
-  /// leave it alone — a network blip or an unrelated 4xx proves nothing.
-  private func observePasskeyRequirement(status: Int, body: Data) throws {
+  /// it (the server accepted this member's bearer token again) unless
+  /// `clearsOnSuccess` is false (gate-exempt endpoint, or a possibly cached
+  /// response). Other statuses leave it alone — a network blip or an unrelated
+  /// 4xx proves nothing.
+  private func observePasskeyRequirement(status: Int, body: Data, clearsOnSuccess: Bool) throws {
     if isPasskeyRequiredResponse(status: status, body: body) {
       passkeyRequirement.markRequired()
       throw MobileAPIError.passkeyRequired
     }
-    if (200..<300).contains(status) {
+    if clearsOnSuccess, (200..<300).contains(status) {
       passkeyRequirement.clear()
     }
   }
@@ -1073,6 +1088,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   private func performMutatingWithLadder(
     _ request: URLRequest,
     staleToken: String,
+    clearsPasskeyRequirement: Bool = true,
     makeRetry: MutatingRetryBuilder?
   ) async throws -> (Data, Int) {
     var current = request
@@ -1081,7 +1097,8 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     var token = staleToken
 
     while true {
-      let (data, response) = try await performHTTP(current)
+      let (data, response) = try await performHTTP(
+        current, clearsPasskeyRequirement: clearsPasskeyRequirement)
       let http = response as! HTTPURLResponse
       let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
       if let freshNonce {
@@ -1116,10 +1133,12 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   private func performVoidHTTP(
     _ request: URLRequest,
     staleToken: String,
+    clearsPasskeyRequirement: Bool = true,
     makeRetry: MutatingRetryBuilder? = nil
   ) async throws {
     let (_, status) = try await performMutatingWithLadder(
-      request, staleToken: staleToken, makeRetry: makeRetry)
+      request, staleToken: staleToken, clearsPasskeyRequirement: clearsPasskeyRequirement,
+      makeRetry: makeRetry)
     try decodeVoidResponse(status: status)
   }
 

@@ -490,6 +490,8 @@ function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
   clearTenantPolicy();
   clearVault();
   chrome.alarms.clear(ALARM_TOKEN_REFRESH);
+  // A TTL alarm left armed would fire later and overwrite `reason` with EXPIRED.
+  chrome.alarms.clear(ALARM_TOKEN_TTL);
   clearSession().catch(() => {});
   void recordDisconnectReason(reason);
   void updateBadge();
@@ -510,8 +512,6 @@ function endConnectionForPasskeyRequirement(generation: number): void {
   if (connectionGeneration !== generation || currentToken === null) return;
   const token = currentToken;
   clearToken(DISCONNECT_REASON.PASSKEY_REQUIRED);
-  // A pending TTL alarm would later overwrite the reason with EXPIRED.
-  chrome.alarms.clear(ALARM_TOKEN_TTL);
   void revokeTokenOnServerWith({ getCurrentToken: () => token });
 }
 
@@ -1182,7 +1182,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   // refresh entirely.
   (async () => {
     await hydrationPromise;
-    if (alarm.name === ALARM_TOKEN_TTL) {
+    // No token: the connection already ended and recorded its own reason (a
+    // clear that raced the alarm's removal); EXPIRED would overwrite it.
+    if (alarm.name === ALARM_TOKEN_TTL && currentToken !== null) {
       clearToken(DISCONNECT_REASON.EXPIRED);
     }
     if (alarm.name === ALARM_VAULT_LOCK) {
@@ -2711,7 +2713,6 @@ async function handleMessage(
     case EXT_MSG.CLEAR_TOKEN: {
       await revokeCurrentTokenOnServer();
       clearToken(DISCONNECT_REASON.MANUAL);
-      chrome.alarms.clear(ALARM_TOKEN_TTL);
       sendResponse({ type: EXT_MSG.CLEAR_TOKEN, ok: true });
       return;
     }

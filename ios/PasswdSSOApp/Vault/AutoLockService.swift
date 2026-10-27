@@ -54,6 +54,7 @@ import Shared
   private let uploadTokenStore: UploadTokenStore
   private let cacheURL: URL
   private let faviconCacheClearing: () -> Void
+  private let passkeyRequirement: PasskeyRequirementStore
 
   public init(
     reducer: LockStateReducer = LockStateReducer(),
@@ -64,7 +65,8 @@ import Shared
     tokenStore: HostTokenStore,
     uploadTokenStore: UploadTokenStore = UploadTokenStore(),
     cacheURL: URL,
-    faviconCacheClearing: @escaping () -> Void = { FaviconLoader.shared?.clearCache() }
+    faviconCacheClearing: @escaping () -> Void = { FaviconLoader.shared?.clearCache() },
+    passkeyRequirement: PasskeyRequirementStore = PasskeyRequirementStore()
   ) {
     self.reducer = reducer
     self.clock = clock
@@ -75,6 +77,7 @@ import Shared
     self.uploadTokenStore = uploadTokenStore
     self.cacheURL = cacheURL
     self.faviconCacheClearing = faviconCacheClearing
+    self.passkeyRequirement = passkeyRequirement
   }
 
   /// Record user interaction — resets the idle timer. The next `tick()` reads
@@ -125,6 +128,9 @@ import Shared
       try? fm.removeItem(at: cacheURL)
     }
     faviconCacheClearing()
+    // The refusal belonged to this account's session; the next sign-in (maybe
+    // another account or server) learns its own state from the server.
+    passkeyRequirement.clear()
     state = .loggedOut(reason: reason)
   }
 

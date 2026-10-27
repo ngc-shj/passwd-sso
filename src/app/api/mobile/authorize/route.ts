@@ -203,8 +203,11 @@ async function handleGET(req: NextRequest): Promise<Response> {
         metadata: { blockedPath: "/api/mobile/authorize" },
       });
     }
+    // Echo the validated `state` (RFC 6749 §4.1.2.1) so the app can tie the
+    // refusal to the authorization request it started before acting on it.
     const refusalUrl = new URL(IOS_CALLBACK_URL);
     refusalUrl.searchParams.set("error", "passkey_required");
+    refusalUrl.searchParams.set("state", state);
     return new NextResponse(null, {
       status: 302,
       headers: {
