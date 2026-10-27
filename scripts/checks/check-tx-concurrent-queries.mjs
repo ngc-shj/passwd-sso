@@ -173,7 +173,7 @@ const clientAliases = new Set();
 function namesClientType(text) {
   if (/\bTransactionClient\b/.test(text)) return true;
   for (const alias of clientAliases) {
-    if (new RegExp(`\\b${alias.replace(/\$/g, "\\$")}\\b`).test(text)) return true;
+    if (new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text)) return true;
   }
   return false;
 }
