@@ -200,7 +200,7 @@ export async function handlePageRoute(
         }
       }).catch((err: unknown) => {
         getLogger().error({
-          msg: "page-route: revoking the refused session cookies failed",
+          msg: "page-route: revoking or auditing the refused session cookies failed",
           error: errorLogFields(err),
         });
       });

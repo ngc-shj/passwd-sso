@@ -379,6 +379,7 @@ describe("handlePageRoute — protected routes auth check", () => {
         makePageRequest("/ja/dashboard/passwords", {
           cookie: `${HOST}=${TOKEN_A}; ${HOST}=${TOKEN_B}`,
           "x-forwarded-for": "203.0.113.7",
+          "user-agent": "refusal-test-ua",
         }),
         dummyOptions,
       );
@@ -391,6 +392,8 @@ describe("handlePageRoute — protected routes auth check", () => {
         scope: "PERSONAL",
         action: "SESSION_REVOKE",
         userId: "u-1",
+        // The request's forensic metadata, from personalAuditBase.
+        userAgent: "refusal-test-ua",
         metadata: { reason: "page_refusal" },
       });
       expect(JSON.stringify(row)).not.toMatch(/digest-|0b6f1c2e|5a7c9e1f/);
@@ -433,7 +436,7 @@ describe("handlePageRoute — protected routes auth check", () => {
       expect(res.status).toBe(307);
       await vi.waitFor(() =>
         expect(mockLoggerError).toHaveBeenCalledWith({
-          msg: "page-route: revoking the refused session cookies failed",
+          msg: "page-route: revoking or auditing the refused session cookies failed",
           error: { name: "Error", code: "P1001" },
         }),
       );
@@ -462,7 +465,7 @@ describe("handlePageRoute — protected routes auth check", () => {
       expect(res.status).toBe(307);
       await vi.waitFor(() =>
         expect(mockLoggerError).toHaveBeenCalledWith({
-          msg: "page-route: revoking the refused session cookies failed",
+          msg: "page-route: revoking or auditing the refused session cookies failed",
           error: { name: "Error", code: "P1001" },
         }),
       );
