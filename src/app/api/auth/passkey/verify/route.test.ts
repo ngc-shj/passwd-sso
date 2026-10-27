@@ -217,9 +217,11 @@ describe("POST /api/auth/passkey/verify", () => {
     const res = await POST(req);
     expect(res.status).toBe(200);
 
+    // The last line sets the session; on https the other CHIPS variant's
+    // deletion precedes it (see the ordering cells below).
     const setCookie = res.headers.getSetCookie();
-    expect(setCookie).toHaveLength(1);
-    const [pair] = setCookie[0].split(";");
+    expect(setCookie).toHaveLength(env.AUTH_URL.startsWith("https:") ? 2 : 1);
+    const [pair] = setCookie[setCookie.length - 1].split(";");
     const eqIdx = pair.indexOf("=");
     const name = pair.slice(0, eqIdx);
     const value = pair.slice(eqIdx + 1);
@@ -252,9 +254,52 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(res.status).toBe(200);
 
     const setCookie = res.headers.getSetCookie();
-    expect(setCookie).toHaveLength(1);
-    expect(setCookie[0]).toMatch(/^__Host-authjs\.session-token=/);
-    expect(/;\s*Partitioned/i.test(setCookie[0])).toBe(expected);
+    expect(setCookie).toHaveLength(2);
+    expect(setCookie[1]).toMatch(/^__Host-authjs\.session-token=[0-9a-f-]+;/);
+    expect(/;\s*Partitioned/i.test(setCookie[1])).toBe(expected);
+  });
+
+  // Issue #962: a CHIPS browser holding the other variant would send it first
+  // and stay on its session. Its deletion is a raw line BEFORE the session
+  // cookie, so a browser without CHIPS deletes and then sets the same cookie.
+  it.each([
+    ["on", "true"],
+    ["off", ""],
+  ])("deletes the other CHIPS variant before setting the session cookie (COOKIE_PARTITIONED %s)", async (_label, flag) => {
+    vi.stubEnv("AUTH_URL", "https://app.example.test");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    vi.stubEnv("COOKIE_PARTITIONED", flag);
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const [deletion, set] = res.headers.getSetCookie();
+    expect(deletion).toMatch(/^__Host-authjs\.session-token=;/);
+    expect(deletion).toMatch(/Expires=Thu, 01 Jan 1970/i);
+    expect(deletion).toMatch(/;\s*Path=\/(;|$)/);
+    expect(deletion).toMatch(/;\s*Secure/i);
+    expect(/;\s*Partitioned/i.test(deletion)).toBe(flag !== "true");
+    expect(/;\s*Partitioned/i.test(set)).toBe(flag === "true");
+  });
+
+  it("deletes the other variant at the basePath cookie path under a basePath", async () => {
+    vi.stubEnv("AUTH_URL", "https://app.example.test/passwd-sso");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    vi.stubEnv("COOKIE_PARTITIONED", "true");
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const res = await POST(req);
+
+    const [deletion, set] = res.headers.getSetCookie();
+    expect(deletion).toMatch(/^__Secure-authjs\.session-token=;/);
+    expect(deletion).toMatch(/;\s*Path=\/passwd-sso\/(;|$)/);
+    expect(/;\s*Partitioned/i.test(deletion)).toBe(false);
+    expect(set).toMatch(/^__Secure-authjs\.session-token=[0-9a-f-]+;/);
   });
 
   it("calls authorizeWebAuthn with correct params", async () => {

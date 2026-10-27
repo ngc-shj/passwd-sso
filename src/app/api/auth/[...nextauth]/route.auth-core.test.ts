@@ -108,7 +108,7 @@ function fakeAdapter() {
   const users = new Map<string, AdapterUser>([[VICTIM.id, VICTIM]]);
   // The real adapter's createSession deletes the session its meta names in
   // the transaction that creates the new one; record what it would read.
-  const replaced: (string | null | undefined)[] = [];
+  const replaced: (readonly string[] | undefined)[] = [];
   const adapter = {
     createUser: vi.fn(async (data: AdapterUser) => {
       const user = { ...data, id: "new-user" };
@@ -121,7 +121,7 @@ function fakeAdapter() {
     updateUser: vi.fn(async (data: Partial<AdapterUser> & { id: string }) => ({ ...VICTIM, ...data })),
     linkAccount: vi.fn(async () => undefined),
     createSession: vi.fn(async (session: AdapterSession) => {
-      replaced.push(sessionMetaStorage.getStore()?.replacesSessionToken);
+      replaced.push(sessionMetaStorage.getStore()?.replacesSessionTokens);
       sessions.set(session.sessionToken, session);
       return session;
     }),
@@ -131,7 +131,11 @@ function fakeAdapter() {
       return session && user ? { session, user } : null;
     }),
     updateSession: vi.fn(async () => null),
-    deleteSession: vi.fn(async () => null),
+    deleteSession: vi.fn(async (token: string) => {
+      const session = sessions.get(token) ?? null;
+      sessions.delete(token);
+      return session;
+    }),
   } satisfies Adapter;
   return { adapter, replaced, sessions };
 }
@@ -167,20 +171,23 @@ function setCookies(response: Response): string[] {
 }
 
 /** Sign in at the IdP, then build the callback a browser holding the victim's cookie sends. */
-async function callbackRequest(config: AuthConfig): Promise<NextRequest> {
+async function callbackRequest(
+  config: AuthConfig,
+  { app = APP, sessionCookies = [`authjs.session-token=${VICTIM_TOKEN}`] } = {},
+): Promise<NextRequest> {
   const signIn = await Auth(
-    new Request(`${APP}/api/auth/signin/idp`, {
+    new Request(`${app}/api/auth/signin/idp`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ callbackUrl: `${APP}/dashboard` }),
+      body: new URLSearchParams({ callbackUrl: `${app}/dashboard` }),
     }),
     config,
   );
   const location = signIn.headers.get("location");
   if (!location) throw new Error(`sign-in did not redirect (status ${signIn.status})`);
   const state = new URL(location).searchParams.get("state") ?? "";
-  const cookie = [`authjs.session-token=${VICTIM_TOKEN}`, ...setCookies(signIn)].join("; ");
-  return new NextRequest(`${APP}/api/auth/callback/idp?${new URLSearchParams({ code: "code-1", state })}`, {
+  const cookie = [...sessionCookies, ...setCookies(signIn)].join("; ");
+  return new NextRequest(`${app}/api/auth/callback/idp?${new URLSearchParams({ code: "code-1", state })}`, {
     headers: { cookie },
   });
 }
@@ -213,7 +220,7 @@ describe("callback through withoutSessionCookieOnCallback (@auth/core)", () => {
     expect(response.headers.get("location")).toBe(`${APP}/dashboard`);
     // ...and the new session is created as the replacement of the one the
     // browser held, so that session is deleted rather than left alive.
-    expect(replaced).toEqual([VICTIM_TOKEN]);
+    expect(replaced).toEqual([[VICTIM_TOKEN]]);
   });
 
   // The replaced session goes only with a session the sign-in creates.
@@ -242,5 +249,114 @@ describe("callback through withoutSessionCookieOnCallback (@auth/core)", () => {
 
     expect(adapter.getSessionAndUser).toHaveBeenCalledWith(VICTIM_TOKEN);
     expect(adapter.linkAccount).toHaveBeenCalledWith(expect.objectContaining({ userId: VICTIM.id }));
+  });
+});
+
+// Issue #962: a CHIPS browser holds the session cookie partitioned and
+// unpartitioned after a COOKIE_PARTITIONED flip. Driven through the real
+// Auth.js callback and sign-out with the cookie options auth.config.ts uses
+// on a Secure deployment with the flag on.
+describe("both CHIPS variants through withSessionCookieVariants (@auth/core)", () => {
+  const SECURE_APP = "https://app.test";
+  const NAME = "__Host-authjs.session-token";
+  const OTHER_TOKEN = "bbbb";
+
+  beforeEach(() => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    vi.stubEnv("AUTH_URL", SECURE_APP);
+    installFetch();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  function secureConfig(adapter: Adapter, events: AuthConfig["events"] = {}): AuthConfig {
+    return {
+      ...authConfig(adapter),
+      events,
+      cookies: {
+        sessionToken: {
+          name: NAME,
+          options: { path: "/", httpOnly: true, sameSite: "lax", secure: true, partitioned: true },
+        },
+      },
+    };
+  }
+
+  const isPartitioned = (line: string) => /;\s*Partitioned/i.test(line);
+  // Next serializes a deletion with an epoch Expires, Auth.js with Max-Age=0.
+  const isDeletion = (line: string) =>
+    line.startsWith(`${NAME}=;`) && (/Expires=Thu, 01 Jan 1970/i.test(line) || /;\s*Max-Age=0/i.test(line));
+  const namesSession = (line: string) => line.startsWith(`${NAME}=`);
+
+  async function wrapped(config: AuthConfig) {
+    const { _withSessionCookieVariants, _withoutSessionCookieOnCallback } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    return _withSessionCookieVariants(
+      _withoutSessionCookieOnCallback((req: NextRequest) => Auth(req, config)),
+    );
+  }
+
+  it("sign-in: the unpartitioned variant is deleted on the line before the new partitioned cookie, and both old sessions are replaced", async () => {
+    const { adapter, replaced } = fakeAdapter();
+    const config = secureConfig(adapter);
+    const handler = await wrapped(config);
+
+    const response = await sessionMetaStorage.run({ ip: null, userAgent: null, acceptLanguage: null }, async () =>
+      handler(
+        await callbackRequest(config, {
+          app: SECURE_APP,
+          sessionCookies: [`${NAME}=${VICTIM_TOKEN}`, `${NAME}=${OTHER_TOKEN}`],
+        }),
+      ),
+    );
+
+    const sessionLines = response.headers.getSetCookie().filter(namesSession);
+    expect(sessionLines).toHaveLength(2);
+    const [deletion, set] = sessionLines;
+    expect(isDeletion(deletion) && !isPartitioned(deletion)).toBe(true);
+    expect(isDeletion(set)).toBe(false);
+    expect(isPartitioned(set)).toBe(true);
+    const all = response.headers.getSetCookie();
+    expect(all.indexOf(deletion)).toBe(all.indexOf(set) - 1);
+    expect(replaced).toEqual([[VICTIM_TOKEN, OTHER_TOKEN]]);
+  });
+
+  it("sign-out: both variants are deleted and every session cookie reaches events.signOut", async () => {
+    const { adapter, sessions } = fakeAdapter();
+    sessions.set(OTHER_TOKEN, { sessionToken: OTHER_TOKEN, userId: VICTIM.id, expires: new Date(Date.now() + 60_000) });
+    const seen: unknown[] = [];
+    const config = secureConfig(adapter, {
+      signOut: () => {
+        seen.push(sessionMetaStorage.getStore()?.signOutSessionTokens);
+      },
+    });
+    const handler = await wrapped(config);
+
+    const response = await sessionMetaStorage.run({ ip: null, userAgent: null, acceptLanguage: null }, () =>
+      handler(
+        new NextRequest(`${SECURE_APP}/api/auth/signout`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: `${NAME}=${VICTIM_TOKEN}; ${NAME}=${OTHER_TOKEN}`,
+          },
+          body: new URLSearchParams({ callbackUrl: `${SECURE_APP}/` }),
+        }),
+      ),
+    );
+
+    // Auth.js revoked the first cookie's session only...
+    expect(adapter.deleteSession).toHaveBeenCalledTimes(1);
+    expect(adapter.deleteSession).toHaveBeenCalledWith(VICTIM_TOKEN);
+    // ...and events.signOut was handed both, for the owner-scoped revocation.
+    expect(seen).toEqual([[VICTIM_TOKEN, OTHER_TOKEN]]);
+    const sessionLines = response.headers.getSetCookie().filter(namesSession);
+    expect(sessionLines).toHaveLength(2);
+    expect(sessionLines.every(isDeletion)).toBe(true);
+    expect(sessionLines.map(isPartitioned).sort()).toEqual([false, true]);
   });
 });

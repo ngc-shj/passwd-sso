@@ -857,7 +857,7 @@ describe("withoutSessionCookieOnCallback hands the replaced session to the sign-
   it("passes the stripped session token, keeping the request meta", async () => {
     expect(
       await metaSeen("/api/auth/callback/google", "authjs.session-token=aaaa; authjs.state=st"),
-    ).toEqual({ ...OUTER_META, replacesSessionToken: "aaaa" });
+    ).toEqual({ ...OUTER_META, replacesSessionTokens: ["aaaa"] });
   });
 
   // On https the configured name carries a prefix: __Host- without a
@@ -866,12 +866,30 @@ describe("withoutSessionCookieOnCallback hands the replaced session to the sign-
     vi.stubEnv("AUTH_URL", "https://example.com");
     expect(
       await metaSeen("/api/auth/callback/google", "__Host-authjs.session-token=bbbb"),
-    ).toMatchObject({ replacesSessionToken: "bbbb" });
+    ).toMatchObject({ replacesSessionTokens: ["bbbb"] });
     vi.resetModules();
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
     expect(
       await metaSeen("/passwd-sso/api/auth/callback/google", "__Secure-authjs.session-token=cccc"),
-    ).toMatchObject({ replacesSessionToken: "cccc" });
+    ).toMatchObject({ replacesSessionTokens: ["cccc"] });
+  });
+
+  // A CHIPS browser holding both variants sends both, older first. The
+  // sign-in response deletes both cookies, so both sessions are replaced.
+  it("passes every token under the configured name, both variants", async () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    expect(
+      await metaSeen(
+        "/api/auth/callback/google",
+        "__Host-authjs.session-token=aaaa; authjs.state=st; __Host-authjs.session-token=bbbb",
+      ),
+    ).toMatchObject({ replacesSessionTokens: ["aaaa", "bbbb"] });
+  });
+
+  it("passes no duplicate whose value is outside the token alphabet", async () => {
+    expect(
+      await metaSeen("/api/auth/callback/google", "authjs.session-token=aaaa; authjs.session-token=%61"),
+    ).toMatchObject({ replacesSessionTokens: ["aaaa"] });
   });
 
   // Auth.js reads only the configured name, so a cookie under another name
@@ -880,7 +898,7 @@ describe("withoutSessionCookieOnCallback hands the replaced session to the sign-
     vi.stubEnv("AUTH_URL", "https://example.com");
     expect(
       await metaSeen("/api/auth/callback/google", "authjs.session-token=aaaa"),
-    ).toMatchObject({ replacesSessionToken: null });
+    ).toMatchObject({ replacesSessionTokens: [] });
   });
 
   it("names no session when the request carried no session cookie", async () => {
@@ -895,10 +913,163 @@ describe("withoutSessionCookieOnCallback hands the replaced session to the sign-
         "/api/auth/callback/google",
         "authjs.session-token=aaaa; authjs.session-token.0=dddd",
       ),
-    ).toMatchObject({ replacesSessionToken: null });
+    ).toMatchObject({ replacesSessionTokens: [] });
   });
 
   it("names no session outside a callback", async () => {
     expect(await metaSeen("/api/auth/session", "authjs.session-token=aaaa")).toEqual(OUTER_META);
+  });
+});
+
+describe("withSessionCookieVariants (issue #962)", () => {
+  const HOST = "__Host-authjs.session-token";
+  const TOKEN_A = "0b6f1c2e-8d4a-4f7e-9a1b-3c5d7e9f0a2b";
+  const TOKEN_B = "5a7c9e1f-2b4d-4c6e-8f0a-1b3d5f7a9c0e";
+  const TOKEN_C = "9c0e5a7c-1f2b-4d4c-8e6f-0a1b3d5f7a9c";
+
+  beforeEach(() => {
+    vi.stubEnv("AUTH_URL", "https://app.example.test");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  const isPartitioned = (line: string) => /;\s*Partitioned/i.test(line);
+  const isDeletionOf = (name: string) => (line: string) =>
+    line.startsWith(`${name}=;`) && /Expires=Thu, 01 Jan 1970/i.test(line);
+
+  function responseWith(lines: string[], init: ResponseInit = { status: 302 }): Response {
+    const headers = new Headers({ location: "https://app.example.test/dashboard" });
+    for (const line of lines) headers.append("set-cookie", line);
+    return new Response(null, { ...init, headers });
+  }
+
+  const sessionSet = (partitioned: boolean) =>
+    `${HOST}=${TOKEN_C}; Path=/; Expires=Wed, 01 Jan 2031 00:00:00 GMT; HttpOnly; Secure; SameSite=Lax${partitioned ? "; Partitioned" : ""}`;
+
+  async function run(
+    path: string,
+    method: string,
+    cookie: string | null,
+    response: Response,
+  ): Promise<{ out: Response; meta: unknown }> {
+    const { _withSessionCookieVariants } = await import("@/app/api/auth/[...nextauth]/route");
+    const { sessionMetaStorage } = await import("@/lib/auth/session/session-meta");
+    let meta: unknown;
+    const inner = vi.fn<RouteHandler>(async () => {
+      meta = sessionMetaStorage.getStore();
+      return response;
+    });
+    const out = await sessionMetaStorage.run({ ip: null, userAgent: null, acceptLanguage: null }, () =>
+      _withSessionCookieVariants(inner)(
+        new NextRequest(`https://app.example.test${path}`, {
+          method,
+          headers: cookie === null ? {} : { cookie },
+        }),
+      ),
+    );
+    return { out, meta };
+  }
+
+  it.each([
+    ["partitioned", true],
+    ["unpartitioned", false],
+  ])("callback: deletes the other variant before the %s session cookie, on the raw lines", async (_label, partitioned) => {
+    const lines = ["authjs.callback-url=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT", sessionSet(partitioned)];
+    const { out } = await run("/api/auth/callback/google", "GET", null, responseWith(lines));
+
+    const raw = out.headers.getSetCookie();
+    expect(raw).toHaveLength(3);
+    expect(raw[0]).toBe(lines[0]);
+    expect(isDeletionOf(HOST)(raw[1])).toBe(true);
+    expect(isPartitioned(raw[1])).toBe(!partitioned);
+    expect(raw[2]).toBe(lines[1]);
+    expect(out.status).toBe(302);
+    expect(out.headers.get("location")).toBe("https://app.example.test/dashboard");
+  });
+
+  it("callback that set no session cookie (a failed sign-in) is returned untouched", async () => {
+    const response = responseWith(["authjs.callback-url=x; Path=/"]);
+    const { out } = await run("/api/auth/callback/google", "GET", null, response);
+    expect(out).toBe(response);
+  });
+
+  it("over http there is no other variant to delete", async () => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    const response = responseWith([`authjs.session-token=${TOKEN_C}; Path=/; HttpOnly; SameSite=Lax`]);
+    const { out } = await run("/api/auth/callback/google", "GET", null, response);
+    expect(out).toBe(response);
+  });
+
+  it("sign-out: deletes both variants of the configured name", async () => {
+    const authjsDeletion = `${HOST}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Secure; SameSite=Lax`;
+    const { out } = await run(
+      "/api/auth/signout",
+      "POST",
+      `${HOST}=${TOKEN_A}; ${HOST}=${TOKEN_B}`,
+      responseWith([authjsDeletion]),
+    );
+
+    const raw = out.headers.getSetCookie();
+    expect(raw).toHaveLength(2);
+    expect(raw.every(isDeletionOf(HOST))).toBe(true);
+    expect(raw.map(isPartitioned).sort()).toEqual([false, true]);
+    expect(raw[1]).toBe(authjsDeletion);
+  });
+
+  // Every well-formed token under every known name, both variants; chunks
+  // and values outside the alphabet are never handed on.
+  it("sign-out: hands every well-formed session token the request carried to events.signOut", async () => {
+    const cookie = [
+      `${HOST}=${TOKEN_A}`,
+      `${HOST}=${TOKEN_B}`,
+      `next-auth.session-token=${TOKEN_C}`,
+      `${HOST}.0=${TOKEN_C.replace("9", "8")}`,
+      `__Secure-authjs.session-token=%61`,
+      "authjs.csrf-token=abc",
+    ].join("; ");
+    const { meta } = await run("/api/auth/signout", "POST", cookie, responseWith([]));
+    expect(meta).toMatchObject({ signOutSessionTokens: [TOKEN_A, TOKEN_B, TOKEN_C] });
+  });
+
+  // A refused sign-out (Auth.js's CSRF check failed, or no session cookie):
+  // Auth.js deleted nothing, so neither does the wrapper.
+  it("sign-out that Auth.js refused is returned untouched", async () => {
+    const response = responseWith([]);
+    const { out } = await run("/api/auth/signout", "POST", `${HOST}=${TOKEN_A}`, response);
+    expect(out).toBe(response);
+  });
+
+  it.each([
+    ["GET /api/auth/signout (the confirmation page)", "/api/auth/signout", "GET"],
+    ["POST /api/auth/session (a session refresh)", "/api/auth/session", "POST"],
+  ])("leaves %s alone", async (_label, path, method) => {
+    const response = responseWith([sessionSet(true)]);
+    const { out, meta } = await run(path, method, `${HOST}=${TOKEN_A}`, response);
+    expect(out).toBe(response);
+    expect(meta).not.toHaveProperty("signOutSessionTokens");
+  });
+
+  // Wired into the exported handler: Auth.js's sign-out response comes back
+  // with both variants deleted.
+  it("is in the exported POST chain", async () => {
+    const route = await import("@/app/api/auth/[...nextauth]/route");
+    const { handlers } = await import("@/auth");
+    const authjsDeletion = `${HOST}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Secure; SameSite=Lax`;
+    vi.mocked(handlers.POST).mockImplementationOnce(async () => responseWith([authjsDeletion]));
+
+    const out = await route.POST(
+      new NextRequest("https://app.example.test/api/auth/signout", {
+        method: "POST",
+        headers: { cookie: `${HOST}=${TOKEN_A}` },
+      }),
+    );
+
+    const raw = out.headers.getSetCookie();
+    expect(raw).toHaveLength(2);
+    expect(raw.map(isPartitioned).sort()).toEqual([false, true]);
   });
 });

@@ -116,6 +116,37 @@ export function readSessionCookie(header: string | null): SessionCookieRead {
 }
 
 /**
+ * A browser holds at most a handful of session cookies: the configured name in
+ * both CHIPS variants, the other known names, and a same-name cookie another
+ * app on the host set at a shorter path. Revocation runs a query per token, so
+ * the list is bounded well above that.
+ */
+const MAX_PRESENTED_SESSION_TOKENS = 16;
+
+/**
+ * Every distinct session token the header carries under one of `names`, in
+ * header order — each duplicate, not only the first occurrence Auth.js reads.
+ * For revoking the sessions a browser holds, never for deciding which session
+ * a request is (that is readSessionCookie). Only an exact name counts (a
+ * chunk `<name>.0` is not a token Auth.js ever wrote), and a value outside
+ * the token alphabet is skipped rather than rewritten.
+ */
+export function presentedSessionTokens(
+  header: string | null,
+  names: readonly string[],
+): string[] {
+  if (!header) return [];
+  const tokens = new Set<string>();
+  for (const pair of parseCookiePairs(header)) {
+    if (tokens.size >= MAX_PRESENTED_SESSION_TOKENS) break;
+    if (names.includes(pair.key) && SESSION_TOKEN_PATTERN.test(pair.value)) {
+      tokens.add(pair.value);
+    }
+  }
+  return [...tokens];
+}
+
+/**
  * True when the header carries anything that could be a session cookie under
  * any known name, prefix-matched as `SessionStore` matches. For the CSRF gate
  * and the Bearer-bypass decision. An empty value is not counted: `SessionStore`

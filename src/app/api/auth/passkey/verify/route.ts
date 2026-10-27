@@ -25,6 +25,7 @@ import {
   isSecureCookieFromAuthUrl,
   isSessionCookiePartitioned,
 } from "@/lib/auth/session/cookie-name";
+import { deleteOtherSessionCookieVariantFirst } from "@/lib/auth/session/session-cookie-variants";
 import { createCappedSession } from "@/lib/auth/session/session-concurrency";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -171,7 +172,12 @@ async function handlePOST(req: NextRequest) {
   // configuredSessionCookieName, so the selection cannot drift. Read at call
   // time, like isSecureCookieFromAuthUrl() and isSessionCookiePartitioned()
   // below, so the attributes cannot disagree either.
-  response.cookies.set(configuredSessionCookieName(), sessionToken, {
+  //
+  // Serialized apart from `response` and appended raw: the other CHIPS
+  // variant's deletion must precede this line, and ResponseCookies would
+  // rewrite two lines of one name (see session-cookie-variants.ts).
+  const sessionCookie = new NextResponse(null);
+  sessionCookie.cookies.set(configuredSessionCookieName(), sessionToken, {
     path: `${basePath}/`,
     httpOnly: true,
     sameSite: "lax",
@@ -179,6 +185,12 @@ async function handlePOST(req: NextRequest) {
     ...(isSessionCookiePartitioned() ? { partitioned: true } : {}),
     expires,
   });
+  for (const line of deleteOtherSessionCookieVariantFirst(
+    sessionCookie.headers.getSetCookie(),
+    basePath,
+  )) {
+    response.headers.append("set-cookie", line);
+  }
 
   return response;
 }

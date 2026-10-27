@@ -256,7 +256,7 @@ describe("session-concurrency-cap — real-DB integration (C1)", () => {
     return raw;
   }
 
-  function signIn(sessionToken: string, replacesSessionToken?: string) {
+  function signIn(sessionToken: string, ...replacesSessionTokens: string[]) {
     return createCappedSession({
       userId,
       tenantId,
@@ -266,7 +266,7 @@ describe("session-concurrency-cap — real-DB integration (C1)", () => {
       userAgent: null,
       acceptLanguage: null,
       provider: "google",
-      replacesSessionToken,
+      replacesSessionTokens,
     });
   }
 
@@ -280,6 +280,24 @@ describe("session-concurrency-cap — real-DB integration (C1)", () => {
     await signIn(newRaw, replaced);
 
     expect(await sessionDigestExists(ctx, hashSessionToken(replaced))).toBe(false);
+    expect(await sessionDigestExists(ctx, hashSessionToken(otherDevice))).toBe(true);
+    expect(await sessionDigestExists(ctx, hashSessionToken(newRaw))).toBe(true);
+  });
+
+  // Both CHIPS variants of the session cookie: the sign-in deletes both
+  // cookies, so both sessions go, and neither pushes out the other device.
+  it("a re-sign-in at the cap replaces both sessions the browser held", async () => {
+    await setMaxConcurrentSessions(ctx, tenantId, 2);
+    const now = Date.now();
+    const otherDevice = await seedSession(userId, new Date(now - 10 * 60_000));
+    const partitioned = await seedSession(userId, new Date(now - 6 * 60_000));
+    const unpartitioned = await seedSession(userId, new Date(now - 5 * 60_000));
+
+    const newRaw = `new-${randomUUID()}`;
+    await signIn(newRaw, partitioned, unpartitioned);
+
+    expect(await sessionDigestExists(ctx, hashSessionToken(partitioned))).toBe(false);
+    expect(await sessionDigestExists(ctx, hashSessionToken(unpartitioned))).toBe(false);
     expect(await sessionDigestExists(ctx, hashSessionToken(otherDevice))).toBe(true);
     expect(await sessionDigestExists(ctx, hashSessionToken(newRaw))).toBe(true);
   });

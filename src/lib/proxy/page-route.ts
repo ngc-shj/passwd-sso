@@ -16,6 +16,7 @@ import {
   configuredSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "../auth/session/cookie-name";
+import { sessionCookieDeletionLine } from "../auth/session/session-cookie-variants";
 import {
   parseCookiePairs,
   readSessionCookie,
@@ -96,15 +97,7 @@ function clearAuthSessionCookies(
   // ResponseCookies holds one entry per name, so the unpartitioned deletion is
   // returned as a raw header for the caller to append after the last
   // `response.cookies` write, which would otherwise rewrite it away.
-  const unpartitioned = new NextResponse(null);
-  unpartitioned.cookies.delete({
-    name: configuredName,
-    path: cookiePath,
-    secure: useSecureCookies,
-    httpOnly: true,
-    sameSite: "lax",
-  });
-  return unpartitioned.headers.getSetCookie();
+  return [sessionCookieDeletionLine(configuredName, basePath, false)];
 }
 
 /**
