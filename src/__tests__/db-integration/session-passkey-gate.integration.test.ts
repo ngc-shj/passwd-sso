@@ -53,7 +53,7 @@ import {
 } from "@/lib/auth/session/session-cache";
 import { generateChallengeId } from "@/lib/auth/webauthn/webauthn-server";
 import { getRedis } from "@/lib/redis";
-import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import { MS_PER_DAY } from "@/lib/constants/time";
 
 const hasDatabase = !!process.env.DATABASE_URL;
@@ -318,6 +318,9 @@ describe.skipIf(!runsUnderCi && (!hasDatabase || !redisAvailable))(
             userId,
           );
         });
+        // A PERSONAL row is invisible to the tenant audit log, where this
+        // admin-group action is listed; every row must be TENANT-scoped.
+        expect(rows.map((r) => r.payload.scope)).toEqual(rows.map(() => AUDIT_SCOPE.TENANT));
         return rows.map((r) => ({
           blockedPath: (r.payload.metadata as Record<string, unknown> | undefined)?.blockedPath,
         }));

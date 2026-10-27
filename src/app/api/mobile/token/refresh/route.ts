@@ -57,7 +57,7 @@ import {
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
 import { refreshIosToken } from "@/lib/auth/tokens/mobile-token";
 import { recordPasskeyAuditEmit } from "@/lib/auth/policy/passkey-enforcement";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
 export const runtime = "nodejs";
@@ -243,8 +243,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       case "PASSKEY_REQUIRED":
         if (recordPasskeyAuditEmit(oldRow.userId, "/api/mobile/token/refresh", Date.now())) {
           await logAuditAsync({
-            ...personalAuditBase(req, oldRow.userId),
-            tenantId: oldRow.tenantId,
+            ...tenantAuditBase(req, oldRow.userId, oldRow.tenantId),
             action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
             metadata: { blockedPath: "/api/mobile/token/refresh" },
           });

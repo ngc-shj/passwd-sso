@@ -35,7 +35,7 @@ import { errorResponse, zodValidationError } from "@/lib/http/api-response";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { BYPASS_GRANT } from "@/lib/tenant-rls-grants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { extractRequestMeta, logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { extractRequestMeta, logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
@@ -198,9 +198,8 @@ async function handleGET(req: NextRequest): Promise<Response> {
   if (passkeyEnforcementBlocks(pkState)) {
     if (recordPasskeyAuditEmit(userId, "/api/mobile/authorize", Date.now())) {
       await logAuditAsync({
-        ...personalAuditBase(req, userId),
+        ...tenantAuditBase(req, userId, tenantId),
         action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-        tenantId,
         metadata: { blockedPath: "/api/mobile/authorize" },
       });
     }

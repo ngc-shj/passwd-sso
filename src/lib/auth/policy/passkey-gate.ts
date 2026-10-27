@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
@@ -10,9 +10,9 @@ import {
 
 /**
  * Per-use passkey gate for user-bound bearer credentials (API keys, operator
- * tokens, extension-row tokens). Lives outside the proxy import graph, so the
- * audit module never reaches the proxy; `passkey-enforcement.ts` stays
- * proxy-safe.
+ * tokens, extension-row tokens). This module is outside the proxy import
+ * graph; the audit module it writes through is not — the proxy reaches it via
+ * `src/lib/proxy/session-passkey-gate.ts`.
  *
  * Called from inside each validator, which is what makes the gate structural:
  * it runs before every caller's scope, clientKind and network checks, so a
@@ -62,8 +62,7 @@ export async function passkeyGateBlocks(args: {
   );
   if (limited.allowed) {
     await logAuditAsync({
-      ...personalAuditBase(req, userId),
-      tenantId,
+      ...tenantAuditBase(req, userId, tenantId),
       action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
       metadata: { blockedPath: credential, credentialId },
     });

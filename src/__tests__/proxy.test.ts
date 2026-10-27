@@ -42,15 +42,6 @@ import { proxy } from "../proxy";
 import { applySecurityHeaders as _applySecurityHeaders } from "../lib/proxy/security-headers";
 import { __resetAllowlistForTests } from "../lib/http/cors";
 import {
-  PASSKEY_AUDIT_MAP_MAX as _PASSKEY_AUDIT_MAP_MAX,
-  PASSKEY_AUDIT_DEDUP_MS as _PASSKEY_AUDIT_DEDUP_MS,
-  recordPasskeyAuditEmit as _recordPasskeyAuditEmit,
-  _resetPasskeyAuditForTests,
-  _passkeyAuditSizeForTests,
-  _passkeyAuditHasForTests,
-  _passkeyAuditFirstKeyForTests,
-} from "../lib/auth/policy/passkey-enforcement";
-import {
   cachedSessionInfo,
   dispatchFetch,
   fetchCallsTo,
@@ -1000,10 +991,11 @@ describe("proxy — access restriction", () => {
 });
 
 // =============================================================================
-// CSRF gate integration tests (C4 step 6 — 11 cases).
+// CSRF gate integration tests (C4 step 6).
 //
 // These exercise the proxy CSRF gate end-to-end through the orchestrator.
-// They are the regression net for pre1 (audit-emit assertOrigin missing) and
+// They are the regression net for pre1 (an api-default mutating route with
+// no assertOrigin of its own) and
 // the R3 baseline (9 session-mutating routes lacked assertOrigin) — both
 // closed structurally by the gate. Without these tests, a refactor that
 // drops shouldEnforceCsrf or reorders the early-returns would pass the suite.
@@ -1057,8 +1049,8 @@ describe("proxy — CSRF gate", () => {
     expect(res.status).toBe(200);
   });
 
-  it("[3] /api/internal/audit-emit POST + session + mismatched Origin → 403 (pre1 closure)", async () => {
-    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+  it("[3] api-default POST + session + mismatched Origin → 403 (pre1 closure)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/maintenance/purge-history`, {
       method: "POST",
       headers: {
         Cookie: "authjs.session-token=5e55-0018",
@@ -1069,8 +1061,8 @@ describe("proxy — CSRF gate", () => {
     expect(res.status).toBe(403);
   });
 
-  it("[4] /api/internal/audit-emit POST + session + matching Origin → pass-through (default branch, route handler authenticates)", async () => {
-    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+  it("[4] api-default POST + session + matching Origin → pass-through (default branch, route handler authenticates)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/maintenance/purge-history`, {
       method: "POST",
       headers: {
         Cookie: "authjs.session-token=5e55-0019",
@@ -1078,7 +1070,7 @@ describe("proxy — CSRF gate", () => {
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
-    // /api/internal/* falls through to api-default — no proxy 401, route handles it
+    // /api/maintenance/* falls through to api-default — no proxy 401, route handles it
     expect(res.status).toBe(200);
   });
 
@@ -1145,26 +1137,8 @@ describe("proxy — CSRF gate", () => {
     expect(res.status).toBe(200);
   });
 
-  it("[10] internal-fetch shape (POST to audit-emit with explicit Origin matching APP_URL + session cookie) → pass-through", async () => {
-    // Simulates the proxy's own self-fetch at proxy.ts:153 with the Origin
-    // header set to selfOrigin. Validates that the C4 step 3 fix works:
-    // the proxy can call its own /api/internal/audit-emit without 403'ing.
-    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
-      method: "POST",
-      headers: {
-        Cookie: "authjs.session-token=5e55-001d",
-        Origin: APP_ORIGIN, // explicit, matches APP_URL
-      },
-    } as ConstructorParameters<typeof NextRequest>[1]);
-    const res = await proxy(req, dummyOptions);
-    expect(res.status).toBe(200);
-  });
-
-  it("[11] internal-fetch counter-test: WITHOUT explicit Origin → 403 (locks T3 fix — proxy MUST set Origin on self-fetch)", async () => {
-    // If a future refactor removes "Origin: selfOrigin" from the internal
-    // fetch (proxy.ts:153), this counter-test catches it: a same-shape
-    // request with no Origin gets 403 from the CSRF gate.
-    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+  it("[10] api-default POST + session WITHOUT Origin → 403 (a missing Origin is refused, not waved through)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/maintenance/purge-history`, {
       method: "POST",
       headers: {
         Cookie: "authjs.session-token=5e55-001e",
@@ -1216,6 +1190,7 @@ describe("proxy — session passkey gate", () => {
     expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "TENANT",
         action: "PASSKEY_ENFORCEMENT_BLOCKED",
         userId: "u-blocked",
         tenantId: "tenant1",
@@ -1240,13 +1215,9 @@ describe("proxy — session passkey gate", () => {
 
   // SEC-2: a page navigation's blocked row names the area, never the
   // caller-chosen path, and is written once.
-  it("redirects a blocked page navigation and audits it once, with a closed blockedPath", async () => {
-    _resetPasskeyAuditForTests();
+  it("redirects a blocked page navigation and audits it once, in-process, with a closed blockedPath", async () => {
     fetchSpy.mockImplementation(
-      dispatchFetch({
-        ...sessionRoute(sessionResponseBody("u-blocked-page", PASSKEY_BLOCKED)),
-        "/api/internal/audit-emit": () => new Response("{}", { status: 200 }),
-      }),
+      dispatchFetch(sessionRoute(sessionResponseBody("u-blocked-page", PASSKEY_BLOCKED))),
     );
 
     const res = await proxy(
@@ -1258,11 +1229,19 @@ describe("proxy — session passkey gate", () => {
     await new Promise((r) => setImmediate(r));
 
     expect(res.status).toBe(307);
-    const auditCalls = fetchCallsTo(fetchSpy, "/api/internal/audit-emit");
-    expect(auditCalls).toHaveLength(1);
-    expect(JSON.parse(String((auditCalls[0][1] as RequestInit).body)).metadata).toEqual({
-      blockedPath: "PAGE /dashboard",
-    });
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "TENANT",
+        action: "PASSKEY_ENFORCEMENT_BLOCKED",
+        userId: "u-blocked-page",
+        tenantId: "tenant1",
+        metadata: { blockedPath: "PAGE /dashboard" },
+      }),
+    );
+    expect(fetchSpy.mock.calls.map((c: unknown[]) => new URL(String(c[0])).pathname)).toEqual([
+      "/api/auth/session",
+    ]);
   });
 
   it("passes the proxy's own session read (Tier A) without reading the session", async () => {
@@ -1321,73 +1300,6 @@ describe("auth-gate session cache miss path", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     expect(cacheSpy).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("proxy — passkeyAuditEmitted staleness eviction", () => {
-  beforeEach(() => {
-    _resetPasskeyAuditForTests();
-  });
-
-  afterEach(() => {
-    _resetPasskeyAuditForTests();
-  });
-
-  // Composite key: `${userId}:${blockedPath}`. Use a fixed path for
-  // these eviction-order tests (the path doesn't affect the eviction logic).
-  const P = "/api/test-path";
-
-  it("returns true on first emit, false within dedup window, true after window", () => {
-    const t0 = 1_000_000;
-    expect(_recordPasskeyAuditEmit("u1", P, t0)).toBe(true);
-    expect(_recordPasskeyAuditEmit("u1", P, t0 + _PASSKEY_AUDIT_DEDUP_MS)).toBe(false);
-    expect(_recordPasskeyAuditEmit("u1", P, t0 + _PASSKEY_AUDIT_DEDUP_MS + 1)).toBe(true);
-  });
-
-  it("evicts the user with the oldest lastEmitted timestamp, not the first-inserted", () => {
-    const base = 1_000_000;
-    const dedup = _PASSKEY_AUDIT_DEDUP_MS;
-
-    // Fill the map. u0 is inserted first (composite key u0:/api/test-path).
-    for (let i = 0; i < _PASSKEY_AUDIT_MAP_MAX; i++) {
-      const accepted = _recordPasskeyAuditEmit(`u${i}`, P, base + i);
-      expect(accepted).toBe(true);
-    }
-    expect(_passkeyAuditSizeForTests()).toBe(_PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditHasForTests("u0", P)).toBe(true);
-    expect(_passkeyAuditHasForTests("u1", P)).toBe(true);
-
-    // Re-emit u0 well beyond the dedup window. With FIFO eviction this would
-    // not save u0 (its insertion-order position would still be 0). With LRU
-    // eviction (delete-then-set) u0 moves to the tail, so u1 is now the
-    // staleness candidate at the head.
-    const refresh = base + _PASSKEY_AUDIT_MAP_MAX + dedup + 1;
-    expect(_recordPasskeyAuditEmit("u0", P, refresh)).toBe(true);
-
-    // Add a new user. Map is at capacity, so something must be evicted.
-    expect(_recordPasskeyAuditEmit("u-new", P, refresh + 1)).toBe(true);
-
-    expect(_passkeyAuditSizeForTests()).toBe(_PASSKEY_AUDIT_MAP_MAX);
-    // Staleness eviction picks u1 (oldest lastEmitted), NOT u0.
-    expect(_passkeyAuditHasForTests("u0", P)).toBe(true);
-    expect(_passkeyAuditHasForTests("u1", P)).toBe(false);
-    expect(_passkeyAuditHasForTests("u-new", P)).toBe(true);
-  });
-
-  it("non-monotonic lastEmitted: most recently refreshed user survives eviction", () => {
-    // Insert u0, u1, u2 in order. Then refresh in non-monotonic order: u1, u0.
-    // The eviction order should be u2 (oldest by last-set), then u1, then u0.
-    const t0 = 1_000_000;
-    const dedup = _PASSKEY_AUDIT_DEDUP_MS;
-    _recordPasskeyAuditEmit("u0", P, t0);
-    _recordPasskeyAuditEmit("u1", P, t0 + 1);
-    _recordPasskeyAuditEmit("u2", P, t0 + 2);
-    // Refresh u1 and u0 past the dedup window so the calls are accepted.
-    _recordPasskeyAuditEmit("u1", P, t0 + dedup + 10);
-    _recordPasskeyAuditEmit("u0", P, t0 + dedup + 20);
-
-    // First key in iteration order is the staleness candidate (composite key form).
-    expect(_passkeyAuditFirstKeyForTests()).toBe(`u2:${P}`);
   });
 });
 

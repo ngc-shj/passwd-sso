@@ -406,6 +406,8 @@ describe("GET /api/mcp/authorize", () => {
     // Exactly one PASSKEY_ENFORCEMENT_BLOCKED audit emit.
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "TENANT",
+        tenantId: "tenant-1",
         action: "PASSKEY_ENFORCEMENT_BLOCKED",
         metadata: { blockedPath: "/api/mcp/authorize" },
       }),

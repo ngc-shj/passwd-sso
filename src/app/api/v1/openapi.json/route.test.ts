@@ -37,7 +37,8 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
     derivePasskeyState: mockDerivePasskeyState,
   };
 });
-vi.mock("@/lib/audit/audit", () => ({
+vi.mock("@/lib/audit/audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   logAuditAsync: mockLogAuditAsync,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId }),
 }));
@@ -172,6 +173,7 @@ describe("GET /api/v1/openapi.json", () => {
     await GET(createRequest("GET", "http://localhost:3000/api/v1/openapi.json"));
     expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
     expect(mockLogAuditAsync.mock.calls[0][0]).toMatchObject({
+      scope: "TENANT",
       action: "PASSKEY_ENFORCEMENT_BLOCKED",
       userId: "user-1",
       tenantId: "tenant-1",

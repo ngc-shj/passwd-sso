@@ -9,7 +9,7 @@
  * This is the architectural choice that makes the gap impossible to
  * recreate: any future cookie-auth API route — whether classified as
  * api-session-required, falling through to api-default, or living in
- * /api/internal/* / /api/folders/* — gets CSRF protection automatically.
+ * /api/folders/* — gets CSRF protection automatically.
  *
  * Routes that need stricter origin checks (e.g., requiring APP_URL to
  * be explicitly set, no Host-header fallback) keep those route-level

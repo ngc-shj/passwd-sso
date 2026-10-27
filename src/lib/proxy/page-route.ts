@@ -3,13 +3,14 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { routing } from "../../i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "../../i18n/locale-utils";
-import { API_PATH } from "../constants";
 import { PASSKEY_PAGE_PATH } from "../constants/auth/page-path";
-import { AUDIT_ACTION } from "../constants/audit/audit";
 import { applySecurityHeaders } from "./security-headers";
 import { buildCspHeader } from "../security/csp-builder";
 import { consentFormActionSources } from "../security/consent-form-action";
 import { getSessionInfo } from "./auth-gate";
+import { auditSessionPasskeyBlock } from "./session-passkey-gate";
+import { getLogger } from "../logger";
+import { errorLogFields } from "../logger/error-fields";
 import {
   ALL_KNOWN_SESSION_COOKIE_NAMES,
   configuredSessionCookieName,
@@ -22,28 +23,7 @@ import {
 } from "../auth/session/session-cookie";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
-import {
-  isPasskeyGracePeriodExpired,
-  passkeyEnforcementBlocks,
-  recordPasskeyAuditEmit,
-  PASSKEY_AUDIT_DEDUP_MS,
-  PASSKEY_AUDIT_MAP_MAX,
-  _resetPasskeyAuditForTests,
-  _passkeyAuditSizeForTests,
-  _passkeyAuditHasForTests,
-  _passkeyAuditFirstKeyForTests,
-} from "../auth/policy/passkey-enforcement";
-
-export {
-  isPasskeyGracePeriodExpired,
-  recordPasskeyAuditEmit,
-  PASSKEY_AUDIT_DEDUP_MS,
-  PASSKEY_AUDIT_MAP_MAX,
-  _resetPasskeyAuditForTests,
-  _passkeyAuditSizeForTests,
-  _passkeyAuditHasForTests,
-  _passkeyAuditFirstKeyForTests,
-};
+import { passkeyEnforcementBlocks } from "../auth/policy/passkey-enforcement";
 
 export type ProxyOptions = {
   cspHeader: string;
@@ -70,9 +50,9 @@ function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
 
 /**
  * The page-navigation `PASSKEY_ENFORCEMENT_BLOCKED` row's `blockedPath`, and
- * its dedup key. A closed set, never the requested path: the path past the
+ * its limiter key. A closed set, never the requested path: the path past the
  * area prefix is caller-chosen text (and may carry IDs), which must not reach
- * a tenant-readable audit row or grow the dedup map.
+ * a tenant-readable audit row or mint a limiter key per URL.
  */
 function pageBlockedPath(pathWithoutLocale: string): string {
   return pathWithoutLocale.startsWith("/admin") ? "PAGE /admin" : "PAGE /dashboard";
@@ -229,26 +209,24 @@ export async function handlePageRoute(
       const securityUrl = request.nextUrl.clone();
       securityUrl.pathname = `/${locale}${PASSKEY_PAGE_PATH}`;
 
-      // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
-      const userId = session.userId ?? "";
-      const blockedPath = pageBlockedPath(pathWithoutLocale);
-      if (recordPasskeyAuditEmit(userId, blockedPath, Date.now())) {
-        // Internal self-fetch: declare same-origin explicitly. Node
-        // fetch (undici) does not auto-set Origin; without it the new
-        // proxy CSRF gate would 403 this request.
-        const selfOrigin = new URL(request.url).origin;
-        void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Origin": selfOrigin,
-            cookie: request.headers.get("cookie") ?? "",
-          },
-          body: JSON.stringify({
-            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-            metadata: { blockedPath },
-          }),
-        }).catch(() => {});
+      // Not awaited: the redirect waits on neither the limiter (Redis) nor the
+      // outbox write, and a failed write is logged, never turned into an
+      // error response. The shared limiter dedups per user and area. A valid
+      // session with a userId always carries its tenant: getSessionInfo
+      // refuses one whose tenant does not resolve, and the session cache
+      // evicts a positive entry without one. The check narrows the type.
+      if (session.userId && session.tenantId) {
+        void auditSessionPasskeyBlock({
+          req: request,
+          userId: session.userId,
+          tenantId: session.tenantId,
+          blockedPath: pageBlockedPath(pathWithoutLocale),
+        }).catch((err: unknown) => {
+          getLogger().error({
+            msg: "page-route: passkey enforcement audit write failed",
+            error: errorLogFields(err),
+          });
+        });
       }
 
       return applySecurityHeaders(

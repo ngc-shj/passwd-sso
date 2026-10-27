@@ -1231,10 +1231,34 @@ describe("POST /api/mcp/token", () => {
       );
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
+          scope: "TENANT",
+          tenantId: TENANT_ID,
           action: "PASSKEY_ENFORCEMENT_BLOCKED",
           metadata: { blockedPath: "/api/mcp/token" },
         }),
       );
+    });
+
+    it("6c-graceexpired: access_denied without a tenantId → 403, no audit row", async () => {
+      // Mirrors the authorization_code arm: a TENANT-scoped row needs the
+      // tenant, so without one the route refuses and writes nothing.
+      mockExchangeRefreshToken.mockResolvedValue({
+        ok: false,
+        error: "access_denied",
+        reason: "passkey_required",
+        tenantId: undefined,
+        userId: USER_ID,
+      });
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY });
+      const res = await POST(req);
+      const { status, json } = await parseResponse(res);
+
+      expect(status).toBe(403);
+      expect(json.error).toBe("access_denied");
+      expect(mockExchangeRefreshToken).toHaveBeenCalledOnce();
+      expect(mockRecordPasskeyAuditEmit).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
     });
 
     it("6c-sa-bound: SA-bound token (userId===null) — lib skips gate, returns ok (route returns 200)", async () => {
@@ -1305,10 +1329,32 @@ describe("POST /api/mcp/token", () => {
       );
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
+          scope: "TENANT",
+          tenantId: TENANT_ID,
           action: "PASSKEY_ENFORCEMENT_BLOCKED",
           metadata: { blockedPath: "/api/mcp/token" },
         }),
       );
+    });
+
+    it("authorization_code: access_denied without a tenantId → 403, no audit row", async () => {
+      // A TENANT-scoped row needs the tenant; without one the route refuses
+      // and writes nothing rather than a row no tenant admin can see.
+      mockExchangeCodeForToken.mockResolvedValue({
+        ok: false,
+        error: "access_denied",
+        userId: USER_ID,
+        tenantId: undefined,
+      });
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_BODY });
+      const res = await POST(req);
+      const { status, json } = await parseResponse(res);
+
+      expect(status).toBe(403);
+      expect(json.error).toBe("access_denied");
+      expect(mockRecordPasskeyAuditEmit).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
     });
   });
 });

@@ -97,7 +97,8 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
   recordPasskeyAuditEmit: mockRecordPasskeyAuditEmit,
 }));
 
-vi.mock("@/lib/audit/audit", () => ({
+vi.mock("@/lib/audit/audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   logAuditAsync: mockLogAuditAsync,
   personalAuditBase: (_req: unknown, userId: string) => ({
     scope: "PERSONAL",
@@ -471,6 +472,8 @@ describe("POST /api/mobile/token/refresh", () => {
       );
       expect(mockLogAuditAsync).toHaveBeenCalledWith(
         expect.objectContaining({
+          scope: "TENANT",
+          tenantId: TENANT_ID,
           action: "PASSKEY_ENFORCEMENT_BLOCKED",
           metadata: { blockedPath: "/api/mobile/token/refresh" },
         }),

@@ -317,12 +317,18 @@ describe("bearer credentials under the tenant passkey requirement (real DB)", ()
     });
   }
 
-  /** PASSKEY_ENFORCEMENT_BLOCKED rows in this tenant, optionally for one credential. */
+  /**
+   * PASSKEY_ENFORCEMENT_BLOCKED rows in this tenant, optionally for one
+   * credential. Every one must be TENANT-scoped: a PERSONAL row is invisible to
+   * the tenant audit log, where this admin-group action is listed.
+   */
   async function blockedRows(credentialId?: string): Promise<number> {
     const rows = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ count: number }[]>(
-        `SELECT count(*)::int AS count FROM audit_outbox
+      return tx.$queryRawUnsafe<{ count: number; not_tenant: number }[]>(
+        `SELECT count(*)::int AS count,
+                (count(*) FILTER (WHERE payload->>'scope' IS DISTINCT FROM 'TENANT'))::int AS not_tenant
+           FROM audit_outbox
           WHERE tenant_id = $1::uuid
             AND payload->>'action' = $2
             AND ($3::text IS NULL OR payload->'metadata'->>'credentialId' = $3::text)`,
@@ -331,6 +337,7 @@ describe("bearer credentials under the tenant passkey requirement (real DB)", ()
         credentialId ?? null,
       );
     });
+    expect(rows[0].not_tenant, "PASSKEY_ENFORCEMENT_BLOCKED rows not TENANT-scoped").toBe(0);
     return rows[0].count;
   }
 

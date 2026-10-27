@@ -1,14 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockCheckAccessWithAudit, mockResolveUserTenantId, mockIntlMiddleware } =
-  vi.hoisted(() => ({
-    mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
-    mockResolveUserTenantId: vi.fn().mockResolvedValue(null),
-    // next-intl/middleware default export factory; we always return 200 here
-    // so handlePageRoute proceeds past the redirect-shortcut.
-    mockIntlMiddleware: vi.fn(),
-  }));
+const {
+  mockCheckAccessWithAudit,
+  mockResolveUserTenantId,
+  mockIntlMiddleware,
+  mockLogAuditAsync,
+  mockLimiterCheck,
+  mockLoggerError,
+} = vi.hoisted(() => ({
+  mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
+  mockResolveUserTenantId: vi.fn().mockResolvedValue(null),
+  // next-intl/middleware default export factory; we always return 200 here
+  // so handlePageRoute proceeds past the redirect-shortcut.
+  mockIntlMiddleware: vi.fn(),
+  mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
+  // Records each limiter key; the real limiter decides unless a cell gives
+  // this mock a return value of its own.
+  mockLimiterCheck: vi.fn(),
+  mockLoggerError: vi.fn(),
+}));
 
 vi.mock("next-intl/middleware", async () => {
   const { NextResponse: NR } = await import("next/server");
@@ -22,6 +33,34 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: mockResolveUserTenantId,
 }));
+vi.mock("@/lib/audit/audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  logAuditAsync: mockLogAuditAsync,
+}));
+// No Redis: the audit limiter falls back to its in-memory counter, which
+// `_resetSessionPasskeyAuditForTests` clears. A real Redis (REDIS_URL is set
+// in app-ci) would keep the key across runs.
+vi.mock("@/lib/redis", () => ({ getRedis: () => null }));
+vi.mock("@/lib/security/rate-limit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/security/rate-limit")>();
+  return {
+    ...actual,
+    createRateLimiter: (options: Parameters<typeof actual.createRateLimiter>[0]) => {
+      const limiter = actual.createRateLimiter(options);
+      return {
+        ...limiter,
+        check: (key: string) => mockLimiterCheck(key) ?? limiter.check(key),
+      };
+    },
+  };
+});
+vi.mock("@/lib/logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/logger")>();
+  return {
+    ...actual,
+    getLogger: () => ({ ...actual.getLogger(), error: mockLoggerError, warn: vi.fn() }),
+  };
+});
 vi.mock("@/lib/auth/session/session-cache", async () => {
   const actual = await vi.importActual<
     typeof import("@/lib/auth/session/session-cache")
@@ -35,6 +74,7 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 });
 
 import { handlePageRoute } from "./page-route";
+import { _resetSessionPasskeyAuditForTests } from "./session-passkey-gate";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
 import {
   dispatchFetch,
@@ -42,15 +82,6 @@ import {
   sessionResponseBody,
   sessionRoute,
 } from "@/__tests__/helpers/proxy-session-fixtures";
-import {
-  recordPasskeyAuditEmit,
-  PASSKEY_AUDIT_DEDUP_MS,
-  PASSKEY_AUDIT_MAP_MAX,
-  _resetPasskeyAuditForTests,
-  _passkeyAuditSizeForTests,
-  _passkeyAuditHasForTests,
-  _passkeyAuditFirstKeyForTests,
-} from "../auth/policy/passkey-enforcement";
 
 const APP_ORIGIN = "http://localhost:3000";
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
@@ -99,7 +130,6 @@ describe("handlePageRoute — public share routes (/s/...)", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    _resetPasskeyAuditForTests();
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
   afterEach(() => {
@@ -119,7 +149,6 @@ describe("handlePageRoute — protected routes auth check", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    _resetPasskeyAuditForTests();
     // Default: a normal user WITH an active tenant membership. A null return
     // (deactivated member) now fails session validation, so it is no longer a
     // valid baseline for a session that should reach access/passkey checks.
@@ -508,7 +537,8 @@ describe("handlePageRoute — passkey enforcement", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    _resetPasskeyAuditForTests();
+    _resetSessionPasskeyAuditForTests();
+    mockLogAuditAsync.mockReset().mockResolvedValue(undefined);
     // Default: a normal user WITH an active tenant membership. A null return
     // (deactivated member) now fails session validation, so it is no longer a
     // valid baseline for a session that should reach access/passkey checks.
@@ -589,10 +619,9 @@ describe("handlePageRoute — passkey enforcement", () => {
 
     function answer(passkeyStateDegraded: boolean) {
       fetchSpy.mockImplementation(
-        dispatchFetch({
-          ...sessionRoute(sessionResponseBody("u-pk-degraded", CATCH_BUNDLE, { passkeyStateDegraded })),
-          "/api/internal/audit-emit": () => new Response("{}", { status: 200 }),
-        }),
+        dispatchFetch(
+          sessionRoute(sessionResponseBody("u-pk-degraded", CATCH_BUNDLE, { passkeyStateDegraded })),
+        ),
       );
     }
 
@@ -601,94 +630,44 @@ describe("handlePageRoute — passkey enforcement", () => {
         makePageRequest("/ja/dashboard/passwords", { cookie: `authjs.session-token=${token}` }),
         dummyOptions,
       );
-      // Let the fire-and-forget audit fetch enqueue.
+      // Let the fire-and-forget audit write run.
       await new Promise((r) => setImmediate(r));
       return res;
     }
 
-    it("control: the same bundle unmarked redirects and fires the audit self-fetch", async () => {
+    it("control: the same bundle unmarked redirects and writes the audit row", async () => {
       answer(false);
       const res = await navigate("5e55-0106");
       expect(res.status).toBe(307);
       expect(res.headers.get("location") ?? "").toContain("/dashboard/settings/auth/passkey");
-      expect(fetchCallsTo(fetchSpy, "/api/internal/audit-emit")).toHaveLength(1);
+      expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
     });
 
-    it("marked degraded, neither redirects nor fires the audit self-fetch", async () => {
+    it("marked degraded, neither redirects nor writes the audit row", async () => {
       answer(true);
       const res = await navigate("5e55-0107");
       expect(res.status).toBe(200);
       expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
-      expect(fetchCallsTo(fetchSpy, "/api/internal/audit-emit")).toHaveLength(0);
+      expect(mockLogAuditAsync).not.toHaveBeenCalled();
     });
   });
 });
 
-describe("recordPasskeyAuditEmit — module-state isolated dedup", () => {
-  beforeEach(() => {
-    _resetPasskeyAuditForTests();
-  });
-
-  const PATH_A = "/dashboard/passwords";
-
-  it("records first emit for a user+path (returns true)", () => {
-    expect(recordPasskeyAuditEmit("u-a", PATH_A, 1_000)).toBe(true);
-    expect(_passkeyAuditHasForTests("u-a", PATH_A)).toBe(true);
-    expect(_passkeyAuditSizeForTests()).toBe(1);
-  });
-
-  it("dedupes a second emit within DEDUP_MS for the same user+path", () => {
-    expect(recordPasskeyAuditEmit("u-b", PATH_A, 1_000)).toBe(true);
-    expect(recordPasskeyAuditEmit("u-b", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS)).toBe(false);
-  });
-
-  it("permits a fresh emit just past DEDUP_MS boundary (1ms after the inclusive window)", () => {
-    expect(recordPasskeyAuditEmit("u-c", PATH_A, 1_000)).toBe(true);
-    expect(
-      recordPasskeyAuditEmit("u-c", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS + 1),
-    ).toBe(true);
-  });
-
-  it("evicts the staleness-oldest entry when map exceeds PASSKEY_AUDIT_MAP_MAX", () => {
-    // Fill map to exactly MAX with distinct users (each with their own path key).
-    for (let i = 0; i < PASSKEY_AUDIT_MAP_MAX; i += 1) {
-      recordPasskeyAuditEmit(`user-${i}`, PATH_A, 1_000 + i);
-    }
-    expect(_passkeyAuditSizeForTests()).toBe(PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditFirstKeyForTests()).toBe(`user-0:${PATH_A}`);
-
-    // One more accepted emit triggers eviction of the staleness head (user-0:PATH_A).
-    recordPasskeyAuditEmit("overflow-user", PATH_A, 1_000 + PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditSizeForTests()).toBe(PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditHasForTests("user-0", PATH_A)).toBe(false);
-    expect(_passkeyAuditHasForTests("overflow-user", PATH_A)).toBe(true);
-  });
-
-  it("re-emit refreshes recency: oldest key shifts to the next-oldest user", () => {
-    recordPasskeyAuditEmit("u-old", PATH_A, 1_000);
-    recordPasskeyAuditEmit("u-mid", PATH_A, 2_000);
-    recordPasskeyAuditEmit("u-new", PATH_A, 3_000);
-    expect(_passkeyAuditFirstKeyForTests()).toBe(`u-old:${PATH_A}`);
-
-    // u-old re-emits past DEDUP_MS → moves to the tail.
-    recordPasskeyAuditEmit("u-old", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS + 1);
-    expect(_passkeyAuditFirstKeyForTests()).toBe(`u-mid:${PATH_A}`);
-  });
-
-  it("same user + different blocked path within window → NOT deduped (two emits)", () => {
-    const PATH_B = "/dashboard/settings";
-    expect(recordPasskeyAuditEmit("u-d", PATH_A, 1_000)).toBe(true);
-    // Same user, different path — NOT deduped.
-    expect(recordPasskeyAuditEmit("u-d", PATH_B, 1_000)).toBe(true);
-    expect(_passkeyAuditSizeForTests()).toBe(2);
-  });
-});
-
-describe("handlePageRoute — passkey audit dedup over consecutive requests", () => {
+describe("handlePageRoute — passkey audit write", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
+  const BLOCKED_USER = {
+    requirePasskey: true,
+    hasPasskey: false,
+    requirePasskeyEnabledAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+    passkeyGracePeriodDays: 1,
+  };
+
   beforeEach(() => {
-    _resetPasskeyAuditForTests();
+    _resetSessionPasskeyAuditForTests();
+    mockLogAuditAsync.mockReset().mockResolvedValue(undefined);
+    mockLimiterCheck.mockReset();
+    mockLoggerError.mockReset();
     // Default: a normal user WITH an active tenant membership. A null return
     // (deactivated member) now fails session validation, so it is no longer a
     // valid baseline for a session that should reach access/passkey checks.
@@ -700,126 +679,109 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
     fetchSpy.mockRestore();
   });
 
-  it("first redirect fires internal audit-emit fetch; second redirect within window does not", async () => {
-    mockValidSession(fetchSpy, {
-      id: "u-dedup",
-      requirePasskey: true,
-      hasPasskey: false,
-      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-      passkeyGracePeriodDays: 1,
-    });
-
-    const baseHeaders = { cookie: "authjs.session-token=5e55-0105" };
-
-    await handlePageRoute(
-      makePageRequest("/ja/dashboard/passwords", baseHeaders),
+  async function navigate(path: string, token: string) {
+    const res = await handlePageRoute(
+      makePageRequest(path, { cookie: `authjs.session-token=${token}` }),
       dummyOptions,
     );
-    // Wait microtask so void-fetch enqueues.
+    // Let the fire-and-forget audit write run.
     await new Promise((r) => setImmediate(r));
-
-    const sessionFetches = fetchSpy.mock.calls.filter(
-      (c: unknown[]) => String(c[0]).includes("/api/auth/session"),
-    ).length;
-    const auditFetches = fetchSpy.mock.calls.filter(
-      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
-    ).length;
-    expect(sessionFetches).toBeGreaterThanOrEqual(1);
-    expect(auditFetches).toBe(1);
-
-    // Second request — same user, within dedup window — must NOT enqueue
-    // another internal audit-emit fetch.
-    await handlePageRoute(
-      makePageRequest("/ja/dashboard/passwords", baseHeaders),
-      dummyOptions,
-    );
-    await new Promise((r) => setImmediate(r));
-    const auditFetchesAfter = fetchSpy.mock.calls.filter(
-      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
-    ).length;
-    expect(auditFetchesAfter).toBe(1);
-    expect(_passkeyAuditSizeForTests()).toBe(1);
-  });
-
-  // F18 + SEC-2: the dedup key is the closed blockedPath, so two dashboard
-  // pages share one emit within the window, while the admin area emits its own.
-  it("F18: same user + same area deduped (even on another page); a different area emits a second audit", async () => {
-    const sessionUser = {
-      id: "u-f18",
-      requirePasskey: true,
-      hasPasskey: false,
-      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-      passkeyGracePeriodDays: 1,
-    };
-    mockValidSession(fetchSpy, sessionUser);
-
-    const headers = { cookie: "authjs.session-token=5e55-0106" };
-
-    // First request to /ja/dashboard/passwords → audit emit fires.
-    await handlePageRoute(makePageRequest("/ja/dashboard/passwords", headers), dummyOptions);
-    await new Promise((r) => setImmediate(r));
-    const auditAfterFirst = fetchSpy.mock.calls.filter(
-      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
-    ).length;
-    expect(auditAfterFirst).toBe(1);
-
-    // Second request to the SAME path → deduped, no second emit.
-    mockValidSession(fetchSpy, sessionUser);
-    await handlePageRoute(makePageRequest("/ja/dashboard/passwords", headers), dummyOptions);
-    await new Promise((r) => setImmediate(r));
-    const auditAfterSamePath = fetchSpy.mock.calls.filter(
-      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
-    ).length;
-    expect(auditAfterSamePath).toBe(1);
-
-    // Another dashboard page → same closed blockedPath → still deduped.
-    mockValidSession(fetchSpy, sessionUser);
-    await handlePageRoute(makePageRequest("/ja/dashboard/settings", headers), dummyOptions);
-    await new Promise((r) => setImmediate(r));
-    const auditAfterSameArea = fetchSpy.mock.calls.filter(
-      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
-    ).length;
-    expect(auditAfterSameArea).toBe(1);
-
-    // The admin area → a different blockedPath → NOT deduped, second emit fires.
-    mockValidSession(fetchSpy, sessionUser);
-    await handlePageRoute(makePageRequest("/ja/admin/tenant/members", headers), dummyOptions);
-    await new Promise((r) => setImmediate(r));
-    const auditAfterDiffArea = fetchSpy.mock.calls.filter(
-      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
-    ).length;
-    expect(auditAfterDiffArea).toBe(2);
-  });
+    return res;
+  }
 
   // SEC-2: the row's blockedPath comes from a closed set, never the requested
   // path, whose suffix is caller-chosen.
   it.each([
     ["/ja/dashboard/passwords/0d6f6b4e-attacker-chosen-text", "PAGE /dashboard", "5e55-0108"],
     ["/ja/admin/x%20y/<script>", "PAGE /admin", "5e55-0109"],
-  ])("writes exactly one audit-emit for %s, with blockedPath %s", async (path, expected, token) => {
-    mockValidSession(fetchSpy, {
-      id: `u-closed-${expected}`,
-      requirePasskey: true,
-      hasPasskey: false,
-      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-      passkeyGracePeriodDays: 1,
-    });
+  ])("writes one row for %s with blockedPath %s and the session's tenant", async (path, expected, token) => {
+    mockValidSession(fetchSpy, { id: "u-closed", ...BLOCKED_USER });
 
-    const res = await handlePageRoute(
-      makePageRequest(path, { cookie: `authjs.session-token=${token}` }),
-      dummyOptions,
-    );
-    await new Promise((r) => setImmediate(r));
+    const res = await navigate(path, token);
 
     expect(res.status).toBe(307);
-    const auditCalls = fetchCallsTo(fetchSpy, "/api/internal/audit-emit");
-    expect(auditCalls).toHaveLength(1);
-    const body = JSON.parse(String((auditCalls[0][1] as RequestInit).body));
-    expect(body).toEqual({
-      action: "PASSKEY_ENFORCEMENT_BLOCKED",
-      metadata: { blockedPath: expected },
-    });
-    expect(_passkeyAuditHasForTests(`u-closed-${expected}`, expected)).toBe(true);
-    expect(_passkeyAuditSizeForTests()).toBe(1);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "TENANT",
+        action: "PASSKEY_ENFORCEMENT_BLOCKED",
+        userId: "u-closed",
+        tenantId: "t-1",
+        metadata: { blockedPath: expected },
+      }),
+    );
+    expect(mockLimiterCheck).toHaveBeenCalledWith(`rl:passkey_session_gate_audit:u-closed:${expected}`);
+  });
+
+  it("writes the row in-process: the only fetch is the proxy's own session read", async () => {
+    mockValidSession(fetchSpy, { id: "u-no-fetch", ...BLOCKED_USER });
+
+    const res = await navigate("/ja/dashboard/passwords", "5e55-010a");
+
+    expect(res.status).toBe(307);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls.map((c: unknown[]) => new URL(String(c[0])).pathname)).toEqual([
+      "/api/auth/session",
+    ]);
+  });
+
+  // F18 + SEC-2: the limiter key is the closed blockedPath, so two dashboard
+  // pages share one row within the window, while the admin area writes its own.
+  it("one row per user and area within the window; a different area writes a second", async () => {
+    const navigateAs = async (path: string) => {
+      mockValidSession(fetchSpy, { id: "u-f18", ...BLOCKED_USER });
+      return navigate(path, "5e55-010b");
+    };
+
+    expect((await navigateAs("/ja/dashboard/passwords")).status).toBe(307);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+
+    // Same page again, then another dashboard page: same blockedPath, no row,
+    // but each navigation is still redirected.
+    expect((await navigateAs("/ja/dashboard/passwords")).status).toBe(307);
+    expect((await navigateAs("/ja/dashboard/settings")).status).toBe(307);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+
+    expect((await navigateAs("/ja/admin/tenant/members")).status).toBe(307);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(2);
+    expect(mockLogAuditAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ metadata: { blockedPath: "PAGE /admin" } }),
+    );
+  });
+
+  it("still redirects, and logs the failure, when the audit write rejects", async () => {
+    mockValidSession(fetchSpy, { id: "u-write-fails", ...BLOCKED_USER });
+    mockLogAuditAsync.mockRejectedValue(new Error("outbox unavailable"));
+
+    const res = await navigate("/ja/dashboard/passwords", "5e55-010c");
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location") ?? "").toContain("/dashboard/settings/auth/passkey");
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ msg: "page-route: passkey enforcement audit write failed" }),
+    );
+  });
+
+  it("answers the redirect without waiting for the audit write", async () => {
+    mockValidSession(fetchSpy, { id: "u-write-hangs", ...BLOCKED_USER });
+    mockLogAuditAsync.mockReturnValue(new Promise<void>(() => {}));
+
+    const res = await navigate("/ja/dashboard/passwords", "5e55-010d");
+
+    expect(res.status).toBe(307);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers the redirect without waiting for the audit limiter", async () => {
+    mockValidSession(fetchSpy, { id: "u-limiter-hangs", ...BLOCKED_USER });
+    mockLimiterCheck.mockReturnValue(new Promise(() => {}));
+
+    const res = await navigate("/ja/dashboard/passwords", "5e55-010e");
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location") ?? "").toContain("/dashboard/settings/auth/passkey");
+    expect(mockLimiterCheck).toHaveBeenCalledWith("rl:passkey_session_gate_audit:u-limiter-hangs:PAGE /dashboard");
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 });

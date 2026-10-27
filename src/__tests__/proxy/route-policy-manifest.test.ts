@@ -590,7 +590,6 @@ const I2_TIER_A = [
   "POST /api/auth/passkey/options",
   "POST /api/auth/passkey/options/email",
   "POST /api/auth/passkey/verify",
-  "POST /api/internal/audit-emit",
 ];
 const I2_TIER_B = [
   "GET /api/webauthn/credentials",

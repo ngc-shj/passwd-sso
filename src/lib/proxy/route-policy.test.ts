@@ -71,7 +71,6 @@ const POSITIVE_CASES: Record<RoutePolicyKind, readonly ClassifyCase[]> = {
   [ROUTE_POLICY_KIND.API_DEFAULT]: [
     { pathname: "/api/mobile/authorize", description: "mobile authorize — self-authenticated, redirects to sign-in when unauthenticated" },
     { pathname: "/api/auth/session", description: "auth session" },
-    { pathname: "/api/internal/audit-emit", description: "internal audit" },
     { pathname: "/api/maintenance/purge-history", description: "maintenance" },
     { pathname: "/api/scim/v2/Users", description: "scim (route-handler auth)" },
     { pathname: "/api/admin/rotate-master-key", description: "admin" },
