@@ -10,6 +10,8 @@ import { rateLimited, unauthorized, errorResponse } from "@/lib/http/api-respons
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
 import { attemptInSavepoint } from "@/lib/prisma/savepoint";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
+import { getLogger } from "@/lib/logger";
 
 import { parseBody } from "@/lib/http/parse-body";
 import { bulkImportSchema } from "@/lib/validations";
@@ -68,6 +70,9 @@ async function handlePOST(req: NextRequest) {
         // commit; a rolled-back entry releases its own, but it wrote nothing
         // and the next entry's guard re-reads the version under a fresh lock.
         if (attempt.error instanceof KeyVersionMismatchError) throw attempt.error;
+        // The SQLSTATE only: a Prisma error's message carries the query and its
+        // bound parameters, i.e. this entry's ciphertext.
+        getLogger().warn({ userId, code: pgErrorCode(attempt.error) }, "passwords.bulk_import.entry_failed");
         failedCount++;
       }
     });

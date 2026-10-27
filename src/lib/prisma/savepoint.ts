@@ -19,7 +19,8 @@ export type SavepointOutcome<T> = { ok: true; value: T } | { ok: false; error: u
  * Errors thrown by `fn` are returned, not thrown, after its writes have been
  * rolled back. A failure of the savepoint statements themselves is thrown:
  * the transaction can no longer be trusted, so the caller must not count it
- * as one failed item and continue.
+ * as one failed item and continue. When that failure happens while undoing a
+ * failed `fn`, the thrown AggregateError carries both errors, `fn`'s first.
  *
  * Row locks taken inside `fn` are released when it is rolled back; locks from
  * a successful `fn` stay held by the transaction until it ends.
@@ -39,8 +40,13 @@ export async function attemptInSavepoint<T>(
   try {
     value = await fn();
   } catch (error) {
-    await db.$executeRaw`ROLLBACK TO SAVEPOINT attempt_in_savepoint`;
-    await db.$executeRaw`RELEASE SAVEPOINT attempt_in_savepoint`;
+    try {
+      await db.$executeRaw`ROLLBACK TO SAVEPOINT attempt_in_savepoint`;
+      await db.$executeRaw`RELEASE SAVEPOINT attempt_in_savepoint`;
+    } catch (rollbackError) {
+      // Keep fn's error: it is the one that explains why a rollback was needed.
+      throw new AggregateError([error, rollbackError], "savepoint rollback failed");
+    }
     return { ok: false, error };
   }
   await db.$executeRaw`RELEASE SAVEPOINT attempt_in_savepoint`;

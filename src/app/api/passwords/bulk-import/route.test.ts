@@ -69,6 +69,7 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { POST } from "./route";
+import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION } from "@/lib/constants";
 
 const URL = "http://localhost:3000/api/passwords/bulk-import";
@@ -173,7 +174,10 @@ describe("POST /api/passwords/bulk-import", () => {
     mockPrismaPasswordEntry.create.mockImplementation(({ data }: { data: { id: string } }) => {
       order.push(`create ${data.id}`);
       return data.id.endsWith("2")
-        ? Promise.reject(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }))
+        ? Promise.reject(Object.assign(new Error("Unique constraint failed"), {
+          code: "P2002",
+          meta: { driverAdapterError: { cause: { originalCode: "23505" } } },
+        }))
         : Promise.resolve({ id: data.id });
     });
 
@@ -206,6 +210,13 @@ describe("POST /api/passwords/bulk-import", () => {
       "550e8400-e29b-41d4-a716-000000000001",
       "550e8400-e29b-41d4-a716-000000000003",
     ]);
+    // Only the SQLSTATE is logged — never the message, which carries the
+    // query's bound parameters.
+    expect(getLogger().warn).toHaveBeenCalledTimes(1);
+    expect(getLogger().warn).toHaveBeenCalledWith(
+      { userId: "test-user-id", code: "23505" },
+      "passwords.bulk_import.entry_failed",
+    );
   });
 
   it("fails the whole import instead of reporting counts when a savepoint rollback fails", async () => {
@@ -220,7 +231,7 @@ describe("POST /api/passwords/bulk-import", () => {
       makeEntry("550e8400-e29b-41d4-a716-000000000002"),
     ];
     await expect(POST(createRequest("POST", URL, { body: { entries } }))).rejects.toThrow(
-      "connection lost",
+      "savepoint rollback failed",
     );
     expect(mockLogAudit).not.toHaveBeenCalled();
   });

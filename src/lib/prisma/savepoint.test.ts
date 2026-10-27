@@ -48,12 +48,41 @@ describe("attemptInSavepoint", () => {
 
   it("throws when the rollback itself fails, so the caller cannot continue on an aborted transaction", async () => {
     const { db } = fakeTx("ROLLBACK TO SAVEPOINT attempt_in_savepoint");
+    const fnError = new Error("P2002");
 
-    await expect(
-      attemptInSavepoint(db, async () => {
-        throw new Error("P2002");
-      }),
-    ).rejects.toThrow("ROLLBACK TO SAVEPOINT attempt_in_savepoint failed");
+    const thrown = await attemptInSavepoint(db, async () => {
+      throw fnError;
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(thrown).toBeInstanceOf(AggregateError);
+    const errors = (thrown as AggregateError).errors as Error[];
+    expect(errors[0]).toBe(fnError);
+    expect(errors[1].message).toBe("ROLLBACK TO SAVEPOINT attempt_in_savepoint failed");
+  });
+
+  it("keeps fn's error when the release after a rollback fails", async () => {
+    const { db } = fakeTx("RELEASE SAVEPOINT attempt_in_savepoint");
+    const fnError = new Error("P2002");
+
+    const thrown = await attemptInSavepoint(db, async () => {
+      throw fnError;
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect((thrown as AggregateError).errors[0]).toBe(fnError);
+  });
+
+  it("rejects when fn succeeds but the release fails", async () => {
+    const { db } = fakeTx("RELEASE SAVEPOINT attempt_in_savepoint");
+
+    await expect(attemptInSavepoint(db, async () => 42)).rejects.toThrow(
+      "RELEASE SAVEPOINT attempt_in_savepoint failed",
+    );
   });
 
   it("does not run fn when the savepoint cannot be opened", async () => {

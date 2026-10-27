@@ -14,6 +14,8 @@ import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { attemptInSavepoint } from "@/lib/prisma/savepoint";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
+import { getLogger } from "@/lib/logger";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -77,8 +79,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           expiresAt: entryData.expiresAt,
         }),
       );
-      if (attempt.ok) createdIds.push(attempt.value.id);
-      else failedCount++;
+      if (attempt.ok) {
+        createdIds.push(attempt.value.id);
+        continue;
+      }
+      // The SQLSTATE only: a Prisma error's message carries the query and its
+      // bound parameters, i.e. this entry's ciphertext.
+      getLogger().warn({ teamId, code: pgErrorCode(attempt.error) }, "teams.bulk_import.entry_failed");
+      failedCount++;
     }
   });
 

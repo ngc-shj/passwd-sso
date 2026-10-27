@@ -88,6 +88,7 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { POST } from "./route";
+import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, TEAM_ROLE } from "@/lib/constants";
 
 const TEAM_ID = "team-123";
@@ -242,7 +243,10 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     mockCreateTeamPassword.mockImplementation(async (_teamId: string, input: { id: string }) => {
       order.push(`create ${input.id}`);
       if (input.id.endsWith("2")) {
-        throw Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+        throw Object.assign(new Error("Unique constraint failed"), {
+          code: "P2002",
+          meta: { driverAdapterError: { cause: { originalCode: "23505" } } },
+        });
       }
       return { id: input.id, entryType: "LOGIN", tags: [], createdAt: new Date() };
     });
@@ -279,6 +283,13 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
       "660e8400-e29b-41d4-a716-000000000001",
       "660e8400-e29b-41d4-a716-000000000003",
     ]);
+    // Only the SQLSTATE is logged — never the message, which carries the
+    // query's bound parameters.
+    expect(getLogger().warn).toHaveBeenCalledTimes(1);
+    expect(getLogger().warn).toHaveBeenCalledWith(
+      { teamId: TEAM_ID, code: "23505" },
+      "teams.bulk_import.entry_failed",
+    );
   });
 
   it("fails the whole import instead of reporting counts when a savepoint rollback fails", async () => {
@@ -294,7 +305,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     ];
     await expect(
       POST(createRequest("POST", URL, { body: { entries } }), createParams({ teamId: TEAM_ID })),
-    ).rejects.toThrow("connection lost");
+    ).rejects.toThrow("savepoint rollback failed");
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
