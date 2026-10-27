@@ -5,7 +5,10 @@
  * RT7: red-proven by a writer that spreads personalAuditBase (the shape eight
  * writers shipped with, #976) and by one that sets no scope at all. The
  * relative-import cell was green on the first version of the gate, which
- * matched import specifiers by spelling and so never saw the reference.
+ * matched import specifiers by spelling and so never saw the reference. The
+ * receiver cells (dynamic import, destructured or indexed namespace, a
+ * namespace passed as a value) were green on the second, which recognised a
+ * reference by its receiver; the gate now anchors on the member name.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -308,6 +311,235 @@ export async function refuse(req: Request, userId: string, tenantId: string) {
     expectFail(/sets scope TENANT without a tenantId/);
   });
 
+  const NS_IMPORTS = `import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
+import * as C from "@/lib/constants";
+`;
+
+  it("passes for a namespace import used directly with tenantAuditBase", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `${NS_IMPORTS}
+export async function refuse(req: Request, userId: string, tenantId: string) {
+  await logAuditAsync({ ...tenantAuditBase(req, userId, tenantId), action: C.AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    const { exitCode, out } = runGuard();
+    expect(exitCode, out).toBe(0);
+    expect(out).toContain("writers=1");
+  });
+
+  it("FAILS for a namespace import used directly with personalAuditBase", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `${NS_IMPORTS}
+export async function refuse(req: Request, userId: string) {
+  await logAuditAsync({ ...personalAuditBase(req, userId), action: C.AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    expectFail(/route\.ts:\d+ {2}writes PASSKEY_ENFORCEMENT_BLOCKED with scope PERSONAL/);
+  });
+
+  it("FAILS for the action read off a dynamic import", () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write(
+      "src/lib/c.ts",
+      `import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+export async function refuse(req: Request, userId: string) {
+  const K = await import("@/lib/constants");
+  await logAuditAsync({ ...personalAuditBase(req, userId), action: K.AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    expectFail(/c\.ts:\d+ {2}references PASSKEY_ENFORCEMENT_BLOCKED through a receiver the gate cannot resolve/);
+  });
+
+  it("FAILS for a dynamic import of a module exporting AUDIT_ACTION, even when no member is named", () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write(
+      "src/lib/c.ts",
+      `import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+export async function refuseAll(req: Request, userId: string) {
+  const K = await import("../lib/constants/audit/audit");
+  for (const action of Object.values(K.AUDIT_ACTION)) {
+    await logAuditAsync({ ...personalAuditBase(req, userId), action });
+  }
+}
+`,
+    );
+    expectFail(/c\.ts:\d+ {2}loads a module exporting AUDIT_ACTION dynamically/);
+  });
+
+  it("FAILS for AUDIT_ACTION destructured out of a namespace import", () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write(
+      "src/lib/c.ts",
+      `${NS_IMPORTS}
+const { AUDIT_ACTION: A } = C;
+export async function refuse(req: Request, userId: string) {
+  await logAuditAsync({ ...personalAuditBase(req, userId), action: A.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    expectFail(/c\.ts:\d+ {2}references PASSKEY_ENFORCEMENT_BLOCKED through a receiver the gate cannot resolve/);
+  });
+
+  it('FAILS for C["AUDIT_ACTION"].PASSKEY_ENFORCEMENT_BLOCKED', () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write(
+      "src/lib/c.ts",
+      `${NS_IMPORTS}
+export async function refuse(req: Request, userId: string) {
+  await logAuditAsync({ ...personalAuditBase(req, userId), action: C["AUDIT_ACTION"].PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    expectFail(/c\.ts:\d+ {2}references PASSKEY_ENFORCEMENT_BLOCKED through a receiver the gate cannot resolve/);
+  });
+
+  it("FAILS for a namespace passed as a value and read inside the callee", () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write(
+      "src/lib/c.ts",
+      `${NS_IMPORTS}
+function pick(ns: typeof C) {
+  return ns.AUDIT_ACTION;
+}
+export async function refuse(req: Request, userId: string) {
+  for (const action of Object.values(pick(C))) {
+    await logAuditAsync({ ...personalAuditBase(req, userId), action });
+  }
+}
+`,
+    );
+    expectFail(/c\.ts:\d+ {2}uses the namespace C other than as `C\.<member>`/);
+  });
+
+  it("FAILS for the action destructured from a value the gate cannot trace", () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write(
+      "src/lib/c.ts",
+      `${IMPORTS}
+export async function refuse(req: Request, userId: string, actions: Record<string, string>) {
+  const { PASSKEY_ENFORCEMENT_BLOCKED: blocked } = actions;
+  await logAuditAsync({ ...personalAuditBase(req, userId), action: blocked });
+}
+`,
+    );
+    expectFail(/c\.ts:\d+ {2}destructures PASSKEY_ENFORCEMENT_BLOCKED/);
+  });
+
+  it("FAILS for a template-literal key in a personal writer", () => {
+    write(
+      "src/app/api/a/route.ts",
+      writer("    ...personalAuditBase(req, userId),\n    tenantId,\n    action: AUDIT_ACTION[`PASSKEY_ENFORCEMENT_BLOCKED`],"),
+    );
+    expectFail(/route\.ts:\d+ {2}writes PASSKEY_ENFORCEMENT_BLOCKED with scope PERSONAL/);
+  });
+
+  it("FAILS for a template-literal spelling of the action in a personal writer", () => {
+    write(
+      "src/app/api/a/route.ts",
+      writer("    ...personalAuditBase(req, userId),\n    action: `PASSKEY_ENFORCEMENT_BLOCKED`,"),
+    );
+    expectFail(/route\.ts:\d+ {2}writes PASSKEY_ENFORCEMENT_BLOCKED with scope PERSONAL/);
+  });
+
+  it("FAILS for a const alias of AUDIT_ACTION", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `${IMPORTS}
+const A = AUDIT_ACTION;
+export async function refuse(req: Request, userId: string, tenantId: string) {
+  await logAuditAsync({ ...tenantAuditBase(req, userId, tenantId), action: A.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    const { exitCode, out } = runGuard();
+    expect(exitCode, out).toBe(1);
+    expect(out).toMatch(/route\.ts:\d+ {2}uses AUDIT_ACTION other than as `AUDIT_ACTION\.<member>`/);
+    expect(out).toMatch(/route\.ts:\d+ {2}references PASSKEY_ENFORCEMENT_BLOCKED through a receiver the gate cannot resolve/);
+  });
+
+  it("passes for AUDIT_ACTION from an `export *` barrel", () => {
+    write("src/lib/k/index.ts", `export * from "../constants/audit/audit";\n`);
+    write(
+      "src/app/api/a/route.ts",
+      TENANT_WRITER.replace('from "@/lib/constants/audit/audit"', 'from "@/lib/k"'),
+    );
+    const { exitCode, out } = runGuard();
+    expect(exitCode, out).toBe(0);
+    expect(out).toContain("writers=1");
+  });
+
+  it("passes for AUDIT_ACTION from an import-then-export barrel", () => {
+    write("src/lib/j.ts", `import { AUDIT_ACTION } from "@/lib/constants";\nexport { AUDIT_ACTION };\n`);
+    write(
+      "src/app/api/a/route.ts",
+      `import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/j";
+export async function refuse(req: Request, userId: string, tenantId: string) {
+  await logAuditAsync({ ...tenantAuditBase(req, userId, tenantId), action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    const { exitCode, out } = runGuard();
+    expect(exitCode, out).toBe(0);
+    expect(out).toContain("writers=1");
+  });
+
+  it("FAILS for a re-export of AUDIT_ACTION under another name", () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write("src/lib/j.ts", `export { AUDIT_ACTION as ACTIONS } from "@/lib/constants";\n`);
+    expectFail(/j\.ts:\d+ {2}re-exports AUDIT_ACTION as ACTIONS/);
+  });
+
+  it("FAILS for a namespace re-export of a module exporting AUDIT_ACTION", () => {
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write("src/lib/j.ts", `export * as K from "@/lib/constants";\n`);
+    expectFail(/j\.ts:\d+ {2}re-exports AUDIT_ACTION inside a namespace/);
+  });
+
+  it("passes for scope: AUDIT_SCOPE.TENANT imported through the barrel", () => {
+    write(
+      "src/app/api/a/route.ts",
+      `import { logAuditAsync } from "@/lib/audit/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+export async function refuse(userId: string, tenantId: string) {
+  await logAuditAsync({ scope: AUDIT_SCOPE.TENANT, userId, tenantId, action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED });
+}
+`,
+    );
+    const { exitCode, out } = runGuard();
+    expect(exitCode, out).toBe(0);
+    expect(out).toContain("writers=1");
+  });
+
+  it("FAILS when a nested spread overrides the tenantId given to tenantAuditBase", () => {
+    write(
+      "src/app/api/a/route.ts",
+      writer(`    ...{ ...tenantAuditBase(req, userId, tenantId), tenantId: undefined },
+    action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,`),
+    );
+    expectFail(/overrides the tenantId given to tenantAuditBase/);
+  });
+
+  it("passes for a non-literal computed key unrelated to a writer", () => {
+    // retention-gc's shape: the key is data, so the file cannot name the
+    // member and the gate does not guess.
+    write("src/app/api/a/route.ts", TENANT_WRITER);
+    write(
+      "src/lib/c.ts",
+      `import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+export const actionFor = (key: keyof typeof AUDIT_ACTION) => AUDIT_ACTION[key];
+`,
+    );
+    const { exitCode, out } = runGuard();
+    expect(exitCode, out).toBe(0);
+    expect(out).toContain("writers=1");
+  });
+
   it("FAILS when no writer is found", () => {
     write("src/app/api/a/route.ts", `export const x = 1;\n`);
     expectFail(/found no PASSKEY_ENFORCEMENT_BLOCKED writer/);
@@ -318,7 +550,8 @@ export async function refuse(req: Request, userId: string, tenantId: string) {
     expectFail(/contributed no source file/);
   });
 
-  it("finds every writer in the real tree", () => {
+  // Parses the whole of src/ (~1000 files), several seconds under suite load.
+  it("finds every writer in the real tree", { timeout: 60_000 }, () => {
     const { exitCode, out } = runGuard(REPO_ROOT);
     expect(exitCode, out).toBe(0);
     expect(Number(out.match(/ writers=(\d+)\n/)?.[1]), out).toBe(REAL_TREE_WRITERS);

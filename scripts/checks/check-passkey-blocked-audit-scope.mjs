@@ -9,33 +9,43 @@
  * of the refusal itself notices. Eight writers did exactly that (#976), each
  * passing a correct tenantId beside the wrong scope.
  *
- * The class is derived from the action, not from a list of writers: every
- * reference to the action outside its definition file must be the `action:`
- * value of an object literal, and that literal's effective scope, read in
- * property order (later spreads and `scope:` override earlier ones), must be
- * TENANT:
+ * The class is anchored on the action's NAME, not on how its receiver is
+ * spelled: every `<x>.PASSKEY_ENFORCEMENT_BLOCKED`, every `<x>["…"]` or
+ * `<x>[`…`]` whose key is the action, every destructured
+ * `{ PASSKEY_ENFORCEMENT_BLOCKED }`, and every string or no-substitution
+ * template literal of the action, outside its definition file, is a reference.
+ * Each must be the `action:` value of an object literal, and that literal's
+ * effective scope, read in property order (later spreads and `scope:` override
+ * earlier ones), must be TENANT:
  *   - `...tenantAuditBase(req, userId, tenantId)` with no later `tenantId:`
- *     override, or
+ *     override (a spread literal or const carries only its own properties), or
  *   - `scope: AUDIT_SCOPE.TENANT` together with a `tenantId` property.
- * A reference anywhere else (a variable, an argument, a comparison) is refused
- * as unclassifiable rather than guessed about: `const a = AUDIT_ACTION.X;
- * write({ action: a })` would otherwise escape.
+ * A member access must be on AUDIT_ACTION itself — a static named import of it,
+ * or `<namespace>.AUDIT_ACTION` on a static namespace import; any other
+ * receiver (a dynamic import, a destructured or aliased copy, a parameter) is
+ * refused, as is a reference anywhere but `action:` (`const a = AUDIT_ACTION.X;
+ * write({ action: a })` would otherwise escape).
  *
- * Helper and constant names are matched through each file's imports and
- * scope-aware bindings (lib/scope-bindings.mjs), so a local function that
- * shadows `tenantAuditBase` does not count as the real one. An import specifier
- * is resolved to a repo path (`@/` -> src/, relative -> against the importing
- * file), and matched against the defining module plus every barrel that
- * re-exports the name — derived from the scanned tree, not listed here. A named
- * import of AUDIT_ACTION from any other module is refused: it would otherwise
- * make every reference in that file invisible. So is any use of AUDIT_ACTION
- * other than `AUDIT_ACTION.<member>` / `AUDIT_ACTION[...]` — a destructuring
- * `const { PASSKEY_ENFORCEMENT_BLOCKED } = AUDIT_ACTION` or an alias
- * `const A = AUDIT_ACTION` would carry the action out of sight.
+ * The object can also reach a write without its member being named, by being
+ * enumerated (`Object.values(AUDIT_ACTION)`). So AUDIT_ACTION, and a namespace
+ * import of a module that exports it, may be used only as the receiver of a
+ * member access; such a module may not be loaded by `import()` / `require()`
+ * with a literal specifier; and a named import of AUDIT_ACTION must come from a
+ * module recognised as exporting it.
  *
- * Runs without a Program (in-memory project). Not covered: a computed access
- * with a non-literal key (`AUDIT_ACTION[entry.auditAction]`), whose value the
- * file cannot name.
+ * Names are matched through each file's imports and scope-aware bindings
+ * (lib/scope-bindings.mjs), so a local function that shadows `tenantAuditBase`
+ * does not count as the real one. An import specifier is resolved to a repo
+ * path (`@/` -> src/, relative -> against the importing file) and matched
+ * against the defining module plus every barrel that re-exports the name —
+ * derived from the scanned tree, not listed here. A re-export under another
+ * name, or as a namespace, is refused.
+ *
+ * Runs without a Program (in-memory project). Not covered: a value built at
+ * run time — a computed key that is not a literal
+ * (`AUDIT_ACTION[entry.auditAction]`), a string assembled by concatenation or
+ * by a template with substitutions, or a module loaded through a non-literal
+ * specifier — whose result the file cannot name.
  */
 import { SyntaxKind } from "ts-morph";
 import { join, dirname, posix } from "node:path";
@@ -188,24 +198,52 @@ function baseHelperName(callee, ctx) {
   return null;
 }
 
-/** True when `expr` is `<AUDIT_ACTION>.<ACTION>` or `<AUDIT_ACTION>["<ACTION>"]`. */
-function isActionReference(expr, ctx) {
-  const kind = expr.getKind();
-  if (kind === SyntaxKind.PropertyAccessExpression) {
-    if (expr.getName() !== ACTION) return false;
-  } else if (kind === SyntaxKind.ElementAccessExpression) {
-    const arg = expr.getArgumentExpression();
-    if (!arg || arg.getKind() !== SyntaxKind.StringLiteral || arg.getLiteralText() !== ACTION) return false;
-  } else {
-    return false;
-  }
-  return refersTo(unwrapExpression(expr.getExpression()), "AUDIT_ACTION", ctx.modules.action, ctx);
+/** True when `expr`, past type-level wrappers, is a string or no-substitution template literal of the action. */
+function isActionLiteral(expr) {
+  const inner = unwrapExpression(expr);
+  const kind = inner?.getKind();
+  return (
+    (kind === SyntaxKind.StringLiteral || kind === SyntaxKind.NoSubstitutionTemplateLiteral) &&
+    inner.getLiteralText() === ACTION
+  );
+}
+
+/**
+ * Every place the file names the action, by member name or literal. A member
+ * access (`.X`, `["X"]`, `[`X`]`) is reported once, as the access; its key
+ * literal is not reported again.
+ */
+function actionMentions(sf) {
+  const members = [
+    ...sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression).filter((e) => e.getName() === ACTION),
+    ...sf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression).filter((e) => isActionLiteral(e.getArgumentExpression())),
+  ];
+  const literals = [
+    ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
+    ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
+  ].filter((lit) => {
+    if (lit.getLiteralText() !== ACTION) return false;
+    const outer = outerExpression(lit);
+    const holder = outer.getParent();
+    return !(holder?.getKind() === SyntaxKind.ElementAccessExpression && holder.getArgumentExpression() === outer);
+  });
+  const destructured = sf.getDescendantsOfKind(SyntaxKind.BindingElement).filter((el) => {
+    const key = el.getPropertyNameNode();
+    if (!key) return el.getNameNode().getKind() === SyntaxKind.Identifier && el.getName() === ACTION;
+    return key.getKind() === SyntaxKind.Identifier && key.getText() === ACTION;
+  });
+  return { members, literals, destructured };
+}
+
+/** True when a member access's receiver is AUDIT_ACTION as this gate recognises it. */
+function onAuditAction(member, ctx) {
+  return refersTo(unwrapExpression(member.getExpression()), "AUDIT_ACTION", ctx.modules.action, ctx);
 }
 
 /**
  * Uses of AUDIT_ACTION itself that are not the receiver of a member access —
  * destructuring, aliasing, spreading, passing it along. Each can carry the
- * action to a write this gate never sees.
+ * action to a write this gate never sees, by enumeration if not by name.
  */
 function bareActionObjectUses(sf, ctx) {
   const sites = [];
@@ -234,6 +272,47 @@ function bareActionObjectUses(sf, ctx) {
     sites.push(node);
   }
   return sites;
+}
+
+/**
+ * A namespace import of a module exporting AUDIT_ACTION used other than as
+ * `<namespace>.<member>`: passed along, destructured, or indexed, it hands the
+ * object on without the gate seeing which member is read.
+ */
+function bareNamespaceUses(sf, ctx) {
+  const sites = [];
+  for (const [local, target] of ctx.imports.namespaces) {
+    if (!ctx.modules.action.has(target)) continue;
+    for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      if (id.getText() !== local) continue;
+      const parent = id.getParent();
+      const pk = parent?.getKind();
+      if (pk === SyntaxKind.NamespaceImport) continue;
+      if (pk === SyntaxKind.PropertyAccessExpression && parent.getNameNode() === id) continue;
+      if (pk !== SyntaxKind.ShorthandPropertyAssignment && parent?.getNameNode?.() === id) continue;
+      if (id.getFirstAncestorByKind(SyntaxKind.TypeQuery)) continue;
+      if (visibleBinding(local, id, ctx.bindingsFor)) continue;
+      const outer = outerExpression(id);
+      const holder = outer.getParent();
+      if (holder?.getKind() === SyntaxKind.PropertyAccessExpression && holder.getExpression() === outer) continue;
+      sites.push(id);
+    }
+  }
+  return sites;
+}
+
+/** `import("<m>")` / `require("<m>")` with a literal specifier naming a module that exports AUDIT_ACTION. */
+function dynamicActionLoads(sf, rel, ctx) {
+  return sf.getDescendantsOfKind(SyntaxKind.CallExpression).filter((call) => {
+    const callee = call.getExpression();
+    const isImport = callee.getKind() === SyntaxKind.ImportKeyword;
+    const isRequire = callee.getKind() === SyntaxKind.Identifier && callee.getText() === "require";
+    if (!isImport && !isRequire) return false;
+    const arg = call.getArguments()[0];
+    const kind = arg?.getKind();
+    if (kind !== SyntaxKind.StringLiteral && kind !== SyntaxKind.NoSubstitutionTemplateLiteral) return false;
+    return ctx.modules.action.has(resolveSpecifier(arg.getLiteralText(), rel));
+  });
 }
 
 /** The outermost expression `node` is the value of, past type-level wrappers. */
@@ -374,20 +453,23 @@ for (const { rel, sf, imports } of files) {
   for (const site of bareActionObjectUses(sf, ctx)) {
     failures.push(`${rel}:${site.getStartLineNumber()}  uses AUDIT_ACTION other than as \`AUDIT_ACTION.<member>\`; the gate cannot follow ${ACTION} out of it`);
   }
+  for (const site of bareNamespaceUses(sf, ctx)) {
+    failures.push(`${rel}:${site.getStartLineNumber()}  uses the namespace ${site.getText()} other than as \`${site.getText()}.<member>\`; the gate cannot follow AUDIT_ACTION out of it`);
+  }
+  for (const call of dynamicActionLoads(sf, rel, ctx)) {
+    failures.push(`${rel}:${call.getStartLineNumber()}  loads a module exporting AUDIT_ACTION dynamically; import it statically so the gate can follow it`);
+  }
 
-  const references = [
-    ...sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression),
-    ...sf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression),
-  ].filter((expr) => isActionReference(expr, ctx));
-  // A bare string spelling of the action is a reference too, but only the
-  // `action:` position can be classified.
-  const literals = [
-    ...sf.getDescendantsOfKind(SyntaxKind.StringLiteral),
-    ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral),
-  ].filter((lit) => lit.getLiteralText() === ACTION && lit.getParent()?.getKind() !== SyntaxKind.ElementAccessExpression);
-
-  for (const ref of [...references, ...literals]) {
+  const { members, literals, destructured } = actionMentions(sf);
+  for (const el of destructured) {
+    failures.push(`${rel}:${el.getStartLineNumber()}  destructures ${ACTION}; the gate cannot tell which scope it is written with`);
+  }
+  for (const ref of [...members, ...literals]) {
     const where = `${rel}:${ref.getStartLineNumber()}`;
+    if (members.includes(ref) && !onAuditAction(ref, ctx)) {
+      failures.push(`${where}  references ${ACTION} through a receiver the gate cannot resolve; read it as AUDIT_ACTION.${ACTION} from a static import`);
+      continue;
+    }
     const value = outerExpression(ref);
     const prop = value.getParent();
     if (
